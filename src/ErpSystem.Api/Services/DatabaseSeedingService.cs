@@ -34,6 +34,7 @@ namespace ErpSystem.Web.Services
         Task SeedBasicDataAsync();
         Task SeedWorkflowDefinitionsAsync();
         Task SeedFinanceWorkflowDefinitionsAsync();
+        Task SeedEstateAcquisitionLandBankParcelsAsync();
         Task SeedTestUsersAsync();
         Task SeedMaintenanceE2ETestDataAsync();
         Task<bool> HasSeedDataAsync();
@@ -221,6 +222,9 @@ namespace ErpSystem.Web.Services
                 _logger.LogInformation("Ensuring project catalog defaults are seeded...");
                 await EnsureProjectCatalogDefaultsSeededAsync();
 
+                _logger.LogInformation("Ensuring Estate acquisition land bank parcels are seeded...");
+                await SeedEstateAcquisitionLandBankParcelsAsync();
+
                 // Always ensure baseline EHC workflow routing rules exist (workflow selection by type/category/priority/department)
                 _logger.LogInformation("Ensuring EHC workflow routing rules are seeded...");
                 await EnsureEhcWorkflowRoutingRulesSeededAsync();
@@ -368,9 +372,6 @@ namespace ErpSystem.Web.Services
                     var defaultTenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Code == "DEFAULT");
                     if (defaultTenant != null)
                     {
-                        _logger.LogInformation("Ensuring public estate portal demo sale listings are seeded...");
-                        await EnsurePublicEstatePortalDemoSaleListingsSeededAsync(defaultTenant.Id);
-
                         var ehcDemoSeeder = new EhcHelpdeskDemoSeeder(_context, _logger);
                         await ehcDemoSeeder.SeedAsync(defaultTenant.Id);
                     }
@@ -8082,12 +8083,27 @@ namespace ErpSystem.Web.Services
             }
         }
 
-        private async Task EnsurePublicEstatePortalDemoSaleListingsSeededAsync(Guid tenantId)
+        public async Task SeedEstateAcquisitionLandBankParcelsAsync()
+        {
+            var tenant = await _context.Tenants
+                .FirstOrDefaultAsync(item => item.Code == "DEFAULT" && !item.IsDeleted)
+                ?? await _context.Tenants
+                    .FirstOrDefaultAsync(item => item.Status == TenantStatus.Active && !item.IsDeleted);
+            if (tenant is null)
+            {
+                _logger.LogWarning("Skipping Estate acquisition land bank parcel seeding because no tenant exists.");
+                return;
+            }
+
+            await EnsureEstateAcquisitionLandBankParcelsSeededAsync(tenant.Id);
+        }
+
+        private async Task EnsureEstateAcquisitionLandBankParcelsSeededAsync(Guid tenantId)
         {
             var now = DateTime.UtcNow;
             var seeds = new[]
             {
-                new PublicEstatePortalSaleListingSeed(
+                new EstateAcquisitionLandBankParcelSeed(
                     ProjectReference: "TDC-PORTAL-ACQ-001",
                     AssetCode: "TDC-PORTAL-LAND-001",
                     AssetName: "Community 25 Serviced Parcel 01",
@@ -8102,8 +8118,8 @@ namespace ErpSystem.Web.Services
                     ContactNumber: "0302001101",
                     SurveyPlanNumber: "SP-TDC-PORTAL-001",
                     MapSheetNumber: "MS-TDC-C25-001",
-                    DemarcationNumber: 1),
-                new PublicEstatePortalSaleListingSeed(
+                    DemarcationCount: 1),
+                new EstateAcquisitionLandBankParcelSeed(
                     ProjectReference: "TDC-PORTAL-ACQ-002",
                     AssetCode: "TDC-PORTAL-LAND-002",
                     AssetName: "East Legon Hills Residential Parcel 02",
@@ -8118,7 +8134,167 @@ namespace ErpSystem.Web.Services
                     ContactNumber: "0302001102",
                     SurveyPlanNumber: "SP-TDC-PORTAL-002",
                     MapSheetNumber: "MS-TDC-ELH-002",
-                    DemarcationNumber: 1)
+                    DemarcationCount: 1),
+                new EstateAcquisitionLandBankParcelSeed(
+                    ProjectReference: "TDC-PORTAL-ACQ-003",
+                    AssetCode: "TDC-PORTAL-LAND-003",
+                    AssetName: "Prampram Residential Enclave Parcel 03",
+                    ListingNotes: "Residential land bank parcel split into four demarcated plots for staged release.",
+                    Location: "Prampram New Town, Ningo-Prampram",
+                    Town: "Prampram",
+                    District: "Ningo-Prampram",
+                    Region: "Greater Accra",
+                    AreaSquareFeet: 21780m,
+                    SalePrice: 2400000m,
+                    OwnerName: "Prampram Stool Lands Secretariat",
+                    ContactNumber: "0302001103",
+                    SurveyPlanNumber: "SP-TDC-PORTAL-003",
+                    MapSheetNumber: "MS-TDC-PRM-003",
+                    DemarcationCount: 4),
+                new EstateAcquisitionLandBankParcelSeed(
+                    ProjectReference: "TDC-PORTAL-ACQ-004",
+                    AssetCode: "TDC-PORTAL-LAND-004",
+                    AssetName: "Dawhenya Mixed Residential Parcel 04",
+                    ListingNotes: "Serviced residential parcel prepared for two demarcated sale lots.",
+                    Location: "Dawhenya, Tema-Aflao Road",
+                    Town: "Dawhenya",
+                    District: "Ningo-Prampram",
+                    Region: "Greater Accra",
+                    AreaSquareFeet: 10890m,
+                    SalePrice: 1320000m,
+                    OwnerName: "Dawhenya Family Lands Office",
+                    ContactNumber: "0302001104",
+                    SurveyPlanNumber: "SP-TDC-PORTAL-004",
+                    MapSheetNumber: "MS-TDC-DWH-004",
+                    DemarcationCount: 2),
+                new EstateAcquisitionLandBankParcelSeed(
+                    ProjectReference: "TDC-PORTAL-ACQ-005",
+                    AssetCode: "TDC-PORTAL-LAND-005",
+                    AssetName: "Oyibi Residential Parcel 05",
+                    ListingNotes: "Single demarcated residential land bank parcel with verified access.",
+                    Location: "Oyibi, Adenta-Dodowa Road",
+                    Town: "Oyibi",
+                    District: "Kpone-Katamanso",
+                    Region: "Greater Accra",
+                    AreaSquareFeet: 6500m,
+                    SalePrice: 780000m,
+                    OwnerName: "Oyibi Lands Family",
+                    ContactNumber: "0302001105",
+                    SurveyPlanNumber: "SP-TDC-PORTAL-005",
+                    MapSheetNumber: "MS-TDC-OYB-005",
+                    DemarcationCount: 1),
+                new EstateAcquisitionLandBankParcelSeed(
+                    ProjectReference: "TDC-PORTAL-ACQ-006",
+                    AssetCode: "TDC-PORTAL-LAND-006",
+                    AssetName: "Kpone Industrial Buffer Parcel 06",
+                    ListingNotes: "Large land bank parcel reserved with four demarcations for phased allocation.",
+                    Location: "Kpone Industrial Area Buffer, Kpone",
+                    Town: "Kpone",
+                    District: "Kpone-Katamanso",
+                    Region: "Greater Accra",
+                    AreaSquareFeet: 34848m,
+                    SalePrice: 3600000m,
+                    OwnerName: "Kpone Traditional Council",
+                    ContactNumber: "0302001106",
+                    SurveyPlanNumber: "SP-TDC-PORTAL-006",
+                    MapSheetNumber: "MS-TDC-KPN-006",
+                    DemarcationCount: 4),
+                new EstateAcquisitionLandBankParcelSeed(
+                    ProjectReference: "TDC-PORTAL-ACQ-007",
+                    AssetCode: "TDC-PORTAL-LAND-007",
+                    AssetName: "Afienya Residential Cluster Parcel 07",
+                    ListingNotes: "Three-demarcation residential cluster prepared for land bank release.",
+                    Location: "Afienya, Shai-Osudoku",
+                    Town: "Afienya",
+                    District: "Shai-Osudoku",
+                    Region: "Greater Accra",
+                    AreaSquareFeet: 16335m,
+                    SalePrice: 1650000m,
+                    OwnerName: "Afienya Lands Committee",
+                    ContactNumber: "0302001107",
+                    SurveyPlanNumber: "SP-TDC-PORTAL-007",
+                    MapSheetNumber: "MS-TDC-AFY-007",
+                    DemarcationCount: 3),
+                new EstateAcquisitionLandBankParcelSeed(
+                    ProjectReference: "TDC-PORTAL-ACQ-008",
+                    AssetCode: "TDC-PORTAL-LAND-008",
+                    AssetName: "Sakumono Infill Parcel 08",
+                    ListingNotes: "Compact infill land bank parcel ready for a single residential allocation.",
+                    Location: "Sakumono Estate Extension",
+                    Town: "Sakumono",
+                    District: "Tema West",
+                    Region: "Greater Accra",
+                    AreaSquareFeet: 4800m,
+                    SalePrice: 920000m,
+                    OwnerName: "Sakumono Family Lands Office",
+                    ContactNumber: "0302001108",
+                    SurveyPlanNumber: "SP-TDC-PORTAL-008",
+                    MapSheetNumber: "MS-TDC-SKM-008",
+                    DemarcationCount: 1),
+                new EstateAcquisitionLandBankParcelSeed(
+                    ProjectReference: "TDC-PORTAL-ACQ-009",
+                    AssetCode: "TDC-PORTAL-LAND-009",
+                    AssetName: "Tema Community 24 Expansion Parcel 09",
+                    ListingNotes: "Four-demarcation expansion parcel prepared for residential sales enquiry.",
+                    Location: "Tema Community 24 Extension",
+                    Town: "Tema Community 24",
+                    District: "Tema West",
+                    Region: "Greater Accra",
+                    AreaSquareFeet: 24000m,
+                    SalePrice: 2900000m,
+                    OwnerName: "Tema Stool Lands Office",
+                    ContactNumber: "0302001109",
+                    SurveyPlanNumber: "SP-TDC-PORTAL-009",
+                    MapSheetNumber: "MS-TDC-C24-009",
+                    DemarcationCount: 4),
+                new EstateAcquisitionLandBankParcelSeed(
+                    ProjectReference: "TDC-PORTAL-ACQ-010",
+                    AssetCode: "TDC-PORTAL-LAND-010",
+                    AssetName: "Dodowa Foothills Parcel 10",
+                    ListingNotes: "Residential foothills parcel split into two demarcated plots.",
+                    Location: "Dodowa Foothills, Shai-Osudoku",
+                    Town: "Dodowa",
+                    District: "Shai-Osudoku",
+                    Region: "Greater Accra",
+                    AreaSquareFeet: 12000m,
+                    SalePrice: 1180000m,
+                    OwnerName: "Dodowa Family Lands Secretariat",
+                    ContactNumber: "0302001110",
+                    SurveyPlanNumber: "SP-TDC-PORTAL-010",
+                    MapSheetNumber: "MS-TDC-DDW-010",
+                    DemarcationCount: 2),
+                new EstateAcquisitionLandBankParcelSeed(
+                    ProjectReference: "TDC-PORTAL-ACQ-011",
+                    AssetCode: "TDC-PORTAL-LAND-011",
+                    AssetName: "Miotso Residential Parcel 11",
+                    ListingNotes: "Single-demarcation residential land bank parcel close to the coastal corridor.",
+                    Location: "Miotso, Ningo-Prampram",
+                    Town: "Miotso",
+                    District: "Ningo-Prampram",
+                    Region: "Greater Accra",
+                    AreaSquareFeet: 7200m,
+                    SalePrice: 690000m,
+                    OwnerName: "Miotso Lands Family",
+                    ContactNumber: "0302001111",
+                    SurveyPlanNumber: "SP-TDC-PORTAL-011",
+                    MapSheetNumber: "MS-TDC-MTS-011",
+                    DemarcationCount: 1),
+                new EstateAcquisitionLandBankParcelSeed(
+                    ProjectReference: "TDC-PORTAL-ACQ-012",
+                    AssetCode: "TDC-PORTAL-LAND-012",
+                    AssetName: "Tema North Residential Block Parcel 12",
+                    ListingNotes: "Four-demarcation land bank block prepared for residential development allocation.",
+                    Location: "Tema North Residential Block",
+                    Town: "Tema North",
+                    District: "Tema Metropolitan",
+                    Region: "Greater Accra",
+                    AreaSquareFeet: 26136m,
+                    SalePrice: 3150000m,
+                    OwnerName: "Tema Development Lands Office",
+                    ContactNumber: "0302001112",
+                    SurveyPlanNumber: "SP-TDC-PORTAL-012",
+                    MapSheetNumber: "MS-TDC-TMN-012",
+                    DemarcationCount: 4)
             };
 
             foreach (var seed in seeds)
@@ -8144,22 +8320,22 @@ namespace ErpSystem.Web.Services
                         CreatedBy = "System"
                     };
                     _context.LandAcquisitions.Add(acquisition);
-                }
 
-                acquisition.IntendedUse = "Residential sale listing";
-                acquisition.EstimatedSize = seed.AreaSquareFeet;
-                acquisition.Location = seed.Location;
-                acquisition.CurrentStage = AcquisitionProcedure.LandAssetCreation;
-                acquisition.Status = LandAcquisitionStatus.AssetCreated;
-                acquisition.OwnershipType = LandOwnershipType.Family;
-                acquisition.Coordinates = BuildSeedBoundary(seed);
-                acquisition.StageOrder = (int)AcquisitionProcedure.LandAssetCreation;
-                acquisition.PlanningUploaded = true;
-                acquisition.InternalApproved = true;
-                acquisition.SuitableForDueDiligence = true;
-                acquisition.ApprovedAt ??= now.AddDays(-7);
-                acquisition.UpdatedAt = now;
-                acquisition.UpdatedBy = "System";
+                    acquisition.IntendedUse = "Residential sale listing";
+                    acquisition.EstimatedSize = seed.AreaSquareFeet;
+                    acquisition.Location = seed.Location;
+                    acquisition.CurrentStage = AcquisitionProcedure.LandAssetCreation;
+                    acquisition.Status = LandAcquisitionStatus.AssetCreated;
+                    acquisition.OwnershipType = LandOwnershipType.Family;
+                    acquisition.Coordinates = BuildSeedBoundary(seed);
+                    acquisition.StageOrder = (int)AcquisitionProcedure.LandAssetCreation;
+                    acquisition.PlanningUploaded = true;
+                    acquisition.InternalApproved = true;
+                    acquisition.SuitableForDueDiligence = true;
+                    acquisition.ApprovedAt = now.AddDays(-7);
+                    acquisition.UpdatedAt = now;
+                    acquisition.UpdatedBy = "System";
+                }
 
                 EnsureSeedCadastralSurvey(acquisition, seed, tenantId, now);
                 EnsureSeedOwnershipHistory(acquisition, seed, tenantId, now);
@@ -8184,105 +8360,112 @@ namespace ErpSystem.Web.Services
                         CreatedBy = "System"
                     };
                     _context.EstateManagedAssets.Add(asset);
+
+                    asset.LandAcquisitionId = acquisition.Id;
+                    asset.Name = seed.AssetName;
+                    asset.Description = seed.ListingNotes;
+                    asset.Location = seed.Location;
+                    asset.Purpose = "Residential development";
+                    asset.ZoningClassification = "Residential";
+                    asset.PlanningComplianceStatus = "Compliant";
+                    asset.BoundaryVerified = true;
+                    asset.BoundaryCoordinates = BuildSeedBoundary(seed);
+                    asset.SurveyPlanNumber = seed.SurveyPlanNumber;
+                    asset.MapSheetNumber = seed.MapSheetNumber;
+                    asset.CadastreDescription = $"{seed.AssetName} cadastral survey";
+                    asset.Region = seed.Region;
+                    asset.District = seed.District;
+                    asset.Town = seed.Town;
+                    asset.AreaValue = seed.AreaSquareFeet;
+                    asset.AreaUnit = "square feet";
+                    asset.SurveyorName = "TDC Survey Unit";
+                    asset.SurveyDate = now.Date.AddDays(-21);
+                    asset.BeaconCount = 4;
+                    asset.AssetType = EstateManagedAssetType.Land;
+                    asset.Status = EstateManagedAssetStatus.LandBank;
+                    asset.SourceType = EstateManagedAssetSourceType.LandAcquisition;
+                    asset.ProjectId = null;
+                    asset.ProjectCode = null;
+                    asset.ProjectTitle = null;
+                    asset.CustomerBusinessPartnerId = null;
+                    asset.LesseeName = null;
+                    asset.AreaSquareMeters = seed.AreaSquareFeet * 0.09290304m;
+                    asset.ValuationAmount = seed.SalePrice;
+                    asset.OwnerConsiderationCost = seed.SalePrice * 0.70m;
+                    asset.ExternalSurveyorCost = 25000m;
+                    asset.StampDutyCost = seed.SalePrice * 0.01m;
+                    asset.OtherAcquisitionCost = 15000m;
+                    asset.TotalCapitalizedCost =
+                        asset.OwnerConsiderationCost + asset.ExternalSurveyorCost + asset.StampDutyCost + asset.OtherAcquisitionCost;
+                    asset.Currency = "GHS";
+                    asset.IsAvailableForLease = false;
+                    asset.IsAvailableForSale = true;
+                    asset.IsPublishedFromProject = false;
+                    asset.IsPublishedToExternalPortal = false;
+                    asset.ExternalListingType = "Sale";
+                    asset.ExternalListingStatus = "Draft";
+                    asset.ExternalListingPrice = seed.SalePrice;
+                    asset.ExternalSalePrice = seed.SalePrice;
+                    asset.ExternalMonthlyRent = null;
+                    asset.ExternalLeaseTermMonths = null;
+                    asset.ExternalListingCurrency = "GHS";
+                    asset.ExternalListingNotes = seed.ListingNotes;
+                    asset.ExternalPublishedAt = now.AddDays(-2);
+                    asset.Notes = "Seeded estate acquisition land bank parcel.";
+                    asset.IsReadyForProjectManagement = false;
+                    asset.UpdatedAt = now;
+                    asset.UpdatedBy = "System";
                 }
 
-                asset.LandAcquisitionId = acquisition.Id;
-                asset.Name = seed.AssetName;
-                asset.Description = seed.ListingNotes;
-                asset.Location = seed.Location;
-                asset.Purpose = "Residential development";
-                asset.ZoningClassification = "Residential";
-                asset.PlanningComplianceStatus = "Compliant";
-                asset.BoundaryVerified = true;
-                asset.BoundaryCoordinates = BuildSeedBoundary(seed);
-                asset.SurveyPlanNumber = seed.SurveyPlanNumber;
-                asset.MapSheetNumber = seed.MapSheetNumber;
-                asset.CadastreDescription = $"{seed.AssetName} cadastral survey";
-                asset.Region = seed.Region;
-                asset.District = seed.District;
-                asset.Town = seed.Town;
-                asset.AreaValue = seed.AreaSquareFeet;
-                asset.AreaUnit = "square feet";
-                asset.SurveyorName = "TDC Survey Unit";
-                asset.SurveyDate = now.Date.AddDays(-21);
-                asset.BeaconCount = 4;
-                asset.AssetType = EstateManagedAssetType.Land;
-                asset.Status = EstateManagedAssetStatus.LandBank;
-                asset.SourceType = EstateManagedAssetSourceType.LandAcquisition;
-                asset.ProjectId = null;
-                asset.ProjectCode = null;
-                asset.ProjectTitle = null;
-                asset.CustomerBusinessPartnerId = null;
-                asset.LesseeName = null;
-                asset.AreaSquareMeters = seed.AreaSquareFeet * 0.09290304m;
-                asset.ValuationAmount = seed.SalePrice;
-                asset.OwnerConsiderationCost = seed.SalePrice * 0.70m;
-                asset.ExternalSurveyorCost = 25000m;
-                asset.StampDutyCost = seed.SalePrice * 0.01m;
-                asset.OtherAcquisitionCost = 15000m;
-                asset.TotalCapitalizedCost =
-                    asset.OwnerConsiderationCost + asset.ExternalSurveyorCost + asset.StampDutyCost + asset.OtherAcquisitionCost;
-                asset.Currency = "GHS";
-                asset.IsAvailableForLease = false;
-                asset.IsAvailableForSale = true;
-                asset.IsPublishedFromProject = false;
-                asset.IsPublishedToExternalPortal = false;
-                asset.ExternalListingType = "Sale";
-                asset.ExternalListingStatus = "Draft";
-                asset.ExternalListingPrice = seed.SalePrice;
-                asset.ExternalSalePrice = seed.SalePrice;
-                asset.ExternalMonthlyRent = null;
-                asset.ExternalLeaseTermMonths = null;
-                asset.ExternalListingCurrency = "GHS";
-                asset.ExternalListingNotes = seed.ListingNotes;
-                asset.ExternalPublishedAt = now.AddDays(-2);
-                asset.Notes = "Seeded public portal land sale listing for sales enquiry testing.";
-                asset.IsReadyForProjectManagement = false;
-                asset.UpdatedAt = now;
-                asset.UpdatedBy = "System";
-
-                var demarcation = asset.Demarcations.FirstOrDefault(item =>
-                    item.DemarcationNumber == seed.DemarcationNumber
-                    && !item.IsDeleted);
-                if (demarcation is null)
+                for (var demarcationNumber = 1; demarcationNumber <= seed.DemarcationCount; demarcationNumber++)
                 {
+                    var demarcation = asset.Demarcations.FirstOrDefault(item =>
+                        item.DemarcationNumber == demarcationNumber
+                        && !item.IsDeleted);
+                    if (demarcation is not null)
+                    {
+                        continue;
+                    }
+
+                    var demarcationArea = seed.AreaSquareFeet / seed.DemarcationCount;
+                    var demarcationCost = asset.TotalCapitalizedCost / seed.DemarcationCount;
+                    var demarcationPrice = seed.SalePrice / seed.DemarcationCount;
                     demarcation = new EstateLandDemarcation
                     {
                         Id = Guid.NewGuid(),
                         TenantId = tenantId,
                         EstateManagedAssetId = asset.Id,
                         EstateManagedAsset = asset,
-                        DemarcationNumber = seed.DemarcationNumber,
+                        DemarcationNumber = demarcationNumber,
+                        Description = $"{seed.ListingNotes} Demarcation {demarcationNumber} of {seed.DemarcationCount}.",
                         CreatedAt = now,
                         CreatedBy = "System"
                     };
+                    demarcation.BeaconCount = 4;
+                    demarcation.BoundaryCoordinates = BuildSeedBoundary(seed, demarcationNumber);
+                    demarcation.AreaSquareFeet = demarcationArea;
+                    demarcation.BoundaryVerified = true;
+                    demarcation.CostAllocationMethod = "Manual";
+                    demarcation.AllocatedCost = demarcationCost;
+                    demarcation.CostPerAcre = demarcationCost / (demarcationArea / 43560m);
+                    demarcation.TargetSalePrice = demarcationPrice;
+                    demarcation.ParentLandAssetReference = seed.AssetCode;
+                    demarcation.FixedAssetPostingStatus = "NotRequired";
+                    demarcation.IsReadyForProjectManagement = false;
+                    demarcation.IsPublishedToExternalPortal = true;
+                    demarcation.ExternalListingType = "Sale";
+                    demarcation.ExternalListingStatus = "Published";
+                    demarcation.ExternalListingPrice = demarcationPrice;
+                    demarcation.ExternalSalePrice = demarcationPrice;
+                    demarcation.ExternalMonthlyRent = null;
+                    demarcation.ExternalLeaseTermMonths = null;
+                    demarcation.ExternalListingCurrency = "GHS";
+                    demarcation.ExternalListingNotes = $"{seed.ListingNotes} Demarcation {demarcationNumber} of {seed.DemarcationCount}.";
+                    demarcation.ExternalPublishedAt = now.AddDays(-2);
+                    demarcation.UpdatedAt = now;
+                    demarcation.UpdatedBy = "System";
                     asset.Demarcations.Add(demarcation);
                 }
-
-                demarcation.Description = seed.ListingNotes;
-                demarcation.BeaconCount = 4;
-                demarcation.BoundaryCoordinates = BuildSeedBoundary(seed);
-                demarcation.AreaSquareFeet = seed.AreaSquareFeet;
-                demarcation.BoundaryVerified = true;
-                demarcation.CostAllocationMethod = "Manual";
-                demarcation.AllocatedCost = asset.TotalCapitalizedCost;
-                demarcation.CostPerAcre = asset.TotalCapitalizedCost / (seed.AreaSquareFeet / 43560m);
-                demarcation.TargetSalePrice = seed.SalePrice;
-                demarcation.ParentLandAssetReference = seed.AssetCode;
-                demarcation.FixedAssetPostingStatus = "NotRequired";
-                demarcation.IsReadyForProjectManagement = false;
-                demarcation.IsPublishedToExternalPortal = true;
-                demarcation.ExternalListingType = "Sale";
-                demarcation.ExternalListingStatus = "Published";
-                demarcation.ExternalListingPrice = seed.SalePrice;
-                demarcation.ExternalSalePrice = seed.SalePrice;
-                demarcation.ExternalMonthlyRent = null;
-                demarcation.ExternalLeaseTermMonths = null;
-                demarcation.ExternalListingCurrency = "GHS";
-                demarcation.ExternalListingNotes = seed.ListingNotes;
-                demarcation.ExternalPublishedAt = now.AddDays(-2);
-                demarcation.UpdatedAt = now;
-                demarcation.UpdatedBy = "System";
             }
 
             await _context.SaveChangesAsync();
@@ -8290,7 +8473,7 @@ namespace ErpSystem.Web.Services
 
         private static void EnsureSeedCadastralSurvey(
             LandAcquisition acquisition,
-            PublicEstatePortalSaleListingSeed seed,
+            EstateAcquisitionLandBankParcelSeed seed,
             Guid tenantId,
             DateTime now)
         {
@@ -8328,7 +8511,7 @@ namespace ErpSystem.Web.Services
 
         private static void EnsureSeedOwnershipHistory(
             LandAcquisition acquisition,
-            PublicEstatePortalSaleListingSeed seed,
+            EstateAcquisitionLandBankParcelSeed seed,
             Guid tenantId,
             DateTime now)
         {
@@ -8367,7 +8550,7 @@ namespace ErpSystem.Web.Services
 
         private static void EnsureSeedNegotiationOffer(
             LandAcquisition acquisition,
-            PublicEstatePortalSaleListingSeed seed,
+            EstateAcquisitionLandBankParcelSeed seed,
             Guid tenantId,
             DateTime now)
         {
@@ -8400,7 +8583,7 @@ namespace ErpSystem.Web.Services
 
         private static void EnsureSeedLandAsset(
             LandAcquisition acquisition,
-            PublicEstatePortalSaleListingSeed seed,
+            EstateAcquisitionLandBankParcelSeed seed,
             Guid tenantId,
             DateTime now)
         {
@@ -8416,7 +8599,7 @@ namespace ErpSystem.Web.Services
                 LandAcquisitionId = acquisition.Id,
                 AssetCode = seed.AssetCode,
                 AssetNumber = seed.AssetCode,
-                ParcelIdentifier = $"{seed.AssetCode}-P{seed.DemarcationNumber:000}",
+                ParcelIdentifier = $"{seed.AssetCode}-PARENT",
                 RegistrationNumber = $"REG-{seed.ProjectReference}",
                 OwnerName = seed.OwnerName,
                 Location = seed.Location,
@@ -8436,10 +8619,17 @@ namespace ErpSystem.Web.Services
             });
         }
 
-        private static string BuildSeedBoundary(PublicEstatePortalSaleListingSeed seed)
+        private static string BuildSeedBoundary(EstateAcquisitionLandBankParcelSeed seed, int demarcationNumber = 0)
         {
-            var longitude = seed.AssetCode.EndsWith("002", StringComparison.Ordinal) ? -0.1837m : -0.0086m;
-            var latitude = seed.AssetCode.EndsWith("002", StringComparison.Ordinal) ? 5.7138m : 5.6813m;
+            var seedIndex = int.TryParse(seed.AssetCode[^3..], out var parsedIndex) ? parsedIndex : 1;
+            var longitude = -0.2150m + ((seedIndex - 1) % 6 * 0.0350m);
+            var latitude = 5.6000m + ((seedIndex - 1) / 6 * 0.0350m);
+            if (demarcationNumber > 1)
+            {
+                longitude += ((demarcationNumber - 1) % 2) * 0.00045m;
+                latitude += ((demarcationNumber - 1) / 2) * 0.00045m;
+            }
+
             return JsonSerializer.Serialize(new[]
             {
                 new { lat = latitude, lng = longitude },
@@ -8450,7 +8640,7 @@ namespace ErpSystem.Web.Services
             });
         }
 
-        private sealed record PublicEstatePortalSaleListingSeed(
+        private sealed record EstateAcquisitionLandBankParcelSeed(
             string ProjectReference,
             string AssetCode,
             string AssetName,
@@ -8465,7 +8655,7 @@ namespace ErpSystem.Web.Services
             string ContactNumber,
             string SurveyPlanNumber,
             string MapSheetNumber,
-            int DemarcationNumber);
+            int DemarcationCount);
 
         private async Task EnsureEstateSopExampleCasesSeededAsync()
         {

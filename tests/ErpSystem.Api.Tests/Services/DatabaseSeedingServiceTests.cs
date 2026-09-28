@@ -1,5 +1,6 @@
 using System.Reflection;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data;
@@ -321,6 +322,62 @@ public partial class DatabaseSeedingServiceTests
         await ((Task)seedMethod.Invoke(service, null)!).ConfigureAwait(false);
 
         (await context.ProjectCatalogEntries.CountAsync(entry => entry.TenantId == tenant.Id)).Should().Be(initialCount);
+    }
+
+    [Fact]
+    public async Task SeedEstateAcquisitionLandBankParcelsAsync_ShouldCreateMissingParcelsAndSkipExistingRows()
+    {
+        await using var context = CreateContext();
+        var tenant = new Tenant
+        {
+            Id = Guid.NewGuid(),
+            Name = "Default Estate Tenant",
+            Code = "DEFAULT",
+            Status = TenantStatus.Active,
+            ContactEmail = "estate@test.local",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "Tests"
+        };
+        context.Tenants.Add(tenant);
+        await context.SaveChangesAsync();
+
+        var service = new DatabaseSeedingService(
+            context,
+            CreateUserManager(),
+            CreateRoleManager(),
+            NullLogger<DatabaseSeedingService>.Instance,
+            CreateEnvironment());
+
+        await service.SeedEstateAcquisitionLandBankParcelsAsync();
+
+        (await context.LandAcquisitions.CountAsync(item => item.TenantId == tenant.Id)).Should().Be(12);
+        (await context.EstateManagedAssets.CountAsync(item => item.TenantId == tenant.Id)).Should().Be(12);
+        (await context.EstateLandDemarcations.CountAsync(item => item.TenantId == tenant.Id)).Should().Be(28);
+        (await context.CadastralSurveys.CountAsync(item => item.TenantId == tenant.Id)).Should().Be(12);
+        (await context.OwnershipHistories.CountAsync(item => item.TenantId == tenant.Id)).Should().Be(12);
+        (await context.NegotiationOffers.CountAsync(item => item.TenantId == tenant.Id)).Should().Be(12);
+        (await context.LandAssets.CountAsync(item => item.TenantId == tenant.Id)).Should().Be(12);
+        (await context.EstateLandDemarcations.CountAsync(item =>
+            item.TenantId == tenant.Id && item.EstateManagedAsset.AssetCode == "TDC-PORTAL-LAND-003")).Should().Be(4);
+
+        var firstAsset = await context.EstateManagedAssets.SingleAsync(item =>
+            item.TenantId == tenant.Id && item.AssetCode == "TDC-PORTAL-LAND-001");
+        firstAsset.Name = "Tenant edited land bank parcel";
+        firstAsset.ExternalSalePrice = 999m;
+        await context.SaveChangesAsync();
+
+        await service.SeedEstateAcquisitionLandBankParcelsAsync();
+
+        (await context.LandAcquisitions.CountAsync(item => item.TenantId == tenant.Id)).Should().Be(12);
+        (await context.EstateManagedAssets.CountAsync(item => item.TenantId == tenant.Id)).Should().Be(12);
+        (await context.EstateLandDemarcations.CountAsync(item => item.TenantId == tenant.Id)).Should().Be(28);
+
+        var preservedAsset = await context.EstateManagedAssets.SingleAsync(item =>
+            item.TenantId == tenant.Id && item.AssetCode == "TDC-PORTAL-LAND-001");
+        preservedAsset.Name.Should().Be("Tenant edited land bank parcel");
+        preservedAsset.ExternalSalePrice.Should().Be(999m);
+        preservedAsset.Status.Should().Be(EstateManagedAssetStatus.LandBank);
+        preservedAsset.SourceType.Should().Be(EstateManagedAssetSourceType.LandAcquisition);
     }
 
     [Fact]
