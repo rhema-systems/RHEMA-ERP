@@ -9142,14 +9142,20 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     line.BudgetRevisionId,
                     line.SegmentValueId,
                     line.AccountId,
-                    line.FiscalPeriodId
+                    line.FiscalPeriodId,
+                    line.FinanceDimensionSetId
                 })
                 .IsUnique()
+                .HasDatabaseName("UX_BudgetRevisionLines_Cell")
                 .HasFilter("[IsDeleted] = 0");
             entity.HasOne(line => line.BudgetRevision)
                 .WithMany(revision => revision.Lines)
                 .HasForeignKey(line => line.BudgetRevisionId)
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(line => line.FinanceDimensionSet)
+                .WithMany()
+                .HasForeignKey(line => line.FinanceDimensionSetId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 

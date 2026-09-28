@@ -240,13 +240,14 @@ public sealed class FinanceBudgetControlServiceTests
             Description = "Prior controlled expense",
             PostingStatus = "Posted",
             BookClassification = "IFRS",
+            AccountingBookId = fixture.Journal.AccountingBookId,
             TotalDebitAmount = 500m,
             TotalCreditAmount = 500m,
             IsBalanced = true,
             Transactions = new List<AccountTransaction>
             {
-                new() { TenantId = TenantId, AccountId = fixture.Expense.Id, FiscalPeriodId = fixture.Period.Id, TransactionDate = fixture.Journal.EntryDate.AddDays(-1), DebitAmount = 500m, LineNumber = 1 },
-                new() { TenantId = TenantId, AccountId = clearingAccountId, FiscalPeriodId = fixture.Period.Id, TransactionDate = fixture.Journal.EntryDate.AddDays(-1), CreditAmount = 500m, LineNumber = 2 }
+                new() { TenantId = TenantId, AccountingBookId = fixture.Journal.AccountingBookId, AccountId = fixture.Expense.Id, FiscalPeriodId = fixture.Period.Id, TransactionDate = fixture.Journal.EntryDate.AddDays(-1), DebitAmount = 500m, LineNumber = 1 },
+                new() { TenantId = TenantId, AccountingBookId = fixture.Journal.AccountingBookId, AccountId = clearingAccountId, FiscalPeriodId = fixture.Period.Id, TransactionDate = fixture.Journal.EntryDate.AddDays(-1), CreditAmount = 500m, LineNumber = 2 }
             }
         };
         db.JournalEntries.Add(priorJournal);
@@ -384,13 +385,31 @@ public sealed class FinanceBudgetControlServiceTests
     [Fact]
     public void Migration_creates_only_budget_control_evidence_and_reverses_cleanly()
     {
-        var source = ArchivedMigrationSource.Read("20260824080000_AddFinanceBudgetControlFoundation.cs");
-        foreach (var token in new[] { "FinanceBudgetOverrideRequests", "FinanceBudgetReservations",
-            "CurrencyCode", "maxLength: 3", "IX_FinanceBudgetOverrideRequests_WorkflowInstanceId",
-            "[WorkflowInstanceId] IS NOT NULL",
-            "IX_FinanceBudgetReservations_TenantId_SourceDocumentType_SourceDocumentId_BudgetEntryId",
-            "[IsDeleted] = 0 AND [Status] = 'Reserved'", "migrationBuilder.DropTable" })
-            source.Should().Contain(token);
+        var up = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        new TestableBudgetControlMigration().ApplyUp(up);
+
+        up.Operations.OfType<CreateTableOperation>().Select(x => x.Name).Should().Equal(
+            "FinanceBudgetOverrideRequests",
+            "FinanceBudgetReservations");
+        up.Operations.OfType<CreateTableOperation>().Should().OnlyContain(x =>
+            x.Columns.Any(column => column.Name == "CurrencyCode" && column.MaxLength == 3 && !column.IsNullable));
+        up.Operations.Should().OnlyContain(x =>
+            x.GetType() == typeof(CreateTableOperation) || x.GetType() == typeof(CreateIndexOperation));
+        up.Operations.OfType<CreateIndexOperation>().Should().Contain(x =>
+            x.Name == "IX_FinanceBudgetOverrideRequests_WorkflowInstanceId"
+            && x.IsUnique
+            && x.Filter == "[WorkflowInstanceId] IS NOT NULL");
+        up.Operations.OfType<CreateIndexOperation>().Should().Contain(x =>
+            x.Name == "IX_FinanceBudgetReservations_TenantId_SourceDocumentType_SourceDocumentId_BudgetEntryId"
+            && x.IsUnique
+            && x.Filter == "[IsDeleted] = 0 AND [Status] = 'Reserved'");
+
+        var down = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        new TestableBudgetControlMigration().ApplyDown(down);
+        down.Operations.OfType<DropTableOperation>().Select(x => x.Name).Should().Equal(
+            "FinanceBudgetReservations",
+            "FinanceBudgetOverrideRequests");
+        down.Operations.Should().HaveCount(2);
     }
 
     private static ApplicationDbContext CreateContext()
@@ -398,7 +417,15 @@ public sealed class FinanceBudgetControlServiceTests
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"finance-budget-control-{Guid.NewGuid():N}")
             .Options;
-        return new ApplicationDbContext(options, TenantId);
+        var db = new ApplicationDbContext(options, TenantId);
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            Code = "PRIMARY", Name = "Primary book",
+            BookType = AccountingBookType.PrimaryFull,
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        });
+        return db;
     }
 
     private static FinanceBudgetControlService CreateService(ApplicationDbContext db, IWorkflowService? workflow = null)
@@ -412,6 +439,7 @@ public sealed class FinanceBudgetControlServiceTests
 
     private static JournalFixture SeedJournal(ApplicationDbContext db, bool budgetTrackingEnabled)
     {
+        var primaryBook = db.AccountingBooks.Local.Single(book => book.IsDefault);
         var fiscalYear = new FiscalYear
         {
             TenantId = TenantId,
@@ -449,37 +477,24 @@ public sealed class FinanceBudgetControlServiceTests
             AccountName = "Accrued liabilities",
             AccountType = AccountType.Liability
         };
-        var book = new AccountingBook
-        {
-            TenantId = TenantId,
-            Code = "IFRS",
-            Name = "IFRS Primary",
-            Purpose = "Primary",
-            BookType = AccountingBookType.PrimaryFull,
-            LifecycleStatus = AccountingBookLifecycleStatus.Active,
-            FunctionalCurrencyCode = "GHS",
-            IsActive = true,
-            IsDefault = true,
-            AllowsPosting = true
-        };
         var journal = new JournalEntry
         {
             TenantId = TenantId,
             JournalEntryNumber = "JE-2026-00001",
             EntryDate = new DateTime(2026, 1, 15),
             FiscalPeriodId = period.Id,
-            AccountingBookId = book.Id,
             JournalType = "General",
             Description = "Controlled expense",
             PostingStatus = "Draft",
             BookClassification = "IFRS",
+            AccountingBookId = primaryBook.Id,
             TotalDebitAmount = 600m,
             TotalCreditAmount = 600m,
             IsBalanced = true,
             Transactions = new List<AccountTransaction>
             {
-                new() { TenantId = TenantId, AccountId = expense.Id, AccountingBookId = book.Id, BookClassification = "IFRS", TransactionDate = new DateTime(2026, 1, 15), DebitAmount = 600m, CreditAmount = 0m, LineNumber = 1 },
-                new() { TenantId = TenantId, AccountId = clearing.Id, AccountingBookId = book.Id, BookClassification = "IFRS", TransactionDate = new DateTime(2026, 1, 15), DebitAmount = 0m, CreditAmount = 600m, LineNumber = 2 }
+                new() { TenantId = TenantId, AccountingBookId = primaryBook.Id, AccountId = expense.Id, TransactionDate = new DateTime(2026, 1, 15), DebitAmount = 600m, CreditAmount = 0m, LineNumber = 1 },
+                new() { TenantId = TenantId, AccountingBookId = primaryBook.Id, AccountId = clearing.Id, TransactionDate = new DateTime(2026, 1, 15), DebitAmount = 0m, CreditAmount = 600m, LineNumber = 2 }
             }
         };
         var financeSettings = new FinanceSettings
@@ -489,7 +504,7 @@ public sealed class FinanceBudgetControlServiceTests
             CoaType = "Segmented",
             AccountSeparator = "-"
         };
-        db.AddRange(fiscalYear, period, expense, clearing, book, journal, financeSettings);
+        db.AddRange(fiscalYear, period, expense, clearing, journal, financeSettings);
         return new JournalFixture(fiscalYear, period, expense, journal);
     }
 
@@ -532,4 +547,9 @@ public sealed class FinanceBudgetControlServiceTests
     private sealed record JournalFixture(FiscalYear FiscalYear, FiscalPeriod Period, Account Expense, JournalEntry Journal);
     private sealed record BudgetFixture(BudgetScenario Scenario, BudgetReturn Return, BudgetEntry Entry);
 
+    private sealed class TestableBudgetControlMigration : AddFinanceBudgetControlFoundation
+    {
+        public void ApplyUp(MigrationBuilder builder) => Up(builder);
+        public void ApplyDown(MigrationBuilder builder) => Down(builder);
+    }
 }

@@ -319,6 +319,7 @@ export type BudgetRevisionStatus = 'Draft' | 'Submitted' | 'Approved' | 'Rejecte
 
 export interface BudgetRevisionLineInput {
     segmentValueId?: string;
+    financeDimensionSetId?: string;
     accountId: string;
     fiscalPeriodId: string;
     adjustmentAmountBase: number;
@@ -339,6 +340,8 @@ export interface BudgetRevisionLine extends BudgetRevisionLineInput {
     id: string;
     segmentCode: string;
     segmentName: string;
+    dimensionCombination: string;
+    dimensionAssignments: BudgetDimensionAssignment[];
     accountCode: string;
     accountName: string;
     periodCode: string;
@@ -372,4 +375,31 @@ export interface BudgetRevision {
     createdAt: string;
     rowVersion: string;
     lines: BudgetRevisionLine[];
+}
+
+export interface FinanceBudgetReconciliationIssue {
+    code: string;
+    severity: 'Error' | 'Warning';
+    reservationId?: string;
+    sourceDocumentType?: string;
+    sourceDocumentId?: string;
+    journalEntryId?: string;
+    postingEventId?: string;
+    message: string;
+    recommendedAction: string;
+}
+
+export interface FinanceBudgetReconciliationReport {
+    generatedAtUtc: string;
+    tenantId: string;
+    primaryAccountingBookId?: string;
+    primaryAccountingBookCode?: string;
+    reservationCount: number;
+    activeReservationCount: number;
+    consumedReservationCount: number;
+    releasedReservationCount: number;
+    errorCount: number;
+    warningCount: number;
+    isReconciled: boolean;
+    issues: FinanceBudgetReconciliationIssue[];
 }

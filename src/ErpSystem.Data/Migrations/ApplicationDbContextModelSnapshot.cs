@@ -12330,6 +12330,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("BudgetRevisionId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("FinanceDimensionSetId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -12376,12 +12379,15 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("BudgetRevisionId");
 
+                    b.HasIndex("FinanceDimensionSetId");
+
                     b.HasIndex("FiscalPeriodId");
 
                     b.HasIndex("SegmentValueId");
 
-                    b.HasIndex("TenantId", "BudgetRevisionId", "SegmentValueId", "AccountId", "FiscalPeriodId")
+                    b.HasIndex("TenantId", "BudgetRevisionId", "SegmentValueId", "AccountId", "FiscalPeriodId", "FinanceDimensionSetId")
                         .IsUnique()
+                        .HasDatabaseName("UX_BudgetRevisionLines_Cell")
                         .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("BudgetRevisionLines");
@@ -186546,6 +186552,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceDimensionSet", "FinanceDimensionSet")
+                        .WithMany()
+                        .HasForeignKey("FinanceDimensionSetId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -186559,6 +186570,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("FinanceDimensionSet");
 
                     b.Navigation("FiscalPeriod");
+
+                    b.Navigation("FinanceDimensionSet");
 
                     b.Navigation("Tenant");
                 });

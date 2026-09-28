@@ -19,7 +19,8 @@ import type {
     ConsolidatedBudgetView,
     BudgetScenarioComparison,
     BudgetRevision,
-    CreateBudgetRevisionDto
+    CreateBudgetRevisionDto,
+    FinanceBudgetReconciliationReport
 } from '@/types/budget';
 
 import { apiService } from '@/services/api.service';
@@ -190,6 +191,10 @@ class BudgetDataService {
 
     async applyRevision(id: string, rowVersion: string): Promise<BudgetRevision> {
         return apiService.post<BudgetRevision>(`/budget/revisions/${id}/apply`, { rowVersion });
+    }
+
+    async getBudgetReconciliation(): Promise<FinanceBudgetReconciliationReport> {
+        return apiService.get<FinanceBudgetReconciliationReport>('/budget/reconciliation');
     }
 }
 
