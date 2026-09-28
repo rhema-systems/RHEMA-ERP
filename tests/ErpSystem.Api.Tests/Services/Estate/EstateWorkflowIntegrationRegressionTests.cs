@@ -1024,7 +1024,7 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         dmsController.Should().Contain("IsPropertyAgreementLegalReviewApprovedAsync");
         dmsController.Should().Contain("before internal approval and digital signature can continue");
         legalCatalog.Should().Contain("LegalPropertyAgreementReview");
-        legalCatalog.Should().Contain("Head of Legal Release");
+        legalCatalog.Should().Contain("Head of Legal Signature");
     }
 
     [Fact]

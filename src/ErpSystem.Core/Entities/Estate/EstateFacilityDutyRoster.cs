@@ -58,6 +58,11 @@ public sealed class EstateFacilityDutyRoster : TenantEntity
     [MaxLength(500)]
     public string? SuppliesIssued { get; set; }
 
+    public Guid? InventoryIssueVoucherId { get; set; }
+
+    [MaxLength(50)]
+    public string? InventoryIssueVoucherNumber { get; set; }
+
     [MaxLength(1000)]
     public string? Checklist { get; set; }
 

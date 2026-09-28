@@ -45,6 +45,15 @@ public sealed class EstateRecurringBillingBackgroundService(
                             if (result.Failures > 0)
                                 logger.LogWarning("Estate recurring billing had {Failures} failures for tenant {TenantId}",
                                     result.Failures, tenantId);
+                            try
+                            {
+                                var reminders = tenantScope.ServiceProvider.GetRequiredService<FacilitiesLeaseReminderService>();
+                                await reminders.RunForTenantAsync(tenantId, stoppingToken);
+                            }
+                            catch (Exception ex) when (ex is not OperationCanceledException)
+                            {
+                                logger.LogError(ex, "Facilities lease reminders failed for tenant {TenantId}", tenantId);
+                            }
                         }
                         finally
                         {

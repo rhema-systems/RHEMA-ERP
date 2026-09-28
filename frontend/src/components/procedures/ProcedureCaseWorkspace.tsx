@@ -67,6 +67,7 @@ import { getProcedureWorkspaceTerminology } from '@/lib/procedure-workspace';
 import { LegalPropertyCaseContextDialog } from './LegalPropertyCaseContextDialog';
 import { estateLandManagementService, EstateManagedAssetStatus, type EstateManagedAsset } from '@/services/estate-land-management.service';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
+import { estateFacilitiesService, type FacilitiesProviderOption } from '@/services/estate-facilities.service';
 import type { LegalWorkspaceField } from '@/services/legal-procedure.service';
 
 const ProcedurePdfViewer = dynamic(
@@ -570,6 +571,7 @@ export function ProcedureCaseWorkspace({
   const [isLegalAssetContextOpen, setIsLegalAssetContextOpen] = React.useState(false);
   const [legalAssetContextError, setLegalAssetContextError] = React.useState<string | null>(null);
   const [legalCustomers, setLegalCustomers] = React.useState<BusinessPartnerDto[]>([]);
+  const [facilitiesProviders, setFacilitiesProviders] = React.useState<FacilitiesProviderOption[]>([]);
   const [isLegalContextOpen, setIsLegalContextOpen] = React.useState(false);
   const [departmentOptions, setDepartmentOptions] = React.useState<
     DepartmentOption[]
@@ -616,8 +618,8 @@ export function ProcedureCaseWorkspace({
   );
   const generatedDocumentSourceLabel =
     module === 'Legal'
-      ? 'Source: Legal Department -> Central DMS'
-      : 'Source: Estate / Facility -> Central DMS';
+      ? 'Legal Department'
+      : 'Estate / Facility';
   const generatedDocumentPreparedBy =
     selectedCase?.sourceDepartment ||
     (module === 'Legal' ? 'Legal Department' : 'Estate Section');
@@ -844,6 +846,37 @@ export function ProcedureCaseWorkspace({
 
     return null;
   }, [entityType, module, selectedCase]);
+  const facilitiesComplaintTicketId = selectedCase?.fields.find(
+    (field) => field.key === 'helpdeskTicketId'
+  )?.value?.trim();
+  const facilitiesComplaintCloseoutBlocker = React.useMemo(() => {
+    if (
+      !selectedCase ||
+      module !== 'Facilities' ||
+      entityType !== 'EstateFacilityComplaint' ||
+      selectedCase.currentStageName !== 'Complaint Closeout'
+    ) {
+      return null;
+    }
+
+    const fieldValue = (key: string) =>
+      selectedCase.fields.find((field) => field.key === key)?.value?.trim() ?? '';
+    const ticketReference = fieldValue('helpdeskTicketReference');
+    if (!ticketReference) {
+      return 'Complaint closeout requires a linked Helpdesk ticket.';
+    }
+    if (fieldValue('helpdeskResolutionComplete') !== 'true') {
+      return `Helpdesk ticket ${ticketReference} must be resolved or closed before Facilities closeout.`;
+    }
+    const feedback = fieldValue('requesterFeedbackStatus');
+    if (!feedback || feedback === 'Pending') {
+      return 'Record the requester feedback outcome before closing the Facilities complaint.';
+    }
+    if (!fieldValue('closureNotes')) {
+      return 'Record closeout notes before closing the Facilities complaint.';
+    }
+    return null;
+  }, [entityType, module, selectedCase]);
   const currentStageEditableFieldKeys = React.useMemo(
     () => new Set(selectedCase?.currentStageFieldKeys ?? []),
     [selectedCase?.currentStageFieldKeys]
@@ -869,7 +902,8 @@ export function ProcedureCaseWorkspace({
     currentStageItems.some((item) => !item.isCompleted) ||
     legalTransferRequiredFieldMessages.length > 0 ||
     !legalTransferPaymentReady ||
-    Boolean(facilitiesMaintenanceCloseoutBlocker);
+    Boolean(facilitiesMaintenanceCloseoutBlocker) ||
+    Boolean(facilitiesComplaintCloseoutBlocker);
 
   const getDocumentManagementRecordId = (fileUrl?: string | null) => {
     const match = fileUrl?.match(/^\/document-management\/records\/([^/?#]+)/i);
@@ -1187,6 +1221,19 @@ export function ProcedureCaseWorkspace({
     });
     return () => { active = false; };
   }, [isCreateDialogOpen, module]);
+
+  React.useEffect(() => {
+    if (module !== 'Facilities' || entityType !== 'EstateFacilityMaintenance') return;
+    let active = true;
+    void estateFacilitiesService.getApprovedProviders().then((providers) => {
+      if (!active) return;
+      setFacilitiesProviders(providers);
+    }).catch(() => {
+      if (!active) return;
+      setFacilitiesProviders([]);
+    });
+    return () => { active = false; };
+  }, [module, entityType]);
 
   React.useEffect(() => {
     if (!supportsGeneratedDocuments) {
@@ -2143,6 +2190,52 @@ export function ProcedureCaseWorkspace({
       </label>
     );
 
+    if (module === 'Facilities' && entityType === 'EstateFacilityMaintenance'
+      && field.key === 'serviceProviderBusinessPartnerId') {
+      return (
+        <div key={field.id} className="space-y-1.5">
+          {label}
+          <Select value={field.value || 'none'} disabled={isDisabled} onValueChange={(value) => {
+            updateFieldValue(field.key, value === 'none' ? '' : value);
+            updateFieldValue('serviceProviderContractId', '');
+          }}>
+            <SelectTrigger id={fieldId}><SelectValue placeholder="Select provider" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">No external provider</SelectItem>
+              {facilitiesProviders.map((provider) => (
+                <SelectItem key={provider.id} value={provider.id} disabled={provider.contracts.length === 0}>
+                  {provider.partnerName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      );
+    }
+
+    if (module === 'Facilities' && entityType === 'EstateFacilityMaintenance'
+      && field.key === 'serviceProviderContractId') {
+      const selectedProviderId = selectedCase?.fields.find((item) =>
+        item.key === 'serviceProviderBusinessPartnerId')?.value;
+      const contracts = facilitiesProviders.find((item) =>
+        item.id === selectedProviderId)?.contracts ?? [];
+      return (
+        <div key={field.id} className="space-y-1.5">
+          {label}
+          <Select value={field.value || 'none'} disabled={isDisabled || !selectedProviderId}
+            onValueChange={(value) => updateFieldValue(field.key, value === 'none' ? '' : value)}>
+            <SelectTrigger id={fieldId}><SelectValue placeholder="Select contract" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Select contract</SelectItem>
+              {contracts.map((contract) => (
+                <SelectItem key={contract.id} value={contract.id}>{contract.contractNumber} - {contract.contractTitle}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      );
+    }
+
     if (fieldType === 'select' && field.options?.length) {
       return (
         <div key={field.id} className="space-y-1.5">
@@ -2240,6 +2333,7 @@ export function ProcedureCaseWorkspace({
                 estateManagedAssetId: asset.id,
                 propertyNumber: asset.projectUnitCode || asset.assetCode,
                 propertyFileReference: asset.propertyFileReference || current.propertyFileReference || '',
+                customerReference: asset.customerBusinessPartnerId || '',
               }));
             }}
           >
@@ -2444,11 +2538,6 @@ export function ProcedureCaseWorkspace({
             <div>
               <CardTitle>{terminology.title}</CardTitle>
             </div>
-            {module !== 'Legal' && module !== 'Planning' ? (
-              <Badge variant={selectedCase?.usesConfiguredWorkflow ? 'default' : 'outline'}>
-                {selectedCase?.usesConfiguredWorkflow ? 'Administration workflow' : 'Procedure stages'}
-              </Badge>
-            ) : null}
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -2595,6 +2684,18 @@ export function ProcedureCaseWorkspace({
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
+                      {module === 'Facilities' && entityType === 'EstateFacilityComplaint' && facilitiesComplaintTicketId ? (
+                        <Button asChild variant="outline" size="sm">
+                          <Link href={`/helpdesk/tickets/${encodeURIComponent(facilitiesComplaintTicketId)}`}>
+                            Open Helpdesk ticket
+                          </Link>
+                        </Button>
+                      ) : null}
+                      {module === 'Facilities' && entityType === 'EstateFacilityComplaint' ? (
+                        <Button variant="outline" size="icon" title="Refresh complaint status" onClick={() => void refreshSelectedCase()}>
+                          <RefreshCw className="h-4 w-4" />
+                        </Button>
+                      ) : null}
                       <Badge
                         variant="outline"
                         className={getStatusBadgeClassName(
@@ -3464,6 +3565,8 @@ export function ProcedureCaseWorkspace({
                         ? legalTransferRequiredFieldMessages[0]
                         : facilitiesMaintenanceCloseoutBlocker
                           ? facilitiesMaintenanceCloseoutBlocker
+                        : facilitiesComplaintCloseoutBlocker
+                          ? facilitiesComplaintCloseoutBlocker
                         : isLegalTransferClientPaymentStage &&
                             !legalTransferPaymentReady
                           ? 'Finance payment must be synced before this stage can be submitted.'

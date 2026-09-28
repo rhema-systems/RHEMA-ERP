@@ -119,13 +119,13 @@ export const getProcedureWorkspaceActionLabel = (
     case 'Operational Board':
       return 'Open board';
     case 'Event Workflow':
-      return 'Open event workflow';
+      return 'Open event';
     case 'Legal Matter':
       return 'Open legal matter';
     case 'Dashboard / Report':
       return 'Open reporting';
     default:
-      return 'Open case workflow';
+      return 'Open case';
   }
 };
 

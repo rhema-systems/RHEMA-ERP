@@ -3,8 +3,6 @@ import { compatibleApiService as apiService } from './compatibleApiService';
 export interface PlanningProcedure {
   title: string;
   entityType: string;
-  source: string;
-  summary: string;
   icon: string;
   stageCount: number;
   accent: string;
@@ -13,7 +11,6 @@ export interface PlanningProcedure {
 export interface PlanningWorkspaceStage {
   name: string;
   owner: string;
-  summary: string;
   checklist: string[];
 }
 

@@ -182,6 +182,15 @@
     <Compile Include="Services\Estate\EstateWorkflowIntegrationRegressionTests.cs" />
     <Compile Include="Services\Estate\EstateRentPenaltyStatusTests.cs" />
     <Compile Include="Services\Estate\FacilitiesDutyRosterScheduleTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesComplaintHandoffServiceTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesProviderSelectionServiceTests.cs" />
+    <Compile Include="Services\Estate\EstateTerminationReleaseTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesMaintenanceCloseoutTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesProviderOptionsControllerTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesBudgetProjectionTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesLeaseReminderTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesArBillingControllerTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesPortalBillingFixtureTests.cs" />
     <Compile Include="Services\Estate\EstateRecurringBillingServiceTests.cs" />
     <Compile Include="Services\QuantitySurvey\**\*.cs" />
     <Compile Include="Services\Finance\BankAccountTenantIsolationTests.cs" />

@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -1350,6 +1351,38 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             throw new InvalidOperationException("Only land assets can return to Land Bank status.");
         }
 
+        if (request.Status == EstateManagedAssetStatus.Available
+            && request.ReleaseOccupant == true
+            && asset.Status is EstateManagedAssetStatus.Leased or EstateManagedAssetStatus.Occupied)
+        {
+            if (!request.TerminationCaseId.HasValue)
+                throw new InvalidOperationException("Select a completed Legal termination case before releasing this occupant.");
+
+            var legalCase = await _unitOfWork.Repository<ProcedureCase>().FirstOrDefaultAsync(item =>
+                item.Id == request.TerminationCaseId.Value
+                && item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted
+                && item.Module == "Legal"
+                && item.EntityType == "LegalTerminationRecognition"
+                && item.Status == "Completed"
+                && item.CompletedAt.HasValue);
+            if (legalCase is null)
+                throw new InvalidOperationException("The selected Legal termination case is not completed or is not available to this tenant.");
+
+            var legalFields = await _unitOfWork.Repository<ProcedureCaseField>().FindAsync(item =>
+                item.ProcedureCaseId == legalCase.Id
+                && item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted);
+            var assetReference = legalFields.FirstOrDefault(item => item.Key == "estateManagedAssetId")?.Value;
+            var customerReference = legalFields.FirstOrDefault(item => item.Key == "customerReference")?.Value;
+            if (assetReference != asset.Id.ToString()
+                || asset.CustomerBusinessPartnerId.HasValue
+                    && customerReference != asset.CustomerBusinessPartnerId.Value.ToString())
+                throw new InvalidOperationException("The Legal termination case must match this property and its current occupant.");
+            if (asset.DateOfTenancy.HasValue && legalCase.CompletedAt < asset.DateOfTenancy.Value)
+                throw new InvalidOperationException("The Legal termination case predates the current tenancy.");
+        }
+
         asset.Status = request.Status;
         var requestedNotes = TrimOrNull(request.Notes);
         if (request.Status == EstateManagedAssetStatus.Available
@@ -1381,7 +1414,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                     requestedNotes,
                     $"Occupancy released on {request.ActualDate!.Value:yyyy-MM-dd}; "
                     + $"occupant: {asset.LesseeName ?? "not recorded"}; "
-                    + $"agreement: {asset.PropertyFileReference ?? "not recorded"}"
+                    + $"agreement: {asset.PropertyFileReference ?? "not recorded"}; "
+                    + $"legal termination case: {request.TerminationCaseId?.ToString() ?? "not required"}"
                 }.Where(value => !string.IsNullOrWhiteSpace(value)));
 
             asset.Notes = releaseHistory;
@@ -2579,6 +2613,9 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         IsReadyForProjectManagement = asset.IsReadyForProjectManagement,
         BlockName = asset.BlockName,
         FloorLabel = asset.FloorLabel,
+        ResponsibleOfficerEmployeeId = asset.ResponsibleOfficerEmployeeId,
+        ResponsibleOfficerEmployeeNumber = asset.ResponsibleOfficerEmployeeNumber,
+        ResponsibleOfficerName = asset.ResponsibleOfficerName,
         AssetType = asset.AssetType,
         Status = asset.Status,
         SourceType = asset.SourceType,

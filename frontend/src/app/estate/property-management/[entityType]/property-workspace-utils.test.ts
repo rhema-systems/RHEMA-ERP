@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import type { EstateManagedAsset } from '@/services/estate-land-management.service';
+import { EstateManagedAssetStatus, type EstateManagedAsset } from '@/services/estate-land-management.service';
 import {
   assetMatchesWorkspacePrefill,
   buildPropertyWorkspaceHref,
+  leaseExpiryAlert,
+  leaseExpiryDate,
 } from './property-workspace-utils';
 
 const asset = {
@@ -37,5 +39,33 @@ describe('property workspace prefill links', () => {
     expect(assetMatchesWorkspacePrefill(asset, null, 'LAND-009')).toBe(true);
     expect(assetMatchesWorkspacePrefill(asset, null, 'LEASE/2026/001')).toBe(true);
     expect(assetMatchesWorkspacePrefill(asset, 'other-asset', 'OTHER')).toBe(false);
+  });
+});
+
+describe('lease expiry', () => {
+  it('clamps month-end terms and flags active leases near expiry', () => {
+    const rental = {
+      ...asset,
+      status: EstateManagedAssetStatus.Leased,
+      dateOfTenancy: '2026-01-31T00:00:00Z',
+      externalLeaseTermMonths: 1,
+    } as EstateManagedAsset;
+
+    expect(leaseExpiryDate(rental)?.toISOString().slice(0, 10)).toBe('2026-02-28');
+    expect(leaseExpiryAlert(rental, new Date('2026-02-01T00:00:00Z')))
+      .toBe('Expires in 27 days');
+    expect(leaseExpiryAlert(rental, new Date('2026-03-01T00:00:00Z')))
+      .toBe('Expired 1 day ago');
+  });
+
+  it('does not warn on a former lease', () => {
+    const former = {
+      ...asset,
+      status: EstateManagedAssetStatus.Available,
+      dateOfTenancy: '2026-01-01T00:00:00Z',
+      leaseTermYears: 1,
+    } as EstateManagedAsset;
+
+    expect(leaseExpiryAlert(former, new Date('2027-01-01T00:00:00Z'))).toBeNull();
   });
 });

@@ -395,7 +395,7 @@ public class LandAcquisitionsController : ControllerBase
             acquisition.StageOrder != (int)AcquisitionProcedure.VendorPayment &&
             acquisition.StageOrder != (int)AcquisitionProcedure.StampDutyPayment)
         {
-            return BadRequest("The Accounts Payable request is available only during Cadastral Survey, Vendor Payment, or Stamp Duty Payment.");
+            return BadRequest("The Estate payable request is available only during Cadastral Survey, Vendor Payment, or Stamp Duty Payment.");
         }
 
         if (!await CanAccessStageAsync(acquisition, acquisition.StageOrder, GetUserId(), IsWorkflowAdministrator()))
@@ -2180,7 +2180,7 @@ public class LandAcquisitionsController : ControllerBase
         SetMissingResponseValue(responseValues, "boardApprovalReference", acquisition.Agreement?.BoardApprovalReference ?? SnapshotText(approvalSnapshot, "boardApprovalReference"));
         SetMissingResponseValue(responseValues, "accountsPayableInvoiceStatus", SnapshotText(paymentSnapshot, "accountsPayableInvoiceStatus") ?? "Not linked");
         SetMissingResponseValue(responseValues, "accountsPayablePaymentStatus", SnapshotText(paymentSnapshot, "accountsPayablePaymentStatus") ?? "Pending");
-        SetMissingResponseValue(responseValues, "paymentNotes", SnapshotText(paymentSnapshot, "paymentNotes") ?? "Create and process the vendor payable in Accounts Payable before instrument execution.");
+        SetMissingResponseValue(responseValues, "paymentNotes", SnapshotText(paymentSnapshot, "paymentNotes") ?? "Create and process the Estate vendor payable before instrument execution.");
     }
 
     private void PopulateAssetCreationDefaults(
@@ -2606,19 +2606,19 @@ public class LandAcquisitionsController : ControllerBase
         if (!snapshots.TryGetValue((int)AcquisitionProcedure.CadastralSurvey, out var surveySnapshot) ||
             !IsExternalSurveyor(surveySnapshot))
         {
-            throw new InvalidOperationException("Select External as the surveyor source before creating a surveyor Accounts Payable request.");
+            throw new InvalidOperationException("Select External as the surveyor source before creating a surveyor Estate payable request.");
         }
 
         var feeAmount = SnapshotDecimal(surveySnapshot, "surveyorFeeAmount");
         if (feeAmount is null or <= 0)
         {
-            throw new InvalidOperationException("Enter a valid external surveyor fee amount before creating the Accounts Payable request.");
+            throw new InvalidOperationException("Enter a valid external surveyor fee amount before creating the Estate payable request.");
         }
 
         var surveyorBusinessPartnerId = SnapshotGuid(surveySnapshot, "surveyorBusinessPartnerId");
         if (!surveyorBusinessPartnerId.HasValue)
         {
-            throw new InvalidOperationException("Select the external surveyor from the vendor list before creating the Accounts Payable request.");
+            throw new InvalidOperationException("Select the external surveyor from the vendor list before creating the Estate payable request.");
         }
 
         var surveyorPartner = await _context.Set<BusinessPartner>()
@@ -2709,7 +2709,7 @@ public class LandAcquisitionsController : ControllerBase
         values["amountDue"] = invoice.TotalAmount;
         values["amountPaid"] = invoice.PaidAmount;
         values["isPaid"] = false;
-        values["paymentNotes"] = $"Complete external surveyor payment in Accounts Payable for invoice {invoice.InvoiceNumber}.";
+        values["paymentNotes"] = $"Complete external surveyor payment for Estate payable request {invoice.InvoiceNumber}.";
         SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.CadastralSurvey, values);
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -2774,7 +2774,7 @@ public class LandAcquisitionsController : ControllerBase
             values["amountDue"] = SnapshotDecimal(surveySnapshot, "surveyorFeeAmount");
             values["amountPaid"] = 0m;
             values["isPaid"] = false;
-            values["paymentNotes"] = "The linked Accounts Payable invoice could not be found.";
+            values["paymentNotes"] = "The linked Estate payable request could not be found.";
             SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.CadastralSurvey, values);
             return;
         }
@@ -2808,12 +2808,12 @@ public class LandAcquisitionsController : ControllerBase
             && amountPaid >= payableAmount
             && balanceAmount <= 0m;
         var paymentNotes = surveyorPayment == null
-            ? $"Accounts Payable invoice {invoice.InvoiceNumber} is {invoice.Status}."
+            ? $"Estate payable request {invoice.InvoiceNumber} is {invoice.Status}."
             : !invoiceAmountMatches
-                ? $"Accounts Payable invoice {invoice.InvoiceNumber} total {invoice.CurrencyCode} {invoice.TotalAmount:N2} does not match surveyor fee {invoice.CurrencyCode} {payableAmount:N2}."
+                ? $"Estate payable request {invoice.InvoiceNumber} total {invoice.CurrencyCode} {invoice.TotalAmount:N2} does not match surveyor fee {invoice.CurrencyCode} {payableAmount:N2}."
                 : isPaid
-                    ? surveyorPayment.Notes ?? $"Accounts Payable payment {surveyorPayment.PaymentNumber} is {surveyorPayment.Status}."
-                    : $"Accounts Payable payment {surveyorPayment.PaymentNumber} is {surveyorPayment.Status}; paid {invoice.CurrencyCode} {amountPaid:N2} of {invoice.CurrencyCode} {payableAmount:N2}, balance {invoice.CurrencyCode} {balanceAmount:N2}.";
+                    ? surveyorPayment.Notes ?? $"Estate payment {surveyorPayment.PaymentNumber} is {surveyorPayment.Status}."
+                    : $"Estate payment {surveyorPayment.PaymentNumber} is {surveyorPayment.Status}; paid {invoice.CurrencyCode} {amountPaid:N2} of {invoice.CurrencyCode} {payableAmount:N2}, balance {invoice.CurrencyCode} {balanceAmount:N2}.";
 
         values["accountsPayableSupplierId"] = invoice.BusinessPartnerId;
         values["accountsPayableInvoiceId"] = invoice.Id;
@@ -2856,7 +2856,7 @@ public class LandAcquisitionsController : ControllerBase
 
         if (agreedAmount is null or <= 0)
         {
-            throw new InvalidOperationException("Record a valid negotiated/agreed vendor payment amount before creating the Accounts Payable request.");
+            throw new InvalidOperationException("Record a valid negotiated/agreed vendor payment amount before creating the Estate payable request.");
         }
 
         var vendorPartnerId =
@@ -2895,7 +2895,7 @@ public class LandAcquisitionsController : ControllerBase
         if (vendorPartner == null || string.IsNullOrWhiteSpace(vendorName))
         {
             throw new InvalidOperationException(
-                "Select an approved Business Partner for the acquisition vendor before creating the Accounts Payable request.");
+                "Select an approved Business Partner for the acquisition vendor before creating the Estate payable request.");
         }
 
         var sourceReference = $"LAND-VENDOR-PAYMENT:{acquisition.Id:N}";
@@ -2983,7 +2983,7 @@ public class LandAcquisitionsController : ControllerBase
             ["vendorPaymentDueDate"] = SnapshotText(negotiationSnapshot, "agreementPaymentDueDate"),
             ["boardApprovalReference"] = acquisition.Agreement?.BoardApprovalReference ?? SnapshotText(approvalSnapshot, "boardApprovalReference"),
             ["isPaid"] = false,
-            ["paymentNotes"] = $"Complete vendor payment in Accounts Payable for invoice {invoice.InvoiceNumber}."
+            ["paymentNotes"] = $"Complete vendor payment for Estate payable request {invoice.InvoiceNumber}."
         });
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -3001,7 +3001,7 @@ public class LandAcquisitionsController : ControllerBase
         var assessment = acquisition.StampDutyAssessment;
         if (assessment == null || !assessment.IsApproved || assessment.DutyAmount <= 0)
         {
-            throw new InvalidOperationException("Approve a valid stamp duty assessment before creating the Accounts Payable request.");
+            throw new InvalidOperationException("Approve a valid stamp duty assessment before creating the Estate payable request.");
         }
 
         var payment = acquisition.StampDutyPayment ?? Child(new StampDutyPayment(), acquisition);
@@ -3098,7 +3098,7 @@ public class LandAcquisitionsController : ControllerBase
             ["amountDue"] = invoice.TotalAmount,
             ["amountPaid"] = invoice.PaidAmount,
             ["isPaid"] = false,
-            ["paymentNotes"] = $"Complete payment in Accounts Payable for invoice {invoice.InvoiceNumber}."
+            ["paymentNotes"] = $"Complete payment for Estate payable request {invoice.InvoiceNumber}."
         });
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -3118,7 +3118,7 @@ public class LandAcquisitionsController : ControllerBase
         var services = ReadOtherAcquisitionServiceCosts(paymentSnapshot);
         if (services.Count == 0)
         {
-            throw new InvalidOperationException("Add at least one other acquisition service cost before creating the Accounts Payable request.");
+            throw new InvalidOperationException("Add at least one other acquisition service cost before creating the Estate payable request.");
         }
 
         var totalAmount = services.Sum(item => item.Amount);
@@ -3217,7 +3217,7 @@ public class LandAcquisitionsController : ControllerBase
         values["otherAmountPaid"] = invoice.PaidAmount;
         values["otherCostsPaid"] = false;
         values["otherAcquisitionCost"] = totalAmount;
-        values["otherPaymentNotes"] = $"Complete other acquisition cost payment in Accounts Payable for invoice {invoice.InvoiceNumber}.";
+        values["otherPaymentNotes"] = $"Complete other acquisition cost payment for Estate payable request {invoice.InvoiceNumber}.";
         SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.StampDutyPayment, values);
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -3251,7 +3251,7 @@ public class LandAcquisitionsController : ControllerBase
         if (invoice == null)
         {
             var missingValues = SnapshotToObjectDictionary(paymentSnapshot);
-            missingValues["otherPaymentNotes"] = "The linked other acquisition costs AP invoice could not be found.";
+            missingValues["otherPaymentNotes"] = "The linked other acquisition costs payable request could not be found.";
             SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.StampDutyPayment, missingValues);
             return;
         }
@@ -3282,10 +3282,10 @@ public class LandAcquisitionsController : ControllerBase
         var balanceAmount = Math.Max(0m, payableAmount - paidAmount);
         var isPaid = completedPayment != null && balanceAmount <= 0.01m;
         var paymentNotes = vendorPayment == null
-            ? $"Accounts Payable invoice {invoice.InvoiceNumber} is {invoice.Status}; payment has not been recorded."
+            ? $"Estate payable request {invoice.InvoiceNumber} is {invoice.Status}; payment has not been recorded."
             : isPaid
-                ? vendorPayment.Notes ?? $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}."
-                : $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}; paid {invoice.CurrencyCode} {paidAmount:N2} of {invoice.CurrencyCode} {payableAmount:N2}, balance {invoice.CurrencyCode} {balanceAmount:N2}.";
+                ? vendorPayment.Notes ?? $"Estate payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}."
+                : $"Estate payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}; paid {invoice.CurrencyCode} {paidAmount:N2} of {invoice.CurrencyCode} {payableAmount:N2}, balance {invoice.CurrencyCode} {balanceAmount:N2}.";
 
         var values = SnapshotToObjectDictionary(paymentSnapshot);
         values["otherAccountsPayableSupplierId"] = invoice.BusinessPartnerId;
@@ -3322,7 +3322,7 @@ public class LandAcquisitionsController : ControllerBase
         if (invoice.Status == VendorInvoiceStatus.Rejected)
         {
             throw new InvalidOperationException(
-                $"Accounts Payable invoice {invoice.InvoiceNumber} was rejected. Correct it in Finance before continuing the acquisition payment stage.");
+                $"Estate payable request {invoice.InvoiceNumber} was rejected. Correct it before continuing the acquisition payment stage.");
         }
     }
 
@@ -3421,7 +3421,7 @@ public class LandAcquisitionsController : ControllerBase
                 ["vendorPaymentDueDate"] = SnapshotText(paymentSnapshot, "vendorPaymentDueDate"),
                 ["boardApprovalReference"] = SnapshotText(paymentSnapshot, "boardApprovalReference"),
                 ["isPaid"] = false,
-                ["paymentNotes"] = "The linked Accounts Payable invoice could not be found."
+                ["paymentNotes"] = "The linked Estate payable request could not be found."
             });
             return;
         }
@@ -3455,12 +3455,12 @@ public class LandAcquisitionsController : ControllerBase
             && amountPaid >= payableAmount
             && balanceAmount <= 0m;
         var paymentNotes = vendorPayment == null
-            ? $"Accounts Payable invoice {invoice.InvoiceNumber} is {invoice.Status}."
+            ? $"Estate payable request {invoice.InvoiceNumber} is {invoice.Status}."
             : !invoiceAmountMatches
-                ? $"Accounts Payable invoice {invoice.InvoiceNumber} total {invoice.CurrencyCode} {invoice.TotalAmount:N2} does not match payable amount {invoice.CurrencyCode} {payableAmount:N2}."
+                ? $"Estate payable request {invoice.InvoiceNumber} total {invoice.CurrencyCode} {invoice.TotalAmount:N2} does not match payable amount {invoice.CurrencyCode} {payableAmount:N2}."
             : isPaid
-                ? vendorPayment.Notes ?? $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}."
-                : $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}; paid {invoice.CurrencyCode} {amountPaid:N2} of {invoice.CurrencyCode} {payableAmount:N2}, balance {invoice.CurrencyCode} {balanceAmount:N2}.";
+                ? vendorPayment.Notes ?? $"Estate payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}."
+                : $"Estate payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}; paid {invoice.CurrencyCode} {amountPaid:N2} of {invoice.CurrencyCode} {payableAmount:N2}, balance {invoice.CurrencyCode} {balanceAmount:N2}.";
 
         SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.VendorPayment, new Dictionary<string, object?>
         {
@@ -3516,7 +3516,7 @@ public class LandAcquisitionsController : ControllerBase
         }
 
         var accountsPayableInvoiceId = stampDutyPayment.AccountsPayableInvoiceId.GetValueOrDefault();
-        // GET endpoints call this sync, so only mutate the tracked payment when Accounts Payable values change.
+        // GET endpoints call this sync, so only mutate the tracked payment when payable values change.
         var changed = false;
 
         void SetIfChanged<T>(T currentValue, T newValue, Action<T> assign)
@@ -3550,7 +3550,7 @@ public class LandAcquisitionsController : ControllerBase
             if (changed)
             {
                 stampDutyPayment.UpdatedAt = DateTime.UtcNow;
-                stampDutyPayment.UpdatedBy = "Accounts Payable Sync";
+                stampDutyPayment.UpdatedBy = "Estate Payable Sync";
             }
 
             return;
@@ -3594,12 +3594,12 @@ public class LandAcquisitionsController : ControllerBase
         var paymentDate = vendorPayment?.PaymentDate;
         var paymentMethod = vendorPayment?.PaymentMethod.ToString();
         var notes = vendorPayment == null
-            ? $"Accounts Payable invoice {invoice.InvoiceNumber} is {invoice.Status}."
+            ? $"Estate payable request {invoice.InvoiceNumber} is {invoice.Status}."
             : !invoiceAmountMatches
-                ? $"Accounts Payable invoice {invoice.InvoiceNumber} total {invoice.CurrencyCode} {invoice.TotalAmount:N2} does not match payable amount {invoice.CurrencyCode} {payableAmount:N2}."
+                ? $"Estate payable request {invoice.InvoiceNumber} total {invoice.CurrencyCode} {invoice.TotalAmount:N2} does not match payable amount {invoice.CurrencyCode} {payableAmount:N2}."
             : isPaid
-                ? vendorPayment.Notes ?? $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}."
-                : $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}; paid {invoice.CurrencyCode} {amountPaid:N2} of {invoice.CurrencyCode} {payableAmount:N2}, balance {invoice.CurrencyCode} {balanceAmount:N2}.";
+                ? vendorPayment.Notes ?? $"Estate payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}."
+                : $"Estate payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}; paid {invoice.CurrencyCode} {amountPaid:N2} of {invoice.CurrencyCode} {payableAmount:N2}, balance {invoice.CurrencyCode} {balanceAmount:N2}.";
 
         SetIfChanged(stampDutyPayment.AccountsPayablePaymentId, accountsPayablePaymentId,
             value => stampDutyPayment.AccountsPayablePaymentId = value);
@@ -3617,7 +3617,7 @@ public class LandAcquisitionsController : ControllerBase
         }
 
         stampDutyPayment.UpdatedAt = DateTime.UtcNow;
-        stampDutyPayment.UpdatedBy = "Accounts Payable Sync";
+        stampDutyPayment.UpdatedBy = "Estate Payable Sync";
 
         SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.StampDutyPayment, new Dictionary<string, object?>
         {
@@ -5664,13 +5664,13 @@ public class LandAcquisitionsController : ControllerBase
         new(5, 5, "Ownership Verification", "Ownership Verification", "Compare ownership and cadastral boundaries, clear overlaps and encumbrances, and verify title, identity, searches, authority to sell, and ownership history.", "ownership-verification", "/LandParcel/OwnershipVerification", "POST", "Legal Manager", "Approve Ownership Verification", "Reject Ownership Verification"),
         new(6, 6, "Agreement Negotiation", "Agreement Negotiation", "Record offers, counteroffers, negotiated value, conditions, and negotiation notes.", "agreement-negotiation", "/LandParcel/AgreementNegotiation", "POST", "Acquisition Committee", "Submit for Agreement Approval", "Return Negotiation"),
         new(7, 7, "Agreement Approval", "Agreement Approval", "Approve negotiated agreement terms before land instrument execution.", "agreement-approval", "/LandParcel/AgreementApproval", "POST", "Executive Approver", "Approve Agreement", "Reject Agreement"),
-        new(8, 8, "Vendor Payment", "Vendor Payment", "Create the Accounts Payable request for the approved vendor consideration and confirm payment before instrument execution.", "vendor-payment", "/LandParcel/VendorPayment", "GET", "Accounts Payable", "Confirm Vendor Payment", "Return Vendor Payment"),
+        new(8, 8, "Vendor Payment", "Vendor Payment", "Create the Estate payable request for the approved vendor consideration and confirm payment before instrument execution.", "vendor-payment", "/LandParcel/VendorPayment", "GET", "Estate Payable", "Confirm Vendor Payment", "Return Vendor Payment"),
         new(9, 9, "Land Instrument Execution", "Land Instrument Execution", "Capture execution details for the conveyance, assignment, lease, or acquisition instrument.", "execution", "/LandParcel/Execution", "GET", "Legal Officer", "Submit Executed Instrument", "Return Execution"),
         new(10, 10, "Statutory Consent", "Statutory Consent", "Prepare and submit statutory consent application to the appropriate authority.", "statutory-consent", "/LandParcel/StatutoryConsent", "GET", "Lands Commission Liaison", "Submit Statutory Consent", "Return Consent Application"),
         new(11, 11, "Statutory Consent Approval", "Statutory Consent Approval", "Review statutory consent approval reference, conditions, approval date, and documents.", "statutory-consent-approval", "/LandParcel/StatutoryConsentApproval", "GET", "Legal Manager", "Approve Statutory Consent", "Reject Statutory Consent"),
         new(12, 12, "Stamp Duty Assessment", "Stamp Duty Assessment", "Record valuation, assessed value, stamp duty amount, and assessment reference.", "stamp-duty-assessment", "/LandParcel/StampDutyAssessment", "GET", "Finance Officer", "Submit Stamp Duty Assessment", "Return Assessment"),
         new(13, 13, "Stamp Duty Approval", "Stamp Duty Approval", "Approve the stamp duty assessment before payment is processed.", "stamp-duty-approval", "/LandParcel/StampDutyApproval", "GET", "Finance Manager", "Approve Stamp Duty Assessment", "Reject Stamp Duty Assessment"),
-        new(14, 14, "Stamp Duty Payment", "Stamp Duty Payment", "Track the linked Accounts Payable request and continue after its payment is processed.", "stamp-duty-payment", "/LandParcel/StampDutyPaymentPage", "GET", "Accounts Payable", "Confirm Accounts Payable Payment", "Return Payment"),
+        new(14, 14, "Stamp Duty Payment", "Stamp Duty Payment", "Track the linked Estate payable request and continue after its payment is processed.", "stamp-duty-payment", "/LandParcel/StampDutyPaymentPage", "GET", "Estate Payable", "Confirm Estate Payment", "Return Payment"),
         new(15, 15, "Registration", "Registration", "Capture publication, title reference, registration number, volume, folio, instrument date, and archive details.", "registration", "/LandParcel/RegistrationStage", "GET", "Land Registry Officer", "Submit Registration", "Return Registration"),
         new(16, 16, "Land Creation", "Land Creation", "Create the estate land record, confirm the total capitalized land cost, GL transfer target, and custodian.", "asset-creation", "/LandParcel/AssetCreation", "GET", "Fixed Asset Officer", "Create Estate Land", "Return Land Creation"),
     };

@@ -9,8 +9,6 @@ public interface IFacilitiesProcedureCatalogService
 public sealed record FacilitiesProcedureCatalogItem(
     string Title,
     string EntityType,
-    string Source,
-    string Summary,
     string Icon,
     int StageCount,
     string Accent,
@@ -27,7 +25,6 @@ public sealed record FacilitiesProcedureWorkspace(
 public sealed record FacilitiesWorkspaceStage(
     string Name,
     string Owner,
-    string Summary,
     IReadOnlyList<string> Checklist);
 
 public sealed record FacilitiesWorkspaceDocument(
