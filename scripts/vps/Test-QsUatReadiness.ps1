@@ -54,7 +54,7 @@ try {
     $copiedDocs=Join-Path $testRoot 'docs'
     [void][IO.Directory]::CreateDirectory($copiedScripts)
     [void][IO.Directory]::CreateDirectory($copiedDocs)
-    foreach($file in @('Get-QsUatReadiness.ps1','OperationalUatVerification.ps1','QsUatPrerequisiteInventory.sql')) {
+    foreach($file in @('Get-QsUatReadiness.ps1','OperationalUatVerification.ps1','QsUatPrerequisiteInventory.sql','QsUatReadinessSummary.ps1')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $copiedScripts $file)
     }
     Copy-Item -LiteralPath (Join-Path $repositoryRoot 'docs\TDC_QS_END_TO_END_UAT_WALKTHROUGH.html') -Destination $copiedDocs
@@ -88,6 +88,7 @@ function Test-Path {
     $report=Get-Content -LiteralPath $reports[0].FullName -Raw | ConvertFrom-Json
     Assert-Test ($report.ReadOnly -eq $true -and $report.QsEndToEndVerified -eq $false -and $report.Database -ceq $VerificationDatabase) 'Report misrepresented the target or UAT readiness.'
     Assert-Test (@($report.Prerequisites).Count -ge 13 -and $null -ne $report.OperationalBaseline) 'Report omitted actor prerequisites or operational baseline findings.'
+    Assert-Test ($report.ConfigurationReviewRequired -and $null -ne $report.ReadyLandCount -and @($report.Prerequisites | Where-Object Category -eq 'Actor').Count -eq 15) 'Report omitted configuration review, ready-land count or expanded UAT actors.'
     $html=Get-Content -LiteralPath $walkthroughs[0].FullName -Raw
     Assert-Test (-not $html.Contains('http://localhost:3000') -and $html.Contains('https://vps-uat.example.test') -and $html.Contains('Historical project IDs')) 'Walkthrough did not preserve the VPS-link and historical-fixture boundaries.'
     Assert-Test ($child.Output.Contains('QS_END_TO_END|NOT_YET_VERIFIED')) 'Console output must not claim completed UAT.'

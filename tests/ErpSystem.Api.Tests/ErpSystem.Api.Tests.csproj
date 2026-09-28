@@ -30,6 +30,9 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' != 'true'">
+    <Compile Include="Services\QsUatActorSeederTests.cs" />
+    <Compile Include="Services\QsUatPreparationSeederTests.cs" />
+    <Compile Include="Services\EstateUatLandSeederTests.cs" />
     <Compile Include="Controllers\Inventory\PhysicalCountReviewTests.cs" />
     <Compile Include="Services\Finance\ProcurementAutoInvoiceTests.cs" />
     <Compile Include="Services\Finance\CustomerBalanceAdjustmentPostingTests.cs" />

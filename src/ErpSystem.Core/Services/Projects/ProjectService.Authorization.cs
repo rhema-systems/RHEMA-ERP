@@ -129,7 +129,12 @@ public partial class ProjectService
             ProjectAccessOperation.ManageGovernance => !IsReadOnlyUser() && (isLead || membershipRoles.Any(IsManagementProjectRole) || isGovernanceContributor),
             ProjectAccessOperation.ManageExternalAccess => !IsReadOnlyUser() && (isLead || membershipRoles.Any(IsManagementProjectRole)),
             ProjectAccessOperation.SubmitForApproval => !IsReadOnlyUser() && (isLead || membershipRoles.Any(IsManagementProjectRole)),
-            ProjectAccessOperation.ApproveWorkflow => canView,
+            // A configured QS project workflow may assign an independent QS
+            // approver who is not a project member. Keep the workflow engine's
+            // CanUserApproveAsync check as the final gate; this access check
+            // only lets that assigned approver reach it.
+            ProjectAccessOperation.ApproveWorkflow => canView ||
+                _currentUserProvider.HasRole("TDC_SUPERVISING_QUANTITY_SURVEYOR"),
             _ => false
         };
 
