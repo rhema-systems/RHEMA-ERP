@@ -122,7 +122,7 @@ function statementLabel(value: FinancialStatementType) {
 
 function statusVariant(status: FinancialStatementLayoutVersionDto['status']) {
     if (status === 'Published') return 'default' as const;
-    if (status === 'Draft') return 'secondary' as const;
+    if (status === 'Draft' || status === 'Submitted') return 'secondary' as const;
     return 'outline' as const;
 }
 
@@ -682,7 +682,6 @@ function LayoutDetailDialog({
     open,
     onOpenChange,
     canManage,
-    canPublish,
     canRun,
     onChanged,
 }: {
@@ -690,7 +689,6 @@ function LayoutDetailDialog({
     open: boolean;
     onOpenChange: (open: boolean) => void;
     canManage: boolean;
-    canPublish: boolean;
     canRun: boolean;
     onChanged: () => void;
 }) {
@@ -843,8 +841,8 @@ function LayoutDetailDialog({
 
     const createDraft = async () => {
         if (!layout) return;
-        if (layout.versions.some((version) => version.status === 'Draft')) {
-            toast({ title: 'Draft already exists', description: 'Publish or replace the existing Draft before creating another.', variant: 'destructive' });
+        if (layout.versions.some((version) => version.status === 'Draft' || version.status === 'Submitted')) {
+            toast({ title: 'Version already in progress', description: 'Complete or reject the existing Draft/Submitted version before creating another.', variant: 'destructive' });
             return;
         }
         const source = [...layout.versions].sort((a, b) => b.versionNumber - a.versionNumber)[0];
@@ -869,19 +867,18 @@ function LayoutDetailDialog({
         }
     };
 
-    const requestPublish = () => {
+    const requestSubmission = () => {
         if (!selectedVersion || selectedVersion.status !== 'Draft') return;
         setConfirmation({
-            title: `Publish version ${selectedVersion.versionNumber}?`,
-            description: 'Publishing makes this version available to financial reports and retires the previously published version. Published rows cannot be edited.',
+            title: `Submit version ${selectedVersion.versionNumber} for approval?`,
+            description: 'Submission freezes this Draft and sends it to the Finance Approval Workbench. A different authorised Finance user must approve it before it becomes available to reports.',
             action: async () => {
                 await runAction(
-                    () => financialStatementLayoutDataService.publishVersion(selectedVersion.id, {
-                        expectedVersionRevision: selectedVersion.revision,
-                        effectiveFrom: selectedVersion.effectiveFrom,
-                        effectiveTo: selectedVersion.effectiveTo,
-                    }).then(() => undefined),
-                    `Version ${selectedVersion.versionNumber} published`,
+                    () => financialStatementLayoutDataService.submitVersion(
+                        selectedVersion.id,
+                        selectedVersion.revision,
+                    ).then(() => undefined),
+                    `Version ${selectedVersion.versionNumber} submitted for independent approval`,
                 );
             },
         });
@@ -999,12 +996,12 @@ function LayoutDetailDialog({
                                                 </Select>
                                             </div>
                                             <div className="flex flex-wrap gap-2">
-                                                {canManage && !layout.isProtectedStandard ? <Button variant="outline" onClick={createDraft} disabled={busy || !layout.isActive || layout.versions.some((version) => version.status === 'Draft')}><Archive className="mr-2 h-4 w-4" />Create next Draft</Button> : null}
+                                                {canManage && !layout.isProtectedStandard ? <Button variant="outline" onClick={createDraft} disabled={busy || !layout.isActive || layout.versions.some((version) => version.status === 'Draft' || version.status === 'Submitted')}><Archive className="mr-2 h-4 w-4" />Create next Draft</Button> : null}
                                                 {canManage && !layout.isProtectedStandard ? <Button variant="outline" onClick={validate} disabled={busy || !selectedVersion}><ClipboardCheck className="mr-2 h-4 w-4" />Validate</Button> : null}
                                                 {canRun && !layout.isProtectedStandard ? <Button variant="outline" onClick={() => setPreviewOpen(true)} disabled={!selectedVersion}><Eye className="mr-2 h-4 w-4" />Run preview</Button> : null}
                                                 {selectedVersion ? <Button variant="outline" onClick={() => void exportVersion('json')} disabled={busy}><FileJson className="mr-2 h-4 w-4" />JSON</Button> : null}
                                                 {selectedVersion ? <Button variant="outline" onClick={() => void exportVersion('xlsx')} disabled={busy}><FileSpreadsheet className="mr-2 h-4 w-4" />Excel</Button> : null}
-                                                {canPublish && !layout.isProtectedStandard && selectedVersion?.status === 'Draft' ? <Button onClick={requestPublish} disabled={busy}><ShieldCheck className="mr-2 h-4 w-4" />Publish version</Button> : null}
+                                                {canManage && !layout.isProtectedStandard && selectedVersion?.status === 'Draft' ? <Button onClick={requestSubmission} disabled={busy}><ShieldCheck className="mr-2 h-4 w-4" />Submit for approval</Button> : null}
                                             </div>
                                         </div>
 
@@ -1023,6 +1020,16 @@ function LayoutDetailDialog({
                                                 <AlertTitle>Immutable publication snapshot</AlertTitle>
                                                 <AlertDescription>
                                                     {selectedVersion.publicationAccountCount.toLocaleString()} frozen account memberships · book {selectedVersion.publishedAccountingBookCode} · resolution {selectedVersion.resolutionFingerprint.slice(0, 12)}… · hierarchy {selectedVersion.hierarchyFingerprint?.slice(0, 12)}…
+                                                </AlertDescription>
+                                            </Alert>
+                                        ) : null}
+
+                                        {selectedVersion?.status === 'Submitted' ? (
+                                            <Alert>
+                                                <ClipboardCheck className="h-4 w-4" />
+                                                <AlertTitle>Awaiting independent Finance approval</AlertTitle>
+                                                <AlertDescription>
+                                                    Submitted by {selectedVersion.submittedByName || 'an authorised preparer'} on {formatDate(selectedVersion.submittedAt)}. The maker cannot approve or reject this version; an eligible checker must decide it in the Finance Approval Workbench.
                                                 </AlertDescription>
                                             </Alert>
                                         ) : null}
@@ -1232,7 +1239,7 @@ function LayoutDetailDialog({
 export default function FinancialStatementLayoutsPage() {
     const { toast } = useToast();
     const { hasPermission, isLoading: authLoading } = useAuth();
-    const { canRead, canManage, canPublish, canRun } =
+    const { canRead, canManage, canRun } =
         resolveFinancialStatementLayoutPermissions(hasPermission);
     const [layouts, setLayouts] = useState<FinancialStatementLayoutSummaryDto[]>([]);
     const [books, setBooks] = useState<AccountingBook[]>([]);
@@ -1487,7 +1494,6 @@ export default function FinancialStatementLayoutsPage() {
                 open={!!selectedLayoutId}
                 onOpenChange={(value) => { if (!value) setSelectedLayoutId(null); }}
                 canManage={canManage}
-                canPublish={canPublish}
                 canRun={canRun}
                 onChanged={() => void load()}
             />

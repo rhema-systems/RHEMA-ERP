@@ -3,6 +3,7 @@ import type {
     CreateFinancialStatementLayoutVersionDto,
     CloneFinancialStatementLayoutDto,
     FinancialStatementLayoutAuditEventDto,
+    FinancialStatementLayoutApprovalQueueItemDto,
     FinancialStatementLayoutDto,
     FinancialStatementLayoutExecutionDto,
     FinancialStatementLayoutImportDefinitionDto,
@@ -104,6 +105,29 @@ class FinancialStatementLayoutDataService {
         return apiService.post<FinancialStatementLayoutDto['versions'][number]>(
             `${root}/versions/${versionId}/publish`,
             request,
+        );
+    }
+
+    submitVersion(versionId: string, expectedVersionRevision: number) {
+        return apiService.post<FinancialStatementLayoutDto['versions'][number]>(
+            `${root}/versions/${versionId}/submit`,
+            { expectedVersionRevision },
+        );
+    }
+
+    getPendingApprovals() {
+        return apiService.get<FinancialStatementLayoutApprovalQueueItemDto[]>(`${root}/approval-queue`);
+    }
+
+    decideVersion(
+        versionId: string,
+        expectedVersionRevision: number,
+        decision: 'Approve' | 'Reject',
+        reason?: string,
+    ) {
+        return apiService.post<FinancialStatementLayoutDto['versions'][number]>(
+            `${root}/versions/${versionId}/decision`,
+            { expectedVersionRevision, decision, reason },
         );
     }
 

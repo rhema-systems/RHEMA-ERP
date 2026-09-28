@@ -136,6 +136,30 @@ describe('financialStatementLayoutDataService', () => {
         }));
     });
 
+    it('uses the governed submit, approval-queue and decision endpoints', async () => {
+        const fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async () => jsonResponse([]));
+
+        await financialStatementLayoutDataService.submitVersion('version-1', 4);
+        await financialStatementLayoutDataService.getPendingApprovals();
+        await financialStatementLayoutDataService.decideVersion('version-1', 5, 'Reject', 'Fix mapping.');
+
+        expect(fetchMock.mock.calls[0][0]).toEqual(expect.stringContaining('/versions/version-1/submit'));
+        expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({
+            method: 'POST', body: JSON.stringify({ expectedVersionRevision: 4 }),
+        }));
+        expect(fetchMock.mock.calls[1][0]).toEqual(expect.stringContaining('/approval-queue'));
+        expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({ method: 'GET' }));
+        expect(fetchMock.mock.calls[2][0]).toEqual(expect.stringContaining('/versions/version-1/decision'));
+        expect(fetchMock.mock.calls[2][1]).toEqual(expect.objectContaining({
+            method: 'POST',
+            body: JSON.stringify({
+                expectedVersionRevision: 5,
+                decision: 'Reject',
+                reason: 'Fix mapping.',
+            }),
+        }));
+    });
+
     it('re-uploads the workbook and preview hash when committing a controlled import', async () => {
         const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue(jsonResponse({
             definitionHash: 'HASH-1',

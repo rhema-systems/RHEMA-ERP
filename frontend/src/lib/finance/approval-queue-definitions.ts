@@ -2,6 +2,7 @@ import { ClipboardCheck, FileText, ShoppingCart } from 'lucide-react';
 import type { ApprovalQueueDefinition, ApprovalQueueItem } from '@/components/approvals/approval-workbench';
 import apiService from '@/services/api.service';
 import { businessPartnerFinanceProfileService } from '@/services/businessPartnerFinanceProfileService';
+import { financialStatementLayoutDataService } from '@/services/finance/financial-statement-layout-data.service';
 
 export const FINANCE_APPROVAL_QUEUE_IDS = {
     financeWorkflows: 'finance-workflows',
@@ -9,6 +10,7 @@ export const FINANCE_APPROVAL_QUEUE_IDS = {
     purchaseOrders: 'finance-purchase-orders',
     businessPartnerProfiles: 'business-partner-finance-profiles',
     businessPartnerIdentities: 'business-partner-identities',
+    statementLayouts: 'financial-statement-layouts',
 } as const;
 
 interface FinanceWorkflowApprovalQueueItem {
@@ -197,10 +199,61 @@ const businessPartnerProfileDefinition: ApprovalQueueDefinition = {
     },
 };
 
+function layoutApprovalAction(item: ApprovalQueueItem): { versionId: string; revision: number } {
+    const separator = item.id.lastIndexOf(':');
+    const versionId = item.id.slice(0, separator);
+    const revision = Number(item.id.slice(separator + 1));
+    if (!versionId || separator < 1 || !Number.isInteger(revision)) {
+        throw new Error('Invalid financial statement layout approval reference.');
+    }
+    return { versionId, revision };
+}
+
+const statementLayoutDefinition: ApprovalQueueDefinition = {
+    id: FINANCE_APPROVAL_QUEUE_IDS.statementLayouts,
+    title: 'Financial Statement Layouts',
+    documentLabel: 'Statement Layouts',
+    description: 'Validated statement-layout versions awaiting an independent Finance publication decision.',
+    emptyMessage: 'No financial statement layouts are awaiting approval.',
+    accessDeniedMessage: 'You need Publish Financial Statement Layouts permission to review these versions.',
+    icon: FileText,
+    accentClassName: 'border-teal-100 bg-teal-50/50',
+    load: async () => (await financialStatementLayoutDataService.getPendingApprovals()).map(row => ({
+        id: `${row.versionId}:${row.revision}`,
+        reference: `${row.layoutCode}/V${row.versionNumber}`,
+        title: row.layoutName,
+        detailHref: `/finance/reports/layouts?layoutId=${row.layoutId}`,
+        documentType: 'Financial Statement Layout',
+        module: 'Finance Reporting',
+        statusLabel: 'Submitted',
+        date: row.submittedAt,
+        submittedBy: row.submittedByName,
+        canApprove: row.canDecide,
+        canReject: row.canDecide,
+        approveDisabledReason: row.decisionDisabledReason,
+        rejectDisabledReason: row.decisionDisabledReason,
+        metadata: [
+            { label: 'Statement', value: row.statementType === 'BalanceSheet' ? 'Balance Sheet' : 'Income Statement' },
+            { label: 'Book', value: `${row.accountingBookCode} — ${row.accountingBookName}` },
+            { label: 'Effective from', value: row.effectiveFrom?.slice(0, 10) || 'On approval' },
+            { label: 'Effective through', value: row.effectiveTo?.slice(0, 10) || 'Open-ended' },
+        ],
+    })),
+    approve: async item => {
+        const action = layoutApprovalAction(item);
+        await financialStatementLayoutDataService.decideVersion(action.versionId, action.revision, 'Approve');
+    },
+    reject: async (item, reason) => {
+        const action = layoutApprovalAction(item);
+        await financialStatementLayoutDataService.decideVersion(action.versionId, action.revision, 'Reject', reason);
+    },
+};
+
 const definitions: ApprovalQueueDefinition[] = [
     allFinanceWorkflowDefinition,
     businessPartnerIdentityDefinition,
     businessPartnerProfileDefinition,
+    statementLayoutDefinition,
     {
         id: FINANCE_APPROVAL_QUEUE_IDS.journalEntries,
         title: 'Journal Entry Approvals',
@@ -231,7 +284,7 @@ const definitions: ApprovalQueueDefinition[] = [
 
 export function getFinanceApprovalQueueDefinitions(queueIds?: string[]): ApprovalQueueDefinition[] {
     if (!queueIds || queueIds.length === 0) {
-        return [allFinanceWorkflowDefinition, businessPartnerIdentityDefinition, businessPartnerProfileDefinition];
+        return [allFinanceWorkflowDefinition, businessPartnerIdentityDefinition, businessPartnerProfileDefinition, statementLayoutDefinition];
     }
 
     const selected = new Set(queueIds);

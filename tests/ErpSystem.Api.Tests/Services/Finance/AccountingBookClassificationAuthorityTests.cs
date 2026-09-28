@@ -602,33 +602,33 @@ public sealed class AccountingBookClassificationAuthorityTests
     }
 
     [Fact]
-    public async Task CreateAsync_RejectsDuplicateSingletonRole_ButAllowsRepeatedCash()
+    public async Task CreateAsync_AllowsCategoryAlignedFixedAssetSystemRoleFamilies()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var book = SeedBook(db, tenantId);
-        var existing = SeedClassification(db, tenantId, book.Id, "AR_ONE", AccountType.Asset);
-        existing.SystemRole = AccountClassificationSystemRole.ReceivableControl;
+        var existing = SeedClassification(db, tenantId, book.Id, "BUILDINGS_COST", AccountType.Asset);
+        existing.SystemRole = AccountClassificationSystemRole.FixedAssetCost;
         await db.SaveChangesAsync();
         var service = new AccountClassificationService(db, CurrentUser(tenantId).Object, Audit().Object);
 
-        var duplicate = () => service.CreateAsync(new SaveAccountClassificationDto
+        var vehicleCost = await service.CreateAsync(new SaveAccountClassificationDto
         {
-            AccountingBookId = book.Id, Code = "AR_TWO", Name = "AR two", CoreAccountType = nameof(AccountType.Asset),
-            SystemRole = nameof(AccountClassificationSystemRole.ReceivableControl), IsPostingClassification = true,
+            AccountingBookId = book.Id, Code = "VEHICLES_COST", Name = "Vehicles cost", CoreAccountType = nameof(AccountType.Asset),
+            SystemRole = nameof(AccountClassificationSystemRole.FixedAssetCost), IsPostingClassification = true,
             Status = nameof(AccountClassificationStatus.Active)
         });
-        await duplicate.Should().ThrowAsync<InvalidOperationException>().WithMessage("*only once*");
+        vehicleCost.SystemRole.Should().Be(nameof(AccountClassificationSystemRole.FixedAssetCost));
 
-        existing.SystemRole = AccountClassificationSystemRole.Cash;
+        existing.SystemRole = AccountClassificationSystemRole.AccumulatedDepreciation;
         await db.SaveChangesAsync();
-        var repeatedCash = await service.CreateAsync(new SaveAccountClassificationDto
+        var vehicleAccumulatedDepreciation = await service.CreateAsync(new SaveAccountClassificationDto
         {
-            AccountingBookId = book.Id, Code = "CASH_TWO", Name = "Cash two", CoreAccountType = nameof(AccountType.Asset),
-            SystemRole = nameof(AccountClassificationSystemRole.Cash), IsPostingClassification = true,
+            AccountingBookId = book.Id, Code = "VEHICLES_ACCUM_DEP", Name = "Vehicles accumulated depreciation", CoreAccountType = nameof(AccountType.Asset),
+            SystemRole = nameof(AccountClassificationSystemRole.AccumulatedDepreciation), IsPostingClassification = true,
             Status = nameof(AccountClassificationStatus.Active)
         });
-        repeatedCash.SystemRole.Should().Be(nameof(AccountClassificationSystemRole.Cash));
+        vehicleAccumulatedDepreciation.SystemRole.Should().Be(nameof(AccountClassificationSystemRole.AccumulatedDepreciation));
     }
 
     [Fact]
@@ -659,14 +659,14 @@ public sealed class AccountingBookClassificationAuthorityTests
     }
 
     [Fact]
-    public async Task SingletonRoleConstraint_RejectsTwoWritersThatBothObservedNoExistingRole()
+    public async Task SystemRoleFamily_AllowsTwoWritersToCreateCategorySpecificMembers()
     {
         var databaseName = $"role-cardinality-{Guid.NewGuid():N}";
         var connectionString = $"Data Source={databaseName};Mode=Memory;Cache=Shared";
         await using var keeper = new SqliteConnection(connectionString);
         await keeper.OpenAsync();
         await using var first = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(keeper).Options);
-        await CreateSqliteClassificationSchemaAsync(first, includeRoleIndex: true);
+        await CreateSqliteClassificationSchemaAsync(first);
         await using var secondConnection = new SqliteConnection(connectionString);
         await secondConnection.OpenAsync();
         await using var second = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(secondConnection).Options);
@@ -679,13 +679,16 @@ public sealed class AccountingBookClassificationAuthorityTests
             && item.AccountingBookId == book.Id && item.SystemRole == AccountClassificationSystemRole.ReceivableControl)).Should().BeFalse();
         (await second.AccountClassifications.AnyAsync(item => item.TenantId == tenantId
             && item.AccountingBookId == book.Id && item.SystemRole == AccountClassificationSystemRole.ReceivableControl)).Should().BeFalse();
-        var one = SeedClassification(first, tenantId, book.Id, "AR_ONE", AccountType.Asset);
-        var two = SeedClassification(second, tenantId, book.Id, "AR_TWO", AccountType.Asset);
-        one.SystemRole = two.SystemRole = AccountClassificationSystemRole.ReceivableControl;
+        var one = SeedClassification(first, tenantId, book.Id, "BUILDINGS_COST", AccountType.Asset);
+        var two = SeedClassification(second, tenantId, book.Id, "VEHICLES_COST", AccountType.Asset);
+        one.SystemRole = two.SystemRole = AccountClassificationSystemRole.FixedAssetCost;
 
         await first.SaveChangesAsync();
-        var staleWriter = () => second.SaveChangesAsync();
-        await staleWriter.Should().ThrowAsync<DbUpdateException>();
+        await second.SaveChangesAsync();
+        (await first.AccountClassifications.CountAsync(item =>
+            item.TenantId == tenantId &&
+            item.AccountingBookId == book.Id &&
+            item.SystemRole == AccountClassificationSystemRole.FixedAssetCost)).Should().Be(2);
     }
 
     [Fact]
@@ -1253,7 +1256,7 @@ public sealed class AccountingBookClassificationAuthorityTests
     }
 
     [Fact]
-    public void CardinalityMigration_AddsFilteredSingletonRoleConstraint()
+    public void HistoricalCardinalityMigration_AddedFilteredSingletonRoleConstraint()
     {
         var source = ArchivedMigrationSource.Read(
             "20260903120000_EnforceFinanceClassificationSystemRoleCardinality.cs");
@@ -1272,5 +1275,24 @@ public sealed class AccountingBookClassificationAuthorityTests
         index.Filter.Should().Be(
             "[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] <> 1 AND [SystemRole] <> 2");
         index.Filter.Should().NotContain("NOT IN");
+    }
+
+    [Fact]
+    public void GovernedLayoutApprovalMigration_RemovesLegacySingletonRoleIndex()
+    {
+        var migration = new GovernLayoutApprovalAndClassificationRoles();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+
+        typeof(GovernLayoutApprovalAndClassificationRoles)
+            .GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, [builder]);
+
+        builder.Operations.OfType<DropIndexOperation>().Should().ContainSingle(item =>
+            item.Name == "IX_AccountClassifications_TenantId_AccountingBookId_SystemRole"
+            && item.Table == "AccountClassifications");
+        builder.Operations.OfType<AddColumnOperation>().Select(item => item.Name).Should().Contain([
+            "SubmittedAt", "SubmittedById", "SubmittedByName", "LastDecisionAt",
+            "LastDecisionById", "LastDecisionByName", "LastDecisionReason"
+        ]);
     }
 }

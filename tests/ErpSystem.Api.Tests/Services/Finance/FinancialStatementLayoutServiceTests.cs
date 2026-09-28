@@ -101,12 +101,13 @@ public sealed class FinancialStatementLayoutServiceTests
         validation.Issues.Should().NotContain(issue =>
             issue.Severity == FinancialStatementLayoutValidationSeverity.Error);
 
+        await PrepareForIndependentPublishAsync(context, replaced.Id, new DateTime(2026, 7, 1));
+
         var published = await service.PublishVersionAsync(
             replaced.Id,
             new PublishFinancialStatementLayoutVersionDto
             {
-                ExpectedVersionRevision = replaced.Revision,
-                EffectiveFrom = new DateTime(2026, 7, 1)
+                ExpectedVersionRevision = replaced.Revision
             });
 
         published.Status.Should().Be(FinancialStatementLayoutVersionStatus.Published);
@@ -166,6 +167,61 @@ public sealed class FinancialStatementLayoutServiceTests
             issue.Code == "DUPLICATE_ACCOUNT_CONTRIBUTION");
         exception.Which.Validation.Issues.Should().Contain(issue =>
             issue.Code == "FORMULA_CYCLE");
+    }
+
+    [Fact]
+    [Trait("Category", "Governance")]
+    public async Task SubmittedLayout_ShouldAppearInWorkbenchAndRequireIndependentDecision()
+    {
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        var checkerId = Guid.NewGuid();
+        await using var context = CreateContext();
+        var book = SeedTenantAndBook(context, tenantId);
+        var cash = SeedAccount(context, tenantId, book.Id, "1000", "Cash", AccountType.Asset);
+        await context.SaveChangesAsync();
+
+        var maker = CreateService(context, tenantId, userId: makerId, userName: "layout.maker");
+        var layout = await maker.CreateLayoutAsync(new CreateFinancialStatementLayoutDto
+        {
+            Code = "BS_APPROVAL", Name = "Governed Balance Sheet",
+            StatementType = FinancialStatementType.BalanceSheet, AccountingBookId = book.Id
+        });
+        var draft = layout.Versions.Single();
+        var prepared = await maker.ReplaceDraftRowsAsync(draft.Id, new ReplaceFinancialStatementRowsDto
+        {
+            ExpectedVersionRevision = draft.Revision,
+            Rows = { Row("CASH", "Cash", FinancialStatementRowType.Account, 10,
+                mappings: Mapping(FinancialStatementRowMappingType.Account, cash.Id)) }
+        });
+        var submitted = await maker.SubmitVersionForApprovalAsync(prepared.Id,
+            new SubmitFinancialStatementLayoutVersionDto { ExpectedVersionRevision = prepared.Revision });
+
+        submitted.Status.Should().Be(FinancialStatementLayoutVersionStatus.Submitted);
+        (await maker.GetPendingApprovalsAsync()).Should().ContainSingle().Which.CanDecide.Should().BeFalse();
+        var selfApproval = () => maker.DecideVersionApprovalAsync(submitted.Id,
+            new DecideFinancialStatementLayoutVersionDto
+            {
+                ExpectedVersionRevision = submitted.Revision,
+                Decision = FinancialStatementLayoutApprovalDecision.Approve
+            });
+        await selfApproval.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*submitter from approving or rejecting*");
+
+        context.ChangeTracker.Clear();
+        var checker = CreateService(context, tenantId, userId: checkerId, userName: "layout.checker");
+        (await checker.GetPendingApprovalsAsync()).Should().ContainSingle().Which.CanDecide.Should().BeTrue();
+        var rejected = await checker.DecideVersionApprovalAsync(submitted.Id,
+            new DecideFinancialStatementLayoutVersionDto
+            {
+                ExpectedVersionRevision = submitted.Revision,
+                Decision = FinancialStatementLayoutApprovalDecision.Reject,
+                Reason = "Mapping requires correction."
+            });
+
+        rejected.Status.Should().Be(FinancialStatementLayoutVersionStatus.Draft);
+        rejected.LastDecisionById.Should().Be(checkerId);
+        rejected.LastDecisionReason.Should().Be("Mapping requires correction.");
     }
 
     [Fact]
@@ -294,6 +350,7 @@ public sealed class FinancialStatementLayoutServiceTests
                         mappings: Mapping(FinancialStatementRowMappingType.Account, cash.Id))
                 }
             });
+        await PrepareForIndependentPublishAsync(context, replaced.Id);
         var published = await service.PublishVersionAsync(
             replaced.Id,
             new PublishFinancialStatementLayoutVersionDto
@@ -368,6 +425,7 @@ public sealed class FinancialStatementLayoutServiceTests
             Rows = { Row("ASSETS", "Assets", FinancialStatementRowType.Account, 10,
                 mappings: ClassificationMapping(assets.Id, true)) }
         });
+        await PrepareForIndependentPublishAsync(context, replaced.Id);
         var published = await service.PublishVersionAsync(replaced.Id, new PublishFinancialStatementLayoutVersionDto
         {
             ExpectedVersionRevision = replaced.Revision
@@ -591,6 +649,7 @@ public sealed class FinancialStatementLayoutServiceTests
             Rows = { Row("CASH", "Cash", FinancialStatementRowType.Account, 10,
                 mappings: Mapping(FinancialStatementRowMappingType.Account, cash.Id)) }
         });
+        await PrepareForIndependentPublishAsync(context, replaced.Id);
 
         var publish = () => service.PublishVersionAsync(replaced.Id, new PublishFinancialStatementLayoutVersionDto
         {
@@ -600,7 +659,7 @@ public sealed class FinancialStatementLayoutServiceTests
 
         context.ChangeTracker.Clear();
         (await context.FinancialStatementLayoutVersions.SingleAsync(item => item.Id == replaced.Id)).Status
-            .Should().Be(FinancialStatementLayoutVersionStatus.Draft);
+            .Should().Be(FinancialStatementLayoutVersionStatus.Submitted);
         (await context.FinancialStatementPublicationAccounts.CountAsync()).Should().Be(0);
     }
 
@@ -630,6 +689,7 @@ public sealed class FinancialStatementLayoutServiceTests
             Rows = { Row("CASH", "Cash", FinancialStatementRowType.Account, 10,
                 mappings: Mapping(FinancialStatementRowMappingType.Account, cash.Id)) }
         });
+        await PrepareForIndependentPublishAsync(context, replaced.Id);
 
         var publish = () => service.PublishVersionAsync(replaced.Id, new PublishFinancialStatementLayoutVersionDto
         {
@@ -639,7 +699,7 @@ public sealed class FinancialStatementLayoutServiceTests
 
         context.ChangeTracker.Clear();
         (await context.FinancialStatementLayoutVersions.SingleAsync(item => item.Id == replaced.Id)).Status
-            .Should().Be(FinancialStatementLayoutVersionStatus.Draft);
+            .Should().Be(FinancialStatementLayoutVersionStatus.Submitted);
         (await context.FinancialStatementPublicationAccounts.CountAsync()).Should().Be(0);
     }
 
@@ -757,13 +817,15 @@ public sealed class FinancialStatementLayoutServiceTests
     private static FinancialStatementLayoutService CreateService(
         ApplicationDbContext context,
         Guid tenantId,
-        Mock<IFinanceAuditService>? auditOverride = null)
+        Mock<IFinanceAuditService>? auditOverride = null,
+        Guid? userId = null,
+        string userName = "layout.accountant")
     {
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(service => service.TenantId).Returns(tenantId);
         currentUser.SetupGet(service => service.Claims).Returns(new Dictionary<string, string>());
-        currentUser.SetupGet(service => service.UserId).Returns(Guid.NewGuid().ToString());
-        currentUser.SetupGet(service => service.UserName).Returns("layout.accountant");
+        currentUser.SetupGet(service => service.UserId).Returns((userId ?? Guid.NewGuid()).ToString());
+        currentUser.SetupGet(service => service.UserName).Returns(userName);
         currentUser.SetupGet(service => service.IpAddress).Returns("127.0.0.1");
         currentUser.SetupGet(service => service.UserAgent).Returns("layout-tests");
 
@@ -781,6 +843,20 @@ public sealed class FinancialStatementLayoutServiceTests
             currentUser.Object,
             audit.Object,
             Mock.Of<ILogger<FinancialStatementLayoutService>>());
+    }
+
+    private static async Task PrepareForIndependentPublishAsync(
+        ApplicationDbContext context,
+        Guid versionId,
+        DateTime? effectiveFrom = null)
+    {
+        var version = await context.FinancialStatementLayoutVersions.SingleAsync(item => item.Id == versionId);
+        version.Status = FinancialStatementLayoutVersionStatus.Submitted;
+        version.SubmittedAt = DateTime.UtcNow;
+        version.SubmittedById = Guid.NewGuid();
+        version.SubmittedByName = "layout.maker";
+        version.EffectiveFrom = effectiveFrom;
+        await context.SaveChangesAsync();
     }
 
     private static AccountingBook SeedTenantAndBook(

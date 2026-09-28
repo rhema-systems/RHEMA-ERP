@@ -3654,9 +3654,6 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
             entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.ParentClassificationId, item.DisplayOrder });
-            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.SystemRole })
-                .IsUnique()
-                .HasFilter("[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] <> 1 AND [SystemRole] <> 2");
             entity.Property(item => item.Code).HasMaxLength(50).IsRequired();
             entity.Property(item => item.Name).HasMaxLength(200).IsRequired();
             entity.Property(item => item.Description).HasMaxLength(1000);
@@ -3721,6 +3718,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.FinancialStatementLayoutId, e.VersionNumber }).IsUnique();
             entity.HasIndex(e => new { e.TenantId, e.FinancialStatementLayoutId, e.Status, e.EffectiveFrom, e.EffectiveTo });
             entity.Property(e => e.PublishedByName).HasMaxLength(200);
+            entity.Property(e => e.SubmittedByName).HasMaxLength(200);
+            entity.Property(e => e.LastDecisionByName).HasMaxLength(200);
+            entity.Property(e => e.LastDecisionReason).HasMaxLength(500);
             entity.Property(e => e.Notes).HasMaxLength(1000);
             entity.Property(e => e.PublicationSnapshotSchemaVersion).HasMaxLength(20);
             entity.Property(e => e.PublishedAccountingBookCode).HasMaxLength(20);

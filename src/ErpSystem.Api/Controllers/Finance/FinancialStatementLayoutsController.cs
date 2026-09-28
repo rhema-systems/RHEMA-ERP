@@ -289,6 +289,70 @@ public sealed class FinancialStatementLayoutsController : ControllerBase
         }
     }
 
+    [HttpPost("versions/{versionId:guid}/submit")]
+    [Authorize(Policy = FinancePermissions.ManageFinancialStatementLayouts)]
+    public async Task<ActionResult<FinancialStatementLayoutVersionDto>> SubmitVersion(
+        Guid versionId,
+        [FromBody] SubmitFinancialStatementLayoutVersionDto request,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return Ok(await _service.SubmitVersionForApprovalAsync(versionId, request, cancellationToken));
+        }
+        catch (FinancialStatementLayoutValidationException exception)
+        {
+            return BadRequest(exception.Validation);
+        }
+        catch (KeyNotFoundException exception)
+        {
+            return NotFound(new { message = exception.Message });
+        }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            return Conflict(new { message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+    }
+
+    [HttpGet("approval-queue")]
+    [Authorize(Policy = FinancePermissions.PublishFinancialStatementLayouts)]
+    public async Task<ActionResult<IReadOnlyList<FinancialStatementLayoutApprovalQueueItemDto>>> GetApprovalQueue(
+        CancellationToken cancellationToken = default)
+        => Ok(await _service.GetPendingApprovalsAsync(cancellationToken));
+
+    [HttpPost("versions/{versionId:guid}/decision")]
+    [Authorize(Policy = FinancePermissions.PublishFinancialStatementLayouts)]
+    public async Task<ActionResult<FinancialStatementLayoutVersionDto>> DecideVersion(
+        Guid versionId,
+        [FromBody] DecideFinancialStatementLayoutVersionDto request,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return Ok(await _service.DecideVersionApprovalAsync(versionId, request, cancellationToken));
+        }
+        catch (FinancialStatementLayoutValidationException exception)
+        {
+            return BadRequest(exception.Validation);
+        }
+        catch (KeyNotFoundException exception)
+        {
+            return NotFound(new { message = exception.Message });
+        }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            return Conflict(new { message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+    }
+
     [HttpPost("versions/{versionId:guid}/preview")]
     [Authorize(Policy = FinancePermissions.RunFinanceReports)]
     public async Task<ActionResult<FinancialStatementLayoutExecutionDto>> PreviewVersion(
