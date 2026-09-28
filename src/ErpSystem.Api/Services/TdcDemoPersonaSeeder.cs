@@ -166,13 +166,21 @@ public class TdcDemoPersonaSeeder
             Constants.Roles.InternalAudit, Constants.Roles.Employee),
     };
 
-    public async Task SeedAsync(CancellationToken ct = default)
+    /// <summary>One persona as the Developer Test Data screen lists it.</summary>
+    public sealed record PersonaInfo(string Username, string PositionTitle, string Purpose, IReadOnlyList<string> Roles);
+
+    /// <summary>The cast, read-only — which logins this seeder creates and what each is for.</summary>
+    public static IReadOnlyList<PersonaInfo> Personas { get; } =
+        Cast.Select(p => new PersonaInfo(p.Username, p.PositionTitle, p.Purpose, p.Roles)).ToArray();
+
+    /// <returns>How many persona logins were created on this run (existing ones are kept).</returns>
+    public async Task<int> SeedAsync(CancellationToken ct = default)
     {
         var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Code == "DEFAULT", ct);
         if (tenant is null)
         {
             _logger.LogError("DEFAULT tenant not found — cannot seed demo personas.");
-            return;
+            return 0;
         }
 
         var tenantId = tenant.Id;
@@ -293,6 +301,7 @@ public class TdcDemoPersonaSeeder
         _logger.LogInformation(
             "Demo personas ready: {Created} created, {Total} in the cast. Password for all of them: {Password}",
             created, Cast.Length, Password);
+        return created;
     }
 
     private async Task EnsureRoleAsync(string roleName)

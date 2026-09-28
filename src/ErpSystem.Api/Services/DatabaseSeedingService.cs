@@ -33,6 +33,8 @@ namespace ErpSystem.Web.Services
         Task SeedWithoutMigrationAsync();
         Task SeedBasicDataAsync();
         Task SeedWorkflowDefinitionsAsync();
+        /// <summary>HR's own approval workflows (HR and leave) and no other module's. Idempotent.</summary>
+        Task SeedHrWorkflowDefinitionsAsync();
         Task SeedFinanceWorkflowDefinitionsAsync();
         Task SeedTestUsersAsync();
         Task SeedMaintenanceE2ETestDataAsync();
@@ -489,6 +491,17 @@ namespace ErpSystem.Web.Services
         /// re-activated or re-pointed; a tenant that has authored its own definition for a type is
         /// not overwritten. Payroll runs are excluded — payroll is another owner's module.</para>
         /// </remarks>
+        /// <summary>
+        /// The two HR steps of <see cref="SeedWorkflowDefinitionsAsync"/> on their own — what the
+        /// Developer Test Data screen's Foundation tier runs, so seeding HR does not also re-seed
+        /// every other module's definitions.
+        /// </summary>
+        public async Task SeedHrWorkflowDefinitionsAsync()
+        {
+            await EnsureHrWorkflowsSeededAsync();
+            await EnsureLeaveWorkflowsSeededAsync();
+        }
+
         private async Task EnsureHrWorkflowsSeededAsync()
         {
             try

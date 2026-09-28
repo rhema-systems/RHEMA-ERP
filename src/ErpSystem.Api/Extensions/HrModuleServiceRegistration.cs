@@ -776,6 +776,11 @@ public static class HrModuleServiceRegistration
         // under it, and that walk already existed here rather than being copied a fourth time.
         services.AddScoped<IStaffDirectoryService, StaffDirectoryService>();
 
+        // Developer Test Data (Administration → HR → HR Settings): seed-hr-all / seed-hr-demo as
+        // three buttons. A SINGLETON on purpose — it holds the one-run-at-a-time gate and the run
+        // log, and opens its own scope per phase, so no request's DbContext is ever used by a run.
+        services.AddSingleton<ErpSystem.Api.Services.IHrTestDataSeedService, ErpSystem.Api.Services.HrTestDataSeedService>();
+
         // The reminder sweep spans both halves of the area — disciplinary clocks and unanswered
         // grievance rungs. Scoped so the daily host and the run-now endpoint share one code path.
         services.AddScoped<IDisciplineReminderService, DisciplineReminderService>();
