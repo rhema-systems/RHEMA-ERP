@@ -37,10 +37,17 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from 'date-fns';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
+import { financeDataService } from '@/services/finance/finance-data.service';
 import { FixedAssetStatus } from '@/types/fixed-assets';
 import {
     FixedAssetReportQuery,
     FixedAssetRegister,
+    FixedAssetAdditionsReport,
+    FixedAssetDepreciationReport,
+    FixedAssetAccumulatedDepreciationReport,
+    FixedAssetValuationMovementReport,
+    FixedAssetRollForwardReport,
+    FixedAssetGlReconciliationReport,
     AssetDisposalReportItem,
     AssetTransferReportItem
 } from '@/types/fixed-asset-reports';
@@ -49,8 +56,14 @@ import { useAuth } from '@/hooks/use-auth';
 
 const REPORT_TYPES = [
     { id: 'AssetRegister', slug: 'asset-register', title: 'Asset Register', description: 'Comprehensive list of all fixed assets with their current valuation.' },
+    { id: 'AdditionsReport', slug: 'additions', title: 'Asset Additions', description: 'Capitalized additions reconciled to posted general-ledger cost.' },
+    { id: 'DepreciationReport', slug: 'depreciation', title: 'Depreciation', description: 'Posted depreciation charges and accumulated-depreciation movements.' },
+    { id: 'AccumulatedDepreciationReport', slug: 'accumulated-depreciation', title: 'Accumulated Depreciation', description: 'Asset-level accumulated depreciation reconciled to the general ledger.' },
+    { id: 'ValuationReport', slug: 'valuations', title: 'Valuation Movements', description: 'Revaluations, impairments and impairment reversals with GL evidence.' },
     { id: 'DisposalReport', slug: 'disposal-activity', title: 'Disposal Activity', description: 'Summary of all assets disposed of within a period, including gain/loss.' },
     { id: 'TransferReport', slug: 'transfer-history', title: 'Transfer History', description: 'Audit trail of movements between locations and departments.' },
+    { id: 'RollForwardReport', slug: 'roll-forward', title: 'Asset Roll-Forward', description: 'Opening balances, period movements and closing balances by category.' },
+    { id: 'GlReconciliationReport', slug: 'gl-reconciliation', title: 'GL Reconciliation', description: 'Fixed asset subledger balances reconciled to posted general-ledger accounts.' },
 ];
 
 function getReportType(reportSlug: string | null) {
@@ -66,12 +79,18 @@ export default function FixedAssetReportsPage() {
     const [loading, setLoading] = useState(false);
     const [exporting, setExporting] = useState<string | null>(null);
     const [reportData, setReportData] = useState<any>(null);
+    const [accountingBooks, setAccountingBooks] = useState<Array<{ id: string; code: string; name: string }>>([
+        { id: 'IFRS', code: 'IFRS', name: 'IFRS' },
+    ]);
+    const usesPeriodRange = ['AdditionsReport', 'DepreciationReport', 'ValuationReport', 'DisposalReport', 'TransferReport', 'RollForwardReport']
+        .includes(selectedReport.id);
 
     // Filters
     const [filters, setFilters] = useState<FixedAssetReportQuery>({
         fromDate: '',
         toDate: '',
         searchTerm: '',
+        bookClassification: 'IFRS',
     });
 
     const fetchReportData = async () => {
@@ -80,12 +99,24 @@ export default function FixedAssetReportsPage() {
             if (selectedReport.id === 'AssetRegister') {
                 const data = await fixedAssetsDataService.getAssetRegister(filters);
                 setReportData(data);
+            } else if (selectedReport.id === 'AdditionsReport') {
+                setReportData(await fixedAssetsDataService.getAdditionsReport(filters));
+            } else if (selectedReport.id === 'DepreciationReport') {
+                setReportData(await fixedAssetsDataService.getDepreciationReport(filters));
+            } else if (selectedReport.id === 'AccumulatedDepreciationReport') {
+                setReportData(await fixedAssetsDataService.getAccumulatedDepreciationReport(filters));
+            } else if (selectedReport.id === 'ValuationReport') {
+                setReportData(await fixedAssetsDataService.getValuationReport(filters));
             } else if (selectedReport.id === 'DisposalReport') {
                 const data = await fixedAssetsDataService.getDisposalReport(filters);
                 setReportData(data);
             } else if (selectedReport.id === 'TransferReport') {
                 const data = await fixedAssetsDataService.getTransferReport(filters);
                 setReportData(data);
+            } else if (selectedReport.id === 'RollForwardReport') {
+                setReportData(await fixedAssetsDataService.getRollForwardReport(filters));
+            } else if (selectedReport.id === 'GlReconciliationReport') {
+                setReportData(await fixedAssetsDataService.getGlReconciliationReport(filters));
             }
         } catch (error) {
             console.error('Failed to fetch report data:', error);
@@ -97,7 +128,27 @@ export default function FixedAssetReportsPage() {
 
     useEffect(() => {
         fetchReportData();
-    }, [selectedReport, filters.status, filters.categoryId]);
+    }, [selectedReport, filters.status, filters.categoryId, filters.bookClassification]);
+
+    useEffect(() => {
+        let active = true;
+        financeDataService.getAccountingBooks(true)
+            .then((books) => {
+                if (!active || books.length === 0) return;
+                setAccountingBooks(books);
+                setFilters((current) => ({
+                    ...current,
+                    bookClassification: books.some((book) => book.code === current.bookClassification)
+                        ? current.bookClassification
+                        : (books.find((book) => book.isDefault)?.code ?? books[0].code),
+                }));
+            })
+            .catch(() => {
+                // IFRS remains available as a safe fallback when governed-book lookup is unavailable.
+            });
+
+        return () => { active = false; };
+    }, []);
 
     useEffect(() => {
         setSelectedReport(getReportType(reportParam));
@@ -189,6 +240,101 @@ export default function FixedAssetReportsPage() {
             );
         }
 
+        if (selectedReport.id === 'AdditionsReport') {
+            const data = reportData as FixedAssetAdditionsReport;
+            return (
+                <Table>
+                    <TableHeader><TableRow>
+                        <TableHead>Code</TableHead><TableHead>Asset</TableHead><TableHead>Capitalized</TableHead>
+                        <TableHead>Source</TableHead><TableHead className="text-right">Cost</TableHead>
+                        <TableHead className="text-right">Posted GL</TableHead><TableHead className="text-right">Variance</TableHead>
+                    </TableRow></TableHeader>
+                    <TableBody>{(data.items || []).map((item) => (
+                        <TableRow key={item.assetId}>
+                            <TableCell className="font-medium">{item.assetCode}</TableCell><TableCell>{item.name}</TableCell>
+                            <TableCell>{item.capitalizationDate ? format(new Date(item.capitalizationDate), 'dd MMM yyyy') : ''}</TableCell>
+                            <TableCell>{item.sourceDocumentType || 'Direct'}</TableCell>
+                            <TableCell className="text-right">{item.capitalizedCost?.toLocaleString()}</TableCell>
+                            <TableCell className="text-right">{item.postedGlCost?.toLocaleString()}</TableCell>
+                            <TableCell className="text-right">{item.variance?.toLocaleString()}</TableCell>
+                        </TableRow>
+                    ))}</TableBody>
+                </Table>
+            );
+        }
+
+        if (selectedReport.id === 'DepreciationReport') {
+            const data = reportData as FixedAssetDepreciationReport;
+            return (
+                <Table>
+                    <TableHeader><TableRow>
+                        <TableHead>Code</TableHead><TableHead>Asset</TableHead><TableHead>Posting Date</TableHead><TableHead>Book</TableHead>
+                        <TableHead className="text-right">Charge</TableHead><TableHead className="text-right">NBV</TableHead>
+                        <TableHead className="text-right">Posted GL</TableHead><TableHead className="text-right">Variance</TableHead>
+                    </TableRow></TableHeader>
+                    <TableBody>{(data.items || []).map((item) => (
+                        <TableRow key={item.scheduleId}>
+                            <TableCell className="font-medium">{item.assetCode}</TableCell><TableCell>{item.assetName}</TableCell>
+                            <TableCell>{item.postingDate ? format(new Date(item.postingDate), 'dd MMM yyyy') : ''}</TableCell>
+                            <TableCell>{item.bookClassification}</TableCell>
+                            <TableCell className="text-right">{item.depreciationAmount?.toLocaleString()}</TableCell>
+                            <TableCell className="text-right">{item.netBookValue?.toLocaleString()}</TableCell>
+                            <TableCell className="text-right">{item.postedExpenseDebit?.toLocaleString()}</TableCell>
+                            <TableCell className="text-right">{item.variance?.toLocaleString()}</TableCell>
+                        </TableRow>
+                    ))}</TableBody>
+                </Table>
+            );
+        }
+
+        if (selectedReport.id === 'AccumulatedDepreciationReport') {
+            const data = reportData as FixedAssetAccumulatedDepreciationReport;
+            return (
+                <Table>
+                    <TableHeader><TableRow>
+                        <TableHead>Code</TableHead><TableHead>Asset</TableHead><TableHead>Book</TableHead>
+                        <TableHead className="text-right">Subledger</TableHead><TableHead className="text-right">Posted GL</TableHead>
+                        <TableHead className="text-right">Variance</TableHead>
+                    </TableRow></TableHeader>
+                    <TableBody>{(data.items || []).map((item) => (
+                        <TableRow key={item.fixedAssetId}>
+                            <TableCell className="font-medium">{item.assetCode}</TableCell><TableCell>{item.assetName}</TableCell>
+                            <TableCell>{item.bookClassification}</TableCell>
+                            <TableCell className="text-right">{item.subledgerAccumulatedDepreciation?.toLocaleString()}</TableCell>
+                            <TableCell className="text-right">{item.postedGlAccumulatedDepreciation?.toLocaleString()}</TableCell>
+                            <TableCell className="text-right">{item.variance?.toLocaleString()}</TableCell>
+                        </TableRow>
+                    ))}</TableBody>
+                </Table>
+            );
+        }
+
+        if (selectedReport.id === 'ValuationReport') {
+            const data = reportData as FixedAssetValuationMovementReport;
+            return (
+                <Table>
+                    <TableHeader><TableRow>
+                        <TableHead>Code</TableHead><TableHead>Asset</TableHead><TableHead>Type</TableHead><TableHead>Date</TableHead><TableHead>Book</TableHead>
+                        <TableHead className="text-right">Before</TableHead><TableHead className="text-right">After</TableHead>
+                        <TableHead className="text-right">Movement</TableHead><TableHead className="text-right">Posted GL</TableHead>
+                    </TableRow></TableHeader>
+                    <TableBody>{(data.items || []).map((item) => {
+                        const movement = item.revaluationSurplus - item.revaluationDeficit - item.impairmentLoss + item.impairmentReversal;
+                        return (
+                            <TableRow key={item.valuationId}>
+                                <TableCell className="font-medium">{item.assetCode}</TableCell><TableCell>{item.assetName}</TableCell>
+                                <TableCell>{item.valuationType}</TableCell><TableCell>{format(new Date(item.accountingDate), 'dd MMM yyyy')}</TableCell>
+                                <TableCell>{item.bookClassification}</TableCell><TableCell className="text-right">{item.carryingAmountBefore?.toLocaleString()}</TableCell>
+                                <TableCell className="text-right">{item.carryingAmountAfter?.toLocaleString()}</TableCell>
+                                <TableCell className="text-right">{movement.toLocaleString()}</TableCell>
+                                <TableCell className="text-right">{item.postedGlMovement?.toLocaleString()}</TableCell>
+                            </TableRow>
+                        );
+                    })}</TableBody>
+                </Table>
+            );
+        }
+
         if (selectedReport.id === 'DisposalReport') {
             const items = reportData as AssetDisposalReportItem[];
             return (
@@ -246,6 +392,73 @@ export default function FixedAssetReportsPage() {
                         ))}
                     </TableBody>
                 </Table>
+            );
+        }
+
+        if (selectedReport.id === 'RollForwardReport') {
+            const data = reportData as FixedAssetRollForwardReport;
+            return (
+                <Table>
+                    <TableHeader><TableRow>
+                        <TableHead>Category</TableHead><TableHead>Book</TableHead><TableHead className="text-right">Opening Cost</TableHead>
+                        <TableHead className="text-right">Additions</TableHead><TableHead className="text-right">Revaluation</TableHead>
+                        <TableHead className="text-right">Depreciation</TableHead><TableHead className="text-right">Disposals</TableHead>
+                        <TableHead className="text-right">Closing Cost</TableHead><TableHead className="text-right">Closing NBV</TableHead>
+                    </TableRow></TableHeader>
+                    <TableBody>{(data.rows || []).map((item) => (
+                        <TableRow key={`${item.categoryId || item.categoryName}-${item.bookClassification}`}>
+                            <TableCell className="font-medium">{item.categoryName}</TableCell><TableCell>{item.bookClassification}</TableCell>
+                            <TableCell className="text-right">{item.openingCost?.toLocaleString()}</TableCell>
+                            <TableCell className="text-right">{item.additions?.toLocaleString()}</TableCell>
+                            <TableCell className="text-right">{(item.revaluationIncrease - item.revaluationDecrease).toLocaleString()}</TableCell>
+                            <TableCell className="text-right">{item.depreciationCharge?.toLocaleString()}</TableCell>
+                            <TableCell className="text-right">{item.disposals?.toLocaleString()}</TableCell>
+                            <TableCell className="text-right">{item.closingCost?.toLocaleString()}</TableCell>
+                            <TableCell className="text-right font-semibold">{item.closingNetBookValue?.toLocaleString()}</TableCell>
+                        </TableRow>
+                    ))}</TableBody>
+                </Table>
+            );
+        }
+
+        if (selectedReport.id === 'GlReconciliationReport') {
+            const data = reportData as FixedAssetGlReconciliationReport;
+            return (
+                <div>
+                    <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-3 dark:bg-slate-900">
+                        <Badge variant={data.isReconciled ? 'default' : 'destructive'}>
+                            {data.isReconciled ? 'Reconciled' : 'Exceptions detected'}
+                        </Badge>
+                        <span className="text-sm text-slate-500">Total variance: {data.totalVariance?.toLocaleString()}</span>
+                    </div>
+                    <Table>
+                        <TableHeader><TableRow>
+                            <TableHead>Area</TableHead><TableHead>Account</TableHead><TableHead className="text-right">GL</TableHead>
+                            <TableHead className="text-right">Subledger</TableHead><TableHead className="text-right">Variance</TableHead>
+                            <TableHead className="text-right">Missing References</TableHead>
+                        </TableRow></TableHeader>
+                        <TableBody>{(data.rows || []).map((item) => (
+                            <TableRow key={`${item.area}-${item.accountId || item.accountNumber}`}>
+                                <TableCell className="font-medium">{item.area}</TableCell>
+                                <TableCell>{item.accountNumber} {item.accountName ? `— ${item.accountName}` : ''}</TableCell>
+                                <TableCell className="text-right">{item.glBalance?.toLocaleString()}</TableCell>
+                                <TableCell className="text-right">{item.subledgerBalance?.toLocaleString()}</TableCell>
+                                <TableCell className={`text-right font-semibold ${Math.abs(item.variance) >= 0.01 ? 'text-red-600' : ''}`}>{item.variance?.toLocaleString()}</TableCell>
+                                <TableCell className="text-right">{item.missingPostingReferenceCount}</TableCell>
+                            </TableRow>
+                        ))}</TableBody>
+                    </Table>
+                    {data.diagnostics?.length > 0 && (
+                        <div className="space-y-2 border-t p-4">
+                            {data.diagnostics.map((diagnostic, index) => (
+                                <div key={`${diagnostic.code}-${index}`} className="text-sm">
+                                    <Badge variant={diagnostic.severity === 'Critical' ? 'destructive' : 'outline'} className="mr-2">{diagnostic.severity}</Badge>
+                                    <span className="font-medium">{diagnostic.code}</span>: {diagnostic.message}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
             );
         }
 
@@ -352,8 +565,7 @@ export default function FixedAssetReportsPage() {
                                     </div>
                                 </div>
 
-                                {selectedReport.id !== 'AssetRegister' && (
-                                    <>
+                                {usesPeriodRange && (
                                         <div className="space-y-1.5">
                                             <Label htmlFor="fromDate">From Date</Label>
                                             <Input
@@ -363,22 +575,41 @@ export default function FixedAssetReportsPage() {
                                                 onChange={(e) => setFilters({ ...filters, fromDate: e.target.value })}
                                             />
                                         </div>
-                                        <div className="space-y-1.5">
-                                            <Label htmlFor="toDate">To Date</Label>
-                                            <Input
-                                                id="toDate"
-                                                type="date"
-                                                value={filters.toDate}
-                                                onChange={(e) => setFilters({ ...filters, toDate: e.target.value })}
-                                            />
-                                        </div>
-                                    </>
                                 )}
+                                <div className="space-y-1.5">
+                                    <Label htmlFor="toDate">{usesPeriodRange ? 'To Date' : 'As of Date'}</Label>
+                                    <Input
+                                        id="toDate"
+                                        type="date"
+                                        value={filters.toDate}
+                                        onChange={(e) => setFilters({ ...filters, toDate: e.target.value })}
+                                    />
+                                </div>
+                                <div className="space-y-1.5 w-[210px]">
+                                    <Label htmlFor="bookClassification">Accounting Book</Label>
+                                    <Select
+                                        value={filters.bookClassification || ''}
+                                        onValueChange={(value) => setFilters({ ...filters, bookClassification: value })}
+                                    >
+                                        <SelectTrigger id="bookClassification">
+                                            <SelectValue placeholder="Select accounting book" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {accountingBooks.map((book) => (
+                                                <SelectItem key={book.id} value={book.code}>{book.code} — {book.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
 
                                 <div className="space-y-1.5 w-[150px]">
                                     <Label htmlFor="status">Status</Label>
                                     <Select
-                                        onValueChange={(val) => setFilters({ ...filters, status: val as any })}
+                                        value={filters.status || 'All'}
+                                        onValueChange={(val) => setFilters({
+                                            ...filters,
+                                            status: val === 'All' ? undefined : val as FixedAssetStatus,
+                                        })}
                                     >
                                         <SelectTrigger id="status">
                                             <SelectValue placeholder="All Status" />

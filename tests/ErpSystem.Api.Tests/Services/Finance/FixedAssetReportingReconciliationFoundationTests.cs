@@ -86,13 +86,28 @@ public sealed class FixedAssetReportingReconciliationFoundationTests
             localOnly.Id,
             null);
         localBookValue.BookClassification = "LOCAL_STATUTORY";
+        var apLocalBookValue = BuildBookValue(
+            tenantId,
+            localBook,
+            fixture.ApAsset,
+            9_000m,
+            800m,
+            8_200m,
+            "FixedAsset",
+            fixture.ApAsset.Id,
+            null);
+        apLocalBookValue.BookClassification = "LOCAL_STATUTORY";
         db.FixedAssets.AddRange(masterOnly, localOnly);
         db.AccountingBooks.Add(localBook);
-        db.FixedAssetBookValues.Add(localBookValue);
+        db.FixedAssetBookValues.AddRange(localBookValue, apLocalBookValue);
         await db.SaveChangesAsync();
         var service = CreateReportsService(db, tenantId);
 
         var report = await service.GetAssetRegisterAsync(DefaultQuery());
+        var additions = await service.GetAdditionsReportAsync(CapitalizationQuery());
+        var accumulated = await service.GetAccumulatedDepreciationReportAsync(DefaultQuery());
+        var rollForward = await service.GetRollForwardReportAsync(DefaultQuery());
+        var reconciliation = await service.GetGlReconciliationReportAsync(DefaultQuery());
 
         report.Items.Should().HaveCount(2);
         report.Items.Should().NotContain(item => item.AssetCode == masterOnly.AssetCode);
@@ -101,6 +116,13 @@ public sealed class FixedAssetReportingReconciliationFoundationTests
         report.TotalCost.Should().Be(2_000m);
         report.TotalAccumulatedDepreciation.Should().Be(100m);
         report.TotalNetBookValue.Should().Be(1_300m);
+        additions.Items.Should().HaveCount(2);
+        additions.Items.Should().NotContain(item => item.AssetCode == masterOnly.AssetCode || item.AssetCode == localOnly.AssetCode);
+        accumulated.Items.Should().HaveCount(2);
+        accumulated.Items.Should().NotContain(item => item.AssetCode == masterOnly.AssetCode || item.AssetCode == localOnly.AssetCode);
+        rollForward.Rows.Should().ContainSingle();
+        rollForward.Totals.OpeningCost.Should().Be(2_000m);
+        reconciliation.Rows.Should().OnlyContain(row => row.Variance == 0m);
     }
 
     [Fact]
@@ -423,6 +445,170 @@ public sealed class FixedAssetReportingReconciliationFoundationTests
         accumulated.Items.Single().SubledgerAccumulatedDepreciation.Should().Be(999m);
         accumulated.TotalVariance.Should().Be(-899m);
         reconciliation.Diagnostics.Should().Contain(d => d.Code == "FA-REPORT-GL-VARIANCE");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetReporting")]
+    [Trait("Category", "FixedAssets")]
+    public async Task LaterPeriodRollForwardCarriesOpeningReservesAndReconciliationRemainsCumulative()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        await SeedReportingFoundationAsync(db, tenantId, "TEN");
+        var service = CreateReportsService(db, tenantId);
+        var query = new FixedAssetReportQueryDto
+        {
+            FromDate = new DateTime(2026, 8, 1),
+            ToDate = new DateTime(2026, 8, 31),
+            BookClassification = "IFRS"
+        };
+
+        var rollForward = await service.GetRollForwardReportAsync(query);
+        var reconciliation = await service.GetGlReconciliationReportAsync(query);
+
+        var row = rollForward.Rows.Single();
+        row.OpeningCost.Should().Be(1_400m);
+        row.OpeningAccumulatedDepreciation.Should().Be(100m);
+        row.OpeningAccumulatedImpairment.Should().Be(0m);
+        row.Additions.Should().Be(0m);
+        row.DepreciationCharge.Should().Be(0m);
+        row.Disposals.Should().Be(0m);
+        row.ClosingCost.Should().Be(1_400m);
+        row.ClosingAccumulatedDepreciation.Should().Be(100m);
+        row.ClosingNetBookValue.Should().Be(1_300m);
+        reconciliation.Rows.Should().OnlyContain(item => item.Variance == 0m);
+        reconciliation.IsReconciled.Should().BeTrue();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetReporting")]
+    [Trait("Category", "FixedAssets")]
+    public async Task SoftDeletedTransactionsAndCorrectedValuationsAreExcludedFromReports()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        await SeedReportingFoundationAsync(db, tenantId, "TEN");
+        foreach (var transfer in db.AssetTransfers)
+            transfer.IsDeleted = true;
+        foreach (var disposal in db.AssetDisposals)
+            disposal.IsDeleted = true;
+        foreach (var valuation in db.AssetValuations)
+            valuation.IsCorrected = true;
+        await db.SaveChangesAsync();
+        var service = CreateReportsService(db, tenantId);
+
+        (await service.GetTransferReportAsync(DefaultQuery())).Should().BeEmpty();
+        (await service.GetDisposalReportAsync(DefaultQuery())).Should().BeEmpty();
+        (await service.GetValuationMovementReportAsync(DefaultQuery())).Items.Should().BeEmpty();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetReporting")]
+    [Trait("Category", "FixedAssets")]
+    public async Task InvalidDateFiscalPeriodAndAccountingBookFiltersAreRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        await SeedReportingFoundationAsync(db, tenantId, "TEN");
+        var other = await SeedReportingFoundationAsync(db, otherTenantId, "OTH");
+        var otherOnlyBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = otherTenantId,
+            Code = "OTH_ONLY",
+            Name = "Other Tenant Only",
+            IsActive = true,
+            AllowsPosting = true,
+            CreatedAt = DateTime.UtcNow
+        };
+        db.AccountingBooks.Add(otherOnlyBook);
+        await db.SaveChangesAsync();
+        var service = CreateReportsService(db, tenantId);
+
+        var dateAct = () => service.GetAssetRegisterAsync(new FixedAssetReportQueryDto
+        {
+            FromDate = new DateTime(2026, 8, 2),
+            ToDate = new DateTime(2026, 8, 1),
+            BookClassification = "IFRS"
+        });
+        await dateAct.Should().ThrowAsync<InvalidOperationException>().WithMessage("*start date*");
+
+        var periodAct = () => service.GetAssetRegisterAsync(new FixedAssetReportQueryDto
+        {
+            FiscalPeriodId = other.Period.Id,
+            BookClassification = "IFRS"
+        });
+        await periodAct.Should().ThrowAsync<InvalidOperationException>().WithMessage("*fiscal period*tenant*");
+
+        var bookAct = () => service.GetAssetRegisterAsync(new FixedAssetReportQueryDto
+        {
+            BookClassification = otherOnlyBook.Code
+        });
+        await bookAct.Should().ThrowAsync<InvalidOperationException>().WithMessage("*accounting book*tenant*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetReporting")]
+    [Trait("Category", "FixedAssets")]
+    public async Task GlEvidenceRequiresPostedParentJournal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedReportingFoundationAsync(db, tenantId, "TEN");
+        var journal = await db.JournalEntries.SingleAsync(entry => entry.Id == fixture.ApAsset.JournalEntryId);
+        journal.PostingStatus = "Draft";
+        await db.SaveChangesAsync();
+        var service = CreateReportsService(db, tenantId);
+
+        var report = await service.GetGlReconciliationReportAsync(DefaultQuery());
+
+        report.Diagnostics.Should().Contain(item => item.Code == "FA-REPORT-GL-VARIANCE");
+        report.IsReconciled.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("AssetRegister")]
+    [InlineData("AdditionsReport")]
+    [InlineData("DepreciationReport")]
+    [InlineData("AccumulatedDepreciationReport")]
+    [InlineData("ValuationReport")]
+    [InlineData("DisposalReport")]
+    [InlineData("TransferReport")]
+    [InlineData("RollForwardReport")]
+    [InlineData("GlReconciliationReport")]
+    [Trait("Batch", "FinanceGoLive-FixedAssetReporting")]
+    [Trait("Category", "FixedAssets")]
+    public async Task EveryFixedAssetReportSupportsExcelExport(string reportType)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        await SeedReportingFoundationAsync(db, tenantId, "TEN");
+        var service = CreateReportsService(db, tenantId);
+
+        var bytes = await service.ExportToExcelAsync(reportType, DefaultQuery());
+
+        bytes.Should().NotBeEmpty();
+        bytes.Take(2).Should().Equal((byte)'P', (byte)'K');
+    }
+
+    [Theory]
+    [InlineData("DisposalReport")]
+    [InlineData("TransferReport")]
+    [InlineData("GlReconciliationReport")]
+    [Trait("Batch", "FinanceGoLive-FixedAssetReporting")]
+    [Trait("Category", "FixedAssets")]
+    public async Task PreviouslyUnavailableReportsSupportPdfExport(string reportType)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        await SeedReportingFoundationAsync(db, tenantId, "TEN");
+        var service = CreateReportsService(db, tenantId);
+
+        var bytes = await service.ExportToPdfAsync(reportType, DefaultQuery());
+
+        bytes.Should().NotBeEmpty();
+        System.Text.Encoding.ASCII.GetString(bytes.Take(4).ToArray()).Should().Be("%PDF");
     }
 
     private static FixedAssetReportQueryDto DefaultQuery() => new()
@@ -905,6 +1091,9 @@ public sealed class FixedAssetReportingReconciliationFoundationTests
     {
         var journalId = Guid.NewGuid();
         var postingEventId = Guid.NewGuid();
+        var accountingBookId = db.AccountingBooks.Local
+            .Single(book => book.TenantId == tenantId && book.Code == "IFRS")
+            .Id;
         var totalDebit = lines.Sum(l => l.Debit);
         var totalCredit = lines.Sum(l => l.Credit);
         var accountingBookId = db.AccountingBooks.Local.Single(book =>
