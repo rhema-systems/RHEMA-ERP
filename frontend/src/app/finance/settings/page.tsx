@@ -14,7 +14,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Settings, Lock, AlertTriangle, Save, DollarSign, Layers, Check, ChevronsUpDown, Banknote, ShieldCheck, Undo2, Tags, BookOpen } from 'lucide-react';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import type { FinanceSettings, UpdateFinanceSettingsDto, Account } from '@/types/finance';
+import type { FinanceSettings, UpdateFinanceSettingsDto, Account, FiscalYear } from '@/types/finance';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -27,6 +27,27 @@ interface AccountPickerProps {
     allowClear?: boolean;
     accounts: Account[];
     onChange: (value?: string) => void;
+}
+
+const MONTHS = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+] as const;
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
+
+function monthDayFromIsoDate(value?: string) {
+    const match = value?.match(/^\d{4}-(\d{2})-(\d{2})/);
+    return match ? { month: Number(match[1]), day: Number(match[2]) } : null;
+}
+
+function formatMonthDay(month: number, day: number) {
+    return `${day} ${MONTHS[month - 1]}`;
+}
+
+function getPreviousMonthDay(month: number, day: number) {
+    if (day > 1) return { month, day: day - 1 };
+    const previousMonth = month === 1 ? 12 : month - 1;
+    return { month: previousMonth, day: DAYS_IN_MONTH[previousMonth - 1] };
 }
 
 function AccountPicker({ id, value, placeholder, disabled, allowClear = true, accounts, onChange }: AccountPickerProps) {
@@ -91,6 +112,7 @@ function AccountPicker({ id, value, placeholder, disabled, allowClear = true, ac
 export default function FinanceSettingsPage() {
     const [settings, setSettings] = useState<FinanceSettings | null>(null);
     const [accounts, setAccounts] = useState<Account[]>([]);
+    const [currentFiscalYear, setCurrentFiscalYear] = useState<FiscalYear | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const { toast } = useToast();
@@ -211,6 +233,18 @@ export default function FinanceSettingsPage() {
 
             // Load accounts for the current COA type
             await loadAccounts(data.coaType);
+            try {
+                const fiscalYears = await financeDataService.getFiscalYears();
+                const today = new Date().toISOString().slice(0, 10);
+                setCurrentFiscalYear(
+                    fiscalYears.find(year => year.startDate.slice(0, 10) <= today && year.endDate.slice(0, 10) >= today)
+                    ?? fiscalYears.find(year => !year.isClosed && !year.isLocked)
+                    ?? null
+                );
+            } catch (error) {
+                console.warn('Unable to load the current fiscal year for WHT alignment guidance.', error);
+                setCurrentFiscalYear(null);
+            }
         } catch (error: any) {
             console.error('Error loading settings:', error);
             toast({
@@ -233,6 +267,16 @@ export default function FinanceSettingsPage() {
     };
 
     const handleSave = async () => {
+        const whtMonth = formData.whtStatutoryYearStartMonth ?? 1;
+        const whtDay = formData.whtStatutoryYearStartDay ?? 1;
+        if (whtMonth < 1 || whtMonth > 12 || whtDay < 1 || whtDay > DAYS_IN_MONTH[whtMonth - 1]) {
+            toast({
+                title: 'Invalid WHT statutory-year boundary',
+                description: 'Select a valid recurring calendar month and day.',
+                variant: 'destructive',
+            });
+            return;
+        }
         const tolerances = [
             formData.apInvoicePriceTolerancePercent,
             formData.apInvoiceQuantityTolerancePercent,
@@ -440,34 +484,92 @@ export default function FinanceSettingsPage() {
                         Sets the annual boundary used for supplier contract/category threshold accumulation.
                     </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
                     <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
                             <Label htmlFor="whtYearStartMonth">Start month</Label>
-                            <Input
-                                id="whtYearStartMonth"
-                                type="number"
-                                min={1}
-                                max={12}
-                                value={formData.whtStatutoryYearStartMonth ?? 1}
-                                onChange={event => setFormData({ ...formData, whtStatutoryYearStartMonth: Number(event.target.value) })}
-                            />
+                            <Select
+                                value={String(formData.whtStatutoryYearStartMonth ?? 1)}
+                                onValueChange={value => {
+                                    const month = Number(value);
+                                    setFormData({
+                                        ...formData,
+                                        whtStatutoryYearStartMonth: month,
+                                        whtStatutoryYearStartDay: Math.min(
+                                            formData.whtStatutoryYearStartDay ?? 1,
+                                            DAYS_IN_MONTH[month - 1]
+                                        ),
+                                    });
+                                }}
+                            >
+                                <SelectTrigger id="whtYearStartMonth"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    {MONTHS.map((month, index) => (
+                                        <SelectItem key={month} value={String(index + 1)}>{month}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="whtYearStartDay">Start day</Label>
-                            <Input
-                                id="whtYearStartDay"
-                                type="number"
-                                min={1}
-                                max={31}
-                                value={formData.whtStatutoryYearStartDay ?? 1}
-                                onChange={event => setFormData({ ...formData, whtStatutoryYearStartDay: Number(event.target.value) })}
-                            />
+                            <Select
+                                value={String(formData.whtStatutoryYearStartDay ?? 1)}
+                                onValueChange={value => setFormData({ ...formData, whtStatutoryYearStartDay: Number(value) })}
+                            >
+                                <SelectTrigger id="whtYearStartDay"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    {Array.from(
+                                        { length: DAYS_IN_MONTH[(formData.whtStatutoryYearStartMonth ?? 1) - 1] },
+                                        (_, index) => index + 1
+                                    ).map(day => <SelectItem key={day} value={String(day)}>{day}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
                         </div>
                     </div>
-                    <p className="mt-3 text-sm text-muted-foreground">
-                        January 1 is the default. Finance validates that the selected month/day is a real calendar date.
-                    </p>
+                    {(() => {
+                        const startMonth = formData.whtStatutoryYearStartMonth ?? 1;
+                        const startDay = formData.whtStatutoryYearStartDay ?? 1;
+                        const end = getPreviousMonthDay(startMonth, startDay);
+                        const fiscalStart = monthDayFromIsoDate(currentFiscalYear?.startDate);
+                        const differsFromFiscalYear = fiscalStart && (fiscalStart.month !== startMonth || fiscalStart.day !== startDay);
+                        return <>
+                            <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                                <span className="font-medium">Statutory year: </span>
+                                {formatMonthDay(startMonth, startDay)} – {formatMonthDay(end.month, end.day)}
+                            </div>
+                            {currentFiscalYear && fiscalStart && (
+                                <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3">
+                                    <div>
+                                        <p className="text-sm font-medium">Accounting fiscal year: {currentFiscalYear.fiscalYearName}</p>
+                                        <p className="text-xs text-muted-foreground">Starts {formatMonthDay(fiscalStart.month, fiscalStart.day)}. WHT may use an independent statutory boundary.</p>
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={!differsFromFiscalYear}
+                                        onClick={() => setFormData({
+                                            ...formData,
+                                            whtStatutoryYearStartMonth: fiscalStart.month,
+                                            whtStatutoryYearStartDay: fiscalStart.day,
+                                        })}
+                                    >
+                                        {differsFromFiscalYear ? 'Use fiscal-year start' : 'Aligned with fiscal year'}
+                                    </Button>
+                                </div>
+                            )}
+                            {differsFromFiscalYear && (
+                                <Alert>
+                                    <AlertTriangle className="h-4 w-4" />
+                                    <AlertTitle>Different statutory and accounting years</AlertTitle>
+                                    <AlertDescription>This is permitted. WHT contract/category thresholds reset on the statutory boundary shown above, not at accounting year-end.</AlertDescription>
+                                </Alert>
+                            )}
+                            <p className="text-sm text-muted-foreground">
+                                January 1 is the Ghana default. This setting controls threshold accumulation only; it does not change fiscal periods.
+                            </p>
+                        </>;
+                    })()}
                 </CardContent>
             </Card>
 

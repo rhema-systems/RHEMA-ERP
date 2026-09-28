@@ -41,7 +41,6 @@ import {
 } from '@/components/ui/popover';
 import {
     Command,
-    CommandEmpty,
     CommandGroup,
     CommandInput,
     CommandList,
@@ -209,8 +208,14 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     });
 
     const { data: taxGroupsData } = useQuery({
-        queryKey: ['tax-groups-active'],
-        queryFn: () => taxDataService.getTaxGroups({ isActive: true, applicability: 'Purchases' }),
+        queryKey: ['tax-groups-active', 'purchases', 'transaction-taxes-only'],
+        queryFn: async () => {
+            const groups = await taxDataService.getTaxGroups({ isActive: true, applicability: 'Purchases' });
+            return groups.filter(group => group.components.every(component =>
+                component.taxCategory !== TaxCategory.Withholding &&
+                component.taxCategory !== TaxCategory.VatWithholding
+            ));
+        },
     });
 
     const { data: withholdingTaxes = [] } = useQuery({
@@ -1123,9 +1128,15 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                             onValueChange={setSupplierSearch}
                                         />
                                         <CommandList>
-                                            <CommandEmpty>
-                                                {suppliersLoading ? "Loading..." : "No supplier found."}
-                                            </CommandEmpty>
+                                            {filteredSuppliers.length === 0 && (
+                                                <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                                                    {suppliersLoading
+                                                        ? 'Loading suppliers…'
+                                                        : supplierSearch
+                                                            ? `No supplier matches “${supplierSearch}”.`
+                                                            : 'No approved, transaction-ready suppliers are available.'}
+                                                </div>
+                                            )}
                                             <CommandGroup>
                                                 {filteredSuppliers.map((supplier: any) => (
                                                     <div
@@ -1425,9 +1436,12 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                             <div className="flex flex-wrap items-center gap-3">
                                 <Switch id="invoiceSubjectToWithholding" checked={!watchIsOpeningBalance && withholdingDecision === true} disabled={watchIsOpeningBalance}
                                     onCheckedChange={checked => { if (checked) setWithholdingPromptOpen(true); else declineWithholding(); }} />
-                                <Label htmlFor="invoiceSubjectToWithholding">Subject to withholding</Label>
+                                <Label htmlFor="invoiceSubjectToWithholding">Classify for WHT at payment</Label>
                                 {supplierWithholding?.required && withholdingDecision === null && !watchIsOpeningBalance && <Button type="button" variant="outline" size="sm" onClick={() => setWithholdingPromptOpen(true)}>Review withholding</Button>}
                             </div>
+                            <p className="text-xs text-muted-foreground">
+                                This records the applicable WHT rule and statutory scope. The payable is not reduced now; the final deduction and any configured threshold are evaluated when a payment is posted.
+                            </p>
                             <div className="grid gap-3 sm:grid-cols-[1fr_130px]">
                             <div className="space-y-1.5"><Label htmlFor="invoiceWithholdingTaxId">WHT Configuration</Label>
                             <Controller
@@ -1457,7 +1471,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                 )}
                             />
                             </div>
-                            <div className="space-y-1.5"><Label htmlFor="invoiceWithholdingRate">WHT Rate (%)</Label>
+                            <div className="space-y-1.5"><Label htmlFor="invoiceWithholdingRate">Expected WHT Rate (%)</Label>
                                 <Input id="invoiceWithholdingRate" type="number" min="0" max="100" step="0.0001" disabled={watchIsOpeningBalance || withholdingDecision !== true}
                                     value={form.watch('withholdingTaxRate') ?? 0} onChange={event => {
                                         const rate = event.target.value === '' ? 0 : Number(event.target.value);
@@ -1482,7 +1496,11 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                 {applySupplierDefaults && supplierDefaults?.postingDefaults.defaultTaxGroupId && taxGroupsData && !taxGroupsData.some(group => group.id === supplierDefaults.postingDefaults.defaultTaxGroupId) && <p role="status" className="text-sm text-amber-700">The saved supplier tax schedule is unavailable. Select tax manually.</p>}
                                 {(applySupplierDefaults || watchApAccountId || watchExpenseAccountId) && <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                                     <div className="space-y-1.5"><Label htmlFor="apAccountId">Accounts Payable</Label><Controller control={form.control} name="apAccountId" render={({ field }) => <PostingAccountPicker id="apAccountId" value={field.value} accounts={(glAccountsData?.items || []).filter(account => account.accountType === 'Liability' && (account.allowDirectPosting || account.isControlAccount))} onChange={value => { manualSupplierDefaults.current.add('apAccountId'); field.onChange(value || ''); }} />} /></div>
-                                    <div className="space-y-1.5"><Label htmlFor="expenseAccountId">Purchases Account</Label><Controller control={form.control} name="expenseAccountId" render={({ field }) => <PostingAccountPicker id="expenseAccountId" value={field.value} accounts={(glAccountsData?.items || []).filter(account => !account.isControlAccount && account.allowDirectPosting && ['Asset', 'Expense'].includes(account.accountType))} onChange={value => { manualSupplierDefaults.current.add('expenseAccountId'); field.onChange(value || ''); }} />} /></div>
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="expenseAccountId">Default line posting account</Label>
+                                        <Controller control={form.control} name="expenseAccountId" render={({ field }) => <PostingAccountPicker id="expenseAccountId" value={field.value} accounts={(glAccountsData?.items || []).filter(account => !account.isControlAccount && account.allowDirectPosting && ['Asset', 'Expense'].includes(account.accountType))} onChange={value => { manualSupplierDefaults.current.add('expenseAccountId'); field.onChange(value || ''); }} />} />
+                                        <p className="text-xs text-muted-foreground">Fallback for a manual GL line. A line-level GL account takes precedence.</p>
+                                    </div>
                                 </div>}
                             </div>
                         )}
@@ -1496,7 +1514,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                         placeholder="e.g. CONTRACT-2026-014"
                                         {...form.register('withholdingContractReference')}
                                     />
-                                    <p className="text-xs text-muted-foreground">Thresholds accumulate only within this supplier contract and category.</p>
+                                    <p className="text-xs text-muted-foreground">Identifies the engagement whose posted payments accumulate toward the statutory threshold.</p>
                                 </div>
                                 <div className="space-y-2">
                                     <Label>WHT Supply Category</Label>
@@ -1514,6 +1532,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                             </Select>
                                         )}
                                     />
+                                    <p className="text-xs text-muted-foreground">Separates Goods, Works, and Services threshold accumulation for this supplier and contract.</p>
                                 </div>
                             </div>
                         )}
@@ -1628,7 +1647,15 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                                     <Command shouldFilter={false}>
                                                                         <CommandInput placeholder="Search code or name..." value={glAccountSearch} onValueChange={setGlAccountSearch} />
                                                                         <CommandList>
-                                                                            <CommandEmpty>No account found.</CommandEmpty>
+                                                                            {filteredGlAccounts.length === 0 && (
+                                                                                <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                                                                                    {glAccountsLoading
+                                                                                        ? 'Loading posting accounts…'
+                                                                                        : glAccountSearch
+                                                                                            ? `No posting account matches “${glAccountSearch}”.`
+                                                                                            : 'No eligible posting accounts are available.'}
+                                                                                </div>
+                                                                            )}
                                                                             <CommandGroup>
                                                                                 {filteredGlAccounts.map((account: any) => (
                                                                                     <div
@@ -1729,7 +1756,15 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                                     <Command shouldFilter={false}>
                                                                         <CommandInput placeholder="Search item code or name..." value={inventoryItemSearch} onValueChange={setInventoryItemSearch} />
                                                                         <CommandList>
-                                                                            <CommandEmpty>No inventory items found.</CommandEmpty>
+                                                                            {filteredInventoryItems.length === 0 && (
+                                                                                <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                                                                                    {inventoryItemsLoading
+                                                                                        ? 'Loading inventory items…'
+                                                                                        : inventoryItemSearch
+                                                                                            ? `No inventory item matches “${inventoryItemSearch}”.`
+                                                                                            : 'No active inventory items are available.'}
+                                                                                </div>
+                                                                            )}
                                                                             <CommandGroup>
                                                                                 {filteredInventoryItems.map((item: any) => (
                                                                                     <div
@@ -1913,10 +1948,10 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 </Card>
             </form>
             <ConfirmationDialog open={withholdingPromptOpen && !watchIsOpeningBalance} onOpenChange={setWithholdingPromptOpen}
-                title="Apply withholding to this invoice?"
+                title="Classify this invoice for WHT at payment?"
                 description={supplierWithholding?.required
-                    ? `This supplier is subject to withholding at ${supplierWithholding.rate}%. Apply it to this invoice? You can change the invoice rate after selecting Yes.`
-                    : 'Apply withholding to this invoice? You can select the configuration and rate after selecting Yes.'}
+                    ? `This supplier's approved profile expects WHT at ${supplierWithholding.rate}%. The actual deduction and threshold test happen when payment is posted. You can change the expected rate after selecting Yes.`
+                    : 'Record a WHT classification for payment-time evaluation? You can select the configuration and expected rate after selecting Yes.'}
                 confirmText="Yes" cancelText="No" onConfirm={acceptWithholding} onCancel={declineWithholding} />
         </div>
     );
