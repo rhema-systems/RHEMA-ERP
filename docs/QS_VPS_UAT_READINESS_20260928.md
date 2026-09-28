@@ -8,7 +8,40 @@ Target: the existing Test VPS application and its configured database. Local acc
 
 Dedicated QS actors checked by that baseline are `uat.qs.preparer`, `uat.qs.reviewer` and `uat.qs.approver`. Existing passwords are preserved. Any initial password for missing users belongs in the secure deployment prompt or protected process setting, never this document.
 
-The HTML account card also names `uat.qs.contractor`. The operational seeder does not provision that external actor or its own-business-partner portal link. Inspect the VPS before creating either; the local walkthrough's contractor ID is not a VPS identity. The named committee and Finance users also need their actual stage assignments verified.
+The operational baseline alone does not provision `uat.qs.contractor` or its own-business-partner portal link. The opt-in QS preparation below addresses those additional starting prerequisites; the named committee and Finance users still need actual stage assignments verified.
+
+## Deploy and prepare the QS test prerequisites
+
+Run from the updated VPS release checkout:
+
+```powershell
+& {
+    $ErrorActionPreference = 'Stop'
+    Set-Location 'C:\Users\Administrator\Documents\ERP\RHEMA-ERP'
+    powershell.exe -NoProfile -ExecutionPolicy Bypass `
+        -File .\scripts\Deploy-QsUatVps.ps1 `
+        -ExpectedDatabase 'RhemaERP_VpsTest_20260926_173800' -PrepareQsUat
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Deployment or QS preparation stopped. Keep the reported evidence before retrying.'
+    }
+}
+```
+
+The wrapper deploys and verifies the release, then explicitly runs test preparation, then generates the read-only readiness report. If a stage fails, later stages do not run. Enter the shared password only at the protected prompt for new UAT accounts; existing passwords are preserved.
+
+Preparation adds missing test contractor/consultant/engineer access, a fictional Estate parcel through its owner, QS catalogue/location masters, named UAT workflow configurations and templates, and populated **draft** QS configuration proposals. It preserves existing user-owned configuration and records conflicts or unresolved controlled selections. It does not create approved projects, BOQs, contracts, invoices or payments.
+
+Inspect the path printed by `QS_UAT_PREPARATION_REPORT`; the report is under `artifacts\qs-uat\preparation-<timestamp>\qs-uat-preparation.json`. Resolve `Preparation.Unresolved` and follow [the 17-decision reviewer checklist](QS_UAT_CONFIGURATION_REVIEW.md). The remaining gate is genuine current published DMS evidence, submission by the preparer, independent approval of all 17 decisions and profile publication. Preparation deliberately reports `QS_CONFIGURATION|INDEPENDENT_REVIEW_REQUIRED` and never certifies the business walkthrough.
+
+If deployment succeeded but preparation stopped, rerun only the additive preparation after resolving its reported blocker:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+    -File .\scripts\vps\Initialize-QsUat.ps1 `
+    -ExpectedDatabase 'RhemaERP_VpsTest_20260926_173800'
+```
+
+New Project's **Estimated Budget** is optional. A blank estimate does not bypass later approved-budget, Procurement, Finance or commitment controls; prepare those at the corresponding A–F stages.
 
 ### Verified deployment coverage versus tomorrow's prerequisites
 
@@ -40,9 +73,17 @@ Local deployment regression checks passed on 27 September: operational-seed wiri
 
 `scripts/quantity-survey/Invoke-QuantitySurveyE2ESeed.ps1` belongs to the documented disposable acceptance workflow. Its SQL prepares governed scenario state directly. Do not substitute it blindly for persistent VPS preparation or rebuild/drop the running VPS database. The older local IDs in `TDC_QS_CLOSEOUT_HANDOFF.md` must not be assumed to exist on the VPS.
 
-Status: **VPS scenario inventory and live QS readiness verification pending.** No remote deployment or seed completion is claimed by this document.
+Status: **The supplied VPS prerequisite report dated 28 September 2026 00:31:15 UTC identified starting setup gaps. The new opt-in preparation and independent configuration review must be verified on the VPS before the fresh business walkthrough.** No completion of that walkthrough is claimed by this document.
 
 ## Read-only VPS evidence command
+
+For a release upgrade followed only by this report, run
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-QsUatVps.ps1`
+from the updated VPS checkout. Add `-PrepareQsUat` for the explicit setup above. Without that switch the wrapper does not run QS preparation. It runs the report only after the normal
+deployment succeeds. It uses the existing deployment preflight; normal `-DryRun`
+is a current-release parity check and is not a prerequisite for pending migrations.
+Windows PowerShell 5.1 `-File` report invocation and failure sequencing have dedicated
+regressions, including default output path resolution after parameter binding.
 
 After this follow-up is available in the release checkout, run this on the VPS. The explicit database below is the name from the user's successful fresh cutover; the script refuses to run if the current API service points elsewhere.
 
@@ -53,6 +94,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
     -ExpectedDatabase 'RhemaERP_VpsTest_20260926_173800'
 ```
 
-This reads the existing WinSW/NSSM API connection privately, executes the existing operational baseline verifier and inventories the HTML's 13 named actors, their role links, the contractor's portal link, effective QS profiles/decision states and published workflow definitions. It writes a JSON report and a VPS-linked HTML walkthrough under `artifacts/qs-uat`. It never changes database records, passwords, permissions or services. Published definitions still require inspection of actual decision bindings, stages and performers; the report never labels QS end-to-end readiness Passed.
+This reads the existing WinSW/NSSM API connection privately, executes the existing operational baseline verifier and inventories the named actors, partner links, project-ready Estate land, QS profile/decision state and workflow prerequisites. It writes a JSON report and a VPS-linked HTML walkthrough under `artifacts/qs-uat`. It never changes database records, passwords, permissions or services. Inspect actual decision bindings, stage performers and assignments; the report never labels QS end-to-end readiness Passed.
 
-The command was exercised against an isolated local copy, including wrong-database rejection and generated HTML links. That is command/schema verification only. On 27 September, SSH to the configured VPS on port 2222 timed out from the development workstation, so remote state has not been inspected. Run the command in the release checkout and use its findings to prepare only the missing prerequisites.
+The command was exercised against an isolated local copy, including wrong-database rejection and generated HTML links. That is command/schema verification only. The user supplied the VPS report captured at 00:31:15 UTC on 28 September; rerun the report after preparation and real configuration approval to capture the resulting state.

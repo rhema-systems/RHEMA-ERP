@@ -144,6 +144,13 @@ if (args.Length > 0 && args[0] == "seed")
     return;
 }
 
+// Explicit test-only preparation. Never runs during web startup or production deployment.
+if (args.Length > 0 && args[0] == "seed-qs-uat")
+{
+    await ErpSystem.Api.Services.QsUatCommand.RunAsync(CreateSeedBuilder(args));
+    return;
+}
+
 // Reconcile reusable Procurement, Inventory, Finance and connected QS UAT actors
 // and master data. Existing passwords and tenant-owned master records are preserved.
 if (args.Length > 0 && args[0] == "seed-operational-uat")
@@ -583,7 +590,7 @@ if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal))
 {
     Console.Error.WriteLine(
         $"Unknown command '{args[0]}'. Valid commands: seed, seed-civil-e2e, seed-tender-e2e, "
-        + "seed-maintenance, seed-maintenance-e2e, seed-db, seed-deployment-uat, seed-operational-uat, seed-workflows, "
+        + "seed-maintenance, seed-maintenance-e2e, seed-db, seed-deployment-uat, seed-operational-uat, seed-qs-uat, seed-workflows, "
         + "seed-supplier-onboarding-e2e, seed-hr-all, seed-hr-org-authority, seed-hr-demo, "
         + "seed-finance-baseline, seed-finance-demo-dimensions, rebuild-db, repair-finance-po-schema.");
     return;

@@ -1,12 +1,17 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$true)][ValidatePattern('^RhemaERP_[A-Za-z0-9_]{1,119}$')][string]$ExpectedDatabase,
-    [string]$OutputDirectory=(Join-Path $PSScriptRoot '..\..\artifacts\qs-uat'),
+    [string]$OutputDirectory,
     [uri]$PublicBaseUrl='https://63.141.230.56'
 )
 # Run on the VPS. Reads only the existing API service configuration and database.
 # Does not create users, change passwords, modify business records or restart services.
 $ErrorActionPreference='Stop'
+# Windows PowerShell 5.1 does not populate PSScriptRoot while binding -File
+# parameter defaults. Resolve the default only after the script body starts.
+if([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    $OutputDirectory=Join-Path $PSScriptRoot '..\..\artifacts\qs-uat'
+}
 $connection=$null;$command=$null
 try {
     $serviceValues=@{}
@@ -34,12 +39,19 @@ try {
     $reader=$command.ExecuteReader()
     try{$table.Load($reader)}finally{$reader.Dispose()}
     $rows=@($table.Rows | ForEach-Object {[pscustomobject]@{Category=[string]$_.Category;Reference=[string]$_.Reference;Finding=[string]$_.Finding}})
+    . (Join-Path $PSScriptRoot 'QsUatReadinessSummary.ps1')
+    $readiness=Get-RhemaQsUatReadinessSummary -Prerequisites $rows -OperationalBaselineReady $operational.Ready
     $output=[IO.Path]::GetFullPath($OutputDirectory);[void][IO.Directory]::CreateDirectory($output)
     $stamp=[DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')
     $report=Join-Path $output ('qs-prerequisites-'+$stamp+'.json')
     [pscustomobject]@{
         Database=$ExpectedDatabase;CapturedUtc=[DateTime]::UtcNow.ToString('o');ReadOnly=$true
         OperationalBaseline=$operational;Prerequisites=$rows;QsEndToEndVerified=$false
+        PrerequisiteSetupRequired=$readiness.PrerequisiteSetupRequired
+        MissingPrerequisites=$readiness.MissingPrerequisites
+        ReadyLandCount=$readiness.ReadyLandCount
+        ConfigurationReviewRequired=$readiness.ConfigurationReviewRequired
+        ConfigurationReview=$readiness.ConfigurationReview
         Pending=@('Verify actual stage permissions and project/contract assignments','Confirm approved budget, accounting mappings and open Finance period','Confirm current rates, authority limits and QS decision bindings','Verify scanner/DMS upload and download','Execute fresh A-E records and the authorised F Finance boundary in the HTML walkthrough')
     } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $report -Encoding UTF8
     if($PublicBaseUrl.Scheme -notin @('https','http') -or $PublicBaseUrl.UserInfo -or $PublicBaseUrl.Query -or $PublicBaseUrl.Fragment){throw 'Public URL must be an HTTP(S) origin without credentials, query or fragment.'}
@@ -51,6 +63,9 @@ try {
     [IO.File]::WriteAllText($walkthrough,$html)
     $rows | Format-Table -AutoSize -Wrap
     Write-Output ('OPERATIONAL_BASELINE|'+$(if($operational.Ready){'PASS'}else{'NEEDS_SETUP'}))
+    Write-Output ('QS_PREREQUISITES|'+$(if($readiness.PrerequisiteSetupRequired){'NEEDS_SETUP'}else{'INVENTORIED_REQUIRES_REVIEW'}))
+    Write-Output ('QS_READY_LAND|'+$readiness.ReadyLandCount)
+    Write-Output 'QS_CONFIGURATION|OWNER_REVIEW_REQUIRED'
     Write-Output "QS_PREREQUISITE_REPORT|$report"
     Write-Output "QS_VPS_WALKTHROUGH|$walkthrough"
     Write-Output 'QS_END_TO_END|NOT_YET_VERIFIED'

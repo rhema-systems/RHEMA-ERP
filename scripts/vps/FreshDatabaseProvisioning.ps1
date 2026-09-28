@@ -66,9 +66,18 @@ SELECT CASE WHEN EXISTS(SELECT 1 FROM sys.databases WHERE name=N'$FreshDatabaseN
 
 function Invoke-RhemaFreshApiCli {
     param([string]$ApiExecutable, [string]$ContentRoot, [string]$ConnectionString,
-          [ValidateSet('apply-migrations','seed-db','seed-deployment-uat','seed-operational-uat')][string]$Command,
+          [ValidateSet('apply-migrations','seed-db','seed-deployment-uat','seed-operational-uat','seed-qs-uat')][string]$Command,
           [int]$TimeoutSeconds = 3600,
-          [string]$OperationalUatPassword)
+          [string]$OperationalUatPassword,
+          [string]$ExpectedQsDatabase)
+    if ($Command -eq 'seed-qs-uat') {
+        $qsTarget = New-Object System.Data.SqlClient.SqlConnectionStringBuilder $ConnectionString
+        if ($ExpectedQsDatabase -cnotmatch '^RhemaERP_(VpsTest|QsUatVerify)_[A-Za-z0-9_]+$' -or
+            $qsTarget.InitialCatalog -cne $ExpectedQsDatabase) {
+            throw 'QS preparation requires the exact explicitly selected test database.'
+        }
+        $qsTarget=$null
+    }
     $start = New-Object Diagnostics.ProcessStartInfo
     $start.FileName = $ApiExecutable
     $start.WorkingDirectory = $ContentRoot
@@ -96,6 +105,13 @@ function Invoke-RhemaFreshApiCli {
         DOTNET_CLI_TELEMETRY_OPTOUT='1'; DOTNET_PROCESSOR_COUNT='2'; DOTNET_GCHeapHardLimit='0x100000000'
     }
     foreach ($entry in $environment.GetEnumerator()) { $start.EnvironmentVariables[$entry.Key] = [string]$entry.Value }
+    if ($Command -eq 'seed-qs-uat') {
+        $start.EnvironmentVariables['ASPNETCORE_ENVIRONMENT']='Test'
+        $start.EnvironmentVariables['DOTNET_ENVIRONMENT']='Test'
+        $start.EnvironmentVariables['QsUat__Enabled']='true'
+        $start.EnvironmentVariables['QsUat__ExpectedDatabase']=$ExpectedQsDatabase
+        $start.EnvironmentVariables['DOTNET_GCHeapHardLimit']='0x200000000'
+    }
     if (-not [string]::IsNullOrWhiteSpace($OperationalUatPassword)) {
         $start.EnvironmentVariables['UatBootstrap__SharedPassword'] = $OperationalUatPassword
     }
@@ -122,7 +138,9 @@ function Invoke-RhemaFreshApiCli {
             Seconds=[math]::Round(([DateTime]::UtcNow-$began).TotalSeconds,1);
             ExceptionTypes=@([regex]::Matches($raw,'\b(?:System|Microsoft)\.[A-Za-z.]+Exception\b') | ForEach-Object Value | Sort-Object -Unique);
             SqlErrorNumbers=@([regex]::Matches($raw,'Error Number:\s*(\d+)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique);
-            GuardCodes=@([regex]::Matches($raw,'\b(?:CANONICAL|C[1-8]|FINANCE|TDC|AP|AR|PROCUREMENT|ESTATE)_[A-Z0-9_]{3,90}:') | ForEach-Object { $_.Value.TrimEnd(':') } | Sort-Object -Unique)
+            GuardCodes=@([regex]::Matches($raw,'\b(?:CANONICAL|C[1-8]|FINANCE|TDC|AP|AR|PROCUREMENT|ESTATE|QS)_[A-Z0-9_]{3,90}:') | ForEach-Object { $_.Value.TrimEnd(':') } | Sort-Object -Unique)
+            QsStages=@([regex]::Matches($raw,'QS_UAT_STAGE\|[A-Z_]+') | ForEach-Object Value)
+            MissingServices=@([regex]::Matches($raw,"Unable to resolve service for type '([A-Za-z0-9_.`]+)'") | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
         }
         $raw = $null
         if ($process.ExitCode -ne 0) { throw 'CLI failed; raw output was suppressed because it may contain seeded credentials.' }
