@@ -1096,8 +1096,6 @@ public sealed class FixedAssetReportingReconciliationFoundationTests
             .Id;
         var totalDebit = lines.Sum(l => l.Debit);
         var totalCredit = lines.Sum(l => l.Credit);
-        var accountingBookId = db.AccountingBooks.Local.Single(book =>
-            book.TenantId == tenantId && book.Code == "IFRS").Id;
 
         db.JournalEntries.Add(new JournalEntry
         {
