@@ -671,6 +671,7 @@ public static class FinancePermissionPolicyMap
         {
             "PublishVersion" => One(FinancePermissions.PublishFinancialStatementLayouts),
             "CreateLayout" or "UpdateLayout" or "CreateDraftVersion" or "CloneProtectedStandard" or "ReplaceDraftRows"
+                or "InitializeFromStandards" or "DiscardUnusedDraft"
                 or "DownloadImportTemplate"
                 or "PreviewJsonImport" or "CommitJsonImport"
                 or "PreviewWorkbookImport" or "CommitWorkbookImport"

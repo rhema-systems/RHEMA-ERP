@@ -307,6 +307,8 @@ public static class FinanceAuditEvents
     public const string FinancialStatementLayoutVersionPublished = "Finance.Reporting.LayoutVersionPublished";
     public const string FinancialStatementLayoutImported = "Finance.Reporting.LayoutImported";
     public const string FinancialStatementLegacyLayoutMigrated = "Finance.Reporting.LegacyLayoutMigrated";
+    public const string FinancialStatementLayoutsInitialized = "Finance.Reporting.LayoutsInitialized";
+    public const string FinancialStatementLayoutDiscarded = "Finance.Reporting.LayoutDiscarded";
     public const string AdHocReportCreated = "Finance.Reporting.AdHocReportCreated";
     public const string AdHocReportUpdated = "Finance.Reporting.AdHocReportUpdated";
     public const string AdHocReportDeleted = "Finance.Reporting.AdHocReportDeleted";

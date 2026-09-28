@@ -160,6 +160,55 @@ public sealed class FinancialStatementLayoutsController : ControllerBase
         }
     }
 
+    [HttpGet("initialization-readiness")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
+    public async Task<ActionResult<FinancialStatementLayoutReadinessDto>> GetInitializationReadiness(
+        [FromQuery] Guid? accountingBookId = null,
+        CancellationToken cancellationToken = default)
+        => Ok(await _service.GetInitializationReadinessAsync(accountingBookId, cancellationToken));
+
+    [HttpPost("initialize-from-standards")]
+    [Authorize(Policy = FinancePermissions.ManageFinancialStatementLayouts)]
+    public async Task<ActionResult<FinancialStatementLayoutInitializationResultDto>> InitializeFromStandards(
+        [FromBody] InitializeFinancialStatementLayoutsDto request,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return Ok(await _service.InitializeFromProtectedStandardsAsync(request, cancellationToken));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+    }
+
+    [HttpDelete("{layoutId:guid}/unused-draft")]
+    [Authorize(Policy = FinancePermissions.ManageFinancialStatementLayouts)]
+    public async Task<IActionResult> DiscardUnusedDraft(
+        Guid layoutId,
+        [FromBody] DiscardFinancialStatementLayoutDto request,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _service.DiscardUnusedDraftAsync(layoutId, request, cancellationToken);
+            return NoContent();
+        }
+        catch (KeyNotFoundException exception)
+        {
+            return NotFound(new { message = exception.Message });
+        }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            return Conflict(new { message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+    }
+
     [HttpPut("versions/{versionId:guid}/rows")]
     [Authorize(Policy = FinancePermissions.ManageFinancialStatementLayouts)]
     public async Task<ActionResult<FinancialStatementLayoutVersionDto>> ReplaceDraftRows(

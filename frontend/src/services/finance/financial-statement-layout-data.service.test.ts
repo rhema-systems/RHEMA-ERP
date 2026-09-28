@@ -97,6 +97,45 @@ describe('financialStatementLayoutDataService', () => {
         }));
     });
 
+    it('uses governed initialization, readiness and unused-Draft discard endpoints', async () => {
+        const fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async () => jsonResponse({
+            isReady: false,
+            books: [],
+            createdCount: 0,
+            items: [],
+            readiness: { isReady: false, books: [] },
+        }));
+
+        await financialStatementLayoutDataService.getInitializationReadiness('book-1');
+        await financialStatementLayoutDataService.initializeFromStandards('book-1');
+        await financialStatementLayoutDataService.discardUnusedDraft(
+            'layout-1',
+            3,
+            'Accidental duplicate.',
+        );
+
+        expect(fetchMock.mock.calls[0][0]).toEqual(expect.stringContaining(
+            '/initialization-readiness?accountingBookId=book-1',
+        ));
+        expect(fetchMock.mock.calls[1][0]).toEqual(expect.stringContaining(
+            '/initialize-from-standards',
+        ));
+        expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({
+            method: 'POST',
+            body: JSON.stringify({ accountingBookId: 'book-1' }),
+        }));
+        expect(fetchMock.mock.calls[2][0]).toEqual(expect.stringContaining(
+            '/layout-1/unused-draft',
+        ));
+        expect(fetchMock.mock.calls[2][1]).toEqual(expect.objectContaining({
+            method: 'DELETE',
+            body: JSON.stringify({
+                expectedRevision: 3,
+                reason: 'Accidental duplicate.',
+            }),
+        }));
+    });
+
     it('re-uploads the workbook and preview hash when committing a controlled import', async () => {
         const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue(jsonResponse({
             definitionHash: 'HASH-1',

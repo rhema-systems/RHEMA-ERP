@@ -2663,6 +2663,37 @@ export interface CloneFinancialStatementLayoutDto {
   accountingBookId: string;
 }
 
+export interface FinancialStatementLayoutReadinessDto {
+  isReady: boolean;
+  books: FinancialStatementLayoutBookReadinessDto[];
+}
+
+export interface FinancialStatementLayoutBookReadinessDto {
+  accountingBookId: string;
+  accountingBookCode: string;
+  accountingBookName: string;
+  balanceSheetReady: boolean;
+  incomeStatementReady: boolean;
+  missingRequirements: string[];
+}
+
+export interface FinancialStatementLayoutInitializationItemDto {
+  accountingBookId: string;
+  accountingBookCode: string;
+  statementType: FinancialStatementType;
+  protectedStandardLayoutId?: string;
+  tenantLayoutId?: string;
+  created: boolean;
+  status: string;
+  validation?: FinancialStatementLayoutValidationResultDto;
+}
+
+export interface FinancialStatementLayoutInitializationResultDto {
+  createdCount: number;
+  items: FinancialStatementLayoutInitializationItemDto[];
+  readiness: FinancialStatementLayoutReadinessDto;
+}
+
 export interface PublishFinancialStatementLayoutVersionDto {
   expectedVersionRevision: number;
   effectiveFrom?: string;

@@ -33,6 +33,19 @@ public interface IFinancialStatementLayoutService
         CloneFinancialStatementLayoutDto request,
         CancellationToken cancellationToken = default);
 
+    Task<FinancialStatementLayoutReadinessDto> GetInitializationReadinessAsync(
+        Guid? accountingBookId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<FinancialStatementLayoutInitializationResultDto> InitializeFromProtectedStandardsAsync(
+        InitializeFinancialStatementLayoutsDto request,
+        CancellationToken cancellationToken = default);
+
+    Task DiscardUnusedDraftAsync(
+        Guid layoutId,
+        DiscardFinancialStatementLayoutDto request,
+        CancellationToken cancellationToken = default);
+
     Task<FinancialStatementLayoutVersionDto> CreateDraftVersionAsync(
         Guid layoutId,
         CreateFinancialStatementLayoutVersionDto request,

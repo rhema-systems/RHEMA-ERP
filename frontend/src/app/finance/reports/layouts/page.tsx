@@ -73,6 +73,7 @@ import type {
     FinancialStatementLayoutExecutionDto,
     FinancialStatementLayoutImportDefinitionDto,
     FinancialStatementLayoutImportPreviewDto,
+    FinancialStatementLayoutReadinessDto,
     FinancialStatementLayoutSummaryDto,
     FinancialStatementLayoutValidationIssueDto,
     FinancialStatementLayoutValidationResultDto,
@@ -703,6 +704,8 @@ function LayoutDetailDialog({
     const [loading, setLoading] = useState(false);
     const [busy, setBusy] = useState(false);
     const [previewOpen, setPreviewOpen] = useState(false);
+    const [discardOpen, setDiscardOpen] = useState(false);
+    const [discardReason, setDiscardReason] = useState('');
     const [confirmation, setConfirmation] = useState<{
         title: string;
         description: string;
@@ -796,6 +799,31 @@ function LayoutDetailDialog({
             });
             setLayout(updated);
         }, 'Layout settings saved');
+    };
+
+    const discardUnusedDraft = async () => {
+        if (!layout || discardReason.trim().length < 5) return;
+        try {
+            setBusy(true);
+            await financialStatementLayoutDataService.discardUnusedDraft(
+                layout.id,
+                layout.revision,
+                discardReason.trim(),
+            );
+            toast({ title: 'Unused Draft layout discarded' });
+            setDiscardOpen(false);
+            setDiscardReason('');
+            onOpenChange(false);
+            onChanged();
+        } catch (error) {
+            toast({
+                title: 'Layout was not discarded',
+                description: errorMessage(error, 'The layout is no longer eligible. Refresh and review its lifecycle.'),
+                variant: 'destructive',
+            });
+        } finally {
+            setBusy(false);
+        }
     };
 
     const requestMetadataSave = () => {
@@ -1101,6 +1129,21 @@ function LayoutDetailDialog({
                                             <Switch checked={edit.isActive} disabled={!canManage || layout.isProtectedStandard} onCheckedChange={(checked) => setEdit((current) => ({ ...current, isActive: checked, isDefault: checked ? current.isDefault : false }))} />
                                         </div>
                                         {canManage && !layout.isProtectedStandard ? <Button onClick={requestMetadataSave} disabled={busy || !edit.name.trim()}><Save className="mr-2 h-4 w-4" />Save settings</Button> : null}
+                                        {canManage
+                                            && !layout.isProtectedStandard
+                                            && !layout.isDefault
+                                            && layout.versions.length > 0
+                                            && layout.versions.every((version) => version.status === 'Draft') ? (
+                                                <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
+                                                    <div className="font-medium">Discard an unused Draft</div>
+                                                    <p className="mt-1 text-sm text-muted-foreground">
+                                                        Available only because this tenant-owned layout has never been published, is not default, and contains Draft versions only. The server rechecks every condition and records an audit tombstone.
+                                                    </p>
+                                                    <Button variant="destructive" className="mt-3" onClick={() => setDiscardOpen(true)} disabled={busy}>
+                                                        <Trash2 className="mr-2 h-4 w-4" />Discard unused Draft
+                                                    </Button>
+                                                </div>
+                                            ) : null}
                                     </div>
                                 </ScrollArea>
                             </TabsContent>
@@ -1134,6 +1177,33 @@ function LayoutDetailDialog({
                 </DialogContent>
             </Dialog>
             <ExecutionPreviewDialog open={previewOpen} onOpenChange={setPreviewOpen} version={selectedVersion} statementType={layout?.statementType || 'BalanceSheet'} />
+            <Dialog open={discardOpen} onOpenChange={setDiscardOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Discard unused Draft layout?</DialogTitle>
+                        <DialogDescription>
+                            This permanently removes the unused definition while retaining a durable Finance audit tombstone. Published, default, protected, referenced, or historically used layouts are rejected by the server.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-2">
+                        <Label htmlFor="discard-layout-reason">Reason</Label>
+                        <Textarea
+                            id="discard-layout-reason"
+                            value={discardReason}
+                            maxLength={500}
+                            placeholder="Explain why this unused Draft should be discarded."
+                            onChange={(event) => setDiscardReason(event.target.value)}
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setDiscardOpen(false)} disabled={busy}>Cancel</Button>
+                        <Button variant="destructive" onClick={() => void discardUnusedDraft()} disabled={busy || discardReason.trim().length < 5}>
+                            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                            Discard Draft
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
             <AlertDialog open={!!confirmation} onOpenChange={(value) => { if (!value) setConfirmation(null); }}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
@@ -1174,6 +1244,9 @@ export default function FinancialStatementLayoutsPage() {
     const [importOpen, setImportOpen] = useState(false);
     const [migrationOpen, setMigrationOpen] = useState(false);
     const [selectedLayoutId, setSelectedLayoutId] = useState<string | null>(null);
+    const [readiness, setReadiness] = useState<FinancialStatementLayoutReadinessDto | null>(null);
+    const [initializationOpen, setInitializationOpen] = useState(false);
+    const [initializing, setInitializing] = useState(false);
 
     const load = useCallback(async () => {
         if (!canRead) {
@@ -1183,16 +1256,18 @@ export default function FinancialStatementLayoutsPage() {
         try {
             setLoading(true);
             setLoadError(null);
-            const [layoutRows, accountingBooks] = await Promise.all([
+            const [layoutRows, accountingBooks, readinessResult] = await Promise.all([
                 financialStatementLayoutDataService.getLayouts({
                     statementType: statementType === 'all' ? undefined : statementType,
                     accountingBookId: bookId === 'all' ? undefined : bookId,
                     includeInactive,
                 }),
                 financeDataService.getAccountingBooks(true),
+                financialStatementLayoutDataService.getInitializationReadiness(),
             ]);
             setLayouts(layoutRows);
             setBooks(accountingBooks);
+            setReadiness(readinessResult);
         } catch (error) {
             const message = errorMessage(error, 'Check your finance permissions and try again.');
             setLoadError(message);
@@ -1221,6 +1296,30 @@ export default function FinancialStatementLayoutsPage() {
     const imported = (layoutId: string) => {
         void load();
         setSelectedLayoutId(layoutId);
+    };
+
+    const initializeFromStandards = async () => {
+        try {
+            setInitializing(true);
+            const result = await financialStatementLayoutDataService.initializeFromStandards();
+            setReadiness(result.readiness);
+            setInitializationOpen(false);
+            toast({
+                title: result.createdCount > 0
+                    ? `${result.createdCount} Draft layout${result.createdCount === 1 ? '' : 's'} created`
+                    : 'Tenant layouts already initialized',
+                description: 'Review validation, publish each approved version, then mark one published Balance Sheet and Income Statement layout as default per book.',
+            });
+            await load();
+        } catch (error) {
+            toast({
+                title: 'Initialization failed',
+                description: errorMessage(error, 'Protected standards could not be initialized.'),
+                variant: 'destructive',
+            });
+        } finally {
+            setInitializing(false);
+        }
     };
 
     const publishedCount = layouts.filter((layout) => layout.publishedVersionNumber).length;
@@ -1252,6 +1351,7 @@ export default function FinancialStatementLayoutsPage() {
                 </div>
                 {canManage ? (
                     <div className="flex flex-wrap gap-2">
+                        <Button variant="outline" onClick={() => setInitializationOpen(true)}><Copy className="mr-2 h-4 w-4" />Initialize from standards</Button>
                         <Button variant="outline" onClick={downloadTemplate}><Download className="mr-2 h-4 w-4" />Excel template</Button>
                         <Button variant="outline" onClick={() => setMigrationOpen(true)}><Import className="mr-2 h-4 w-4" />Migrate legacy mappings</Button>
                         <Button onClick={() => setImportOpen(true)}><Upload className="mr-2 h-4 w-4" />Import layout</Button>
@@ -1268,6 +1368,20 @@ export default function FinancialStatementLayoutsPage() {
                     <BreadcrumbItem><BreadcrumbPage>Statement Layouts</BreadcrumbPage></BreadcrumbItem>
                 </BreadcrumbList>
             </Breadcrumb>
+
+            {readiness && !readiness.isReady ? (
+                <Alert>
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Financial-statement layouts are not fully ready</AlertTitle>
+                    <AlertDescription>
+                        {readiness.books.filter((book) => book.missingRequirements.length > 0).map((book) => (
+                            <div key={book.accountingBookId}>
+                                <span className="font-medium">{book.accountingBookCode}</span>: {book.missingRequirements.join(' and ')} required.
+                            </div>
+                        ))}
+                    </AlertDescription>
+                </Alert>
+            ) : null}
 
             <div className="grid gap-3 sm:grid-cols-3">
                 <Card><CardHeader className="pb-2"><CardDescription>Visible layouts</CardDescription><CardTitle className="text-2xl">{layouts.length}</CardTitle></CardHeader></Card>
@@ -1377,6 +1491,31 @@ export default function FinancialStatementLayoutsPage() {
                 canRun={canRun}
                 onChanged={() => void load()}
             />
+            <Dialog open={initializationOpen} onOpenChange={setInitializationOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Initialize tenant layouts from protected standards</DialogTitle>
+                        <DialogDescription>
+                            Creates only missing tenant-owned Draft clones for each active posting book. Protected standards remain immutable and non-default. Existing clones are retained, and every resulting Draft is validated.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-2 rounded-md border p-4 text-sm">
+                        <div className="font-medium">Controlled next steps</div>
+                        <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
+                            <li>Review each generated Balance Sheet and Income Statement Draft.</li>
+                            <li>Resolve validation findings and obtain authorised publication.</li>
+                            <li>Set one published layout of each statement type as the book default.</li>
+                        </ol>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setInitializationOpen(false)} disabled={initializing}>Cancel</Button>
+                        <Button onClick={() => void initializeFromStandards()} disabled={initializing}>
+                            {initializing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Copy className="mr-2 h-4 w-4" />}
+                            Create missing Drafts
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

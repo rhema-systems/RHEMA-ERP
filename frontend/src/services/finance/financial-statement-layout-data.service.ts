@@ -8,6 +8,8 @@ import type {
     FinancialStatementLayoutImportDefinitionDto,
     FinancialStatementLayoutImportPreviewDto,
     FinancialStatementLayoutImportResultDto,
+    FinancialStatementLayoutInitializationResultDto,
+    FinancialStatementLayoutReadinessDto,
     FinancialStatementLayoutSummaryDto,
     FinancialStatementLayoutValidationResultDto,
     FinancialStatementRowInputDto,
@@ -59,6 +61,29 @@ class FinancialStatementLayoutDataService {
 
     cloneLayout(layoutId: string, request: CloneFinancialStatementLayoutDto) {
         return apiService.post<FinancialStatementLayoutDto>(`${root}/${layoutId}/clone`, request);
+    }
+
+    getInitializationReadiness(accountingBookId?: string) {
+        const suffix = accountingBookId
+            ? `?accountingBookId=${encodeURIComponent(accountingBookId)}`
+            : '';
+        return apiService.get<FinancialStatementLayoutReadinessDto>(
+            `${root}/initialization-readiness${suffix}`,
+        );
+    }
+
+    initializeFromStandards(accountingBookId?: string) {
+        return apiService.post<FinancialStatementLayoutInitializationResultDto>(
+            `${root}/initialize-from-standards`,
+            { accountingBookId },
+        );
+    }
+
+    discardUnusedDraft(layoutId: string, expectedRevision: number, reason: string) {
+        return apiService.delete<void>(`${root}/${layoutId}/unused-draft`, {
+            expectedRevision,
+            reason,
+        });
     }
 
     replaceDraftRows(versionId: string, expectedVersionRevision: number, rows: FinancialStatementRowInputDto[]) {

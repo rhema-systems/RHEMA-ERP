@@ -426,6 +426,140 @@ public sealed class FinancialStatementLayoutServiceTests
 
     [Fact]
     [Trait("Category", "Reporting")]
+    public async Task InitializeFromStandards_ShouldCreateMissingDraftsIdempotentlyAndExposeReadiness()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var context = CreateContext();
+        var book = SeedTenantAndBook(context, tenantId);
+        await context.SaveChangesAsync();
+        var service = CreateService(context, tenantId);
+        var balanceSheet = await service.CreateLayoutAsync(new CreateFinancialStatementLayoutDto
+        {
+            Code = "STD_BS", Name = "Standard Balance Sheet",
+            StatementType = FinancialStatementType.BalanceSheet, AccountingBookId = book.Id
+        });
+        var incomeStatement = await service.CreateLayoutAsync(new CreateFinancialStatementLayoutDto
+        {
+            Code = "STD_IS", Name = "Standard Income Statement",
+            StatementType = FinancialStatementType.IncomeStatement, AccountingBookId = book.Id
+        });
+        (await context.FinancialStatementLayouts.SingleAsync(item => item.Id == balanceSheet.Id)).IsProtectedStandard = true;
+        (await context.FinancialStatementLayouts.SingleAsync(item => item.Id == incomeStatement.Id)).IsProtectedStandard = true;
+        await context.SaveChangesAsync();
+
+        var first = await service.InitializeFromProtectedStandardsAsync(
+            new InitializeFinancialStatementLayoutsDto());
+        var second = await service.InitializeFromProtectedStandardsAsync(
+            new InitializeFinancialStatementLayoutsDto());
+
+        first.CreatedCount.Should().Be(2);
+        first.Items.Should().OnlyContain(item => item.TenantLayoutId.HasValue);
+        first.Items.Should().OnlyContain(item => item.Validation != null);
+        first.Readiness.IsReady.Should().BeFalse("Drafts must be reviewed, published, and made default explicitly");
+        second.CreatedCount.Should().Be(0);
+        (await context.FinancialStatementLayouts.CountAsync(item =>
+            !item.IsProtectedStandard && item.StandardSourceLayoutId.HasValue)).Should().Be(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Reporting")]
+    public async Task DiscardUnusedDraft_ShouldDeleteEligibleGraphAndWriteAuditTombstone()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var context = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options);
+        await CreateSqliteLayoutSchemaAsync(context);
+        var book = SeedTenantAndBook(context, tenantId);
+        await context.SaveChangesAsync();
+        var audit = new Mock<IFinanceAuditService>();
+        audit.Setup(item => item.RecordAsync(
+                It.IsAny<FinanceAuditEventDto>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AuditLog { Id = Guid.NewGuid(), TenantId = tenantId });
+        var service = CreateService(context, tenantId, audit);
+        var layout = await service.CreateLayoutAsync(new CreateFinancialStatementLayoutDto
+        {
+            Code = "ACCIDENTAL_BS", Name = "Accidental Balance Sheet",
+            StatementType = FinancialStatementType.BalanceSheet, AccountingBookId = book.Id
+        });
+        context.FinancialStatementRows.Add(new FinancialStatementRow
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FinancialStatementLayoutVersionId = layout.Versions.Single().Id,
+            RowCode = "HEADING",
+            Label = "Unused heading",
+            RowType = FinancialStatementRowType.Header,
+            DisplayOrder = 10,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "layout.accountant"
+        });
+        await context.SaveChangesAsync();
+
+        await service.DiscardUnusedDraftAsync(layout.Id, new DiscardFinancialStatementLayoutDto
+        {
+            ExpectedRevision = layout.Revision,
+            Reason = "Accidental duplicate created during tenant setup."
+        });
+
+        (await context.FinancialStatementLayouts.AnyAsync(item => item.Id == layout.Id)).Should().BeFalse();
+        (await context.FinancialStatementLayoutVersions.AnyAsync(item =>
+            item.FinancialStatementLayoutId == layout.Id)).Should().BeFalse();
+        (await context.FinancialStatementRows.AnyAsync(item =>
+            item.FinancialStatementLayoutVersionId == layout.Versions.Single().Id)).Should().BeFalse();
+        audit.Verify(item => item.RecordAsync(
+            It.Is<FinanceAuditEventDto>(entry =>
+                entry.EventType == FinanceAuditEvents.FinancialStatementLayoutDiscarded
+                && entry.SourceDocumentId == layout.Id
+                && entry.Reason == "Accidental duplicate created during tenant setup."),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "Reporting")]
+    public async Task DiscardUnusedDraft_ShouldRejectDefaultAndPublishedLayouts()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var context = CreateContext();
+        var book = SeedTenantAndBook(context, tenantId);
+        await context.SaveChangesAsync();
+        var service = CreateService(context, tenantId);
+        var layout = await service.CreateLayoutAsync(new CreateFinancialStatementLayoutDto
+        {
+            Code = "DEFAULT_BS", Name = "Default Balance Sheet",
+            StatementType = FinancialStatementType.BalanceSheet, AccountingBookId = book.Id,
+            IsDefault = true
+        });
+
+        var discardDefault = () => service.DiscardUnusedDraftAsync(layout.Id,
+            new DiscardFinancialStatementLayoutDto
+            {
+                ExpectedRevision = layout.Revision,
+                Reason = "Attempting an unsafe discard."
+            });
+        await discardDefault.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*default layout*");
+
+        var entity = await context.FinancialStatementLayouts
+            .Include(item => item.Versions)
+            .SingleAsync(item => item.Id == layout.Id);
+        entity.IsDefault = false;
+        entity.Versions.Single().Status = FinancialStatementLayoutVersionStatus.Published;
+        await context.SaveChangesAsync();
+        var discardPublished = () => service.DiscardUnusedDraftAsync(layout.Id,
+            new DiscardFinancialStatementLayoutDto
+            {
+                ExpectedRevision = entity.Revision,
+                Reason = "Attempting another unsafe discard."
+            });
+        await discardPublished.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*never-published*");
+    }
+
+    [Fact]
+    [Trait("Category", "Reporting")]
     public async Task Publish_ShouldRollBackSnapshotAndStatusWhenAuditFails()
     {
         var tenantId = Guid.NewGuid();
@@ -617,6 +751,7 @@ public sealed class FinancialStatementLayoutServiceTests
         foreach (var statement in statements)
             await context.Database.ExecuteSqlRawAsync(statement.Replace(
                 "\"RowVersion\" BLOB NOT NULL", "\"RowVersion\" BLOB NOT NULL DEFAULT X''", StringComparison.Ordinal));
+        await context.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = ON;");
     }
 
     private static FinancialStatementLayoutService CreateService(
@@ -660,6 +795,9 @@ public sealed class FinancialStatementLayoutServiceTests
             Code = "IFRS",
             Name = "IFRS",
             Purpose = "Primary",
+            BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
             IsActive = true,
             IsDefault = true,
             AllowsPosting = true,
