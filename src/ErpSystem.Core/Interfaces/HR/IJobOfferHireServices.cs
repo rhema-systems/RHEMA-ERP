@@ -35,6 +35,12 @@ public interface IJobOfferService
 
     // CRUD
     Task<JobOfferDto> CreateAsync(CreateJobOfferDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// What the system proposes for a new offer against this application, with the source of
+    /// every value (round 4, lane G1). Writes nothing; every value is editable.
+    /// </summary>
+    Task<JobOfferDefaultsDto> GetDefaultsAsync(Guid applicationId, CancellationToken cancellationToken = default);
     Task<JobOfferDto> UpdateAsync(UpdateJobOfferDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 

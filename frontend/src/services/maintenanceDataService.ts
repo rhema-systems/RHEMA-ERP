@@ -164,7 +164,11 @@ class MaintenanceDataService {
   async getTechnicians(): Promise<Employee[]> {
     try {
       // Technicians are employee-driven (HR). Scheduling/labor now uses Employee IDs.
-      const response = await apiService.get('/employees/maintenance-available');
+      // ⚠ Round 4, lane O: HR's technician door. It answers with the one predicate the work-order,
+      // labour and schedule gates apply (CanBeAssignedToMaintenance, which follows the position's
+      // "technician role" flag), so nobody offered here is refused on assignment. It replaced the root
+      // `/employees/maintenance-available`, which returned each person's full employee record.
+      const response = await apiService.get('/hr/employees/technicians');
       const employees = Array.isArray(response) ? response : [];
 
       return employees
@@ -174,13 +178,14 @@ class MaintenanceDataService {
           firstName: emp.firstName,
           lastName: emp.lastName,
           email: emp.emailAddress,
-          department: emp.departmentName,
+          // HR's organisation unit IS the department an employee works in.
+          department: emp.organizationUnitName,
           position: emp.positionTitle,
           locationId: emp.locationId,
           locationName: emp.locationName,
           isActive: emp.isActive !== false,
         }));
-      
+
     } catch (error) {
       console.error('❌ Error fetching technicians:', error);
       throw error; // Re-throw so the UI can handle it

@@ -59,6 +59,13 @@ public class ConsultantClient : TenantEntity
 
     public Guid? CountryId { get; set; }
 
+    /// <summary>
+    /// The Finance (Sales) customer this client is billed as (lane 8, slice 6). Null means the
+    /// client's invoices stay HR-side: the AR hand-off records them Skipped until it is set.
+    /// Not a navigation: the customer is Finance's row, read through <c>api/hr/customers</c>.
+    /// </summary>
+    public Guid? FinanceCustomerId { get; set; }
+
     // ── Billing Contact ───────────────────────────────────────────────────
 
     [MaxLength(200)]

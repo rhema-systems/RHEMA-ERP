@@ -17,7 +17,7 @@ import {
 } from '@/components/hr/recruitment/CandidateFormFields';
 import { useToast } from '@/hooks/use-toast';
 import { jobCandidateService } from '@/services/hr/recruitment-pipeline.service';
-import type { Gender } from '@/types/hr/recruitment-pipeline';
+import type { Gender, PreferredWorkArrangement } from '@/types/hr/recruitment-pipeline';
 
 export default function EditCandidatePage() {
   const router = useRouter();
@@ -52,6 +52,11 @@ export default function EditCandidatePage() {
       postalAddress: data.postalAddress ?? null,
       digitalAddress: data.digitalAddress ?? null,
       city: data.city,
+      // Round 4, lane A. Both seeded so the cascade re-opens where the candidate actually is —
+      // AddressFields asks the server for the area's ancestors and rebuilds the tiers from this
+      // one id. Region is display-only and disabled whenever a scheme is loaded.
+      region: data.region ?? null,
+      geoAreaId: data.geoAreaId ?? '',
       // G-7.3: seeded so an edit that does not touch it does not clear it.
       nationality: data.nationality ?? null,
       // Optional on the read since slice 13b (internal shadow candidates carry no country), but
@@ -63,6 +68,17 @@ export default function EditCandidatePage() {
       nationalIdTypeId: data.nationalIdTypeId ?? null,
       nationalIdNumber: data.nationalIdNumber ?? null,
       nationalIdExpiryDate: data.nationalIdExpiryDate?.slice(0, 10) ?? null,
+      // Round 4, lane B. Seeded so an edit that does not touch them does not clear them — this
+      // DTO replaces the record wholesale. The two numbers are strings on the form: '' is "not
+      // asked", which is a different answer from 0.
+      headline: data.headline ?? null,
+      professionalSummary: data.professionalSummary ?? null,
+      currentJobTitle: data.currentJobTitle ?? null,
+      currentEmployer: data.currentEmployer ?? null,
+      totalYearsExperience: data.totalYearsExperience != null ? String(data.totalYearsExperience) : null,
+      noticePeriodDays: data.noticePeriodDays != null ? String(data.noticePeriodDays) : null,
+      availableFrom: data.availableFrom?.slice(0, 10) ?? null,
+      preferredWorkArrangement: data.preferredWorkArrangement ?? 'Any',
       isInTalentPool: data.isInTalentPool,
     });
   }, [data, form]);
@@ -79,12 +95,24 @@ export default function EditCandidatePage() {
         digitalAddress: values.digitalAddress || null,
         // '' does not bind to a Guid? — it is a 400 before the service ever runs.
         countryId: values.countryId || null,
+        // Same rule, and the cascade emits '' for "nothing chosen at this tier". ⚠ A null here
+        // genuinely clears the area — this DTO replaces the address wholesale.
+        geoAreaId: values.geoAreaId || null,
+        city: values.city?.trim() || null,
         linkedInProfile: values.linkedInProfile || null,
         portfolioUrl: values.portfolioUrl || null,
         gitHubUrl: values.gitHubUrl || null,
         nationalIdTypeId: values.nationalIdTypeId || null,
         nationalIdNumber: values.nationalIdNumber?.trim() || null,
         nationalIdExpiryDate: values.nationalIdExpiryDate || null,
+        headline: values.headline?.trim() || null,
+        professionalSummary: values.professionalSummary?.trim() || null,
+        currentJobTitle: values.currentJobTitle?.trim() || null,
+        currentEmployer: values.currentEmployer?.trim() || null,
+        totalYearsExperience: values.totalYearsExperience ? Number(values.totalYearsExperience) : null,
+        noticePeriodDays: values.noticePeriodDays ? Number(values.noticePeriodDays) : null,
+        availableFrom: values.availableFrom || null,
+        preferredWorkArrangement: (values.preferredWorkArrangement || 'Any') as PreferredWorkArrangement,
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['hr', 'candidate', id] });

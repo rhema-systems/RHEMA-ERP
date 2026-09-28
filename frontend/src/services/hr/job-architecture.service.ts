@@ -1,4 +1,5 @@
 import { apiService } from '../api.service';
+import type { HrBudgetFinanceActuals } from '@/types/hr/finance-posting';
 import { hrDocumentService } from './hr-document.service';
 import type { PagedResult } from '@/types/hr/common';
 import type { BudgetLineForRequisition } from '@/types/hr/recruitment';
@@ -895,6 +896,11 @@ class JobArchitectureService {
   }
 
   /** Approved and pending recruitment costs drawn against the budget's recruitment envelope (R6). */
+  /** What Finance says was spent on the unit's account over the budget period — a read of Finance's book balances (lane 8, slice 6). */
+  getFinanceActuals(budgetId: string) {
+    return apiService.get<HrBudgetFinanceActuals>(`${this.jobs}/budgets/${budgetId}/finance-actuals`);
+  }
+
   getRecruitmentSpend(budgetId: string) {
     return apiService.get<RecruitmentSpend>(`${this.jobs}/budgets/${budgetId}/recruitment-spend`);
   }

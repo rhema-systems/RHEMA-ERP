@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.HR;
@@ -72,6 +72,19 @@ public interface IJobInterviewService
         DateOnly date, TimeSpan start, TimeSpan end,
         Guid? excludeInterviewId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Round 4, D4 — the windows in a date range where the WHOLE panel is free.
+    /// </summary>
+    /// <remarks>
+    /// A clash check that only says no is half a tool. Soft commitments do not exclude a window but
+    /// are reported on it, so HR can take a slot where somebody is nominally on leave.
+    /// </remarks>
+    Task<List<PanelSlotSuggestionDto>> SuggestPanelSlotsAsync(
+        IReadOnlyList<Guid> panelistEmployeeIds, IReadOnlyList<Guid> externalAssociateIds,
+        DateOnly fromDate, DateOnly toDate, TimeSpan dayStart, TimeSpan dayEnd,
+        int durationMinutes, Guid? excludeInterviewId, int maxSuggestions = 20,
+        CancellationToken cancellationToken = default);
+
     // CRUD
     Task<JobInterviewDto> CreateAsync(CreateJobInterviewDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<JobInterviewDto> UpdateAsync(UpdateJobInterviewDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
@@ -102,6 +115,29 @@ public interface IJobInterviewService
     Task<bool> RemoveIntervieweeAsync(Guid intervieweeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobIntervieweeDto>> GetIntervieweesAsync(Guid interviewId, CancellationToken cancellationToken = default);
     Task<bool> UpdateIntervieweeSlotAsync(UpdateIntervieweeSlotDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// What the day would look like at a given interval — a dry run that writes nothing.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="ApplySlotApportionmentAsync"/> because a recruiter changes the
+    /// interval several times before they like the shape of the day, and each attempt must not
+    /// rewrite nine candidates' times. Readable by the panel as well as HR.
+    /// </remarks>
+    Task<InterviewSlotPlanDto> PreviewSlotApportionmentAsync(
+        ApportionInterviewSlotsDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Writes the timetable onto the session's candidates, and remembers the interval so a
+    /// reschedule can lay the day out again.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Candidates the window cannot hold have any existing slot CLEARED rather than left
+    /// standing — a stale time on somebody the new layout could not place is how a candidate
+    /// arrives for an appointment nobody is keeping.
+    /// </remarks>
+    Task<InterviewSlotPlanDto> ApplySlotApportionmentAsync(
+        ApportionInterviewSlotsDto dto, CancellationToken cancellationToken = default);
     Task<ConfirmPanelistAssignmentResultDto> ConfirmPanelistAssignmentByTokenAsync(string token, CancellationToken cancellationToken = default);
     Task<bool> RecordAttendanceAsync(Guid intervieweeId, bool? attended, string? noShowReason, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> RecordOutcomeAsync(RecordIntervieweeOutcomeDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default);
@@ -162,6 +198,13 @@ public interface IJobInterviewService
     /// behind most of the authorization holes this module has had.
     /// </summary>
     Task<IEnumerable<JobInterviewPanelistDto>> GetMyPanelistSlotsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The caller's own scorecard worklist: each session they sit on, the candidates on it, and how
+    /// far their own card for each has got (round 4, lane F5). Only the caller's own cards.
+    /// </summary>
+    Task<IEnumerable<PanelistScorecardWorklistDto>> GetMyScorecardWorklistAsync(
+        CancellationToken cancellationToken = default);
     Task<IEnumerable<JobIntervieweeDto>> GetInterviewsByApplicationAsync(Guid applicationId, CancellationToken cancellationToken = default);
 
     // Score summaries

@@ -14,6 +14,7 @@ import {
   ChevronDown,
   Menu,
   Briefcase,
+  ClipboardCheck,
   ClipboardList,
   Users,
   ListTodo,
@@ -207,6 +208,11 @@ const candidateMenuItems: MenuItem[] = [
     title: 'Browse Jobs',
     href: '/careers',
     icon: Briefcase,
+  },
+  {
+    title: 'My Assessments',
+    href: '/external-portal/careers/assessments',
+    icon: ClipboardCheck,
   },
   {
     title: 'My Candidate Profile',

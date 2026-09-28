@@ -1,6 +1,8 @@
 using ErpSystem.Core.Entities.HR.Orientation;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.HR;
@@ -412,9 +414,8 @@ public class OrientationSessionRepository : GenericRepository<OrientationSession
     {
         var now = DateTime.UtcNow;
         return await WithSummaryNavigations()
-            .Where(s => !s.IsDeleted
-                        && s.Status == OrientationSessionStatus.EnrollmentOpen
-                        && (s.EnrollmentDeadlineAt == null || s.EnrollmentDeadlineAt >= now))
+            .Where(s => !s.IsDeleted)
+            .Where(OrientationSessionEnrolment.IsOpen(now))   // the one definition — the enrol check reads it too
             .OrderBy(s => s.ScheduledStartAt)
             .ToListAsync();
     }
@@ -902,7 +903,35 @@ public class OrientationFeedbackRepository : GenericRepository<OrientationFeedba
 
 public class OrientationCertificateRepository : GenericRepository<OrientationCertificate>, IOrientationCertificateRepository
 {
-    public OrientationCertificateRepository(ApplicationDbContext context) : base(context) { }
+    private readonly INumberSequenceService _sequences;
+
+    public OrientationCertificateRepository(ApplicationDbContext context, INumberSequenceService sequences) : base(context)
+    {
+        _sequences = sequences;
+    }
+
+    /// <summary>
+    /// Round 4, lane K-b. Was the highest serial + 1, read in the service — right about soft deletes,
+    /// and a race the moment two people complete together, which a deadline makes likely once
+    /// certificates are issued at completion. Year-scoped like the serial it prints; the probe sees
+    /// soft-deleted rows, which still hold their numbers.
+    /// </summary>
+    public Task<string> NextCertificateNumberAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var year = DateTime.UtcNow.Year;
+        return _sequences.NextUnusedAsync(
+            "OCERT",
+            tenantId,
+            year,
+            format: value => $"OCERT-{year}-{value:D5}",
+            isTaken: number => GetQueryableIncludingDeleted(c => c.TenantId == tenantId && c.CertificateNumber == number)
+                .AnyAsync(cancellationToken),
+            highestIssued: async () => NumberSequenceExtensions.HighestIssued(
+                await GetQueryableIncludingDeleted(c => c.TenantId == tenantId && c.CertificateNumber.StartsWith($"OCERT-{year}-"))
+                    .Select(c => c.CertificateNumber)
+                    .ToListAsync(cancellationToken)),
+            cancellationToken);
+    }
 
     public async Task<OrientationCertificate?> GetByCertificateNumberAsync(string certificateNumber)
     {

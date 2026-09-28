@@ -252,6 +252,22 @@ public class ProbationController : ControllerBase
         return Ok(new { message = "Probation confirmed." });
     }
 
+    /// <summary>
+    /// Confirms the employees whose probation term ended before they were entered — the imported
+    /// workforce — with a derived confirmation date (HR finish plan lane 11).
+    /// </summary>
+    /// <remarks>
+    /// Administration, like the leave module's entitlement repair: it changes hundreds of records at
+    /// once. Run it with <paramref name="dryRun"/> first; the counts always add up to those examined.
+    /// </remarks>
+    /// <param name="employeeId">Only this employee. Omit for the whole tenant.</param>
+    /// <param name="dryRun">⚠ Work it out and report it; write nothing.</param>
+    [Authorize(Policy = HrPermissions.ProbationAdminPolicy)]
+    [HttpPost("repair-imported-confirmations")]
+    public async Task<ActionResult<ProbationConfirmationRepairResult>> RepairImportedConfirmations(
+        [FromQuery] Guid? employeeId = null, [FromQuery] bool dryRun = false, CancellationToken ct = default)
+        => Ok(await _service.RepairImportedConfirmationsAsync(employeeId, dryRun, ct));
+
     /// <summary>The FR-HR-032 confirmation letter for a confirmed probation.</summary>
     /// <remarks>
     /// <para>Rendered on demand from the HR-editable "ProbationConfirmationLetter" template, and

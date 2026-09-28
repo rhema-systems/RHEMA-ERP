@@ -28,6 +28,7 @@ namespace ErpSystem.Api.Controllers.HR
         /// <summary>
         /// Rolls remaining available days from <paramref name="fromYear"/> into the next year's
         /// carried-over balance (capped at each leave type's MaxCarryOverDays). Idempotent.
+        /// Refused with 400 for a year that has not ended, except as a preview (round 5, lane G).
         /// </summary>
         [HttpPost("carry-over")]
         // W3: a year-end job rewrites every balance in the tenant - admin tier only.
@@ -44,13 +45,22 @@ namespace ErpSystem.Api.Controllers.HR
             if (fromYear < 2000)
                 return BadRequest(new { message = "A valid fromYear is required." });
 
-            var result = await _yearEndService.ProcessCarryOverAsync(fromYear, employeeId, dryRun);
-            return Ok(result);
+            try
+            {
+                var result = await _yearEndService.ProcessCarryOverAsync(fromYear, employeeId, dryRun);
+                return Ok(result);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // A year that has not ended cannot be carried from (round 5, lane G) — say which day
+                // it can, rather than 500.
+                return BadRequest(new { message = ex.Message });
+            }
         }
 
         /// <summary>
-        /// Forfeits unused accrual past the leave type's cut-off and expires carried-over days
-        /// past their window. Idempotent per balance.
+        /// Forfeits unused accrual past the leave type's cut-off and expires the carried-over days
+        /// not taken before their window closed — only those (round 5, lane G). Idempotent per balance.
         /// </summary>
         [HttpPost("forfeiture")]
         // W3: a year-end job rewrites every balance in the tenant - admin tier only.

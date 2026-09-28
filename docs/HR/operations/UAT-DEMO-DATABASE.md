@@ -30,18 +30,24 @@ powershell -File .\scripts\New-UatDatabase.ps1
 ErpSystemDB_UAT
 ```
 
-**A4.** Wait. It runs five steps and takes **45–60 minutes** (the fifth is the long one). You should
+**A4.** Wait. It runs seven steps and takes **45–60 minutes** (the last is the long one). You should
 see, in order:
 
 ```
-  -> Rebuilding schema from the EF model and running base seeders
+  -> Dropping and recreating 'ErpSystemDB_UAT' empty
+  -> Building the schema through the migration chain (~2 min)
+  -> Running the core seeders (roles, tenant, modules)
   -> Seeding workflow definitions (approvals refuse to submit without these)
   -> Seeding HR reference data and TDC organisation structure
   -> Seeding the DEMO workforce, leave calendar and HR/SHE sample data
-  -> Building the transactional layer and checking coverage
+  -> Building the transactional layer through the API, then checking it
 ```
 
-The fifth step starts the scanner stub and the API itself (on port 5000 — nothing else may be on
+> ⚠ **Changed 2026-09-27 (merge #11).** The first step used to be `rebuild-db`, which builds the
+> schema from the EF model. It now builds through the migration chain, because only the chain
+> creates master's 500 guard triggers. See rule G.2.
+
+The last step starts the scanner stub and the API itself (on port 5000 — nothing else may be on
 it, see B1), runs every demo scenario as the personas, checks the result, and stops what it
 started. It prints one `▶` line per scenario with a `✓` or `✗` under it.
 
@@ -252,11 +258,15 @@ named `Actor…`, leave types named `Lane4 Leave 194151`. That is exactly how th
 database became 91% robots. Always switch to Dev (section C) before running anything in
 `dev-harness/`.
 
-**2. A rebuilt database can never be migrated forward.** `rebuild-db` builds tables from the EF
-model and then stamps all migrations as applied, so anything that exists only inside migration SQL
-is missing while the database claims to be current. `dotnet ef database update` will fail on it
-afterwards. Fine for a demo box you rebuild on demand; **not fine for go-live.** Details in
-`CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` section 21.
+**2. Never build UAT with `rebuild-db`.** `rebuild-db` builds tables from the EF model and then
+stamps all migrations as applied, so anything that exists only inside migration SQL is missing
+while the database claims to be current. Since master's disposable baseline that is most of the
+platform's business rules: the chain creates **500 guard triggers**, 7 functions, a view and 65
+more default constraints, and `rebuild-db` creates none of them. Such a database also cannot be
+migrated forward — several of master's migrations patch a guard that must already exist, and
+refuse. That is how the previous UAT stalled at merge #11 (2026-09-27). `New-UatDatabase.ps1`
+therefore builds through the chain (section A). Details in
+`CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` sections 21 and 31.
 
 ---
 

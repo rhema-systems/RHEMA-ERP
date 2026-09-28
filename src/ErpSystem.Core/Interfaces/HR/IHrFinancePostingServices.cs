@@ -121,3 +121,13 @@ public interface IHrFinancePostingAdminService
     /// </summary>
     Task<HrFinancePostingRecordDto> RefreshAsync(Guid recordId, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// Finance's actuals against an HR budget (lane 8, slice 6): read from Finance's book balances on
+/// the account the budget is charged to, over the budget's period. A read; HR writes nothing.
+/// </summary>
+public interface IHrFinanceActualsService
+{
+    Task<HrBudgetFinanceActualsDto> GetManpowerBudgetActualsAsync(Guid budgetId, CancellationToken cancellationToken = default);
+    Task<HrBudgetFinanceActualsDto> GetTrainingBudgetActualsAsync(Guid budgetId, CancellationToken cancellationToken = default);
+}

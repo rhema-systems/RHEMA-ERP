@@ -15,8 +15,12 @@ export function ReactQueryProvider({ children }: { children: React.ReactNode }) 
             refetchOnWindowFocus: false,
             refetchOnReconnect: false,
             retry: (failureCount, error: any) => {
-              // Don't retry on 4xx errors
-              if (error?.response?.status >= 400 && error?.response?.status < 500) {
+              // Don't retry on 4xx errors. ⚠ `apiService` puts the HTTP status on `error.status`
+              // and the parsed body on `error.response`, so `error.response.status` was always
+              // undefined and every 400/403/404 was retried three times before the screen heard
+              // about it (round 5 lane E1b). Both places are read, for any caller that differs.
+              const status = error?.status ?? error?.response?.status;
+              if (status >= 400 && status < 500) {
                 return false;
               }
               return failureCount < 3;

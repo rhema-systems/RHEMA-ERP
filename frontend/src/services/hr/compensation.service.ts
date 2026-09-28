@@ -11,7 +11,6 @@ import type {
   CreateEmployeePayComponent,
   UpdateEmployeePayComponent,
   EmployeeEmolumentSummary,
-  EncashmentRateResult,
 } from '@/types/hr/compensation';
 
 /**
@@ -140,23 +139,8 @@ class EmolumentService {
     );
   }
 
-  /**
-   * The per-day rate leave encashment pays at, derived from basic plus the allowances the leave
-   * type links. Pass `days` to also get the payout for that many days.
-   */
-  getEncashmentRate(
-    employeeId: string,
-    leaveTypeId: string,
-    days = 0,
-    asOf?: string,
-  ): Promise<EncashmentRateResult> {
-    return apiService.get<EncashmentRateResult>(`${this.baseUrl}/encashment-rate`, {
-      employeeId,
-      leaveTypeId,
-      days,
-      asOf,
-    });
-  }
+  // getEncashmentRate (GET emoluments/encashment-rate) left with leave settings audit 2 (L-73):
+  // Finance values leave; HR quotes only the days.
 }
 
 export const payComponentService = new PayComponentService();

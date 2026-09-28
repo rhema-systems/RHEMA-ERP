@@ -23,11 +23,16 @@ namespace ErpSystem.Api.Controllers.HR;
 public class OrientationProgramsController : ControllerBase
 {
     private readonly IOrientationProgramService _service;
+    private readonly IOrientationEnrollmentTriggerService _triggers;
     private readonly ICurrentUserService _currentUser;
 
-    public OrientationProgramsController(IOrientationProgramService service, ICurrentUserService currentUser)
+    public OrientationProgramsController(
+        IOrientationProgramService service,
+        IOrientationEnrollmentTriggerService triggers,
+        ICurrentUserService currentUser)
     {
         _service = service;
+        _triggers = triggers;
         _currentUser = currentUser;
     }
 
@@ -95,6 +100,22 @@ public class OrientationProgramsController : ControllerBase
 
         var created = await _service.CreateAsync(dto, ctx.TenantId, ctx.UserId);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+    }
+
+    /// <summary>
+    /// Round 4, lane J2: copy a programme — modules, content, prerequisites, quiz and audience
+    /// rules — as a new draft. Sessions and enrolments stay with the original.
+    /// </summary>
+    [HttpPost("{id:guid}/clone")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
+    public async Task<ActionResult<OrientationProgramDto>> Clone(Guid id, [FromBody] CloneOrientationProgramDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        var ctx = ResolveContext(out var bad);
+        if (bad != null) return bad;
+
+        var copy = await _service.CloneAsync(id, dto, ctx.TenantId, ctx.UserId);
+        return CreatedAtAction(nameof(GetById), new { id = copy.Id }, copy);
     }
 
     [HttpPut("{id:guid}")]
@@ -275,6 +296,54 @@ public class OrientationProgramsController : ControllerBase
     {
         await _service.DeleteAudienceRuleAsync(ruleId);
         return NoContent();
+    }
+
+    // =========================================================================
+    // TRIGGERS — round 4, lane I
+    // =========================================================================
+
+    /// <summary>
+    /// How many people a rule's target reaches, asked while the rule is being written — the
+    /// "this rule reaches 412 people" line (I2). A POST because it carries a body, not because it
+    /// changes anything.
+    /// </summary>
+    [HttpPost("audience-rules/reach")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
+    public async Task<ActionResult<OrientationAudienceReachDto>> CountReach([FromBody] OrientationAudienceReachRequestDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _triggers.CountReachAsync(dto));
+    }
+
+    /// <summary>
+    /// HR's "enrol the audience now": the programme's rules that have no date to count from.
+    /// <c>preview=true</c> writes nothing and says what it would do.
+    /// </summary>
+    [HttpPost("{id:guid}/enrol-audience")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
+    public async Task<ActionResult<OrientationTriggerRunResultDto>> EnrolAudience(Guid id, [FromQuery] bool preview = false)
+    {
+        if (!Guid.TryParse(_currentUser.UserId, out var userId)) return BadRequest("Your user could not be resolved.");
+        return Ok(await _triggers.EnrolAudienceNowAsync(id, userId, preview));
+    }
+
+    /// <summary>Which rules would fire for this employee, and why (I5).</summary>
+    [HttpGet("triggers/diagnose/{employeeId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
+    public async Task<ActionResult<OrientationTriggerDiagnosisDto>> Diagnose(Guid employeeId)
+        => Ok(await _triggers.DiagnoseAsync(employeeId));
+
+    /// <summary>
+    /// The nightly sweep, now, for this tenant — the same code path the hosted service runs.
+    /// <c>preview=true</c> writes nothing.
+    /// </summary>
+    [HttpPost("triggers/run")]
+    [Authorize(Policy = HrPermissions.OrientationAdminPolicy)]
+    public async Task<ActionResult<OrientationTriggerRunResultDto>> RunTriggers([FromQuery] bool preview = false)
+    {
+        if (_currentUser.TenantId is not { } tenantId) return BadRequest("Tenant context could not be resolved.");
+        Guid? userId = Guid.TryParse(_currentUser.UserId, out var u) ? u : null;
+        return Ok(await _triggers.RunSweepForTenantAsync(tenantId, "Manual", userId, preview));
     }
 
     // =========================================================================

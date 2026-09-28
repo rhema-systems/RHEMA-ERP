@@ -246,6 +246,12 @@ export default function OnboardingPlanDetailPage() {
             )}
           </div>
           {plan.notes && <p className="text-sm">{plan.notes}</p>}
+          {plan.templateSelectionReason && (
+            // Round 4, lane I4: a plan the system created on hire says which template it chose and why.
+            <p className="text-muted-foreground text-sm">
+              <span className="font-medium">Created automatically.</span> {plan.templateSelectionReason}
+            </p>
+          )}
           <MandatoryOutstandingNote tasks={tasks} />
         </CardContent>
       </Card>

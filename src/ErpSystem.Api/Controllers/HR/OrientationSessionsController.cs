@@ -83,6 +83,22 @@ public class OrientationSessionsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    /// <summary>
+    /// Round 4, lane J3: run a session again on a new date — same programme, venue, capacity and
+    /// facilitators (who must confirm afresh), as a new draft with nobody enrolled.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
+    [HttpPost("{id:guid}/clone")]
+    public async Task<ActionResult<OrientationSessionDto>> Clone(Guid id, [FromBody] CloneOrientationSessionDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        var ctx = ResolveContext(out var bad);
+        if (bad != null) return bad;
+
+        var copy = await _service.CloneAsync(id, dto, ctx.TenantId, ctx.UserId);
+        return CreatedAtAction(nameof(GetById), new { id = copy.Id }, copy);
+    }
+
     [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<OrientationSessionDto>> Update(Guid id, [FromBody] UpdateOrientationSessionDto dto)

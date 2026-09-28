@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/leave-request.ts",
+    "src/services/hr/leave.service.ts",
+    "src/services/hr/leave-type.service.ts",
+    "src/app/hr/leave/calendar/*.tsx",
+    "src/app/me/leave/calendar/*.tsx",
+    "src/components/hr/leave/LeaveCalendar.tsx",
+    "src/components/hr/common/EmployeePicker.tsx",
+    "src/components/hr/common/OrganizationUnitPicker.tsx"
+  ]
+}

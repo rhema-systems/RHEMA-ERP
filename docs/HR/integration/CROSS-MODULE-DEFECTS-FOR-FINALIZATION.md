@@ -22,7 +22,7 @@ file carrying the defect received no change in this range.
 
 | # | Defect | Status after merge #8 | Evidence |
 |---|---|---|---|
-| 1 | Procurement `SuppliersController` dead | **Open** | `SupplierRepositories.cs` + controller untouched |
+| 1 | Procurement `SuppliersController` dead | **RESOLVED 2026-09-22** | `GET /api/Suppliers?page=1&pageSize=1` answers **200** where it answered 400; verified directly with an admin token and by `hr-jobarch/run-r7`, whose assertion pinned the 400 and began failing because the defect is gone |
 | 2 | Finance currency conversion inverted | **RESOLVED** | PR #99 `finance-fx-seed-contract` transposed the seed (`Rate=12.5`, `InverseRate=0.08`) and documented the contract; both directions re-derived against `CurrencyService.ConvertAsync` |
 | 3 | Workflow conditional routing never routes | **Open** | `WorkflowDefinitionServiceAdapter:686` still `JsonSerializer.Serialize`s the condition; `WorkflowConditionEvaluator` untouched, still parses it as an expression |
 | 4 | Inventory frontend type errors | **Partly resolved** | duplicate `isStockingUnit` gone (1 declaration); a full re-count is impossible while #20 aborts the compiler |
@@ -42,6 +42,37 @@ file carrying the defect received no change in this range.
 | 18 | Payroll loans readable by anyone | **Open** | `PayrollController.cs` untouched |
 | 19 | Helpdesk tickets readable by any employee | **Open** | `EhcInternalTicketsController` untouched |
 | 20 | Shared reporting crashes `tsc` | **Open (new)** | introduced by this range |
+| 21 | Supplier registration claims a "verified email address" and verifies nothing | **Open (new, 2026-09-21)** | found during HR round 4, § below |
+
+### 21 — Procurement supplier registration does not verify the applicant's email
+
+**Raised for the procurement owner. Not HR's to fix.**
+
+`BusinessPartnerRegistrationService.SubmitAsync` refuses submission with:
+
+> *"A verified email address or phone number is required for submission"*
+
+The check behind that message tests only that the field is **non-empty and syntactically valid**.
+A grep of the whole procurement area finds **no OTP, no confirmation token and no ownership check of
+any kind**. Supplier portal credentials and a one-time temporary password are later emailed to what
+the code itself calls *"the verified application contact"* — an address nobody proved ownership of.
+
+**What contains the risk:** a supplier application is reviewed by a person and its documents must
+each be verified or rejected before approval, so no account is provisioned on the say-so of the form
+alone. The exposure is a typo'd or deliberately supplied third-party address receiving live supplier
+credentials, and a message that asserts a check the code does not perform.
+
+**Two suggestions, one in each direction:**
+
+- Correct the wording, or build the check. HR's `auth/candidate/activate` (round 4) is a worked
+  example of the second: a single-use, expiring, user-bound Identity token, anonymous because the
+  account cannot yet sign in, refusing any account outside the expected role, with a resend endpoint
+  that returns one neutral message so it cannot be used to enumerate accounts.
+- ⚠ **HR should borrow procurement's token design.** `ProcurementSupplierOnboardingToken` stores the
+  token **SHA-256 hashed at rest** with only the last four characters in clear, plus `Generation`,
+  `Status`, issued/activated/expired timestamps and an `ExpiryReason`. HR's offer-response and
+  interview-confirmation tokens are stored in clear and carry none of that audit trail. Theirs is
+  the better model and the gap is ours.
 
 ### Not a numbered defect, but fixed by this range
 
@@ -53,6 +84,14 @@ and end step; it must create and process its approval before the workflow comple
 that avoided single-step definitions for this reason can stop working around it, after re-testing.
 
 ## 1. Procurement — `SuppliersController` is entirely non-functional
+
+> **✅ RESOLVED 2026-09-22.** `GET /api/Suppliers?page=1&pageSize=1` now answers **200**. Found by
+> `hr-jobarch/run-r7`, whose assertion asserted the 400 — so the suite started failing precisely
+> *because* Procurement fixed it. ⚠ An assertion that pins somebody else’s defect inverts on the
+> day they repair it: it then reports a regression where there is an improvement. The assertion has
+> been rewritten to assert the correct behaviour, with this note as the record of why it changed.
+>
+> The account below is kept as written, because it is the evidence the fix was needed.
 
 **Severity: blocking.** Found 2026-08-17 while retiring HR travel's duplicate vendor master onto
 Procurement's `Supplier` (area 12, slice 3).
@@ -1637,6 +1676,234 @@ Look at `SuppliersController.CreateSupplier` after the `GuardDirectMutationAsync
 produce exactly this. The empty body suggests the action is returning a result whose payload was
 never populated. The mapping endpoint it blocks,
 `POST /api/pre-employment-checks/providers`, is HR's and works.
+
+## 29. Maintenance — its technician list decides "technician" by a unit's NAME, and reads a workload nothing writes (2026-09-23)
+
+**Owner:** Maintenance. **Severity:** (a) the technicians screen disagrees with Maintenance's own
+assignment gates, listing people the gates refuse; (b) every technician reads "available, 0%
+loaded"; (c)–(g) dead or misleading code. **Status:** open — the hand-off from HR round 4, lane O.
+**HR's side is done:** HR now maintains `Employee.CanBeAssignedToMaintenance` — the column
+Maintenance's gates already read — from the position's **Technician role** flag, with a per-person
+exception, and serves it at `GET api/hr/employees/technicians*`.
+
+### What is broken
+
+(a) **Two predicates for one question.** `TechnicianRepository` decides who is a technician by
+`e.OrganizationUnit.Name.Contains("Maintenance")`. That covers `GetTechniciansAsync`,
+`GetActiveTechniciansAsync`, `GetByDepartmentAsync`, `GetBySpecializationAsync`,
+`GetByEmployeeIdAsync` and four more, nine sites in all. `TechnicianService` builds the
+`/maintenance/technicians` screen from them. Maintenance's own gates read the COLUMN instead:
+- `WorkOrderService` (assign);
+- `WorkOrderLaborService` (log labour);
+- `MaintenanceStaffScheduleService` (create and update);
+- `QualityControlService.GetQualifiedInspectionOfficersAsync`.
+
+So the screen lists people the gates refuse, and misses the technicians the gates accept: anyone in
+a technician post outside a unit with that name.
+
+(b) **Availability from a column nothing writes.** `TechnicianService.MapToDto(Employee)` computes
+`IsAvailable = IsActive && CurrentWorkload < MaxWorkload`, and reports both figures from `Employee`.
+`CurrentWorkload` is written by nothing, so it is always 0. Every technician therefore reads
+available and 0% utilised, on that screen and in its utilisation figures.
+`TechnicianSchedulingService` computes real utilisation from schedules, but the screen does not use it.
+
+(c) **A sync that does nothing and reports success.** `TechnicianRepository.GetFromHRModuleAsync` is
+`// TODO: Implement actual HR module integration`, returning an empty list. So
+`SyncTechniciansFromHRAsync`, `GetTechnicianFromHRAsync` and
+`POST api/maintenance/technical-skills/sync-from-hr` do nothing, and `GetAllTechniciansAsync` calls
+the no-op sync on every read. There is nothing to sync: HR's record is read live.
+
+(d) **Unreachable writes into HR's record.** `TechnicianService.CreateTechnicianAsync` and
+`UpdateTechnicianAsync` write HR's `Employee` columns, and no controller calls them. The columns are
+`CanBeAssignedToMaintenance`, `Specialization`, `CertificationLevel`, `ExperienceLevel`,
+`MaxWorkload`, `Notes` and the names. Create also gates on the unit-name rule. If they were wired up,
+HR would keep the column write as a **by-hand inclusion**: it sticks, and shows on HR's employee form
+as set by hand. HR does not undo it on the next save.
+
+(e) **Names for past records go through the wrong door.** `MaintenanceScheduleService` resolves an
+assigned technician's NAME through HR's technician door (`IEmployeeService.GetTechnicianByIdAsync`),
+which answers only for CURRENT technicians. Now that the answer follows the post, someone who moves
+out of a technician post will read "Unknown Technician" on their past schedules. UAT holds no
+schedules today.
+
+(f) **The name is split by hand.** `TechnicianSchedulingService` splits HR's `FullName` on the first
+space to get a first and last name. The door now carries `FirstName` and `LastName`.
+
+(g) **A table with no reader.** The `Technicians` table (entity `Maintenance/Technician`) is written
+by two seeders only and read by no service. `ITechnicianRepository` is `IGenericRepository<Employee>`.
+
+### What was proven
+
+Round 4 lane O's suite (`dev-harness/hr-jobarch/run-round4-o.mjs`, 101 ×2, UAT, 2026-09-23) set up
+an employee in a fixture post that is NOT a technician role, inside the "Building Maintenance" unit:
+- HR's door leaves them out, and the stored column stays false;
+- `GET api/maintenance/technicians` still lists them, by unit name. The suite prints this as an
+  observation and does not assert it, because it is Maintenance's to fix.
+
+Measured on UAT before the lane:
+
+| Measure | Count |
+|---|---|
+| employees with the column set | 0 of 2,089 |
+| employees in a `MAINT` department | 0 |
+| employees in a unit named like "Maintenance" | 1 |
+| work orders | 0 |
+| `Technicians` rows | 0 |
+| `LastSyncDate` written | 0 |
+
+### What it blocks
+
+The Maintenance technicians screen cannot show the pool HR maintains, and its availability and
+utilisation figures say "free".
+
+Maintenance's shipped dropdowns are **not** blocked. The work-order, emergency, scheduled and
+job-card screens call `maintenanceDataService.getTechnicians()`, which lane O repointed at HR's door.
+
+⚠ **HR touched two Maintenance frontend files, and says so here.** The plan's O3 changed them
+because, until they were moved, the flag changed nothing a user saw:
+- `maintenanceDataService.getTechnicians()` now calls `/hr/employees/technicians`. It used the root
+  `/employees/maintenance-available`, which is retired and returned each person's full record.
+- `maintenanceApiService.getTechnicians()` is removed. It had no caller, and it fell back to
+  `/employees?pageSize=1000`, offering every employee in the tenant as a technician.
+
+### What a fix needs
+
+- (a) Replace the unit-name predicate in `TechnicianRepository` with `CanBeAssignedToMaintenance`,
+  the gates' own, or read HR's door.
+- (b) Take availability and utilisation from `TechnicianSchedulingService`, and stop reading
+  `Employee.CurrentWorkload`.
+- (c) Delete the sync.
+- (d) Delete `Create/UpdateTechnicianAsync`, or have HR's employee form be the only writer of those
+  columns.
+- (e) Resolve historical names through `IEmployeeService.GetEmployeeSummaryByIdAsync`.
+- (f) Read the door's `FirstName` and `LastName`.
+- (g) Retire the `Technicians` table.
+
+None of these needs an HR change.
+
+## 30. Global search — gating `POST api/hr/employees/paged` refused every name picker outside the HR desk (2026-09-27)
+
+**Owner:** global search (master `b29cf068f`, "Add global search and restore partner account and
+receipt controls"), plus **Payroll** for (b). **Severity:** (a) fixed on HR's side; (b) open.
+**Found:** hrdev ← master merge #11.
+
+### What is broken
+
+Global search's employee record source reads `POST api/hr/employees/paged`, and the same commit put
+`[Authorize(Policy = HrPermissions.EmployeeReadPolicy)]` on that endpoint. For a full `EmployeeDto`
+read that is correct. But the endpoint was also the back end of every lean employee search, and the
+permission catalogue promised that search stays open: `HrPermissions.ViewEmployees` reads *"the lean
+directory reads (the shared name picker, org lookups) stay open to internal staff and do not need
+this."*
+
+- (a) HR's shared `EmployeePicker` (imported by 83 files) searched through it. Only the HR desk bundle
+  (`HrStaffGrants`) holds `HR.Employee.Read`; `SafetyOfficerGrants`, `SheManagerGrants` and every
+  line-manager login do not, so their pickers were refused.
+- (b) `payrollService.searchEmployees` (`frontend/src/services/payrollService.ts`) still posts to the
+  same endpoint, so a payroll user without `HR.Employee.Read` gets 403 from payroll's employee search.
+
+### What was proven
+
+Master's gate is the only change to `EmployeesController` in the range; the endpoint was ungated
+at the merge base (`21ff99f3`), and all 10 `hr/safety` picker screens predate the gate.
+
+### What it blocks
+
+(b): payroll's employee search, for any payroll role without HR's employee-read permission.
+
+### What a fix needs
+
+- (a) **Done in HR.** The picker now searches `GET api/employee-portal/directory/lookup`: the
+  directory's lean card (name, number, post, unit), any internal user, no employee link required, at
+  least two characters, at most 25 rows. Master's gate on `/paged` is untouched.
+- (b) Payroll: move `searchEmployees` to `directory/lookup`, or grant payroll roles
+  `HR.Employee.Read` if payroll genuinely needs the full record. No HR change needed either way.
+
+## 31. Platform — a `rebuild-db` database now lacks 500 guard triggers, and cannot migrate past master's QS guards (2026-09-27)
+
+**Owner:** Finance (the disposable baseline) and the module owners whose guards live only in
+migration SQL — Quantity Survey, Procurement, Inventory, Finance. **Severity:** a model-built database
+silently runs without the platform's business-rule guards, and cannot be brought forward.
+**Supersedes the scale, not the substance, of § 21.**
+
+### What is broken
+
+§ 21 found a few check constraints and triggers that exist only in migration SQL. Since master's
+disposable baseline (`20260916132000`) the migration chain builds a complete database from empty,
+and the guards have multiplied. Two scratch databases built from the same assembly at merge #11 —
+one by `apply-migrations` on an empty database, one by `rebuild-db` — match exactly in tables (1,703),
+columns, primary, unique and check constraints (848) and foreign keys (6,252), but:
+
+| Object | Chain-built | `rebuild-db` |
+| --- | --- | --- |
+| Triggers | **500** | **0** |
+| SQL scalar functions | 7 | 0 |
+| Views | 1 | 0 |
+| Default constraints | 185 | 120 |
+
+### What was proven
+
+`ErpSystemDB_UAT` (built by `rebuild-db` on 2026-09-20) applied 6 of master's 48 new migrations and
+stopped at `20260920121000_AllowInternalQuantitySurveyValuations`:
+
+```
+The existing QS valuation guard is required before internal valuation alignment.
+```
+
+That migration, `20260920124000`, `20260920154000` and `20260925190000` read an existing trigger's
+text and patch it (`REPLACE(@guard, N'CREATE TRIGGER', N'ALTER TRIGGER')` plus clause edits), so the
+guard must exist at exactly the version the patch expects. Installing today's final-state trigger
+would not satisfy them either.
+
+### What it blocks
+
+Every developer database built with `rebuild-db`, which until this merge was the documented reset in
+HR's docs and `scripts/New-UatDatabase.ps1`. On such a database the API's startup `MigrateAsync`
+throws, and even before that, the database enforced none of the 500 guards.
+
+### What a fix needs
+
+- Treat `rebuild-db` as scratch-only, or make it build through the chain (drop, create empty,
+  `MigrateAsync`, seed) now that the chain can.
+- **HR's side is done:** `New-UatDatabase.ps1` now drops, creates empty, runs `apply-migrations`
+  then `seed-db`. Verified: the whole chain applies from empty in about 1.8 min (89 of 89).
+
+## 32. Finance / Procurement / Inventory — nine migration-created unique indexes carry filters the model does not declare (2026-09-27)
+
+**Owner:** Finance (Business Partner roles and profiles, primary-book designations, vendor-invoice
+receipt allocations), Procurement / Inventory (landed costs, issue-voucher receipt lines).
+**Severity:** low — a schema drift between chain-built and model-built databases; no correctness
+change. **Found:** hrdev ← master merge #11, schema comparison of the two scratch databases in § 31.
+
+### What is broken
+
+These unique indexes are created by raw SQL with a filter, while the EF model declares them
+unfiltered, so a chain-built database and a model-built one differ:
+
+- `IX_AccountingBookPrimaryDesignations_TenantId_EffectiveFrom`
+  (`20260920030047_AddGovernedPrimaryBookReplacementAuthority`)
+- `IX_BusinessPartnerRoles_TenantId_BusinessPartnerId_RoleType`, the AP/AR profile-version and AP
+  WHT-default indexes (`20260924032011_CanonicalBusinessPartnerFinanceProfiles`)
+- `IX_LandedCostReceiptWeights_…`, `IX_LandedCostSupplierDocuments_…`
+  (`20260924210000`, `20260924220000`)
+- `IX_VendorInvoiceReceiptAllocations_TenantId_VendorInvoiceLineItemId`
+  (`20260924230000_ProcurementAutoInvoiceReceipts`)
+- `IX_InventoryIssueVoucherReceiptLines_…` (`20260927021852_InventoryIssueActualReceipts`)
+
+Every filter reads `[col] IS NOT NULL AND …`, over key columns that are **all NOT NULL** (24 of 24),
+so the filter excludes nothing.
+
+### What it blocks
+
+Nothing functionally. A filtered index cannot serve a parameterised lookup whose predicate the
+optimiser cannot prove matches the filter, so these unique indexes may be skipped for exactly the
+lookups they were built for.
+
+### What a fix needs
+
+Drop the redundant filters in a follow-up migration, or declare `HasFilter` on the model if they are
+intentional. `has-pending-model-changes` will not surface this: the snapshot follows the model,
+not the SQL.
 
 ## How to use this file
 

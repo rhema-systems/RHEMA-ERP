@@ -82,8 +82,30 @@ export interface CompanyHrPolicySettings {
   queryResponseWindowHours: number;
   investigationDays: number;
   disciplineBacklogHorizonDays: number;
-  /** ⚠ Moves money: 365 calendar / 360 thirty-day / 264 working — a 38% spread on the same facts. */
-  settlementDaysPerYear: number;
+  // settlementDaysPerYear left with leave settings audit 2 (L-74): Finance values a leaver's pay.
+  /**
+   * The most days of annual leave a leaver's settlement pays for (FR-HR-152); `null` = no cap
+   * (round 5, lane L2b). ⚠ Send it on every save: the server keeps 56 for a save that omits it.
+   */
+  settlementLeaveDaysCap: number | null;
+  /**
+   * Deciding members — a chair or member — who must be present at the sitting where a medical board
+   * decides a case (round 5, lane K-II-a). 1–20, default 1. ⚠ Send it on every save: the server
+   * resets a save that omits it to 1.
+   */
+  medicalBoardQuorum: number;
+  /**
+   * PNDCL 187 s.5 — months' earnings for permanent total incapacity (lane K-II-b). `null` = no figure
+   * worked out. ⚠ Send it on every save: the server keeps 96 for a save that omits it.
+   */
+  permanentTotalIncapacityMonths: number | null;
+  /** PNDCL 187 s.7(2)(c) — the longest temporary incapacity is paid for, in months. Default 24. */
+  temporaryIncapacityMaxMonths: number;
+  /**
+   * PNDCL 187 s.36 — the most of a year's earnings compensation is worked on. No default: the Act's
+   * figure predates redenomination. ⚠ A save that omits it CLEARS it.
+   */
+  compensationEarningsCeiling: number | null;
   attendanceRateIncludesApprovedLeave: boolean;
 
   /**
@@ -93,13 +115,7 @@ export interface CompanyHrPolicySettings {
    * tenant has it ON, because the encashment screen has already been demonstrated.
    */
   allowInServiceEncashment: boolean;
-  /**
-   * ⚠ Read beside `settlementDaysPerYear` and expect them to disagree — 22 working days a month
-   * against 365 calendar days a year is roughly 38% apart on the same salary. They are different
-   * money events and deliberately not merged; the settings screen shows both with a worked example
-   * so the gap is met there rather than in a payout.
-   */
-  encashmentWorkingDaysPerMonth: number;
+  // encashmentWorkingDaysPerMonth left with leave settings audit 2 (L-75).
 
   /** The leave reminder cadence. All five were private constants before. */
   leaveStartingReminderDays: number;
@@ -114,6 +130,18 @@ export interface CompanyHrPolicySettings {
    * ⚠ Change-once-at-setup: the API refuses it once the tenant holds any leave data (D-9).
    */
   leaveYearStartMonth: number;
+
+  /**
+   * Round 4, lane K — the orientation & onboarding reminder windows, read by the sweep that
+   * delivers (an in-app notification and an email) rather than only logging.
+   */
+  onboardingTaskDueLeadDays: number;
+  orientationDueLeadDays: number;
+  orientationCertificateExpiryLeadDays: number;
+  /** Days a task awaiting sign-off, an unattempted assessment or an unsigned acknowledgement waits before it is chased. */
+  orientationChaseAfterDays: number;
+  /** Round 4, lane N-b2: days before an event's RSVP deadline that everybody who has not answered is chased, once. */
+  companyEventRsvpChaseLeadDays: number;
 
   createdAt: string;
   createdBy: string | null;

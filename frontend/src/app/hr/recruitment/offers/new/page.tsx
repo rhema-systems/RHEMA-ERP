@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Info, Loader2, Save } from 'lucide-react';
@@ -18,7 +18,11 @@ import { formatMoney } from '@/lib/hr/attendance-format';
 import { jobOfferService } from '@/services/hr/offers.service';
 import { jobVacancyService } from '@/services/hr/recruitment.service';
 import { jobApplicationService } from '@/services/hr/recruitment-pipeline.service';
-import type { CreateJobOffer } from '@/types/hr/offers';
+import { CurrencyPicker } from '@/components/hr/common/CurrencyPicker';
+import { LocationPicker } from '@/components/hr/common/LocationPicker';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { salaryGradeService } from '@/services/hr/salary-grade.service';
+import type { CreateJobOffer, JobOfferDefaults } from '@/types/hr/offers';
 
 /**
  * Raising an offer against an application.
@@ -66,10 +70,69 @@ export default function NewJobOfferPage() {
     weeklyHours: '',
     ndaRequired: false,
     isConditional: false,
+    // ⚠ `locationId` was already here before round 4 — in state, sent on create, and bound to
+    // NO control (§ 3 defect 13). It therefore sent null on every offer ever raised, while the
+    // offer letter printed {{LocationName}}. `locationLevelId` is its partner and was absent.
+    locationLevelId: null as string | null,
     locationId: null as string | null,
+    salaryLevelId: null as string | null,
+    salaryNotchId: null as string | null,
     additionalTerms: '',
   });
 
+  // Round 4, lane G1. The proposal the form opens with. Writes nothing, and every value is
+  // editable — the server’s own rules still run on create and still win.
+  const defaultsQuery = useQuery({
+    queryKey: ['hr', 'offer-defaults', applicationId],
+    queryFn: () => jobOfferService.getDefaults(applicationId),
+    enabled: !!applicationId,
+  });
+  const defaults: JobOfferDefaults | undefined = defaultsQuery.data;
+
+  // ⚠ Seeded ONCE, and only into boxes the user has not touched. Re-seeding on every render of
+  // the query would overwrite a recruiter mid-edit; seeding unconditionally on refetch would
+  // silently revert a deliberate override back to the system’s suggestion.
+  const [seeded, setSeeded] = useState(false);
+  useEffect(() => {
+    if (seeded || !defaults) return;
+    const n = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v));
+    setForm((prev) => ({
+      ...prev,
+      baseSalary: n(defaults.baseSalary),
+      currencyCode: defaults.currencyCode ?? prev.currencyCode,
+      proposedStartDate: defaults.proposedStartDate?.slice(0, 10) ?? prev.proposedStartDate,
+      expiryDate: defaults.expiryDate?.slice(0, 10) ?? prev.expiryDate,
+      contractDurationMonths: n(defaults.contractDurationMonths),
+      probationPeriodMonths: n(defaults.probationPeriodMonths),
+      noticePeriodMonths: n(defaults.noticePeriodMonths),
+      annualLeaveDays: n(defaults.annualLeaveDays),
+      weeklyHours: n(defaults.weeklyHours),
+      isConditional: defaults.isConditional,
+      locationLevelId: defaults.locationLevelId ?? null,
+      locationId: defaults.locationId ?? null,
+      salaryLevelId: defaults.salaryLevelId ?? null,
+      salaryNotchId: defaults.salaryNotchId ?? null,
+    }));
+    setSeeded(true);
+  }, [defaults, seeded]);
+
+  // The grade’s ladder, for the two controls that had no UI at all.
+  const levels = useQuery({
+    queryKey: ['hr', 'salary-levels', defaults?.salaryGradeId],
+    queryFn: () => salaryGradeService.getLevels(defaults!.salaryGradeId as string),
+    enabled: !!defaults?.salaryGradeId,
+  });
+  const notches = useQuery({
+    queryKey: ['hr', 'salary-notches', form.salaryLevelId],
+    queryFn: () => salaryGradeService.getNotches(form.salaryLevelId as string),
+    enabled: !!form.salaryLevelId,
+  });
+
+  /** The one-line provenance under a box, or nothing when the value was not derived. */
+  const Source = ({ field }: { field: string }) => {
+    const why = defaults?.sources?.[field];
+    return why ? <p className="text-xs text-muted-foreground">{why}</p> : null;
+  };
   const create = useMutation({
     mutationFn: () => {
       const payload: CreateJobOffer = {
@@ -89,7 +152,10 @@ export default function NewJobOfferPage() {
         weeklyHours: form.weeklyHours ? Number(form.weeklyHours) : null,
         ndaRequired: form.ndaRequired,
         isConditional: form.isConditional,
+        locationLevelId: form.locationLevelId,
         locationId: form.locationId,
+        salaryLevelId: form.salaryLevelId,
+        salaryNotchId: form.salaryNotchId,
         additionalTerms: form.additionalTerms.trim() || null,
       };
       return jobOfferService.create(payload);
@@ -184,6 +250,47 @@ export default function NewJobOfferPage() {
         </AlertDescription>
       </Alert>
 
+      {/* ⚠ Round 4, lane G1. Named explicitly rather than left as empty boxes. The endpoint
+          returns a source line only for values it actually derived, so anything it could not
+          work out is listed here instead of being given a confident caption it does not
+          deserve. */}
+      {defaults && defaults.unresolved.length > 0 && (
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertTitle>You will need to supply these</AlertTitle>
+          <AlertDescription>
+            <ul className="ml-4 list-disc space-y-0.5">
+              {defaults.unresolved.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Placement</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* ⚠ The control that never existed. `locationId` has been in this form’s state and on
+              its create payload all along, bound to nothing — so every offer ever raised sent
+              null, while the offer letter printed {{LocationName}}. The picker carries the level
+              too, which the payload also accepts and nothing ever set. */}
+          <LocationPicker
+            value={form.locationId ?? ''}
+            onChange={(locationId) => setForm({ ...form, locationId: locationId || null })}
+            onLevelChange={(levelId) => setForm({ ...form, locationLevelId: levelId || null })}
+            allowNone="Not stated"
+            levelLabel="Location level"
+            locationLabel="Duty station"
+            hint="Printed on the offer letter as the place of work."
+            idPrefix="offer"
+          />
+          <Source field="locationId" />
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Compensation</CardTitle>
@@ -198,18 +305,22 @@ export default function NewJobOfferPage() {
               value={form.baseSalary}
               onChange={(e) => setForm({ ...form, baseSalary: e.target.value })}
             />
+            <Source field="baseSalary" />
             <p className="text-xs text-muted-foreground">
               Checked against the position grade&apos;s band server-side.
             </p>
           </div>
           <div className="space-y-1.5">
+            {/* ⚠ Was a free-text box accepting ten characters, validated by nothing (§ 3 defect
+                14). The server now refuses a code Finance does not hold, so a typo that used to
+                reach the offer letter comes back as a 422 instead. */}
             <Label htmlFor="currencyCode">Currency</Label>
-            <Input
+            <CurrencyPicker
               id="currencyCode"
-              maxLength={10}
               value={form.currencyCode}
-              onChange={(e) => setForm({ ...form, currencyCode: e.target.value.toUpperCase() })}
+              onChange={(code) => setForm({ ...form, currencyCode: code })}
             />
+            <Source field="currencyCode" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="weeklyHours">Weekly hours</Label>
@@ -221,6 +332,7 @@ export default function NewJobOfferPage() {
               onChange={(e) => setForm({ ...form, weeklyHours: e.target.value })}
               placeholder="Defaults from the employment type"
             />
+            <Source field="weeklyHours" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="bonus">Bonus</Label>
@@ -258,6 +370,75 @@ export default function NewJobOfferPage() {
               onChange={(e) => setForm({ ...form, commissionStructure: e.target.value })}
             />
           </div>
+
+          {/* ⚠ Two more fields the create payload has always accepted with no UI behind them.
+              They place the salary on the grade’s ladder, which is what makes a figure
+              defensible later — "notch 3 of level II" rather than a number somebody typed. */}
+          {defaults?.salaryGradeId && (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="salaryLevelId">Salary level</Label>
+                <Select
+                  value={form.salaryLevelId ?? 'none'}
+                  onValueChange={(value) =>
+                    // Changing the level invalidates the notch: a notch belongs to one level, and
+                    // keeping it would post a notch from a level no longer selected.
+                    setForm({
+                      ...form,
+                      salaryLevelId: value === 'none' ? null : value,
+                      salaryNotchId: null,
+                    })
+                  }
+                >
+                  <SelectTrigger id="salaryLevelId">
+                    <SelectValue placeholder="Not placed" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not placed</SelectItem>
+                    {(levels.data ?? []).map((level) => (
+                      <SelectItem key={level.id} value={level.id}>
+                        {level.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Source field="salaryLevelId" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="salaryNotchId">Notch</Label>
+                <Select
+                  value={form.salaryNotchId ?? 'none'}
+                  disabled={!form.salaryLevelId}
+                  onValueChange={(value) => {
+                    const notchId = value === 'none' ? null : value;
+                    const notch = (notches.data ?? []).find((n) => n.id === notchId);
+                    // A notch IS an amount. Picking one and leaving a different figure in the
+                    // box would put the offer outside the ladder it claims to sit on.
+                    setForm({
+                      ...form,
+                      salaryNotchId: notchId,
+                      baseSalary: notch ? String(notch.salaryAmount) : form.baseSalary,
+                    });
+                  }}
+                >
+                  <SelectTrigger id="salaryNotchId">
+                    <SelectValue placeholder={form.salaryLevelId ? 'Not placed' : 'Choose a level first'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not placed</SelectItem>
+                    {(notches.data ?? []).map((notch) => (
+                      <SelectItem key={notch.id} value={notch.id}>
+                        Notch {notch.notchNumber}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Choosing a notch sets the base salary to its amount.
+                </p>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 
@@ -274,6 +455,7 @@ export default function NewJobOfferPage() {
               value={form.proposedStartDate}
               onChange={(e) => setForm({ ...form, proposedStartDate: e.target.value })}
             />
+            <Source field="proposedStartDate" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="expiryDate">Offer expires</Label>
@@ -283,6 +465,7 @@ export default function NewJobOfferPage() {
               value={form.expiryDate}
               onChange={(e) => setForm({ ...form, expiryDate: e.target.value })}
             />
+            <Source field="expiryDate" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="contractDurationMonths">Contract length (months)</Label>
@@ -294,6 +477,7 @@ export default function NewJobOfferPage() {
               onChange={(e) => setForm({ ...form, contractDurationMonths: e.target.value })}
               placeholder="Leave blank if permanent"
             />
+            <Source field="contractDurationMonths" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="probationPeriodMonths">Probation (months)</Label>
@@ -305,6 +489,7 @@ export default function NewJobOfferPage() {
               onChange={(e) => setForm({ ...form, probationPeriodMonths: e.target.value })}
               placeholder="Defaults from the position"
             />
+            <Source field="probationPeriodMonths" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="noticePeriodMonths">Notice period (months)</Label>
@@ -316,6 +501,7 @@ export default function NewJobOfferPage() {
               onChange={(e) => setForm({ ...form, noticePeriodMonths: e.target.value })}
               placeholder="Defaults from the position"
             />
+            <Source field="noticePeriodMonths" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="annualLeaveDays">Annual leave (days)</Label>
@@ -326,6 +512,7 @@ export default function NewJobOfferPage() {
               value={form.annualLeaveDays}
               onChange={(e) => setForm({ ...form, annualLeaveDays: e.target.value })}
             />
+            <Source field="annualLeaveDays" />
           </div>
 
           <div className="flex items-center gap-2">

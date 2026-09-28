@@ -28,12 +28,14 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { AddressFields } from '@/components/reference/AddressFields';
+import { geographyService } from '@/services/reference/geography.service';
 import { useToast } from '@/hooks/use-toast';
 import { certificationService } from '@/services/hr/certification.service';
 import { languageService } from '@/services/hr/language.service';
 import { jobVacancyService } from '@/services/hr/recruitment.service';
 import { skillService } from '@/services/hr/skill.service';
-import { qualificationService } from '@/services/hr/lookup.service';
+import { qualificationService, referenceDimensionService } from '@/services/hr/lookup.service';
 import { GENDERS } from '@/types/hr/recruitment-pipeline';
 import {
   MANDATORY_MATCH_MODES,
@@ -205,6 +207,17 @@ export function VacancyCriteriaPanel({
     queryFn: () => languageService.getActive(),
     enabled: open && valueKind === 'Language',
   });
+  // Round 4, lane Q: the ladder an "Education level" criterion picks its minimum from. The same key
+  // as the qualification catalogue form's level picker, so the two share one cache entry.
+  const levels = useQuery({
+    queryKey: ['hr', 'qualification-levels', 'active'],
+    queryFn: () => referenceDimensionService.getQualificationLevels(true),
+    enabled: open && valueKind === 'QualificationLevel',
+  });
+  const ladder = useMemo(
+    () => [...(levels.data ?? [])].sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name)),
+    [levels.data],
+  );
 
   const catalogue: { id: string; name: string }[] = useMemo(() => {
     switch (valueKind) {
@@ -225,6 +238,30 @@ export function VacancyCriteriaPanel({
     (valueKind === 'Qualification' && qualifications.isLoading) ||
     (valueKind === 'Certification' && certifications.isLoading) ||
     (valueKind === 'Language' && languages.isLoading);
+
+  // Round 4, lane A — the geography cascade's own state. It is NOT part of the criterion: it is the
+  // scratch pad you walk down before pressing Add, and it resets after each area so the next one
+  // can start from a different tier.
+  const [areaCountryId, setAreaCountryId] = useState('');
+  const [areaId, setAreaId] = useState('');
+
+  // The chosen area's name, for the badge. AddressFields emits an id only, so the name is read
+  // back through the ancestors endpoint — the same call the cascade already makes to re-open
+  // itself, so this is a cache hit rather than a second round trip.
+  const areaAncestors = useQuery({
+    queryKey: ['reference', 'geo', 'ancestors', areaId],
+    queryFn: () => geographyService.getAncestors(areaId),
+    enabled: !!areaId,
+  });
+  const areaLabel = useMemo(() => {
+    const chain = areaAncestors.data ?? [];
+    if (chain.length === 0) return '';
+    // Broadest-first, own area last. Name it as "Tema Metropolitan, Greater Accra" so two
+    // like-named districts in different regions are told apart on the badge.
+    const own = chain[chain.length - 1];
+    const parent = chain.length > 1 ? chain[chain.length - 2] : undefined;
+    return parent ? `${own.name}, ${parent.name}` : own.name;
+  }, [areaAncestors.data]);
 
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: ['hr', 'vacancy-criteria', vacancyId] });
@@ -334,6 +371,8 @@ export function VacancyCriteriaPanel({
       return `${label} · ${op} ${c.minValue ?? '—'}${c.maxValue != null ? `–${c.maxValue}` : ''}`;
     }
     const labels = c.values?.length ? c.values.map((v) => v.label) : (c.requiredValue ?? '').split(',').map((v) => v.trim()).filter(Boolean);
+    // Round 4, lane Q: a level is a minimum, and the row should say so.
+    if (s?.valueKind === 'QualificationLevel' && labels.length > 0) return `${label} · at least ${labels[0]}`;
     if (labels.length > 0) return `${label} · ${labels.join(', ')}`;
     if (c.requiredQualificationId || c.requiredSkillId) return `${label} · from the catalogue`;
     return label;
@@ -543,7 +582,7 @@ export function VacancyCriteriaPanel({
                   Accepted values
                   {shape.requiresValues && <span className="ml-0.5 text-red-500">*</span>}
                 </Label>
-                {picked.length > 0 && (
+                {picked.length > 0 && valueKind !== 'QualificationLevel' && (
                   <div className="flex flex-wrap gap-1.5">
                     {picked.map((v, i) => (
                       <Badge key={`${v.referenceId ?? 'text'}:${v.label}`} variant="secondary" className="gap-1 pr-1">
@@ -585,6 +624,46 @@ export function VacancyCriteriaPanel({
                     </SelectContent>
                   </Select>
                 )}
+                {/* Round 4, lane Q. ONE value, the minimum rung; a new pick replaces it rather than
+                    adding a second, which the server refuses. Ranks are shown because they are the
+                    comparison: rungs with the same number are equivalents. */}
+                {valueKind === 'QualificationLevel' && (
+                  <div className="space-y-1.5">
+                    <Select
+                      value={picked[0]?.referenceId ?? NONE}
+                      onValueChange={(v) => {
+                        if (v === NONE) {
+                          setPicked([]);
+                          return;
+                        }
+                        const rung = ladder.find((l) => l.id === v);
+                        if (rung) setPicked([{ referenceId: rung.id, label: rung.name }]);
+                      }}
+                    >
+                      <SelectTrigger id="criteriaLevelPicker">
+                        <SelectValue placeholder={levels.isLoading ? 'Loading the ladder…' : 'The minimum level'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE}>{levels.isLoading ? 'Loading…' : 'Choose the minimum level'}</SelectItem>
+                        {/* A rung retired since the criterion was saved stays selectable in its own edit. */}
+                        {picked[0]?.referenceId && !ladder.some((l) => l.id === picked[0].referenceId) && (
+                          <SelectItem value={picked[0].referenceId}>{picked[0].label} (retired)</SelectItem>
+                        )}
+                        {ladder.map((l) => (
+                          <SelectItem key={l.id} value={l.id}>
+                            {l.name} · rank {l.rank}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {!levels.isLoading && ladder.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        This organisation has no qualification ladder yet. Build it under HR Setup →
+                        People Reference Data → Qualification Levels, then come back.
+                      </p>
+                    )}
+                  </div>
+                )}
                 {valueKind === 'Gender' && (
                   <div className="flex flex-wrap gap-4">
                     {[...GENDERS, 'Any'].map((g) => {
@@ -605,12 +684,53 @@ export function VacancyCriteriaPanel({
                     })}
                   </div>
                 )}
+                {/* Round 4, lane A. Location used to be a text box — "A city, e.g. Kumasi" — matched
+                    by ordinal substring against whatever the candidate typed, so "Greater Accra"
+                    found nobody in Tema. It is now the shared geography cascade: pick a country,
+                    walk down as far as you mean to go, and Add. Adding at a HIGHER tier is the
+                    point, not a shortcut — one entry for Greater Accra accepts every district,
+                    town and community beneath it. */}
+                {valueKind === 'GeoArea' && (
+                  <div className="space-y-2">
+                    <AddressFields
+                      countryId={areaCountryId}
+                      onCountryChange={(v) => {
+                        setAreaCountryId(v);
+                        setAreaId('');
+                      }}
+                      geoAreaId={areaId}
+                      onGeoAreaChange={setAreaId}
+                      fallback={(schemeLoaded) =>
+                        schemeLoaded ? null : (
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            This country has no administrative tree loaded, so there are no areas to
+                            pick. Choose a country that does, or set this criterion up as free text
+                            on a vacancy that needs one.
+                          </p>
+                        )
+                      }
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!areaId}
+                      onClick={() => {
+                        if (!areaId) return;
+                        addPicked({ referenceId: areaId, label: areaLabel || 'Selected area' });
+                        setAreaId('');
+                      }}
+                    >
+                      Add this area
+                    </Button>
+                  </div>
+                )}
                 {valueKind === 'Text' && (
                   <div className="flex gap-2">
                     <Input
                       id="criteriaTypedValue"
                       value={typedValue}
-                      placeholder={form.type === 'Location' ? 'A city, e.g. Kumasi' : 'A value'}
+                      placeholder="A value"
                       onChange={(e) => setTypedValue(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {

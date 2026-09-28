@@ -198,10 +198,14 @@ function Invoke-WebBuild {
     # The bundler needs more heap than Node's default (about 4 GB): the first run on this laptop died
     # at 3.9 GB with "JavaScript heap out of memory" after four minutes. 8 GB is what
     # Deploy-RhemaVps.ps1 builds the same frontend with. Set for the build only, then put back.
+    # frontend\next.config.js only emits the standalone server when NEXT_OUTPUT says so; a plain
+    # build leaves .next\ with no standalone\server.js to run. The Dockerfile sets the same variable.
     $savedNodeOptions = $env:NODE_OPTIONS
     $savedTelemetry = $env:NEXT_TELEMETRY_DISABLED
+    $savedNextOutput = $env:NEXT_OUTPUT
     $env:NODE_OPTIONS = '--max-old-space-size=8192'
     $env:NEXT_TELEMETRY_DISABLED = '1'
+    $env:NEXT_OUTPUT = 'standalone'
     # next build prints UTF-8 glyphs (the ▲ logo, ✓ ticks, the ○ ƒ ├ └ route markers). PowerShell
     # 5.1 decodes a native command's output with the console's legacy code page (850 here), which
     # turns ▲ into "Ôû▓" and ✓ into "Ô£ô" on screen and in the log. Decode as UTF-8 for the build
@@ -222,6 +226,7 @@ function Invoke-WebBuild {
         [Console]::OutputEncoding = $savedConsoleEncoding
         $env:NODE_OPTIONS = $savedNodeOptions
         $env:NEXT_TELEMETRY_DISABLED = $savedTelemetry
+        $env:NEXT_OUTPUT = $savedNextOutput
     }
     if ($exit -ne 0) {
         $outOfMemory = [bool](Select-String -LiteralPath $webBuildLog -Pattern 'heap out of memory' -Quiet -ErrorAction SilentlyContinue)
@@ -235,7 +240,9 @@ function Invoke-WebBuild {
     }
     $server = Find-WebServer
     if (-not $server) {
-        throw "The build finished but no standalone server.js appeared under $webStandaloneDir. Is output: 'standalone' still set in frontend\next.config.js? Full output: $webBuildLog"
+        throw ("The build finished but no standalone server.js appeared under $webStandaloneDir. " +
+               "This build sets NEXT_OUTPUT=standalone; does frontend\next.config.js still turn that into output: 'standalone'? " +
+               "Full output: $webBuildLog. Or bring the demo up with -DevWeb.")
     }
     # The standalone folder does not include the static chunks or public\, by design (the
     # Dockerfile copies them in the same way). Replace, not merge, so nothing from an older build

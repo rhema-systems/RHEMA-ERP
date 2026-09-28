@@ -1,11 +1,16 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { z } from 'zod';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { ResourceListPanel } from '@/components/hr/common/ResourceListPanel';
+import {
+  CopyOnboardingTemplateDialog,
+  type TemplateCopySource,
+} from '@/components/hr/orientation/CopyDialogs';
 import {
   TextField,
   TextareaField,
@@ -38,6 +43,8 @@ const emptyTemplate: TemplateForm = {
 };
 
 export default function OnboardingTemplatesPage() {
+  const [copying, setCopying] = useState<TemplateCopySource | null>(null);
+
   return (
     <div className="space-y-6 p-6">
       <PageHeader
@@ -68,6 +75,12 @@ export default function OnboardingTemplatesPage() {
         }
         remove={(id) => onboardingPlanTemplateService.remove(id)}
         getId={(t) => t.id}
+        actions={[
+          {
+            label: 'Copy',
+            run: async (t) => setCopying({ id: t.id, name: t.name }),
+          },
+        ]}
         columns={[
           {
             header: 'Template',
@@ -129,6 +142,8 @@ export default function OnboardingTemplatesPage() {
           </div>
         )}
       />
+
+      <CopyOnboardingTemplateDialog source={copying} onClose={() => setCopying(null)} />
     </div>
   );
 }

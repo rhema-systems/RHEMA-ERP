@@ -61,14 +61,20 @@ export default function LeaveTypesPage() {
     queryFn: () => leaveTypeService.getAll(false),
   });
 
+  // ⚠ Retired types are hidden until asked for (round 5 lane M). A retired type stays on every
+  // request made against it, so they accumulate — on the demo database hundreds of them, from the
+  // verification harness, buried the nine in use.
+  const [showRetired, setShowRetired] = useState(false);
+  const retiredCount = (data ?? []).filter((t) => !t.isActive).length;
+
   const leaveTypes = useMemo(() => {
     const term = search.trim().toLowerCase();
-    const all = data ?? [];
+    const all = (data ?? []).filter((t) => showRetired || t.isActive);
     if (!term) return all;
     return all.filter(
       (t) => t.name.toLowerCase().includes(term) || t.code.toLowerCase().includes(term),
     );
-  }, [data, search]);
+  }, [data, search, showRetired]);
 
   return (
     <div className="space-y-6 p-6">
@@ -86,6 +92,10 @@ export default function LeaveTypesPage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>Leave Types</CardTitle>
+            <label className="ml-auto mr-4 flex items-center gap-2 text-sm text-muted-foreground">
+              <input type="checkbox" checked={showRetired} onChange={(e) => setShowRetired(e.target.checked)} />
+              Show retired types ({retiredCount})
+            </label>
             <div className="relative w-64">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -105,7 +115,6 @@ export default function LeaveTypesPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>Code</TableHead>
                   <TableHead className="text-right">Default days</TableHead>
-                  <TableHead className="text-right">Max days</TableHead>
                   <TableHead>Rules</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead />
@@ -167,14 +176,15 @@ export default function LeaveTypesPage() {
                       </TableCell>
                       <TableCell className="text-muted-foreground">{t.code}</TableCell>
                       <TableCell className="text-right">{t.defaultDaysPerYear}</TableCell>
-                      <TableCell className="text-right">{t.maxDaysPerYear}</TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
                           {!t.isPaid && <Badge variant="outline">Unpaid</Badge>}
                           {t.requiresApproval && <Badge variant="secondary">Approval</Badge>}
                           {t.allowCarryOver && <Badge variant="secondary">Carry-over</Badge>}
                           {t.allowCashConversion && <Badge variant="secondary">Encashable</Badge>}
-                          {t.mandatoryAnnualLeave && <Badge variant="outline">Mandatory</Badge>}
+                          {/* The kind (round 5, A4) replaced the "Mandatory" flag. */}
+                          {t.category === 'Annual' && <Badge variant="outline">Annual</Badge>}
+                          {t.category === 'Maternity' && <Badge variant="outline">Maternity</Badge>}
                         </div>
                       </TableCell>
                       <TableCell>

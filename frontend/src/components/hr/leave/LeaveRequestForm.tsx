@@ -21,6 +21,8 @@ import { leaveTypeService } from '@/services/hr/leave-type.service';
 import { leaveService } from '@/services/hr/leave.service';
 import { employeeRelieverService } from '@/services/hr/employee-reliever.service';
 import { DateField, FieldRow, SelectField, TextareaField } from '@/components/hr/employee/tabs/fields';
+import { fmtDay } from './AccrualStatementPanel';
+import { ExcessToAnnualOffer } from './ExcessToAnnualOffer';
 
 export const leaveRequestSchema = z
   .object({
@@ -36,6 +38,8 @@ export const leaveRequestSchema = z
     handoverNotes: z.string().max(2000).optional().or(z.literal('')),
     /** Set only when the request was raised from an approved plan; never edited on the form. */
     leavePlanId: z.string().optional().or(z.literal('')),
+    /** Round 5, A5: the days beyond the type's limit, charged to annual leave if HR approves. */
+    chargeExcessToAnnual: z.boolean().optional(),
   })
   .refine((v) => v.endDate >= v.startDate, {
     message: 'End date cannot be before the start date',
@@ -64,6 +68,7 @@ export const emptyLeaveRequest: LeaveRequestFormValues = {
   relieverNotes: '',
   handoverNotes: '',
   leavePlanId: '',
+  chargeExcessToAnnual: false,
 };
 
 interface LeaveRequestFormProps {
@@ -153,8 +158,10 @@ export function LeaveRequestForm({
   // Show what the employee actually has left for the chosen type — the most common
   // reason a request gets rejected downstream.
   const { data: balances } = useQuery({
-    queryKey: ['hr', 'leave-balances', 'employee', employeeId],
-    queryFn: () => leaveService.getEmployeeBalances(employeeId),
+    // Round 5, lane J: annual leave worked out live when no request has opened its record, so the
+    // strip shows it from the first request ('live' keeps it apart in the cache).
+    queryKey: ['hr', 'leave-balances', 'employee', employeeId, 'live'],
+    queryFn: () => leaveService.getEmployeeBalances(employeeId, 0, true),
     enabled: !!employeeId,
   });
 
@@ -214,7 +221,8 @@ export function LeaveRequestForm({
         {form.watch('leavePlanId') && (
           <div className="mx-6 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
             Raised from an approved leave plan. The dates and relievers are the ones planned — change
-            them here if they have moved, and the request will still be linked to the plan.
+            them here if they have moved, and the request will still be linked to the plan. For any
+            other kind of leave, raise a request without the plan.
           </div>
         )}
 
@@ -237,6 +245,9 @@ export function LeaveRequestForm({
               label="Leave type"
               required
               options={(leaveTypes ?? []).map((t) => ({ value: t.id, label: t.name }))}
+              // A request raised from a plan is that plan's leave; the server refuses any other.
+              disabled={!!form.watch('leavePlanId')}
+              description={form.watch('leavePlanId') ? 'The leave the plan is for.' : undefined}
             />
             <SelectField
               form={form}
@@ -253,7 +264,24 @@ export function LeaveRequestForm({
             enforces, which on an accruing type counts only what has accrued so far. Showing only the
             policy figure invited requests the server then refused (closure plan L-14).
           */}
-          {balance && (
+          {/*
+            Round 5, A5: an OTHER kind is a limit, not a balance, and reads as one. The same figures,
+            put the way sick or casual leave is actually thought about.
+          */}
+          {balance && (balance.leaveTypeCategory ?? selectedType?.category) === 'Other' && (
+            <div className="rounded-md border bg-muted/40 p-3 text-sm">
+              <span className="text-muted-foreground">{balance.leaveTypeName}: </span>
+              <span className="font-medium">Limit {balance.entitledDays}</span>
+              <span className="text-muted-foreground">
+                {' · '}
+                {balance.usedDays} used
+                {balance.pendingDays > 0 ? ` · ${balance.pendingDays} waiting` : ''}
+                {' · '}
+              </span>
+              <span className="font-medium">{balance.accruedAvailableDays} left</span>
+            </div>
+          )}
+          {balance && (balance.leaveTypeCategory ?? selectedType?.category) !== 'Other' && (
             <div className="rounded-md border bg-muted/40 p-3 text-sm">
               <span className="text-muted-foreground">Can be taken now for {balance.leaveTypeName}: </span>
               <span className="font-medium">{balance.accruedAvailableDays} days</span>
@@ -266,7 +294,8 @@ export function LeaveRequestForm({
                 <p className="mt-1 text-xs text-muted-foreground">
                   {balance.availableDays} days for the full year — this leave type accrues, so{' '}
                   {Math.round((balance.availableDays - balance.accruedAvailableDays) * 100) / 100}{' '}
-                  of them have not accrued yet.
+                  of them have not accrued yet
+                  {balance.accruedAsOf ? ` (as at ${fmtDay(balance.accruedAsOf)})` : ''}.
                 </p>
               )}
             </div>
@@ -285,6 +314,18 @@ export function LeaveRequestForm({
                 : '.'}
             </p>
           )}
+
+          <ExcessToAnnualOffer
+            employeeId={employeeId}
+            leaveTypeId={leaveTypeId}
+            leaveTypeName={selectedType?.name}
+            leaveSubTypeId={form.watch('leaveSubTypeId') || undefined}
+            startDate={startDate}
+            endDate={endDate}
+            checked={!!form.watch('chargeExcessToAnnual')}
+            onCheckedChange={(v) => form.setValue('chargeExcessToAnnual', v)}
+            forSelf={false}
+          />
 
           <TextareaField form={form} name="reason" label="Reason" rows={3} />
 
@@ -379,4 +420,5 @@ export const leaveRequestFormToPayload = (v: LeaveRequestFormValues, saveAsDraft
   // dead-ending and the employee re-keying their own dates (closure plan L-9).
   leavePlanId: v.leavePlanId || null,
   saveAsDraft,
+  chargeExcessToAnnual: !!v.chargeExcessToAnnual,
 });

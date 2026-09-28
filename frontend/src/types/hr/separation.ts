@@ -77,6 +77,12 @@ export interface SeparationDetail extends SeparationListItem {
   reasonCategoryName?: string | null;
   reasonNotes?: string | null;
 
+  /**
+   * The medical board a medical retirement rests on (round 5, lane K-II-a). A bare id: the board is
+   * a Medical record, read from its own service under the Medical permissions.
+   */
+  medicalBoardId?: string | null;
+
   noticeGivenOn?: string | null;
   noticeDays?: number | null;
   noticeRequiredDays: number;
@@ -379,7 +385,23 @@ export type SettlementLineCategory =
  * salary on file and there are no leave balances, so most computed lines land here on live data. A
  * screen must show "not computed" rather than a zero, because zero is a claim somebody will sign.
  */
-export type SettlementLineComputation = 'Computed' | 'ManuallyEntered' | 'CannotCompute';
+export type SettlementLineComputation = 'Computed' | 'ManuallyEntered' | 'CannotCompute' | 'ValuedByFinance';
+
+/**
+ * The PAY lines (leave settings audit 2, P3): HR records their days and facts, and Finance values
+ * them in Pay to value — HR cannot enter their amounts. Mirrors `SeparationService.IsPayLine`.
+ * Benefit payment and other earning joined on 2026-09-27: every line that pays the leaver.
+ */
+export const PAY_LINE_CATEGORIES: SettlementLineCategory[] = [
+  'UnpaidSalary',
+  'NoticePay',
+  'LeaveEncashment',
+  'GratuityOrEndOfService',
+  'BenefitPayment',
+  'PensionRelated',
+  'OtherEarning',
+  'TaxDeduction',
+];
 
 export type SettlementReviewOutcome = 'NotReviewed' | 'Approved' | 'Returned';
 
@@ -400,6 +422,18 @@ export interface SettlementLine {
   sourceTravelAdvanceId?: string | null;
   isSystemGenerated: boolean;
   sortOrder: number;
+  /** The days HR recorded on a pay line (notice paid in lieu, annual leave owed). */
+  days?: number | null;
+  /** PAY — valued by Finance, never priced by HR (leave settings audit 2). */
+  isPayLine: boolean;
+  /**
+   * A pay line still waiting for Finance's figure — true also where HR put a figure on it before pay
+   * moved to Finance: only Finance's settles it. `SeparationService.AwaitsFinance`.
+   */
+  awaitingFinance: boolean;
+  /** Who in Finance valued the line, and when. */
+  valuedByName?: string | null;
+  valuedOn?: string | null;
 }
 
 export interface SeparationSettlement {
@@ -441,17 +475,43 @@ export interface AddSettlementLine {
   category: SettlementLineCategory;
   isDeduction?: boolean;
   description: string;
-  /** Omit to record the line as still uncomputed. */
+  /** Omit to record the line as still uncomputed. ⚠ Refused on a pay line — Finance values those. */
   amount?: number | null;
+  /** The days, on a pay line that is a count of days. */
+  days?: number | null;
   /** Required whenever an amount is supplied. */
   sourceReference?: string | null;
 }
 
 export interface UpdateSettlementLine {
   description?: string;
+  /** ⚠ Refused on a pay line — Finance values those. */
   amount?: number | null;
+  /** A pay line's days. Changing them after Finance valued the line clears Finance's figure. */
+  days?: number | null;
   sourceReference?: string | null;
   isDeduction?: boolean;
+}
+
+/** Finance's valuation of one pay line — `PUT api/hr/pay-valuation/settlement-lines/{id}`. */
+export interface ValueSettlementLine {
+  amount: number;
+  sourceReference: string;
+}
+
+/** One item in Finance's queue — `GET api/hr/pay-valuation`. */
+export interface PayToValueItem {
+  kind: 'Settlement' | 'Encashment';
+  /** The separation (a settlement) or the encashment. */
+  id: string;
+  reference: string;
+  employeeName: string;
+  employeeNumber?: string | null;
+  lastDay?: string | null;
+  currencyCode: string;
+  awaitingCount: number;
+  days?: number | null;
+  summary: string;
 }
 
 export interface FinaliseSettlement {

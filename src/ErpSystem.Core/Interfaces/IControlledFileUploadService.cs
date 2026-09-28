@@ -75,6 +75,13 @@ public static class ControlledFileUploadCategories
     public const string HrMedicalExamDocuments = "hr-medical-exam-documents";
     public const string HrMedicalClaimDocuments = "hr-medical-claim-documents";
     public const string HrMedicalInsuranceProviderDocuments = "hr-medical-insurance-provider-documents";
+
+    /// <summary>
+    /// Papers on a medical board (round 5, lane K4) — a referral, a specialist's report the panel
+    /// read, the signed minutes. Its own category rather than the exam documents': a board's file
+    /// outlives any one examination and is what a medical retirement is argued from.
+    /// </summary>
+    public const string HrMedicalBoardDocuments = "hr-medical-board-documents";
     public const string HrAppraisalAttachments = "hr-appraisal-attachments";
 
     /// <summary>
@@ -307,6 +314,10 @@ public static class ControlledFileUploadCategories
                 // — so the upload fails with an InvalidOperationException that names neither the
                 // category nor the scan. Declaring the constant is half the job.
                 HrMedicalInsuranceProviderDocuments,
+                // Registered in the same change that declares it (round 5, lane K4): a board paper is
+                // a clinical record, and a declared-but-unregistered category passes the gate unscanned
+                // and then fails DMS registration as a 500.
+                HrMedicalBoardDocuments,
                 // Same reason again, one family further on: succession documents had the identical
                 // caller-supplied-path defect and are registered here in the same commit
                 // that gives them an upload route, so the earlier half-job cannot recur.

@@ -305,8 +305,21 @@ public class TransitionJobVacancyDto
     public int? NumberOfInterviewRounds { get; set; }
     public DateOnly? TargetStartDate { get; set; }
     public bool IsSalaryVisible { get; set; }
-    public EmploymentType EmploymentType { get; set; }
-    public WorkMode WorkMode { get; set; }
+    /// <summary>The employment type, or null to leave it as it is.</summary>
+    /// <remarks>
+    /// ⚠ <b>Nullable, and that is the fix.</b> These two were non-nullable with no initialiser,
+    /// unlike <see cref="CreateJobVacancyDto"/> which defaults them. A transition payload that did
+    /// not mention them therefore bound to <c>default</c> = <b>0</b> — a value outside BOTH enums,
+    /// since <c>EmploymentType.Permanent</c> is 1 and <c>WorkMode.OnSite</c> is 1 — and the mapper
+    /// wrote it. Publishing a vacancy through the API without restating every field silently erased
+    /// its employment type and work mode, and <c>JobOfferService.CreateAsync</c> then copied the
+    /// garbage onto every offer raised from it. The UI never hit this because it posts a full
+    /// update payload; a harness sending only what it meant to change did.
+    /// </remarks>
+    public EmploymentType? EmploymentType { get; set; }
+
+    /// <inheritdoc cref="EmploymentType"/>
+    public WorkMode? WorkMode { get; set; }
     public decimal? SalaryRangeMin { get; set; }
     public decimal? SalaryRangeMax { get; set; }
     [MaxLength(10)]
@@ -968,7 +981,16 @@ public class JobCandidateDto : BaseDto
     public string FirstName { get; set; } = string.Empty;
     public string? MiddleName { get; set; }
     public string LastName { get; set; } = string.Empty;
-    public string FullName => $"{FirstName} {MiddleName ?? string.Empty} {LastName}".Trim();
+    /// <remarks>
+    /// ⚠ <b>A second copy of the entity's expression, and it had the same bug.</b> Fixing
+    /// <c>JobCandidate.FullName</c> alone left this one rendering the double space, so the paged
+    /// application read (which goes through the entity) and the candidate read (which goes through
+    /// here) disagreed about the same person's name — caught by slice B, whose assertion compares
+    /// the two. Keep the two in step, or delete this one in favour of the entity's.
+    /// </remarks>
+    public string FullName => string.IsNullOrWhiteSpace(MiddleName)
+        ? $"{FirstName} {LastName}".Trim()
+        : $"{FirstName} {MiddleName} {LastName}".Trim();
     public DateTime DateOfBirth { get; set; }
     public Gender Gender { get; set; }
     public string GenderName => Gender.ToString();
@@ -977,7 +999,23 @@ public class JobCandidateDto : BaseDto
     public string? AlternatePhone { get; set; }
     public string? PostalAddress { get; set; }
     public string? DigitalAddress { get; set; }
+    /// <summary>⚠ A display snapshot resolved from <see cref="GeoAreaId"/> when one is set.</summary>
     public string City { get; set; } = string.Empty;
+    /// <summary>⚠ A display snapshot resolved from <see cref="GeoAreaId"/> when one is set.</summary>
+    public string? Region { get; set; }
+
+    /// <summary>
+    /// Where the candidate lives, as one reference to the geography tree — the lowest tier known.
+    /// The edit form re-opens its cascade from this by asking for the area's ancestors.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ No <c>GeoAreaName</c> or full path beside it, deliberately — the same call the employee
+    /// read DTO makes. Either would be null on every read whose query did not Include the
+    /// navigation, and lists print <see cref="Region"/> and <see cref="City"/>, which is what the
+    /// snapshot columns are kept for.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
     public string? Nationality { get; set; }
     /// <summary>Optional since slice 13b — an internal candidate may have no country on file.</summary>
     public Guid? CountryId { get; set; }
@@ -1030,6 +1068,8 @@ public class JobCandidateSummaryDto
     public string Email { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public string City { get; set; } = string.Empty;
+    /// <summary>Round 4, lane A — so the register can say "Tema, Greater Accra" without a tree walk.</summary>
+    public string? Region { get; set; }
     public string CountryName { get; set; } = string.Empty;
     public bool IsInTalentPool { get; set; }
     /// <summary>Round 3, lane C2 — the list shows a face beside the name when one is on file.</summary>
@@ -1050,8 +1090,37 @@ public class JobCandidateDetailDto : JobCandidateDto
     public List<JobApplicationSummaryDto> Applications { get; set; } = new();
 }
 
-public class CreateJobCandidateDto : CreateDtoBase
+/// <summary>
+/// The one statement of what counts as an address on a candidate, shared by the create and update
+/// DTOs so the two cannot drift.
+/// </summary>
+/// <remarks>
+/// ⚠ Kept deliberately permissive about <i>which</i> form. Most of the world has no geography
+/// scheme loaded, so insisting on an area would make the careers form unfillable outside Ghana;
+/// insisting on a city would make it unfillable inside Ghana, where the cascade writes the city and
+/// the input is disabled. One or the other, never neither.
+/// </remarks>
+internal static class JobCandidateAddressRule
 {
+    public static IEnumerable<ValidationResult> Validate(Guid? geoAreaId, string? city)
+    {
+        if (geoAreaId is null && string.IsNullOrWhiteSpace(city))
+            yield return new ValidationResult(
+                "Say where the candidate is: pick an area, or type a city.",
+                new[] { nameof(CreateJobCandidateDto.City), nameof(CreateJobCandidateDto.GeoAreaId) });
+    }
+}
+
+public class CreateJobCandidateDto : CreateDtoBase, IValidatableObject
+{
+    /// <summary>
+    /// An address in one form or the other. <see cref="City"/> stopped being <c>[Required]</c> when
+    /// the geography cascade arrived, and without this a candidate could be created with no stated
+    /// location at all — which the Location shortlisting criterion would then silently fail.
+    /// </summary>
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        => JobCandidateAddressRule.Validate(GeoAreaId, City);
+
     [Required]
     [MaxLength(100)]
     public string FirstName { get; set; } = string.Empty;
@@ -1087,9 +1156,33 @@ public class CreateJobCandidateDto : CreateDtoBase
     [MaxLength(30)]
     public string? DigitalAddress { get; set; }
 
-    [Required]
+    /// <summary>
+    /// The candidate's town or city, as free text.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>No longer <c>[Required]</c> as of round 4, lane A</b>, and that is deliberate rather
+    /// than a relaxation. When <see cref="GeoAreaId"/> is supplied the service <i>overwrites</i>
+    /// this from the tree, so a form whose cascade is filled in has nothing to put here — and a
+    /// required field the user is not allowed to type into is a form that cannot be submitted.
+    /// The address is still compulsory: <c>Validate</c> refuses a payload carrying neither an area
+    /// nor a city.
+    /// </remarks>
     [MaxLength(100)]
-    public string City { get; set; } = string.Empty;
+    public string? City { get; set; }
+
+    /// <summary>
+    /// Where the candidate lives, as one reference to the geography tree — the lowest tier chosen.
+    /// </summary>
+    /// <remarks>
+    /// <para>Null is "no area", not "leave unchanged": this DTO replaces the record's address
+    /// wholesale, so there is no <c>ClearGeoArea</c> flag of the kind the employee's patch-style
+    /// update needs.</para>
+    ///
+    /// <para>The area's country is reconciled with <c>CountryId</c> on save — a candidate cannot
+    /// claim Nigeria while pointing at a Ghanaian district — and a stated country that is silent is
+    /// filled in from the area rather than refused.</para>
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
 
     /// <summary>
     /// The candidate's nationality, as free text.
@@ -1139,12 +1232,50 @@ public class CreateJobCandidateDto : CreateDtoBase
     public string? NationalIdNumber { get; set; }
 
     public DateTime? NationalIdExpiryDate { get; set; }
+
+    // ── Professional profile and availability ────────────────────────────────
+    //
+    // Round 4, lane B. These were writable ONLY through the candidate's own portal profile, while
+    // the talent pool's match rubric scores on three of them and the pool list has a column for two.
+    // So a candidate HR typed in by hand — which is how a career fair, a referral and an
+    // unsolicited CV all reach the pool — could never rank above the "nothing on file" tier,
+    // whatever HR knew about them, and there was no box to put it in.
+    //
+    // ⚠ This is the shape G-13.2 warned about from the other side: the rubric was corrected so that
+    // silence stops scoring like a match, which is right — and then the only people who could break
+    // the silence were the candidates themselves.
+
+    [MaxLength(300)]
+    public string? Headline { get; set; }
+
+    [MaxLength(4000)]
+    public string? ProfessionalSummary { get; set; }
+
+    [MaxLength(200)]
+    public string? CurrentJobTitle { get; set; }
+
+    [MaxLength(200)]
+    public string? CurrentEmployer { get; set; }
+
+    [Range(0, 60)]
+    public int? TotalYearsExperience { get; set; }
+
+    [Range(0, 1825)]
+    public int? NoticePeriodDays { get; set; }
+
+    public DateTime? AvailableFrom { get; set; }
+
+    public ErpSystem.Core.Enums.PreferredWorkArrangement PreferredWorkArrangement { get; set; }
 
     public bool IsInTalentPool { get; set; }
 }
 
-public class UpdateJobCandidateDto : UpdateDtoBase
+public class UpdateJobCandidateDto : UpdateDtoBase, IValidatableObject
 {
+    /// <inheritdoc cref="CreateJobCandidateDto.Validate"/>
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        => JobCandidateAddressRule.Validate(GeoAreaId, City);
+
     [Required]
     [MaxLength(100)]
     public string FirstName { get; set; } = string.Empty;
@@ -1180,9 +1311,33 @@ public class UpdateJobCandidateDto : UpdateDtoBase
     [MaxLength(30)]
     public string? DigitalAddress { get; set; }
 
-    [Required]
+    /// <summary>
+    /// The candidate's town or city, as free text.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>No longer <c>[Required]</c> as of round 4, lane A</b>, and that is deliberate rather
+    /// than a relaxation. When <see cref="GeoAreaId"/> is supplied the service <i>overwrites</i>
+    /// this from the tree, so a form whose cascade is filled in has nothing to put here — and a
+    /// required field the user is not allowed to type into is a form that cannot be submitted.
+    /// The address is still compulsory: <c>Validate</c> refuses a payload carrying neither an area
+    /// nor a city.
+    /// </remarks>
     [MaxLength(100)]
-    public string City { get; set; } = string.Empty;
+    public string? City { get; set; }
+
+    /// <summary>
+    /// Where the candidate lives, as one reference to the geography tree — the lowest tier chosen.
+    /// </summary>
+    /// <remarks>
+    /// <para>Null is "no area", not "leave unchanged": this DTO replaces the record's address
+    /// wholesale, so there is no <c>ClearGeoArea</c> flag of the kind the employee's patch-style
+    /// update needs.</para>
+    ///
+    /// <para>The area's country is reconciled with <c>CountryId</c> on save — a candidate cannot
+    /// claim Nigeria while pointing at a Ghanaian district — and a stated country that is silent is
+    /// filled in from the area rather than refused.</para>
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
 
     /// <summary>
     /// The candidate's nationality, as free text.
@@ -1232,6 +1387,29 @@ public class UpdateJobCandidateDto : UpdateDtoBase
     public string? NationalIdNumber { get; set; }
 
     public DateTime? NationalIdExpiryDate { get; set; }
+
+    /// <inheritdoc cref="CreateJobCandidateDto.Headline"/>
+    [MaxLength(300)]
+    public string? Headline { get; set; }
+
+    [MaxLength(4000)]
+    public string? ProfessionalSummary { get; set; }
+
+    [MaxLength(200)]
+    public string? CurrentJobTitle { get; set; }
+
+    [MaxLength(200)]
+    public string? CurrentEmployer { get; set; }
+
+    [Range(0, 60)]
+    public int? TotalYearsExperience { get; set; }
+
+    [Range(0, 1825)]
+    public int? NoticePeriodDays { get; set; }
+
+    public DateTime? AvailableFrom { get; set; }
+
+    public ErpSystem.Core.Enums.PreferredWorkArrangement PreferredWorkArrangement { get; set; }
 
     public bool IsInTalentPool { get; set; }
 }
@@ -1251,6 +1429,17 @@ public class JobCandidateQualificationDto : BaseDto
     public string Institution { get; set; } = string.Empty;
     public DateOnly DateAwarded { get; set; }
     public string? Grade { get; set; }
+
+    /// <summary>The rung the row itself states (round 4, lane Q). What a form edits.</summary>
+    public Guid? QualificationLevelId { get; set; }
+
+    /// <summary>
+    /// The rung the engine scores: <see cref="QualificationLevelId"/>, or else the catalogue entry's.
+    /// </summary>
+    public Guid? EffectiveQualificationLevelId { get; set; }
+
+    /// <summary>The effective rung's name, so a list is readable without a second call.</summary>
+    public string? EffectiveQualificationLevelName { get; set; }
 }
 
 public class CreateJobCandidateQualificationDto : CreateDtoBase
@@ -1262,6 +1451,12 @@ public class CreateJobCandidateQualificationDto : CreateDtoBase
     public QualificationType QualificationType { get; set; }
 
     public Guid? QualificationId { get; set; }
+
+    /// <summary>
+    /// The rung of the qualification ladder (round 4, lane Q). Required for Education unless the
+    /// catalogue entry picked already sits on one; optional otherwise.
+    /// </summary>
+    public Guid? QualificationLevelId { get; set; }
 
     [Required]
     [MaxLength(200)]
@@ -1283,6 +1478,12 @@ public class UpdateJobCandidateQualificationDto : UpdateDtoBase
     public QualificationType QualificationType { get; set; }
 
     public Guid? QualificationId { get; set; }
+
+    /// <summary>
+    /// The rung of the qualification ladder (round 4, lane Q). ⚠ Whole-record, like every field
+    /// here: an update that omits it clears it.
+    /// </summary>
+    public Guid? QualificationLevelId { get; set; }
 
     [Required]
     [MaxLength(200)]
@@ -1655,6 +1856,18 @@ public class JobApplicationDto : BaseDto
     public string CandidateName { get; set; } = string.Empty;
     public string CandidateEmail { get; set; } = string.Empty;
     public string CandidatePhone { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Whether the candidate has a photograph on file, so a screen can show a face beside the name
+    /// (round 4, lane B5).
+    /// </summary>
+    /// <remarks>
+    /// &#9888; A flag, not the image. Photographs go through the gated
+    /// <c>GET api/job-candidates/{id}/photo</c> like every other controlled upload; this exists so a
+    /// list of thirty applications does not fire thirty requests that will each come back 404.
+    /// </remarks>
+    public bool CandidateHasPhoto { get; set; }
+
     public DateTime ApplicationDate { get; set; }
     public ApplicationStatus Status { get; set; }
     public string StatusName => FormatApplicationStatus(Status);
@@ -1719,6 +1932,10 @@ public class JobApplicationSummaryDto
     public Guid JobCandidateId { get; set; }
     public string CandidateName { get; set; } = string.Empty;
     public string CandidateEmail { get; set; } = string.Empty;
+
+    /// <inheritdoc cref="JobApplicationDto.CandidateHasPhoto"/>
+    public bool CandidateHasPhoto { get; set; }
+
     public DateTime ApplicationDate { get; set; }
     public ApplicationStatus Status { get; set; }
     public string StatusName => JobApplicationDto.FormatApplicationStatus(Status);
@@ -2151,6 +2368,8 @@ public class JobInterviewQuestionDetailDto : BaseDto
     public int Weight { get; set; }
     public int MinScore { get; set; }
     public int MaxScore { get; set; }
+    /// <summary>What a good answer sounds like. Printed on the paper scoring sheet when set.</summary>
+    public string? ScoringGuide { get; set; }
     public Guid QuestionTypeId { get; set; }
     public string QuestionTypeName { get; set; } = string.Empty;
     public bool IsActive { get; set; }
@@ -2170,6 +2389,13 @@ public class CreateJobInterviewQuestionDetailDto : CreateDtoBase
 
     [Range(1, 100)]
     public int MaxScore { get; set; } = 10;
+
+    /// <summary>
+    /// What a good answer sounds like — printed beside the question on the paper scoring sheet.
+    /// Optional; a question that needs no guidance should not carry an empty heading on every sheet.
+    /// </summary>
+    [MaxLength(2000)]
+    public string? ScoringGuide { get; set; }
 
     [Required]
     public Guid QuestionTypeId { get; set; }
@@ -2191,6 +2417,10 @@ public class UpdateJobInterviewQuestionDetailDto : UpdateDtoBase
 
     [Range(1, 100)]
     public int MaxScore { get; set; }
+
+    /// <inheritdoc cref="CreateJobInterviewQuestionDetailDto.ScoringGuide"/>
+    [MaxLength(2000)]
+    public string? ScoringGuide { get; set; }
 
     [Required]
     public Guid QuestionTypeId { get; set; }
@@ -2348,6 +2578,23 @@ public class JobInterviewDto : BaseDto
     public int IntervieweeCount { get; set; }
     public int PanelistCount { get; set; }
     public Guid? QuestionPresetId { get; set; }
+
+    // ── Round 4, lane D ────────────────────────────────────────────────────────
+
+    /// <inheritdoc cref="CreateJobInterviewDto.RoomBookingId"/>
+    public Guid? RoomBookingId { get; set; }
+
+    /// <summary>The held room's name and booking number, so the screen need not fetch the booking.</summary>
+    public string? RoomName { get; set; }
+    public string? RoomBookingNumber { get; set; }
+
+    /// <summary>
+    /// Set when this interview was scheduled over a panelist's confirmed commitment. Null is the
+    /// ordinary case; a value means somebody decided, and said why.
+    /// </summary>
+    public string? PanelClashOverrideReason { get; set; }
+    public string? PanelClashOverrideDetail { get; set; }
+    public DateTime? PanelClashOverriddenAt { get; set; }
 }
 
 public class JobInterviewSummaryDto
@@ -2420,6 +2667,27 @@ public class CreateJobInterviewDto : CreateDtoBase
     public List<Guid>? PanelistEmployeeIds { get; set; }
     public List<Guid>? ExternalPanelistAssociateIds { get; set; }
     public Guid? QuestionPresetId { get; set; }
+
+    /// <summary>
+    /// Why this interview may be scheduled despite a panelist's confirmed commitment
+    /// (round 4, D3; decision D-5).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Without it a HARD clash REFUSES the write — the check stopped being advisory in round 4.
+    /// Supplying it schedules anyway and records the reason, who gave it and what was overridden,
+    /// on the interview. A reason supplied where there is no clash is discarded.
+    /// </remarks>
+    [MaxLength(1000)]
+    public string? PanelClashOverrideReason { get; set; }
+
+    /// <summary>
+    /// The room to HOLD for this interview, booked through the meeting-room register (D8).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Distinct from <c>LocationOrLink</c>, which is free text and reserves nothing. A room named
+    /// only in that box is invisible to the room's own double-booking check.
+    /// </remarks>
+    public Guid? RoomBookingId { get; set; }
 }
 
 public sealed class ApplicationSlotEntry
@@ -2462,6 +2730,13 @@ public class UpdateJobInterviewDto : UpdateDtoBase
     [MaxLength(2000)]
     public string? Instructions { get; set; }
     public Guid? QuestionPresetId { get; set; }
+
+    /// <inheritdoc cref="CreateJobInterviewDto.PanelClashOverrideReason"/>
+    [MaxLength(1000)]
+    public string? PanelClashOverrideReason { get; set; }
+
+    /// <inheritdoc cref="CreateJobInterviewDto.RoomBookingId"/>
+    public Guid? RoomBookingId { get; set; }
 }
 
 public class RescheduleJobInterviewDto
@@ -2484,6 +2759,13 @@ public class RescheduleJobInterviewDto
     [Required]
     [MaxLength(2000)]
     public string RescheduleReason { get; set; } = string.Empty;
+
+    /// <inheritdoc cref="CreateJobInterviewDto.PanelClashOverrideReason"/>
+    [MaxLength(1000)]
+    public string? PanelClashOverrideReason { get; set; }
+
+    /// <inheritdoc cref="CreateJobInterviewDto.RoomBookingId"/>
+    public Guid? RoomBookingId { get; set; }
 }
 
 public class CancelJobInterviewDto
@@ -2504,22 +2786,99 @@ public class CancelJobInterviewDto
 /// </summary>
 public class PanelistAvailabilityCheckDto
 {
+    /// <summary>True when anyone has anything at all — hard or soft.</summary>
     public bool HasConflicts { get; set; }
+
+    /// <summary>
+    /// True when at least one clash is HARD, which is what makes a schedule refuse without an
+    /// override reason (round 4, decision D-5).
+    /// </summary>
+    public bool HasHardConflicts { get; set; }
+
+    /// <summary>
+    /// Which sources actually answered, so an empty result can be told from an unregistered source.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Diagnostic, and load-bearing for that reason. A commitment source that exists but was never
+    /// registered contributes nothing and the check cheerfully reports "free" — the exact failure
+    /// this lane exists to remove, reappearing as a DI omission. If a source you expect is missing
+    /// from this list, it is not wired up.
+    /// </remarks>
+    public List<string> SourcesConsulted { get; set; } = new();
+
     public List<PanelistAvailabilityDto> Panelists { get; set; } = new();
 }
 
 /// <summary>Per-panelist conflict breakdown for the proposed slot.</summary>
+/// <remarks>
+/// ⚠ Round 4, lane D1. The three typed lists — interviews, leave, travel — were replaced by one
+/// <see cref="Commitments"/> list. There are seven sources now and there will be more; a DTO with a
+/// named list per source needs editing every time the organisation learns to track something else,
+/// and the screen needs editing with it.
+/// </remarks>
 public class PanelistAvailabilityDto
 {
     /// <summary>Employee id for internal panelists, or associate id for external panelists.</summary>
     public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
-    /// <summary>True when this row is an external associate (interview-overlap only; no leave/travel tracked).</summary>
+
+    /// <summary>
+    /// True when this row is an external associate. Only the sources keyed on an interview or a
+    /// company-wide closure can speak about them — there is no leave, travel or training on file.
+    /// </summary>
     public bool IsExternal { get; set; }
+
     public bool HasConflicts { get; set; }
-    public List<PanelistInterviewConflictDto> InterviewConflicts { get; set; } = new();
-    public List<PanelistLeaveConflictDto> LeaveConflicts { get; set; } = new();
-    public List<PanelistTravelConflictDto> TravelConflicts { get; set; } = new();
+    public bool HasHardConflicts { get; set; }
+
+    public List<PanelistCommitmentDto> Commitments { get; set; } = new();
+}
+
+/// <summary>One thing standing between this panelist and the proposed window.</summary>
+public class PanelistCommitmentDto
+{
+    public CommitmentKind Kind { get; set; }
+    public string KindName => Kind.ToString();
+
+    public CommitmentHardness Hardness { get; set; }
+    public string HardnessName => Hardness.ToString();
+
+    /// <summary>What a recruiter reads — "Interview panel for Senior Accountant".</summary>
+    public string Label { get; set; } = string.Empty;
+
+    public DateTime Start { get; set; }
+    public DateTime End { get; set; }
+
+    /// <summary>
+    /// True when the source records whole days, so the times above are the day's bounds rather than
+    /// a real window. Leave, travel, closures and all-day events.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The screen must not print a day-granular commitment as "09:00–11:00" — that is a precision
+    /// the record does not have, and it is why these are soft.
+    /// </remarks>
+    public bool IsDayGranular { get; set; }
+
+    /// <summary>The record's own number, where it has one, so a recruiter can go and look.</summary>
+    public string? Reference { get; set; }
+}
+
+/// <summary>
+/// A window in which the whole panel is free — the answer to "then when?" (round 4, D4).
+/// </summary>
+/// <remarks>
+/// ⚠ A slot is suggested when no panelist has a HARD commitment. Soft ones do not exclude it but
+/// are reported on it: a slot where somebody is nominally on leave is still a slot HR may want, and
+/// hiding it would be the system making that call on day-granular evidence.
+/// </remarks>
+public class PanelSlotSuggestionDto
+{
+    public DateOnly Date { get; set; }
+    public TimeSpan StartTime { get; set; }
+    public TimeSpan EndTime { get; set; }
+
+    public bool HasSoftConflicts { get; set; }
+    public string? SoftConflictSummary { get; set; }
 }
 
 public class PanelistInterviewConflictDto
@@ -2794,6 +3153,97 @@ public class UpdateIntervieweeSlotDto
     public TimeSpan? SlotEndTime   { get; set; }
 }
 
+// ── Slot apportionment (round 4, lane C) ────────────────────────────────────────────────────────
+
+/// <summary>One rest period inside the interview window that no candidate may be booked into.</summary>
+public class InterviewBreakDto
+{
+    [Required] public TimeSpan Start { get; set; }
+    [Required] public TimeSpan End   { get; set; }
+
+    /// <summary>What the break is for — printed on the timetable. "Lunch", "Panel conference".</summary>
+    [MaxLength(100)]
+    public string? Label { get; set; }
+}
+
+/// <summary>
+/// Asks what a day would look like at a given interval, without writing anything.
+/// </summary>
+/// <remarks>
+/// A dry run on purpose: a recruiter changes the interval three times before they like the shape of
+/// the day, and each attempt must not rewrite nine candidates' times — nor send anybody anything.
+/// </remarks>
+public class ApportionInterviewSlotsDto
+{
+    [Required]
+    public Guid InterviewId { get; set; }
+
+    [Range(InterviewSlotLimits.MinSlotMinutes, InterviewSlotLimits.MaxSlotMinutes)]
+    public int SlotMinutes { get; set; } = 30;
+
+    [Range(0, InterviewSlotLimits.MaxBufferMinutes)]
+    public int BufferMinutes { get; set; }
+
+    public List<InterviewBreakDto> Breaks { get; set; } = new();
+
+    /// <summary>
+    /// The candidates to place, in the order they should be seen. Omit to place everyone currently
+    /// booked into the session, in the order they were added.
+    /// </summary>
+    public List<Guid>? ApplicationIds { get; set; }
+}
+
+/// <summary>The bounds shared by the DTO attributes and the apportioner, so the two cannot drift.</summary>
+public static class InterviewSlotLimits
+{
+    public const int MinSlotMinutes = 5;
+    public const int MaxSlotMinutes = 480;
+    public const int MaxBufferMinutes = 120;
+}
+
+/// <summary>One candidate's place in the day.</summary>
+public class InterviewSlotAssignmentDto
+{
+    public Guid IntervieweeId { get; set; }
+    public Guid JobApplicationId { get; set; }
+    public string CandidateName { get; set; } = string.Empty;
+    public string ApplicationNumber { get; set; } = string.Empty;
+    public int Ordinal { get; set; }
+    public TimeSpan SlotStartTime { get; set; }
+    public TimeSpan SlotEndTime { get; set; }
+}
+
+/// <summary>
+/// The timetable, and — the reason this endpoint exists — whether everybody actually fits.
+/// </summary>
+public class InterviewSlotPlanDto
+{
+    public Guid InterviewId { get; set; }
+    public DateOnly ScheduledDate { get; set; }
+    public TimeSpan WindowStart { get; set; }
+    public TimeSpan WindowEnd { get; set; }
+    public int SlotMinutes { get; set; }
+    public int BufferMinutes { get; set; }
+    public List<InterviewBreakDto> Breaks { get; set; } = new();
+
+    public List<InterviewSlotAssignmentDto> Slots { get; set; } = new();
+
+    /// <summary>Candidates the window could not hold, in the order they would have been seen.</summary>
+    public List<InterviewSlotAssignmentDto> Unplaced { get; set; } = new();
+
+    /// <summary>True when every candidate fits. The single fact the screen leads with.</summary>
+    public bool AllFit { get; set; }
+
+    /// <summary>
+    /// The first time of day after the window that is not inside a break — where a second session
+    /// could pick up. Null when everybody fits. The DATE is the recruiter's to choose.
+    /// </summary>
+    public TimeSpan? FirstFreeAfterWindow { get; set; }
+
+    /// <summary>A sentence a recruiter can act on without reading the table.</summary>
+    public string Summary { get; set; } = string.Empty;
+}
+
 public class RecordIntervieweeAttendanceDto
 {
     [Required]
@@ -2893,6 +3343,11 @@ public class JobInterviewSelectedQuestionDto : BaseDto
     public int Weight { get; set; }
     public int MinScore { get; set; }
     public int MaxScore { get; set; }
+    /// <summary>
+    /// What a good answer sounds like. Carried here because this is the shape the printed scoring
+    /// sheet renders from — the drawn questions, not the bank.
+    /// </summary>
+    public string? ScoringGuide { get; set; }
     public int DisplayOrder { get; set; }
 }
 
@@ -2930,6 +3385,37 @@ public class JobInterviewScoreSummaryDto : BaseDto
     public DateTime EvaluationDate { get; set; }
     public bool IsFinalized { get; set; }
     public DateTime? FinalizedDate { get; set; }
+
+    /// <summary>
+    /// Typed by the panelist, or transcribed by HR from a signed paper sheet. Null on scorecards
+    /// recorded before this was tracked — which is not a claim that they were filed online.
+    /// </summary>
+    public InterviewScoreSource? ScoreSource { get; set; }
+
+    /// <summary>
+    /// The HR person who filed it on the panelist's behalf. Null when the panelist did.
+    /// ⚠ An <b>employee</b> id — see the entity's note on why it is not a user id.
+    /// </summary>
+    public Guid? FiledByHrOnBehalfOfEmployeeId { get; set; }
+
+    /// <summary>Their name, when the read loaded it. Null when nobody filed on anybody's behalf.</summary>
+    public string? FiledByHrOnBehalfOfName { get; set; }
+
+    /// <summary>
+    /// A one-line statement of provenance for the screen, so the badge does not have to be
+    /// reassembled from three nullable fields at every call site.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ It says <i>filed on their behalf</i>, not <i>transcribed from a signed sheet</i>. The paper
+    /// sheet is how this normally happens and is what the screen offers, but the only thing the
+    /// server actually witnessed is that somebody other than the panelist pressed the button. An
+    /// audit line should claim exactly that and no more.
+    /// </remarks>
+    public string? FiledOnBehalfNote => ScoreSource == InterviewScoreSource.PaperSheet
+        ? string.IsNullOrWhiteSpace(FiledByHrOnBehalfOfName)
+            ? $"Filed by HR on behalf of {PanelistName}"
+            : $"Filed by {FiledByHrOnBehalfOfName} on behalf of {PanelistName}"
+        : null;
 }
 
 public class JobInterviewScoreSummaryDetailDto : JobInterviewScoreSummaryDto
@@ -2953,6 +3439,12 @@ public class CreateJobInterviewScoreSummaryDto : CreateDtoBase
 
     public DateTime EvaluationDate { get; set; } = DateTime.UtcNow;
     public List<CreateJobInterviewScoreEntryDto> ScoreEntries { get; set; } = new();
+
+    // ⚠ There is deliberately NO ScoreSource here. Provenance is derived by the service from who is
+    // calling — a panelist filing their own card is Online, anyone filing somebody else's is not —
+    // because a source the client could assert freely would be worth nothing in an audit, and a
+    // field the server ignores reads to the next developer as a control that exists when it does
+    // not. The "from a paper sheet" mode on the scorecard screen is a workflow, not a flag.
 }
 
 public class FinalizeInterviewScoreDto
@@ -3997,6 +4489,17 @@ public class OnboardingPlanTemplateDetailDto : OnboardingPlanTemplateDto
     public List<OnboardingTaskTemplateDto> TaskTemplates { get; set; } = new();
 }
 
+/// <summary>
+/// Copy an onboarding plan template under a new name (round 4, lane J1). Its tasks come with it; its
+/// audience does not, and it is never the default — see <c>OnboardingPlanTemplateService.CloneAsync</c>.
+/// </summary>
+public class CloneOnboardingPlanTemplateDto
+{
+    [Required]
+    [MaxLength(200)]
+    public string NewName { get; set; } = string.Empty;
+}
+
 public class CreateOnboardingPlanTemplateDto : CreateDtoBase
 {
     [Required]
@@ -4059,7 +4562,12 @@ public class CreateOnboardingTaskTemplateDto : CreateDtoBase
     [Required]
     public OnboardingTaskCategory Category { get; set; }
 
-    [Range(0, 365)]
+    /// <summary>
+    /// Days from the start date; negative for a task due before it (the contract, the accounts). The
+    /// template screen always offered −90…365 — "Negative for before the start date" — while this
+    /// range was 0…365 from the port, so every pre-start task was refused (found by round 4, lane J).
+    /// </summary>
+    [Range(-90, 365)]
     public int DueDaysFromStartDate { get; set; }
 
     public bool IsMandatory { get; set; } = true;
@@ -4083,7 +4591,8 @@ public class UpdateOnboardingTaskTemplateDto : UpdateDtoBase
     [Required]
     public OnboardingTaskCategory Category { get; set; }
 
-    [Range(0, 365)]
+    /// <summary>Negative for a task due before the start date — see the create DTO.</summary>
+    [Range(-90, 365)]
     public int DueDaysFromStartDate { get; set; }
 
     public bool IsMandatory { get; set; }
@@ -4117,6 +4626,10 @@ public class OnboardingPlanDto : BaseDto
     public Guid? OnboardingCoordinatorId { get; set; }
     public string? OnboardingCoordinatorName { get; set; }
     public string? Notes { get; set; }
+
+    /// <summary>Set when the system created the plan on hire confirmation: which template and why
+    /// (round 4, lane I4). Null on a plan a person created.</summary>
+    public string? TemplateSelectionReason { get; set; }
     public int TotalTasks { get; set; }
     public int CompletedTasks { get; set; }
     public int OverdueTasks { get; set; }
@@ -5388,6 +5901,10 @@ public class PipelineApplicationListItemDto
     public string ApplicationNumber { get; set; } = string.Empty;
     public string CandidateName { get; set; } = string.Empty;
     public string CandidateEmail { get; set; } = string.Empty;
+
+    /// <inheritdoc cref="JobApplicationDto.CandidateHasPhoto"/>
+    public bool CandidateHasPhoto { get; set; }
+
     public ApplicationStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public ApplicationSource Source { get; set; }
@@ -5632,6 +6149,12 @@ public class ExternalQualificationDto
     /// <summary>Optional link to the Qualification catalogue. Null when the candidate typed free text.</summary>
     public Guid? QualificationId { get; set; }
 
+    /// <summary>
+    /// The rung of the qualification ladder (round 4, lane Q). The careers profile requires it for
+    /// Education unless the catalogue entry picked already sits on one.
+    /// </summary>
+    public Guid? QualificationLevelId { get; set; }
+
     [Required]
     [MaxLength(200)]
     public string Institution { get; set; } = string.Empty;
@@ -5857,6 +6380,10 @@ public class CandidatePortalProfileDto
     public DateTime? DateOfBirth { get; set; }
     public ErpSystem.Core.Enums.Gender? Gender { get; set; }
     public string? City { get; set; }
+    /// <summary>Round 4, lane A — the resolved tier-1 name, so the portal can echo the full address back.</summary>
+    public string? Region { get; set; }
+    /// <summary>Round 4, lane A — the candidate re-opens their cascade from this on the next visit.</summary>
+    public Guid? GeoAreaId { get; set; }
     public Guid? CountryId { get; set; }
     public string? CountryName { get; set; }
     public string? PostalAddress { get; set; }
@@ -5914,8 +6441,24 @@ public class UpdateCandidatePortalProfileDto
     public string? AlternatePhone { get; set; }
     public DateTime? DateOfBirth { get; set; }
     public ErpSystem.Core.Enums.Gender? Gender { get; set; }
+    /// <summary>
+    /// ⚠ Overwritten by the resolved town or district when <see cref="GeoAreaId"/> is supplied —
+    /// round 4, lane A. It remains the only address a candidate in a country with no geography
+    /// scheme can give, which is most of the world.
+    /// </summary>
     [MaxLength(100)]
     public string? City { get; set; }
+
+    /// <summary>
+    /// Where the candidate lives, from the shared geography tree — the lowest tier they chose.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The careers form only shows the cascade when the chosen country has a published scheme;
+    /// the endpoint answers 204 otherwise and the form falls back to the free-text city. Null here
+    /// therefore means "no area", never "the candidate skipped a required step".
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
     /// <summary>
     /// Optional, matching the entity. ⚠ Until 2026-09-14 this was a non-nullable <c>Guid</c> and
     /// the careers page sent <c>Guid.Empty</c> as a sentinel meaning "no country" — a handshake
@@ -6228,6 +6771,23 @@ public class TalentPoolFilterDto
     public DateTime? AvailableBefore    { get; set; }
     public bool?    OverdueForReview    { get; set; }
     public int?     DormantMoreThanDays { get; set; }
+
+    /// <summary>
+    /// Where they are, by the geography tree: an area matches candidates recorded in it AND
+    /// anywhere beneath it (round 4, lane B2).
+    /// </summary>
+    /// <remarks>
+    /// <para>Subtree containment, not equality, for the same reason the Location criterion works
+    /// that way: "who do we have in Greater Accra?" must find the person recorded in Tema, and
+    /// nobody types the region when the cascade offers them the district.</para>
+    ///
+    /// <para>&#9888; A candidate with only a typed city is NOT matched. The text fallback belongs
+    /// to scoring, where a criterion carries the area's name to compare against; a filter has no
+    /// such name and guessing at one would quietly widen the answer. Use the search box for a
+    /// typed city.</para>
+    /// </remarks>
+    public Guid?    GeoAreaId           { get; set; }
+
     public int      PageNumber          { get; set; } = 1;
     public int      PageSize            { get; set; } = 25;
     public string   SortBy              { get; set; } = "LastName";
@@ -6363,6 +6923,198 @@ public class TalentPoolPagedResultDto
     public int  TotalPages  => (int)Math.Ceiling((double)TotalCount / PageSize);
 }
 
+// -- Screening the pool by real criteria (round 4, lane B) ---------------------------------------
+
+/// <summary>
+/// One criterion in an ad-hoc screen - the same shape a vacancy's criterion has, minus the vacancy.
+/// </summary>
+/// <remarks>
+/// Resolved and validated by the SAME <c>IShortlistingCriteriaResolver</c> a saved criterion goes
+/// through, so a mandatory Gender, a numeric criterion with no bound, a list criterion with no
+/// values and an area that is not on the tree are refused here exactly as they are on a vacancy.
+/// Nothing is written: the rows exist for the length of the request.
+/// </remarks>
+public class AdHocScreeningCriterionDto
+{
+    [Required]
+    [MaxLength(100)]
+    public string CriteriaName { get; set; } = string.Empty;
+
+    [Required]
+    public JobShortlistingCriteriaType Type { get; set; }
+
+    [MaxLength(500)]
+    public string? RequiredValue { get; set; }
+
+    public decimal? MinValue { get; set; }
+    public decimal? MaxValue { get; set; }
+    public bool IsMandatory { get; set; }
+
+    public MandatoryMatchMode MatchMode { get; set; } = MandatoryMatchMode.AnyMatched;
+    public ValueMatchStrategy MatchStrategy { get; set; } = ValueMatchStrategy.Exact;
+
+    [Range(1, 100)]
+    public int Weight { get; set; } = 1;
+
+    public ShortlistingComparisonOperator? ComparisonOperator { get; set; }
+
+    /// <summary>The accepted values, as the whole set - same rules as a saved criterion.</summary>
+    public List<ShortlistingCriteriaValueInputDto>? Values { get; set; }
+}
+
+/// <summary>
+/// What to screen: which slice of the pool, how many rows back, and - for the ad-hoc door - the
+/// criteria to screen by.
+/// </summary>
+/// <remarks>
+/// <para>The filter is the ordinary <see cref="TalentPoolFilterDto"/> the pool list already uses,
+/// so "screen the people I am looking at" needs no second filter vocabulary. Its paging fields are
+/// ignored: screening reads the whole matching set and <see cref="TopN"/> trims the ANSWER, which
+/// is a different question from paging the list.</para>
+///
+/// <para>&#9888; <see cref="IncludeNonMatching"/> defaults to true deliberately. A screen that
+/// silently dropped everyone who failed a mandatory criterion would answer "nobody in the pool is
+/// close", and a recruiter would have no way to see the near miss they might waive. The rows carry
+/// the verdict; hiding them is the reader's choice, not the engine's.</para>
+/// </remarks>
+public class TalentPoolScreenRequestDto
+{
+    public TalentPoolFilterDto? Filter { get; set; }
+
+    [Range(1, 500)]
+    public int TopN { get; set; } = 50;
+
+    public bool IncludeNonMatching { get; set; } = true;
+
+    /// <summary>
+    /// The ad-hoc criteria, for <c>POST api/talent-pool/screen</c>. Ignored by the by-vacancy door,
+    /// which reads the vacancy's own live criteria - the whole point being that the pool is judged
+    /// by what the vacancy actually says.
+    /// </summary>
+    public List<AdHocScreeningCriterionDto>? Criteria { get; set; }
+}
+
+/// <summary>One pool member, scored against the criteria the request named.</summary>
+public class TalentPoolScreenRowDto
+{
+    public Guid    CandidateId     { get; set; }
+    public string  CandidateName   { get; set; } = string.Empty;
+    public string  CandidateNumber { get; set; } = string.Empty;
+    public string  Email           { get; set; } = string.Empty;
+    public string? Headline        { get; set; }
+    public string? City            { get; set; }
+    public Guid?   GeoAreaId       { get; set; }
+    public int?    TotalYearsExperience { get; set; }
+    public string? PreferredWorkArrangementName { get; set; }
+    public DateTime? AvailableFrom { get; set; }
+    public bool    HasPhoto        { get; set; }
+    public bool    IsInTalentPool  { get; set; }
+
+    /// <summary>
+    /// The criteria score out of <see cref="CriteriaScoreMax"/>, or null when nothing about this
+    /// candidate could be measured.
+    /// </summary>
+    /// <remarks>
+    /// &#9888; Null and 0 mean different things and are rendered differently. 0 is "measured, and
+    /// missed everything"; null is "the criteria asked questions this record cannot answer".
+    /// Collapsing them would put a candidate nobody knows anything about at the bottom of the list
+    /// beside one who was checked and genuinely does not fit - or, if the fallback went the other
+    /// way, at the top. Both are the fault this module keeps having to remove.
+    /// </remarks>
+    public decimal? CriteriaScore   { get; set; }
+
+    public decimal CriteriaScoreMax { get; set; } = 100m;
+
+    /// <summary>False when a criterion marked mandatory was missed - the score is then 0.</summary>
+    public bool AllMandatoryPassed  { get; set; } = true;
+
+    /// <summary>The weight actually measured; criteria left out of the score do not count here.</summary>
+    public decimal TotalWeight      { get; set; }
+
+    /// <summary>Whether this candidate already has an application against the screened vacancy.</summary>
+    public bool AlreadyApplied      { get; set; }
+
+    public List<CriterionScoreResult> Breakdown { get; set; } = new();
+}
+
+/// <summary>The answer to a screen: what was screened, against what, and who came back.</summary>
+public class TalentPoolScreenResultDto
+{
+    /// <summary>Null for an ad-hoc screen, which is not about any one vacancy.</summary>
+    public Guid?   VacancyId     { get; set; }
+    public string? VacancyNumber { get; set; }
+    public string? JobTitle      { get; set; }
+
+    /// <summary>How many pool members the filter selected, before <c>TopN</c> trimmed the answer.</summary>
+    public int ScreenedCount  { get; set; }
+
+    /// <summary>How many were scored at all - a member nothing could be measured about is not one.</summary>
+    public int ScoredCount    { get; set; }
+
+    /// <summary>How many met every mandatory criterion.</summary>
+    public int QualifiedCount { get; set; }
+
+    /// <summary>
+    /// The criteria the screen actually ran, named and weighted, so a reader can see what the score
+    /// is made of without opening the vacancy.
+    /// </summary>
+    public List<ScreeningCriterionSummaryDto> Criteria { get; set; } = new();
+
+    public List<TalentPoolScreenRowDto> Rows { get; set; } = new();
+}
+
+/// <summary>A criterion as it was applied to a screen - what it measures, and how heavily.</summary>
+public class ScreeningCriterionSummaryDto
+{
+    public Guid?  CriteriaId   { get; set; }
+    public string CriteriaName { get; set; } = string.Empty;
+    public JobShortlistingCriteriaType Type { get; set; }
+    public string TypeName     => Type.ToString();
+    public bool   IsMandatory  { get; set; }
+    public int    Weight       { get; set; }
+    public string? AcceptedValues { get; set; }
+}
+
+/// <summary>Invite pool members to apply for a vacancy - the first of lane B's two bulk acts.</summary>
+public class TalentPoolInviteToApplyDto
+{
+    [Required]
+    public Guid JobVacancyId { get; set; }
+
+    [Required]
+    [MinLength(1)]
+    public List<Guid> CandidateIds { get; set; } = new();
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    /// <summary>
+    /// Whether the candidate is emailed. Default true; the send is best-effort and never fails the
+    /// application it belongs to, exactly as the other recruitment notifications are.
+    /// </summary>
+    public bool SendEmail { get; set; } = true;
+}
+
+/// <summary>Book pool members into an existing interview session - the second bulk act.</summary>
+/// <remarks>
+/// &#9888; Requires each candidate to already have an application against that interview's vacancy.
+/// Decision Q2: shortlisting and interviewing belong to an application, and manufacturing one
+/// silently here would lose the trail of who decided to consider this person and when. A candidate
+/// with no application is skipped with a reason that says to invite them first.
+/// </remarks>
+public class TalentPoolBookInterviewDto
+{
+    [Required]
+    public Guid JobInterviewId { get; set; }
+
+    [Required]
+    [MinLength(1)]
+    public List<Guid> CandidateIds { get; set; } = new();
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+}
+
 #endregion
 
 // ============================================================================
@@ -6387,4 +7139,221 @@ public class OfferLetterDto
 
     /// <summary>Rendered, self-contained HTML document body suitable for display and print-to-PDF.</summary>
     public string HtmlBody { get; set; } = string.Empty;
+}
+
+// ── The printed interview paper (round 4, lane F) ───────────────────────────────────────────────
+
+/// <summary>Which paper to print.</summary>
+public enum InterviewPaperVariant
+{
+    /// <summary>One sheet per candidate per panelist, with score boxes. The thing that gets signed.</summary>
+    ScoreSheet = 1,
+
+    /// <summary>
+    /// The drawn questions alone, for the panel to read beforehand. No score boxes.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This one reveals the questions, so it stays behind the same per-record gate as everything
+    /// else on the interview. A blank scoring sheet leaks nothing; a question list does.
+    /// </remarks>
+    Questions = 2,
+
+    /// <summary>The cover page — panel and timetable — followed by every scoring sheet.</summary>
+    Pack = 3,
+}
+
+/// <summary>The rendered paper. HTML the client prints; there is no PDF by design.</summary>
+public class InterviewPaperDto
+{
+    public Guid InterviewId { get; set; }
+    public string InterviewNumber { get; set; } = string.Empty;
+    public string JobTitle { get; set; } = string.Empty;
+    public InterviewPaperVariant Variant { get; set; }
+
+    /// <summary>How many physical sheets this will print — so the screen can say so before it does.</summary>
+    public int SheetCount { get; set; }
+
+    /// <summary>
+    /// The whole document. Each sheet is a <c>&lt;section class='interview-paper-sheet'&gt;</c>
+    /// carrying its own page break, so the print stylesheet has something to hang on.
+    /// </summary>
+    public string HtmlBody { get; set; } = string.Empty;
+}
+
+// ── The panelist's own scorecard worklist (round 4, lane F5) ────────────────────────────────────
+
+/// <summary>
+/// Where one of the caller's scorecards has got to. Derived, not stored.
+/// </summary>
+public enum PanelistScorecardState
+{
+    /// <summary>Nothing saved at all.</summary>
+    NotStarted = 1,
+
+    /// <summary>A private draft exists. Nobody else can see it, and it does not count as filed.</summary>
+    Draft = 2,
+
+    /// <summary>A scorecard is saved and visible to the panel, but not yet signed off.</summary>
+    Saved = 3,
+
+    /// <summary>Signed off. It can no longer be changed.</summary>
+    SignedOff = 4,
+}
+
+/// <summary>One candidate the caller has to score, and how far they have got.</summary>
+/// <remarks>
+/// ⚠ Carries the <b>caller's own</b> card only. A colleague's mark never appears here, whatever the
+/// blind-scoring rule would allow elsewhere — this is a to-do list, and a to-do list showing
+/// somebody else's answer is the anchoring problem with a different shape.
+/// </remarks>
+public class PanelistScorecardCandidateDto
+{
+    public Guid IntervieweeId { get; set; }
+    public Guid JobApplicationId { get; set; }
+    public string CandidateName { get; set; } = string.Empty;
+    public string ApplicationNumber { get; set; } = string.Empty;
+
+    /// <summary>Their slot, when the day was apportioned. Null means "sometime in the session".</summary>
+    public TimeSpan? SlotStartTime { get; set; }
+    public TimeSpan? SlotEndTime { get; set; }
+
+    /// <summary>Whether they turned up. Null before the day.</summary>
+    public bool? CandidateAttended { get; set; }
+
+    public Guid? ScoreSummaryId { get; set; }
+    public PanelistScorecardState State { get; set; } = PanelistScorecardState.NotStarted;
+    public decimal? TotalWeightedScore { get; set; }
+    public JobInterviewRecommendation? Recommendation { get; set; }
+    public string? RecommendationName => Recommendation?.ToString();
+
+    /// <summary>True once nothing further is owed for this candidate.</summary>
+    public bool IsComplete => State == PanelistScorecardState.SignedOff;
+}
+
+/// <summary>
+/// One interview the caller sits on, with the candidates they owe a scorecard for.
+/// </summary>
+/// <remarks>
+/// <para><b>Why this exists</b> (round 4, lane F5). A panelist's diary listed interview <i>numbers</i>
+/// and nothing else, while describing itself as "the scorecards you owe" — so the only route to a
+/// scorecard ran through HR's desk screen and a tab. This is the read that lets the portal keep
+/// that promise: who you are seeing, when, and what you still owe.</para>
+///
+/// <para>⚠ <b>Takes the employee from the token</b>, like <c>me/panelist-slots</c>. The id-bearing
+/// twin would mean the client fetching its own employee id and handing it back, which is the shape
+/// that produced this module's authorization holes.</para>
+/// </remarks>
+public class PanelistScorecardWorklistDto
+{
+    public Guid InterviewId { get; set; }
+    public string InterviewNumber { get; set; } = string.Empty;
+    public string JobTitle { get; set; } = string.Empty;
+    public string VacancyNumber { get; set; } = string.Empty;
+    public int Round { get; set; }
+
+    public JobInterviewType Type { get; set; }
+    public string TypeName => Type.ToString();
+    public InterviewMode Mode { get; set; }
+    public string ModeName => Mode.ToString();
+    public JobInterviewStatus Status { get; set; }
+    public string StatusName => Status.ToString();
+
+    public DateOnly ScheduledDate { get; set; }
+    public TimeSpan StartTime { get; set; }
+    public TimeSpan EndTime { get; set; }
+    public string? LocationOrLink { get; set; }
+
+    /// <summary>The caller's own seat on this panel — the id the scorecard is filed against.</summary>
+    public Guid PanelistId { get; set; }
+    public JobInterviewPanelistRole Role { get; set; }
+    public string RoleName => Role.ToString();
+    public bool IsRequired { get; set; }
+    public bool IsConfirmed { get; set; }
+
+    /// <summary>Whether this session has a question plan the panel can be held to.</summary>
+    public bool HasQuestionPlan { get; set; }
+
+    public List<PanelistScorecardCandidateDto> Candidates { get; set; } = new();
+
+    /// <summary>How many scorecards are still owed. Zero is the state a panelist is working towards.</summary>
+    public int OutstandingCount => Candidates.Count(c => !c.IsComplete);
+
+    /// <summary>
+    /// Whether anything can still be filed. A cancelled or completed session is read-only, and a
+    /// screen that offers a scorecard on one is offering a 422.
+    /// </summary>
+    public bool IsOpen => Status != JobInterviewStatus.Cancelled && Status != JobInterviewStatus.Completed;
+}
+
+// ── The offer defaults proposal (round 4, lane G) ───────────────────────────────────────────────
+
+/// <summary>
+/// What the system proposes for a new offer, and — for every value — where it came from.
+/// </summary>
+/// <remarks>
+/// <para><b>Why this exists.</b> The offer create path already filled several gaps
+/// <i>server-side at save time</i>: probation and notice months fell back to the position's, weekly
+/// hours to 20 or 40, the position snapshot and the benefit list were seeded outright. All of that
+/// happened <b>after</b> HR pressed Save, invisibly — so the form showed empty boxes, HR typed
+/// values that were then silently overridden or silently defaulted, and nobody could see which
+/// number was theirs and which was the system's.</para>
+///
+/// <para>This read moves the proposal to <b>before</b> the form is filled in. Every value is
+/// editable; every value carries its source in <see cref="Sources"/> so the screen can say
+/// <i>"14 days — from the offer validity policy"</i> under the box.</para>
+///
+/// <para>⚠ <b><see cref="Sources"/> carries an entry only where a value was actually resolved.</b>
+/// A field the system could not derive comes back null with <b>no</b> source line, rather than a
+/// sentence explaining a number that is not there. Rendering a source for an absent value would be
+/// the same fault as an empty criterion scoring full marks: an unanswerable question dressed up as
+/// an answer.</para>
+/// </remarks>
+public class JobOfferDefaultsDto
+{
+    public Guid JobApplicationId { get; set; }
+    public string ApplicationNumber { get; set; } = string.Empty;
+    public string CandidateName { get; set; } = string.Empty;
+    public string VacancyNumber { get; set; } = string.Empty;
+    public string PositionTitle { get; set; } = string.Empty;
+    public string DepartmentName { get; set; } = string.Empty;
+    public string EmploymentTypeName { get; set; } = string.Empty;
+
+    // ── placement ──
+    public Guid? LocationLevelId { get; set; }
+    public Guid? LocationId { get; set; }
+    public string? LocationName { get; set; }
+
+    // ── terms ──
+    public int? ContractDurationMonths { get; set; }
+    public int? ProbationPeriodMonths { get; set; }
+    public int? NoticePeriodMonths { get; set; }
+    public int? AnnualLeaveDays { get; set; }
+    public decimal? WeeklyHours { get; set; }
+    public bool IsConditional { get; set; }
+    public DateOnly? ProposedStartDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+
+    // ── money ──
+    public Guid? SalaryGradeId { get; set; }
+    public string? SalaryGradeName { get; set; }
+    public decimal? SalaryGradeMin { get; set; }
+    public decimal? SalaryGradeMax { get; set; }
+    public Guid? SalaryLevelId { get; set; }
+    public string? SalaryLevelName { get; set; }
+    public Guid? SalaryNotchId { get; set; }
+    public int? SalaryNotchNumber { get; set; }
+    public decimal? BaseSalary { get; set; }
+    public string? CurrencyCode { get; set; }
+
+    /// <summary>
+    /// camelCase field name → the one-line explanation of where that value came from. Only
+    /// populated for values that were actually resolved.
+    /// </summary>
+    public Dictionary<string, string> Sources { get; set; } = new();
+
+    /// <summary>
+    /// Things the system could not propose and the reason, so the screen can say what HR has to
+    /// supply by hand rather than leaving a silently empty box.
+    /// </summary>
+    public List<string> Unresolved { get; set; } = new();
 }

@@ -60,6 +60,7 @@ public static class EmployeeImportColumns
     public const string MaritalStatus = "MaritalStatus";
     public const string EmploymentType = "EmploymentType";
     public const string DateEmployed = "DateEmployed";
+    public const string ConfirmationDate = "ConfirmationDate";
     public const string ContractEndDate = "ContractEndDate";
     public const string Department = "Department";
     public const string Section = "Section";
@@ -114,6 +115,11 @@ public static class EmployeeImportColumns
         new(EmploymentType, "Employment Type", true, EmployeeImportColumnKind.List,
             "Decides which staff-number register the number is checked against.", ListEmploymentType, Width: 16),
         new(DateEmployed, "Date Employed", true, EmployeeImportColumnKind.Date, "Start date with the organisation.", Width: 14),
+        // HR finish plan lane 11: without it every imported permanent employee was put on a
+        // probation that had ended years before, because nothing said they had passed it.
+        new(ConfirmationDate, "Confirmation Date", false, EmployeeImportColumnKind.Date,
+            "When probation was passed, for staff confirmed before this system. If blank, it is worked out as Date Employed "
+            + "plus the position's probation term — when that term has already ended — and marked as worked out.", Width: 16),
         new(ContractEndDate, "Contract End Date", false, EmployeeImportColumnKind.Date,
             "Required when Employment Type is Contract or FixedTerm.", Width: 16),
         new(Department, "Department", true, EmployeeImportColumnKind.Text,

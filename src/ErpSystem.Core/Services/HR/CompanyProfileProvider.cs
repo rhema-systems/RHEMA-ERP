@@ -47,9 +47,13 @@ public sealed class CompanyProfileProvider : ICompanyProfileProvider
         return tenantId;
     }
 
-    public async Task<CompanyProfile> GetAsync(CancellationToken cancellationToken = default)
+    public Task<CompanyProfile> GetAsync(CancellationToken cancellationToken = default)
+        => GetForTenantAsync(GetTenantId(), cancellationToken);
+
+    public async Task<CompanyProfile> GetForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant was named for the company profile.");
         var profile = await _repo
             .GetQueryable()
             .Include(p => p.Country)

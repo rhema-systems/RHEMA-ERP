@@ -145,6 +145,7 @@ import {
   Recycle,
   Plane,
   Layers3,
+  Zap,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -154,6 +155,7 @@ import {
   hrOperationalTrainingLinks,
   hrSetupNavChildren,
 } from '../../config/hr-setup-nav';
+import { PAY_VALUER_ROLES } from '../hr/common/PermissionGate';
 
 export interface NavItem {
   title: string;
@@ -370,6 +372,18 @@ export const navigationItems: NavItem[] = [
           'Financial Controller',
           'Managing Director',
         ],
+      },
+      {
+        // Leave settings audit 2 (P2): Finance values the pay HR records in days — a leaver's
+        // settlement pay lines and leave cashed in. The page lives under /hr, whose gate every
+        // internal role passes, and is shown only to holders of the valuation permission — or of
+        // a role the API's fallback grants it to, while a tenant's permission seed has not run.
+        title: 'Pay to value (HR)',
+        href: '/hr/pay-valuation',
+        icon: Banknote,
+        roles: PAY_VALUER_ROLES,
+        permissions: ['HR.Pay.Value'],
+        accessMode: 'any',
       },
       {
         title: 'General Ledger',
@@ -1305,6 +1319,23 @@ export const navigationItems: NavItem[] = [
                 icon: CalendarCheck,
                 permissions: ['HR.Company.Read'],
               },
+              {
+                // Round 4, D5. The diary: everything the signed-in person is down for, assembled
+                // from the same commitment sources the interview clash check fans out over.
+                // ⚠ NO permission — the server takes the employee from the token, so this is
+                // self-service and gating it would lock people out of their own schedule.
+                title: 'My Schedule',
+                href: '/hr/company-schedule/my-schedule',
+                icon: CalendarClock,
+              },
+              {
+                // ⚠ Company WRITE, not Read: the team view exposes other people's leave and
+                // travel, which is desk information rather than general reading.
+                title: 'Team Schedule',
+                href: '/hr/company-schedule/team',
+                icon: Users,
+                permissions: ['HR.Company.Write'],
+              },
             ],
           },
           {
@@ -1549,6 +1580,9 @@ export const navigationItems: NavItem[] = [
               { title: 'Talent Pool', href: '/hr/recruitment/talent-pool', icon: Star, permissions: ['HR.Recruitment.Read'] },
               { title: 'Applications', href: '/hr/recruitment/applications', icon: FileText, permissions: ['HR.Recruitment.Read'] },
               { title: 'Interviews', href: '/hr/recruitment/interviews', icon: CalendarClock, permissions: ['HR.Recruitment.Read'] },
+              // Round 4, lane E. Between interviews and offers because that is where it falls in the
+              // hire: a test is sat before a decision, and its marking queue is a daily job.
+              { title: 'Assessments', href: '/hr/recruitment/assessments', icon: ClipboardCheck, permissions: ['HR.Recruitment.Read'] },
               // The only recruitment screen a non-HR employee can use: a panelist's own sessions. The
               // interview schedule above answers 403 for them, so without this they have no way in.
               { title: 'Offers', href: '/hr/recruitment/offers', icon: HandCoins, permissions: ['HR.Recruitment.Read'] },
@@ -1585,6 +1619,8 @@ export const navigationItems: NavItem[] = [
               { title: 'Dashboard', href: '/hr/orientation/dashboard', icon: LayoutDashboard, permissions: ['HR.Orientation.Read'] },
               { title: 'Sessions', href: '/hr/orientation/sessions', icon: CalendarClock, permissions: ['HR.Orientation.Read'] },
               { title: 'Enrollments', href: '/hr/orientation/enrollments', icon: Users, permissions: ['HR.Orientation.Read'] },
+              // Round 4, lane I5: "which rules would fire for this person, and why".
+              { title: 'Enrollment Triggers', href: '/hr/orientation/triggers', icon: Zap, permissions: ['HR.Orientation.Read'] },
               // My Orientation re-homed to the portal (/me/orientation).
               { title: 'Onboarding Plans', href: '/hr/orientation/onboarding', icon: ListChecks, permissions: ['HR.Orientation.Read'] },
               { title: 'Task Queues', href: '/hr/orientation/onboarding/queues', icon: ClipboardCheck, permissions: ['HR.Orientation.Read'] },

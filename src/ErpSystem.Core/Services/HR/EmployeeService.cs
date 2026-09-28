@@ -28,6 +28,10 @@ public class EmployeeService : IEmployeeService
     private readonly ILogger<EmployeeService> _logger;
     private readonly IDisabilityTypeService _disabilityTypes; // round 3, lane P2
 
+    // Round 4, lane I3: an employee being created is the OnHire trigger. The form, the import and
+    // anything else that creates an employee through this service fire it here, once.
+    private readonly IOrientationEnrollmentTriggerService _orientationTriggers;
+
     public EmployeeService(
         IEmployeeRepository employeeRepository,
         IOrganizationUnitRepository organizationUnitRepository,
@@ -43,8 +47,10 @@ public class EmployeeService : IEmployeeService
         ICompanyHrPolicySettingsService policySettings,
         IPositionNamedSetService namedSets,
         ILogger<EmployeeService> logger,
-        IDisabilityTypeService disabilityTypes)
+        IDisabilityTypeService disabilityTypes,
+        IOrientationEnrollmentTriggerService orientationTriggers)
     {
+        _orientationTriggers = orientationTriggers;
         _currencies = currencies;
         _staffNumbers = staffNumbers;
         _payrollMembership = payrollMembership;
@@ -523,11 +529,13 @@ public class EmployeeService : IEmployeeService
                 + "this system, use the import door — tick that they already have a staff number.");
 
         await _disabilityTypes.EnsureUsableAsync(dto.DisabilityTypeId, dto.HasDisability, cancellationToken); // round 3, lane P2
+        dto.ExperienceLevel = CanonicalExperienceLevel(dto.ExperienceLevel); // round 4, lane O
         var employeeEntity = dto.ToEntity(employeeNumber, orgUnit.OrganizationLevelId, location.LocationLevelId);
         employeeEntity.EmailAddress = email;
         employeeEntity.TenantId = GetTenantId();
         employeeEntity.ProbationPeriodDays = probationDays;
         employeeEntity.ProbationSource = probationSource;
+        if (isImport) ApplyImportedConfirmation(employeeEntity);
 
         // Before the insert: State and City are written from the tree so the row is never
         // persisted with a snapshot that disagrees with its own GeoAreaId, not even briefly.
@@ -557,9 +565,60 @@ public class EmployeeService : IEmployeeService
         // the hire. Create-only — see PayrollMembershipService.
         await _payrollMembership.EnsurePayrollProfileAsync(employeeEntity, cancellationToken);
 
+        // Round 4, lane I3 — the OnHire orientation rules. Also after the commit and best-effort
+        // (the trigger service logs and swallows its own failure). An imported employee whose
+        // employment date is years back is due for no rule, so importing the existing workforce
+        // enrols nobody; see OrientationTriggerWindows.CatchUpDays.
+        await _orientationTriggers.OnEmployeeHiredAsync(employeeEntity.Id, cancellationToken);
+
         var created = await _employeeRepository.GetByIdWithDetailsAsync(employeeEntity.Id);
         if (created == null) throw new InvalidOperationException("Employee created but could not be reloaded.");
         return created.ToDetailDto();
+    }
+
+    /// <summary>
+    /// The confirmation date of an imported employee: the one the file supplied, or — when it gave
+    /// none — the hire date plus the probation term, if that term had ended (HR finish plan lane 11).
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ Runs before <see cref="OpenInitialContractAsync"/>, which opens a probation only for
+    /// somebody arriving unconfirmed. The import had no confirmation column before lane 11, so every
+    /// imported permanent employee arrived unconfirmed and was put on a probation that had ended
+    /// years earlier — 2,191 of UAT's 2,399 staff, measured 2026-09-25.</para>
+    ///
+    /// <para>A derived date is marked as such (<see cref="ConfirmationSource.Derived"/>), so it can
+    /// be told apart from one somebody supplied. The rule is <see cref="ConfirmationDerivation"/>,
+    /// shared with the repair of the employees already entered.</para>
+    /// </remarks>
+    private static void ApplyImportedConfirmation(Employee employee)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
+
+        if (employee.ConfirmationDate is { } supplied)
+        {
+            if (employee.DateEmployed is { } hired && supplied < hired)
+                throw new InvalidOperationException(
+                    $"The confirmation date {supplied:yyyy-MM-dd} is before the date employed, {hired:yyyy-MM-dd}.");
+            if (supplied > today)
+                throw new InvalidOperationException(
+                    $"The confirmation date {supplied:yyyy-MM-dd} is in the future. It records a probation already passed.");
+            employee.ConfirmationSource = ConfirmationSource.Imported;
+            return;
+        }
+
+        // Only a permanent appointment carries a probation (see OpenInitialContractAsync), and a
+        // term can only be worked out from a hire date.
+        if (employee.EmploymentType != EmploymentType.Permanent
+            || employee.ProbationPeriodDays <= 0
+            || employee.DateEmployed is not { } start)
+            return;
+
+        var termEnd = ConfirmationDerivation.TermEnd(start, employee.ProbationPeriodDays);
+        if (ConfirmationDerivation.Derive(termEnd, today) is { } derived)
+        {
+            employee.ConfirmationDate = derived;
+            employee.ConfirmationSource = ConfirmationSource.Derived;
+        }
     }
 
     /// <summary>
@@ -615,9 +674,9 @@ public class EmployeeService : IEmployeeService
             || employee.ConfirmationDate != null)
             return;
 
-        // Back to months, the unit ProbationPeriod counts in. At least one: a term of a few days is
-        // still a probation, and a zero-month row would end the day it began.
-        var months = Math.Max(1, (int)Math.Round(employee.ProbationPeriodDays / 30.0));
+        // Back to months, the unit ProbationPeriod counts in — by the same rule a derived
+        // confirmation date uses (lane 11), so the two never disagree about when a term ended.
+        var months = ConfirmationDerivation.TermMonths(employee.ProbationPeriodDays);
         var probationEnd = start.AddMonths(months);
 
         await _unitOfWork.Repository<ProbationPeriod>().AddAsync(new ProbationPeriod
@@ -828,6 +887,7 @@ public class EmployeeService : IEmployeeService
         var previousProbationDays = employee.ProbationPeriodDays;
 
         await _disabilityTypes.EnsureUsableAsync(dto.DisabilityTypeId, dto.HasDisability, cancellationToken); // round 3, lane P2
+        dto.ExperienceLevel = CanonicalExperienceLevel(dto.ExperienceLevel); // round 4, lane O
         dto.Apply(employee, newOrgLevelId, newLocationLevelId);
 
         // ⚠ AFTER Apply, which has just written whatever probation length the caller sent. The
@@ -4036,7 +4096,14 @@ public class EmployeeService : IEmployeeService
     public async Task<IEnumerable<EmployeeDto>> GetByEmploymentTypeAsync(EmploymentType employmentType)
         => (await _employeeRepository.GetByEmploymentTypeAsync(employmentType)).Select(e => e.ToSummaryDto());
 
-    // Maintenance integration left as existing (no aggregate writes)
+    // ── The technician door (round 4, lane O) ─────────────────────────────────────────────────
+    //
+    // HR's answer to Maintenance's "who may I assign work to?", served at api/hr/employees/technicians*
+    // and read in-process by Maintenance's TechnicianSchedulingService and MaintenanceScheduleService.
+    // ⚠ ONE predicate, the stored CanBeAssignedToMaintenance: it is what Maintenance's work-order,
+    // labour and schedule gates read, so the door can never offer somebody those gates refuse. It
+    // follows the position's IsTechnicianRole unless set by hand — see ApplicationDbContext.HrTechnicianRole.cs.
+
     public async Task<IEnumerable<MaintenanceTechnicianDto>> GetMaintenanceTechniciansAsync()
     {
         var technicians = await _employeeRepository.GetMaintenanceTechniciansAsync();
@@ -4051,7 +4118,10 @@ public class EmployeeService : IEmployeeService
 
     public async Task<MaintenanceTechnicianDto?> GetTechnicianByIdAsync(Guid employeeId)
     {
-        var employee = await _employeeRepository.GetByIdWithDetailsAsync(employeeId);
+        // ⚠ The door's own read, not the employee detail read: that one never loaded the linked
+        // credentials a skill row's certification dates come from, and carried five collections the
+        // door does not report.
+        var employee = await _employeeRepository.GetMaintenanceTechnicianByIdAsync(employeeId);
         return employee == null || !employee.CanBeAssignedToMaintenance ? null : MapToMaintenanceTechnicianDto(employee);
     }
 
@@ -4060,22 +4130,26 @@ public class EmployeeService : IEmployeeService
         var employee = await _employeeRepository.GetByIdAsync(employeeId);
         if (employee == null || !employee.CanBeAssignedToMaintenance) return null;
 
+        var working = IsWorkingTechnician(employee);
         return new TechnicianAvailabilityDto
         {
             EmployeeId = employee.Id,
             EmployeeName = employee.FullName,
-            IsAvailable = employee.IsActive && employee.StaffStatus == StaffStatus.Active,
-            AvailableFrom = employee.StaffStatus == StaffStatus.Active ? DateTime.UtcNow : null,
-            UnavailabilityReason = employee.StaffStatus != StaffStatus.Active ? employee.StaffStatus.ToString() : null,
-            CurrentWorkOrders = 0,
-            WorkloadPercentage = 0
+            IsAvailable = working,
+            AvailableFrom = working ? DateTime.UtcNow : null,
+            UnavailabilityReason = working ? null : (employee.IsActive ? employee.StaffStatus.ToString() : "Inactive"),
+            // ⚠ Not supplied (null) where it was a hardcoded 0 — see MaintenanceTechnicianDto.
+            CurrentWorkOrders = null,
+            WorkloadPercentage = null
         };
     }
 
     public async Task<IEnumerable<MaintenanceTechnicianDto>> GetTechniciansWithSkillAsync(Guid skillId, SkillLevel? minLevel = null)
     {
-        var employees = await _employeeRepository.GetEmployeesBySkillAsync(skillId, minLevel);
-        return employees.Where(e => e.CanBeAssignedToMaintenance).Select(MapToMaintenanceTechnicianDto);
+        // The predicate in SQL now, where it used to load every holder of the skill and filter them
+        // in memory.
+        var employees = await _employeeRepository.GetMaintenanceTechniciansWithSkillAsync(skillId, minLevel);
+        return employees.Select(MapToMaintenanceTechnicianDto);
     }
 
     public Task<bool> EmployeeNumberExistsAsync(string employeeNumber) => _employeeRepository.EmployeeNumberExistsAsync(employeeNumber);
@@ -4221,24 +4295,109 @@ public class EmployeeService : IEmployeeService
         {
             Id = employee.Id,
             EmployeeNumber = employee.EmployeeNumber,
+            FirstName = employee.FirstName,
+            LastName = employee.LastName,
             FullName = employee.FullName,
             DisplayName = employee.DisplayName,
             EmailAddress = employee.EmailAddress,
             MobileNumber = employee.MobileNumber,
+            PositionId = employee.PositionId,
             PositionTitle = employee.Position?.Title ?? string.Empty,
+            IsTechnicianRole = employee.Position?.IsTechnicianRole ?? false,
+            MaintenanceAssignment = employee.MaintenanceAssignment,
+            OrganizationUnitId = employee.OrganizationUnitId,
+            OrganizationUnitName = employee.OrganizationUnit?.Name,
+            LocationId = employee.LocationId,
+            LocationName = employee.Location?.Name,
+            Specialization = employee.Specialization,
+            CertificationLevel = employee.CertificationLevel,
+            ExperienceLevel = employee.ExperienceLevel,
+            StaffStatus = employee.StaffStatus,
             IsActive = employee.IsActive,
-            IsAvailable = employee.IsActive && employee.StaffStatus == StaffStatus.Active,
-            Skills = employee.Skills?.Select(es => new ErpSystem.Core.DTOs.Maintenance.UserTechnicianSkillDto
-            {
-                SkillName = es.Skill.Name,
-                Level = (int)es.SkillLevel,
-                IsCertified = es.CertificationDate.HasValue
-            }).ToList() ?? new List<ErpSystem.Core.DTOs.Maintenance.UserTechnicianSkillDto>(),
-            CurrentWorkOrders = 0,
-            WorkloadScore = 0,
+            IsAvailable = IsWorkingTechnician(employee),
+            Skills = (employee.Skills ?? new List<EmployeeSkill>())
+                .Where(es => !es.IsDeleted)
+                .OrderBy(es => es.Skill?.Name)
+                .Select(ToTechnicianSkill)
+                .ToList(),
+            // ⚠ Not supplied, deliberately (round 4, lane O). All three were a hardcoded 0 or null,
+            // and a 0 reads as "this technician is free". Employee.CurrentWorkload / MaxWorkload
+            // look like the fix and are not: nothing writes the first. Maintenance counts its own
+            // work orders (TechnicianSchedulingService).
+            CurrentWorkOrders = null,
+            WorkloadScore = null,
             BadgeNumber = employee.BadgeNumber,
             ShiftName = null
         };
+    }
+
+    /// <summary>
+    /// A skill row as Maintenance needs it: enough to tell a lapsed certification from a current one.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Before round 4, lane O this sent only the name, the level and <c>IsCertified</c> — and that
+    /// last was <c>CertificationDate.HasValue</c>, not the row's own flag, so a certified skill with no
+    /// date on file read as uncertified. The linked credential (round 2, lane C2) wins where there is
+    /// one, as on HR's own skills tab; the per-skill columns stand for rows recorded before the
+    /// catalogue.
+    /// </remarks>
+    private static ErpSystem.Core.DTOs.Maintenance.UserTechnicianSkillDto ToTechnicianSkill(EmployeeSkill es)
+    {
+        var credential = es.EmployeeCertification is { IsDeleted: false } linked ? linked : null;
+        return new ErpSystem.Core.DTOs.Maintenance.UserTechnicianSkillDto
+        {
+            Id = es.Id,
+            EmployeeId = es.EmployeeId,
+            SkillId = es.SkillId,
+            SkillName = es.Skill?.Name ?? string.Empty,
+            Level = (int)es.SkillLevel,
+            ProficiencyLevel = (int)es.SkillLevel,
+            IsCertified = credential != null ? !credential.IsRevoked : es.IsCertified,
+            CertificationDate = AsUtcDate(credential != null ? credential.IssuedOn : es.CertificationDate),
+            CertificationExpiry = AsUtcDate(credential != null ? credential.ExpiresOn : es.CertificationExpiryDate),
+            CertificationNumber = credential?.CertificateNumber ?? es.CertificationNumber,
+            CertifyingBody = es.CertifyingBodyRef?.Name ?? es.CertifyingBody,
+            CreatedAt = es.CreatedAt,
+            UpdatedAt = es.UpdatedAt
+        };
+    }
+
+    // A calendar date as UTC midnight, so the JSON carries the Z (round 4, lane E-a's lesson).
+    private static DateTime? AsUtcDate(DateOnly? date)
+        => date?.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+
+    /// <summary>
+    /// Employed and at work — Active or on probation (round 4, lane O; TDC's call 2026-09-23). The
+    /// door's list, its <c>available</c> list and each row's <c>IsAvailable</c> all use this one rule.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ It was Active only, and every hire starts on probation, so a new artisan read "unavailable:
+    /// Probation" in the very pool that listed them. What HR does not know — schedules, work orders —
+    /// is Maintenance's to add.
+    /// </remarks>
+    private static bool IsWorkingTechnician(Employee employee)
+        => employee.IsActive && employee.StaffStatus is StaffStatus.Active or StaffStatus.Probation;
+
+    /// <summary>The words Maintenance filters an experience level on (round 4, lane O).</summary>
+    private static readonly string[] ExperienceLevels = { "Junior", "Intermediate", "Senior", "Expert" };
+
+    /// <summary>
+    /// Null stays null (not supplied), blank stays blank (clear), and anything else must be one of
+    /// <see cref="ExperienceLevels"/> — stored in its canonical casing.
+    /// </summary>
+    /// <remarks>
+    /// Maintenance's technician list filters on this text and its analytics group by it, so a free
+    /// "senior " and "Snr" would be three levels where TDC has one. The entity has always documented
+    /// the four words; this is the first write that holds anyone to them.
+    /// </remarks>
+    private static string? CanonicalExperienceLevel(string? value)
+    {
+        if (value == null) return null;
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var trimmed = value.Trim();
+        return ExperienceLevels.FirstOrDefault(l => string.Equals(l, trimmed, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException(
+                $"Experience level must be one of {string.Join(", ", ExperienceLevels)}; '{trimmed}' is not one of them.");
     }
 
     #endregion

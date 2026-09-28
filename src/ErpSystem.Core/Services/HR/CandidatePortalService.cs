@@ -6,6 +6,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Services.HR.Recruitment;
+using ErpSystem.Core.Services.Reference;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Security.Cryptography;
@@ -42,6 +43,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
     private readonly ITemplatedEmailService _templatedEmail;
     private readonly IApplicationSnapshotService _snapshotService;
     private readonly IApplicationPipelineService _pipelineService;
+    private readonly IGeographyService _geography;
 
     public CandidatePortalService(
         IJobCandidateRepository candidateRepo,
@@ -65,7 +67,8 @@ public sealed class CandidatePortalService : ICandidatePortalService
         IEmailService email,
         ITemplatedEmailService templatedEmail,
         IApplicationSnapshotService snapshotService,
-        IApplicationPipelineService pipelineService)
+        IApplicationPipelineService pipelineService,
+        IGeographyService geography)
     {
         _candidateRepo    = candidateRepo;
         _workHistoryRepo  = workHistoryRepo;
@@ -89,6 +92,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
         _pipelineService  = pipelineService;
         _email            = email;
         _templatedEmail   = templatedEmail;
+        _geography        = geography;
     }
 
     // Portal callers supply tenantId via header/JWT. When ICurrentUserProvider.TenantId is set
@@ -161,6 +165,43 @@ public sealed class CandidatePortalService : ICandidatePortalService
         return dto;
     }
 
+    /// <summary>
+    /// The rung each incoming qualification will be stored with, under the same rules as HR's door
+    /// (<see cref="QualificationLevelRules"/>; round 4, lane Q, decision Q-D1).
+    /// </summary>
+    /// <remarks>
+    /// Keyed by the DTO row itself, not its id: every new row arrives with <c>Guid.Empty</c>.
+    /// </remarks>
+    private async Task<Dictionary<ExternalQualificationDto, Guid?>> ResolveQualificationLevelsAsync(
+        Guid userId, List<ExternalQualificationDto> incoming, Guid tenantId, CancellationToken ct)
+    {
+        var result = new Dictionary<ExternalQualificationDto, Guid?>(ReferenceEqualityComparer.Instance);
+        if (incoming.Count == 0) return result;
+
+        var ladder = await QualificationLadder.LoadAsync(_unitOfWork, tenantId, ct);
+        var master = (await _qualificationMasterRepo.FindAsync(x => x.TenantId == tenantId && !x.IsDeleted))
+                     .ToDictionary(x => x.Id);
+        var own = await FindOwnCandidateAsync(userId, tenantId);
+        var current = own is null
+            ? new Dictionary<Guid, Guid?>()
+            : (await _qualificationRepo.FindAsync(q => q.JobCandidateId == own.Id && q.TenantId == tenantId))
+              .ToDictionary(q => q.Id, q => q.QualificationLevelId);
+
+        foreach (var q in incoming)
+        {
+            // The catalogue check FIRST, with the same rule and words the save loop applies: an id
+            // outside the catalogue is the more basic mistake, and answering it with "choose the
+            // level" would misdirect. Checked here, it is also refused before anything is written.
+            var (catalogueId, name) = ResolveCatalogueOrText(
+                q.QualificationId, q.QualificationName, master, x => x.Name, "qualification");
+            var catalogueLevel = catalogueId is { } cid ? master[cid].QualificationLevelId : null;
+            var currentLevel = q.Id != Guid.Empty && current.TryGetValue(q.Id, out var level) ? level : null;
+            result[q] = QualificationLevelRules.Resolve(
+                q.QualificationType, q.QualificationLevelId, catalogueLevel, currentLevel, ladder, name);
+        }
+        return result;
+    }
+
     // ── Save Profile ───────────────────────────────────────────────────────────
     public async Task<CandidatePortalProfileDto> SaveProfileAsync(
         CandidateAccountContext account,
@@ -175,6 +216,11 @@ public sealed class CandidatePortalService : ICandidatePortalService
         // 2026-09-14: this door wrote whatever country id it was handed, unchecked — another
         // tenant's Country row, or a garbage guid, reached the INSERT.
         await RequireCountryAsync(dto.CountryId, tenantId);
+
+        // Round 4, lane Q: every qualification's level is settled HERE, before anything is written.
+        // The saves below are separate commits, so a refusal inside the qualification loop would
+        // leave the profile's own fields saved and its qualifications not: half a profile.
+        var qualificationLevels = await ResolveQualificationLevelsAsync(account.UserId, dto.Qualifications, tenantId, ct);
 
         // Loaded without nav props deliberately — EF tracking child collections during the
         // scalar update would cause duplicate inserts when the collections are patched below.
@@ -198,7 +244,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
 
                 candidate = byEmail;
                 candidate.UserId = account.UserId;
-                MapDtoToCandidate(dto, candidate);
+                await MapDtoToCandidateAsync(dto, candidate, ct);
                 await _candidateRepo.UpdateAsync(candidate);
                 await _unitOfWork.SaveChangesAsync(ct);
             }
@@ -211,14 +257,14 @@ public sealed class CandidatePortalService : ICandidatePortalService
                     Email           = account.Email,
                     UserId          = account.UserId,
                 };
-                MapDtoToCandidate(dto, candidate);
+                await MapDtoToCandidateAsync(dto, candidate, ct);
                 await _candidateRepo.AddAsync(candidate);
                 await _unitOfWork.SaveChangesAsync(ct);
             }
         }
         else
         {
-            MapDtoToCandidate(dto, candidate);
+            await MapDtoToCandidateAsync(dto, candidate, ct);
             await _candidateRepo.UpdateAsync(candidate);
             await _unitOfWork.SaveChangesAsync(ct);
         }
@@ -297,6 +343,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
                         JobCandidateId        = candidate.Id,
                         QualificationType     = q.QualificationType,
                         QualificationId       = qualificationId,
+                        QualificationLevelId  = qualificationLevels[q],
                         QualificationFreeText = qualificationName,
                         Institution           = q.Institution,
                         DateAwarded           = q.DateAwarded,
@@ -307,6 +354,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
                 {
                     row.QualificationType     = q.QualificationType;
                     row.QualificationId       = qualificationId;
+                    row.QualificationLevelId  = qualificationLevels[q];
                     row.QualificationFreeText = qualificationName;
                     row.Institution           = q.Institution;
                     row.DateAwarded           = q.DateAwarded;
@@ -624,7 +672,12 @@ public sealed class CandidatePortalService : ICandidatePortalService
             application.Id, vacancy.Id, vacancy.TenantId, ct);
 
         var summary = MapApplicationToSummary(application, vacancy);
-        await SendApplicationReceivedEmailAsync(account.Email, account.Email, summary);
+        // ⚠ The candidate's NAME: this passed account.Email for both arguments, so "Dear {{CandidateName}}"
+        // greeted every applicant by their email address (found by round 4 lane N's survey of the senders).
+        await SendApplicationReceivedEmailAsync(
+            account.Email,
+            string.IsNullOrWhiteSpace(ownCandidate.FullName) ? account.Email : ownCandidate.FullName,
+            summary);
         return summary;
     }
 
@@ -713,6 +766,20 @@ public sealed class CandidatePortalService : ICandidatePortalService
         // submission — the withdrawal is already durable.
         await AdjustVacancyApplicationCountAsync(
             application.JobVacancyId, -1, tenantId, ct);
+
+        // Round 4 lane N-b: the pipeline is told, as HR's withdrawal tells it — the open stage row is
+        // closed as Withdrawn (this door left it open, so the application went on sitting in its stage)
+        // — and the candidate gets the confirmation every withdrawal now sends. The closer only logs
+        // its actor, and a candidate is not an employee.
+        await _pipelineService.CloseCurrentStageForExitAsync(
+            application.Id, JobApplicationStageExitReason.Withdrawn, Guid.Empty, ct);
+
+        var vacancy = await _vacancyRepo.GetByIdAsync(application.JobVacancyId);
+        await SendApplicationWithdrawnEmailAsync(
+            ownCandidate.Email,
+            string.IsNullOrWhiteSpace(ownCandidate.FullName) ? "Candidate" : ownCandidate.FullName,
+            application.ApplicationNumber,
+            string.IsNullOrWhiteSpace(vacancy?.JobTitle) ? "the position" : vacancy.JobTitle);
     }
 
     // ── Get Applications ───────────────────────────────────────────────────────
@@ -950,6 +1017,31 @@ public sealed class CandidatePortalService : ICandidatePortalService
         await _unitOfWork.SaveChangesAsync(ct);
     }
 
+    /// <remarks>
+    /// ⚠ <b>Async, and not static, since round 4 lane A</b>, so the geography snapshot is applied
+    /// where the payload is applied. <c>SaveProfileAsync</c> calls this from three branches —
+    /// adopt-by-email, create, and plain update — and a separate call after each is three chances
+    /// for the fourth branch to forget. The address rule now travels with the mapping.
+    /// </remarks>
+    private async Task MapDtoToCandidateAsync(
+        UpdateCandidatePortalProfileDto dto, JobCandidate c, CancellationToken ct)
+    {
+        MapDtoToCandidate(dto, c);
+
+        // Region has no input on the careers form and is only ever written from the tree, so an
+        // area the candidate cleared must take its region with it. See the HR-side twin in
+        // JobCandidateService for the full reasoning.
+        if (c.GeoAreaId is null) c.Region = null;
+
+        c.CountryId = await GeoAddressSnapshot.ReconcileCountryAsync(
+            _geography, c.GeoAreaId, c.CountryId, "candidate", ct);
+
+        await GeoAddressSnapshot.ApplyAsync(
+            _geography, _logger, c.GeoAreaId,
+            r => c.Region = r, city => c.City = city,
+            "candidate", c.Id, ct);
+    }
+
     private static void MapDtoToCandidate(UpdateCandidatePortalProfileDto dto, JobCandidate c)
     {
         c.FirstName       = dto.FirstName;
@@ -960,6 +1052,11 @@ public sealed class CandidatePortalService : ICandidatePortalService
         c.DateOfBirth     = dto.DateOfBirth ?? c.DateOfBirth;
         c.Gender          = dto.Gender ?? c.Gender;
         c.City            = dto.City ?? string.Empty;
+        // Round 4, lane A. Null is "no area" — this profile save replaces the address wholesale,
+        // the same contract the HR-side update DTO carries. ⚠ Region is NOT taken from the payload:
+        // it has no input on the careers form and is only ever written from the tree, by
+        // ApplyGeoAreaSnapshotAsync below.
+        c.GeoAreaId       = dto.GeoAreaId;
         // The careers page used to send Guid.Empty to mean "no country" and this line read it as
         // "leave unchanged". The DTO is nullable now, so null and Guid.Empty both mean none, and
         // a country the candidate clears actually clears.
@@ -1016,6 +1113,8 @@ public sealed class CandidatePortalService : ICandidatePortalService
         dto.DateOfBirth    = c.DateOfBirth == default ? null : c.DateOfBirth;
         dto.Gender          = c.Gender;
         dto.City            = c.City;
+        dto.Region          = c.Region;
+        dto.GeoAreaId       = c.GeoAreaId;
         dto.CountryId       = c.CountryId;
         dto.CountryName     = c.Country?.Name;
         dto.PostalAddress   = c.PostalAddress;
@@ -1072,6 +1171,12 @@ public sealed class CandidatePortalService : ICandidatePortalService
             Institution           = q.Institution,
             DateAwarded           = q.DateAwarded,
             Grade                 = q.Grade,
+            // Round 4, lane Q: the row's own rung, which the form edits, and the one scored.
+            QualificationLevelId            = q.QualificationLevelId,
+            EffectiveQualificationLevelId   = q.QualificationLevelId ?? q.Qualification?.QualificationLevelId,
+            EffectiveQualificationLevelName = q.QualificationLevelId.HasValue
+                                                  ? q.QualificationLevel?.Name
+                                                  : q.Qualification?.QualificationLevel?.Name,
         }).ToList();
 
         dto.Referees = c.Referees.Where(r => !r.IsDeleted).Select(r => new JobCandidateRefereeDto
@@ -1220,6 +1325,36 @@ public sealed class CandidatePortalService : ICandidatePortalService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to send application received email to {Email}", toEmail);
+        }
+    }
+
+    private async Task SendApplicationWithdrawnEmailAsync(
+        string? toEmail, string candidateName, string applicationNumber, string jobTitle)
+    {
+        if (string.IsNullOrWhiteSpace(toEmail)) return;
+
+        var tokens = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["CandidateName"]     = candidateName,
+            ["JobTitle"]          = jobTitle,
+            ["ApplicationNumber"] = applicationNumber,
+        };
+
+        // The same race as the received email: the withdrawal is durable before this runs.
+        try
+        {
+            var emailTask = _templatedEmail.SendAsync(
+                RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.ApplicationWithdrawn, toEmail, tokens);
+            if (await Task.WhenAny(emailTask, Task.Delay(TimeSpan.FromSeconds(10))) == emailTask)
+                await emailTask;
+            else
+                _logger.LogWarning(
+                    "Application withdrawn email timed out after 10 s for {Email} — the withdrawal was recorded.",
+                    toEmail);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to send application withdrawn email to {Email}", toEmail);
         }
     }
 }

@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/medical-board.ts",
+    "src/types/hr/separation.ts",
+    "src/types/hr/policy-settings.ts",
+    "src/services/hr/medical-board.service.ts",
+    "src/services/hr/separation.service.ts",
+    "src/app/hr/medical/boards/page.tsx",
+    "src/app/hr/medical/boards/[id]/page.tsx",
+    "src/components/hr/medical/MedicalBoardCaseFields.tsx",
+    "src/components/hr/leave/MedicalBoardLinkPanel.tsx",
+    "src/components/hr/separations/SeparationMedicalBoardPanel.tsx",
+    "src/app/hr/separations/[id]/page.tsx",
+    "src/app/administration/hr/settings/policy/page.tsx",
+    "src/components/hr/common/StatusBadge.tsx"
+  ]
+}

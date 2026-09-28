@@ -80,7 +80,11 @@ public enum HrFinanceAccountRole
 
     /// <summary>Revenue: what an insurer or the NHIS pays the company back — medical, NHIS and incident claims (slice 5).</summary>
     [Description("Insurance recoveries income")]
-    InsuranceRecoveriesIncome = 15
+    InsuranceRecoveriesIncome = 15,
+
+    /// <summary>Revenue: consultants' billed hours — the line on the AR invoice HR raises to a client (slice 6).</summary>
+    [Description("Consulting revenue")]
+    ConsultingRevenue = 16
 }
 
 /// <summary>
@@ -93,7 +97,11 @@ public enum HrFinancePostingKind
     Journal = 1,
 
     [Description("Accounts payable vendor invoice")]
-    VendorInvoice = 2
+    VendorInvoice = 2,
+
+    /// <summary>An Accounts Receivable customer invoice: HR bills a third party, Finance collects.</summary>
+    [Description("Accounts receivable customer invoice")]
+    CustomerInvoice = 3
 }
 
 /// <summary>

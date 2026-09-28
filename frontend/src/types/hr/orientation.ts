@@ -5,6 +5,10 @@
 // notifications,dashboard} and api/employee-orientations. Each service names its own.
 
 import type { AuditFields } from './common';
+// The shared HR audience axis (announcements, policies, and since round 4 lane I orientation).
+import type { HrAudienceTargetType } from '@/services/hr/announcements.service';
+
+export type { HrAudienceTargetType };
 
 const opts = <T extends string>(entries: [T, string][]) =>
   entries.map(([value, label]) => ({ value, label }));
@@ -201,7 +205,11 @@ export type OrientationEnrollmentSource =
   | 'AutoRule'
   | 'SelfEnrollment'
   | 'HrAssigned'
-  | 'ManagerAssigned';
+  | 'ManagerAssigned'
+  // Round 4, lane I-b: the next cycle of a recurring programme, opened by the nightly sweep.
+  // ⚠ Deliberately NOT in the options below — they are the manual-enrolment picker, and a person
+  //   enrolling somebody by hand is not a renewal.
+  | 'Recurrence';
 
 export const ORIENTATION_ENROLLMENT_SOURCE_OPTIONS = opts<OrientationEnrollmentSource>([
   ['HrAssigned', 'HR Assigned'],
@@ -284,6 +292,36 @@ export const ORIENTATION_ENROLLMENT_TRIGGER_OPTIONS = opts<OrientationEnrollment
   ['Manual', 'Manual'],
 ]);
 
+/**
+ * What each trigger actually does since round 4 lane I made them fire — shown under the picker, so
+ * the choice is made knowing its consequence rather than from a label.
+ */
+export const ORIENTATION_TRIGGER_HINTS: Record<OrientationEnrollmentTrigger, string> = {
+  OnHire: 'When an employee is created — the form, the import or a confirmed hire. Counts the delay from the employment date.',
+  OnTransfer: 'When a transfer, lateral move or secondment is implemented. Counts the delay from its effective date.',
+  OnPromotion: 'When a promotion is implemented. Counts the delay from its effective date.',
+  OnProgramPublish: 'Once, when the programme is made Active. Afterwards only “Enrol audience now” runs it.',
+  Scheduled: 'Every night: anyone the rule reaches who is not yet on the programme.',
+  Manual: 'Only when HR presses “Enrol audience now” on this programme.',
+};
+
+/** Hire, transfer and promotion have a date a delay can count from; the rest enrol immediately. */
+export const DATED_TRIGGERS: OrientationEnrollmentTrigger[] = ['OnHire', 'OnTransfer', 'OnPromotion'];
+
+/** Who, of the people at the target, a rule means — derived from data, never typed in. */
+export type OrientationAudiencePopulation = 'Anyone' | 'NewHires' | 'Management' | 'Contractors';
+
+export const ORIENTATION_AUDIENCE_POPULATION_OPTIONS: {
+  value: OrientationAudiencePopulation;
+  label: string;
+  hint: string;
+}[] = [
+  { value: 'Anyone', label: 'Anyone there', hint: 'Everyone the target reaches.' },
+  { value: 'NewHires', label: 'New hires', hint: 'Employed within the last 90 days.' },
+  { value: 'Management', label: 'Management', hint: 'Heads a unit, or has at least one direct report.' },
+  { value: 'Contractors', label: 'Contractors', hint: 'Contract, fixed-term, consultant or freelance staff.' },
+];
+
 export type OrientationQuestionType = 'SingleChoice' | 'MultiSelect' | 'TrueFalse' | 'FreeText';
 
 export const ORIENTATION_QUESTION_TYPE_OPTIONS = opts<OrientationQuestionType>([
@@ -309,7 +347,13 @@ export type OrientationNotificationType =
   | 'Overdue'
   | 'Completion'
   | 'CertificateIssued'
-  | 'Cancellation';
+  | 'Cancellation'
+  // Round 4, lane K-b
+  | 'SessionScheduled'
+  | 'SessionRescheduled'
+  | 'SessionPostponed'
+  | 'OnboardingPlanAssigned'
+  | 'OnboardingTaskAssigned';
 
 export type OrientationRecurrenceFrequency =
   | 'Monthly'
@@ -448,30 +492,194 @@ export interface OrientationPrerequisiteCreateRequest {
   notes?: string | null;
 }
 
+/**
+ * An audience rule. Since round 4 lane I the target is the shared HR audience axis (the same one
+ * announcements use) and `population` narrows it; the old single `OrientationAudienceScope` value
+ * is now only a descriptive label on the programme.
+ */
 export interface OrientationAudienceRule extends AuditFields {
   tenantId: string;
   programId: string;
   programTitle?: string | null;
   ruleName: string;
   description?: string | null;
-  targetType: OrientationAudienceScope;
+  targetType: HrAudienceTargetType;
   targetEntityId?: string | null;
+  /** "Organisation unit: Operations and the units beneath it" — resolved by the server. */
+  targetEntityName?: string | null;
+  population: OrientationAudiencePopulation;
   trigger: OrientationEnrollmentTrigger;
   enrollmentDelayDays: number;
   isInclusive: boolean;
   isActive: boolean;
+  /** Active employees the rule reaches today (for an exclusion, the number it keeps out). */
+  reachCount?: number | null;
 }
 
 export interface OrientationAudienceRuleCreateRequest {
   programId: string;
   ruleName: string;
   description?: string | null;
-  targetType: OrientationAudienceScope;
+  targetType: HrAudienceTargetType;
   targetEntityId?: string | null;
+  population: OrientationAudiencePopulation;
   trigger: OrientationEnrollmentTrigger;
   enrollmentDelayDays: number;
   isInclusive: boolean;
   isActive: boolean;
+}
+
+export interface OrientationAudienceReach {
+  count: number;
+  description: string;
+}
+
+/** What one run of the rules did — or, on a preview, would do. */
+export interface OrientationTriggerRunResult {
+  trigger: string;
+  isPreview: boolean;
+  asOf: string;
+  programsEvaluated: number;
+  rulesEvaluated: number;
+  enrolled: number;
+  alreadyEnrolled: number;
+  excluded: number;
+  waitingOnPrerequisite: number;
+  /** Of `enrolled`, the next cycles of recurring programmes (lane I-b). */
+  renewed: number;
+  /** Due for a next cycle, but no rule of the programme reaches them any longer. */
+  leftAudience: number;
+  error?: string | null;
+  /** At most 500 rows; the counts above are complete. */
+  enrolments: {
+    enrollmentId?: string | null;
+    employeeId: string;
+    employeeName?: string | null;
+    employeeNumber?: string | null;
+    programId: string;
+    programTitle: string;
+    /** Null for a renewal — no rule creates it. */
+    ruleId?: string | null;
+    ruleName: string;
+    triggerEvent?: OrientationEnrollmentTrigger | null;
+    /** The hire/movement date — or, for a renewal, the completion it renews. */
+    triggerDate?: string | null;
+    isRenewal: boolean;
+  }[];
+}
+
+export type OrientationTriggerVerdict =
+  | 'WouldEnrolNow'
+  | 'Enrolled'
+  | 'Excluded'
+  | 'WaitingForDate'
+  | 'WindowLapsed'
+  | 'WaitingOnPrerequisite'
+  | 'OnlyWhenHrEnrols'
+  | 'NoTriggeringEvent'
+  | 'NotInAudience'
+  | 'ProgramNotActive'
+  // Round 4, lane I-b — a recurring programme after the last cycle was completed.
+  | 'RenewalDue'
+  | 'RenewalScheduled'
+  // Withdrawn, cancelled or a no-show — never undone by the system; HR can re-enrol by hand.
+  | 'EndedByHr';
+
+export interface OrientationRuleDiagnosis {
+  ruleId: string;
+  ruleName: string;
+  isInclusive: boolean;
+  isActive: boolean;
+  trigger: OrientationEnrollmentTrigger;
+  targetType: HrAudienceTargetType;
+  targetName?: string | null;
+  population: OrientationAudiencePopulation;
+  enrollmentDelayDays: number;
+  matchesTarget: boolean;
+  matchesPopulation: boolean;
+  triggerDate?: string | null;
+  firesFrom?: string | null;
+  firesUntil?: string | null;
+  timing: 'Due' | 'NotYet' | 'Lapsed' | 'NoEvent' | 'Nightly' | 'AtPublish' | 'OnlyByHr';
+  explanation: string;
+}
+
+export interface OrientationProgramDiagnosis {
+  programId: string;
+  programCode: string;
+  programTitle: string;
+  programStatus: OrientationProgramStatus;
+  verdict: OrientationTriggerVerdict;
+  explanation: string;
+  enrollmentId?: string | null;
+  enrollmentStatus?: string | null;
+  enrollmentSource?: string | null;
+  enrolledByRuleName?: string | null;
+  missingPrerequisites: string[];
+  rules: OrientationRuleDiagnosis[];
+  /** Lane I-b — a recurring programme after the latest cycle was completed. */
+  lastCompletedOn?: string | null;
+  nextCycleOpensOn?: string | null;
+  nextCycleDueOn?: string | null;
+}
+
+/** "Which rules would fire for this employee, and why" (lane I5). */
+export interface OrientationTriggerDiagnosis {
+  employeeId: string;
+  employeeName: string;
+  employeeNumber?: string | null;
+  isActive: boolean;
+  asOf: string;
+  hireDate?: string | null;
+  organizationUnitName?: string | null;
+  organizationLevelName?: string | null;
+  positionTitle?: string | null;
+  locationName?: string | null;
+  employmentType: string;
+  populations: string[];
+  recentMovements: {
+    movementId: string;
+    movementNumber: string;
+    movementType: string;
+    trigger: OrientationEnrollmentTrigger;
+    effectiveDate: string;
+  }[];
+  programs: OrientationProgramDiagnosis[];
+  onboarding?: OnboardingTemplateApplicability | null;
+  onboardingPlanId?: string | null;
+  onboardingPlanTemplateName?: string | null;
+  onboardingPlanSelectionReason?: string | null;
+}
+
+// ── Onboarding template applicability (lane I4) ───────────────────────────────
+
+export interface OnboardingPlanTemplateAudience {
+  id: string;
+  planTemplateId: string;
+  targetType: HrAudienceTargetType;
+  targetEntityId?: string | null;
+  targetEntityName?: string | null;
+  isInclusive: boolean;
+}
+
+export interface OnboardingTemplateCandidate {
+  templateId: string;
+  templateName: string;
+  isDefault: boolean;
+  matchedOn: string;
+  matchedTargetName?: string | null;
+  specificity: number;
+  isExcluded: boolean;
+  excludedBy?: string | null;
+}
+
+export interface OnboardingTemplateApplicability {
+  templateId?: string | null;
+  templateName?: string | null;
+  reason: string;
+  matchedOn: string;
+  isAmbiguous: boolean;
+  candidates: OnboardingTemplateCandidate[];
 }
 
 export interface OrientationAudienceRuleUpdateRequest
@@ -544,6 +752,17 @@ export interface OrientationProgramSummary {
   estimatedDurationMinutes?: number | null;
   isCertificateIssued: boolean;
   requiresAssessment: boolean;
+  /** Round 4, lane I-b — a list needs it to offer "open the next cycle" on a completion. */
+  isRecurring?: boolean;
+  recurrenceFrequency?: OrientationRecurrenceFrequency | null;
+  /** Round 4, lane L — Active and in its effective dates: what an enrolment picker may offer. */
+  acceptsEnrolment?: boolean;
+  closedBecause?: string | null;
+  /**
+   * Round 4, lane R — the programme is only its live session: nothing to work through, no
+   * assessment, delivered live. Attendance completes it, and HR may mark an enrolment completed.
+   */
+  completesByAttendance?: boolean;
   moduleCount: number;
   enrollmentCount: number;
   completedCount: number;
@@ -566,6 +785,9 @@ export interface OrientationProgram extends AuditFields {
   requiresAssessment: boolean;
   passingScorePercent?: number | null;
   requiresAcknowledgement: boolean;
+  /** Round 4, lane R — the declaration each enrolment gets its own copy of. */
+  acknowledgementTitle?: string | null;
+  acknowledgementText?: string | null;
   completionDeadlineDays?: number | null;
   isCertificateIssued: boolean;
   certificateValidityMonths?: number | null;
@@ -581,6 +803,8 @@ export interface OrientationProgram extends AuditFields {
   ownerOrganizationUnitName?: string | null;
   moduleCount: number;
   sessionCount: number;
+  /** Round 4, lane R — see {@link OrientationProgramSummary.completesByAttendance}. */
+  completesByAttendance?: boolean;
   enrollmentCount: number;
   completedCount: number;
   modules: OrientationModule[];
@@ -604,6 +828,9 @@ export interface OrientationProgramCreateRequest {
   requiresAssessment: boolean;
   passingScorePercent?: number | null;
   requiresAcknowledgement: boolean;
+  /** Round 4, lane R — sent only while an acknowledgement is required. */
+  acknowledgementTitle?: string | null;
+  acknowledgementText?: string | null;
   completionDeadlineDays?: number | null;
   isCertificateIssued: boolean;
   certificateValidityMonths?: number | null;
@@ -628,6 +855,12 @@ export interface ChangeOrientationProgramStatusRequest {
   newStatus: OrientationProgramStatus;
 }
 
+/** Round 4, lane J2. The copy is a Draft; `newCode` is generated when omitted. */
+export interface CloneOrientationProgramRequest {
+  newName: string;
+  newCode?: string | null;
+}
+
 // ── Session / facilitator / attendance ────────────────────────────────────────
 
 export interface OrientationSessionFacilitator extends AuditFields {
@@ -638,6 +871,11 @@ export interface OrientationSessionFacilitator extends AuditFields {
   externalFacilitatorName?: string | null;
   externalFacilitatorEmail?: string | null;
   externalFacilitatorOrganization?: string | null;
+  /** Round 4, lane M: picked from the training vendor register. The three fields above are then its snapshot. */
+  externalFacilitatorVendorId?: string | null;
+  externalFacilitatorTrainerProfileId?: string | null;
+  /** What the register says now about that pick, when it matters ("…has since been blacklisted…"). */
+  registerNote?: string | null;
   role: OrientationFacilitatorRole;
   hasConfirmed: boolean;
   notes?: string | null;
@@ -649,6 +887,12 @@ export interface OrientationSessionFacilitatorCreateRequest {
   externalFacilitatorName?: string | null;
   externalFacilitatorEmail?: string | null;
   externalFacilitatorOrganization?: string | null;
+  /**
+   * A pick from the training vendor register: the server takes the name, email and organisation
+   * from it and ignores typed ones. ⚠ On an update, omitting these means "not from the register".
+   */
+  externalFacilitatorVendorId?: string | null;
+  externalFacilitatorTrainerProfileId?: string | null;
   role: OrientationFacilitatorRole;
   hasConfirmed: boolean;
   notes?: string | null;
@@ -670,7 +914,19 @@ export interface OrientationSessionSummary {
   scheduledStartAt?: string | null;
   maxParticipants?: number | null;
   enrolledCount: number;
+  /** Round 4, lane L — whether it can take an enrolment now, by the server's one definition. */
+  enrollmentDeadlineAt?: string | null;
+  acceptsEnrolment?: boolean;
+  /** "it was cancelled" — when it cannot. */
+  closedBecause?: string | null;
 }
+
+/** Delivery modes with no sessions to attend — the participant works through them alone. */
+export const SELF_PACED_DELIVERY_MODES: OrientationDeliveryMode[] = [
+  'SelfPacedOnline',
+  'VideoOnDemand',
+  'PrintedMaterial',
+];
 
 export interface OrientationSession extends AuditFields {
   tenantId: string;
@@ -729,6 +985,16 @@ export interface OrientationSessionUpdateRequest
 export interface ChangeOrientationSessionStatusRequest {
   sessionId: string;
   newStatus: OrientationSessionStatus;
+}
+
+/**
+ * Round 4, lane J3: run a session again. Without an end the copy keeps the original's length; the
+ * enrolment deadline keeps its lead before the start.
+ */
+export interface CloneOrientationSessionRequest {
+  scheduledStartAt: string;
+  scheduledEndAt?: string | null;
+  title?: string | null;
 }
 
 export interface OrientationAttendanceRecord extends AuditFields {
@@ -899,7 +1165,10 @@ export interface IssueOrientationCertificateRequest {
   /** Omit to have the server generate OCERT-{year}-NNNNN. */
   certificateNumber?: string | null;
   expiresAt?: string | null;
+  /** Ignored since round 4 lane K-b — the issuer is the signed-in HR officer. */
   issuedByEmployeeId?: string | null;
+  /** Replace the enrolment's live certificate. Without it the server refuses a second live one. */
+  reissue?: boolean;
 }
 
 export interface RevokeOrientationCertificateRequest {
@@ -925,6 +1194,14 @@ export interface EmployeeOrientationSummary {
   enrolledAt: string;
   completedAt?: string | null;
   nextDueDate?: string | null;
+  /** Round 4, lane I3 — how the person came to be on it. */
+  enrollmentSource?: OrientationEnrollmentSource;
+  audienceRuleId?: string | null;
+  triggerEvent?: OrientationEnrollmentTrigger | null;
+  triggerDate?: string | null;
+  /** Round 4, lane K-b — whether it holds a live certificate, for "Issue" or "Reissue". */
+  certificateIssued?: boolean;
+  certificateSerialNumber?: string | null;
 }
 
 export interface EmployeeOrientation extends AuditFields {
@@ -939,6 +1216,9 @@ export interface EmployeeOrientation extends AuditFields {
   employeeNumber?: string | null;
   enrollmentStatus: OrientationEnrollmentStatus;
   enrollmentSource: OrientationEnrollmentSource;
+  audienceRuleId?: string | null;
+  triggerEvent?: OrientationEnrollmentTrigger | null;
+  triggerDate?: string | null;
   enrolledAt: string;
   enrolledByEmployeeId?: string | null;
   enrolledByName?: string | null;
@@ -951,6 +1231,11 @@ export interface EmployeeOrientation extends AuditFields {
   attemptCount: number;
   isPassed: boolean;
   acknowledgementSigned: boolean;
+  /** Round 4, lane R — attendance confirmed, on a programme that is only its session. */
+  attendanceConfirmedAt?: string | null;
+  attendanceConfirmedByEmployeeId?: string | null;
+  attendanceConfirmedByName?: string | null;
+  attendanceConfirmationNote?: string | null;
   certificateIssued: boolean;
   certificateSerialNumber?: string | null;
   certificateExpiresAt?: string | null;
@@ -991,6 +1276,30 @@ export interface BulkEnrollOrientationRequest {
 export interface WithdrawOrientationRequest {
   enrollmentId: string;
   withdrawalReason: string;
+}
+
+/**
+ * Round 4, lane R — HR's "Mark completed" on an enrolment whose programme is only its live
+ * session. The note says why; the officer is recorded.
+ */
+export interface ConfirmOrientationAttendanceRequest {
+  employeeOrientationId: string;
+  note: string;
+}
+
+/** Round 4, lane R — what marking a session Completed would do to its participants. */
+export interface OrientationSessionCompletionPreview {
+  sessionId: string;
+  programTitle?: string | null;
+  /** False when the programme has content or an assessment: those complete it, not the session. */
+  completesByAttendance: boolean;
+  /** Attendance alone does not complete it: the declaration is still to be signed. */
+  requiresAcknowledgement: boolean;
+  /** Seat-holders the register shows attending on at least one day, not yet confirmed. */
+  willComplete: number;
+  /** Seat-holders with no attended day on the register: they stay open. */
+  notShownAttending: number;
+  alreadyConfirmed: number;
 }
 
 // ── Notifications ─────────────────────────────────────────────────────────────
@@ -1049,4 +1358,136 @@ export interface OrientationDashboard {
   overdueList: EmployeeOrientationSummary[];
   upcomingSessionList: OrientationSessionSummary[];
   expiringCertificateList: OrientationCertificate[];
+}
+
+// ── Reminders (round 4, lane K) — the sweep that delivers ─────────────────────
+
+/** Sent, Failed, TimedOut, NoAddress, NoMailServer, NotRouted — or Pending while a run is mid-send. */
+export type OrientationReminderEmailOutcome =
+  | 'Sent'
+  | 'Failed'
+  | 'TimedOut'
+  | 'NoAddress'
+  | 'NoMailServer'
+  | 'NotRouted'
+  | 'Pending';
+
+export interface OrientationReminderRunResult {
+  runId: string;
+  remindersQueued: number;
+  notificationsDelivered: number;
+  emailsSent: number;
+  emailsNotSent: number;
+  unrouted: number;
+  mailServerConfigured: boolean;
+  byKind: Record<string, number>;
+}
+
+export interface OrientationReminderPreviewItem {
+  kind: string;
+  itemType: string;
+  entityId: string;
+  onboardingPlanId?: string | null;
+  employeeOrientationId?: string | null;
+  reference: string;
+  dueDate?: string | null;
+  daysRemaining: number;
+  escalationTier: number;
+  routedToEmployeeId?: string | null;
+  routedToName?: string | null;
+  dedupeKey: string;
+  navigationUrl?: string | null;
+}
+
+export interface OrientationReminderRun {
+  id: string;
+  startedAt: string;
+  completedAt?: string | null;
+  trigger: string;
+  remindersQueued: number;
+  notificationsDelivered: number;
+  emailsSent: number;
+  emailsNotSent: number;
+  unrouted: number;
+  mailServerConfigured: boolean;
+}
+
+export interface OrientationReminderLogEntry {
+  id: string;
+  runId: string;
+  kind: string;
+  itemType: string;
+  entityId: string;
+  onboardingPlanId?: string | null;
+  employeeOrientationId?: string | null;
+  reference: string;
+  dueDate?: string | null;
+  daysRemaining: number;
+  escalationTier: number;
+  routedToEmployeeId?: string | null;
+  routedToName?: string | null;
+  notificationId?: string | null;
+  emailOutcome: OrientationReminderEmailOutcome | string;
+  dispatchedAt: string;
+}
+
+// ── Lifecycle notices (round 4, lane K-b) ────────────────────────────────────
+
+/** What a notice's email did. Null: never meant to be emailed (a manual notice, or one from before K-b). */
+export type OrientationNoticeEmailStatus =
+  | 'Queued'
+  | 'Sent'
+  | 'Failed'
+  | 'TimedOut'
+  | 'NoAddress'
+  | 'NoMailServer'
+  | 'Stale';
+
+/** The catalogue events a notice can be. */
+export type OrientationNoticeKind =
+  | 'OrientationEnrolled'
+  | 'OrientationSessionScheduled'
+  | 'OrientationSessionRescheduled'
+  | 'OrientationSessionPostponed'
+  | 'OrientationSessionCancelled'
+  | 'OrientationCompleted'
+  | 'OrientationCertificateIssued'
+  | 'OnboardingWelcome'
+  | 'OnboardingCoordinatorAssigned'
+  | 'OnboardingBuddyAssigned'
+  | 'OnboardingTaskAssigned'
+  | 'OnboardingTaskDone'
+  | 'OrientationReminderDigest';
+
+export interface OrientationNoticeLogEntry {
+  id: string;
+  sentAt: string;
+  type: OrientationNotificationType | string;
+  /** Null for a manual notice. */
+  kind?: OrientationNoticeKind | string | null;
+  recipientEmployeeId: string;
+  recipientName?: string | null;
+  programId?: string | null;
+  programTitle?: string | null;
+  employeeOrientationId?: string | null;
+  subject: string;
+  message?: string | null;
+  isRead: boolean;
+  emailStatus?: OrientationNoticeEmailStatus | string | null;
+  emailAttempts: number;
+  emailLastAttemptAt?: string | null;
+}
+
+export interface OrientationNoticeDispatchResult {
+  /** Another pass held the lock; this one sent nothing. */
+  busy: boolean;
+  mailServerConfigured: boolean;
+  picked: number;
+  sent: number;
+  failed: number;
+  retrying: number;
+  noAddress: number;
+  noMailServer: number;
+  stale: number;
+  stillQueued: number;
 }

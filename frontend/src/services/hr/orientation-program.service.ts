@@ -7,6 +7,7 @@ import type {
   OrientationProgramStatus,
   OrientationProgramType,
   ChangeOrientationProgramStatusRequest,
+  CloneOrientationProgramRequest,
   OrientationModule,
   OrientationModuleCreateRequest,
   OrientationModuleUpdateRequest,
@@ -18,6 +19,11 @@ import type {
   OrientationAudienceRule,
   OrientationAudienceRuleCreateRequest,
   OrientationAudienceRuleUpdateRequest,
+  OrientationAudiencePopulation,
+  OrientationAudienceReach,
+  OrientationTriggerRunResult,
+  OrientationTriggerDiagnosis,
+  HrAudienceTargetType,
   OrientationAssessmentQuestion,
   OrientationAssessmentQuestionCreateRequest,
   OrientationAssessmentQuestionUpdateRequest,
@@ -87,6 +93,14 @@ class OrientationProgramService {
 
   update(id: string, data: OrientationProgramUpdateRequest): Promise<OrientationProgram> {
     return apiService.put<OrientationProgram>(`${this.baseUrl}/${id}`, data);
+  }
+
+  /**
+   * Round 4, lane J2: copy a programme — modules, content, prerequisites, quiz and audience rules —
+   * as a Draft. Sessions and enrolments stay with the original. 422 when the code is taken.
+   */
+  clone(id: string, data: CloneOrientationProgramRequest): Promise<OrientationProgram> {
+    return apiService.post<OrientationProgram>(`${this.baseUrl}/${id}/clone`, data);
   }
 
   changeStatus(id: string, data: ChangeOrientationProgramStatusRequest): Promise<void> {
@@ -193,6 +207,38 @@ class OrientationProgramService {
 
   removeAudienceRule(ruleId: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/audience-rules/${ruleId}`);
+  }
+
+  // ── Triggers (round 4, lane I) ────────────────────────────────────────────
+
+  /** How many people a rule's target reaches, before it is saved. Writes nothing. */
+  countReach(data: {
+    targetType: HrAudienceTargetType;
+    targetEntityId?: string | null;
+    population: OrientationAudiencePopulation;
+  }): Promise<OrientationAudienceReach> {
+    return apiService.post<OrientationAudienceReach>(`${this.baseUrl}/audience-rules/reach`, data);
+  }
+
+  /** "Enrol audience now" — the programme's undated rules. `preview` writes nothing. */
+  enrolAudience(programId: string, preview: boolean): Promise<OrientationTriggerRunResult> {
+    return apiService.post<OrientationTriggerRunResult>(
+      `${this.baseUrl}/${programId}/enrol-audience?preview=${preview}`,
+      {},
+    );
+  }
+
+  /** Which rules would fire for this employee, and why. */
+  diagnose(employeeId: string): Promise<OrientationTriggerDiagnosis> {
+    return apiService.get<OrientationTriggerDiagnosis>(`${this.baseUrl}/triggers/diagnose/${employeeId}`);
+  }
+
+  /** The nightly sweep, run now for this organisation. `preview` writes nothing. */
+  runTriggers(preview: boolean): Promise<OrientationTriggerRunResult> {
+    return apiService.post<OrientationTriggerRunResult>(
+      `${this.baseUrl}/triggers/run?preview=${preview}`,
+      {},
+    );
   }
 
   // ── Assessment questions ──────────────────────────────────────────────────

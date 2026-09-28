@@ -25,11 +25,18 @@ import type {
   PublicCatalogueIdentificationType,
   PublicCatalogueLanguage,
   PublicCatalogueQualification,
+  PublicCatalogueQualificationLevel,
   PublicCatalogueSkill,
   PublicTenant,
   PublicVacancy,
   SaveCandidateProfilePayload,
 } from '@/types/hr/careers';
+import type {
+  CandidateAssessmentSummary,
+  CandidateSitting,
+  CandidateSittingResult,
+  SubmitSittingPayload,
+} from '@/types/hr/recruitment-tests';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -99,6 +106,11 @@ class PublicCareersService {
     return publicFetch<PublicCatalogueQualification[]>(`/public/catalogue/qualifications`, tenantId);
   }
 
+  /** Round 4, lane Q: the employer's qualification ladder, lowest rung first. */
+  getCatalogueQualificationLevels(tenantId: string): Promise<PublicCatalogueQualificationLevel[]> {
+    return publicFetch<PublicCatalogueQualificationLevel[]>(`/public/catalogue/qualification-levels`, tenantId);
+  }
+
   getCatalogueLanguages(tenantId: string): Promise<PublicCatalogueLanguage[]> {
     return publicFetch<PublicCatalogueLanguage[]>(`/public/catalogue/languages`, tenantId);
   }
@@ -145,6 +157,37 @@ class PublicCareersService {
     const body = await res.json().catch(() => null);
     if (!res.ok) throw new Error(body?.message ?? `Request failed (${res.status})`);
     return body ?? {};
+  }
+
+  /**
+   * Activates a self-registered careers account from the emailed link — round 4.
+   *
+   * ⚠ Anonymous by necessity, not by oversight: the account this activates is inactive and
+   * cannot sign in, which is the situation the link exists to resolve. The Identity token is
+   * single-use, expiring and bound to that one user, and the server refuses any account that is
+   * not in the Candidate role.
+   */
+  async activateAccount(userId: string, token: string): Promise<{ message: string }> {
+    const res = await fetch(`${API_BASE}/auth/candidate/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, token }),
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(body?.message ?? `Activation failed (${res.status})`);
+    return body ?? { message: 'Your account is active.' };
+  }
+
+  /** Asks for a fresh activation link when the first expired or never arrived. */
+  async resendActivation(email: string): Promise<{ message: string }> {
+    const res = await fetch(`${API_BASE}/auth/candidate/activate/resend`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(body?.message ?? `Request failed (${res.status})`);
+    return body ?? { message: 'If that address has an account awaiting activation, a link is on its way.' };
   }
 }
 
@@ -266,6 +309,45 @@ class CandidateService {
     return apiService.post<{ message: string }>(
       `${this.baseUrl}/applications/${applicationId}/offer/respond`,
       { response, notes: notes ?? null, declineReason: declineReason ?? null },
+    );
+  }
+
+  // ── assessments (round 4, lane E) ────────────────────────────────────────
+  //
+  // ⚠ CandidateSitting carries no isCorrect and no expectedAnswer, because the SERVER does not
+  // send them — the candidate projection is a different type on both sides. A component that
+  // renders a paper must take CandidateTestQuestion, never the authoring shape.
+
+  getAssessments(): Promise<CandidateAssessmentSummary[]> {
+    return apiService.get<CandidateAssessmentSummary[]>(`${this.baseUrl}/assessments`);
+  }
+
+  /**
+   * Opens an attempt, or returns the one already running (which does not consume another).
+   *
+   * ⚠ The clock starts on the SERVER here and does not restart when the page is reloaded. Keep the
+   * returned `accessToken` — every save and the submit must present it.
+   */
+  startAssessment(assignmentId: string): Promise<CandidateSitting> {
+    return apiService.post<CandidateSitting>(`${this.baseUrl}/assessments/${assignmentId}/start`, {});
+  }
+
+  /** Resumes an attempt. Re-issues the access token, which invalidates any other open window. */
+  getSitting(sittingId: string): Promise<CandidateSitting> {
+    return apiService.get<CandidateSitting>(`${this.baseUrl}/assessments/sittings/${sittingId}`);
+  }
+
+  saveAssessmentProgress(payload: SubmitSittingPayload): Promise<CandidateSitting> {
+    return apiService.put<CandidateSitting>(
+      `${this.baseUrl}/assessments/sittings/${payload.sittingId}/progress`,
+      payload,
+    );
+  }
+
+  submitAssessment(payload: SubmitSittingPayload): Promise<CandidateSittingResult> {
+    return apiService.post<CandidateSittingResult>(
+      `${this.baseUrl}/assessments/sittings/${payload.sittingId}/submit`,
+      payload,
     );
   }
 }

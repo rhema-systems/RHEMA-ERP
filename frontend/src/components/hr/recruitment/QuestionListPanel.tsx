@@ -33,6 +33,7 @@ const schema = z
     weight: z.coerce.number().int().min(1, 'Weight must be at least 1').max(100),
     minScore: z.coerce.number().int().min(0).max(100),
     maxScore: z.coerce.number().int().min(1).max(100),
+    scoringGuide: z.string().max(2000, 'Keep the guide under 2,000 characters'),
     isActive: z.boolean(),
   })
   .refine((v) => v.maxScore > v.minScore, {
@@ -69,7 +70,14 @@ export function QuestionListPanel({ type }: { type: InterviewQuestionTypeSummary
 
   const form = useForm<FormValues, any, FormOutput>({
     resolver: zodResolver(schema) as any,
-    defaultValues: { questionText: '', weight: 10, minScore: 1, maxScore: 10, isActive: true },
+    defaultValues: {
+      questionText: '',
+      weight: 10,
+      minScore: 1,
+      maxScore: 10,
+      scoringGuide: '',
+      isActive: true,
+    },
   });
 
   useEffect(() => {
@@ -79,13 +87,21 @@ export function QuestionListPanel({ type }: { type: InterviewQuestionTypeSummary
       weight: editing?.weight ?? 10,
       minScore: editing?.minScore ?? 1,
       maxScore: editing?.maxScore ?? 10,
+      scoringGuide: editing?.scoringGuide ?? '',
       isActive: editing?.isActive ?? true,
     });
   }, [dialogOpen, editing, form]);
 
   const save = useMutation({
     mutationFn: (values: FormOutput) => {
-      const payload = { ...values, questionTypeId: type.id };
+      // An empty box is "no guide", not a guide that says nothing — the sheet prints a heading for
+      // every guide it is given, so a blank one would rule an empty box onto every printed question.
+      const scoringGuide = values.scoringGuide.trim();
+      const payload = {
+        ...values,
+        scoringGuide: scoringGuide.length > 0 ? scoringGuide : null,
+        questionTypeId: type.id,
+      };
       return editing
         ? bank.updateQuestion(editing.id, { ...payload, id: editing.id })
         : bank.createQuestion(payload);
@@ -166,7 +182,14 @@ export function QuestionListPanel({ type }: { type: InterviewQuestionTypeSummary
             <TableBody>
               {rows.map((question) => (
                 <TableRow key={question.id}>
-                  <TableCell className="max-w-[420px]">{question.questionText}</TableCell>
+                  <TableCell className="max-w-[420px]">
+                    <p>{question.questionText}</p>
+                    {question.scoringGuide ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        <span className="font-medium">Guide:</span> {question.scoringGuide}
+                      </p>
+                    ) : null}
+                  </TableCell>
                   <TableCell>{question.weight}</TableCell>
                   <TableCell>
                     {question.minScore}–{question.maxScore}
@@ -249,6 +272,23 @@ export function QuestionListPanel({ type }: { type: InterviewQuestionTypeSummary
               The panel is held to this band — a mark outside it is refused, so the scorecard cannot be
               inflated past the question&rsquo;s ceiling.
             </p>
+
+            <div className="space-y-2">
+              <Label htmlFor="scoringGuide">Scoring guide</Label>
+              <Textarea
+                id="scoringGuide"
+                rows={3}
+                placeholder="e.g. Top of the band: names a specific incident, their own part in it, and what changed afterwards."
+                {...form.register('scoringGuide')}
+              />
+              {form.formState.errors.scoringGuide && (
+                <p className="text-sm text-red-500">{form.formState.errors.scoringGuide.message}</p>
+              )}
+              <p className="text-sm text-muted-foreground">
+                Optional — what a good answer sounds like. Printed beside the question on the paper
+                scoring sheet, which is handed to panelists who did not write it.
+              </p>
+            </div>
 
             <div className="flex items-center justify-between rounded-md border p-3">
               <div>

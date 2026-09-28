@@ -179,6 +179,11 @@ export interface OnboardingPlanTemplateUpdateRequest extends OnboardingPlanTempl
   id: string;
 }
 
+/** Round 4, lane J1. The copy is never the default and does not inherit the original's audience. */
+export interface CloneOnboardingPlanTemplateRequest {
+  newName: string;
+}
+
 // ── Task comments ─────────────────────────────────────────────────────────────
 
 export interface OnboardingTaskComment extends AuditFields {
@@ -350,6 +355,8 @@ export interface OnboardingPlan extends AuditFields {
   onboardingCoordinatorId?: string | null;
   onboardingCoordinatorName?: string | null;
   notes?: string | null;
+  /** Set when the system created the plan on hire confirmation: which template, and why (round 4, lane I4). */
+  templateSelectionReason?: string | null;
   totalTasks: number;
   completedTasks: number;
   overdueTasks: number;
@@ -383,4 +390,71 @@ export interface OnboardingPlanUpdateRequest {
   assignedBuddyId?: string | null;
   onboardingCoordinatorId?: string | null;
   notes?: string | null;
+}
+
+// ── My onboarding — the self-service view (round 4, lane K-b2) ───────────────
+// Backend: GET api/employee-portal/onboarding, POST …/tasks/{taskId}/complete. Always the caller's own.
+
+/** A task on the new hire's own plan: what is being done, by whom, and whether it is theirs. */
+export interface MyOnboardingPlanTask {
+  taskId: string;
+  taskName: string;
+  category: OnboardingTaskCategory;
+  status: OnboardingTaskStatus;
+  dueDate: string;
+  isMandatory: boolean;
+  who?: string | null;
+  isMine: boolean;
+}
+
+export interface MyOnboardingPlan {
+  planId: string;
+  status: OnboardingStatus;
+  startDate: string;
+  targetCompletionDate?: string | null;
+  coordinatorName?: string | null;
+  buddyName?: string | null;
+  tasksTotal: number;
+  tasksDone: number;
+  tasks: MyOnboardingPlanTask[];
+}
+
+/** A task given to the signed-in employee, on anybody's plan. */
+export interface MyOnboardingTask {
+  taskId: string;
+  planId: string;
+  taskName: string;
+  description?: string | null;
+  category: OnboardingTaskCategory;
+  status: OnboardingTaskStatus;
+  dueDate: string;
+  isMandatory: boolean;
+  requiresVerification: boolean;
+  isOverdue: boolean;
+  forMyOwnOnboarding: boolean;
+  newHireName?: string | null;
+  newHireStartDate: string;
+  coordinatorName?: string | null;
+  completedDate?: string | null;
+  completionNotes?: string | null;
+  canMarkDone: boolean;
+  cannotMarkDoneBecause?: string | null;
+}
+
+export interface MyOnboardingBuddy {
+  planId: string;
+  newHireName?: string | null;
+  startDate: string;
+  status: OnboardingStatus;
+  coordinatorName?: string | null;
+}
+
+export interface MyOnboarding {
+  myPlan?: MyOnboardingPlan | null;
+  tasksAssignedToMe: MyOnboardingTask[];
+  buddyFor: MyOnboardingBuddy[];
+}
+
+export interface CompleteMyOnboardingTaskRequest {
+  completionNotes?: string | null;
 }

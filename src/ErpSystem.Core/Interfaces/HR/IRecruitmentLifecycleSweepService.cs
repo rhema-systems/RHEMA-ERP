@@ -1,4 +1,4 @@
-namespace ErpSystem.Core.Interfaces.HR;
+﻿namespace ErpSystem.Core.Interfaces.HR;
 
 /// <summary>What one recruitment lifecycle sweep changed.</summary>
 public sealed class RecruitmentSweepResultDto
@@ -12,7 +12,18 @@ public sealed class RecruitmentSweepResultDto
     /// <summary>Anticipated vacancies whose expected date has arrived, promoted to <c>Open</c>.</summary>
     public int VacanciesOpened { get; set; }
 
-    public int TotalChanged => OffersExpired + PostingsExpired + VacanciesOpened;
+    /// <summary>
+    /// Test sittings left running past their deadline, marked on what was saved and closed
+    /// (round 4, lane E).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ A candidate who closes the tab and never comes back leaves a sitting <c>InProgress</c> for
+    /// ever. Without this it stays in HR's marking queue as work outstanding, and the attempt is
+    /// never released either — so the candidate cannot legitimately be given another go.
+    /// </remarks>
+    public int SittingsExpired { get; set; }
+
+    public int TotalChanged => OffersExpired + PostingsExpired + VacanciesOpened + SittingsExpired;
 }
 
 /// <summary>

@@ -65,6 +65,15 @@ public sealed class QualificationCatalogueService : IQualificationCatalogueServi
         return items.Where(x => x.TenantId == tenantId).OrderBy(x => x.Name).Select(MapToDto);
     }
 
+    public async Task<IEnumerable<QualificationLevelOptionDto>> GetActiveLevelsAsync(Guid tenantId)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("A tenant id is required.", nameof(tenantId));
+
+        var levels = await _repository.GetActiveLevelsAsync(tenantId);
+        return levels.Select(l => new QualificationLevelOptionDto { Id = l.Id, Name = l.Name, Code = l.Code, Rank = l.Rank });
+    }
+
     public async Task<IEnumerable<QualificationCatalogueDto>> GetByTypeAsync(QualificationType type)
     {
         var tenantId = GetTenantId();

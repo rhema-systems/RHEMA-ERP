@@ -1,13 +1,15 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Requisition;
+using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Core.Services;
 using ErpSystem.Core.Services.HR.Recruitment;
 using Microsoft.EntityFrameworkCore;
@@ -36,6 +38,12 @@ public class JobOfferService : IJobOfferService
     private readonly IEmailService _email;
     private readonly ITemplatedEmailService _templatedEmail;
     private readonly string _portalBaseUrl;
+    private readonly ICompanyHrPolicySettingsService _policySettings;
+    private readonly HrCurrencyBridge _currencies;
+    private readonly IOfferLetterService _offerLetters;
+    private readonly IHtmlToPdfRenderer _pdfRenderer;
+    private readonly ILeaveEntitlementService _entitlements;
+    private readonly ILeaveYearContext _leaveYear;
 
     public JobOfferService(
         IJobOfferRepository offerRepository,
@@ -51,7 +59,13 @@ public class JobOfferService : IJobOfferService
         ILogger<JobOfferService> logger,
         IEmailService email,
         ITemplatedEmailService templatedEmail,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ICompanyHrPolicySettingsService policySettings,
+        HrCurrencyBridge currencies,
+        IOfferLetterService offerLetters,
+        IHtmlToPdfRenderer pdfRenderer,
+        ILeaveEntitlementService entitlements,
+        ILeaveYearContext leaveYear)
     {
         _offerRepository         = offerRepository;
         _benefitRepository       = benefitRepository;
@@ -66,6 +80,12 @@ public class JobOfferService : IJobOfferService
         _logger                  = logger;
         _email                   = email;
         _templatedEmail          = templatedEmail;
+        _policySettings          = policySettings;
+        _currencies              = currencies;
+        _offerLetters            = offerLetters;
+        _pdfRenderer             = pdfRenderer;
+        _entitlements            = entitlements;
+        _leaveYear               = leaveYear;
         // No localhost fallback: this URL goes into offer emails sent to real candidates. A missing
         // config value must fail at startup, not silently mail every candidate a link to localhost.
         _portalBaseUrl           = configuration["CandidatePortal:PortalUrl"]
@@ -121,6 +141,49 @@ public class JobOfferService : IJobOfferService
     /// message blamed the salary rather than the missing configuration. An absent band means the
     /// grade has nothing to say about the number, not that the number is wrong.</para>
     /// </summary>
+    /// <summary>
+    /// The check set an offer for this post starts from: the post’s own template, else the
+    /// tenant’s single active one (round 4, lane H1).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>"Single" is literal, and deliberately so.</b> With no post-level template and several
+    /// active ones, this returns null rather than picking. An offer letter is a commitment to a
+    /// candidate about what they must produce; listing checks nobody chose is worse than listing
+    /// none, because HR would have to notice the letter was wrong AFTER it was sent. One active
+    /// template is an unambiguous house standard; three is a decision somebody has to make.
+    /// </remarks>
+    private async Task<PreEmploymentCheckTemplate?> ResolveCheckTemplateAsync(
+        EmployeePosition? position, Guid tenantId, CancellationToken ct)
+    {
+        var templates = _unitOfWork.Repository<PreEmploymentCheckTemplate>().GetQueryable()
+            .Where(t => t.TenantId == tenantId && !t.IsDeleted && t.IsActive);
+
+        if (position?.PreEmploymentCheckTemplateId is { } chosen)
+        {
+            var own = await templates.Include(t => t.Items)
+                .FirstOrDefaultAsync(t => t.Id == chosen, ct);
+            if (own is not null) return own;
+            // The post names a template that has since been retired or deleted. Fall through to
+            // the tenant default rather than silently seeding nothing.
+        }
+
+        var active = await templates.Include(t => t.Items).Take(2).ToListAsync(ct);
+        return active.Count == 1 ? active[0] : null;
+    }
+
+    /// <summary>
+    /// Refuses a currency Finance does not hold (round 4, lane G3, § 3 defect 14).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The offer path was the one money-bearing HR surface that never called this. Travel,
+    /// guarantors, succession and requisition costs all validate through the same bridge; an offer
+    /// accepted a hand-typed <c>CurrencyCode</c> of up to ten characters and printed it on the
+    /// letter. <c>optional: true</c> because the column is genuinely nullable — an offer may state
+    /// no salary at all — but a PRESENT code still has to be real.
+    /// </remarks>
+    private Task RequireKnownCurrencyAsync(string? code, CancellationToken ct) =>
+        _currencies.RequireKnownCurrencyAsync(code, ct, optional: true);
+
     private static void EnsureSalaryWithinBand(JobOffer offer)
     {
         if (!offer.BaseSalary.HasValue) return;
@@ -236,6 +299,264 @@ public class JobOfferService : IJobOfferService
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
+    /// <summary>
+    /// What the system proposes for a new offer against this application, with the source of every
+    /// value (round 4, lane G1). Writes nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this is a separate read rather than more defaulting inside
+    /// <see cref="CreateAsync"/>.</b> Create already fills gaps — probation and notice from the
+    /// position, weekly hours from the employment type, the whole position snapshot and benefit
+    /// list — but it does so <i>after</i> Save, invisibly. HR saw empty boxes, typed numbers that
+    /// were then silently overridden, and could not tell which value was theirs. Proposing before
+    /// the form is filled in is the same information arriving in time to be useful.</para>
+    ///
+    /// <para>⚠ <b>Nothing here is authoritative and nothing here is enforced.</b> Every value is a
+    /// starting point the recruiter may overwrite; the server's own rules — the salary band check,
+    /// the position snapshot, the status gate — still run on create and still win. A default that
+    /// could not be resolved comes back <b>null with no source line</b>, and is named in
+    /// <c>Unresolved</c> instead, so the screen says what HR must supply rather than showing an
+    /// empty box with a confident caption under it.</para>
+    /// </remarks>
+    public async Task<JobOfferDefaultsDto> GetDefaultsAsync(
+        Guid applicationId, CancellationToken cancellationToken = default)
+    {
+        // ⚠ No role check here. This controller gates every action with
+        // [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)], unlike JobInterviewService
+        // whose rule is per record. Adding a second, different gate in the service would mean two
+        // places to change and one of them forgotten.
+        var tenantId = GetTenantId();
+
+        // A wider read than GetForOfferSeedingAsync: the defaults need the REQUISITION (for the
+        // location and the required-by date) and the grade's level/notch ladder, neither of which
+        // the create path loads. Kept separate rather than widening that query, which runs on every
+        // create and would carry the extra joins for nothing.
+        var application = await _unitOfWork.Repository<JobApplication>().GetQueryable()
+            .Include(a => a.JobCandidate)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.Position).ThenInclude(p => p!.SalaryGrade)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.Position).ThenInclude(p => p!.OrganizationUnit)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.Position).ThenInclude(p => p!.StaffLevel)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.Requisition).ThenInclude(r => r!.Location)
+            .FirstOrDefaultAsync(a => a.Id == applicationId && a.TenantId == tenantId && !a.IsDeleted,
+                cancellationToken);
+
+        if (application is null)
+            throw new ArgumentException($"Application '{applicationId}' not found.");
+
+        var vacancy = application.JobVacancy;
+        var position = vacancy?.Position;
+        var requisition = vacancy?.Requisition;
+        var settings = await _policySettings.GetForTenantAsync(tenantId, cancellationToken);
+
+        var dto = new JobOfferDefaultsDto
+        {
+            JobApplicationId = application.Id,
+            ApplicationNumber = application.ApplicationNumber,
+            CandidateName = application.JobCandidate?.FullName ?? string.Empty,
+            VacancyNumber = vacancy?.VacancyNumber ?? string.Empty,
+            PositionTitle = position?.Title ?? string.Empty,
+            DepartmentName = position?.OrganizationUnit?.Name ?? string.Empty,
+            EmploymentTypeName = vacancy?.EmploymentType.ToString() ?? string.Empty,
+        };
+
+        void Source(string field, string why) => dto.Sources[field] = why;
+
+        // ── placement: the requisition said where the post sits ──────────────────────────────
+        if (requisition?.LocationId is { } locationId)
+        {
+            dto.LocationId = locationId;
+            dto.LocationLevelId = requisition.LocationLevelId;
+            dto.LocationName = requisition.Location?.Name;
+            Source("locationId", $"From the requisition {requisition.RequisitionNumber}");
+        }
+        else
+        {
+            dto.Unresolved.Add("Duty station — the requisition behind this vacancy names none.");
+        }
+
+        // ── terms from the position ──────────────────────────────────────────────────────────
+        if (position?.ProbationPeriodMonths is { } probation)
+        {
+            dto.ProbationPeriodMonths = probation;
+            Source("probationPeriodMonths", $"The {position.Title} post's probation period");
+        }
+        else if (settings.DefaultProbationMonths > 0)
+        {
+            dto.ProbationPeriodMonths = settings.DefaultProbationMonths;
+            Source("probationPeriodMonths", "The organisation's default probation period");
+        }
+
+        if (position?.NoticePeriodMonths is { } notice)
+        {
+            dto.NoticePeriodMonths = notice;
+            Source("noticePeriodMonths", $"The {position.Title} post's notice period");
+        }
+
+        // ⚠ Mirrors CreateAsync's own fallback exactly (20 part-time, 40 otherwise). If the two
+        // ever disagree, the form would propose one number and the save would store another.
+        var employmentType = vacancy?.EmploymentType ?? EmploymentType.Permanent;
+        dto.WeeklyHours = employmentType == EmploymentType.PartTime ? 20m : 40m;
+        Source("weeklyHours", $"Standard hours for a {Prettify(employmentType.ToString())} contract");
+
+        // A duration belongs to a contract that ends. Proposing 12 months against a permanent post
+        // is worse than proposing nothing.
+        if (employmentType is EmploymentType.Contract or EmploymentType.Temporary or EmploymentType.Internship)
+        {
+            dto.Unresolved.Add(
+                $"Contract duration — a {Prettify(employmentType.ToString())} appointment needs one, " +
+                "and nothing in the requisition states it.");
+        }
+
+        // ── annual leave ─────────────────────────────────────────────────────────────────────
+        // ⚠ Leave settings audit 2, L-91 / L-96. The days the leave engine would give the post's
+        // holder: the annual leave type found by its KIND (at most one is Annual and active, round 5
+        // A1) — it was found by the word "Annual" in its name — then the allocation for the post's
+        // staff level, else the type's default, under the annual ceiling. This read the default
+        // alone, on the stated ground that "this system has no entitlement keyed on grade"; it has —
+        // staff-level allocations — so the letter could promise a figure the new hire's balance would
+        // never show. A full year's days: no hire date is passed, so no first-year scaling applies,
+        // and every arm is a whole number.
+        var annualLeave = await _unitOfWork.Repository<LeaveType>().GetQueryable()
+            .Where(t => t.TenantId == tenantId && !t.IsDeleted && t.IsActive
+                     && t.Category == LeaveTypeCategory.Annual)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (annualLeave is not null)
+        {
+            // The leave year the proposed start falls in, so an allocation that takes effect by then
+            // is the one read; the current leave year when nothing proposes a start.
+            var startMonth = await _leaveYear.StartMonthAsync(cancellationToken);
+            var leaveYear = requisition is not null
+                ? LeaveYear.For(requisition.DesiredStartDate, startMonth)
+                : await _leaveYear.CurrentYearAsync(cancellationToken);
+            var holder = new LeaveAccrualSubject(Guid.Empty, HiredOn: null, LeftOn: null, position?.StaffLevelId);
+            var snapshots = await _entitlements.GetSnapshotsAsync(
+                new[] { holder }, annualLeave.Id, leaveYear, ct: cancellationToken);
+            var days = (int)snapshots[holder.EmployeeId].AnnualEntitledDays;
+
+            if (days > 0)
+            {
+                dto.AnnualLeaveDays = days;
+                Source("annualLeaveDays", position?.StaffLevelId is null
+                    ? $"The standard entitlement for {annualLeave.Name}"
+                      + (position is null ? "" : $" (the {position.Title} post names no staff level)")
+                    : $"What {annualLeave.Name} gives the {position.Title} post's staff level"
+                      + (position.StaffLevel is { } level ? $", {level.Name}," : "")
+                      + $" in the leave year from {LeaveYear.StartOf(leaveYear, startMonth):d MMM yyyy}");
+            }
+            else
+            {
+                dto.Unresolved.Add(position?.StaffLevelId is null
+                    ? $"Annual leave days — {annualLeave.Name} carries no standard entitlement."
+                    : $"Annual leave days — {annualLeave.Name} gives the {position.Title} post's staff level no days.");
+            }
+        }
+        else
+        {
+            dto.Unresolved.Add("Annual leave days — no leave type is set up as annual leave.");
+        }
+
+        // ── conditional on pre-employment checks ─────────────────────────────────────────────
+        // Derived, not stored: the position has no IsConditional flag, but a post that demands a
+        // licence, a certification or a guarantor is one whose offer is conditional on producing
+        // them. Stated as a source so HR can see why the box arrived ticked.
+        if (position is not null &&
+            (position.RequiresLicense || position.RequiresCertification || position.RequiresGuarantor))
+        {
+            var needs = new List<string>();
+            if (position.RequiresLicense) needs.Add("a licence");
+            if (position.RequiresCertification) needs.Add("a certification");
+            if (position.RequiresGuarantor) needs.Add("a guarantor");
+            dto.IsConditional = true;
+            Source("isConditional", $"The post requires {Join(needs)}");
+        }
+
+        // ── dates ────────────────────────────────────────────────────────────────────────────
+        if (requisition is not null)
+        {
+            dto.ProposedStartDate = DateOnly.FromDateTime(requisition.DesiredStartDate);
+            Source("proposedStartDate", $"The date requisition {requisition.RequisitionNumber} asked for");
+        }
+
+        // D-10. An offer with no expiry never lapses: it sits Issued while the candidate takes
+        // another job and the vacancy stays notionally filled.
+        dto.ExpiryDate = DateTime.UtcNow.Date.AddDays(settings.OfferValidityDays);
+        Source("expiryDate", $"{settings.OfferValidityDays} days, from the offer validity policy");
+
+        // ── money: the grade's ladder, most specific rung first ──────────────────────────────
+        if (position?.SalaryGrade is { } grade)
+        {
+            dto.SalaryGradeId = grade.Id;
+            dto.SalaryGradeName = grade.Name;
+            dto.SalaryGradeMin = grade.MinSalary;
+            dto.SalaryGradeMax = grade.MaxSalary;
+
+            var entryLevel = await _unitOfWork.Repository<SalaryLevel>().GetQueryable()
+                .Where(l => l.TenantId == tenantId && !l.IsDeleted && l.IsActive && l.SalaryGradeId == grade.Id)
+                .OrderBy(l => l.Sequence)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (entryLevel is not null)
+            {
+                dto.SalaryLevelId = entryLevel.Id;
+                dto.SalaryLevelName = entryLevel.Name;
+
+                var firstNotch = await _unitOfWork.Repository<SalaryNotch>().GetQueryable()
+                    .Where(n => n.TenantId == tenantId && !n.IsDeleted && n.IsActive
+                             && n.SalaryLevelId == entryLevel.Id)
+                    .OrderBy(n => n.NotchNumber)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                // The ladder: an exact notch amount beats a level midpoint beats the grade floor.
+                // Each rung is a real number somebody set; the fallback only ever gets less precise,
+                // never invented.
+                if (firstNotch is not null)
+                {
+                    dto.SalaryNotchId = firstNotch.Id;
+                    dto.SalaryNotchNumber = firstNotch.NotchNumber;
+                    dto.BaseSalary = firstNotch.SalaryAmount;
+                    Source("baseSalary",
+                        $"{grade.Name} · {entryLevel.Name} · notch {firstNotch.NotchNumber}");
+                }
+                else
+                {
+                    dto.BaseSalary = entryLevel.MidSalary;
+                    Source("baseSalary", $"Midpoint of {grade.Name} · {entryLevel.Name} — the level has no notches");
+                }
+
+                Source("salaryLevelId", $"Entry level of {grade.Name}");
+            }
+            else
+            {
+                dto.BaseSalary = grade.MinSalary;
+                Source("baseSalary", $"Minimum of {grade.Name} — the grade has no levels");
+            }
+        }
+        else
+        {
+            dto.Unresolved.Add("Base salary — the post carries no salary grade, so there is no band to start from.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.DefaultCurrencyCode))
+        {
+            dto.CurrencyCode = settings.DefaultCurrencyCode;
+            Source("currencyCode", "The organisation's default currency");
+        }
+
+        return dto;
+    }
+
+    private static string Prettify(string pascal) =>
+        System.Text.RegularExpressions.Regex.Replace(pascal, "(?<!^)([A-Z])", " $1");
+
+    private static string Join(IReadOnlyList<string> parts) => parts.Count switch
+    {
+        0 => string.Empty,
+        1 => parts[0],
+        2 => $"{parts[0]} and {parts[1]}",
+        _ => $"{string.Join(", ", parts.Take(parts.Count - 1))} and {parts[^1]}",
+    };
+
     public async Task<JobOfferDto> CreateAsync(CreateJobOfferDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         var current = GetTenantId();
@@ -283,6 +604,9 @@ public class JobOfferService : IJobOfferService
         if (position is null)
             throw new InvalidOperationException(
                 "The vacancy behind this application has no position, so the offer has no role to describe.");
+
+        // Round 4, lane G3: a hand-typed currency is refused before anything is written.
+        await RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
 
         // Build entity from the client-supplied negotiated fields
         var entity = createDto.ToEntity(current, createdByUserId);
@@ -346,6 +670,52 @@ public class JobOfferService : IJobOfferService
                 await _benefitRepository.AddRangeAsync(seededBenefits);
         }
 
+        // --- Seed the PRE-EMPLOYMENT CHECK SET (round 4, lane H1) -------------------------
+        //
+        // ⚠ This is what stops AcceptConditionallyAsync being a dead end. That method refuses an
+        // offer with no check set — correctly, because the condition in "conditionally accepted" IS
+        // the check set — but nothing ever created one, so HR had to know to open a tab, build a
+        // set by hand and add every item before a conditional acceptance would be taken at all.
+        // The refusal was honest; the absence of a set was the defect.
+        //
+        // Mirrors PreEmploymentCheckService.ApplyTemplateAsync’s field mapping. Kept here rather
+        // than calling that service so offer creation does not take a dependency on the check
+        // service, which is the same call CreateAsync already makes for the benefit lines.
+        var checkTemplate = await ResolveCheckTemplateAsync(position, current, cancellationToken);
+        if (checkTemplate is not null)
+        {
+            var checkSet = new PreEmploymentCheck
+            {
+                TenantId = current,
+                JobOfferId = entity.Id,
+                OverallStatus = PreEmploymentCheckStatus.Pending,
+                Notes = $"Started from the “{checkTemplate.Name}” check set.",
+                CreatedBy = createdByUserId.ToString(),
+            };
+            await _unitOfWork.Repository<PreEmploymentCheck>().AddAsync(checkSet);
+
+            var checkItems = (checkTemplate.Items ?? new List<PreEmploymentCheckTemplateItem>())
+                .Where(t => !t.IsDeleted)
+                .Select(t => new PreEmploymentCheckItem
+                {
+                    TenantId = current,
+                    PreEmploymentCheckId = checkSet.Id,
+                    CheckType = t.CheckType,
+                    ServiceProviderName = t.DefaultServiceProvider,
+                    ServiceProviderSupplierId = t.DefaultServiceProviderSupplierId,
+                    Instructions = t.Instructions,
+                    IsMandatory = t.IsMandatory,
+                    IsBlockingOnFail = t.IsBlockingOnFail,
+                    ExpectedDays = t.ExpectedDays,
+                    Status = CheckItemStatus.Pending,
+                    CreatedBy = createdByUserId.ToString(),
+                })
+                .ToList();
+
+            if (checkItems.Count > 0)
+                await _unitOfWork.Repository<PreEmploymentCheckItem>().AddRangeAsync(checkItems);
+        }
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job offer created: {OfferNumber}", entity.OfferNumber);
@@ -370,6 +740,7 @@ public class JobOfferService : IJobOfferService
         // \u26a0 Validated AFTER the update is applied. This check used to run first, so it tested the
         // salary already on the record and never the one being saved \u2014 the band guard that create
         // enforces was a no-op on every edit.
+        await RequireKnownCurrencyAsync(entity.CurrencyCode, cancellationToken);
         EnsureSalaryWithinBand(entity);
 
         await _offerRepository.UpdateAsync(entity);
@@ -795,6 +1166,8 @@ public class JobOfferService : IJobOfferService
         if (offer.OfferStatus != JobOfferStatus.Draft && offer.OfferStatus != JobOfferStatus.PendingApproval)
             throw new InvalidOperationException("Benefits can only be added to a Draft or Pending-Approval offer.");
 
+        await RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
+
         var benefit = new JobOfferBenefit
         {
             TenantId = current,
@@ -836,6 +1209,9 @@ public class JobOfferService : IJobOfferService
         if (updateDto.BenefitName != null)  benefit.BenefitName  = updateDto.BenefitName.Trim();
         if (updateDto.Description != null)  benefit.Description  = updateDto.Description;
         if (updateDto.MonetaryValue.HasValue) benefit.MonetaryValue = updateDto.MonetaryValue;
+        // ⚠ Checked BEFORE the assignment. The entity is tracked, so validating afterwards would
+        // leave a refused code sitting on it for whatever else the request goes on to save.
+        await RequireKnownCurrencyAsync(updateDto.CurrencyCode, cancellationToken);
         if (updateDto.CurrencyCode != null)  benefit.CurrencyCode  = updateDto.CurrencyCode.ToUpperInvariant();
         if (updateDto.IsMonetary.HasValue)   benefit.IsMonetary    = updateDto.IsMonetary.Value;
         if (updateDto.DisplayOrder.HasValue) benefit.DisplayOrder  = updateDto.DisplayOrder.Value;
@@ -1163,7 +1539,8 @@ public class JobOfferService : IJobOfferService
             // ⚠ Deliberately NOT `offer.OfferLetterPath`. That is a server filesystem path, and this
             // payload goes to an unauthenticated caller holding only an emailed token — it told them
             // where the file lives on disk and was useless to them as a link anyway. The letter
-            // reaches the candidate as an email attachment; a download route for them would need its
+            // reaches the candidate as a PDF attached to the Offer Issued email (round 4, lane N-b —
+            // this comment said so before it was true); a download route for them would need its
             // own token check, which is candidate-portal work rather than something to bolt on here.
             OfferLetterUrl  = null,
         };
@@ -1209,7 +1586,20 @@ public class JobOfferService : IJobOfferService
             "Candidate responded to offer {OfferNumber} via token: {Response}",
             entity.OfferNumber, dto.Response);
 
+        if (dto.Response == JobOfferStatus.Accepted)
+            await SendAcceptanceConfirmationAsync(entity.Id);
+
         return true;
+    }
+
+    /// <summary>The Offer Accepted email for an acceptance the candidate made themselves.</summary>
+    private async Task SendAcceptanceConfirmationAsync(Guid offerId)
+    {
+        var fullOffer = await _offerRepository.GetWithFullDetailsAsync(offerId);
+        if (fullOffer is null) return;
+        var candidateEmail = fullOffer.Application?.JobCandidate?.Email;
+        var candidateName  = fullOffer.Application?.JobCandidate?.FullName ?? "Candidate";
+        await SendOfferAcceptedEmailAsync(candidateEmail ?? string.Empty, candidateName, fullOffer);
     }
 
     public async Task<bool> RecordPortalCandidateResponseAsync(Guid applicationId, CandidatePortalOfferResponseDto dto, CancellationToken cancellationToken = default)
@@ -1250,6 +1640,9 @@ public class JobOfferService : IJobOfferService
             "Candidate responded to offer {OfferNumber} via portal: {Response}",
             entity.OfferNumber, dto.Response);
 
+        if (dto.Response == JobOfferStatus.Accepted)
+            await SendAcceptanceConfirmationAsync(entity.Id);
+
         return true;
     }
 
@@ -1271,15 +1664,59 @@ public class JobOfferService : IJobOfferService
             // no token was issued.
             ["RespondUrl"]    = candidateToken.HasValue
                 ? $"{_portalBaseUrl}/careers/portal/offer-response?token={candidateToken.Value}"
-                : $"{_portalBaseUrl}/careers/portal/login?returnUrl=/careers/portal/offer/{offer.JobApplicationId}",
+                // ⚠ Corrected 2026-09-22. This read
+                //   /careers/portal/login?returnUrl=/careers/portal/offer/{id}
+                // which was wrong three times over: the login page is at /login, its parameter is
+                // `redirect` (not returnUrl), and /careers/portal/offer/{id} has never existed. A
+                // candidate who reached this branch — any offer issued without a candidate token
+                // — got a 404 instead of their offer. The offer opens from the application list,
+                // which is where this now lands them after signing in.
+                : $"{_portalBaseUrl}/login?redirect={Uri.EscapeDataString("/external-portal/careers")}",
         };
+
+        // The offer letter, as a PDF the candidate can keep (round 4, lane N-b — the user's call). Its
+        // sentence in the email is switched on only when the attachment really exists: a letter that
+        // cannot be rendered or converted costs the candidate the attachment, never the offer email,
+        // and the email never promises a file it does not carry. The letter itself stays readable on
+        // the portal either way.
+        IReadOnlyList<EmailAttachmentDto>? attachments = null;
+        try
+        {
+            var letter = await _offerLetters.GenerateAsync(offer.Id);
+            var pdf = await _pdfRenderer.RenderAsync(letter.HtmlBody, $"Offer letter {offer.OfferNumber}");
+            if (pdf is { Length: > 0 })
+            {
+                attachments = new[]
+                {
+                    new EmailAttachmentDto
+                    {
+                        FileName    = $"Offer letter {offer.OfferNumber}.pdf",
+                        ContentType = "application/pdf",
+                        Content     = pdf,
+                    },
+                };
+                tokens["LetterAttached"] = "yes";
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "The offer letter for {OfferNumber} could not be made a PDF; the offer email goes without it.",
+                    offer.OfferNumber);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "The offer letter for {OfferNumber} could not be rendered; the offer email goes without it.",
+                offer.OfferNumber);
+        }
 
         // Best-effort: the offer is already committed when this runs, so a mail failure must not turn a
         // successful issue into an error response.
         try
         {
             await _templatedEmail.SendAsync(
-                RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.OfferIssued, toEmail, tokens);
+                RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.OfferIssued, toEmail, tokens, attachments);
         }
         catch (Exception ex)
         {
@@ -1289,6 +1726,12 @@ public class JobOfferService : IJobOfferService
         }
     }
 
+    /// <remarks>
+    /// Sent however the acceptance arrives — HR recording it, the candidate's emailed link, the careers
+    /// portal (round 4, lane N-b: only HR's recording sent it, although this comment already claimed the
+    /// link did). ⚠ By the OFFER'S tenant: the link is anonymous, so there is no signed-in user to say
+    /// whose wording and whose company name the email carries.
+    /// </remarks>
     private async Task SendOfferAcceptedEmailAsync(string toEmail, string candidateName, JobOffer offer)
     {
         if (string.IsNullOrWhiteSpace(toEmail)) return;
@@ -1306,8 +1749,8 @@ public class JobOfferService : IJobOfferService
         // unresponsive SMTP server would otherwise hold their response open.
         try
         {
-            var emailTask = _templatedEmail.SendAsync(
-                RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.OfferAccepted, toEmail, tokens);
+            var emailTask = _templatedEmail.SendForTenantAsync(
+                offer.TenantId, RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.OfferAccepted, toEmail, tokens);
 
             if (await Task.WhenAny(emailTask, Task.Delay(TimeSpan.FromSeconds(10))) == emailTask)
                 await emailTask;
@@ -1357,6 +1800,11 @@ public class JobHireService : IJobHireService
     private readonly IPayrollMembershipService _payrollMembership;
     private readonly IEmployeeService _employees;
 
+    // Round 4, lane I: a confirmed start is the hire trigger for orientation, and the moment the
+    // onboarding plan the entities always promised is created.
+    private readonly IOrientationEnrollmentTriggerService _orientationTriggers;
+    private readonly IOnboardingTemplateApplicabilityService _onboardingTemplates;
+
     public JobHireService(
         IJobHireRecordRepository hireRepository,
         IJobOfferRepository offerRepository,
@@ -1375,8 +1823,12 @@ public class JobHireService : IJobHireService
         IStaffNumberService staffNumbers,
         IPayrollMembershipService payrollMembership,
         IEmployeeService employees,
+        IOrientationEnrollmentTriggerService orientationTriggers,
+        IOnboardingTemplateApplicabilityService onboardingTemplates,
         ILogger<JobHireService> logger)
     {
+        _orientationTriggers      = orientationTriggers;
+        _onboardingTemplates      = onboardingTemplates;
         _staffNumbers             = staffNumbers;
         _payrollMembership        = payrollMembership;
         _employees                = employees;
@@ -1929,6 +2381,25 @@ public class JobHireService : IJobHireService
             var hired = await _employeeRepository.GetByIdAsync(hiredEmployeeId);
             if (hired != null)
                 await _payrollMembership.EnsurePayrollProfileAsync(hired, cancellationToken);
+
+            // Round 4, lane I — both after the commit and best-effort, like payroll above: the hire
+            // stands whatever orientation or onboarding make of it. The orientation hook decides
+            // for itself whether any OnHire rule is due (an internal hire linked to an employee of
+            // long standing is not a new hire, and none will be).
+            await _orientationTriggers.OnEmployeeHiredAsync(hiredEmployeeId, cancellationToken);
+
+            // The onboarding plan RecruitmentEntities has always said is "generated from an
+            // OnboardingPlanTemplate when a HireRecord is confirmed" — until now it was not. Only for
+            // an employee THIS hire created: the template is chosen by placement, and a linked
+            // (internal) employee still carries their old placement at this point — choosing by it
+            // would hand them the onboarding plan for the job they are leaving. The officer who
+            // confirmed the start coordinates it: its unassigned tasks are reminded to them.
+            if (!linkedEmployeeId.HasValue && entity.ActualStartDate is { } started)
+                await _onboardingTemplates.CreatePlanOnHireAsync(
+                    entity.TenantId, hiredEmployeeId, started,
+                    _currentUserProvider.UserId == Guid.Empty ? confirmedByUserId : _currentUserProvider.UserId,
+                    confirmedByUserId,
+                    cancellationToken);
         }
 
         return true;

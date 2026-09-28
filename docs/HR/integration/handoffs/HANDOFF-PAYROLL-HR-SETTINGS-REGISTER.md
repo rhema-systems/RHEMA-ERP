@@ -30,11 +30,12 @@ PayrollComponent.IsActive           →  PayComponent.IsActive
 
 Payroll rows are read `AsNoTracking` and **never written**. Mirrored rows carry a provenance marker
 in their description, so the projection only ever updates or deactivates its own rows — anything HR
-defined before the bridge existed is left alone, which matters because `LeaveTypeAllowance` and
-`BenefitPolicy` hold live foreign keys to them.
+defined before the bridge existed is left alone, which matters because `BenefitPolicy` holds live
+foreign keys to them (as `LeaveTypeAllowance` did until leave settings audit 2 dropped it, 2026-09-27).
 
 **What HR adds on top**, because payroll does not model it: effective dating, pensionability, the
-contributes-to-gross flag, and the links from a component to a leave type and to a benefit policy.
+contributes-to-gross flag, and the links from a component to a benefit policy. *(The links to a leave
+type went with HR's encashment rate, 2026-09-27: Finance values leave cashed in.)*
 
 > **So, to answer the question that prompted this register directly:** *allowances are defined in
 > payroll.* HR does not maintain a competing list and should not start. What HR is missing is a

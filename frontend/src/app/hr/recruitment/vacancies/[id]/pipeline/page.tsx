@@ -29,12 +29,13 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { GatedPhoto } from '@/components/hr/common/PhotoDialog';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate } from '@/lib/hr/attendance-format';
 import { jobVacancyService } from '@/services/hr/recruitment.service';
-import { applicationPipelineService } from '@/services/hr/recruitment-pipeline.service';
+import { applicationPipelineService, jobCandidateService } from '@/services/hr/recruitment-pipeline.service';
 import {
   INBOX_STAGE_ID,
   type BulkOperationResult,
@@ -299,19 +300,31 @@ export default function VacancyPipelinePage() {
                           />
                         </TableCell>
                         <TableCell>
-                          <Link
-                            href={`/hr/recruitment/applications/${r.applicationId}`}
-                            className="font-medium hover:underline"
-                          >
-                            {r.candidateName || '—'}
-                          </Link>
-                          <div className="text-xs text-muted-foreground">
-                            {r.candidateEmail}
-                            {r.isInternalCandidate && (
-                              <Badge variant="secondary" className="ml-2">
-                                Internal
-                              </Badge>
-                            )}
+                          {/* Round 4, lane B5 — the photograph the candidate screens have had
+                              since round 3, on the board a recruiter actually works from. */}
+                          <div className="flex items-center gap-3">
+                            <GatedPhoto
+                              endpoint={jobCandidateService.photoUrl(r.candidateId)}
+                              enabled={r.candidateHasPhoto}
+                              alt={r.candidateName}
+                              className="h-8 w-8"
+                            />
+                            <div>
+                              <Link
+                                href={`/hr/recruitment/applications/${r.applicationId}`}
+                                className="font-medium hover:underline"
+                              >
+                                {r.candidateName || '—'}
+                              </Link>
+                              <div className="text-xs text-muted-foreground">
+                                {r.candidateEmail}
+                                {r.isInternalCandidate && (
+                                  <Badge variant="secondary" className="ml-2">
+                                    Internal
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </TableCell>
                         <TableCell className="font-mono text-xs">{r.applicationNumber}</TableCell>

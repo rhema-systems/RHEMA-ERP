@@ -132,7 +132,7 @@ built.
 | 19 | Payroll Bonus | `PayrollBonusPolicy/.Rule/.Exception` (`Amount`, `TaxFreeCeiling`, `TaxRate`) | Bonus computation & tax treatment | EXP | Posted via `PayrollJournalMapping` (row 14) at run time | 🟡 calculated, posts via row 15 |
 | 20 | Payroll Backpay | `PayrollBackpayPolicy/.Rule/.Exception` (`Amount`, `MinimumServiceValue`) | Retroactive pay adjustment | EXP | Same as row 19 | 🟡 calculated, posts via row 15 |
 | 21 | Payroll Disbursement | `EmployeeBankDetail`, `BankSchedule`/`TaxSchedule`/`PensionSchedule` (report types) | Payment instruction artifacts (bank file, tax authority remittance, pension remittance) | PAY | **Report export only — no Finance cash/AP hand-off; actual disbursement is manual today** | 🟡 generated, not wired |
-| 22 | Leave | `LeaveType.EncashmentRateBasis/.EncashmentRatePerDay/.EncashmentWorkingDaysPerMonth` | Cash-conversion pricing rule for unused leave | REF | Feeds row 23 | ⚪ configuration |
+| 22 | Leave | ~~`LeaveType.EncashmentRateBasis/.EncashmentRatePerDay/.EncashmentWorkingDaysPerMonth`~~ | Cash-conversion pricing rule for unused leave — **removed 2026-09-27** (leave settings audit 2): Finance enters the amount when it marks leave cashed in as paid | REF | — | ⚪ removed |
 | 23 | Leave | `LeaveEncashment.DaysEncashed`, `.AmountPaid` | Leave cashed out mid-service | EXP/PAY | Should post like a payroll component — **currently no GL hand-off recorded** | 🟡 HR-only, back-fill owed (backlog area 2) |
 | 24 | Leave | `LeaveBalance.EncashedDays` | Running total feeding a leave liability | REF | Basis for a **leave-liability accrual** Finance may want on the balance sheet — not modelled anywhere today | 🔲 not modelled |
 | 25 | Benefits | `BenefitPolicy` (`EmployeeContribution`, `EmployerContribution`, `CoverageLimit`, `FlatValue`, `ValuationRate`, `ValuationCap`, `TaxExemptThreshold`) | Benefit valuation & tax-treatment configuration | REF | Feeds row 26 | ⚪ configuration |
@@ -192,7 +192,7 @@ built.
 | 79 | Assets | `AssetMaintenance.Cost`; `AssetAssignment.RepairCost/.ReplacementCost`; `AssetSurcharge.AmountRecovered`; `CompanyAsset.InvoiceNumber` | Maintenance spend (EXP, possibly AP); the assignment-level damage costs that seed a surcharge; the running recovered total; a purchase-invoice reference with no AP link | EXP / REC / REF | Rows 36–41's treatment | 🟡 HR-only |
 | 80 | Discipline | **`StaffDisciplineTermination.FinalPaycheckProcessed/.FinalPaycheckDate/.FinalPaycheckAmount`**; `StaffDisciplineSeparation.FinalPayrollProcessed`; `StaffDisciplineLegalReview.LegalCostsIncurred`; `StaffDisciplineSuspension.SuspensionWithPay` | **A second final-pay record that can disagree with `SeparationSettlement` (row 54)**; external legal fees (AP); an unpaid suspension is a pay stoppage | PAY / EXP | Row 54's treatment — but first decide which record is authoritative for a dismissal's final pay | 🔲 conflict not resolved |
 | 81 | Travel | `StaffTravelVisaApplication.ProcessingFee`; `StaffTravelInsurancePolicy.SumInsured/.Premium`; `StaffTravelFlightBooking.TotalFare/.TaxesAndFees/.CancellationFee`; `StaffTravelHotelBooking.RatePerNight/.PolicyMaxRatePerNight/.CancellationFee`; `StaffTravelRequest.EstimatedTotalCost/.ApprovedBudget`; `StaffTravelBudget.TotalCommitted/.TotalActual/.Variance`; `StaffTravelPolicy.MaxSingleTripBudget/.MaxAnnualTravelBudget` | Visa fees and travel-insurance premiums are **two payables to third parties** not in rows 48–53 (the bookings carry a `VendorId` → Procurement `Supplier`, so the payee IS modelled here); cancellation fees are sunk cost; the trip budget already has its own commitment/actual/variance triple | PAY / BUD | AP via the existing `Supplier` FK — the one HR area where decision #7 is already answered | 🟡 HR-only |
-| 82 | Leave | `LeaveTypeAllowance.PayComponentId` (`LeaveEntities.cs:116`) | Leave-type → pay-component link (the allowances that price encashment) | REF | Feeds rows 22–23 | ⚪ configuration |
+| 82 | Leave | ~~`LeaveTypeAllowance.PayComponentId`~~ | Leave-type → pay-component link (the allowances that priced encashment) — **table dropped 2026-09-27** (leave settings audit 2) | REF | — | ⚪ removed |
 | 83 | Attendance | `PublicHoliday.AttractsHolidayPay/.HolidayPayMultiplier`; `ShiftDefinition.ShiftDifferentialPercentage`; `StaffAttendancePayrollExport` (a hand-off *record*, no file) | Pay-rate multipliers and the hours hand-off to payroll | REF | Feeds payroll rates | ⚪ configuration |
 | 84 | Company | `CompanyHrPolicySettings.BudgetEnforcementMode` (Warn/Block) + `EstablishmentEnforcementMode` | The only budget-enforcement switch in HR (tenant setting, Admin-tier) | REF | Governs whether row 68/5 refuse over-budget requisitions | ⚪ configuration |
 | 85 | Payroll (owner: payroll dev) | **`PayrollExchangeRate`** (`PayrollEntities.cs:781`), `PayrollParameterSet.ExchangeRate`, `PayrollPaymentMethod.Amount/.ExchangeRate` | **A parallel FX master inside payroll** — violates the "read Finance's `ExchangeRate`, never duplicate" rule | REF | Finance `ExchangeRate` | 🔲 duplicate master — raise with the payroll owner |
@@ -289,6 +289,13 @@ no link to Finance's or Sales' `Customer`/`BusinessPartner`. Every other row in 
 money going *out*; this one is money coming *in*, so none of decisions #1–#10 covers it. It needs
 its own decision (#11 below): does a `TimesheetInvoice` become a Finance AR invoice, and is the
 `ConsultantClient` a Finance customer?
+
+**Decided and built 2026-09-21 (lane 8 slice 6): yes to both.** `ConsultantClient.FinanceCustomerId`
+links the client to a Finance (Sales) customer through HR's read door `api/hr/customers`; sending a
+timesheet invoice raises a Finance AR customer invoice (`TIMESHEET_INVOICE_SENT`, one revenue line
+for the billed hours before tax — Finance's tax group governs) into AR approval, and the posting
+register's refresh writes Finance's receipt back onto the HR invoice, which can no longer be marked
+paid by hand. See `HR-FINANCE-POSTING-DESIGN.md` § 3.1f.
 
 ### 3.2 Benefits & Medical — the priority back-fill
 

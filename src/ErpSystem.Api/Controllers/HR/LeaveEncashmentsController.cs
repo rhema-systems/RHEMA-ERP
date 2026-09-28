@@ -1,5 +1,7 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -13,8 +15,9 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 /// <remarks>
 /// W3 slice 5: an employee requests and views their OWN encashment (self-or-permission), the
-/// register and the payment step are the leave read/write tiers, and approve/reject stay with
-/// the workflow assignee, validated per request by the service.
+/// register is the leave read tier, and approve/reject stay with the workflow assignee, validated
+/// per request by the service. Since leave settings audit 2 the payment step is Finance's
+/// (<c>HR.Pay.Value</c>): a request carries days, and Finance enters the amount when it pays.
 /// </remarks>
 [ApiController]
 [Route("api/hr/leave-encashments")]
@@ -25,6 +28,7 @@ public class LeaveEncashmentsController : ControllerBase
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
     private readonly IAuthorizationService _authorization;
+    private readonly ILeaveYearContext _leaveYear;
     private readonly ILogger<LeaveEncashmentsController> _logger;
 
     public LeaveEncashmentsController(
@@ -32,12 +36,14 @@ public class LeaveEncashmentsController : ControllerBase
         ApplicationDbContext db,
         ICurrentUserService currentUserService,
         IAuthorizationService authorization,
+        ILeaveYearContext leaveYear,
         ILogger<LeaveEncashmentsController> logger)
     {
         _service = service;
         _db = db;
         _currentUserService = currentUserService;
         _authorization = authorization;
+        _leaveYear = leaveYear;
         _logger = logger;
     }
 
@@ -63,6 +69,25 @@ public class LeaveEncashmentsController : ControllerBase
         return (await _authorization.AuthorizeAsync(User, policy)).Succeeded;
     }
 
+    /// <summary>Whether leave may be cashed in while still employed (round 5, lane L1)</summary>
+    /// <remarks>
+    /// Open to anybody signed in: the portal asks it to decide whether to show its encashment screen
+    /// at all. It says only whether the route exists — no figures, nobody's leave.
+    /// </remarks>
+    [HttpGet("availability")]
+    [ProducesResponseType(typeof(LeaveEncashmentAvailabilityDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<LeaveEncashmentAvailabilityDto>> GetAvailability()
+    {
+        var allowed = await _service.IsInServiceAllowedAsync();
+        return Ok(new LeaveEncashmentAvailabilityDto
+        {
+            InServiceAllowed = allowed,
+            Explanation = allowed
+                ? "Annual leave may be cashed in while employed, subject to approval."
+                : "Leave is cashed in only when you leave: unused annual leave is paid in your final settlement.",
+        });
+    }
+
     [HttpGet]
     [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<LeaveEncashmentDto>), StatusCodes.Status200OK)]
@@ -72,10 +97,13 @@ public class LeaveEncashmentsController : ControllerBase
         [FromQuery] Guid?     leaveTypeId = null,
         [FromQuery] DateTime? from        = null,
         [FromQuery] DateTime? to          = null,
-        [FromQuery] string?   search      = null)
+        [FromQuery] string?   search      = null,
+        // ⚠ The page always sent a status and nothing read it, so its Status filter did nothing
+        // (found in round 5 lane M's re-read of the guide).
+        [FromQuery] LeaveEncashmentStatus? status = null)
     {
-        if (year == 0) year = DateTime.Today.Year;
-        return Ok(await _service.GetAllEncashmentsAsync(year, employeeId, leaveTypeId, from, to, search));
+        if (year == 0) year = await _leaveYear.CurrentYearAsync();
+        return Ok(await _service.GetAllEncashmentsAsync(year, employeeId, leaveTypeId, from, to, search, status));
     }
 
     [HttpGet("{id:guid}")]
@@ -99,7 +127,7 @@ public class LeaveEncashmentsController : ControllerBase
         if (!await CanActForEmployeeAsync(employeeId, HrPermissions.LeaveReadPolicy))
             return Forbid();
 
-        if (year == 0) year = DateTime.Today.Year;
+        if (year == 0) year = await _leaveYear.CurrentYearAsync();
         return Ok(await _service.GetEmployeeEncashmentsAsync(employeeId, year));
     }
 
@@ -153,8 +181,10 @@ public class LeaveEncashmentsController : ControllerBase
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
+    // Leave settings audit 2 (P4): marking paid is Finance's — it enters the amount — so the gate is
+    // HR.Pay.Value, not the leave desk's Write. HR approves the days; it does not pay them.
     [HttpPatch("{id:guid}/process")]
-    [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
+    [Authorize(Policy = HrPermissions.PayValuePolicy)]
     [ProducesResponseType(typeof(LeaveEncashmentDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

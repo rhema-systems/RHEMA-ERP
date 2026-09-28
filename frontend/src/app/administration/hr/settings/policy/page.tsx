@@ -89,17 +89,27 @@ const schema = z
     queryResponseWindowHours: z.coerce.number().int().min(1).max(720),
     investigationDays: z.coerce.number().int().min(1).max(365),
     disciplineBacklogHorizonDays: z.coerce.number().int().min(1).max(3650),
-    settlementDaysPerYear: z.coerce.number().int().min(1).max(366),
+    // Round 5, lane L2b: empty means no cap, so '' is a real answer here.
+    settlementLeaveDaysCap: z.union([z.coerce.number().int().min(1).max(366), z.literal('')]).optional(),
+    medicalBoardQuorum: z.coerce.number().int().min(1).max(20),
+    // Round 5, lane K-II-b (PNDCL 187). Empty is a real answer for the months and the ceiling.
+    permanentTotalIncapacityMonths: z.union([z.coerce.number().int().min(1).max(600), z.literal('')]).optional(),
+    temporaryIncapacityMaxMonths: z.coerce.number().int().min(1).max(120),
+    compensationEarningsCeiling: z.union([z.coerce.number().positive(), z.literal('')]).optional(),
     attendanceRateIncludesApprovedLeave: z.boolean(),
 
     allowInServiceEncashment: z.boolean(),
-    encashmentWorkingDaysPerMonth: z.coerce.number().int().min(1).max(31),
     leaveStartingReminderDays: z.coerce.number().int().min(0).max(180),
     leaveClosureGraceDays: z.coerce.number().int().min(0).max(180),
     leaveUndecidedChaseDays: z.coerce.number().int().min(0).max(180),
     mandatoryLeaveChaseFromMonth: z.coerce.number().int().min(1).max(12),
     leaveCarryOverExpiryReminderDays: z.coerce.number().int().min(0).max(365),
     leaveYearStartMonth: z.string(),
+    onboardingTaskDueLeadDays: z.coerce.number().int().min(0).max(90),
+    orientationDueLeadDays: z.coerce.number().int().min(0).max(90),
+    orientationCertificateExpiryLeadDays: z.coerce.number().int().min(0).max(365),
+    orientationChaseAfterDays: z.coerce.number().int().min(1).max(90),
+    companyEventRsvpChaseLeadDays: z.coerce.number().int().min(0).max(60),
 
     budgetEnforcementMode: z.string(),
     establishmentEnforcementMode: z.string(),
@@ -206,38 +216,32 @@ export default function PolicySettingsPage() {
       queryResponseWindowHours: data.queryResponseWindowHours,
       investigationDays: data.investigationDays,
       disciplineBacklogHorizonDays: data.disciplineBacklogHorizonDays,
-      settlementDaysPerYear: data.settlementDaysPerYear,
+      settlementLeaveDaysCap: data.settlementLeaveDaysCap ?? '',
+      medicalBoardQuorum: data.medicalBoardQuorum ?? 1,
+      permanentTotalIncapacityMonths: data.permanentTotalIncapacityMonths ?? '',
+      temporaryIncapacityMaxMonths: data.temporaryIncapacityMaxMonths ?? 24,
+      compensationEarningsCeiling: data.compensationEarningsCeiling ?? '',
       attendanceRateIncludesApprovedLeave: data.attendanceRateIncludesApprovedLeave,
       allowInServiceEncashment: data.allowInServiceEncashment,
-      encashmentWorkingDaysPerMonth: data.encashmentWorkingDaysPerMonth,
       leaveStartingReminderDays: data.leaveStartingReminderDays,
       leaveClosureGraceDays: data.leaveClosureGraceDays,
       leaveUndecidedChaseDays: data.leaveUndecidedChaseDays,
       mandatoryLeaveChaseFromMonth: data.mandatoryLeaveChaseFromMonth,
       leaveCarryOverExpiryReminderDays: data.leaveCarryOverExpiryReminderDays,
       leaveYearStartMonth: String(data.leaveYearStartMonth ?? 1),
+      onboardingTaskDueLeadDays: data.onboardingTaskDueLeadDays,
+      orientationDueLeadDays: data.orientationDueLeadDays,
+      orientationCertificateExpiryLeadDays: data.orientationCertificateExpiryLeadDays,
+      orientationChaseAfterDays: data.orientationChaseAfterDays,
+      companyEventRsvpChaseLeadDays: data.companyEventRsvpChaseLeadDays ?? 2,
     });
   }, [data, form]);
 
   const genderSpecific = !!form.watch('useGenderSpecificRetirementAge');
   const proceduralDays = Number(form.watch('proceduralAbsenceDays') ?? 0);
 
-  // ⚠ The whole point of showing these two together. Encashment divides monthly emoluments by
-  // WORKING DAYS PER MONTH; a final settlement divides annualised pay by CALENDAR DAYS PER YEAR. At
-  // the defaults that is ~38% apart on the same salary. They are different money events and are
-  // deliberately not merged — but a client should meet that gap here, on a settings screen,
-  // rather than in a payout somebody has already queried.
-  const SAMPLE_MONTHLY = 6000;
-  const encashDivisor = Number(form.watch('encashmentWorkingDaysPerMonth') ?? 0);
-  const settleDivisor = Number(form.watch('settlementDaysPerYear') ?? 0);
-  const encashDaily = encashDivisor > 0 ? SAMPLE_MONTHLY / encashDivisor : null;
-  const settleDaily = settleDivisor > 0 ? (SAMPLE_MONTHLY * 12) / settleDivisor : null;
-  const spreadPct =
-    encashDaily && settleDaily
-      ? Math.abs(encashDaily - settleDaily) / Math.min(encashDaily, settleDaily)
-      : null;
-  const money = (n: number) =>
-    n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // The "two daily-rate bases" comparison that sat here left with leave settings audit 2 (L-73,
+  // L-74): HR holds no rate at all now. It records days, and Finance values them.
 
   // The weights are relative, so what actually matters is their share. Show it.
   const weights = [
@@ -297,16 +301,29 @@ export default function PolicySettingsPage() {
         queryResponseWindowHours: Number(v.queryResponseWindowHours),
         investigationDays: Number(v.investigationDays),
         disciplineBacklogHorizonDays: Number(v.disciplineBacklogHorizonDays),
-        settlementDaysPerYear: Number(v.settlementDaysPerYear),
+        // ⚠ Sent every time, as null when emptied: the server keeps its default (56) for a save
+        // that leaves the field out, so only an explicit null removes the cap.
+        settlementLeaveDaysCap: orNullNumber(v.settlementLeaveDaysCap),
+        // ⚠ Sent every time: a save that leaves it out resets it to 1.
+        medicalBoardQuorum: Number(v.medicalBoardQuorum),
+        // ⚠ Both sent every time, as null when emptied: the months keep 96 on a save that omits
+        // them, and the ceiling would be cleared by one.
+        permanentTotalIncapacityMonths: orNullNumber(v.permanentTotalIncapacityMonths),
+        temporaryIncapacityMaxMonths: Number(v.temporaryIncapacityMaxMonths),
+        compensationEarningsCeiling: orNullNumber(v.compensationEarningsCeiling),
         attendanceRateIncludesApprovedLeave: v.attendanceRateIncludesApprovedLeave,
         allowInServiceEncashment: v.allowInServiceEncashment,
-        encashmentWorkingDaysPerMonth: Number(v.encashmentWorkingDaysPerMonth),
         leaveStartingReminderDays: Number(v.leaveStartingReminderDays),
         leaveClosureGraceDays: Number(v.leaveClosureGraceDays),
         leaveUndecidedChaseDays: Number(v.leaveUndecidedChaseDays),
         mandatoryLeaveChaseFromMonth: Number(v.mandatoryLeaveChaseFromMonth),
         leaveCarryOverExpiryReminderDays: Number(v.leaveCarryOverExpiryReminderDays),
         leaveYearStartMonth: Number(v.leaveYearStartMonth),
+        onboardingTaskDueLeadDays: Number(v.onboardingTaskDueLeadDays),
+        orientationDueLeadDays: Number(v.orientationDueLeadDays),
+        orientationCertificateExpiryLeadDays: Number(v.orientationCertificateExpiryLeadDays),
+        orientationChaseAfterDays: Number(v.orientationChaseAfterDays),
+        companyEventRsvpChaseLeadDays: Number(v.companyEventRsvpChaseLeadDays),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hr', 'policy-settings'] });
@@ -622,26 +639,26 @@ export default function PolicySettingsPage() {
               engine that shouts for ever trains people to ignore it.
             </p>
 
-            {/* ⚠ The one setting on this page that changes what a person is paid. */}
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40">
+            {/*
+              Leave settings audit 2 (L-74): "Final settlement — days per year" was the divisor HR
+              used to price notice pay and leave owed on exit. Finance values a leaver's pay now, so
+              HR holds no rate.
+            */}
+
+            {/* Round 5, lane L2b: FR-HR-152's cap, visible and changeable instead of a constant. */}
+            <div className="space-y-2">
               <NumberField
                 form={form}
-                name="settlementDaysPerYear"
-                label="Final settlement — days per year"
-                required
+                name="settlementLeaveDaysCap"
+                label="Final settlement — most days of annual leave paid"
               />
-              <p className="mt-2 text-sm">
-                <strong>This one moves money.</strong> A daily rate is monthly pay × 12 ÷ this
-                number: <strong>365</strong> for calendar days, <strong>360</strong> for thirty-day
-                months, <strong>264</strong> for a 22-day working month. On TDC&apos;s own worked
-                example the answers run from <strong>GHS 3,156.16</strong> to{' '}
-                <strong>GHS 4,363.64</strong> — a 38% spread on the same facts.
-              </p>
-              <p className="mt-2 text-sm">
-                Every settlement records which basis produced it, so changing this never rewrites
-                one already computed. That makes an early settlement auditable; it does not make it
-                right. <strong>Do not run real final settlements until TDC has confirmed the
-                basis.</strong>
+              <p className="text-sm text-muted-foreground">
+                A leaver is paid for the annual leave they are owed on their last day: this leave
+                year&apos;s share, built up to that day, plus carried days not yet lapsed, less what
+                they took or already cashed in. This caps the days paid (FR-HR-152 says 56).{' '}
+                <strong>Leave it empty for no cap.</strong> Nothing is paid on summary dismissal
+                (Labour Act, s.30(3)), whatever this says. The amount on the statement is indicative:
+                Finance confirms it.
               </p>
             </div>
 
@@ -654,12 +671,67 @@ export default function PolicySettingsPage() {
           </CardContent>
         </Card>
 
+        {/* Round 5, lane K-II-a: a board decides each case at a sitting, by the members present. */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Medical boards</CardTitle>
+            <CardDescription>
+              How many of a board&apos;s deciding members must be present for it to decide a case.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <NumberField
+              form={form}
+              name="medicalBoardQuorum"
+              label="Quorum — deciding members present"
+              required
+            />
+            <p className="text-sm text-muted-foreground">
+              A board decides each case at a recorded sitting, and the members present are the panel
+              that decided it. A chair or member counts; a secretary or observer attends without
+              deciding. A case cannot be decided at a sitting with fewer deciding members than this.
+              The default, <strong>1</strong>, is the least a finding can rest on; set it to your
+              organisation&apos;s rule for how many doctors must sit.
+            </p>
+
+            {/* Round 5, lane K-II-b: the Workmen's Compensation Act's figures, as defaults. */}
+            <div className="grid gap-4 pt-2 sm:grid-cols-3">
+              <NumberField
+                form={form}
+                name="permanentTotalIncapacityMonths"
+                label="Months' earnings — permanent total incapacity"
+              />
+              <NumberField
+                form={form}
+                name="temporaryIncapacityMaxMonths"
+                label="Longest temporary incapacity (months)"
+                required
+              />
+              <NumberField
+                form={form}
+                name="compensationEarningsCeiling"
+                label="Earnings ceiling — a year"
+              />
+            </div>
+            <p className="text-sm text-muted-foreground">
+              The Workmen&apos;s Compensation Act pays <strong>96</strong> months&apos; earnings for permanent
+              total incapacity (s.5) and a partial incapacity its percentage of that; temporary incapacity
+              is paid through payroll for at most <strong>24</strong> months (s.7). Leave the months empty
+              and no figure is worked out. The Act computes compensation on at most a set amount of a
+              year&apos;s earnings (s.36) — its 25,000 cedis predates redenomination and no revision was
+              found, so <strong>this is empty until your organisation or counsel names the ceiling in
+              force</strong>; every figure says whether a ceiling applied. The figure a board case shows
+              is indicative: the labour officer notifies the amount due, and it is paid to the Court.
+            </p>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle>Leave — encashment</CardTitle>
             <CardDescription>
-              Whether unused leave can be cashed in while still employed, and what a day of it is
-              worth.
+              Whether unused leave can be cashed in while still employed. HR approves the days;
+              Finance puts the money on them when it pays.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -670,67 +742,18 @@ export default function PolicySettingsPage() {
               description="Off: leave is only ever paid out when somebody leaves, and the in-service encashment screen refuses. On: employees may convert unused days to cash, for whichever leave types are marked convertible. This switch decides whether the route exists at all - the per-type setting still decides which leave may use it."
             />
             <p className="text-sm text-muted-foreground">
-              FR-HR-046 says leave is encashed <em>only on exit, no other route</em> — so a new
-              tenant starts with this off. Turn it on if this organisation&apos;s policy differs.
+              FR-HR-046 says leave is encashed <em>only on exit, no other route</em>, and the Labour
+              Act makes an agreement to give up annual leave void (s.31) — so this is off, and the
+              employee portal hides its encashment screen. Turn it on only if this
+              organisation&apos;s policy differs; even then, only annual leave, from the current
+              leave year, up to the days built up so far, can be cashed in.
             </p>
 
-            {/* The two daily-rate bases, shown together on purpose. */}
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40">
-              <NumberField
-                form={form}
-                name="encashmentWorkingDaysPerMonth"
-                label="Encashment — working days per month"
-                required
-              />
-              <p className="mt-2 text-sm">
-                <strong>This one moves money.</strong> A day of encashed leave is worth monthly
-                basic plus linked allowances divided by this number. A leave type may set its own
-                figure; this is what every type without one falls back to.
-              </p>
-
-              <div className="mt-3 rounded border bg-background/60 p-3 text-sm">
-                <p className="font-medium">
-                  On a salary of {money(SAMPLE_MONTHLY)} a month, the two bases in force right now:
-                </p>
-                <table className="mt-2 w-full">
-                  <tbody>
-                    <tr>
-                      <td className="py-1 pr-3">Encashed leave, per day</td>
-                      <td className="py-1 pr-3 text-muted-foreground">
-                        {money(SAMPLE_MONTHLY)} / {encashDivisor || '-'}
-                      </td>
-                      <td className="py-1 text-right font-medium">
-                        {encashDaily === null ? '-' : money(encashDaily)}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-1 pr-3">Final settlement, per day</td>
-                      <td className="py-1 pr-3 text-muted-foreground">
-                        {money(SAMPLE_MONTHLY)} x 12 / {settleDivisor || '-'}
-                      </td>
-                      <td className="py-1 text-right font-medium">
-                        {settleDaily === null ? '-' : money(settleDaily)}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-                {spreadPct !== null && spreadPct > 0.005 && (
-                  <p className="mt-2">
-                    The same day of leave is worth{' '}
-                    <strong>{(spreadPct * 100).toFixed(0)}% more</strong> under one basis than the
-                    other.
-                  </p>
-                )}
-              </div>
-
-              <p className="mt-2 text-sm">
-                <strong>That gap is not necessarily wrong.</strong> Encashing unused days while
-                employed is not the same event as a final settlement on exit, and the two are
-                deliberately configurable apart. What matters is that it is a choice: every
-                encashment and every settlement records the basis that produced it, so changing
-                either number never rewrites an amount already paid.
-              </p>
-            </div>
+            {/*
+              Leave settings audit 2 (L-73): what a day of cashed-in leave is worth is Finance's
+              figure, entered when it marks the days paid. HR holds no rate, so the comparison of
+              two bases that sat here is gone.
+            */}
           </CardContent>
         </Card>
 
@@ -786,11 +809,35 @@ export default function PolicySettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+              <p className="font-medium text-foreground">Who is told, in the app and by email</p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                <li>Leave starting soon, and carried days about to lapse: the employee.</li>
+                <li>
+                  A request waiting: whoever its approval step is asking. The employee instead, when
+                  the approver has suggested other dates.
+                </li>
+                <li>
+                  Leave not closed: the line manager once the return is reported, otherwise HR.
+                </li>
+                <li>
+                  Annual leave not yet planned or taken: the employee, their supervisor (one message
+                  naming all their people) and HR (one summary).
+                </li>
+                <li>
+                  When someone has served the qualifying period for annual leave: the employee and HR.
+                </li>
+              </ul>
+              <p className="mt-1">
+                Anyone who cannot be told directly, for example because they have no login, is
+                passed to HR with the reason.
+              </p>
+            </div>
             <FieldRow>
               <NumberField
                 form={form}
                 name="leaveStartingReminderDays"
-                label="Announce approved leave this many days ahead"
+                label="Ask the employee about approved leave this many days ahead"
                 required
               />
               <NumberField
@@ -817,13 +864,90 @@ export default function PolicySettingsPage() {
             <NumberField
               form={form}
               name="mandatoryLeaveChaseFromMonth"
-              label="Start chasing outstanding mandatory leave from month"
+              label="Start chasing annual leave not yet planned or taken from month of the leave year"
               required
             />
             <p className="text-sm text-muted-foreground">
-              Month 9 is September — late enough that the chase is not noise, early enough that
-              there is still a quarter of the year in which to take the leave. Chasing from January
-              says nothing; chasing in December is too late to act on.
+              Counted from the month the leave year starts: month 9 is September when the leave year
+              starts in January, December when it starts in April. Late enough that the chase is not
+              noise, early enough that there is still a quarter of the year in which to take the
+              leave. Chasing from the first month says nothing; chasing in the last is too late to
+              act on.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Orientation &amp; onboarding — reminders</CardTitle>
+            <CardDescription>
+              The daily reminder sweep tells people what is due: onboarding tasks go to their
+              assignee, else the plan&apos;s coordinator; orientations, assessments, acknowledgements
+              and certificates to the participant. Each person gets one notification listing theirs,
+              and the same by email.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <FieldRow>
+              <NumberField
+                form={form}
+                name="onboardingTaskDueLeadDays"
+                label="Remind about an onboarding task this many days before it is due"
+                required
+              />
+              <NumberField
+                form={form}
+                name="orientationDueLeadDays"
+                label="Remind about an orientation this many days before it is due"
+                required
+              />
+            </FieldRow>
+            <FieldRow>
+              <NumberField
+                form={form}
+                name="orientationCertificateExpiryLeadDays"
+                label="Warn this many days before an orientation certificate expires"
+                required
+              />
+              <NumberField
+                form={form}
+                name="orientationChaseAfterDays"
+                label="Chase something waiting on a person after this many days"
+                required
+              />
+            </FieldRow>
+            <p className="text-sm text-muted-foreground">
+              &quot;Waiting on a person&quot; is a completed task nobody has signed off, an assessment
+              not yet attempted, or an acknowledgement not yet signed. Overdue items are reminded when
+              they fall due, again after a week and after a fortnight; anything more than 90 days
+              overdue is treated as history.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Company schedule reminders</CardTitle>
+            <CardDescription>
+              Sent automatically, once each. An event&apos;s own reminder goes the number of days
+              before it that its form asks for, when <strong>Send reminders</strong> is on. Everybody
+              who has not answered an invitation is chased once, ahead of the event&apos;s RSVP deadline.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <FieldRow>
+              <NumberField
+                form={form}
+                name="companyEventRsvpChaseLeadDays"
+                label="Chase unanswered invitations this many days before the RSVP deadline"
+                required
+              />
+            </FieldRow>
+            <p className="text-sm text-muted-foreground">
+              Only live events are reminded: scheduled, confirmed or rescheduled, and approved where
+              approval is required. Moving an event&apos;s date lets it be reminded again for the new
+              date. Pressing <strong>Send reminder now</strong> or <strong>Chase unanswered now</strong> on
+              the event counts as the send, so nobody is told twice.
             </p>
           </CardContent>
         </Card>

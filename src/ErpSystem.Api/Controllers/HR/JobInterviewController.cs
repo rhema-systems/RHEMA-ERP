@@ -1,4 +1,4 @@
-using ErpSystem.Api.Filters;
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -33,11 +33,16 @@ namespace ErpSystem.Api.Controllers.HR;
 public class JobInterviewController : ControllerBase
 {
     private readonly IJobInterviewService _service;
+    private readonly IInterviewPaperService _paper;
     private readonly ICurrentUserService _currentUser;
 
-    public JobInterviewController(IJobInterviewService service, ICurrentUserService currentUser)
+    public JobInterviewController(
+        IJobInterviewService service,
+        IInterviewPaperService paper,
+        ICurrentUserService currentUser)
     {
         _service = service;
+        _paper = paper;
         _currentUser = currentUser;
     }
 
@@ -75,9 +80,18 @@ public class JobInterviewController : ControllerBase
         => Ok(await _service.GetByRoundAsync(vacancyId, round));
 
     /// <summary>
-    /// Advisory availability check for a proposed interview slot: overlapping interviews the panelists
-    /// already sit on, plus approved/pending leave and travel. Non-blocking — surfaced as a UI warning.
+    /// What every panelist is already committed to during a proposed window.
     /// </summary>
+    /// <remarks>
+    /// <para>⚠ Round 4, lane D. This was three sources — other interviews, leave, travel — and
+    /// purely advisory. It now fans out over every registered <c>IPanelistCommitmentSource</c>
+    /// (meetings the panelist is a participant of, room bookings, training nominations, closures and
+    /// public holidays as well), and the WRITE paths enforce it: a hard clash refuses a create,
+    /// update or reschedule unless <c>panelClashOverrideReason</c> is supplied.</para>
+    ///
+    /// <para>Reading it remains advisory, which is what this endpoint is for — the screen shows the
+    /// clash before the recruiter commits to a time.</para>
+    /// </remarks>
     [HttpGet("panelist-availability")]
     public async Task<ActionResult<PanelistAvailabilityCheckDto>> CheckPanelistAvailability(
         [FromQuery] List<Guid> panelistIds,
@@ -90,6 +104,36 @@ public class JobInterviewController : ControllerBase
         => Ok(await _service.CheckPanelistAvailabilityAsync(
             panelistIds ?? new List<Guid>(), externalPanelistIds ?? new List<Guid>(),
             date, start, end, excludeInterviewId, ct));
+
+    /// <summary>
+    /// Round 4, D4 — when IS the whole panel free? Walks the range and returns the windows where
+    /// nobody has a hard commitment.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ A slot carrying SOFT conflicts is still suggested, flagged rather than hidden: a window
+    /// where a panelist is nominally on leave is one HR may well want, and day-granular evidence is
+    /// not grounds for the system to withhold it.
+    /// </remarks>
+    [HttpGet("suggest-slots")]
+    public async Task<ActionResult<List<PanelSlotSuggestionDto>>> SuggestSlots(
+        [FromQuery] List<Guid> panelistIds,
+        [FromQuery] List<Guid> externalPanelistIds,
+        [FromQuery] DateOnly from,
+        [FromQuery] DateOnly to,
+        [FromQuery] TimeSpan dayStart,
+        [FromQuery] TimeSpan dayEnd,
+        [FromQuery] int durationMinutes,
+        [FromQuery] Guid? excludeInterviewId,
+        [FromQuery] int maxSuggestions,
+        CancellationToken ct)
+        => Ok(await _service.SuggestPanelSlotsAsync(
+            panelistIds ?? new List<Guid>(), externalPanelistIds ?? new List<Guid>(),
+            from, to,
+            dayStart == default ? new TimeSpan(9, 0, 0) : dayStart,
+            dayEnd == default ? new TimeSpan(17, 0, 0) : dayEnd,
+            durationMinutes <= 0 ? 60 : durationMinutes,
+            excludeInterviewId,
+            maxSuggestions <= 0 ? 20 : maxSuggestions, ct));
 
     // =========================================================================
     // INTERVIEW CRUD
@@ -261,6 +305,24 @@ public class JobInterviewController : ControllerBase
     public async Task<ActionResult<IEnumerable<JobInterviewPanelistDto>>> GetMyPanelistSlots()
         => Ok(await _service.GetMyPanelistSlotsAsync());
 
+    /// <summary>
+    /// The caller's own scorecard worklist — every session they sit on, the candidates on it, and
+    /// how far their own card for each has got.
+    /// </summary>
+    /// <remarks>
+    /// <para>Round 4, lane F5. The route the portal uses so a panelist can find and file their own
+    /// scorecards without going through HR's interview desk and its Candidates tab, which was the
+    /// only path that existed.</para>
+    ///
+    /// <para>⚠ Returns the caller's <b>own</b> cards only, never a colleague's — separately from the
+    /// blind-scoring rule on the score reads, and regardless of it.</para>
+    /// </remarks>
+    [HttpGet("me/scorecard-worklist")]
+    [ProducesResponseType(typeof(IEnumerable<PanelistScorecardWorklistDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<PanelistScorecardWorklistDto>>> GetMyScorecardWorklist(
+        CancellationToken ct = default)
+        => Ok(await _service.GetMyScorecardWorklistAsync(ct));
+
     // =========================================================================
     // EXTERNAL PANELISTS
     // =========================================================================
@@ -412,6 +474,68 @@ public class JobInterviewController : ControllerBase
         dto.IntervieweeId = intervieweeId;
         await _service.UpdateIntervieweeSlotAsync(dto);
         return Ok(new { message = "Slot time updated." });
+    }
+
+    /// <summary>
+    /// The printed interview paper — the scoring sheets, the question list, or the whole pack.
+    /// </summary>
+    /// <remarks>
+    /// <para>Returns HTML the client prints. There is deliberately no PDF: a scoring sheet is
+    /// written on and signed, so the browser's own print is the target, and the wording lives in an
+    /// HR-editable template rather than in a document builder.</para>
+    ///
+    /// <para>⚠ Gated on <b>read</b> access, not <c>EnsureHr</c> — the panelist who needs the sheet
+    /// is not the person who manages the session. The service applies
+    /// <c>EnsureCanReadInterviewAsync</c>: HR, or a panelist on this interview.</para>
+    /// </remarks>
+    [HttpGet("{interviewId:guid}/paper")]
+    [ProducesResponseType(typeof(InterviewPaperDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<InterviewPaperDto>> GetPaper(
+        Guid interviewId,
+        [FromQuery] InterviewPaperVariant variant = InterviewPaperVariant.ScoreSheet,
+        [FromQuery] Guid? panelistId = null,
+        [FromQuery] Guid[]? intervieweeIds = null,
+        CancellationToken ct = default)
+    {
+        // The paper reads the interview, so the same per-record rule applies. Asked here rather
+        // than duplicated in the paper service, which has no business knowing about panels.
+        await _service.GetByIdAsync(interviewId);
+
+        return Ok(await _paper.GenerateAsync(
+            interviewId, variant, panelistId,
+            intervieweeIds is { Length: > 0 } ? intervieweeIds : null, ct));
+    }
+
+    /// <summary>
+    /// What the day would look like at this interval — writes nothing.
+    /// </summary>
+    /// <remarks>
+    /// Answers the question the schedule screen exists to ask: <i>can we see all of them today?</i>
+    /// The response carries the timetable, whoever does not fit, and the first free time afterwards.
+    /// Readable by a panelist as well as HR; only applying it is an HR act.
+    /// </remarks>
+    [HttpPost("{interviewId:guid}/slots/preview")]
+    [ProducesResponseType(typeof(InterviewSlotPlanDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<InterviewSlotPlanDto>> PreviewSlots(
+        Guid interviewId, [FromBody] ApportionInterviewSlotsDto dto, CancellationToken ct = default)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        dto.InterviewId = interviewId;
+        return Ok(await _service.PreviewSlotApportionmentAsync(dto, ct));
+    }
+
+    /// <summary>Writes the timetable onto the session's candidates.</summary>
+    [HttpPost("{interviewId:guid}/slots/apply")]
+    [ProducesResponseType(typeof(InterviewSlotPlanDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<InterviewSlotPlanDto>> ApplySlots(
+        Guid interviewId, [FromBody] ApportionInterviewSlotsDto dto, CancellationToken ct = default)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        dto.InterviewId = interviewId;
+        return Ok(await _service.ApplySlotApportionmentAsync(dto, ct));
     }
 
     [HttpPost("interviewees/{intervieweeId:guid}/attendance")]

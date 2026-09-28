@@ -81,9 +81,11 @@ interface LeaveCalendarProps {
   /** Shown above the grid; the three entry points each say who they are about. */
   title: string;
   description?: string;
-  /** Organisation scope only — narrows to one unit. */
+  /** Organisation scope only — narrows to one unit and every unit beneath it. */
   organizationUnitId?: string;
   leaveTypeId?: string;
+  /** One person's leave (round 5 lane F). The server applies it after the scope, so it can only narrow. */
+  employeeId?: string;
   /** Where a band links to. The portal and the desk have different detail routes. */
   hrefFor?: (entry: LeaveCalendarEntry) => string;
 }
@@ -94,6 +96,7 @@ export function LeaveCalendar({
   description,
   organizationUnitId,
   leaveTypeId,
+  employeeId,
   hrefFor,
 }: LeaveCalendarProps) {
   const [month, setMonth] = useState(() => {
@@ -107,9 +110,12 @@ export function LeaveCalendar({
   const to = iso(days[days.length - 1]);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['hr', 'leave-calendar', scope, from, to, organizationUnitId ?? '', leaveTypeId ?? ''],
+    queryKey: [
+      'hr', 'leave-calendar', scope, from, to,
+      organizationUnitId ?? '', leaveTypeId ?? '', employeeId ?? '',
+    ],
     queryFn: () =>
-      leaveService.getCalendar({ from, to, scope, organizationUnitId, leaveTypeId }),
+      leaveService.getCalendar({ from, to, scope, organizationUnitId, leaveTypeId, employeeId }),
   });
 
   const entries = data?.entries ?? [];
@@ -224,7 +230,7 @@ export function LeaveCalendar({
               <div className="p-6">
                 <EmptyState
                   icon={CalendarDays}
-                  title="Nobody is away this month"
+                  title={employeeId ? 'No leave this month' : 'Nobody is away this month'}
                   description="Leave appears here once it is requested."
                 />
               </div>

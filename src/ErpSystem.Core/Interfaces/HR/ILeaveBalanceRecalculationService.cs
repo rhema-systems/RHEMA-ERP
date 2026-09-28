@@ -69,6 +69,12 @@ public interface ILeaveBalanceRecalculationService
     /// — availability is computed — so nothing needs recalculating afterwards. ⚠ But a carry-over
     /// already run for this year used the OLD figure, and this pass does not revisit it. That is
     /// reported rather than corrected: re-running carry-over is a decision of its own.</para>
+    ///
+    /// <para>⚠ <b>One act runs it besides the repair screen (leave settings audit 2, L-89):</b>
+    /// saving, editing or removing an allocation runs it for that leave type and the CURRENT leave
+    /// year only, and the save reports how many balances moved. Changing the rule is the deliberate
+    /// act there, so the balance moves and something says why. A closed year still goes through the
+    /// preview here.</para>
     /// </remarks>
     Task<LeaveEntitlementRepairResult> RepairEntitlementsAsync(
         int year, Guid? leaveTypeId = null, Guid? employeeId = null, bool dryRun = false,

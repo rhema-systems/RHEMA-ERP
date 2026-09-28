@@ -21,8 +21,10 @@ import type {
   CreateLeavePlanRequest,
   SuggestLeavePlanChangesRequest,
   RespondToLeaveSuggestionRequest,
+  UpdateLeavePlanRelieversRequest,
   SuggestLeaveRequestChanges,
   RecallLeaveRequest,
+  ReportResumptionRequest,
   RescheduleLeaveRequest,
   LeaveCalendarScope,
   LeaveCalendarData,
@@ -35,6 +37,10 @@ import type {
   LeaveYearEndResult,
   LeaveBulkRecalculationResult,
   LeaveEntitlementRepairResult,
+  LeaveAccrualStatement,
+  LeaveOwedReport,
+  LeaveYearInfo,
+  LeaveExcessPreview,
 } from '@/types/hr/leave-request';
 
 /**
@@ -56,6 +62,26 @@ class LeaveService {
 
   getByNumber(requestNumber: string): Promise<LeaveRequest> {
     return apiService.get<LeaveRequest>(`${this.baseUrl}/by-number/${requestNumber}`);
+  }
+
+  /**
+   * What these dates cost the leave type, and whether the days beyond its limit could be charged to
+   * annual leave (round 5, lane H). The request forms read it before anything is saved.
+   */
+  getExcessPreview(params: {
+    employeeId: string;
+    leaveTypeId: string;
+    startDate: string;
+    endDate: string;
+    leaveSubTypeId?: string | null;
+  }): Promise<LeaveExcessPreview> {
+    return apiService.get<LeaveExcessPreview>(`${this.baseUrl}/excess-preview`, {
+      employeeId: params.employeeId,
+      leaveTypeId: params.leaveTypeId,
+      startDate: params.startDate,
+      endDate: params.endDate,
+      leaveSubTypeId: params.leaveSubTypeId || undefined,
+    });
   }
 
   /**
@@ -244,6 +270,15 @@ class LeaveService {
     });
   }
 
+  /** The annual view as a CSV (round 5, lane J): the same rows as `getAnnualBalances`. */
+  exportAnnualBalances(year: number, employeeId?: string, organizationUnitId?: string): Promise<Blob> {
+    return apiService.downloadBlob(`${this.baseUrl}/balances/annual/export`, {
+      year,
+      employeeId,
+      organizationUnitId,
+    });
+  }
+
   exportCompliance(year: number): Promise<Blob> {
     return apiService.downloadBlob(`${this.baseUrl}/compliance/export`, { year });
   }
@@ -272,7 +307,10 @@ class LeaveService {
     to: string;
     scope: LeaveCalendarScope;
     leaveTypeId?: string;
+    /** Organisation scope only — the unit and every unit beneath it. */
     organizationUnitId?: string;
+    /** One person's leave. Narrows any scope; never widens it (round 5 lane F). */
+    employeeId?: string;
   }): Promise<LeaveCalendarData> {
     return apiService.get<LeaveCalendarData>(`${this.baseUrl}/calendar`, params);
   }
@@ -295,8 +333,19 @@ class LeaveService {
     return apiService.put<void>(`${this.baseUrl}/${id}/cancel`, cancellationReason);
   }
 
+  /** Confirming the employee's return, which closes the leave (round 5, B3). */
   close(id: string, data: CloseLeaveRequest): Promise<LeaveRequest> {
     return apiService.put<LeaveRequest>(`${this.baseUrl}/${id}/close`, data);
+  }
+
+  /** "I'm back at work" — the employee's own report; the day defaults to today (round 5, B3). */
+  reportResumption(id: string, data: ReportResumptionRequest): Promise<LeaveRequest> {
+    return apiService.put<LeaveRequest>(`${this.baseUrl}/${id}/report-resumption`, data);
+  }
+
+  /** Returns waiting for the caller to confirm, as the employee's supervisor or head of department. */
+  getResumptionsToConfirm(): Promise<LeaveRequest[]> {
+    return apiService.get<LeaveRequest[]>(`${this.baseUrl}/resumptions-to-confirm`);
   }
 
   // ── Balances ──────────────────────────────────────────────────────────────────
@@ -313,14 +362,58 @@ class LeaveService {
     });
   }
 
-  getEmployeeBalances(employeeId: string, year = 0): Promise<LeaveBalance[]> {
+  /**
+   * One employee's balances, annual leave first. With `includeLiveAnnual`, an employee no request
+   * has opened an annual record for yet gets their annual leave worked out live (`hasRecord: false`)
+   * — the portal and the request forms ask for it (round 5, lane J).
+   */
+  getEmployeeBalances(employeeId: string, year = 0, includeLiveAnnual = false): Promise<LeaveBalance[]> {
     return apiService.get<LeaveBalance[]>(`${this.baseUrl}/employee/${employeeId}/balances`, {
       year,
+      includeLiveAnnual: includeLiveAnnual || undefined,
+    });
+  }
+
+  /**
+   * Annual leave for every employee still serving (round 5, lane J): the record where there is one,
+   * the figures worked out live where there is none. Leavers are left out; a unit takes everything
+   * beneath it. Nothing is created.
+   */
+  getAnnualBalances(year = 0, employeeId?: string, organizationUnitId?: string): Promise<LeaveBalance[]> {
+    return apiService.get<LeaveBalance[]>(`${this.baseUrl}/balances/annual`, {
+      year,
+      employeeId,
+      organizationUnitId,
     });
   }
 
   getBalanceDetail(id: string): Promise<LeaveBalanceDetail> {
     return apiService.get<LeaveBalanceDetail>(`${this.baseUrl}/balances/${id}`);
+  }
+
+  /**
+   * How a balance's accrual is worked out as at a date (round 5, lane C2). Self-or-HR: the portal
+   * reads the employee's own, the desk anybody's. `asOf` defaults to today on the server.
+   */
+  getAccrualStatement(balanceId: string, asOf?: string): Promise<LeaveAccrualStatement> {
+    return apiService.get<LeaveAccrualStatement>(
+      `${this.baseUrl}/balances/${balanceId}/accrual-statement`,
+      { asOf },
+    );
+  }
+
+  /** Annual leave built up and not yet taken, per employee, as at a date (round 5, lane C6). */
+  getLeaveOwed(asOf?: string): Promise<LeaveOwedReport> {
+    return apiService.get<LeaveOwedReport>(`${this.baseUrl}/balances/owed`, { asOf });
+  }
+
+  exportLeaveOwed(asOf?: string): Promise<Blob> {
+    return apiService.downloadBlob(`${this.baseUrl}/balances/owed/export`, { asOf });
+  }
+
+  /** The tenant's current leave year, so a screen can open on it (round 5, lane C4). */
+  getLeaveYear(): Promise<LeaveYearInfo> {
+    return apiService.get<LeaveYearInfo>(`${this.baseUrl}/leave-year`);
   }
 
   recalculateBalance(data: RecalculateLeaveBalanceRequest): Promise<void> {
@@ -419,6 +512,10 @@ class LeavePlanService {
   /**
    * Is this reliever free over these dates? Same answer the register carries per row as
    * `relieverClashes`, asked before the plan exists. (Finish-plan lane 4.)
+   *
+   * ⚠ Round 5 lane E1: this used to wrap the query in `{ params: {...} }`. `apiService.get` takes the
+   * query object itself, so the request went out as `?params=[object Object]`, the API answered 400
+   * "A reliever is required", and the form showed every reliever as free.
    */
   getRelieverClashes(
     relieverId: string,
@@ -427,12 +524,10 @@ class LeavePlanService {
     excludePlanId?: string | null,
   ): Promise<LeaveRelieverClash[]> {
     return apiService.get<LeaveRelieverClash[]>(`${this.baseUrl}/reliever-clashes`, {
-      params: {
-        relieverId,
-        startDate,
-        endDate,
-        ...(excludePlanId ? { excludePlanId } : {}),
-      },
+      relieverId,
+      startDate,
+      endDate,
+      ...(excludePlanId ? { excludePlanId } : {}),
     });
   }
 
@@ -477,14 +572,34 @@ class LeavePlanService {
     return apiService.patch<LeavePlan>(`${this.baseUrl}/${id}/respond-suggestion`, data);
   }
 
-  cancel(id: string): Promise<void> {
-    return apiService.patch<void>(`${this.baseUrl}/${id}/cancel`);
+  /**
+   * The approver's one edit to a plan — its relievers (round 5 lane E3). Both slots are replaced:
+   * send the one being kept as well as the one being changed.
+   */
+  updateRelievers(id: string, data: UpdateLeavePlanRelieversRequest): Promise<LeavePlan> {
+    return apiService.patch<LeavePlan>(`${this.baseUrl}/${id}/relievers`, data);
+  }
+
+  /**
+   * Cancel a plan. The employee may cancel their own until it is approved; HR may also cancel an
+   * approved plan, and must then give a reason (round 5 lane E5).
+   */
+  cancel(id: string, reason?: string | null): Promise<void> {
+    return apiService.patch<void>(`${this.baseUrl}/${id}/cancel`, { reason: reason?.trim() || null });
   }
 }
 
 /** api/hr/leave-encashments — converting unused days to cash. */
 class LeaveEncashmentService {
   private readonly baseUrl = '/hr/leave-encashments';
+
+  /**
+   * Whether leave may be cashed in while still employed (round 5, lane L1) — open to anybody signed
+   * in. Off, the portal hides its encashment screen: unused leave is paid in the final settlement.
+   */
+  getAvailability(): Promise<{ inServiceAllowed: boolean; explanation: string }> {
+    return apiService.get<{ inServiceAllowed: boolean; explanation: string }>(`${this.baseUrl}/availability`);
+  }
 
   getAll(year = 0, status?: string): Promise<LeaveEncashment[]> {
     return apiService.get<LeaveEncashment[]>(this.baseUrl, { year, status });

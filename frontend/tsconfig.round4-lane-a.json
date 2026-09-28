@@ -1,0 +1,17 @@
+{
+  "//": "Round 4, lane A — the recruitment geography slice. Scoped because `npm run type-check` over the whole tree does not complete on this branch; see the hr-coverage README.",
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/**/*.ts",
+    "src/types/reference/**/*.ts",
+    "src/services/hr/**/*.ts",
+    "src/services/reference/**/*.ts",
+    "src/components/reference/**/*.tsx",
+    "src/components/hr/recruitment/**/*.tsx",
+    "src/components/hr/employee/tabs/**/*.tsx",
+    "src/app/hr/recruitment/**/*.tsx",
+    "src/app/careers/**/*.tsx",
+    "src/app/external-portal/careers/**/*.tsx"
+  ]
+}

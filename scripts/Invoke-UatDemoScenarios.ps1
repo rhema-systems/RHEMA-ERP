@@ -23,9 +23,11 @@
          already serving /health (in which case it assumes YOU started it against the right
          database -- it cannot tell).
       3. node scenarios.mjs        (every module under scenarios/, in order)
-      4. node verify-tables.mjs    (every REQUIRED table in demo-coverage-manifest.csv holds a row)
-      5. node verify-runbook.mjs   (every record the runbooks name exists), when the file exists
-      6. Stops the API and the scanner stub IF it started them.
+      4. A second 'seed-hr-demo' pass, for the demo tables that hang off scenario rows
+      5. node scenarios.mjs --only 052, once more: its vacancy only gets criteria in step 4
+      6. node verify-tables.mjs    (every REQUIRED table in demo-coverage-manifest.csv holds a row)
+      7. node verify-runbook.mjs   (every record the runbooks name exists), when the file exists
+      8. Stops the API and the scanner stub IF it started them.
 
 .PARAMETER Database
     The demo database. Defaults to ErpSystemDB_UAT. The development database is refused.
@@ -236,6 +238,20 @@ try {
             } finally {
                 $env:ConnectionStrings__DefaultConnection = $prevConn
                 $env:ASPNETCORE_ENVIRONMENT = $prevEnv
+            }
+
+            # ── 4b. the one scenario that needs the second pass's rows ─────────────────────────
+            # Scenario 052 finalises the housing-officer test scripts, which scores them, before
+            # the second pass gives that vacancy its shortlisting criteria
+            # (TdcDemoLivePipelineBackfillSeeder). A fresh build therefore left the test blend
+            # unscored (recruitment guide R4-5.3). Run again, 052 re-scores what it finds unscored
+            # and writes nothing else; on a database already built it writes nothing at all.
+            Write-Host ""
+            Write-Host "  -> Re-running scenario 052 now that its vacancy has criteria" -ForegroundColor Green
+            & node scenarios.mjs --only 052 2>&1 | Tee-Object -FilePath (Join-Path $HarnessDir 'out\scenarios-after-second-pass.log') | ForEach-Object { Write-Host "     $_" }
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "  !! Re-running scenario 052 after the second pass failed -- see above." -ForegroundColor Red
+                $scenarioFailures++
             }
         }
 

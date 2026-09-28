@@ -140,48 +140,12 @@ public class EmolumentsController : ControllerBase
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
     }
 
-    [HttpGet("encashment-rate")]
-    [ProducesResponseType(typeof(EncashmentRateResult), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<EncashmentRateResult>> GetEncashmentRate(
-        [FromQuery] Guid employeeId, [FromQuery] Guid leaveTypeId,
-        [FromQuery] DateOnly? asOf = null, [FromQuery] decimal days = 0)
-    {
-        // W3: self-or-permission — the encashment form quotes the caller their OWN daily rate.
-        if (!await SelfOrPolicyAsync(employeeId, HrPermissions.CompensationReadPolicy))
-            return Forbid();
-
-        try
-        {
-            var rate = await _service.GetEncashmentDailyRateAsync(
-                employeeId, leaveTypeId, asOf ?? DateOnly.FromDateTime(DateTime.UtcNow));
-            return Ok(new EncashmentRateResult
-            {
-                DailyRate = rate.Rate,
-                // The sentence travels with the figure so the form can show what produced it rather
-                // than a bare number the employee has no way to check.
-                Basis = rate.Basis,
-                Days = days,
-                Amount = Math.Round(rate.Rate * days, 2)
-            });
-        }
-        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
-    }
+    // GET encashment-rate — HR's quote of a day of leave in money — was removed in leave settings
+    // audit 2 (L-73): pay is Finance's, so HR quotes the days and Finance the amount.
 }
 
 public class UpdatePositionPayComponentRequest
 {
     public decimal? Amount { get; set; }
     public bool IsActive { get; set; } = true;
-}
-
-public class EncashmentRateResult
-{
-    public decimal DailyRate { get; set; }
-
-    /// <summary>How the rate was arrived at, in words. Built from the same divisor that produced it.</summary>
-    public string Basis { get; set; } = string.Empty;
-
-    public decimal Days { get; set; }
-    public decimal Amount { get; set; }
 }

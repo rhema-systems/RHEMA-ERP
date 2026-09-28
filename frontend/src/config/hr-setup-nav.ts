@@ -37,6 +37,7 @@ import {
   ListChecks,
   ListOrdered,
   ListTree,
+  Mail,
   MapPin,
   Medal,
   Plane,
@@ -123,6 +124,14 @@ export const hrSetupGroups: HrSetupGroup[] = [
         href: '/administration/hr/settings/staff-numbering',
         icon: Hash,
         description: 'Numbering rules per register, and the counter each one issues from.',
+      },
+      {
+        // Round 4 lane N: every email the HR modules send, reworded per tenant. Covers the
+        // EmailTemplate catalogues only — in-app notifications are a separate system.
+        title: 'Letter & Email Templates',
+        href: '/administration/hr/settings/letter-templates',
+        icon: Mail,
+        description: 'The wording of every email HR sends and document it prints, with a preview, a test send and reset.',
       },
       {
         // HR finish plan lane 8: which Finance accounts HR posts to, which money events post,

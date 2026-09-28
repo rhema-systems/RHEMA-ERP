@@ -28,6 +28,17 @@ export interface PublicCatalogueQualification {
   id: string;
   name: string;
   type: QualificationType;
+  /** Round 4, lane Q: the rung the entry sits on, so picking it pre-fills the row's Level. */
+  levelId?: string | null;
+}
+
+/** One rung of the employer's qualification ladder (`GET public/catalogue/qualification-levels`). */
+export interface PublicCatalogueQualificationLevel {
+  id: string;
+  name: string;
+  code?: string | null;
+  /** Higher is more advanced; rungs ranked alike are equivalents. */
+  rank: number;
 }
 
 export interface PublicCatalogueLanguage {
@@ -85,6 +96,14 @@ export interface CareersQualification {
   institution: string;
   dateAwarded: string;
   grade?: string | null;
+  /**
+   * Round 4, lane Q: the rung of the qualification ladder. Sent on save; required for Education
+   * unless the catalogue entry picked sits on one.
+   */
+  qualificationLevelId?: string | null;
+  /** Read only: the rung the engine scores — the row's own, or its catalogue entry's. */
+  effectiveQualificationLevelId?: string | null;
+  effectiveQualificationLevelName?: string | null;
 }
 
 export interface CareersReferee {
@@ -152,7 +171,12 @@ export interface CandidateProfile {
   alternatePhone?: string | null;
   dateOfBirth?: string | null;
   gender?: Gender | null;
+  /** ⚠ Round 4, lane A — the server rewrites this from `geoAreaId` when one is set. */
   city?: string | null;
+  /** Round 4, lane A — the resolved tier-1 name; derived, never sent on a write. */
+  region?: string | null;
+  /** Round 4, lane A — the candidate's chosen area; re-opens their cascade on the next visit. */
+  geoAreaId?: string | null;
   countryId?: string | null;
   countryName?: string | null;
   postalAddress?: string | null;
@@ -201,6 +225,11 @@ export interface SaveCandidateProfilePayload {
   dateOfBirth?: string | null;
   gender?: Gender | null;
   city?: string | null;
+  /**
+   * Round 4, lane A — the chosen administrative area. Null clears it; this payload replaces the
+   * address wholesale. Only offered where the country has a scheme, which is a minority of them.
+   */
+  geoAreaId?: string | null;
   /** Optional since 2026-09-14 — send null for "no country". The old EMPTY_GUID sentinel is retired. */
   countryId?: string | null;
   postalAddress?: string | null;

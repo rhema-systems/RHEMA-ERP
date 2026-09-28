@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/leave.ts",
+    "src/types/hr/leave-request.ts",
+    "src/components/hr/employee/tabs/fields.tsx",
+    "src/components/hr/leave/LeaveRequestForm.tsx",
+    "src/components/me/leave/MyLeaveRequestForm.tsx",
+    "src/app/hr/leave/requests/**/*.tsx",
+    "src/app/me/leave/**/*.tsx"
+  ]
+}

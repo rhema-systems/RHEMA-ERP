@@ -1,6 +1,6 @@
 'use client';
 
-import { Workflow, HelpCircle, LayoutList, ClipboardCheck } from 'lucide-react';
+import { Workflow, HelpCircle, LayoutList, ClipboardCheck, FileQuestion } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
 
@@ -43,6 +43,13 @@ export default function RecruitmentAdministrationPage() {
               'Named sets of questions, so a panel starts from a prepared scorecard rather than a blank one.',
             href: '/administration/hr/recruitment/question-presets',
             icon: LayoutList,
+          },
+          {
+            title: 'Test Papers',
+            description:
+              'Aptitude and knowledge tests, sat online by candidates and marked by the system. A finalised score feeds the vacancy’s shortlisting blend.',
+            href: '/administration/hr/recruitment/tests',
+            icon: FileQuestion,
           },
           {
             title: 'Check Templates',

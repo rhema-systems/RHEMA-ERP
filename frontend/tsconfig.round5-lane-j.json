@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/leave-request.ts",
+    "src/services/hr/leave.service.ts",
+    "src/services/hr/me-portal.service.ts",
+    "src/app/hr/leave/balances/page.tsx",
+    "src/app/me/leave/page.tsx",
+    "src/app/me/page.tsx",
+    "src/components/hr/leave/LeaveRequestForm.tsx",
+    "src/components/me/leave/MyLeaveRequestForm.tsx"
+  ]
+}

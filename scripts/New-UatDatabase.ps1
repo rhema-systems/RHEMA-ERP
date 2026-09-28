@@ -6,20 +6,21 @@
     Stands up a second database alongside the development one so a demo can be given against
     clean data while development carries on against its own.
 
-    !! WHY THIS SCRIPT EXISTS RATHER THAN `dotnet ef database update`
-    The migration chain cannot build a database from scratch -- no migration ever CREATEs the
-    Employees table -- so `database update` against an empty database fails. `rebuild-db` is the
-    only route: it calls EnsureDeleted + EnsureCreated (schema straight from the EF model) and
-    then stamps every migration as applied.
+    !! THE SCHEMA IS BUILT BY THE MIGRATION CHAIN, NOT BY rebuild-db (since 2026-09-27)
+    Master's disposable baseline (20260916132000) made the chain able to build a database from
+    empty, and master now gates exactly that in CI. So this script drops the database, creates it
+    empty, and runs `apply-migrations`; `seed-db` then runs the core seeders.
 
-    !! THE PRICE OF THAT, AND IT IS PERMANENT
-    EnsureCreated builds only what the EF model declares. Anything that exists solely inside
-    migration SQL is never created -- Procurement's CK_ProcurementTenderControls_State check
-    constraint and its lifecycle trigger are the known cases. The stamping then records the whole
-    chain as applied, so the database CLAIMS to be current while missing those objects, and it can
-    never afterwards be brought forward with `dotnet ef database update`. That is acceptable for a
-    demo box that is rebuilt on demand. It is NOT acceptable for anything that becomes go-live.
-    See docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md section 21.
+    It used to call `rebuild-db` (EnsureDeleted + EnsureCreated + stamp every migration). That is
+    no longer good enough even for a demo box. EnsureCreated builds only what the EF model
+    declares, and master's business rules now live in migration SQL the model does not declare:
+    measured on two scratch databases built from the same assembly, the chain creates 500 guard
+    triggers, 7 functions, 1 view and 65 more default constraints, and EnsureCreated creates none
+    of them. A rebuild-db database therefore runs WITHOUT those guards -- and it cannot be brought
+    forward either, because several of master's later migrations patch a guard that must already
+    exist and refuse ("The existing QS valuation guard is required ..."). That is how the previous
+    UAT stalled at merge #11. See docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md
+    sections 21 and 31.
 
     !! WHAT YOU GET, AND WHAT IS INVENTED
     'seed-hr-all' installs FACTS: the real organisation structure, the real positions, the reference
@@ -48,8 +49,8 @@
 
 .PARAMETER Database
     Target database name. Defaults to ErpSystemDB_UAT. The script REFUSES to target the
-    development database -- that guard is the whole reason to use this rather than running
-    rebuild-db by hand, because rebuild-db drops whatever it is pointed at without asking.
+    development database -- it drops whatever it is pointed at, so that guard is the whole reason
+    to use this rather than dropping and migrating by hand.
 
 .PARAMETER SkipScenarios
     Stop after the EF seeders. Only for debugging a seeder; the result is NOT a demo database.
@@ -118,7 +119,7 @@ if (-not $SkipConfirm) {
 # appsettings.json keeps pointing at the dev database and is never edited. Verified by pointing
 # the override at a dead port and watching it fail there (error 10061) rather than on the dev box.
 function Invoke-ApiCommand {
-    param([string]$Command, [string]$Label)
+    param([string]$Command, [string]$Label, [string[]]$Arguments = @())
 
     Write-Host "  -> $Label" -ForegroundColor Green
     $previous = $env:ConnectionStrings__DefaultConnection
@@ -127,7 +128,7 @@ function Invoke-ApiCommand {
         $env:ConnectionStrings__DefaultConnection = $connection
         $env:ASPNETCORE_ENVIRONMENT = 'Development'
         Push-Location $apiDir
-        $output = & dotnet $dll $Command 2>&1
+        $output = & dotnet $dll $Command @Arguments 2>&1
         if ($LASTEXITCODE -ne 0) {
             $output | Select-Object -Last 20 | ForEach-Object { Write-Host "      $_" -ForegroundColor DarkRed }
             throw "'$Command' failed with exit code $LASTEXITCODE."
@@ -140,7 +141,25 @@ function Invoke-ApiCommand {
     }
 }
 
-Invoke-ApiCommand -Command 'rebuild-db'             -Label 'Rebuilding schema from the EF model and running base seeders'
+# Drop and recreate EMPTY. The protected-database guard above has already run.
+Write-Host "  -> Dropping and recreating '$Database' empty" -ForegroundColor Green
+& sqlcmd -S $Server -d master -U $UserId -P $Password -C -I -b -Q @"
+IF DB_ID(N'$Database') IS NOT NULL
+BEGIN
+    ALTER DATABASE [$Database] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+    DROP DATABASE [$Database];
+END;
+CREATE DATABASE [$Database];
+"@
+if ($LASTEXITCODE -ne 0) { throw "Could not drop and recreate '$Database' (sqlcmd exit $LASTEXITCODE)." }
+
+# The whole chain from empty. The baseline alone is ~9 MB of DDL, so the per-command timeout is
+# raised the way master's own fresh-install gate raises it. A failure here stops the script:
+# a half-built schema must never be seeded.
+Invoke-ApiCommand -Command 'apply-migrations'       -Label 'Building the schema through the migration chain (~2 min)' `
+                  -Arguments @('--migration-command-timeout-seconds', '600')
+Invoke-ApiCommand -Command 'seed-db'                -Label 'Running the core seeders (roles, tenant, modules)' `
+                  -Arguments @('--migration-command-timeout-seconds', '600')
 Invoke-ApiCommand -Command 'seed-workflows'         -Label 'Seeding workflow definitions (approvals refuse to submit without these)'
 Invoke-ApiCommand -Command 'seed-hr-all'            -Label 'Seeding HR reference data and TDC organisation structure'
 

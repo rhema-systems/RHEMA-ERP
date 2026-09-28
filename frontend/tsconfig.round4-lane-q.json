@@ -1,0 +1,16 @@
+{
+  "//": "Round 4, lane Q — the education level on the qualification ladder: the criteria editors, both qualification forms, the careers profile. Scoped because `npm run type-check` over the whole tree does not complete on this branch; see the hr-coverage README.",
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/**/*.ts",
+    "src/services/hr/**/*.ts",
+    "src/components/hr/recruitment/VacancyCriteriaPanel.tsx",
+    "src/components/hr/recruitment/TalentPoolScreeningPanel.tsx",
+    "src/components/hr/recruitment/CandidateSubResourceTabs.tsx",
+    "src/app/hr/recruitment/vacancies/[id]/page.tsx",
+    "src/app/hr/recruitment/candidates/[id]/page.tsx",
+    "src/app/hr/recruitment/talent-pool/page.tsx",
+    "src/app/external-portal/careers/profile/page.tsx"
+  ]
+}

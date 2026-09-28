@@ -180,6 +180,11 @@ public class TrainingVendorService : ITrainingVendorService
     {
         var entity = await GetOwnedAsync(id);
 
+        // Round 4, lane M3: orientation sessions can name a vendor as their facilitator.
+        if (await _unitOfWork.WhyStillBookedAsync(entity.TenantId, entity.Id, null, entity.Name,
+                "make the vendor inactive, which keeps its record and stops it being picked", cancellationToken) is { } booked)
+            throw new InvalidOperationException(booked);
+
         await _vendorRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 

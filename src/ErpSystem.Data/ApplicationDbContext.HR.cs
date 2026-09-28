@@ -103,7 +103,6 @@ public partial class ApplicationDbContext
     public DbSet<LeaveEncashment> LeaveEncashments { get; set; } = null!;
     public DbSet<LeaveAdjustment> LeaveAdjustments { get; set; } = null!;
     public DbSet<EmployeeReliever> EmployeeRelievers { get; set; } = null!;
-    public DbSet<LeaveTypeAllowance> LeaveTypeAllowances { get; set; } = null!;
     public DbSet<PayComponent> PayComponents { get; set; } = null!;
     public DbSet<PositionPayComponent> PositionPayComponents { get; set; } = null!;
     public DbSet<EmployeePayComponent> EmployeePayComponents { get; set; } = null!;
@@ -240,6 +239,16 @@ public partial class ApplicationDbContext
     public DbSet<MedicalBoard> MedicalBoards { get; set; } = null!;
     public DbSet<MedicalBoardMember> MedicalBoardMembers { get; set; } = null!;
     public DbSet<MedicalBoardSitting> MedicalBoardSittings { get; set; } = null!;
+    /// <summary>Papers on a board, through the upload gate (round 5, lane K4).</summary>
+    public DbSet<MedicalBoardDocument> MedicalBoardDocuments { get; set; } = null!;
+    /// <summary>One employee's case before a board, and its finding (round 5, lane K-II-a).</summary>
+    public DbSet<MedicalBoardCase> MedicalBoardCases { get; set; } = null!;
+    /// <summary>Who was present at a sitting — the panel for whatever was decided there (lane K-II-a).</summary>
+    public DbSet<MedicalBoardSittingAttendance> MedicalBoardSittingAttendances { get; set; } = null!;
+    /// <summary>The injuries assessed on a case (round 5, lane K-II-b).</summary>
+    public DbSet<MedicalBoardCaseInjury> MedicalBoardCaseInjuries { get; set; } = null!;
+    /// <summary>A tenant's compensation schedule — PNDCL 187's First and Third Schedules by default (K-II-b).</summary>
+    public DbSet<IncapacityScheduleItem> IncapacityScheduleItems { get; set; } = null!;
     public DbSet<MedicalAppointment> MedicalAppointments { get; set; } = null!;
     public DbSet<NHISClaim> NHISClaims { get; set; } = null!;
     public DbSet<NHISClaimDocument> NHISClaimDocuments { get; set; } = null!;
@@ -293,6 +302,19 @@ public partial class ApplicationDbContext
     public DbSet<JobApplication> JobApplications { get; set; } = null!;
     public DbSet<JobApplicationStageHistory> JobApplicationStageHistories { get; set; } = null!;
     public DbSet<JobApplicantTestResult> JobApplicantTestResults { get; set; } = null!;
+
+    // ── Round 4, lane E — the recruitment test engine ──────────────────────────
+    //
+    // ⚠ JobApplicantTestResults above is KEPT. It is the ledger an offline test lands in — a
+    // practical, a typing test at a desk — and finalising a sitting writes a row into it. The
+    // engine becomes one way of producing a result, not the only one.
+    public DbSet<RecruitmentTest> RecruitmentTests { get; set; } = null!;
+    public DbSet<RecruitmentTestSection> RecruitmentTestSections { get; set; } = null!;
+    public DbSet<RecruitmentTestQuestion> RecruitmentTestQuestions { get; set; } = null!;
+    public DbSet<RecruitmentTestQuestionOption> RecruitmentTestQuestionOptions { get; set; } = null!;
+    public DbSet<RecruitmentTestAssignment> RecruitmentTestAssignments { get; set; } = null!;
+    public DbSet<RecruitmentTestSitting> RecruitmentTestSittings { get; set; } = null!;
+    public DbSet<RecruitmentTestAnswer> RecruitmentTestAnswers { get; set; } = null!;
     public DbSet<JobApplicantCommunication> JobApplicantCommunications { get; set; } = null!;
     public DbSet<ShortlistDecisionLog> ShortlistDecisionLogs { get; set; } = null!;
     public DbSet<ShortlistReview> ShortlistReviews { get; set; } = null!;
@@ -321,6 +343,7 @@ public partial class ApplicationDbContext
     public DbSet<PreEmploymentCheckProviderService> PreEmploymentCheckProviderServices { get; set; } = null!;
     public DbSet<ReferenceCheckResponse> ReferenceCheckResponses { get; set; } = null!;
     public DbSet<OnboardingPlanTemplate> OnboardingPlanTemplates { get; set; } = null!;
+    public DbSet<OnboardingPlanTemplateAudience> OnboardingPlanTemplateAudiences { get; set; } = null!;
     public DbSet<OnboardingTaskTemplate> OnboardingTaskTemplates { get; set; } = null!;
     public DbSet<OnboardingPlan> OnboardingPlans { get; set; } = null!;
     public DbSet<OnboardingTask> OnboardingTasks { get; set; } = null!;
@@ -461,6 +484,8 @@ public partial class ApplicationDbContext
     public DbSet<ProbationConfirmingAuthority> ProbationConfirmingAuthorities { get; set; } = null!;
     public DbSet<ProbationReminderRun> ProbationReminderRuns { get; set; } = null!;
     public DbSet<ProbationReminderDispatchLog> ProbationReminderDispatchLogs { get; set; } = null!;
+    public DbSet<OnboardingOrientationReminderRun> OnboardingOrientationReminderRuns { get; set; } = null!;
+    public DbSet<OnboardingOrientationReminderDispatchLog> OnboardingOrientationReminderDispatchLogs { get; set; } = null!;
     public DbSet<SheIncidentType> SheIncidentTypes { get; set; } = null!;
     public DbSet<SheIncidentTypeCorrectiveAction> SheIncidentTypeCorrectiveActions { get; set; } = null!;
     public DbSet<SheInjuryType> SheInjuryTypes { get; set; } = null!;
@@ -2406,23 +2431,8 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // Configure LeaveTypeAllowance entity
-        builder.Entity<LeaveTypeAllowance>(entity =>
-        {
-            entity.HasIndex(la => new { la.TenantId, la.LeaveTypeId, la.PayComponentId })
-                .IsUnique()
-                .HasDatabaseName("IX_LeaveTypeAllowance_Tenant_LeaveType_Component");
-
-            entity.HasOne(la => la.LeaveType)
-                .WithMany(lt => lt.LeaveTypeAllowances)
-                .HasForeignKey(la => la.LeaveTypeId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasOne(la => la.PayComponent)
-                .WithMany()
-                .HasForeignKey(la => la.PayComponentId)
-                .OnDelete(DeleteBehavior.Restrict);
-        });
+        // LeaveTypeAllowance (the pay components that fed HR's encashment rate) was removed in leave
+        // settings audit 2 (L-73): pay is Finance's, so HR holds no rate and nothing to feed it.
 
         // Configure Division entity
         builder.Entity<Division>(entity =>
@@ -3035,6 +3045,13 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .HasForeignKey(x => x.LeavePlanId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            // The annual part of a split points at the request it was split from (round 5, lane H).
+            // No navigations on either side — see the property.
+            entity.HasOne<LeaveRequest>()
+                .WithMany()
+                .HasForeignKey(x => x.SplitFromRequestId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             // Encashment (one-to-one)
             entity.HasOne(x => x.Encashment)
                 .WithOne(x => x.LeaveRequest)
@@ -3108,16 +3125,12 @@ private void ConfigureHREntities(ModelBuilder builder)
         // Configure Leave Category Allocation entity
         builder.Entity<LeaveCategoryAllocation>(entity =>
         {
-            entity.HasIndex(x => new { x.LeaveTypeId, x.LeaveSubTypeId, x.StaffLevelId, x.EffectiveFrom });
+            // The sub-type left this index with its column (leave settings audit 2, L-76).
+            entity.HasIndex(x => new { x.LeaveTypeId, x.StaffLevelId, x.EffectiveFrom });
 
             entity.HasOne(x => x.LeaveType)
                 .WithMany(x => x.LeaveCategoryAllocations)
                 .HasForeignKey(x => x.LeaveTypeId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            entity.HasOne(x => x.LeaveSubType)
-                .WithMany(x => x.LeaveCategoryAllocations)
-                .HasForeignKey(x => x.LeaveSubTypeId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(x => x.StaffLevel)
@@ -4292,6 +4305,8 @@ private void ConfigureHREntities(ModelBuilder builder)
                 ReviewDueLeadDays              = 30,
                 ContractExpiryLeadDays         = 60,
                 ProbationEndLeadDays           = 30,
+                // Round 4, D-10 — how long an offer stays open when HR sets no expiry.
+                OfferValidityDays              = 14,
                 // Round 2, lane C2 — the certification sweep's default lead time.
                 CertificationExpiryLeadDays    = 60,
                 // Round 2, lane F2 — a committee action item is a thing somebody does on Tuesday,
@@ -4345,25 +4360,31 @@ private void ConfigureHREntities(ModelBuilder builder)
                 QueryResponseWindowHours       = 72,
                 InvestigationDays              = 28,
                 DisciplineBacklogHorizonDays   = 90,
-                // ⚠ Moves money: monthly × 12 ÷ this. 365 calendar / 360 thirty-day / 264 working,
-                // a 38% spread on the same facts, and TDC has not chosen. See the entity.
-                SettlementDaysPerYear          = 365,
+                // SettlementDaysPerYear (the settlement's daily-rate divisor) left with leave settings
+                // audit 2: Finance values a leaver's pay, so HR holds no rate (L-74).
+                // Round 5, lane L2b: FR-HR-152's cap, a setting now rather than a constant in
+                // SeparationService. ⚠ Nullable, so leaving it out of this anonymous seed would seed
+                // "no cap" rather than fail the build — it must be named.
+                SettlementLeaveDaysCap         = 56,
+                // Round 5, lane K-II-a: deciding members present at a board's deciding sitting.
+                MedicalBoardQuorum             = 1,
+                // Round 5, lane K-II-b: PNDCL 187 s.5 and s.7(2)(c). ⚠ Both named — the first is
+                // nullable, and left out it would seed "not worked out" instead of 96.
+                PermanentTotalIncapacityMonths = 96,
+                TemporaryIncapacityMaxMonths   = 24,
+                // s.36's ceiling: deliberately empty — the Act's figure predates redenomination (R5-Q5).
+                CompensationEarningsCeiling    = (decimal?)null,
                 AttendanceRateIncludesApprovedLeave = true,
                 // Residue plan G2. Same rule as the block above: every property must appear here or
                 // the DbContext will not build at design time.
                 //
-                // ⚠ AllowInServiceEncashment is seeded TRUE and the entity's own default is FALSE,
-                // and that difference is deliberate. FR-HR-046 says leave is encashed only on exit,
-                // so a brand-new tenant should start there — but this seeded tenant is the one the
-                // demo runs on, the encashment screen has already been shown to stakeholders, and
-                // defaulting it off without this line would make a demonstrated feature disappear.
-                // A client who wants the FRD's reading switches it off; a fresh tenant already has it.
-                AllowInServiceEncashment       = true,
-                // The divisor that decides what a day of unused leave is worth. Was a private const
-                // in EmolumentService. ⚠ Read it against SettlementDaysPerYear above — 22 working
-                // days a month against 365 calendar days a year is ~38% apart on the same salary.
-                // Different money events, deliberately not merged; see the entity.
-                EncashmentWorkingDaysPerMonth  = 22,
+                // ⚠ Round 5, decision A3 / lane L1: OFF, like the entity's default. It was seeded ON
+                // because stakeholders had been shown the encashment screen; the Labour Act (s.31) and
+                // public-service practice settled that leave is cashed only on exit, and TDC's own
+                // FR-HR-046 says the same.
+                AllowInServiceEncashment       = false,
+                // EncashmentWorkingDaysPerMonth left with leave settings audit 2 (L-75): no screen
+                // set it, and Finance values leave now.
                 // The reminder cadence, previously five private consts in LeaveReminderService.
                 // Each value is exactly what its constant was, so the seeded tenant is nagged today
                 // on the same schedule as yesterday.
@@ -4376,6 +4397,13 @@ private void ConfigureHREntities(ModelBuilder builder)
                 // setting existed — and every property must appear in this seed block or the
                 // DbContext will not build at design time.
                 LeaveYearStartMonth            = 1,
+                // Round 4, lane K: the orientation & onboarding reminder windows, at their defaults.
+                OnboardingTaskDueLeadDays      = 3,
+                OrientationDueLeadDays         = 7,
+                OrientationCertificateExpiryLeadDays = 30,
+                OrientationChaseAfterDays      = 3,
+                // Round 4, lane N-b2: the RSVP chase, two days before the deadline.
+                CompanyEventRsvpChaseLeadDays  = 2,
                 CreatedAt                      = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
                 UpdatedAt                      = (DateTime?)null,
                 CreatedBy                      = "System",
@@ -5783,7 +5811,12 @@ private void ConfigureHREntities(ModelBuilder builder)
 
         builder.Entity<CompanyEvent>(entity =>
         {
-            entity.HasIndex(x => x.EventNumber);
+            // ⚠ Round 4, D7 (C-6). UNIQUE per tenant. These three were plain indexes, so the
+            // count-based generators that used to issue the numbers could hand the same reference to
+            // two rows and nothing objected. The generators are fixed; this is the guard that makes
+            // a future regression fail loudly instead of silently duplicating.
+            entity.HasIndex(x => new { x.TenantId, x.EventNumber }).IsUnique()
+                .HasDatabaseName("IX_CompanyEvent_Tenant_EventNumber");
             entity.HasIndex(x => x.EventName);
             entity.HasIndex(x => x.Category);
             entity.HasIndex(x => x.Status);
@@ -5885,6 +5918,147 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        // ── Round 4, lane E — the recruitment test engine ──────────────────────
+        //
+        // ⚠ Every number is UNIQUE PER TENANT from the start. Lane D-2 had to retrofit that onto
+        // three company-schedule generators that had been quietly issuing duplicates; there is no
+        // reason to repeat the lesson here.
+        builder.Entity<RecruitmentTest>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.TestCode }).IsUnique()
+                .HasDatabaseName("IX_RecruitmentTest_Tenant_Code");
+            entity.HasIndex(x => x.IsActive).HasDatabaseName("IX_RecruitmentTest_IsActive");
+            entity.Property(x => x.TestType).HasConversion<int>();
+            entity.Property(x => x.PassMarkPercent).HasPrecision(5, 2);
+        });
+
+        builder.Entity<RecruitmentTestSection>(entity =>
+        {
+            entity.HasIndex(x => x.RecruitmentTestId).HasDatabaseName("IX_RecruitmentTestSection_Test");
+
+            // ⚠ Cascade, and only here. A section belongs to its paper and has no meaning without
+            // it. The SITTING side is Restrict throughout: deleting a test must not silently delete
+            // somebody's marked answers.
+            entity.HasOne(x => x.Test)
+                .WithMany(x => x.Sections)
+                .HasForeignKey(x => x.RecruitmentTestId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<RecruitmentTestQuestion>(entity =>
+        {
+            entity.HasIndex(x => x.RecruitmentTestId).HasDatabaseName("IX_RecruitmentTestQuestion_Test");
+            entity.HasIndex(x => x.RecruitmentTestSectionId).HasDatabaseName("IX_RecruitmentTestQuestion_Section");
+            entity.Property(x => x.QuestionType).HasConversion<int>();
+            entity.Property(x => x.Points).HasPrecision(6, 2);
+
+            entity.HasOne(x => x.Test)
+                .WithMany(x => x.Questions)
+                .HasForeignKey(x => x.RecruitmentTestId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // ⚠ NOT cascade. Deleting a section must not take its questions with it — a section is a
+            // heading, and regrouping a paper should not destroy it.
+            entity.HasOne(x => x.Section)
+                .WithMany(x => x.Questions)
+                .HasForeignKey(x => x.RecruitmentTestSectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<RecruitmentTestQuestionOption>(entity =>
+        {
+            entity.HasIndex(x => x.RecruitmentTestQuestionId).HasDatabaseName("IX_RecruitmentTestOption_Question");
+
+            entity.HasOne(x => x.Question)
+                .WithMany(x => x.Options)
+                .HasForeignKey(x => x.RecruitmentTestQuestionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<RecruitmentTestAssignment>(entity =>
+        {
+            entity.HasIndex(x => x.RecruitmentTestId).HasDatabaseName("IX_RecruitmentTestAssignment_Test");
+            entity.HasIndex(x => x.JobVacancyId).HasDatabaseName("IX_RecruitmentTestAssignment_Vacancy");
+            entity.HasIndex(x => x.JobApplicationId).HasDatabaseName("IX_RecruitmentTestAssignment_Application");
+
+            entity.HasOne(x => x.Test)
+                .WithMany()
+                .HasForeignKey(x => x.RecruitmentTestId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.JobVacancy)
+                .WithMany()
+                .HasForeignKey(x => x.JobVacancyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.JobApplication)
+                .WithMany()
+                .HasForeignKey(x => x.JobApplicationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<RecruitmentTestSitting>(entity =>
+        {
+            entity.HasIndex(x => x.RecruitmentTestAssignmentId).HasDatabaseName("IX_RecruitmentTestSitting_Assignment");
+            entity.HasIndex(x => x.JobApplicationId).HasDatabaseName("IX_RecruitmentTestSitting_Application");
+            entity.HasIndex(x => x.Status).HasDatabaseName("IX_RecruitmentTestSitting_Status");
+
+            // ⚠ One row per attempt, and the pair is unique. Without this a double-submit could mint
+            // two attempt 1s and the attempt limit would count wrong.
+            entity.HasIndex(x => new { x.RecruitmentTestAssignmentId, x.JobApplicationId, x.AttemptNumber })
+                .IsUnique()
+                .HasDatabaseName("IX_RecruitmentTestSitting_Assignment_Application_Attempt");
+
+            entity.Property(x => x.Status).HasConversion<int>();
+            // ⚠ The DEFAULT is Online in the MODEL as well as the migration, so a database rebuilt
+            // from the model and one migrated to it carry the same constraint.
+            entity.Property(x => x.Mode)
+                .HasConversion<int>()
+                .HasDefaultValue(RecruitmentSittingMode.Online);
+            entity.Property(x => x.AutoScore).HasPrecision(8, 2);
+            entity.Property(x => x.ManualScore).HasPrecision(8, 2);
+            entity.Property(x => x.FinalScore).HasPrecision(8, 2);
+            entity.Property(x => x.TotalPoints).HasPrecision(8, 2);
+            entity.Property(x => x.ScorePercent).HasPrecision(5, 2);
+
+            entity.HasOne(x => x.Assignment)
+                .WithMany(x => x.Sittings)
+                .HasForeignKey(x => x.RecruitmentTestAssignmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.JobApplication)
+                .WithMany()
+                .HasForeignKey(x => x.JobApplicationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.TestResult)
+                .WithMany()
+                .HasForeignKey(x => x.JobApplicantTestResultId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<RecruitmentTestAnswer>(entity =>
+        {
+            entity.HasIndex(x => x.RecruitmentTestSittingId).HasDatabaseName("IX_RecruitmentTestAnswer_Sitting");
+            entity.HasIndex(x => x.RecruitmentTestQuestionId).HasDatabaseName("IX_RecruitmentTestAnswer_Question");
+            entity.Property(x => x.PointsAwarded).HasPrecision(6, 2);
+
+            entity.HasOne(x => x.Sitting)
+                .WithMany(x => x.Answers)
+                .HasForeignKey(x => x.RecruitmentTestSittingId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Question)
+                .WithMany()
+                .HasForeignKey(x => x.RecruitmentTestQuestionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.SelectedOption)
+                .WithMany()
+                .HasForeignKey(x => x.SelectedOptionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<EventAttachment>(entity =>
         {
             entity.HasIndex(x => x.EventId);
@@ -5920,7 +6094,9 @@ private void ConfigureHREntities(ModelBuilder builder)
 
         builder.Entity<MeetingRoom>(entity =>
         {
-            entity.HasIndex(x => x.RoomCode);
+            // Same rule as CompanyEvent above: a room code is a reference, and two rooms must not share one.
+            entity.HasIndex(x => new { x.TenantId, x.RoomCode }).IsUnique()
+                .HasDatabaseName("IX_MeetingRoom_Tenant_RoomCode");
             entity.HasIndex(x => x.RoomName);
             entity.HasIndex(x => x.LocationId);
             entity.HasIndex(x => x.IsActive);
@@ -5940,7 +6116,8 @@ private void ConfigureHREntities(ModelBuilder builder)
 
         builder.Entity<RoomBooking>(entity =>
         {
-            entity.HasIndex(x => x.BookingNumber);
+            entity.HasIndex(x => new { x.TenantId, x.BookingNumber }).IsUnique()
+                .HasDatabaseName("IX_RoomBooking_Tenant_BookingNumber");
             entity.HasIndex(x => x.RoomId);
             entity.HasIndex(x => x.EventId);
             entity.HasIndex(x => x.BookedById);
@@ -6980,6 +7157,87 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany(x => x.Documents)
                 .HasForeignKey(x => x.ExamId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- MedicalBoardDocument (round 5, lane K4) ----
+        // ⚠ The uploader is RESTRICT, not the convention's cascade. The board already cascades from
+        // Employees (its subject) and its documents cascade from the board, so a cascading uploader
+        // would be a second path from Employees to this table — which SQL Server refuses, and a
+        // model-built database would fail to create. Cascading from the board matches its members
+        // and sittings.
+        builder.Entity<MedicalBoardDocument>(entity =>
+        {
+            entity.HasOne(x => x.Board)
+                .WithMany(x => x.Documents)
+                .HasForeignKey(x => x.BoardId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.UploadedBy)
+                .WithMany()
+                .HasForeignKey(x => x.UploadedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- MedicalBoardCase (round 5, lane K-II-a) ----
+        // One employee, one case, per board — filtered on IsDeleted, although cases are withdrawn
+        // rather than deleted, because a soft delete does not release a unique index. The employee is
+        // RESTRICT: a clinical record is never deleted along with an employee (soft-deleted anyway).
+        // Cascading from the board matches its members, sittings and documents.
+        builder.Entity<MedicalBoardCase>(entity =>
+        {
+            entity.HasIndex(x => new { x.BoardId, x.EmployeeId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_MedicalBoardCases_Board_Employee");
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasOne(x => x.Board)
+                .WithMany(x => x.Cases)
+                .HasForeignKey(x => x.BoardId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- MedicalBoardSittingAttendance (round 5, lane K-II-a) ----
+        // Cascades from its sitting only; MemberId is a bare Guid (see the entity).
+        builder.Entity<MedicalBoardSittingAttendance>(entity =>
+        {
+            entity.HasIndex(x => new { x.SittingId, x.MemberId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_MedicalBoardSittingAttendances_Sitting_Member");
+            entity.HasOne(x => x.Sitting)
+                .WithMany(x => x.Attendance)
+                .HasForeignKey(x => x.SittingId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- MedicalBoardCaseInjury (round 5, lane K-II-b) ----
+        // Cascades from its case. The schedule row is RESTRICT: rows are deactivated, never deleted,
+        // and the percentage is copied onto the injury anyway (see the entity).
+        builder.Entity<MedicalBoardCaseInjury>(entity =>
+        {
+            entity.HasIndex(x => x.CaseId);
+            entity.HasOne(x => x.Case)
+                .WithMany(x => x.Injuries)
+                .HasForeignKey(x => x.CaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.ScheduleItem)
+                .WithMany()
+                .HasForeignKey(x => x.ScheduleItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- IncapacityScheduleItem (round 5, lane K-II-b) ----
+        // One row per injury per schedule per tenant, among live rows — the load-defaults action
+        // matches on it, so it must not be able to hold two.
+        builder.Entity<IncapacityScheduleItem>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.Kind, x.Injury })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_IncapacityScheduleItems_Tenant_Kind_Injury");
         });
 
         builder.Entity<MedicalClaimPreAuthorization>(entity =>
@@ -8240,6 +8498,15 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(x => x.QualificationId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Round 4, lane Q: the rung the candidate's qualification sits on, when it states one.
+            // Restrict, like the catalogue link: a rung in use is retired, never deleted from under
+            // the qualifications that name it.
+            entity.HasIndex(x => x.QualificationLevelId).HasDatabaseName("IX_CandidateQualification_QualificationLevelId");
+            entity.HasOne(x => x.QualificationLevel)
+                .WithMany()
+                .HasForeignKey(x => x.QualificationLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<JobCandidateWorkHistory>(entity =>
@@ -9019,6 +9286,18 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        // Round 4, lane I4: who a template is for.
+        builder.Entity<OnboardingPlanTemplateAudience>(entity =>
+        {
+            entity.HasIndex(x => x.PlanTemplateId).HasDatabaseName("IX_OnboardingTemplateAudience_TemplateId");
+            entity.Property(x => x.TargetType).HasConversion<int>();
+
+            entity.HasOne(x => x.PlanTemplate)
+                .WithMany(x => x.Audiences)
+                .HasForeignKey(x => x.PlanTemplateId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<OnboardingTaskTemplate>(entity =>
         {
             entity.HasIndex(x => x.PlanTemplateId).HasDatabaseName("IX_OnboardingTaskTemplate_PlanId");
@@ -9431,6 +9710,13 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.Settlement)
                 .WithMany(x => x.Lines)
                 .HasForeignKey(x => x.SettlementId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Leave settings audit 2 (P2): who in Finance valued the line. Restrict, as the
+            // settlement's own staff references are — a line is never deleted with a person.
+            entity.HasOne(x => x.ValuedByEmployee)
+                .WithMany()
+                .HasForeignKey(x => x.ValuedByEmployeeId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -10755,6 +11041,22 @@ private void ConfigureHREntities(ModelBuilder builder)
             e.HasIndex(x => new { x.TenantId, x.CreatedAt });
             e.HasIndex(x => x.RunId);
             e.HasIndex(x => x.ProbationPeriodId);
+
+            e.HasOne(x => x.Run)
+                .WithMany(x => x.DispatchLogs)
+                .HasForeignKey(x => x.RunId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- Orientation & onboarding reminder engine (round 4, lane K) — the sweep that delivers ----
+        builder.Entity<OnboardingOrientationReminderRun>(e => e.HasIndex(x => new { x.TenantId, x.StartedAt }));
+        builder.Entity<OnboardingOrientationReminderDispatchLog>(e =>
+        {
+            // The engine's send-once guarantee — a sweep claims a key in the same save that delivers.
+            e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            e.HasIndex(x => x.RunId);
+            e.HasIndex(x => x.RoutedToEmployeeId);
 
             e.HasOne(x => x.Run)
                 .WithMany(x => x.DispatchLogs)
@@ -12677,6 +12979,9 @@ private void ConfigureOrientationEntities(ModelBuilder builder)
 
             entity.Property(x => x.TargetType).HasConversion<int>();
             entity.Property(x => x.Trigger).HasConversion<int>();
+            // Round 4, lane I1. Anyone (0) is what every pre-existing rule meant.
+            entity.Property(x => x.Population).HasConversion<int>()
+                .HasDefaultValue(OrientationAudiencePopulation.Anyone);
 
             entity.HasOne(x => x.Program)
                 .WithMany(x => x.AudienceRules)
@@ -12717,6 +13022,22 @@ private void ConfigureOrientationEntities(ModelBuilder builder)
                 .WithMany(x => x.Facilitators)
                 .HasForeignKey(x => x.SessionId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Round 4, lane M: a facilitator picked from the training vendor register. No collection on
+            // the vendor or trainer side, so both are one-way — configured here, or EF would pair them
+            // by convention and could mint a shadow key.
+            entity.HasIndex(x => x.ExternalFacilitatorVendorId);
+            entity.HasIndex(x => x.ExternalFacilitatorTrainerProfileId);
+
+            entity.HasOne(x => x.ExternalFacilitatorVendor)
+                .WithMany()
+                .HasForeignKey(x => x.ExternalFacilitatorVendorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ExternalFacilitatorTrainerProfile)
+                .WithMany()
+                .HasForeignKey(x => x.ExternalFacilitatorTrainerProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // =====================================================
@@ -12750,6 +13071,9 @@ private void ConfigureOrientationEntities(ModelBuilder builder)
             entity.Property(x => x.EnrollmentStatus).HasConversion<int>();
             entity.Property(x => x.EnrollmentSource).HasConversion<int>();
             entity.Property(x => x.CompletionStatus).HasConversion<int>();
+            // Round 4, lane I3: which rule and event created an automatic enrollment.
+            entity.Property(x => x.TriggerEvent).HasConversion<int?>();
+            entity.HasIndex(x => x.AudienceRuleId);
 
             entity.HasOne(x => x.Program)
                 .WithMany(x => x.Enrollments)
@@ -12893,6 +13217,12 @@ private void ConfigureOrientationEntities(ModelBuilder builder)
             entity.HasIndex(x => x.EmployeeOrientationId);
             entity.HasIndex(x => x.RecipientEmployeeId);
             entity.HasIndex(x => x.IsRead);
+
+            // Round 4, lane K-b: HR's "what did we tell whom" read, and the email outbox — filtered
+            // to the rows the dispatcher still has to send, which is the only question it asks.
+            entity.HasIndex(x => new { x.TenantId, x.SentAt });
+            entity.HasIndex(x => new { x.TenantId, x.SentAt }, "IX_OrientationNotifications_EmailQueue")
+                .HasFilter("[EmailStatus] = N'Queued'");
 
             entity.Property(x => x.Type).HasConversion<int>();
 

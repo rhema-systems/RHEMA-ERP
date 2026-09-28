@@ -1,6 +1,8 @@
-using ErpSystem.Core.Entities.HR.CompanySchedule;
+﻿using ErpSystem.Core.Entities.HR.CompanySchedule;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.HR;
@@ -9,8 +11,34 @@ namespace ErpSystem.Data.Repositories.HR;
 
 public class CompanyEventRepository : GenericRepository<CompanyEvent>, ICompanyEventRepository
 {
-    public CompanyEventRepository(ApplicationDbContext context) : base(context)
+    private readonly INumberSequenceService _sequences;
+
+    public CompanyEventRepository(ApplicationDbContext context, INumberSequenceService sequences)
+        : base(context)
     {
+        _sequences = sequences;
+    }
+
+    /// <summary>
+    /// Round 4, D7 (C-6). Year-scoped, and the probe sees SOFT-DELETED rows too — a deleted event
+    /// still occupies its number, which is the whole point.
+    /// </summary>
+    public Task<string> GetNextEventNumberAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var year = DateTime.UtcNow.Year;
+        return _sequences.NextUnusedAsync(
+            "EVT",
+            tenantId,
+            year,
+            format: value => $"EVT-{year}-{value:D5}",
+            isTaken: number => _dbSet.IgnoreQueryFilters()
+                .AnyAsync(e => e.TenantId == tenantId && e.EventNumber == number, cancellationToken),
+            highestIssued: async () => NumberSequenceExtensions.HighestIssued(
+                await _dbSet.IgnoreQueryFilters()
+                    .Where(e => e.TenantId == tenantId && e.EventNumber.StartsWith($"EVT-{year}-"))
+                    .Select(e => e.EventNumber)
+                    .ToListAsync(cancellationToken)),
+            cancellationToken);
     }
 
     public async Task<CompanyEvent?> GetByEventNumberAsync(string eventNumber)
@@ -301,9 +329,32 @@ public class EventTaskRepository : GenericRepository<EventTask>, IEventTaskRepos
 
 public class MeetingRoomRepository : GenericRepository<MeetingRoom>, IMeetingRoomRepository
 {
-    public MeetingRoomRepository(ApplicationDbContext context) : base(context)
+    private readonly INumberSequenceService _sequences;
+
+    public MeetingRoomRepository(ApplicationDbContext context, INumberSequenceService sequences)
+        : base(context)
     {
+        _sequences = sequences;
     }
+
+    /// <summary>
+    /// Round 4, D7 (C-6). NOT year-scoped — a room code carries no year, so the sequence must not
+    /// restart in January and hand RM-0001 to a second room.
+    /// </summary>
+    public Task<string> GetNextRoomCodeAsync(Guid tenantId, CancellationToken cancellationToken = default)
+        => _sequences.NextUnusedAsync(
+            "RM",
+            tenantId,
+            year: null,
+            format: value => $"RM-{value:D4}",
+            isTaken: code => _dbSet.IgnoreQueryFilters()
+                .AnyAsync(r => r.TenantId == tenantId && r.RoomCode == code, cancellationToken),
+            highestIssued: async () => NumberSequenceExtensions.HighestIssued(
+                await _dbSet.IgnoreQueryFilters()
+                    .Where(r => r.TenantId == tenantId)
+                    .Select(r => r.RoomCode)
+                    .ToListAsync(cancellationToken)),
+            cancellationToken);
 
     public async Task<MeetingRoom?> GetByRoomCodeAsync(string roomCode)
     {
@@ -368,8 +419,31 @@ public class MeetingRoomRepository : GenericRepository<MeetingRoom>, IMeetingRoo
 
 public class RoomBookingRepository : GenericRepository<RoomBooking>, IRoomBookingRepository
 {
-    public RoomBookingRepository(ApplicationDbContext context) : base(context)
+    private readonly INumberSequenceService _sequences;
+
+    public RoomBookingRepository(ApplicationDbContext context, INumberSequenceService sequences)
+        : base(context)
     {
+        _sequences = sequences;
+    }
+
+    /// <inheritdoc cref="ICompanyEventRepository.GetNextEventNumberAsync"/>
+    public Task<string> GetNextBookingNumberAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var year = DateTime.UtcNow.Year;
+        return _sequences.NextUnusedAsync(
+            "BK",
+            tenantId,
+            year,
+            format: value => $"BK-{year}-{value:D5}",
+            isTaken: number => _dbSet.IgnoreQueryFilters()
+                .AnyAsync(b => b.TenantId == tenantId && b.BookingNumber == number, cancellationToken),
+            highestIssued: async () => NumberSequenceExtensions.HighestIssued(
+                await _dbSet.IgnoreQueryFilters()
+                    .Where(b => b.TenantId == tenantId && b.BookingNumber.StartsWith($"BK-{year}-"))
+                    .Select(b => b.BookingNumber)
+                    .ToListAsync(cancellationToken)),
+            cancellationToken);
     }
 
     public async Task<RoomBooking?> GetByBookingNumberAsync(string bookingNumber)

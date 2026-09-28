@@ -48,6 +48,16 @@ export function PermissionGate({ permissions, roles, fallback = null, children }
 export const HR_ADMIN_ROLES = ['admin', 'SuperAdmin', 'TenantAdmin'];
 
 /**
+ * Finance's roles that value the pay HR records — a leaver's settlement pay lines and leave cashed
+ * in (leave settings audit 2, P2).
+ *
+ * Mirrors `HrPermissions.FinancePayValuerRoles`. The backend's role fallback grants them
+ * `HR.Pay.Value` while a tenant's permission seed has not run — and login lists only seeded
+ * permissions — so a screen checks these roles beside the permission, as the API does.
+ */
+export const PAY_VALUER_ROLES = ['Finance Officer', 'Senior Accountant', 'Chief Accountant'];
+
+/**
  * Roles with HR access.
  *
  * "HR User" was the pre-rename name and no longer exists on a migrated tenant (the reference

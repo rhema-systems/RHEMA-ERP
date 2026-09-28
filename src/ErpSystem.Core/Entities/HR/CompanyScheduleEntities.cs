@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Enums;
 
@@ -120,10 +120,14 @@ public class CompanyEvent : TenantEntity
     [MaxLength(1000)]
     public string? TechnicalRequirements { get; set; }
 
-    // Reminders
+    // Reminders — sent by the company-schedule reminder sweep (round 4, lane N-b2): the event reminder
+    // ReminderDaysBefore days ahead when SendReminders is on, and the RSVP chase ahead of RsvpDeadline.
+    // Each is sent ONCE, and the sent-date is what says so; HR's manual buttons stamp the same dates,
+    // and a reschedule clears them, since a reminder for the old date reminds nobody of the new one.
     public bool SendReminders { get; set; }
     public int? ReminderDaysBefore { get; set; }
     public DateTime? ReminderSentDate { get; set; }
+    public DateTime? RsvpReminderSentDate { get; set; }
 
     // Completion
     public DateTime? ActualStartTime { get; set; }
@@ -142,8 +146,33 @@ public class CompanyEvent : TenantEntity
 
     // Reschedule
     public bool IsRescheduled { get; set; }
+
+    /// <summary>
+    /// ⚠ <b>When the event was moved, not what it was moved from.</b> The name reads like the
+    /// latter and the screens read it like the latter, which is half of company-schedule defect C-2.
+    /// The original window is <see cref="OriginalStartDate"/> and its three siblings; this stays as
+    /// it is because other readers already treat it as a timestamp.
+    /// </summary>
     public DateTime? RescheduledDate { get; set; }
-    
+
+    /// <summary>
+    /// What this event was originally scheduled for, kept when it is first moved (round 4, D7; C-2).
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ The reschedule used to overwrite <c>StartDate</c>/<c>EndDate</c> and keep nothing,
+    /// while the dialog told the user the original was retained. Nothing anywhere remembered it.
+    /// The interview path solved this in lane C with <c>JobInterview.OriginalDate</c>; these four
+    /// are the same repair for an event, which carries a date AND a time at each end.</para>
+    ///
+    /// <para>⚠ Set on the FIRST move only. "When was this originally going to be?" has one answer,
+    /// and refreshing it on each move would make a twice-moved event claim it was always meant for
+    /// whenever it last sat.</para>
+    /// </remarks>
+    public DateTime? OriginalStartDate { get; set; }
+    public TimeSpan? OriginalStartTime { get; set; }
+    public DateTime? OriginalEndDate { get; set; }
+    public TimeSpan? OriginalEndTime { get; set; }
+
     [MaxLength(2000)]
     public string? RescheduleReason { get; set; }
 

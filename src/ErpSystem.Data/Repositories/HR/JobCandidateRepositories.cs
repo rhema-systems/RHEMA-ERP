@@ -49,11 +49,19 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
         // replace-set save deleted an interest and the response served it straight back.
         return await _dbSet
             .Include(c => c.Country)
+            // Round 4, lane A: the application snapshot freezes GeoArea.Path so a re-score can test
+            // "is this candidate under Greater Accra?" without re-reading a tree that may have been
+            // re-parented since. Without this include the path is silently null on every snapshot
+            // and the scorer has to resolve it live — correct, but a query per application.
+            .Include(c => c.GeoArea)
             .Include(c => c.NationalIdTypeRef)
             // Round 3, lane C2: the catalogue rows behind a qualification and a skill ride along —
             // no lazy loading here, so without these the mappers' `Qualification?.Name` and
             // `Skill?.Name` were always null on this read.
-            .Include(c => c.Qualifications.Where(q => !q.IsDeleted)).ThenInclude(q => q.Qualification)
+            .Include(c => c.Qualifications.Where(q => !q.IsDeleted)).ThenInclude(q => q.Qualification).ThenInclude(x => x!.QualificationLevel)
+            // Round 4, lane Q: the rung's NAME on a profile read. Scoring needs only the ids,
+            // which ride on the rows and on the catalogue entry above.
+            .Include(c => c.Qualifications.Where(q => !q.IsDeleted)).ThenInclude(q => q.QualificationLevel)
             .Include(c => c.WorkHistories.Where(w => !w.IsDeleted))
             .Include(c => c.Referees.Where(r => !r.IsDeleted))
             .Include(c => c.Skills.Where(s => !s.IsDeleted)).ThenInclude(s => s.Skill)
@@ -112,16 +120,19 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
 
     // ── Talent pool — filtered queries ────────────────────────────────────────
 
-    public async Task<(List<JobCandidate> Items, int TotalCount)> GetTalentPoolFilteredAsync(
-        TalentPoolFilterDto filter,
-        Guid tenantId,
-        CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Every talent-pool predicate, in one place, so the list screen and the screening read cannot
+    /// select different people from the same filter (round 4, lane B2).
+    /// </summary>
+    /// <remarks>
+    /// &#9888; Paging and sorting are deliberately NOT here. The list pages; the screen scores the
+    /// whole selected set and trims the answer afterwards. Sharing the predicates is the point;
+    /// sharing the paging would make the screen silently score only the first 25.
+    /// </remarks>
+    private static IQueryable<JobCandidate> ApplyTalentPoolFilter(
+        IQueryable<JobCandidate> query, TalentPoolFilterDto filter, Guid tenantId)
     {
-        var query = _dbSet
-            .Include(c => c.Country)
-            .Include(c => c.SegmentMemberships).ThenInclude(m => m.Segment)
-            .Include(c => c.EngagementEvents)
-            .Where(c => c.TenantId == tenantId && c.IsInTalentPool && !c.IsDeleted);
+        query = query.Where(c => c.TenantId == tenantId && c.IsInTalentPool && !c.IsDeleted);
 
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
@@ -135,7 +146,11 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
                 (c.CurrentEmployer != null && c.CurrentEmployer.ToLower().Contains(s)));
         }
 
-        if (filter.SegmentIds.Count > 0)
+        // ⚠ Null-checked as well as counted. The list read binds this from a query string, where an
+        // omitted key leaves the initialiser's empty list standing; the screen binds it from JSON,
+        // where "segmentIds": null overwrites the initialiser with null. Same DTO, two binders,
+        // one of which can hand this a null the other never could.
+        if (filter.SegmentIds is { Count: > 0 })
             query = query.Where(c => c.SegmentMemberships
                 .Any(m => filter.SegmentIds.Contains(m.SegmentId) && !m.IsDeleted));
 
@@ -166,6 +181,30 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
             query = query.Where(c => c.LastEngagedDate == null || c.LastEngagedDate < threshold);
         }
 
+        // Round 4, lane B2. Subtree containment against the materialised GeoArea.Path, which is
+        // "/root/child/leaf" with no trailing slash - so one is appended on the way in, exactly as
+        // ShortlistingEvaluator.PathContainsArea does, or an area matching its own leaf would miss.
+        if (filter.GeoAreaId is { } areaId)
+        {
+            var pattern = $"%/{areaId}/%";
+            query = query.Where(c => c.GeoArea != null && EF.Functions.Like(c.GeoArea.Path + "/", pattern));
+        }
+
+        return query;
+    }
+
+    public async Task<(List<JobCandidate> Items, int TotalCount)> GetTalentPoolFilteredAsync(
+        TalentPoolFilterDto filter,
+        Guid tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        var query = ApplyTalentPoolFilter(
+            _dbSet
+                .Include(c => c.Country)
+                .Include(c => c.SegmentMemberships).ThenInclude(m => m.Segment)
+                .Include(c => c.EngagementEvents),
+            filter, tenantId);
+
         var totalCount = await query.CountAsync(cancellationToken);
 
         query = (filter.SortBy?.ToLower(), filter.SortDescending) switch
@@ -189,6 +228,45 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
             .ToListAsync(cancellationToken);
 
         return (items, totalCount);
+    }
+
+    /// <summary>
+    /// The same slice of the pool the list screen shows, loaded with everything the shortlisting
+    /// engine reads: skills, qualifications, languages and the candidate's geography (round 4,
+    /// lane B1).
+    /// </summary>
+    /// <remarks>
+    /// <para>&#9888; A separate read rather than heavier includes on the list. The list is the
+    /// recruiter's landing screen and pages at 25; screening is an explicit act over a filtered
+    /// set. Loading four collections per row on every page view to serve an occasional screen
+    /// would be paying the cost in the wrong place.</para>
+    ///
+    /// <para>&#9888; Every child include filters <c>IsDeleted</c>, as <c>GetWithFullDetailsAsync</c>
+    /// does. A retired skill scoring a criterion is worse than a missing one: it produces a match
+    /// the recruiter cannot see the reason for, and cannot remove.</para>
+    ///
+    /// <para><c>GeoArea</c> rides along so <c>ScoringCandidateView.FromCandidate</c> has the
+    /// ancestor path in hand. Without it, containment would need a query per candidate - the N+1
+    /// that the application path avoids by freezing the path into its snapshot.</para>
+    /// </remarks>
+    public async Task<List<JobCandidate>> GetTalentPoolForScreeningAsync(
+        TalentPoolFilterDto filter,
+        Guid tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        var query = ApplyTalentPoolFilter(
+            _dbSet
+                .Include(c => c.GeoArea)
+                .Include(c => c.Skills.Where(x => !x.IsDeleted))
+                .Include(c => c.Qualifications.Where(x => !x.IsDeleted)).ThenInclude(q => q.Qualification)
+                .Include(c => c.Languages.Where(x => !x.IsDeleted)),
+            filter, tenantId);
+
+        return await query
+            .AsSplitQuery()
+            .OrderBy(c => c.LastName)
+            .ThenBy(c => c.FirstName)
+            .ToListAsync(cancellationToken);
     }
 
     public async Task<IEnumerable<JobCandidate>> GetDormantPoolCandidatesAsync(
@@ -372,7 +450,12 @@ public class JobCandidateQualificationRepository : GenericRepository<JobCandidat
 
     public async Task<IEnumerable<JobCandidateQualification>> GetByCandidateIdAsync(Guid candidateId)
     {
+        // ⚠ Round 4, lane Q: these Includes were missing, so a catalogue-linked qualification came
+        // back with a BLANK name on HR's Qualifications tab. The DTO reads Qualification.Name, and
+        // HR's form stores no typed text beside a catalogue pick. The rung names need them too.
         return await _dbSet
+            .Include(q => q.Qualification).ThenInclude(c => c!.QualificationLevel)
+            .Include(q => q.QualificationLevel)
             .Where(q => q.JobCandidateId == candidateId && !q.IsDeleted)
             .OrderByDescending(q => q.DateAwarded)
             .ToListAsync();

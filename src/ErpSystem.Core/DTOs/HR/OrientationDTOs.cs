@@ -99,6 +99,9 @@ public class OrientationProgramDto : BaseDto
     public bool RequiresAssessment { get; set; }
     public decimal? PassingScorePercent { get; set; }
     public bool RequiresAcknowledgement { get; set; }
+    /// <summary>Round 4, lane R — the declaration each enrolment gets a copy of.</summary>
+    public string? AcknowledgementTitle { get; set; }
+    public string? AcknowledgementText { get; set; }
     public int? CompletionDeadlineDays { get; set; }
 
     // Certificate
@@ -125,6 +128,10 @@ public class OrientationProgramDto : BaseDto
     // Roll-up counts
     public int ModuleCount { get; set; }
     public int SessionCount { get; set; }
+
+    /// <summary>Round 4, lane R: the programme is only its live session, so attendance completes it
+    /// (<c>OrientationCompletionRules.CompletesByAttendance</c>).</summary>
+    public bool CompletesByAttendance { get; set; }
     public int EnrollmentCount { get; set; }
     public int CompletedCount { get; set; }
 
@@ -152,6 +159,21 @@ public class OrientationProgramSummaryDto
     public int? EstimatedDurationMinutes { get; set; }
     public bool IsCertificateIssued { get; set; }
     public bool RequiresAssessment { get; set; }
+
+    /// <summary>Round 4, lane I-b — lists need it to offer "open the next cycle" on a completion.</summary>
+    public bool IsRecurring { get; set; }
+    public OrientationRecurrenceFrequency? RecurrenceFrequency { get; set; }
+
+    /// <summary>Round 4, lane L: Active and in its effective dates — what an enrolment picker may offer.</summary>
+    public bool AcceptsEnrolment { get; set; }
+
+    /// <summary>Round 4, lane R: only its live session — attendance completes it, and HR may mark an
+    /// enrolment completed.</summary>
+    public bool CompletesByAttendance { get; set; }
+
+    /// <summary>Why not ("it has been retired"), when <see cref="AcceptsEnrolment"/> is false.</summary>
+    public string? ClosedBecause { get; set; }
+
     public int ModuleCount { get; set; }
     public int EnrollmentCount { get; set; }
     public int CompletedCount { get; set; }
@@ -194,6 +216,14 @@ public class CreateOrientationProgramDto : CreateDtoBase
     public decimal? PassingScorePercent { get; set; }
 
     public bool RequiresAcknowledgement { get; set; }
+    /// <summary>Round 4, lane R — the declaration each enrolment gets a copy of. Blank means a default
+    /// made from the title; the form requires it whenever an acknowledgement is required.</summary>
+    [MaxLength(300)]
+    public string? AcknowledgementTitle { get; set; }
+
+    [MaxLength(4000)]
+    public string? AcknowledgementText { get; set; }
+
     public int? CompletionDeadlineDays { get; set; }
 
     public bool IsCertificateIssued { get; set; }
@@ -251,6 +281,14 @@ public class UpdateOrientationProgramDto : UpdateDtoBase
     public decimal? PassingScorePercent { get; set; }
 
     public bool RequiresAcknowledgement { get; set; }
+    /// <summary>Round 4, lane R — the declaration each enrolment gets a copy of. Blank means a default
+    /// made from the title; the form requires it whenever an acknowledgement is required.</summary>
+    [MaxLength(300)]
+    public string? AcknowledgementTitle { get; set; }
+
+    [MaxLength(4000)]
+    public string? AcknowledgementText { get; set; }
+
     public int? CompletionDeadlineDays { get; set; }
 
     public bool IsCertificateIssued { get; set; }
@@ -272,6 +310,23 @@ public class UpdateOrientationProgramDto : UpdateDtoBase
 
     public Guid? OwnerEmployeeId { get; set; }
     public Guid? OwnerOrganizationUnitId { get; set; }
+}
+
+/// <summary>
+/// Copy a programme (round 4, lane J2): its modules and their content, its assessment questions and
+/// their options, its prerequisites and its audience rules — as a Draft. Sessions and enrolments are
+/// deliveries of the original and stay with it.
+/// </summary>
+public class CloneOrientationProgramDto
+{
+    /// <summary>The copy's title.</summary>
+    [Required]
+    [MaxLength(300)]
+    public string NewName { get; set; } = string.Empty;
+
+    /// <summary>The copy's programme code; generated when omitted.</summary>
+    [MaxLength(50)]
+    public string? NewCode { get; set; }
 }
 
 /// <summary>Lifecycle transition for a program (publish, suspend, retire, archive …).</summary>
@@ -487,10 +542,19 @@ public class OrientationAudienceRuleDto : BaseDto
     public string RuleName { get; set; } = string.Empty;
     public string? Description { get; set; }
 
-    public OrientationAudienceScope TargetType { get; set; }
+    /// <summary>Where the people sit — the shared HR audience axis (round 4, lane I1).</summary>
+    public HrAudienceTargetType TargetType { get; set; }
     public string TargetTypeName => TargetType.ToString();
     public Guid? TargetEntityId { get; set; }
+
+    /// <summary>
+    /// The unit, level, position, location or employee's name. Declared from the start and never
+    /// filled until lane I2 — the rules list could only ever show a GUID.
+    /// </summary>
     public string? TargetEntityName { get; set; }
+
+    /// <summary>Which of the people at the target the rule means.</summary>
+    public OrientationAudiencePopulation Population { get; set; }
 
     public OrientationEnrollmentTrigger Trigger { get; set; }
     public string TriggerName => Trigger.ToString();
@@ -498,6 +562,10 @@ public class OrientationAudienceRuleDto : BaseDto
     public int EnrollmentDelayDays { get; set; }
     public bool IsInclusive { get; set; }
     public bool IsActive { get; set; }
+
+    /// <summary>How many active employees this rule reaches today, target and population together.
+    /// Filled on the list read; an exclusion's reach is the number it keeps out.</summary>
+    public int? ReachCount { get; set; }
 }
 
 public class CreateOrientationAudienceRuleDto : CreateDtoBase
@@ -513,9 +581,11 @@ public class CreateOrientationAudienceRuleDto : CreateDtoBase
     public string? Description { get; set; }
 
     [Required]
-    public OrientationAudienceScope TargetType { get; set; }
+    public HrAudienceTargetType TargetType { get; set; }
 
     public Guid? TargetEntityId { get; set; }
+
+    public OrientationAudiencePopulation Population { get; set; } = OrientationAudiencePopulation.Anyone;
 
     [Required]
     public OrientationEnrollmentTrigger Trigger { get; set; }
@@ -535,9 +605,11 @@ public class UpdateOrientationAudienceRuleDto : UpdateDtoBase
     public string? Description { get; set; }
 
     [Required]
-    public OrientationAudienceScope TargetType { get; set; }
+    public HrAudienceTargetType TargetType { get; set; }
 
     public Guid? TargetEntityId { get; set; }
+
+    public OrientationAudiencePopulation Population { get; set; } = OrientationAudiencePopulation.Anyone;
 
     [Required]
     public OrientationEnrollmentTrigger Trigger { get; set; }
@@ -604,6 +676,15 @@ public class OrientationSessionSummaryDto
     public DateTime? ScheduledStartAt { get; set; }
     public int? MaxParticipants { get; set; }
     public int EnrolledCount { get; set; }
+
+    // Round 4, lane L — so a picker can mark what it cannot take rather than offer it.
+    public DateTime? EnrollmentDeadlineAt { get; set; }
+
+    /// <summary>Open for enrolment now — the same definition the enrol check applies.</summary>
+    public bool AcceptsEnrolment { get; set; }
+
+    /// <summary>Why not, in words ("it was cancelled"), when <see cref="AcceptsEnrolment"/> is false.</summary>
+    public string? ClosedBecause { get; set; }
 }
 
 public class CreateOrientationSessionDto : CreateDtoBase
@@ -680,6 +761,22 @@ public class UpdateOrientationSessionDto : UpdateDtoBase
     public string? ParticipantInstructions { get; set; }
 }
 
+/// <summary>
+/// Run a session again on a new date (round 4, lane J3) — the common case for a recurring briefing.
+/// </summary>
+public class CloneOrientationSessionDto
+{
+    [Required]
+    public DateTime? ScheduledStartAt { get; set; }
+
+    /// <summary>When omitted, the copy keeps the original's length.</summary>
+    public DateTime? ScheduledEndAt { get; set; }
+
+    /// <summary>When omitted, the original's title — which often names the month, so the screen asks.</summary>
+    [MaxLength(300)]
+    public string? Title { get; set; }
+}
+
 public class ChangeOrientationSessionStatusDto
 {
     [Required]
@@ -708,14 +805,30 @@ public class OrientationSessionFacilitatorDto : BaseDto
     public string? ExternalFacilitatorEmail { get; set; }
     public string? ExternalFacilitatorOrganization { get; set; }
 
+    /// <summary>The training vendor, when picked from the register (round 4, lane M).</summary>
+    public Guid? ExternalFacilitatorVendorId { get; set; }
+
+    /// <summary>The vendor's trainer, when picked from the register and the person is known.</summary>
+    public Guid? ExternalFacilitatorTrainerProfileId { get; set; }
+
+    /// <summary>
+    /// What the register says NOW about a vendor or trainer picked earlier, when it matters — "GIMPA
+    /// has since been blacklisted in the training vendor register". Null when all is well or nothing
+    /// was picked. The snapshot columns keep saying what was agreed; this says what changed since.
+    /// </summary>
+    public string? RegisterNote { get; set; }
+
     public OrientationFacilitatorRole Role { get; set; }
     public string RoleName => Role.ToString();
 
     public bool HasConfirmed { get; set; }
     public string? Notes { get; set; }
 
-    /// <summary>Resolved display name (internal employee or external facilitator).</summary>
-    public string DisplayName => EmployeeName ?? ExternalFacilitatorName ?? string.Empty;
+    /// <summary>
+    /// Resolved display name — the employee, the external person, or (a vendor yet to name its
+    /// trainer) the vendor.
+    /// </summary>
+    public string DisplayName => EmployeeName ?? ExternalFacilitatorName ?? ExternalFacilitatorOrganization ?? string.Empty;
 }
 
 public class CreateOrientationSessionFacilitatorDto : CreateDtoBase
@@ -734,6 +847,15 @@ public class CreateOrientationSessionFacilitatorDto : CreateDtoBase
 
     [MaxLength(200)]
     public string? ExternalFacilitatorOrganization { get; set; }
+
+    /// <summary>
+    /// Pick from the training vendor register (round 4, lane M). The name, email and organisation are
+    /// then taken from the register and any typed values are ignored. A trainer alone is enough — its
+    /// vendor is implied.
+    /// </summary>
+    public Guid? ExternalFacilitatorVendorId { get; set; }
+
+    public Guid? ExternalFacilitatorTrainerProfileId { get; set; }
 
     [Required]
     public OrientationFacilitatorRole Role { get; set; }
@@ -757,6 +879,14 @@ public class UpdateOrientationSessionFacilitatorDto : UpdateDtoBase
 
     [MaxLength(200)]
     public string? ExternalFacilitatorOrganization { get; set; }
+
+    /// <summary>
+    /// ⚠ The whole pick, every time — like every field here. Omitting these on an update means "not
+    /// from the register", and the facilitator becomes a typed one.
+    /// </summary>
+    public Guid? ExternalFacilitatorVendorId { get; set; }
+
+    public Guid? ExternalFacilitatorTrainerProfileId { get; set; }
 
     [Required]
     public OrientationFacilitatorRole Role { get; set; }
@@ -888,6 +1018,11 @@ public class EmployeeOrientationDto : BaseDto
     public OrientationEnrollmentSource EnrollmentSource { get; set; }
     public string EnrollmentSourceName => EnrollmentSource.ToString();
 
+    /// <summary>Round 4, lane I3: the audience rule, event and date behind an automatic enrollment.</summary>
+    public Guid? AudienceRuleId { get; set; }
+    public OrientationEnrollmentTrigger? TriggerEvent { get; set; }
+    public DateOnly? TriggerDate { get; set; }
+
     public DateTime EnrolledAt { get; set; }
     public Guid? EnrolledByEmployeeId { get; set; }
     public string? EnrolledByName { get; set; }
@@ -906,6 +1041,12 @@ public class EmployeeOrientationDto : BaseDto
     public bool IsPassed { get; set; }
 
     public bool AcknowledgementSigned { get; set; }
+
+    /// <summary>Round 4, lane R: attendance confirmed, on a programme that is only its session.</summary>
+    public DateTime? AttendanceConfirmedAt { get; set; }
+    public Guid? AttendanceConfirmedByEmployeeId { get; set; }
+    public string? AttendanceConfirmedByName { get; set; }
+    public string? AttendanceConfirmationNote { get; set; }
 
     public bool CertificateIssued { get; set; }
     public string? CertificateSerialNumber { get; set; }
@@ -945,6 +1086,16 @@ public class EmployeeOrientationSummaryDto
     public DateTime EnrolledAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public DateTime? NextDueDate { get; set; }
+
+    // Round 4, lane I3 — how the person came to be on it.
+    public OrientationEnrollmentSource EnrollmentSource { get; set; }
+    public Guid? AudienceRuleId { get; set; }
+    public OrientationEnrollmentTrigger? TriggerEvent { get; set; }
+    public DateOnly? TriggerDate { get; set; }
+
+    // Round 4, lane K-b — so the list can offer "Issue certificate" or "Reissue".
+    public bool CertificateIssued { get; set; }
+    public string? CertificateSerialNumber { get; set; }
 }
 
 public class CreateEmployeeOrientationDto : CreateDtoBase
@@ -997,6 +1148,45 @@ public class WithdrawOrientationDto
     [Required]
     [MaxLength(1000)]
     public string WithdrawalReason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Round 4, lane R: HR's "Mark completed" on an enrolment whose programme is only its live session —
+/// for somebody enrolled without a session, or whom the register does not show. The note says why.
+/// </summary>
+public class ConfirmOrientationAttendanceDto
+{
+    [Required]
+    public Guid EmployeeOrientationId { get; set; }
+
+    [Required]
+    [MaxLength(1000)]
+    public string Note { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Round 4, lane R: what marking a session Completed will do to its participants, for the status
+/// confirmation to say before it is pressed.
+/// </summary>
+public class OrientationSessionCompletionPreviewDto
+{
+    public Guid SessionId { get; set; }
+    public string? ProgramTitle { get; set; }
+
+    /// <summary>False when the programme has content or an assessment — those complete it, not the session.</summary>
+    public bool CompletesByAttendance { get; set; }
+
+    /// <summary>Attendance alone does not complete it: the declaration is still to be signed.</summary>
+    public bool RequiresAcknowledgement { get; set; }
+
+    /// <summary>Seat-holders the register shows attending on at least one day, not yet confirmed.</summary>
+    public int WillComplete { get; set; }
+
+    /// <summary>Seat-holders with no attended day on the register — they stay open.</summary>
+    public int NotShownAttending { get; set; }
+
+    /// <summary>Seat-holders whose attendance is already confirmed.</summary>
+    public int AlreadyConfirmed { get; set; }
 }
 
 #endregion
@@ -1336,7 +1526,12 @@ public class IssueOrientationCertificateDto
     public string? CertificateNumber { get; set; }   // auto-generated if not supplied
 
     public DateTime? ExpiresAt { get; set; }
+
+    /// <summary>Ignored — the issuer is the signed-in HR officer (round 4, lane K-b). Kept so older callers still bind.</summary>
     public Guid? IssuedByEmployeeId { get; set; }
+
+    /// <summary>Replace the enrolment's live certificate (marked Reissued). Without it, a second live one is refused.</summary>
+    public bool Reissue { get; set; }
 }
 
 public class RevokeOrientationCertificateDto

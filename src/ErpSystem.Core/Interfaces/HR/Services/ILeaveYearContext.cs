@@ -26,4 +26,16 @@ public interface ILeaveYearContext
     /// no settings row, which is what every tenant had before the setting existed.
     /// </summary>
     Task<int> StartMonthAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The leave year today falls in, labelled the way <c>LeaveYear.For</c> labels it (round 5,
+    /// lane C4).
+    /// </summary>
+    /// <remarks>
+    /// The default wherever a caller names no year. It was <c>DateTime.Today.Year</c> in eleven
+    /// controller actions, which is right only while the leave year starts in January: from January
+    /// to March an April tenant is still in the leave year named after the previous calendar year,
+    /// and every one of those reads would have answered for a year that has not started.
+    /// </remarks>
+    Task<int> CurrentYearAsync(CancellationToken cancellationToken = default);
 }

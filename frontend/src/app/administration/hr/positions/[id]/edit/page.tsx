@@ -162,6 +162,11 @@ export default function EditEmployeePositionPage() {
           : null,
         requiredGuarantorCurrencyCode: values.requiredGuarantorCurrencyCode || null,
         requiresLicense: values.requiresLicense,
+        isTechnicianRole: values.isTechnicianRole,
+        // ⚠ Round 4, lane O found this missing since lane H1. The update applies it unconditionally,
+        // so omitting it did not merely ignore the picker: every save from this page CLEARED the
+        // post's check set, which only the API could have set.
+        preEmploymentCheckTemplateId: values.preEmploymentCheckTemplateId,
         isActive: values.isActive,
         skillRequirements: values.skillRequirements.map((r) => ({
           skillId: r.skillId,
@@ -249,6 +254,9 @@ export default function EditEmployeePositionPage() {
               position.requiredGuarantorAmount != null ? String(position.requiredGuarantorAmount) : '',
             requiredGuarantorCurrencyCode: position.requiredGuarantorCurrencyCode ?? '',
             requiresLicense: position.requiresLicense,
+            isTechnicianRole: position.isTechnicianRole ?? false,
+            // Loaded back for the same reason as the collections below: the save sends what the form holds.
+            preEmploymentCheckTemplateId: position.preEmploymentCheckTemplateId ?? null,
             isActive: position.isActive,
             skillRequirements: (position.skillRequirements ?? []).map((r) => ({
               skillId: r.skillId,

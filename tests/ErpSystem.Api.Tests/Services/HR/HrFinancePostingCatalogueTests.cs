@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.HR.Awards;
 using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.Requisition;
 using ErpSystem.Core.Entities.HR.Safety;
+using ErpSystem.Core.Entities.HR.StaffAttendance;
 using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Entities.HR.StaffLeave;
@@ -155,6 +156,48 @@ public sealed class HrFinancePostingCatalogueTests
         yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.MedicalInsurerRecoveryReceived), HrFinancePostingCommandFactory.MedicalInsurerRecoveryReceived(insurerClaim));
         yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.NhisClaimReimbursed), HrFinancePostingCommandFactory.NhisClaimReimbursed(nhis));
         yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.SheInsuranceClaimReceived), HrFinancePostingCommandFactory.SheInsuranceClaimReceived(incident));
+
+        // slice 6 — HR's one revenue
+        var consultingInvoice = new TimesheetInvoice
+        {
+            Id = Guid.NewGuid(), TenantId = Tenant, InvoiceNumber = "TSI-2026-0001", ClientId = Guid.NewGuid(), ConsultantId = Guid.NewGuid(),
+            BillingPeriodStart = new DateOnly(2026, 9, 1), BillingPeriodEnd = new DateOnly(2026, 9, 5), TotalHours = 32m, HourlyRate = 420m,
+            SubTotal = 13440m, TaxPercentage = 21.9m, TaxAmount = 2943.36m, TotalAmount = 16383.36m, Currency = "GHS",
+            Status = TimesheetInvoiceStatus.Sent, IssuedDate = new DateOnly(2026, 9, 8)
+        };
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.TimesheetInvoiceSent), HrFinancePostingCommandFactory.TimesheetInvoiceSent(consultingInvoice, Guid.NewGuid(), "GPHA"));
+    }
+
+    [Fact]
+    public void ConsultingInvoices_RaiseOneRevenueLineBeforeTax_AndSkipUnlinkedClients()
+    {
+        var invoice = new TimesheetInvoice { Id = Guid.NewGuid(), InvoiceNumber = "TSI-9", TotalHours = 10m, HourlyRate = 100m, SubTotal = 1000m, TaxPercentage = 21.9m, TaxAmount = 219m, TotalAmount = 1219m, Currency = "USD", Status = TimesheetInvoiceStatus.Sent };
+        var command = HrFinancePostingCommandFactory.TimesheetInvoiceSent(invoice, Guid.NewGuid(), "Client");
+        HrFinancePostingEventCatalog.GetRequired(command.EventCode).Kind.Should().Be(HrFinancePostingKind.CustomerInvoice);
+        command.Lines.Should().ContainSingle(l => !l.IsDebit && l.Role == HrFinanceAccountRole.ConsultingRevenue && l.Amount == 1000m, "the receivable is billed hours before tax; Finance's tax group governs");
+        command.TransactionCurrencyCode.Should().Be("USD");
+        command.Description.Should().Contain("Finance's tax group governs");
+
+        HrFinancePostingCommandFactory.TimesheetInvoiceSent(invoice, null, "Client").SkipReason.Should().Contain("not linked to a Finance customer");
+    }
+
+    [Fact]
+    public void Slice6Services_RouteTheirMoneyEventsThroughTheAdapter()
+    {
+        var root = FindRepositoryRoot();
+        var consulting = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "HR", "ConsultantServices.cs"));
+        var actuals = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "HR", "Finance", "HrFinanceActualsService.cs"));
+
+        Between(consulting, "public async Task<TimesheetInvoiceDto> SendAsync(", "public async Task<TimesheetInvoiceDto> MarkPaidAsync(")
+            .Should().Contain("_financePosting.RunAsync").And.Contain("HrFinancePostingCommandFactory.TimesheetInvoiceSent(");
+        Between(consulting, "public async Task<TimesheetInvoiceDto> MarkPaidAsync(", "public async Task<TimesheetInvoiceDto> VoidAsync(")
+            .Should().Contain("EnsureNotPostedAsync", "once Finance holds the receivable, the receipt is Finance's fact");
+        Between(consulting, "public async Task<TimesheetInvoiceDto> VoidAsync(", "public async Task<bool> DeleteAsync(")
+            .Should().Contain("EnsureNotPostedAsync");
+        consulting.Should().NotContain("IInvoiceService").And.NotContain("IJournalEntryService");
+
+        // The budget actuals are a READ of Finance's balances: nothing is written to either budget.
+        actuals.Should().Contain("IBookBalanceReadModelService").And.NotContain("ActualSpent =").And.NotContain("SpentAmount =").And.NotContain("SaveChangesAsync");
     }
 
     [Fact]
@@ -411,6 +454,16 @@ public sealed class HrFinancePostingCatalogueTests
             (command.RouteDirectLines is not null).Should().Be(definition.SupportsSettlementRoute,
                 $"{definition.Code}: a command carries route-dependent lines exactly when its event supports a settlement route");
 
+            if (definition.Kind == HrFinancePostingKind.CustomerInvoice)
+            {
+                // An AR hand-off carries exactly one revenue leg; the debit is Finance's receivable.
+                definition.DebitRoles.Should().BeEmpty($"{definition.Code}: HR never names the receivable side of a customer invoice");
+                command.Lines.Should().ContainSingle(l => !l.IsDebit && l.Amount > 0m, $"{definition.Code}");
+                command.Lines.Select(l => l.Role).Should().BeSubsetOf(definition.CreditRoles, $"{definition.Code} credit roles");
+                command.PayeeCustomerId.Should().NotBeNull($"{definition.Code}: the sample names a customer");
+                continue;
+            }
+
             if (definition.Kind == HrFinancePostingKind.VendorInvoice)
             {
                 // An AP hand-off carries exactly one expense leg; the credit is Finance's AP control.
@@ -518,9 +571,12 @@ public sealed class HrFinancePostingCatalogueTests
         events.Should().OnlyContain(e =>
             !string.IsNullOrWhiteSpace(e.Name) && !string.IsNullOrWhiteSpace(e.SourceDocumentType)
             && !string.IsNullOrWhiteSpace(e.Trigger) && !string.IsNullOrWhiteSpace(e.Treatment)
-            && e.DebitRoles.Count > 0
-            // A journal names both sides; an AP invoice names only its expense line — the payable is Finance's.
-            && (e.Kind == HrFinancePostingKind.VendorInvoice ? e.CreditRoles.Count == 0 : e.CreditRoles.Count > 0));
+            // A journal names both sides; an AP invoice only its expense line (the payable is Finance's);
+            // an AR invoice only its revenue line (the receivable is Finance's). (An expression tree
+            // cannot hold a switch expression, hence the conditional chain.)
+            && (e.Kind == HrFinancePostingKind.VendorInvoice ? e.DebitRoles.Count > 0 && e.CreditRoles.Count == 0
+                : e.Kind == HrFinancePostingKind.CustomerInvoice ? e.DebitRoles.Count == 0 && e.CreditRoles.Count > 0
+                : e.DebitRoles.Count > 0 && e.CreditRoles.Count > 0));
 
         // Two events on one source document type must never share a posting action — Finance
         // de-duplicates on (type, id, action).

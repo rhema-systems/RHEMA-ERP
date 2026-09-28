@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/leave-request.ts",
+    "src/services/hr/leave.service.ts",
+    "src/app/hr/leave/requests/**/*.tsx",
+    "src/app/hr/leave/approvals/*.tsx",
+    "src/app/me/leave/**/*.tsx",
+    "src/components/hr/leave/LeaveDateChangeDialogs.tsx"
+  ]
+}

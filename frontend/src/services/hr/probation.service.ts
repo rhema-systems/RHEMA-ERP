@@ -9,6 +9,7 @@ import type {
   ProbationExtension,
   ProbationStatus,
   ProbationConfirmationLetter,
+  ProbationConfirmationRepairResult,
   ProbationConfirmingAuthority,
   ResolvedConfirmingAuthority,
   CreateProbationPeriod,
@@ -127,6 +128,19 @@ class ProbationService {
    */
   confirm(id: string) {
     return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/confirm`, {});
+  }
+
+  /**
+   * Confirms, by rule, the employees whose probation ended before they were entered — the imported
+   * workforce (HR finish plan lane 11). Admin only. ⚠ Run with `dryRun` first: it changes hundreds
+   * of records at once.
+   */
+  repairImportedConfirmations(dryRun: boolean) {
+    const params = new URLSearchParams({ dryRun: String(dryRun) });
+    return apiService.post<ProbationConfirmationRepairResult>(
+      `${this.baseUrl}/repair-imported-confirmations?${params.toString()}`,
+      {},
+    );
   }
 
   /** Admin only. Records the decision and hands off — entitlements belong to the separation module. */

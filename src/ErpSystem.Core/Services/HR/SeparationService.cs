@@ -1,6 +1,7 @@
 ﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Entities.HR.StaffTravel;
@@ -14,6 +15,8 @@ using ErpSystem.Core.Services.HR.Finance;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace ErpSystem.Core.Services.HR;
 
@@ -40,9 +43,6 @@ public class SeparationService : ISeparationService
     private readonly ICurrencyService _currencies;
     private readonly IEmployeeService _employeeService;
 
-    // What the person is paid, resolved the one way HR resolves it (lane E1) — not read off a
-    // contract row the Salary tab no longer maintains.
-    private readonly IPayrollMembershipService _payrollMembership;
     private readonly IWorkflowIntegrationService _workflow;
     private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
 
@@ -56,6 +56,12 @@ public class SeparationService : ISeparationService
     /// </remarks>
     private readonly AssetCustodyClearanceBridge _assetCustody;
     private readonly IHrFinancePostingAdapter _financePosting;
+
+    /// <summary>
+    /// Leave's own answer to "how much annual leave is this person owed at a date" — the working the
+    /// leave owed report uses (round 5, lane L2), so the leaver's figure and Finance's agree.
+    /// </summary>
+    private readonly ILeaveOwedCalculator _leaveOwed;
 
     private readonly ILogger<SeparationService> _logger;
 
@@ -72,14 +78,13 @@ public class SeparationService : ISeparationService
         ICompanyHrPolicyProvider policyProvider,
         ICurrencyService currencies,
         IEmployeeService employeeService,
-        IPayrollMembershipService payrollMembership,
         IWorkflowIntegrationService workflow,
         IWorkflowStatusAdapterRegistry workflowAdapters,
         AssetCustodyClearanceBridge assetCustody,
         ILogger<SeparationService> logger,
-        IHrFinancePostingAdapter financePosting)
+        IHrFinancePostingAdapter financePosting,
+        ILeaveOwedCalculator leaveOwed)
     {
-        _payrollMembership = payrollMembership;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _policyProvider = policyProvider;
@@ -90,6 +95,7 @@ public class SeparationService : ISeparationService
         _assetCustody = assetCustody;
         _logger = logger;
         _financePosting = financePosting;
+        _leaveOwed = leaveOwed;
     }
 
     private Guid GetTenantId()
@@ -368,6 +374,9 @@ public class SeparationService : ISeparationService
                 + "Cancel it and raise a new one if the details are wrong.");
 
         if (dto.SeparationType is { } type) entity.SeparationType = type;
+        // ⚠ A board's finding supports a medical retirement and nothing else (lane K-II-a); left
+        // behind on another route out it would read as evidence for something it never said.
+        if (entity.SeparationType != EmployeeTerminationType.MedicalRetirement) entity.MedicalBoardId = null;
         if (dto.ReasonCategory is { } reason) entity.ReasonCategory = reason;
         if (dto.ReasonNotes is not null)
             entity.ReasonNotes = string.IsNullOrWhiteSpace(dto.ReasonNotes) ? null : dto.ReasonNotes.Trim();
@@ -426,6 +435,75 @@ public class SeparationService : ISeparationService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Separation {Number} cancelled", entity.SeparationNumber);
+        return ToDetailDto(await ReloadAsync(tenantId, entity.Id, cancellationToken));
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>⚠ <b>This closes a column nothing could set.</b> <c>MedicalBoardId</c> went in with the
+    /// residue plan's G4 and no screen, endpoint or service ever wrote it (lane K-II-a).</para>
+    ///
+    /// <para>⚠ <b>A decided finding, not a pending board</b> — unlike leave, which lets a request
+    /// name the board it is waiting on and enforces the finding at its gate. Here the link IS the
+    /// evidence (submission accepts it in place of the medical report), so it is checked when made.
+    /// A board can find somebody unfit for their post and fit for redeployment; only a case that
+    /// recommends retirement can carry one.</para>
+    ///
+    /// <para>The board stays the thing linked, as on leave: an employee is before a board at most
+    /// once, so the board and this separation's employee name exactly one case.</para>
+    /// </remarks>
+    public async Task<EmployeeSeparationDetailDto> LinkMedicalBoardAsync(
+        Guid id, Guid? medicalBoardId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await RequireAsync(tenantId, id, cancellationToken);
+
+        if (entity.Status != SeparationStatus.Draft)
+            throw new InvalidOperationException(
+                $"This separation is {entity.Status} and can no longer be amended. The board it rests on "
+                + "was fixed when it was submitted.");
+
+        if (medicalBoardId is Guid boardId)
+        {
+            if (entity.SeparationType != EmployeeTerminationType.MedicalRetirement)
+                throw new InvalidOperationException(
+                    "Only a medical retirement rests on a medical board's finding.");
+
+            var board = await _unitOfWork.Repository<MedicalBoard>().GetQueryable()
+                .AsNoTracking()
+                .Where(b => b.TenantId == tenantId && b.Id == boardId)
+                .Select(b => new { b.BoardNumber })
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new ArgumentException($"Medical board '{boardId}' not found.");
+
+            var onBoard = await _unitOfWork.Repository<MedicalBoardCase>().GetQueryable()
+                .AsNoTracking()
+                .Where(c => c.TenantId == tenantId && c.BoardId == boardId && c.EmployeeId == entity.EmployeeId)
+                .Select(c => new { c.Status, c.RecommendsMedicalRetirement })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (onBoard is null)
+                throw new InvalidOperationException(
+                    $"Medical board {board.BoardNumber} has no case about this employee, so a retirement "
+                    + "cannot rest on it.");
+
+            if (onBoard.Status != MedicalBoardCaseStatus.Concluded)
+                throw new InvalidOperationException(onBoard.Status == MedicalBoardCaseStatus.Withdrawn
+                    ? $"Medical board {board.BoardNumber} withdrew this employee's case without deciding it."
+                    : $"Medical board {board.BoardNumber} has not yet decided this employee's case. Link it "
+                      + "once it has.");
+
+            if (!onBoard.RecommendsMedicalRetirement)
+                throw new InvalidOperationException(
+                    $"Medical board {board.BoardNumber}'s finding on this employee does not recommend "
+                    + "medical retirement, so a medical retirement cannot rest on it.");
+        }
+
+        entity.MedicalBoardId = medicalBoardId;
+
+        await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
         return ToDetailDto(await ReloadAsync(tenantId, entity.Id, cancellationToken));
     }
 
@@ -1921,12 +1999,27 @@ public class SeparationService : ISeparationService
     private async Task RequireSupportingEvidenceAsync(
         Guid tenantId, EmployeeSeparation separation, CancellationToken cancellationToken)
     {
+        // ⚠ Round 5, lane K-II-a: a medical retirement may instead rest on a medical board's decided
+        // finding recommending it — the stronger form, naming who decided and when. The link was
+        // checked when it was made; it is read again here because this is the gate.
+        if (separation.SeparationType == EmployeeTerminationType.MedicalRetirement
+            && separation.MedicalBoardId is Guid boardId)
+        {
+            var recommended = await _unitOfWork.Repository<MedicalBoardCase>().GetQueryable()
+                .AnyAsync(c => c.TenantId == tenantId && c.BoardId == boardId
+                               && c.EmployeeId == separation.EmployeeId
+                               && c.Status == MedicalBoardCaseStatus.Concluded
+                               && c.RecommendsMedicalRetirement, cancellationToken);
+            if (recommended) return;
+        }
+
         var required = separation.SeparationType switch
         {
             EmployeeTerminationType.MedicalRetirement =>
                 (Category: SeparationDocumentCategory.MedicalReport,
-                 Message: "A medical retirement needs the medical report that supports it. Attach it "
-                          + "to the separation before submitting."),
+                 Message: "A medical retirement needs the medical report that supports it, or a medical "
+                          + "board's finding recommending it. Attach the report, or link the board, "
+                          + "before submitting."),
             EmployeeTerminationType.Death =>
                 (Category: SeparationDocumentCategory.DeathCertificate,
                  Message: "A separation by death needs the death certificate. Attach it to the "
@@ -1947,20 +2040,52 @@ public class SeparationService : ISeparationService
 
     // ── Final settlement (FR-HR-184) ──────────────────────────────────────────
 
-    /// <summary>Days per year used to turn a monthly salary into a daily rate — the DEFAULT only.</summary>
+    /// <summary>
+    /// The settlement lines that are PAY — valued by Finance, never priced by HR (leave settings
+    /// audit 2, decision P3).
+    /// </summary>
     /// <remarks>
-    /// ⚠ <b>A policy assumption, stated rather than buried.</b> Calendar days: monthly × 12 ÷ 365.
-    /// A 30-day-month or working-day basis gives different money on the same facts, and TDC has not
-    /// said which it uses — so the basis is written onto every computed line in words, and the
-    /// question is recorded in <c>docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md</c>. Do not change this quietly.
+    /// ⚠ HR records the facts on these — the days of notice paid in lieu, the days of annual leave
+    /// owed — and Finance (<c>HR.Pay.Value</c>) puts the money on them. Until leave settings audit 2,
+    /// HR worked notice pay and leave out itself (monthly × 12 ÷ 365 a day) and that figure went into
+    /// Finance's books when Internal Audit released the statement; "Finance confirms the amount" was
+    /// a label, not a step. Recoveries (loans, advances, property, other deductions) are balances of
+    /// documents Finance already holds, and stay as HR carries them.
+    /// <para>⚠ Benefit payment and other earning were added on 2026-09-27 (the user, after slice A):
+    /// every line that pays the leaver is Finance's to value.</para>
     /// </remarks>
+    internal static bool IsPayLine(SettlementLineCategory category) => category is
+        SettlementLineCategory.UnpaidSalary
+        or SettlementLineCategory.NoticePay
+        or SettlementLineCategory.LeaveEncashment
+        or SettlementLineCategory.GratuityOrEndOfService
+        or SettlementLineCategory.BenefitPayment
+        or SettlementLineCategory.PensionRelated
+        or SettlementLineCategory.OtherEarning
+        or SettlementLineCategory.TaxDeduction;
+
+    /// <summary>
+    /// A pay line still waiting for Finance's figure: not valued by Finance, and not a stated zero.
+    /// </summary>
     /// <remarks>
-    /// ⚠ The figure in force is <c>CompanyHrPolicySettings.SettlementDaysPerYear</c>; this seeds it.
-    /// 365 calendar, 360 for thirty-day months, 264 for a 22-day working month — a 38% spread on the
-    /// same facts, and TDC has not answered which. The basis is written onto the settlement in words
-    /// derived from the configured number, so a settlement always says which basis produced it.
+    /// The one rule the queue, the blocked reason and the finalise gate share (leave settings audit 2,
+    /// slice B). A pay line is settled only by Finance's figure — so a figure HR put on one, from before
+    /// pay moved to Finance or on a category since added to <see cref="IsPayLine"/>, still waits for
+    /// Finance rather than passing as priced; widening the categories needs no data step. A stated zero
+    /// (no days owed, summary dismissal) is a fact, not a valuation.
     /// </remarks>
-    private const decimal DefaultDaysPerYear = 365m;
+    internal static bool AwaitsFinance(SeparationSettlementLine line) =>
+        IsPayLine(line.Category)
+        && line.Computation != SettlementLineComputation.ValuedByFinance
+        && !(line.Computation == SettlementLineComputation.Computed && line.Amount == 0m);
+
+    /// <summary>
+    /// A line still waiting for a figure — a pay line until Finance values it, any other line while
+    /// nobody could value it. What holds a statement open.
+    /// </summary>
+    private static bool StillToValue(SeparationSettlementLine line) =>
+        AwaitsFinance(line)
+        || (!IsPayLine(line.Category) && line.Computation == SettlementLineComputation.CannotCompute);
 
     /// <summary>
     /// The currency a settlement is stated in: HR's configured default, validated against Finance,
@@ -1996,46 +2121,64 @@ public class SeparationService : ISeparationService
         return baseCurrency.CurrencyCode;
     }
 
+    // DailyRateAsync — HR's monthly × 12 ÷ SettlementDaysPerYear — was removed in leave settings
+    // audit 2 (L-74): Finance values every pay line, so HR works out no rate.
+
     /// <summary>
-    /// The employee's daily rate, and how it was arrived at — or null with the reason, where no
-    /// salary is on record.
+    /// A pay line carrying a figure HR put on it — worked out or typed in, and not zero.
     /// </summary>
-    private async Task<(decimal? Rate, string Basis)> DailyRateAsync(
-        Guid tenantId, Guid employeeId, string currency, CancellationToken cancellationToken)
+    /// <remarks>
+    /// Only a statement from before leave settings audit 2 can hold one: HR can no longer price a pay
+    /// line. The migration cleared them on statements still with HR; one finalised before it is
+    /// refused at Internal Audit's approval and cleared when it is returned (<see cref="ClearHrFigure"/>).
+    /// A stated zero is a fact — no days owed — not a valuation, and posts nothing.
+    /// </remarks>
+    private static bool IsHrPricedPayLine(SeparationSettlementLine line) =>
+        IsPayLine(line.Category)
+        && line.Computation is (SettlementLineComputation.Computed or SettlementLineComputation.ManuallyEntered)
+        && line.Amount is { } amount && amount != 0m;
+
+    /// <summary>The days HR wrote into a legacy line's description ("… — 56.00 day(s)").</summary>
+    private static readonly Regex DaysInDescription =
+        new(@"(\d+(?:\.\d+)?) day\(s\)", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Turns a pay line HR priced back to unvalued, for Finance: the amount goes, the days stay, and
+    /// where HR had its figure from is kept in the basis. The same change the PayValuedByFinance
+    /// migration made to statements that were still with HR.
+    /// </summary>
+    private static void ClearHrFigure(SeparationSettlementLine line, string when)
     {
-        // ⚠ E-8 (round-2 plan § 6.5.4). This read the salary off the newest contract row — a
-        // figure that stopped being maintained the day the Salary tab took the pay fields off the
-        // contract dialog. The pay basis is now resolved the one way every HR reader resolves it:
-        // notch, level, or record figure on the scale; payroll's basis when negotiated. The
-        // contract is the fallback for the rows that predate that, so an old settlement still
-        // computes rather than printing "no salary on record" for somebody who plainly has one.
-        var (monthly, source) = await _payrollMembership.ResolveMonthlyBasicPayAsync(employeeId, cancellationToken);
+        if (line.Days is null
+            && line.Category is (SettlementLineCategory.NoticePay or SettlementLineCategory.LeaveEncashment)
+            && DaysInDescription.Match(line.Description) is { Success: true } match
+            && decimal.TryParse(match.Groups[1].Value, NumberStyles.Number, CultureInfo.InvariantCulture, out var days))
+            line.Days = days;
 
-        if (monthly is not > 0m)
+        var from = string.IsNullOrWhiteSpace(line.SourceReference)
+            ? string.Empty
+            : $" HR had taken it from: {line.SourceReference.Trim()}";
+
+        line.Amount = null;
+        line.Computation = SettlementLineComputation.CannotCompute;
+        line.SourceReference = null;
+        line.ValuedByEmployeeId = null;
+        line.ValuedOn = null;
+        line.Basis = FitBasis(new[]
         {
-            var contract = await _unitOfWork.Repository<EmployeeContractDetail>().GetQueryable()
-                .Where(c => c.TenantId == tenantId && !c.IsDeleted && c.EmployeeId == employeeId && c.Salary > 0)
-                .OrderByDescending(c => c.IsCurrent)
-                .ThenByDescending(c => c.EffectiveDate)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (contract is null)
-                return (null, $"No salary is on record for this employee, so amounts based on pay cannot be computed. ({source})");
-
-            monthly = contract.Salary;
-            source = $"contract {contract.ContractNumber}";
-        }
-
-        // ⚠ The divisor and the SENTENCE come from the same number, so the words on the settlement
-        // can never describe a basis other than the one that produced the figure beside them.
-        var policy = await _policyProvider.GetAsync(cancellationToken);
-        decimal daysPerYear = policy.SettlementDaysPerYear;
-
-        var rate = Math.Round(monthly.Value * 12m / daysPerYear, 4, MidpointRounding.AwayFromZero);
-        return (rate,
-            $"{currency} {monthly.Value:N2} per month × 12 ÷ {daysPerYear:N0} days = "
-            + $"{currency} {rate:N4} per day ({source}).");
+            $"HR's figure was cleared {when}: pay is valued by Finance now (leave settings audit 2).",
+            FinanceValues + from,
+        });
     }
+
+    /// <summary>The sentence every unvalued pay line ends with: what Finance is to do.</summary>
+    private const string FinanceValues =
+        "To be valued by Finance: the amount and its source are entered in Finance's step (Pay to value).";
+
+    /// <summary>HR's refusal when it tries to price a pay line.</summary>
+    private const string PayLineIsFinances =
+        "Pay is valued by Finance, not HR: record the days and facts on this line, and Finance enters the amount "
+        + "and its source in Pay to value.";
 
     /// <inheritdoc />
     public async Task<SeparationSettlementDto> PrepareSettlementAsync(
@@ -2071,15 +2214,15 @@ public class SeparationService : ISeparationService
 
         var settings = await _policyProvider.GetAsync(cancellationToken);
         var currency = await ResolveCurrencyAsync(settings, cancellationToken);
-        var (rate, rateBasis) = await DailyRateAsync(tenantId, separation.EmployeeId, currency, cancellationToken);
 
+        // ⚠ No daily rate (leave settings audit 2, L-74): HR records days, Finance values them. The
+        // statement's DailyRate and DailyRateBasis stay empty on everything prepared from here on;
+        // statements released before keep the rate they were paid on.
         var settlement = new SeparationSettlement
         {
             TenantId = tenantId,
             SeparationId = separationId,
             CurrencyCode = currency,
-            DailyRate = rate,
-            DailyRateBasis = rateBasis,
             PreparedById = actorEmployeeId,
             PreparedOn = DateTime.UtcNow,
         };
@@ -2092,7 +2235,7 @@ public class SeparationService : ISeparationService
 
         void Add(SettlementLineCategory category, bool deduction, string description,
                  decimal? amount, SettlementLineComputation computation, string basis,
-                 Guid? clearanceItemId = null, Guid? travelAdvanceId = null)
+                 Guid? clearanceItemId = null, Guid? travelAdvanceId = null, decimal? days = null)
         {
             order += 10;
             lines.Add(new SeparationSettlementLine
@@ -2105,6 +2248,7 @@ public class SeparationService : ISeparationService
                 Amount = amount,
                 Computation = computation,
                 Basis = basis,
+                Days = days,
                 SourceClearanceItemId = clearanceItemId,
                 SourceTravelAdvanceId = travelAdvanceId,
                 IsSystemGenerated = true,
@@ -2112,33 +2256,27 @@ public class SeparationService : ISeparationService
             });
         }
 
-        // ── Earnings ──────────────────────────────────────────────────────────
+        // ── Earnings — PAY, so HR records the facts and Finance values them (audit 2, P3) ────────
 
-        // Unpaid salary has no source in this system: PayrollPayslipSnapshots is empty and there is
-        // no accrual to read. Recorded as owed and uncomputed rather than omitted, so nobody signs
-        // a statement that quietly forgot the last month's pay.
+        // Unpaid salary: pay to the last working day. Recorded as owed and unvalued rather than
+        // omitted, so nobody signs a statement that quietly forgot the last month's pay.
         Add(SettlementLineCategory.UnpaidSalary, false,
             "Unpaid salary to the last working day", null, SettlementLineComputation.CannotCompute,
-            "No payroll figure is available in this system. Enter the amount from payroll and name the source.");
+            $"Pay to the last working day. {FinanceValues}");
 
-        // Notice pay only where the notice was to be PAID rather than served or waived.
+        // Notice pay only where the notice was to be PAID rather than served or waived. The DAYS are
+        // HR's fact; the money is Finance's (L-74 — HR priced them at monthly × 12 ÷ 365 a day).
         var (_, _, shortfall) = Notice(separation);
         if (separation.IsNoticePaidInLieu && shortfall is > 0)
-        {
-            if (rate is { } r)
-                Add(SettlementLineCategory.NoticePay, false,
-                    $"Notice pay in lieu — {shortfall} day(s) not served",
-                    Math.Round(r * shortfall.Value, 2, MidpointRounding.AwayFromZero),
-                    SettlementLineComputation.Computed,
-                    $"{shortfall} day(s) × {rateBasis}");
-            else
-                Add(SettlementLineCategory.NoticePay, false,
-                    $"Notice pay in lieu — {shortfall} day(s) not served",
-                    null, SettlementLineComputation.CannotCompute, rateBasis);
-        }
+            Add(SettlementLineCategory.NoticePay, false,
+                $"Notice pay in lieu — {shortfall} day(s) not served",
+                null, SettlementLineComputation.CannotCompute,
+                $"{shortfall} day(s) of notice paid in lieu rather than served. {FinanceValues}",
+                days: shortfall.Value);
 
-        // Leave encashment: FR-HR-046 (on exit only) and FR-HR-152 (capped at 56 days).
-        await AddLeaveEncashmentLineAsync(tenantId, separation, rate, rateBasis, currency, Add, cancellationToken);
+        // Annual leave owed on exit: FR-HR-046 (cash on exit only), FR-HR-152 (the cap, a setting since
+        // round 5 lane L2b) and the Labour Act (s.30: the year's share; s.30(3): none on summary dismissal).
+        await AddLeaveEncashmentLineAsync(tenantId, separation, settings, Add, cancellationToken);
 
         // ── Deductions ────────────────────────────────────────────────────────
 
@@ -2216,59 +2354,140 @@ public class SeparationService : ISeparationService
     }
 
     /// <summary>
-    /// The leave encashment line — FR-HR-046 (encashed on exit, and only on exit) and FR-HR-152
-    /// (capped at fifty-six days).
+    /// The leaver's annual leave line — FR-HR-046 (cash for leave on exit, and only on exit), FR-HR-152
+    /// (a cap on the days) and the Labour Act 2003 (round 5, lane L2).
     /// </summary>
     /// <remarks>
-    /// ⚠ Measured 2026-08-20: <c>LeaveBalances</c> holds <b>zero</b> rows, so on live data this
-    /// always lands on <c>CannotCompute</c>. The cap and the rate are applied anyway, so that the
-    /// rules bite the moment balances exist rather than being remembered later.
+    /// <para><b>What is paid: annual leave owed at the last day</b>, by the working the leave owed
+    /// report uses (<see cref="ILeaveOwedCalculator"/>): this leave year's share built up to the day
+    /// employment ends — the accrual stops there when the policy pro-rates on exit, which is what
+    /// makes <c>ProRateOnExit</c> bind — plus carried days not yet lapsed, plus adjustments, less leave
+    /// taken by then and days already cashed in; less, too, requests still awaiting a decision, which
+    /// would be paid twice if they are approved after the cash.</para>
+    ///
+    /// <para>⚠ <b>Until lane L this summed every balance of every leave type and every year</b> — sick
+    /// days, casual days and closed years included — with whole-year figures. Only annual leave is
+    /// owed in cash (Act 651 s.30 speaks of annual leave, and sick or casual days are not a reserve
+    /// of money), and only the year the person leaves in (earlier years were carried or lapsed).</para>
+    ///
+    /// <para><b>Summary dismissal pays none</b> (Act 651 s.30(3)). The line is written anyway, at
+    /// zero, saying so: a missing line is invisible on a statement in a way a stated zero is not.
+    /// Finance's posting skips a zero line.</para>
+    ///
+    /// <para><b>No amount: HR records the days, Finance values them</b> (leave settings audit 2,
+    /// L-74). This line used to carry an "indicative" amount HR worked out at monthly × 12 ÷ 365 a
+    /// day, and that figure went into Finance's books when Internal Audit released the statement
+    /// unless somebody overwrote it. It now carries the days and their working, unvalued, and holds
+    /// the statement open until Finance has put the money on it.</para>
     /// </remarks>
     private async Task AddLeaveEncashmentLineAsync(
-        Guid tenantId, EmployeeSeparation separation, decimal? rate, string rateBasis, string currency,
-        Action<SettlementLineCategory, bool, string, decimal?, SettlementLineComputation, string, Guid?, Guid?> add,
+        Guid tenantId, EmployeeSeparation separation, CompanyHrPolicySettings settings,
+        Action<SettlementLineCategory, bool, string, decimal?, SettlementLineComputation, string, Guid?, Guid?, decimal?> add,
         CancellationToken cancellationToken)
     {
-        const decimal encashmentCapDays = 56m;   // FR-HR-152
+        const SettlementLineCategory category = SettlementLineCategory.LeaveEncashment;
 
-        var balances = await _unitOfWork.Repository<LeaveBalance>().GetQueryable()
-            .AsNoTracking()
-            .Where(b => b.TenantId == tenantId && !b.IsDeleted && b.EmployeeId == separation.EmployeeId)
-            .ToListAsync(cancellationToken);
-
-        if (balances.Count == 0)
+        if (separation.SeparationType == EmployeeTerminationType.SummaryDismissal)
         {
-            add(SettlementLineCategory.LeaveEncashment, false,
-                "Accrued leave encashed on exit", null, SettlementLineComputation.CannotCompute,
-                "No leave balance is on record for this employee. Enter the days and amount, and name the source.",
-                null, null);
+            // A stated zero is a FACT — no days are owed — not a valuation, so it needs no Finance step.
+            add(category, false, "Annual leave on exit — none payable", 0m, SettlementLineComputation.Computed,
+                "Summary dismissal: no leave pay is due on dismissal without notice (Labour Act 2003, "
+                + "Act 651, s.30(3)).", null, null, 0m);
             return;
         }
 
-        var available = balances.Sum(b =>
-            b.EntitledDays + b.CarriedOverDays + b.AdjustmentDays - b.UsedDays - b.PendingDays - b.EncashedDays);
+        var lastDay = separation.EffectiveDate ?? separation.LastWorkingDay;
+        if (lastDay is not DateOnly exit)
+        {
+            add(category, false, "Annual leave owed on exit", null, SettlementLineComputation.CannotCompute,
+                "The separation has no end date yet, so the leave owed at it cannot be worked out. Record the "
+                + $"days on this line. {FinanceValues}", null, null, null);
+            return;
+        }
 
-        if (available <= 0)
-            return;   // nothing accrued: no line rather than a zero one
+        var employee = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .AsNoTracking()
+            .Where(e => e.Id == separation.EmployeeId && e.TenantId == tenantId)
+            .Select(e => new { e.DateEmployed, StaffLevelId = e.Position != null ? e.Position.StaffLevelId : null })
+            .FirstAsync(cancellationToken);
 
-        var capped = Math.Min(available, encashmentCapDays);
-        var cappedNote = capped < available
-            ? $" Capped at {encashmentCapDays:N0} days under FR-HR-152 (from {available:N2} accrued)."
-            : string.Empty;
+        LeaveOwedComputation owed;
+        try
+        {
+            // ⚠ The build-up is asked of the leave year's END, with the last day on the subject, so the
+            // accrual policy's ProRateOnExit decides where it stops: on, at the last day; off, the
+            // whole year. Asked as at the last day, the clock would stop there whatever the policy said.
+            owed = await _leaveOwed.ComputeAsync(
+                exit,
+                new[] { new LeaveAccrualSubject(separation.EmployeeId, employee.DateEmployed, exit, employee.StaffLevelId) },
+                accrueToYearEnd: true,
+                ct: cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // No Annual leave type: said on the line, not thrown at whoever is preparing the statement.
+            add(category, false, "Annual leave owed on exit", null, SettlementLineComputation.CannotCompute,
+                $"{ex.Message} Record the days on this line. {FinanceValues}", null, null, null);
+            return;
+        }
 
-        if (rate is { } r)
-            add(SettlementLineCategory.LeaveEncashment, false,
-                $"Accrued leave encashed on exit — {capped:N2} day(s)",
-                Math.Round(r * capped, 2, MidpointRounding.AwayFromZero),
-                SettlementLineComputation.Computed,
-                $"{capped:N2} day(s) × {rateBasis}{cappedNote}",
-                null, null);
-        else
-            add(SettlementLineCategory.LeaveEncashment, false,
-                $"Accrued leave encashed on exit — {capped:N2} day(s)",
-                null, SettlementLineComputation.CannotCompute,
-                $"{rateBasis}{cappedNote}",
-                null, null);
+        var f = owed.ByEmployee[separation.EmployeeId];
+        var days = f.OwedDays - f.AwaitingApprovalDays;
+
+        // Where the build-up stopped: the last day (the policy pro-rates on exit), or the year's end
+        // (it does not) — said, because the two differ by up to a year's leave.
+        var builtUpTo = f.BuiltUpTo is DateOnly to ? $" to {to:d MMM yyyy}" : " (whole entitlement)";
+
+        // ⚠ Basis holds 500 characters. The first cut of this line wrote the working, both notes, the
+        // cap and the daily rate's whole sentence, and a capped leaver's statement failed to save —
+        // a 500 on "prepare", found by lane L's suite. Hence the short words and a last-resort fit.
+        var parts = new List<string>
+        {
+            $"{owed.AnnualType.Name} {owed.Year}, last day {exit:d MMM yyyy}: built up{builtUpTo} {f.BuiltUpDays:0.##}"
+            + $" + carried {f.CarriedInDays:0.##} + adjusted {f.AdjustmentDays:0.##} − taken {f.TakenDays:0.##}"
+            + $" − cashed {f.CashedInDays:0.##}"
+            + (f.AwaitingApprovalDays > 0 ? $" − awaiting a decision {f.AwaitingApprovalDays:0.##}" : string.Empty)
+            + $" = {days:0.##} day(s).",
+        };
+        if (f.AwaitingApprovalDays > 0)
+            parts.Add("Awaiting a decision: cancel any never taken, then correct this line.");
+        if (f.BookedDays > 0)
+            parts.Add($"{f.BookedDays:0.##} day(s) approved after the last day are not deducted: cancel them.");
+
+        if (days <= 0)
+        {
+            // No days owed: a stated zero, which is a fact rather than a valuation.
+            add(category, false, "Annual leave owed on exit — none", 0m, SettlementLineComputation.Computed,
+                FitBasis(parts), null, null, 0m);
+            return;
+        }
+
+        // FR-HR-152's cap, a company setting since lane L2b; empty means none. Days, so it stays HR's.
+        var cap = settings.SettlementLeaveDaysCap;
+        var paid = cap is int c && days > c ? c : days;
+        if (paid < days)
+            parts.Add($"Capped at {paid:0.##} by the settlement cap (FR-HR-152), from {days:0.##}.");
+
+        // ⚠ The DAYS, unvalued (audit 2, L-74). The working comes first in the basis, so FitBasis
+        // keeps it if anything has to give.
+        parts.Add(FinanceValues);
+        add(category, false, $"Annual leave owed on exit — {paid:0.##} day(s)",
+            null, SettlementLineComputation.CannotCompute, FitBasis(parts), null, null, paid);
+    }
+
+    /// <summary>
+    /// Joins a line's sentences and makes them fit <c>SeparationSettlementLine.Basis</c> (500).
+    /// </summary>
+    /// <remarks>
+    /// A last resort: the leave line's sentences are written to fit, but a daily-rate source named at
+    /// length could still carry it over, and an overlong basis fails the whole statement's save. The
+    /// working comes first, so it is what survives.
+    /// </remarks>
+    private static string FitBasis(IEnumerable<string> parts)
+    {
+        const int max = 500;
+        var text = string.Join(" ", parts);
+        return text.Length <= max ? text : text[..(max - 1)] + "…";
     }
 
     /// <summary>Which settlement category a clearance line's outstanding amount belongs under.</summary>
@@ -2300,18 +2519,23 @@ public class SeparationService : ISeparationService
             ?? throw new ArgumentException("No settlement has been prepared for this separation.");
 
         var lines = await _unitOfWork.Repository<SeparationSettlementLine>().GetQueryable()
+            .Include(l => l.ValuedByEmployee)
             .AsNoTracking()
             .Where(l => l.TenantId == tenantId && !l.IsDeleted && l.SettlementId == settlement.Id)
             .OrderBy(l => l.SortOrder)
             .ThenBy(l => l.Description)
             .ToListAsync(cancellationToken);
 
-        var uncomputed = lines.Count(l => l.Computation == SettlementLineComputation.CannotCompute);
+        // Lines still waiting for a figure: a pay line until Finance values it (AwaitsFinance), any
+        // other line while nobody could value it.
+        var uncomputed = lines.Count(StillToValue);
         var earnings = lines.Where(l => !l.IsDeduction).Sum(l => l.Amount ?? 0m);
         var deductions = lines.Where(l => l.IsDeduction).Sum(l => l.Amount ?? 0m);
 
-        var canFinalise = !settlement.FinalisedOn.HasValue
-                          && uncomputed == 0
+        // ⚠ Keyed on the separation's status, not FinalisedOn — the rule RequireEditable states. A
+        // statement Internal Audit returned keeps its FinalisedOn as history, and read "finalised"
+        // here until leave settings audit 2, so it could never be finalised again from the screen.
+        var canFinalise = uncomputed == 0
                           && lines.Count > 0
                           && separation.Status == SeparationStatus.SettlementPending;
 
@@ -2339,7 +2563,7 @@ public class SeparationService : ISeparationService
             PreparedOn = settlement.PreparedOn,
             Notes = settlement.Notes,
             CanFinalise = canFinalise,
-            BlockedReason = SettlementBlockedReason(settlement, separation, lines, uncomputed),
+            BlockedReason = SettlementBlockedReason(separation, lines, uncomputed),
             ReviewOutcome = settlement.ReviewOutcome,
             ReviewOutcomeName = settlement.ReviewOutcome.ToString(),
             ReviewedById = settlement.ReviewedById,
@@ -2353,10 +2577,10 @@ public class SeparationService : ISeparationService
     }
 
     private static string? SettlementBlockedReason(
-        SeparationSettlement settlement, EmployeeSeparation separation,
-        List<SeparationSettlementLine> lines, int uncomputed)
+        EmployeeSeparation separation, List<SeparationSettlementLine> lines, int uncomputed)
     {
-        if (settlement.FinalisedOn.HasValue)
+        // The separation's status, not FinalisedOn: a returned statement keeps that as history.
+        if (separation.Status == SeparationStatus.SettlementUnderReview)
             return "This settlement has been finalised and is with Internal Audit.";
 
         if (separation.Status != SeparationStatus.SettlementPending)
@@ -2366,8 +2590,18 @@ public class SeparationService : ISeparationService
             return "The settlement has no lines.";
 
         if (uncomputed > 0)
-            return $"{uncomputed} line(s) could not be valued. Enter each amount and name its source, "
-                   + "or remove the line if nothing is owed.";
+        {
+            // Leave settings audit 2 (P2/P3): a pay line waits on Finance, not on HR.
+            var awaitingFinance = lines.Count(AwaitsFinance);
+            var other = uncomputed - awaitingFinance;
+            var parts = new List<string>();
+            if (awaitingFinance > 0)
+                parts.Add($"{awaitingFinance} pay line(s) await Finance's valuation (Pay to value)");
+            if (other > 0)
+                parts.Add($"{other} other line(s) could not be valued — enter each amount and name its source, "
+                          + "or remove the line if nothing is owed");
+            return string.Join("; ", parts) + ".";
+        }
 
         return null;
     }
@@ -2394,6 +2628,13 @@ public class SeparationService : ISeparationService
         if (dto.Amount is < 0)
             throw new InvalidOperationException("A settlement amount cannot be negative. Use a deduction line instead.");
 
+        // Leave settings audit 2 (P3): HR records a pay line's facts — its days — and Finance prices it.
+        var payLine = IsPayLine(dto.Category);
+        if (payLine && dto.Amount is not null)
+            throw new InvalidOperationException(PayLineIsFinances);
+        if (dto.Days is < 0)
+            throw new InvalidOperationException("The days cannot be negative.");
+
         RequireDirectionMatchesCategory(dto.Category, dto.IsDeduction);
 
         var maxOrder = await _unitOfWork.Repository<SeparationSettlementLine>().GetQueryable()
@@ -2409,10 +2650,13 @@ public class SeparationService : ISeparationService
             IsDeduction = dto.IsDeduction,
             Description = dto.Description.Trim(),
             Amount = dto.Amount,
+            Days = dto.Days,
             Computation = dto.Amount is null
                 ? SettlementLineComputation.CannotCompute
                 : SettlementLineComputation.ManuallyEntered,
-            Basis = dto.Amount is null ? "Recorded as owed; the amount is not yet known." : null,
+            Basis = payLine
+                ? FinanceValues
+                : dto.Amount is null ? "Recorded as owed; the amount is not yet known." : null,
             SourceReference = string.IsNullOrWhiteSpace(dto.SourceReference) ? null : dto.SourceReference.Trim(),
             IsSystemGenerated = false,
             SortOrder = maxOrder + 10,
@@ -2458,7 +2702,31 @@ public class SeparationService : ISeparationService
             line.IsDeduction = deduction;
         }
 
-        if (dto.SourceReference is not null)
+        // Leave settings audit 2 (P3): on a pay line HR holds the facts, Finance the money.
+        var payLine = IsPayLine(line.Category);
+        if (payLine && dto.Amount is not null)
+            throw new InvalidOperationException(PayLineIsFinances);
+
+        if (dto.Days is { } newDays && newDays != line.Days)
+        {
+            if (newDays < 0)
+                throw new InvalidOperationException("The days cannot be negative.");
+            line.Days = newDays;
+
+            // ⚠ Finance's figure was for the OLD days. Changed days mean an unvalued line again, so
+            // the statement waits for Finance rather than carrying an amount nobody priced.
+            if (payLine && line.Computation == SettlementLineComputation.ValuedByFinance)
+            {
+                line.Amount = null;
+                line.Computation = SettlementLineComputation.CannotCompute;
+                line.ValuedByEmployeeId = null;
+                line.ValuedOn = null;
+                line.SourceReference = null;
+                line.Basis = $"Days changed by HR after Finance valued them: to be valued again. {FinanceValues}";
+            }
+        }
+
+        if (dto.SourceReference is not null && !payLine)
             line.SourceReference = string.IsNullOrWhiteSpace(dto.SourceReference) ? null : dto.SourceReference.Trim();
 
         if (dto.Amount is { } amount)
@@ -2482,6 +2750,135 @@ public class SeparationService : ISeparationService
 
         return ToSettlementLineDto(line);
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Finance's step (leave settings audit 2, P2): the holder of <c>HR.Pay.Value</c> puts the money
+    /// on a pay line HR recorded in days or facts. Only while the statement is still a draft — the
+    /// same window HR edits in — and never after it has posted.
+    /// </remarks>
+    public async Task<SeparationSettlementLineDto> ValueSettlementLineAsync(
+        Guid lineId, ValueSettlementLineDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var tenantId = GetTenantId();
+
+        // ⚠ Who valued it is the point of the step, so an account with no employee record is refused
+        // rather than recorded as nobody.
+        if (actorEmployeeId is not Guid valuer || valuer == Guid.Empty)
+            throw new InvalidOperationException(
+                "Valuing pay requires your user account to be linked to an employee record, so the statement can "
+                + "say who valued it. Please contact your administrator.");
+
+        var line = await _unitOfWork.Repository<SeparationSettlementLine>().GetQueryable()
+            .FirstOrDefaultAsync(l => l.Id == lineId && l.TenantId == tenantId && !l.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException($"Settlement line with ID '{lineId}' not found.");
+
+        if (!IsPayLine(line.Category))
+            throw new InvalidOperationException(
+                "Only pay is valued by Finance — unpaid salary, notice pay, annual leave owed, gratuity, benefits, "
+                + "pension, other earnings and tax. This line is a recovery HR carries as recorded.");
+
+        var settlement = await _unitOfWork.Repository<SeparationSettlement>().GetQueryable()
+            .FirstOrDefaultAsync(s => s.Id == line.SettlementId && s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException("The settlement this line belongs to was not found.");
+        await _financePosting.EnsureNotPostedAsync(
+            HrFinancePostingEventCatalog.SourceSeparationSettlement, settlement.Id, "Valuing a settlement line", cancellationToken);
+        RequireEditable(await RequireAsync(tenantId, settlement.SeparationId, cancellationToken));
+
+        if (dto.Amount < 0)
+            throw new InvalidOperationException("An amount cannot be negative.");
+        if (string.IsNullOrWhiteSpace(dto.SourceReference))
+            throw new InvalidOperationException(
+                "Name where the figure came from — the payroll computation or worksheet it was worked out on.");
+
+        line.Amount = Math.Round(dto.Amount, 2, MidpointRounding.AwayFromZero);
+        line.SourceReference = dto.SourceReference.Trim();
+        line.Computation = SettlementLineComputation.ValuedByFinance;
+        line.ValuedByEmployeeId = valuer;
+        line.ValuedOn = DateTime.UtcNow;
+        // The basis keeps HR's working (the days, how they were reached); its "to be valued" ending
+        // would now be untrue.
+        if (line.Basis is not null)
+            line.Basis = line.Basis.Replace(FinanceValues, "Valued by Finance.");
+
+        await _unitOfWork.Repository<SeparationSettlementLine>().UpdateAsync(line);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        line.ValuedByEmployee = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(e => e.Id == valuer, cancellationToken);
+        return ToSettlementLineDto(line);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<PayToValueItemDto>> GetSettlementsAwaitingValuationAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var payCategories = Enum.GetValues<SettlementLineCategory>().Where(IsPayLine).ToArray();
+
+        var rows = await _unitOfWork.Repository<SeparationSettlementLine>().GetQueryable()
+            .AsNoTracking()
+            // AwaitsFinance, as SQL: a pay line not valued by Finance and not a stated zero.
+            .Where(l => l.TenantId == tenantId && !l.IsDeleted
+                        && payCategories.Contains(l.Category)
+                        && l.Computation != SettlementLineComputation.ValuedByFinance
+                        && !(l.Computation == SettlementLineComputation.Computed && l.Amount == 0m)
+                        && !l.Settlement.IsDeleted
+                        && l.Settlement.Separation.Status == SeparationStatus.SettlementPending)
+            .Select(l => new
+            {
+                l.Settlement.SeparationId,
+                l.Settlement.CurrencyCode,
+                l.Category,
+                l.Days,
+                l.SortOrder,
+                l.Settlement.Separation.SeparationNumber,
+                l.Settlement.Separation.Employee.FirstName,
+                l.Settlement.Separation.Employee.LastName,
+                l.Settlement.Separation.Employee.EmployeeNumber,
+                LastDay = l.Settlement.Separation.EffectiveDate ?? l.Settlement.Separation.LastWorkingDay,
+            })
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .GroupBy(r => r.SeparationId)
+            .Select(g =>
+            {
+                var first = g.First();
+                var days = g.Where(r => r.Days.HasValue).Select(r => r.Days!.Value).ToList();
+                return new PayToValueItemDto
+                {
+                    Kind = "Settlement",
+                    Id = g.Key,
+                    Reference = first.SeparationNumber,
+                    EmployeeName = $"{first.FirstName} {first.LastName}".Trim(),
+                    EmployeeNumber = first.EmployeeNumber,
+                    LastDay = first.LastDay,
+                    CurrencyCode = first.CurrencyCode,
+                    AwaitingCount = g.Count(),
+                    Days = days.Count > 0 ? days.Sum() : null,
+                    Summary = string.Join("; ", g.OrderBy(r => r.SortOrder).Select(r =>
+                        PayLineLabel(r.Category) + (r.Days is decimal d ? $" {d:0.##} day(s)" : string.Empty))),
+                };
+            })
+            .OrderBy(i => i.LastDay)
+            .ThenBy(i => i.Reference)
+            .ToList();
+    }
+
+    /// <summary>A pay line's name on Finance's queue.</summary>
+    private static string PayLineLabel(SettlementLineCategory category) => category switch
+    {
+        SettlementLineCategory.UnpaidSalary => "Unpaid salary",
+        SettlementLineCategory.NoticePay => "Notice pay",
+        SettlementLineCategory.LeaveEncashment => "Annual leave owed",
+        SettlementLineCategory.GratuityOrEndOfService => "Gratuity",
+        SettlementLineCategory.PensionRelated => "Pension",
+        SettlementLineCategory.TaxDeduction => "Tax",
+        _ => category.ToString(),
+    };
 
     /// <inheritdoc />
     public async Task<bool> DeleteSettlementLineAsync(Guid lineId, CancellationToken cancellationToken = default)
@@ -2528,15 +2925,27 @@ public class SeparationService : ISeparationService
         // The rule this whole slice turns on. A statement finalised with an unvalued line would go
         // to Internal Audit, and then to payment, carrying a silent zero where a real amount was
         // owed. Zero is a claim; the block is what keeps it from being made by accident.
-        var uncomputed = lines.Where(l => l.Computation == SettlementLineComputation.CannotCompute).ToList();
+        var uncomputed = lines.Where(StillToValue).ToList();
         if (uncomputed.Count > 0)
         {
-            var names = string.Join(", ", uncomputed.Take(4).Select(l => l.Description));
-            var more = uncomputed.Count > 4 ? $" and {uncomputed.Count - 4} more" : string.Empty;
+            // Leave settings audit 2: a pay line waits on Finance's figure, not on HR's — so the
+            // refusal says which lines are whose, as the statement's blocked reason does. A pay line
+            // carrying HR's figure waits too (AwaitsFinance): only Finance's figure settles it.
+            static string Names(List<SeparationSettlementLine> of) =>
+                string.Join(", ", of.Take(4).Select(l => l.Description))
+                + (of.Count > 4 ? $" and {of.Count - 4} more" : string.Empty);
+
+            var awaitingFinance = uncomputed.Where(AwaitsFinance).ToList();
+            var other = uncomputed.Where(l => !AwaitsFinance(l)).ToList();
+            var parts = new List<string>();
+            if (awaitingFinance.Count > 0)
+                parts.Add($"{awaitingFinance.Count} pay line(s) await Finance's valuation in Pay to value — "
+                          + Names(awaitingFinance));
+            if (other.Count > 0)
+                parts.Add($"{other.Count} other line(s) could not be valued — {Names(other)}: enter each amount "
+                          + "and name its source, or remove the line if nothing is owed");
             throw new InvalidOperationException(
-                $"{uncomputed.Count} line(s) could not be valued — {names}{more}. Enter each amount "
-                + "and name its source, or remove the line if nothing is owed. A settlement is not "
-                + "finalised with an unknown amount showing as zero.");
+                string.Join("; ", parts) + ". A settlement is not finalised with an unknown amount showing as zero.");
         }
 
         settlement.FinalisedOn = DateTime.UtcNow;
@@ -2611,6 +3020,15 @@ public class SeparationService : ISeparationService
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
+        // Leave settings audit 2 (P5): nothing HR priced goes into Finance's books. Only a statement
+        // finalised before pay moved to Finance can carry HR's figures; returning it clears them.
+        var hrPriced = lines.Where(IsHrPricedPayLine).ToList();
+        if (hrPriced.Count > 0)
+            throw new InvalidOperationException(
+                $"{hrPriced.Count} pay line(s) on this statement carry a figure HR entered before pay moved to "
+                + $"Finance — {string.Join(", ", hrPriced.Take(4).Select(l => l.Description))}. Return the "
+                + "statement to HR: returning it clears those figures, and Finance values the lines in Pay to value.");
+
         // A deduction that recovers an asset surcharge Finance already holds as a receivable must
         // credit that receivable, not recoveries income a second time (slice 4). The line points at
         // its clearance item, the item at the surcharge, and the register says whether it posted.
@@ -2682,6 +3100,18 @@ public class SeparationService : ISeparationService
         // later is "how many times was this queried before it was paid".
         separation.Status = SeparationStatus.SettlementPending;
 
+        // Leave settings audit 2: a statement finalised before pay moved to Finance comes back with
+        // HR's figures on its pay lines. They are cleared here, so Finance values them before it can
+        // be finalised again — left in place, HR could neither change them nor get it approved.
+        var lines = await _unitOfWork.Repository<SeparationSettlementLine>().GetQueryable()
+            .Where(l => l.TenantId == tenantId && l.SettlementId == settlement.Id && !l.IsDeleted)
+            .ToListAsync(cancellationToken);
+        foreach (var line in lines.Where(IsHrPricedPayLine))
+        {
+            ClearHrFigure(line, "when Internal Audit returned the statement");
+            await _unitOfWork.Repository<SeparationSettlementLine>().UpdateAsync(line);
+        }
+
         await _unitOfWork.Repository<SeparationSettlement>().UpdateAsync(settlement);
         await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(separation);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2728,6 +3158,12 @@ public class SeparationService : ISeparationService
         SourceTravelAdvanceId = l.SourceTravelAdvanceId,
         IsSystemGenerated = l.IsSystemGenerated,
         SortOrder = l.SortOrder,
+        Days = l.Days,
+        IsPayLine = IsPayLine(l.Category),
+        AwaitingFinance = AwaitsFinance(l),
+        // Needs ValuedByEmployee loaded; the statement read includes it.
+        ValuedByName = l.ValuedByEmployee == null ? null : FullName(l.ValuedByEmployee),
+        ValuedOn = l.ValuedOn,
     };
 
     // ── Clearance: the catalogue ──────────────────────────────────────────────
@@ -3719,6 +4155,7 @@ public class SeparationService : ISeparationService
         ReasonCategory = s.ReasonCategory,
         ReasonCategoryName = s.ReasonCategory?.ToString(),
         ReasonNotes = s.ReasonNotes,
+        MedicalBoardId = s.MedicalBoardId,
         NoticeGivenOn = s.NoticeGivenOn,
         NoticeDays = s.NoticeDays,
         NoticeRequiredDays = Notice(s).Required,

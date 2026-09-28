@@ -30,6 +30,7 @@ public sealed class LeaveRequestWorkflowStatusAdapter : IWorkflowStatusAdapter
     public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
     {
         var request = Require(entity);
+        if (IsFinal(request)) return;
         Apply(request, outcome, userId);
 
         if (outcome == WorkflowOutcome.Rejected && !string.IsNullOrWhiteSpace(rejectionReason))
@@ -41,14 +42,30 @@ public sealed class LeaveRequestWorkflowStatusAdapter : IWorkflowStatusAdapter
     public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null)
     {
         var request = Require(entity);
+        if (IsFinal(request)) return;
         request.Status = LeaveStatus.Draft;
         request.ApprovedById = null;
         request.ApprovedDate = null;
         request.RejectionReason = null;
     }
 
+    /// <summary>
+    /// Cancelled and closed leave is final: no workflow outcome moves it (round 5, lane D).
+    /// </summary>
+    /// <remarks>
+    /// Until lane D, cancelling a Pending request left its workflow instance live. An approver could
+    /// then still act on it, and the generic workflow recall applies this adapter directly,
+    /// bypassing LeaveService, so a cancelled request could come back as Draft, or as Approved.
+    /// Cancelling now withdraws the instance, but instances already stranded by the old cancel
+    /// remain, and this is the one place every door passes through.
+    /// </remarks>
+    private static bool IsFinal(LeaveRequest request)
+        => request.Status is LeaveStatus.Cancelled or LeaveStatus.Completed;
+
     private static void Apply(LeaveRequest request, WorkflowOutcome outcome, Guid? userId)
     {
+        if (IsFinal(request)) return;
+
         switch (outcome)
         {
             case WorkflowOutcome.Approved:

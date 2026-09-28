@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { CurrencyPicker } from '@/components/hr/common/CurrencyPicker';
 import { useToast } from '@/hooks/use-toast';
 import { jobOfferService } from '@/services/hr/offers.service';
 import type { UpdateJobOffer } from '@/types/hr/offers';
@@ -170,13 +171,14 @@ export default function EditJobOfferPage() {
             />
           </div>
           <div className="space-y-1.5">
+            {/* ⚠ Round 4, lane G3. The server now refuses a code Finance does not hold, so a
+                free-text box here would offer the user a 422 they could not see coming. */}
             <Label htmlFor="currencyCode">Currency</Label>
-            <Input
+            <CurrencyPicker
               id="currencyCode"
-              maxLength={10}
-              disabled={!editable}
               value={form.currencyCode}
-              onChange={(e) => setForm({ ...form, currencyCode: e.target.value.toUpperCase() })}
+              onChange={(code) => setForm({ ...form, currencyCode: code })}
+              disabled={!editable}
             />
           </div>
           <div className="space-y-1.5">

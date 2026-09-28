@@ -418,56 +418,9 @@ class MaintenanceApiService {
     }
   }
 
-  // Technicians
-  async getTechnicians(): Promise<Employee[]> {
-    try {
-      // Check if user is authenticated
-      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
-      if (!token) {
-        console.warn('No authentication token found. User must log in to access employees.');
-        return [];
-      }
-
-      // Try the specific maintenance technician endpoint first
-      try {
-        const response = await apiService.request<any>('/employees/maintenance-available');
-        
-        // The endpoint returns an array directly
-        const technicians = Array.isArray(response) ? response : [];
-        
-        return technicians.map((emp: any) => ({
-          id: emp.id,
-          firstName: emp.firstName,
-          lastName: emp.lastName,
-          email: emp.emailAddress,
-          department: emp.departmentName,
-          position: emp.positionTitle,
-          isActive: emp.isActive
-        }));
-      } catch (maintenanceError) {
-        console.warn('Maintenance-available endpoint failed, trying all employees:', maintenanceError);
-        
-        // Fallback to all employees
-        const response = await apiService.request<any>('/employees?pageSize=1000&isActive=true');
-        const employees = Array.isArray(response) ? response : [];
-        
-        return employees
-          .filter((emp: any) => emp.isActive)
-          .map((emp: any) => ({
-            id: emp.id,
-            firstName: emp.firstName,
-            lastName: emp.lastName,
-            email: emp.emailAddress,
-            department: emp.departmentName,
-            position: emp.positionTitle,
-            isActive: emp.isActive
-          }));
-      }
-    } catch (error) {
-      console.error('Error fetching technicians from all endpoints:', error);
-      return [];
-    }
-  }
+  // Technicians: see maintenanceDataService.getTechnicians(), which the screens call.
+  // ⚠ Round 4, lane O removed this service's copy. Nothing called it, and when its endpoint failed it
+  // fell back to `/employees?pageSize=1000` — offering EVERY employee in the tenant as a technician.
 
   // Work Orders
   async getWorkOrders(

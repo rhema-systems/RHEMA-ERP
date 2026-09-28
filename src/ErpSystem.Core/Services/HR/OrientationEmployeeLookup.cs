@@ -31,6 +31,8 @@ internal static class OrientationEmployeeLookup
     {
         if (map.TryGetValue(dto.EmployeeId, out var e)) { dto.EmployeeName = e.Name; dto.EmployeeNumber = e.Number; }
         if (dto.EnrolledByEmployeeId.HasValue && map.TryGetValue(dto.EnrolledByEmployeeId.Value, out var by)) dto.EnrolledByName = by.Name;
+        // Round 4, lane R: who confirmed attendance — the officer who closed the session, or who marked it completed.
+        if (dto.AttendanceConfirmedByEmployeeId.HasValue && map.TryGetValue(dto.AttendanceConfirmedByEmployeeId.Value, out var confirmedBy)) dto.AttendanceConfirmedByName = confirmedBy.Name;
         dto.Certificates.FillNames(map);
         dto.Feedbacks.FillNames(map);
         dto.AttendanceRecords.FillNames(map);
@@ -74,6 +76,7 @@ internal static class OrientationEmployeeLookup
     {
         yield return dto.EmployeeId;
         yield return dto.EnrolledByEmployeeId;
+        yield return dto.AttendanceConfirmedByEmployeeId;
         foreach (var c in dto.Certificates) { yield return c.EmployeeId; yield return c.IssuedByEmployeeId; }
         foreach (var f in dto.Feedbacks) yield return f.SubmittedByEmployeeId;
         foreach (var a in dto.AttendanceRecords) { yield return a.EmployeeId; yield return a.MarkedByEmployeeId; }

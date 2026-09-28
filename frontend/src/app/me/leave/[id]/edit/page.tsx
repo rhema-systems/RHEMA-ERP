@@ -108,6 +108,9 @@ export default function EditMyLeaveDraftPage({
           secondRelieverEmployeeId: request.secondRelieverEmployeeId ?? '',
           relieverNotes: request.relieverNotes ?? '',
           handoverNotes: request.handoverNotes ?? '',
+          // Shows the plan banner and holds the leave type to the plan's (guide L-59).
+          leavePlanId: request.leavePlanId ?? '',
+          chargeExcessToAnnual: request.chargeExcessToAnnual ?? false,
         }}
         onSubmit={handleSubmit}
         submitting={submitting}

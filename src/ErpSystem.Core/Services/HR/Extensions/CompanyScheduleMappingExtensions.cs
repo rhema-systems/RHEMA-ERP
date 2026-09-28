@@ -61,7 +61,9 @@ public static class CompanyScheduleMappingExtensions
             TechnicalRequirements = entity.TechnicalRequirements,
             SendReminders = entity.SendReminders,
             ReminderDaysBefore = entity.ReminderDaysBefore,
-            ReminderSentDate = entity.ReminderSentDate,
+            // ⚠ As UTC: a datetime2 reads back unspecified and JSON then drops its Z (round 4, lane E).
+            ReminderSentDate = entity.ReminderSentDate is { } reminded ? DateTime.SpecifyKind(reminded, DateTimeKind.Utc) : null,
+            RsvpReminderSentDate = entity.RsvpReminderSentDate is { } chased ? DateTime.SpecifyKind(chased, DateTimeKind.Utc) : null,
             ActualStartTime = entity.ActualStartTime,
             ActualEndTime = entity.ActualEndTime,
             ActualAttendance = entity.ActualAttendance,
@@ -71,6 +73,12 @@ public static class CompanyScheduleMappingExtensions
             CancellationReason = entity.CancellationReason,
             IsRescheduled = entity.IsRescheduled,
             RescheduledDate = entity.RescheduledDate,
+            // Round 4, D7 (C-2). Null on an event that never moved, and on any moved before this
+            // lane — the original was overwritten then and cannot be recovered.
+            OriginalStartDate = entity.OriginalStartDate,
+            OriginalStartTime = entity.OriginalStartTime,
+            OriginalEndDate = entity.OriginalEndDate,
+            OriginalEndTime = entity.OriginalEndTime,
             RescheduleReason = entity.RescheduleReason,
             AdditionalNotes = entity.AdditionalNotes,
             CreatedAt = entity.CreatedAt,
@@ -154,7 +162,9 @@ public static class CompanyScheduleMappingExtensions
             TechnicalRequirements = entity.TechnicalRequirements,
             SendReminders = entity.SendReminders,
             ReminderDaysBefore = entity.ReminderDaysBefore,
-            ReminderSentDate = entity.ReminderSentDate,
+            // ⚠ As UTC: a datetime2 reads back unspecified and JSON then drops its Z (round 4, lane E).
+            ReminderSentDate = entity.ReminderSentDate is { } reminded ? DateTime.SpecifyKind(reminded, DateTimeKind.Utc) : null,
+            RsvpReminderSentDate = entity.RsvpReminderSentDate is { } chased ? DateTime.SpecifyKind(chased, DateTimeKind.Utc) : null,
             ActualStartTime = entity.ActualStartTime,
             ActualEndTime = entity.ActualEndTime,
             ActualAttendance = entity.ActualAttendance,
