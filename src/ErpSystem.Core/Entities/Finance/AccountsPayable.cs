@@ -197,6 +197,13 @@ public class VendorInvoice : TenantEntity
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = "USD";
 
+    /// <summary>
+    /// Required for a manually captured invoice whose transaction currency differs from the
+    /// supplier master currency. PO-backed invoices inherit their governed source currency.
+    /// </summary>
+    [MaxLength(500)]
+    public string? CurrencyOverrideReason { get; set; }
+
     [Column(TypeName = "decimal(18,6)")]
     public decimal ExchangeRate { get; set; } = 1.0m;
 

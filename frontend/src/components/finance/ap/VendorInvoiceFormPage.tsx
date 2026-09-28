@@ -106,6 +106,7 @@ const invoiceSchema = z.object({
     exchangeRateId: z.string().optional(),
     exchangeRateDate: z.date().optional(),
     exchangeRateSource: z.string().optional().default('Daily'),
+    currencyOverrideReason: z.string().max(500).optional(),
     notes: z.string().optional(),
     reference: z.string().optional(),
     taxGroupId: z.string().optional(),
@@ -237,6 +238,12 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         enabled: Boolean(currentTenantCode),
     });
 
+    const { data: activeCurrencies = [] } = useQuery({
+        queryKey: ['finance-currencies', currentTenantCode, 'active'],
+        queryFn: () => financeDataService.getCurrencies({ isActive: true }),
+        enabled: Boolean(currentTenantCode),
+    });
+
     const { data: purchaseOrdersData, isLoading: purchaseOrdersLoading } = useQuery({
         queryKey: ['ap-purchase-orders', selectedSupplier?.businessPartnerId || selectedSupplier?.id],
         queryFn: () => purchasingService.getPurchaseOrders({
@@ -319,6 +326,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             exchangeRateId: undefined,
             exchangeRateDate: new Date(),
             exchangeRateSource: 'Daily',
+            currencyOverrideReason: '',
             isOpeningBalance: defaultOpeningBalance,
             withholdingTaxId: 'none',
             withholdingTaxRate: 0,
@@ -367,6 +375,20 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     const watchSupplierId = form.watch('supplierId');
     const watchIsOpeningBalance = form.watch('isOpeningBalance');
     const watchCurrencyCode = form.watch('currencyCode') || 'GHS';
+    const supplierCurrency = selectedSupplier?.currency?.trim().toUpperCase() || '';
+    const currencyOptions = activeCurrencies.map(currency => ({
+        id: currency.id,
+        currencyCode: currency.currencyCode,
+        currencyName: currency.currencyName,
+    }));
+    for (const code of [watchCurrencyCode, supplierCurrency, financeSettings?.baseCurrency || 'GHS'].filter(Boolean)) {
+        if (!currencyOptions.some(currency => currency.currencyCode === code)) {
+            currencyOptions.push({ id: `fallback-${code}`, currencyCode: code, currencyName: 'Configured currency' });
+        }
+    }
+    const currencyOverridesSupplier = Boolean(
+        selectedSupplier && !selectedPurchaseOrderId && supplierCurrency && watchCurrencyCode !== supplierCurrency
+    );
     const watchWithholdingTaxId = form.watch('withholdingTaxId');
     const withholdingTaxOptions = (withholdingTaxes as Tax[]).filter(tax =>
         tax.isActive && tax.category === TaxCategory.Withholding && (
@@ -486,6 +508,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             exchangeRateId: editInvoice.exchangeRateId,
             exchangeRateDate: invoiceDate,
             exchangeRateSource: editInvoice.exchangeRateId ? 'Approved rate' : 'Daily',
+            currencyOverrideReason: editInvoice.currencyOverrideReason || '',
             notes: editInvoice.notes || '',
             reference: editInvoice.reference || '',
             taxGroupId: 'none',
@@ -773,6 +796,12 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         form.setValue('purchaseOrderId', value || undefined);
         form.setValue('acceptedSupplyKind', undefined);
         form.setValue('acceptedSupplySourceId', undefined);
+        if (!value) {
+            form.setValue('lineItems', [{
+                sourceLineId: crypto.randomUUID(), lineItemType: 'Expense', description: '',
+                quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none',
+            }]);
+        }
     };
 
     useEffect(() => {
@@ -804,7 +833,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             : selectedPurchaseOrder.items.map(item => ({ ...item, invoiceQuantity: item.remainingQuantity > 0 ? item.remainingQuantity : item.orderedQuantity }));
         form.setValue('lineItems', sourceItems.map(item => ({
             sourceLineId: crypto.randomUUID(),
-            lineItemType: selectedPurchaseOrder.procurementCategory === 'Goods' ? 'Inventory' : 'Expense',
+            lineItemType: selectedPurchaseOrder.procurementCategory === 'Goods' ? 'Inventory' : 'Service',
             inventoryItemId: item.inventoryItemId || undefined,
             warehouseId: item.warehouseId || undefined,
             purchaseOrderItemId: item.id,
@@ -874,6 +903,30 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 }
             }
             const isOpeningBalance = data.isOpeningBalance;
+            if (!data.purchaseOrderId && data.lineItems.some(line => line.lineItemType !== 'Expense')) {
+                toast({
+                    title: 'Manual invoices use GL expense lines',
+                    description: 'Inventory and service lines must come from their governed Procurement or accepted-supply source.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+            if (goodsCategory && data.lineItems.some(line => line.lineItemType !== 'Inventory' || !line.purchaseOrderItemId)) {
+                toast({
+                    title: 'Goods lines must come from accepted receipts',
+                    description: 'Reload the selected purchase order to restore its governed receipt lines.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+            if (serviceCategory && data.lineItems.some(line => line.lineItemType !== 'Service' || !line.purchaseOrderItemId)) {
+                toast({
+                    title: 'Service lines must come from the selected purchase order',
+                    description: 'Reload the selected purchase order and approved completion evidence.',
+                    variant: 'destructive',
+                });
+                return;
+            }
             if (serviceCategory && !data.acceptedSupplySourceId) {
                 toast({
                     title: 'Service completion required',
@@ -905,6 +958,14 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 return;
             }
             const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
+            if (currencyOverridesSupplier && (data.currencyOverrideReason?.trim().length || 0) < 10) {
+                toast({
+                    title: 'Currency override reason required',
+                    description: `Explain why this invoice uses ${data.currencyCode} instead of the supplier default ${supplierCurrency} (at least 10 characters).`,
+                    variant: 'destructive',
+                });
+                return;
+            }
             if (data.currencyCode !== functionalCurrency && !data.exchangeRateId) {
                 toast({
                     title: 'Approved exchange rate required',
@@ -920,6 +981,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 ...invoiceData,
                 businessPartnerId: supplierId,
                 businessPartnerRoleId: selectedSupplier?.businessPartnerRoleId,
+                currencyOverrideReason: currencyOverridesSupplier ? data.currencyOverrideReason?.trim() : undefined,
                 apAccountId: data.apAccountId || undefined,
                 expenseAccountId: data.expenseAccountId || undefined,
                 paymentTermsDays: !isOpeningBalance && applySupplierDefaults && supplierDefaults?.paymentTermId === data.paymentTermId && !manualSupplierDefaults.current.has('paymentTermId') && !manualSupplierDefaults.current.has('dueDate')
@@ -1097,6 +1159,10 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                         <CardTitle>Invoice Details</CardTitle>
                     </CardHeader>
                     <CardContent className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                        <div className="md:col-span-2 lg:col-span-3">
+                            <h2 className="text-base font-semibold">Supplier and document</h2>
+                            <p className="text-sm text-muted-foreground">Identify the payable, its governed source, dates, terms and transaction currency.</p>
+                        </div>
                         <div className="min-w-0 space-y-2">
                             <Label htmlFor="supplier">Supplier</Label>
                             <Popover open={supplierComboOpen} onOpenChange={setSupplierComboOpen}>
@@ -1284,6 +1350,9 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                         value={field.value}
                                         onValueChange={async (val) => {
                                             field.onChange(val);
+                                            if (!supplierCurrency || val === supplierCurrency || selectedPurchaseOrderId) {
+                                                form.setValue('currencyOverrideReason', '');
+                                            }
                                             try {
                                                 await applyInvoiceExchangeRate(val);
                                             } catch (err) {
@@ -1298,14 +1367,29 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                             <SelectValue placeholder="Select Currency" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="GHS">GHS - Ghana Cedi</SelectItem>
-                                            <SelectItem value="USD">USD - US Dollar</SelectItem>
-                                            <SelectItem value="EUR">EUR - Euro</SelectItem>
-                                            <SelectItem value="GBP">GBP - British Pound</SelectItem>
+                                            {currencyOptions.map(currency => (
+                                                <SelectItem key={currency.id} value={currency.currencyCode}>
+                                                    {currency.currencyCode} - {currency.currencyName}
+                                                    {currency.currencyCode === supplierCurrency ? ' (supplier default)' : ''}
+                                                </SelectItem>
+                                            ))}
                                         </SelectContent>
                                     </Select>
                                 )}
                             />
+                            {currencyOverridesSupplier && (
+                                <div className="mt-3 space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-950">
+                                    <p className="text-sm font-medium">Currency differs from the supplier default ({supplierCurrency}).</p>
+                                    <p className="text-xs">Confirm the commercial document currency and record why this exception is appropriate.</p>
+                                    <Label htmlFor="currencyOverrideReason">Override reason</Label>
+                                    <Textarea
+                                        id="currencyOverrideReason"
+                                        placeholder="Explain why this invoice uses a different currency…"
+                                        {...form.register('currencyOverrideReason')}
+                                    />
+                                    {form.formState.errors.currencyOverrideReason && <p className="text-xs text-destructive">{form.formState.errors.currencyOverrideReason.message}</p>}
+                                </div>
+                            )}
                         </div>
 
                         {watchCurrencyCode !== (financeSettings?.baseCurrency || 'GHS') && (
@@ -1369,7 +1453,12 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                             />
                         </div>
 
-                        <div className="space-y-2">
+                        <div className="border-t pt-5 md:col-span-2 lg:col-span-3">
+                            <h2 className="text-base font-semibold">VAT and levies</h2>
+                            <p className="text-sm text-muted-foreground">Select the default transactional tax treatment for new invoice lines. WHT is classified separately below.</p>
+                        </div>
+
+                        <div className="space-y-2 md:col-span-2 lg:col-span-1">
                             <Label>Default Tax Group (For new lines)</Label>
                             <Controller
                                 control={form.control}
@@ -1432,7 +1521,12 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                             </div>
                         )}
 
-                        <div className="space-y-2 md:col-span-2">
+                        <div className="border-t pt-5 md:col-span-2 lg:col-span-3">
+                            <h2 className="text-base font-semibold">Withholding tax classification</h2>
+                            <p className="text-sm text-muted-foreground">Capture payment-time WHT policy and statutory threshold scope without reducing the invoice liability.</p>
+                        </div>
+
+                        <div className="space-y-2 md:col-span-2 lg:col-span-3">
                             <div className="flex flex-wrap items-center gap-3">
                                 <Switch id="invoiceSubjectToWithholding" checked={!watchIsOpeningBalance && withholdingDecision === true} disabled={watchIsOpeningBalance}
                                     onCheckedChange={checked => { if (checked) setWithholdingPromptOpen(true); else declineWithholding(); }} />
@@ -1483,7 +1577,11 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                         </div>
 
                         {!isEditMode && selectedSupplier && (
-                            <div className="space-y-3 rounded-lg border p-3 md:col-span-2 lg:col-span-3">
+                            <details className="rounded-lg border md:col-span-2 lg:col-span-3">
+                                <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">
+                                    Posting defaults <span className="ml-2 font-normal text-muted-foreground">AP control and fallback line account</span>
+                                </summary>
+                                <div className="space-y-3 border-t p-4">
                                 <div className="flex flex-wrap items-center justify-between gap-3">
                                     <div className="flex items-center gap-2">
                                         <Checkbox id="applySupplierDefaults" checked={applySupplierDefaults} disabled={watchIsOpeningBalance} onCheckedChange={checked => setApplySupplierDefaults(checked === true)} />
@@ -1502,7 +1600,8 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                         <p className="text-xs text-muted-foreground">Fallback for a manual GL line. A line-level GL account takes precedence.</p>
                                     </div>
                                 </div>}
-                            </div>
+                                </div>
+                            </details>
                         )}
 
                         {selectedWithholdingTax && !watchIsOpeningBalance && (
@@ -1591,9 +1690,9 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between">
                         <CardTitle>Line Items</CardTitle>
-                        <Button type="button" variant="outline" size="sm" onClick={() => append({ sourceLineId: crypto.randomUUID(), lineItemType: 'Expense' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' })}>
-                            <Plus className="mr-2 h-4 w-4" /> Add Item
-                        </Button>
+                        {!selectedPurchaseOrderId && <Button type="button" variant="outline" size="sm" onClick={() => append({ sourceLineId: crypto.randomUUID(), lineItemType: 'Expense' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' })}>
+                            <Plus className="mr-2 h-4 w-4" /> Add GL line
+                        </Button>}
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-4">
@@ -1606,21 +1705,18 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                     <div key={field.id} className="grid grid-cols-12 gap-4 items-end border-b pb-4">
                                         <div className="col-span-2 space-y-2">
                                             <Label className={index !== 0 ? 'sr-only' : ''}>Type</Label>
-                                            <Controller
-                                                control={form.control}
-                                                name={`lineItems.${index}.lineItemType`}
-                                                render={({ field }) => (
-                                                    <Select value={field.value} onValueChange={field.onChange}>
-                                                        <SelectTrigger><SelectValue placeholder="Type" /></SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="Expense">GL Account / Expense</SelectItem>
-                                                            <SelectItem value="Service">Service / Works certificate</SelectItem>
-                                                            <SelectItem value="Inventory">Inventory Item</SelectItem>
-                                                            <SelectItem value="Product">Product / Other</SelectItem>
-                                                        </SelectContent>
-                                                    </Select>
-                                                )}
-                                            />
+                                            <div className="flex h-10 items-center rounded-md border bg-muted/40 px-3 text-sm">
+                                                {lineItemType === 'Inventory'
+                                                    ? 'Goods receipt / Inventory'
+                                                    : lineItemType === 'Service'
+                                                        ? 'Approved service completion'
+                                                        : lineItemType === 'Product'
+                                                            ? 'Legacy product line'
+                                                            : 'GL Account / Expense'}
+                                            </div>
+                                            {index === 0 && <p className="text-xs text-muted-foreground">
+                                                {selectedPurchaseOrderId ? 'Line type is governed by the selected source document.' : 'Manual AP invoices post directly to GL expense or asset accounts.'}
+                                            </p>}
                                         </div>
 
                                         {lineItemType === 'Expense' || lineItemType === 'Service' ? (
@@ -1745,7 +1841,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                                 onOpenChange={(open) => { setInventoryItemOpenIndex(open ? index : null); if (!open) setInventoryItemSearch(''); }}
                                                             >
                                                                 <PopoverTrigger asChild>
-                                                                    <Button variant="outline" role="combobox" className="h-10 w-full min-w-0 justify-between overflow-hidden px-3 text-left font-medium">
+                                                                    <Button variant="outline" role="combobox" disabled={Boolean(selectedPurchaseOrderId)} className="h-10 w-full min-w-0 justify-between overflow-hidden px-3 text-left font-medium">
                                                                         <span className="min-w-0 flex-1 truncate text-sm">
                                                                             {getInventoryItemDisplay(field.value) || (inventoryItemsLoading ? "Loading..." : "Select item...")}
                                                                         </span>
@@ -1801,7 +1897,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                         control={form.control}
                                                         name={`lineItems.${index}.warehouseId`}
                                                         render={({ field }) => (
-                                                            <Select value={field.value} onValueChange={field.onChange}>
+                                                            <Select value={field.value} onValueChange={field.onChange} disabled={Boolean(selectedPurchaseOrderId)}>
                                                                 <SelectTrigger><SelectValue placeholder="Warehouse..." /></SelectTrigger>
                                                                 <SelectContent>
                                                                     {warehousesData?.map((wh: any) => (
@@ -1884,7 +1980,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                             />
                                         </div>
                                         <div className="col-span-1 flex items-end justify-center">
-                                            <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} disabled={fields.length === 1} className="h-10">
+                                            <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} disabled={fields.length === 1 || Boolean(selectedPurchaseOrderId)} className="h-10">
                                                 <Trash2 className="h-4 w-4 text-red-500" />
                                             </Button>
                                         </div>
@@ -1895,7 +1991,24 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
 
                         {/* Dynamic Tax and Payable Breakdown */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-8 border-t mt-8">
-                            <div>
+                            <div className="space-y-4">
+                                <div className="rounded-lg border p-4">
+                                    <div className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Posting readiness</div>
+                                    <ul className="space-y-2 text-sm">
+                                        <li className={selectedSupplier?.isTransactionReady ? 'text-emerald-700' : 'text-amber-700'}>
+                                            {selectedSupplier?.isTransactionReady ? '✓' : '○'} Approved supplier and AP profile
+                                        </li>
+                                        <li className={watchCurrencyCode === (financeSettings?.baseCurrency || 'GHS') || Boolean(form.watch('exchangeRateId')) ? 'text-emerald-700' : 'text-amber-700'}>
+                                            {watchCurrencyCode === (financeSettings?.baseCurrency || 'GHS') || Boolean(form.watch('exchangeRateId')) ? '✓' : '○'} Currency and approved exchange-rate evidence
+                                        </li>
+                                        <li className={!selectedPurchaseOrderId || (goodsCategory ? Boolean(goodsEntry && !goodsEntryError) : Boolean(form.watch('acceptedSupplySourceId'))) ? 'text-emerald-700' : 'text-amber-700'}>
+                                            {!selectedPurchaseOrderId || (goodsCategory ? Boolean(goodsEntry && !goodsEntryError) : Boolean(form.watch('acceptedSupplySourceId'))) ? '✓' : '○'} Governed source-document evidence
+                                        </li>
+                                        <li className={watchIsOpeningBalance || withholdingDecision !== null ? 'text-emerald-700' : 'text-amber-700'}>
+                                            {watchIsOpeningBalance || withholdingDecision !== null ? '✓' : '○'} WHT classification decision
+                                        </li>
+                                    </ul>
+                                </div>
                                 {taxEstimate.taxList.length > 0 && (
                                     <div className="p-4 bg-muted/40 rounded-lg space-y-2 border">
                                         <div className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">Estimated Levies & VAT Details</div>

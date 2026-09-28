@@ -193,15 +193,15 @@ export function TaxFormDialog({ open, tax, accounts, accountsLoading = false, on
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-3xl">
-                <DialogHeader>
+            <DialogContent className="flex max-h-[calc(100vh-2rem)] max-w-3xl flex-col overflow-hidden">
+                <DialogHeader className="shrink-0">
                     <DialogTitle>{isEditing ? 'Edit Tax' : 'Add Tax'}</DialogTitle>
                     <DialogDescription>
                         Configure tax behavior and GL mappings used by posting and statutory tax reports.
                     </DialogDescription>
                 </DialogHeader>
 
-                <div className="grid gap-4 py-4">
+                <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto py-4 pr-2">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="tax-code">Tax Code *</Label>
@@ -348,7 +348,7 @@ export function TaxFormDialog({ open, tax, accounts, accountsLoading = false, on
                     </div>
                 </div>
 
-                <DialogFooter>
+                <DialogFooter className="shrink-0 border-t pt-4">
                     <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
                         Cancel
                     </Button>
