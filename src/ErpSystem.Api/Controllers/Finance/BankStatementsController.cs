@@ -2,10 +2,13 @@ using System.Globalization;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Finance;
@@ -21,16 +24,22 @@ public class BankStatementsController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IFinanceAccessScopeService _financeAccessScopeService;
 
-    public BankStatementsController(ApplicationDbContext context, ICurrentUserService currentUserService)
+    public BankStatementsController(
+        ApplicationDbContext context,
+        ICurrentUserService currentUserService,
+        IFinanceAccessScopeService financeAccessScopeService)
     {
         _context = context;
         _currentUserService = currentUserService;
+        _financeAccessScopeService = financeAccessScopeService;
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
 
     [HttpGet]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<IReadOnlyList<BankStatementDto>>> GetStatements([FromQuery] Guid? bankAccountId = null)
     {
         var tenantId = TenantId;
@@ -38,8 +47,15 @@ public class BankStatementsController : ControllerBase
             .AsNoTracking()
             .Where(s => s.TenantId == tenantId && !s.IsDeleted);
 
+        var permittedIds = await _financeAccessScopeService.GetPermittedBankAccountIdsAsync(
+            FinanceAccessLevel.Read);
+        if (permittedIds != null)
+            query = query.Where(s => permittedIds.Contains(s.BankAccountId));
+
         if (bankAccountId.HasValue)
         {
+            if (permittedIds != null && !permittedIds.Contains(bankAccountId.Value))
+                return Forbid();
             query = query.Where(s => s.BankAccountId == bankAccountId.Value);
         }
 
@@ -51,6 +67,7 @@ public class BankStatementsController : ControllerBase
     }
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<BankStatementDto>> GetStatementById(Guid id)
     {
         var tenantId = TenantId;
@@ -58,19 +75,29 @@ public class BankStatementsController : ControllerBase
             .AsNoTracking()
             .FirstOrDefaultAsync(s => s.Id == id && s.TenantId == tenantId && !s.IsDeleted);
 
+        if (statement != null)
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                statement.BankAccountId,
+                FinanceAccessLevel.Read);
+
         return statement == null ? NotFound() : Ok(ToDto(statement));
     }
 
     [HttpGet("{id:guid}/lines")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<IReadOnlyList<BankStatementLineDto>>> GetStatementLines(Guid id)
     {
         var tenantId = TenantId;
-        var statementExists = await _context.Set<BankStatement>()
-            .AnyAsync(s => s.Id == id && s.TenantId == tenantId && !s.IsDeleted);
-        if (!statementExists)
+        var statement = await _context.Set<BankStatement>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == id && s.TenantId == tenantId && !s.IsDeleted);
+        if (statement == null)
         {
             return NotFound();
         }
+        await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+            statement.BankAccountId,
+            FinanceAccessLevel.Read);
 
         var lines = await _context.Set<BankStatementLine>()
             .AsNoTracking()
@@ -91,6 +118,7 @@ public class BankStatementsController : ControllerBase
     /// Dates parse as yyyy-MM-dd or dd/MM/yyyy; amounts are invariant-culture decimals.
     /// </remarks>
     [HttpPost("import")]
+    [Authorize(Policy = FinancePermissions.PerformBankReconciliation)]
     public async Task<ActionResult<BankStatementDto>> ImportStatement(
         [FromForm] IFormFile file,
         [FromForm] Guid bankAccountId,
@@ -98,6 +126,9 @@ public class BankStatementsController : ControllerBase
         [FromForm] string? notes = null)
     {
         var tenantId = TenantId;
+        await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+            bankAccountId,
+            FinanceAccessLevel.Operate);
         if (file == null || file.Length == 0)
         {
             return BadRequest(new { message = "A statement file is required." });

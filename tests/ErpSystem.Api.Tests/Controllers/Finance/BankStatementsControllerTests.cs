@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -110,7 +111,17 @@ public sealed class BankStatementsControllerTests
         currentUser.SetupGet(x => x.Claims).Returns(new Dictionary<string, string>());
         currentUser.SetupGet(x => x.UserId).Returns(Guid.NewGuid().ToString());
         currentUser.SetupGet(x => x.UserName).Returns("statement.importer");
-        return new BankStatementsController(db, currentUser.Object);
+        var accessScope = new Mock<IFinanceAccessScopeService>();
+        accessScope.Setup(x => x.GetPermittedBankAccountIdsAsync(
+                It.IsAny<FinanceAccessLevel>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyCollection<Guid>?)null);
+        accessScope.Setup(x => x.EnsureBankAccountAccessAsync(
+                It.IsAny<Guid?>(),
+                It.IsAny<FinanceAccessLevel>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        return new BankStatementsController(db, currentUser.Object, accessScope.Object);
     }
 
     private static ApplicationDbContext CreateContext()

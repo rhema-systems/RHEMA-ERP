@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -63,6 +64,7 @@ public class BankReconciliationController : ControllerBase
     /// <response code="200">The reconciliation was found and returned successfully.</response>
     /// <response code="404">No reconciliation exists with the specified identifier.</response>
     [HttpGet("{id}")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<BankReconciliationDto>> GetById(Guid id)
     {
         var reconciliation = await _reconciliationService.GetByIdAsync(id);
@@ -94,6 +96,7 @@ public class BankReconciliationController : ControllerBase
     /// <returns>A collection of bank reconciliation sessions associated with the specified bank account.</returns>
     /// <response code="200">The list of reconciliations was retrieved successfully (may be empty).</response>
     [HttpGet("bank-account/{bankAccountId}")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<IEnumerable<BankReconciliationDto>>> GetByBankAccount(Guid bankAccountId)
     {
         var reconciliations = await _reconciliationService.GetByBankAccountAsync(bankAccountId);
@@ -127,6 +130,7 @@ public class BankReconciliationController : ControllerBase
     /// <response code="201">The reconciliation session was created successfully.</response>
     /// <response code="400">Validation failed (e.g., overlapping period, missing required fields, or invalid bank account).</response>
     [HttpPost("start")]
+    [Authorize(Policy = FinancePermissions.PerformBankReconciliation)]
     public async Task<ActionResult<BankReconciliationDto>> StartReconciliation([FromBody] StartReconciliationDto dto)
     {
         try
@@ -166,6 +170,7 @@ public class BankReconciliationController : ControllerBase
     /// <response code="200">Auto-matching completed successfully; returns the list of new matches (may be empty if no matches found).</response>
     /// <response code="400">The reconciliation is in an invalid state for auto-matching (e.g., already approved) or does not exist.</response>
     [HttpPost("{id}/auto-match")]
+    [Authorize(Policy = FinancePermissions.PerformBankReconciliation)]
     public async Task<ActionResult<IEnumerable<ReconciliationMatchDto>>> AutoMatch(Guid id)
     {
         try
@@ -207,6 +212,7 @@ public class BankReconciliationController : ControllerBase
     /// <response code="200">The manual match was created successfully.</response>
     /// <response code="400">Validation failed (e.g., items already matched, reconciliation not in valid state, or mismatched amounts).</response>
     [HttpPost("{id}/manual-match")]
+    [Authorize(Policy = FinancePermissions.PerformBankReconciliation)]
     public async Task<ActionResult<ReconciliationMatchDto>> CreateManualMatch(
         Guid id,
         [FromBody] CreateManualMatchDto dto)
@@ -248,6 +254,7 @@ public class BankReconciliationController : ControllerBase
     /// <response code="200">The match was removed successfully.</response>
     /// <response code="400">The match could not be removed (e.g., reconciliation is already approved or match does not exist).</response>
     [HttpDelete("match/{matchId}")]
+    [Authorize(Policy = FinancePermissions.PerformBankReconciliation)]
     public async Task<ActionResult<ReconciliationMatchDto>> RemoveMatch(Guid matchId)
     {
         try
@@ -265,6 +272,7 @@ public class BankReconciliationController : ControllerBase
     /// Retrieves the transaction pairs already matched in a reconciliation.
     /// </summary>
     [HttpGet("{id}/matches")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<IEnumerable<ReconciliationMatchDto>>> GetMatches(Guid id)
     {
         try
@@ -281,6 +289,7 @@ public class BankReconciliationController : ControllerBase
     /// Creates and posts an explicit reconciliation adjustment through the central Finance posting engine.
     /// </summary>
     [HttpPost("{id}/adjustments/post")]
+    [Authorize(Policy = FinancePermissions.PerformBankReconciliation)]
     public async Task<ActionResult<ReconciliationAdjustmentDto>> CreateAndPostAdjustment(
         Guid id,
         [FromBody] CreateReconciliationAdjustmentDto dto,
@@ -301,6 +310,7 @@ public class BankReconciliationController : ControllerBase
     /// Finalizes a reconciliation after posted GL book balance agrees to the statement balance.
     /// </summary>
     [HttpPost("{id}/finalize")]
+    [Authorize(Policy = FinancePermissions.PerformBankReconciliation)]
     public async Task<ActionResult<BankReconciliationDto>> Finalize(Guid id, CancellationToken cancellationToken)
     {
         try
@@ -318,6 +328,7 @@ public class BankReconciliationController : ControllerBase
     /// Cancels an open reconciliation that has not been finalized.
     /// </summary>
     [HttpPost("{id}/cancel")]
+    [Authorize(Policy = FinancePermissions.PerformBankReconciliation)]
     public async Task<ActionResult<BankReconciliationDto>> Cancel(
         Guid id,
         [FromBody] CancelReconciliationDto dto,
@@ -362,6 +373,7 @@ public class BankReconciliationController : ControllerBase
     /// <response code="200">The reconciliation was approved and finalized successfully.</response>
     /// <response code="400">Approval failed (e.g., outstanding unmatched items, non-zero difference, or reconciliation not in valid state).</response>
     [HttpPost("{id}/approve")]
+    [Authorize(Policy = FinancePermissions.ApproveBankReconciliation)]
     public async Task<ActionResult<BankReconciliationDto>> Approve(Guid id)
     {
         try
@@ -400,6 +412,7 @@ public class BankReconciliationController : ControllerBase
     /// <response code="200">The reconciliation summary was computed and returned successfully.</response>
     /// <response code="404">No reconciliation exists with the specified identifier.</response>
     [HttpGet("{id}/summary")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<ReconciliationSummaryDto>> GetSummary(Guid id)
     {
         try
