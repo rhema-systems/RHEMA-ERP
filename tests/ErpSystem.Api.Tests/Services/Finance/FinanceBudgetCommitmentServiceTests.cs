@@ -779,6 +779,12 @@ public sealed class FinanceBudgetCommitmentServiceTests
         public void ApplyDown(MigrationBuilder builder) => Down(builder);
     }
 
+    private sealed class TestableDimensionRevisionMigration : AddDimensionAwareBudgetRevisions
+    {
+        public void ApplyUp(MigrationBuilder builder) => Up(builder);
+        public void ApplyDown(MigrationBuilder builder) => Down(builder);
+    }
+
     /// <summary>
     /// ApplicationDbContext currently embeds a constructor tenant in its cached EF model. A
     /// dedicated derived type gives this suite an unfiltered model so parallel tests with another

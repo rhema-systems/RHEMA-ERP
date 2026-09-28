@@ -1599,9 +1599,6 @@ namespace ErpSystem.Api.Services.Finance.AP
         {
             if (string.IsNullOrWhiteSpace(reason))
                 throw new ArgumentException("A void and reversal reason is required.", nameof(reason));
-            if (_financePostingEngine == null)
-                throw new InvalidOperationException("Central finance posting engine is not configured for AP invoice reversal.");
-
             if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
             {
                 return await _unitOfWork.ExecuteInStrategyAsync(
@@ -1630,6 +1627,13 @@ namespace ErpSystem.Api.Services.Finance.AP
                 if (await _unitOfWork.Repository<InventorySupplierReturnAllocation>().GetQueryable(x => x.TenantId == TenantId &&
                     x.OriginalVendorInvoiceId == invoice.Id && !x.IsDeleted).AnyAsync(cancellationToken))
                     throw new InvalidOperationException("This invoice retains a dispatched supplier return. Complete its governed return credit lifecycle; voiding the original invoice cannot release its receipt claims.");
+
+                if (invoice.Status == VendorInvoiceStatus.Voided)
+                    return await GetByIdAsync(invoice.Id, cancellationToken) ?? MapToDto(invoice);
+
+                if (invoice.JournalEntryId.HasValue && _financePostingEngine == null)
+                    throw new InvalidOperationException(
+                        "Central finance posting engine is not configured for AP invoice reversal.");
 
                 // A posted supplier debit note is the controlled correction of this exact AP
                 // recognition. Do not void its source invoice underneath that evidence; reverse
@@ -1674,6 +1678,31 @@ namespace ErpSystem.Api.Services.Finance.AP
                 {
                     throw new InvalidOperationException(
                         "Cannot void an invoice with active payment settlement. Reverse or void the posted payment first.");
+                }
+
+                if (!invoice.JournalEntryId.HasValue)
+                {
+                    if (invoice.Status is VendorInvoiceStatus.PartiallyPaid
+                        or VendorInvoiceStatus.Paid
+                        or VendorInvoiceStatus.Overdue)
+                        throw new InvalidOperationException(
+                            "An invoice with a settlement status but no posting journal requires Finance investigation before it can be voided.");
+
+                    if (invoice.Status is VendorInvoiceStatus.PendingApproval or VendorInvoiceStatus.OnHold)
+                    {
+                        var cancellation = await _workflowService.CancelWorkflowAsync(
+                            "VendorInvoice", invoice.Id, reason.Trim());
+                        if (!cancellation.Success || cancellation.Status != WorkflowInstanceStatus.Cancelled)
+                            throw new InvalidOperationException(
+                                cancellation.Message ?? "The active vendor invoice approval workflow could not be cancelled.");
+                    }
+
+                    await ReleaseVendorInvoiceBudgetAsync(
+                        invoice.Id,
+                        reservations: null,
+                        $"Vendor invoice was voided before posting: {reason.Trim()}",
+                        "PrePostVoid",
+                        cancellationToken);
                 }
 
                 FinancePostingResultDto? reversal = null;
@@ -1738,6 +1767,32 @@ namespace ErpSystem.Api.Services.Finance.AP
                         reversal.PostingEventId,
                         reason.Trim(),
                         cancellationToken);
+                }
+
+                if (reversal != null && invoice.JournalEntryId.HasValue)
+                {
+                    var consumedBudgetExists = await _unitOfWork.Repository<FinanceBudgetReservation>()
+                        .ExistsAsync(row => row.TenantId == TenantId
+                            && !row.IsDeleted
+                            && row.SourceDocumentType == VendorInvoiceBudgetSource
+                            && row.SourceDocumentId == invoice.Id
+                            && row.Status == "Consumed");
+                    if (consumedBudgetExists && _budgetCommitments == null)
+                        throw new InvalidOperationException(
+                            "Finance budget reversal evidence is not configured for this budget-controlled invoice.");
+                    if (consumedBudgetExists)
+                    {
+                        var originalEvent = await GetPostedInvoiceEventAsync(invoice, cancellationToken);
+                        await _budgetCommitments!.RecordActualReversalAsync(
+                            TenantId,
+                            VendorInvoiceBudgetSource,
+                            invoice.Id,
+                            invoice.JournalEntryId.Value,
+                            originalEvent.Id,
+                            reversal.JournalEntryId,
+                            reversal.PostingEventId,
+                            cancellationToken);
+                    }
                 }
 
                 if (invoice.Status != VendorInvoiceStatus.Voided)
@@ -2858,7 +2913,17 @@ namespace ErpSystem.Api.Services.Finance.AP
             CancellationToken cancellationToken)
         {
             if (_budgetCommitments == null)
+            {
+                var activeReservationExists = reservations?.Count > 0
+                    || await _unitOfWork.Repository<FinanceBudgetReservation>()
+                        .ExistsAsync(row => row.TenantId == TenantId && !row.IsDeleted
+                            && row.SourceDocumentType == VendorInvoiceBudgetSource
+                            && row.SourceDocumentId == invoiceId && row.Status == "Reserved");
+                if (activeReservationExists)
+                    throw new InvalidOperationException(
+                        "Finance budget commitments are not configured; the active reservation cannot be released safely.");
                 return;
+            }
             var active = reservations ?? await _unitOfWork.Repository<FinanceBudgetReservation>()
                 .GetQueryable(row => row.TenantId == TenantId && !row.IsDeleted
                     && row.SourceDocumentType == VendorInvoiceBudgetSource
