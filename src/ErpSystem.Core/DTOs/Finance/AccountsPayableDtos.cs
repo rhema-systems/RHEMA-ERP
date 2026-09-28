@@ -45,6 +45,7 @@ public class VendorInvoiceDto
     public decimal BalanceAmount { get; set; }
 
     public string CurrencyCode { get; set; } = string.Empty;
+    public string? CurrencyOverrideReason { get; set; }
     public decimal ExchangeRate { get; set; } = 1.0m;
     public Guid? ExchangeRateId { get; set; }
     public decimal BaseCurrencyAmount { get; set; }
@@ -140,6 +141,8 @@ public class VendorInvoiceCreateDto
     public DateTime? DueDate { get; set; }
 
     public string CurrencyCode { get; set; } = string.Empty;
+    [MaxLength(500)]
+    public string? CurrencyOverrideReason { get; set; }
     public decimal ExchangeRate { get; set; } = 1.0m;
     public Guid? ExchangeRateId { get; set; }
 
@@ -204,6 +207,8 @@ public class VendorInvoiceUpdateDto
     public DateTime? DueDate { get; set; }
 
     public string CurrencyCode { get; set; } = "USD";
+    [MaxLength(500)]
+    public string? CurrencyOverrideReason { get; set; }
     public decimal ExchangeRate { get; set; } = 1.0m;
     public Guid? ExchangeRateId { get; set; }
 

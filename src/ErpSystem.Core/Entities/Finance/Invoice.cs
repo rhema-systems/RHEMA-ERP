@@ -88,6 +88,9 @@ namespace ErpSystem.Core.Entities.Finance
         [MaxLength(3)]
         public string CurrencyCode { get; set; } = "USD";
 
+        [MaxLength(500)]
+        public string? CurrencyOverrideReason { get; set; }
+
         [Column(TypeName = "decimal(18,6)")]
         public decimal ExchangeRate { get; set; } = 1.0m;
 

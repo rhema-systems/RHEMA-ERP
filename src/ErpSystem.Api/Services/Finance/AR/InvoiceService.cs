@@ -217,6 +217,26 @@ namespace ErpSystem.Api.Services.Finance.AR
                 dto.InvoiceDate,
                 cancellationToken);
             var customer = counterparty.Partner;
+            var customerCurrency = await _unitOfWork.Repository<Customer>()
+                .GetQueryable(item => item.TenantId == TenantId && item.Id == customer.Id && !item.IsDeleted)
+                .Select(item => item.CurrencyCode)
+                .FirstOrDefaultAsync(cancellationToken);
+            var normalizedCustomerCurrency = NormalizeCurrency(customerCurrency, string.Empty);
+            var normalizedInvoiceCurrency = NormalizeCurrency(dto.CurrencyCode, normalizedCustomerCurrency);
+            var currencyOverrideReason = string.IsNullOrWhiteSpace(dto.CurrencyOverrideReason)
+                ? null
+                : dto.CurrencyOverrideReason.Trim();
+            if (!string.IsNullOrWhiteSpace(normalizedCustomerCurrency) &&
+                !string.Equals(normalizedInvoiceCurrency, normalizedCustomerCurrency, StringComparison.OrdinalIgnoreCase) &&
+                (currencyOverrideReason is null || currencyOverrideReason.Length < 10))
+            {
+                throw new InvalidOperationException(
+                    $"Customer currency is {normalizedCustomerCurrency}. A currency override reason of at least 10 characters is required for a {normalizedInvoiceCurrency} invoice.");
+            }
+            if (currencyOverrideReason?.Length > 500)
+                throw new InvalidOperationException("Currency override reason cannot exceed 500 characters.");
+            if (string.Equals(normalizedInvoiceCurrency, normalizedCustomerCurrency, StringComparison.OrdinalIgnoreCase))
+                currencyOverrideReason = null;
 
             var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId ?? counterparty.Profile.PaymentTermId, cancellationToken);
             var paymentTermsDays = paymentTerm?.DueDays ?? 30;
@@ -277,6 +297,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Notes = dto.Notes,
                 IsOpeningBalance = dto.IsOpeningBalance,
                 CurrencyCode = openingExchangeRate?.TransactionCurrency ?? dto.CurrencyCode,
+                CurrencyOverrideReason = currencyOverrideReason,
                 ExchangeRate = openingExchangeRate?.Rate ?? dto.ExchangeRate,
                 ExchangeRateId = openingExchangeRate?.ExchangeRateId,
                 PaymentTermsDays = paymentTermsDays,
@@ -484,6 +505,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 && string.Equals(existing.Notes ?? string.Empty, dto.Notes ?? string.Empty, StringComparison.Ordinal)
                 && existing.IsOpeningBalance == dto.IsOpeningBalance
                 && string.Equals(existing.CurrencyCode, dto.CurrencyCode, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(existing.CurrencyOverrideReason ?? string.Empty, dto.CurrencyOverrideReason?.Trim() ?? string.Empty, StringComparison.Ordinal)
                 && existing.DiscountAmount == dto.DiscountAmount
                 && existing.TaxGroupId == (dto.IsOpeningBalance ? null : dto.TaxGroupId)
                 && activeLines.Count == dto.LineItems.Count;
@@ -2568,6 +2590,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Reference = invoice.Reference,
                 IsOpeningBalance = invoice.IsOpeningBalance,
                 CurrencyCode = invoice.CurrencyCode,
+                CurrencyOverrideReason = invoice.CurrencyOverrideReason,
                 ExchangeRate = invoice.ExchangeRate,
                 ExchangeRateId = invoice.ExchangeRateId,
                 PaymentTermsDays = invoice.PaymentTermsDays,

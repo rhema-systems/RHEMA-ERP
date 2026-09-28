@@ -88,6 +88,7 @@ export interface VendorInvoice {
     paidAmount: number;
     balanceAmount: number;
     currencyCode: string;
+    currencyOverrideReason?: string;
     exchangeRate: number;
     exchangeRateId?: string;
     baseCurrencyAmount: number;
@@ -348,6 +349,7 @@ export interface VendorInvoiceCreateRequest {
     receivedDate?: string;
     dueDate?: string;
     currencyCode?: string;
+    currencyOverrideReason?: string;
     exchangeRate?: number;
     exchangeRateId?: string;
     paymentTermsDays?: number;
