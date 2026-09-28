@@ -5,6 +5,17 @@
 Chapter 1 is the shared background; chapters 2–15 are one per screen group; chapter 16 is what is
 only visible once they are all read. Start at chapter 16 if you want the conclusions first.
 
+> ## Record numbers renumbered 2026-09-28
+>
+> Every live demo number in this guide dropped by twelve. The recruitment-history seeder used to run
+> in the FIRST demo-seed pass on a fresh build, ahead of scenario 050, and took the first twelve
+> offers and vacancies (and REQ-2026-00001…) from the records the runbook quotes. It now waits for
+> the scenario (`HrDemoSeedOrchestrator`), so the scenario's records carry the low numbers:
+> OFR-000013 → **OFR-000001** (the runbook's draft), OFR-000015 → **OFR-000003**, OFR-000016 →
+> **OFR-000004**, OFR-000017 → **OFR-000005** (Rita Amponsah), OFR-000019 → **OFR-000007**
+> (Comfort Asiedu), VAC-000021 → **VAC-000009** (Estates Officer — Housing). The text below uses
+> the new numbers; the events it narrates are unchanged.
+>
 > ## Updated 2026-09-23 for round 4 of the demo feedback
 >
 > Round 4 (`docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-4-PLAN.md`) rebuilt four parts of the module
@@ -25,7 +36,7 @@ only visible once they are all read. Start at chapter 16 if you want the conclus
 > - **R4-5.1** ✅: the seeded test blend now shows (81, 67.5, 66), because the three candidates who sat
 >   the paper now hold the first degree the vacancy makes mandatory;
 > - **R4-10.1** ✅: TDC's is now the only active check template, so the fallback works, and the four
->   live demo offers raised before the fix have TDC's checklist too. Rita Amponsah's (OFR-000017) is
+>   live demo offers raised before the fix have TDC's checklist too. Rita Amponsah's (OFR-000005) is
 >   now *Conditionally Accepted*, as the demo story has it, and scenario 050 no longer leaves the
 >   runbook's draft offer without a checklist on a rebuild;
 > - **R4-5.2** ✅, fixed properly by **round 4 lane Q**: that degree criterion matched the *word*
@@ -1553,7 +1564,7 @@ application at once. The blend averages every scored row. That is why a re-sit *
 instead of adding one: averaging a re-sit with the attempt it replaced would penalise the candidate
 for whatever went wrong the first time.
 
-> **On the demo database the blend now shows (R4-5.1, fixed in the data 2026-09-24).** VAC-000021,
+> **On the demo database the blend now shows (R4-5.1, fixed in the data 2026-09-24).** VAC-000009,
 > *Estates Officer — Housing*, carries the seeded aptitude paper at a **30%** weight. Three candidates
 > sat it, scoring 95%, 50% and 45%. Until 2026-09-24 **all three scored 0**: the vacancy's mandatory
 > criterion *A relevant first degree* failed for each of them, because they had **no qualifications
@@ -1575,9 +1586,9 @@ for whatever went wrong the first time.
 >
 > | | Now |
 > |---|---|
-> | **R4-5.1** | ✅ **Fixed in the data, 2026-09-24.** *Was:* the demo's test blend was invisible. Every candidate who sat the seeded paper on VAC-000021 failed the mandatory degree criterion for want of any qualification on file, and scored 0 whatever their paper said. *Now:* scenario 052 (step 3b) records a first degree for each of the three and re-scores them, giving 81, 67.5 and 66. A second run writes nothing. |
+> | **R4-5.1** | ✅ **Fixed in the data, 2026-09-24.** *Was:* the demo's test blend was invisible. Every candidate who sat the seeded paper on VAC-000009 failed the mandatory degree criterion for want of any qualification on file, and scored 0 whatever their paper said. *Now:* scenario 052 (step 3b) records a first degree for each of the three and re-scores them, giving 81, 67.5 and 66. A second run writes nothing. |
 > | **R4-5.2** | ✅ **Fixed by round 4 lane Q, 2026-09-24 (the user's choice: the proper fix).** *Was:* the seeded criterion "A relevant first degree" could not recognise a first degree. `TdcDemoLivePipelineBackfillSeeder` wrote it as the word "Degree", matched by containment, and no candidate qualification on the tenant contained it. The root cause was the engine: no criterion type compared qualification levels. *Now:* *Education level* compares RANKS on the qualification ladder (§ 5.8). Every candidate qualification carries a Level, required for Education at both doors. The seeder writes *Education level, at least Bachelor's*, and the six live-pipeline criteria on UAT were converted through the API. The 186-entry catalogue was placed on the ladder by scenario 008, which left five ambiguous entries for HR: Associate Degree, the three clinical doctorates and the GCSE. The 165 typed Education rows on UAT were filled from their names: 110 Bachelor's, 37 Master's and 5 HND, with 13 that cannot be read (all the fixture "Something else entirely") left empty. |
-> | **R4-5.3** | ✅ **Fixed 2026-09-24 (the user's call), in the rebuild script.** *Was:* on a rebuilt database the blend was not scored. Scenario 052 finalises the scripts, and scores them, before VAC-000021 has any criteria, because the backfill seeder runs in the second seeder pass after every scenario. *Now:* `scripts/Invoke-UatDemoScenarios.ps1` runs scenario 052 once more after that pass (step 4b). The second run re-scores what it finds unscored and writes nothing else. ⚠ Parse-checked, not yet exercised by a full rebuild. |
+> | **R4-5.3** | ✅ **Fixed 2026-09-24 (the user's call), in the rebuild script.** *Was:* on a rebuilt database the blend was not scored. Scenario 052 finalises the scripts, and scores them, before VAC-000009 has any criteria, because the backfill seeder runs in the second seeder pass after every scenario. *Now:* `scripts/Invoke-UatDemoScenarios.ps1` runs scenario 052 once more after that pass (step 4b). The second run re-scores what it finds unscored and writes nothing else. ⚠ Parse-checked, not yet exercised by a full rebuild. |
 >
 > **✅ All eight closed, 2026-09-15 → 16.** Read the findings as history.
 >
@@ -2482,7 +2493,7 @@ Scenario `052-recruitment-tests` seeded TDC's *Numerical and Verbal Reasoning* p
 - **TEST-0045**: 40 minutes, pass mark 50%, one attempt, options shuffled;
 - three sections, eight questions, 20 marks: three single-choice, two numeric, one true/false, one
   multi-select and one written;
-- on **VAC-000021**, *Estates Officer — Housing*, weighted at **30%**.
+- on **VAC-000009**, *Estates Officer — Housing*, weighted at **30%**.
 
 Three scripts are entered as sat on paper and marked. Each candidate also holds the first degree the
 vacancy makes mandatory (step 3b of the scenario, added 2026-09-24), so the blend shows on the
@@ -2509,7 +2520,7 @@ That is why the scenario re-scores the three above one at a time.
 
 ⚠ **Comfort Asiedu is in two stories.** Scenario 050 § 20 uses the first applicant on this vacancy
 for its *hire starting soon*. So the same application that sat the paper and scores 81 also carries
-an accepted offer, OFR-000019, and a hire record, while its status still reads *New*. The
+an accepted offer, OFR-000007, and a hire record, while its status still reads *New*. The
 screening screen and the hires list therefore show the same person at opposite ends of the
 pipeline. Recorded 2026-09-24, not changed.
 
@@ -3199,7 +3210,7 @@ guarantees the outcome it exists to avoid."*
 >
 > | | Now |
 > |---|---|
-> | **R4-10.1** | ✅ **Fixed 2026-09-24, in the data and in the scenario that builds it.** *Was:* no demo offer got a check set. The fallback needs the tenant's *single* active template, and UAT held **44**: the demo's *TDC Standard Pre-Employment Checks* plus 43 harness fixtures (12 *"R4H Standard checks …"*, 31 *"E2E RecD Template …"*). No demo post names a template either, because the position form's picker never saved until round 4 lane O fixed it. So a demo offer printed no checklist, and **Accept conditionally** was refused. *Now:* the 43 fixtures are switched off (backup: `dev-harness/hr-recruitment/fixture-check-templates-retired-2026-09-24.csv`), and TDC's is the only active template, so every offer raised from now on starts from it. The four scripts that made the fixtures now switch theirs off however they end: lane H's suite, slice-d, `run-g` and lane I's. **The four live demo offers raised before the fix were given TDC's checklist the same day** (the user's call): OFR-000013 (Draft), OFR-000015 (Sent), OFR-000016 (Negotiating) and OFR-000017 (Sent). Each got one set of five items, through the real doors, via `dev-harness/hr-recruitment/repair-demo-offer-checklists.mjs`, which writes nothing on a second run. OFR-000017's letter now prints *Conditions Precedent* with the five checks. **Rita Amponsah's offer (OFR-000017) was then conditionally accepted the same day** (the user's call), as scenario 050 always meant: through 050's door, as its persona and in its own words, via `dev-harness/hr-recruitment/record-demo-conditional-acceptance.mjs`, which writes nothing on a second run. It sent no email and raised no notification; both were checked. Left at *Sent*, it would have expired on 30 September, and the door refuses an expired offer. **A rebuilt database was not free of the problem either, as this row first said.** Scenario 050 raises the runbook's draft (OFR-000013) *before* it creates TDC's template, so on a fresh build that draft had no checklist. 050 now gives it one once the template exists. It also used to skip any offer that already existed, so a refused step could never be finished by a re-run. It now carries each live offer on to its planned state and names any that falls short in its summary. |
+> | **R4-10.1** | ✅ **Fixed 2026-09-24, in the data and in the scenario that builds it.** *Was:* no demo offer got a check set. The fallback needs the tenant's *single* active template, and UAT held **44**: the demo's *TDC Standard Pre-Employment Checks* plus 43 harness fixtures (12 *"R4H Standard checks …"*, 31 *"E2E RecD Template …"*). No demo post names a template either, because the position form's picker never saved until round 4 lane O fixed it. So a demo offer printed no checklist, and **Accept conditionally** was refused. *Now:* the 43 fixtures are switched off (backup: `dev-harness/hr-recruitment/fixture-check-templates-retired-2026-09-24.csv`), and TDC's is the only active template, so every offer raised from now on starts from it. The four scripts that made the fixtures now switch theirs off however they end: lane H's suite, slice-d, `run-g` and lane I's. **The four live demo offers raised before the fix were given TDC's checklist the same day** (the user's call): OFR-000001 (Draft), OFR-000003 (Sent), OFR-000004 (Negotiating) and OFR-000005 (Sent). Each got one set of five items, through the real doors, via `dev-harness/hr-recruitment/repair-demo-offer-checklists.mjs`, which writes nothing on a second run. OFR-000005's letter now prints *Conditions Precedent* with the five checks. **Rita Amponsah's offer (OFR-000005) was then conditionally accepted the same day** (the user's call), as scenario 050 always meant: through 050's door, as its persona and in its own words, via `dev-harness/hr-recruitment/record-demo-conditional-acceptance.mjs`, which writes nothing on a second run. It sent no email and raised no notification; both were checked. Left at *Sent*, it would have expired on 30 September, and the door refuses an expired offer. **A rebuilt database was not free of the problem either, as this row first said.** Scenario 050 raises the runbook's draft (OFR-000001) *before* it creates TDC's template, so on a fresh build that draft had no checklist. 050 now gives it one once the template exists. It also used to skip any offer that already existed, so a refused step could never be finished by a re-run. It now carries each live offer on to its planned state and names any that falls short in its summary. |
 > | **R4-10.2** | **An offer with no expiry date never expires.** The sweep expires `Sent` offers past their expiry, and 21 `Sent` offers on UAT have none. Offers raised since lane G are proposed an expiry, and HR can still clear it. |
 > | **R4-10.3** | **Two defaults are thinner than the plan hoped.** Annual leave comes from the annual leave type's standard days, not a grade rule, because none exists. `NdaRequired` has no source at all. Both are said on screen rather than guessed. |
 > | **R4-10.4** | **The offer-response token is stored in clear**, like the interview confirmations (R4-9.2). Procurement's hashed design is the model; the test engine already follows it. |

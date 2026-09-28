@@ -362,10 +362,22 @@ public class HrDemoSeedOrchestrator
             // scenario first, and this step also assigns a recruiter to the live vacancies the
             // scenario leaves unassigned — which is what the ageing and recruiter-load charts group by.
             // Probed on a FILLED vacancy: the scenario never fills one.
+            //
+            // ⚠ "Done" is not enough of a guard — it must also wait until the scenario HAS run. On a
+            // freshly built database there is no Filled vacancy in the FIRST pass either, so this step
+            // ran there, before scenario 050: it took REQ-2026-00001… and VAC-000001/2 from the
+            // records the runbook quotes, wrote no scorecards (no question bank yet), backfilled no
+            // dossiers for the scenario's applicants, and closed the check-provider guard below before
+            // the scenario's check items existed. Six runbook counts failed on every fresh build
+            // (2026-09-18 and 2026-09-28). The question bank is the scenario's own output that this
+            // seeder depends on (it warns without one), so its absence means "not yet", and the step
+            // is skipped until the second pass.
             "Recruitment history — the closed 2026 cycles behind the analytics charts",
-            ct => _context.Set<JobVacancy>().IgnoreQueryFilters()
-                          .AnyAsync(v => v.TenantId == tenantId && !v.IsDeleted
-                                      && v.VacancyStatus == ErpSystem.Core.Enums.JobVacancyStatus.Filled, ct),
+            async ct => await _context.Set<JobVacancy>().IgnoreQueryFilters()
+                                .AnyAsync(v => v.TenantId == tenantId && !v.IsDeleted
+                                            && v.VacancyStatus == ErpSystem.Core.Enums.JobVacancyStatus.Filled, ct)
+                        || !await _context.Set<JobInterviewQuestionDetail>().IgnoreQueryFilters()
+                                .AnyAsync(q => q.TenantId == tenantId && !q.IsDeleted, ct),
             ct => new TdcDemoRecruitmentHistorySeeder(_context, Log<TdcDemoRecruitmentHistorySeeder>()).SeedAsync(ct)),
 
         new SeedStep(
