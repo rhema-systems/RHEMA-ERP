@@ -9,10 +9,11 @@ function Assert-Test {
 }
 
 $buildPath = Join-Path $repositoryRoot 'scripts\Build-RhemaRelease.ps1'
+$recoveryPath = Join-Path $repositoryRoot 'scripts\Complete-RhemaReleasePackaging.ps1'
 $deployPath = Join-Path $repositoryRoot 'scripts\Deploy-RhemaVps.ps1'
 $remotePath = Join-Path $repositoryRoot 'scripts\vps\Invoke-RhemaVpsRemote.ps1'
 $workflowPath = Join-Path $repositoryRoot '.github\workflows\ci-cd.yml'
-foreach ($path in @($buildPath, $deployPath, $remotePath)) {
+foreach ($path in @($buildPath, $recoveryPath, $deployPath, $remotePath)) {
     $tokens = $null; $errors = $null
     [void][Management.Automation.Language.Parser]::ParseFile(
         $path, [ref]$tokens, [ref]$errors)
@@ -58,6 +59,16 @@ foreach ($contract in @('CleanBuild', '.next-production', "'cache'", 'npm.cmd', 
 Assert-Test $build.Contains(
     "Select-String -Pattern 'localhost:5000|localhost:53484|localhost:7095'") `
     'Compiled URL validation leaves -Pattern without its argument in Windows PowerShell.'
+Assert-Test $build.Contains('[string]::Equals(') `
+    'Frontend ZIP validation still suffix-matches dependency package manifests.'
+
+$recovery = Get-Content $recoveryPath -Raw
+foreach ($contract in @('ArtifactSourceCommit', 'FrontendBuildCommit',
+        'Application build inputs changed', 'packagingRecovered',
+        'RELEASE_BUILD_PASSED|')) {
+    Assert-Test $recovery.Contains($contract) `
+        "Compressed release recovery is missing contract: $contract"
+}
 
 $deploy = Get-Content $deployPath -Raw
 foreach ($contract in @('DeployOnly', 'ArtifactDirectory',
