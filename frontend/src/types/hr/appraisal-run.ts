@@ -18,14 +18,17 @@
  * **Scoring model.** Every leg scores the same frozen snapshot. When a cycle generates its
  * appraisals it copies the template's items into `PerformanceAppraisalCriterionConfig` rows
  * with their weights and grade bands, so later edits to the template cannot move a scored
- * appraisal underneath it. The unit everyone scores is therefore `templateItemId`, and each
- * leg's context read returns the same section → item tree with its own scores attached.
+ * appraisal underneath it. A template's **goals section** holds no items: on each appraisal it is
+ * filled with one row per goal in the employee's locked set. The unit everyone scores is therefore
+ * the criterion — `criterionKey`, a template row's template item or a goal row's own snapshot row —
+ * and each leg's context read returns the same section → item tree with its own scores attached.
  *
  * Enums serialize as strings, so every union below is the enum member name.
  */
 import type { AuditFields } from './common';
 import type {
   AppraisalCycleStatus,
+  AppraisalSectionKind,
   AppraisalSettings,
   PeerNominationMode,
 } from './appraisal';
@@ -89,7 +92,13 @@ export type GoalProgressStatus =
 /** How a KPI item is measured. `Range` scores against a min/max band rather than a single target. */
 export type MeasurementType = 'NumericAbsolute' | 'PercentageTarget' | 'Boolean' | 'Range';
 
-export type KpiTargetSource = 'Goal' | 'KpiDefinition' | 'None';
+/** Where a measured row's target came from: the employee's goal, or the template item's default. */
+export type KpiTargetSource = 'Goal' | 'Template';
+
+/** How a row is scored: an actual against a target, or a score on the grade bands. */
+export type CriterionScoringMethod = 'Measured' | 'Rated';
+
+export type { AppraisalSectionKind };
 
 /** The role the workflow service answers editability questions for. Lower-cased on the wire. */
 export type AppraisalEditRole = 'employee' | 'manager' | 'peer' | 'hr';
@@ -266,15 +275,21 @@ export interface EvaluationGradeRange {
 }
 
 /**
- * One scoreable line. `templateItemId` is the key every leg scores against and the key every
- * save is posted under.
+ * One scoreable line. `criterionKey` is what every leg scores against and what a form keys its rows
+ * by: the template item for a template row, the snapshot row for a goal row, which has no template
+ * item. A save names the row by both of its ids (`toItemScores`).
  *
- * An item is KPI-driven when `kpiDefinitionId` is set — those take an *actual value* measured
- * against `kpiTargetValue`, not a 0–100 score. Everything else takes the 0–100 score.
+ * `scoringMethod` decides the input: a **measured** row — a KPI, or a goal with a target — takes an
+ * *actual value* against `kpiTargetValue`; a **rated** one takes a score on its grade bands.
  */
 export interface EvaluationItem {
-  templateItemId: string;
+  /** Null on a goal row. */
+  templateItemId: string | null;
   criterionConfigId: string;
+  criterionKey: string;
+  scoringMethod: CriterionScoringMethod;
+  /** The goal a goal row scores; null on a template row. */
+  employeeGoalId?: string | null;
   itemName: string;
   itemDescription?: string | null;
   customQuestion?: string | null;
@@ -337,6 +352,8 @@ export interface PeerEvaluationItem extends EvaluationItem {
 interface EvaluationSectionBase {
   sectionId: string;
   sectionName: string;
+  /** A fixed section, or the employee's goals. */
+  kind: AppraisalSectionKind;
   sectionDescription?: string | null;
   displayOrder: number;
   sectionWeight: number;
@@ -364,15 +381,19 @@ export interface SelfEvaluationCustomQuestion {
 }
 
 /**
- * One scored item on the way back to the server. Send `numericScore` for competency and
- * custom-question items, `actualValue` for KPI-driven ones.
+ * One scored item on the way back to the server. Send `numericScore` for a rated row and
+ * `actualValue` for a measured one. The row is named by its template item and/or its snapshot row;
+ * a goal row has only the snapshot row.
  *
  * ⚠ Only send rows that actually carry a value. A submit (not a draft) is refused if any row
  * arrives with both fields null, because the server reads the payload as "these are the items
  * I have scored" rather than as the whole form.
  */
 export interface EvaluationItemInput {
-  templateItemId: string;
+  /** The template item — null on a goal row. */
+  templateItemId?: string | null;
+  /** The snapshot row — the only id a goal row has. */
+  criterionConfigId?: string | null;
   numericScore?: number | null;
   actualValue?: number | null;
   notes?: string | null;
@@ -442,7 +463,12 @@ export interface SelfEvaluationResult {
 // ── The read-only submitted view ─────────────────────────────────────────────────
 
 export interface SubmittedEvaluationItem {
-  templateItemId: string;
+  /** Null on a goal row. */
+  templateItemId: string | null;
+  criterionConfigId?: string | null;
+  criterionKey: string;
+  /** Measured (an actual against a target) or rated — a goal row carries no KPI id to tell by. */
+  scoringMethod?: CriterionScoringMethod;
   itemName: string;
   itemDescription?: string | null;
   kpiDefinitionId?: string | null;
@@ -459,6 +485,7 @@ export interface SubmittedEvaluationItem {
 
 export interface SubmittedEvaluationSection {
   sectionName: string;
+  kind?: AppraisalSectionKind;
   sectionWeight: number;
   displayOrder: number;
   items: SubmittedEvaluationItem[];
@@ -547,6 +574,7 @@ export interface ManagerEvaluationContext {
   appealRemandDeadline?: string | null;
   isRemandDeadlineExceeded: boolean;
   appealedKpiIds: string[];
+  /** The appealed criteria's keys — compare with `criterionKey` (a goal row's is its snapshot row). */
   appealedTemplateItemIds: string[];
   managerEvaluatorEvaluationId?: string | null;
   isManagerEvaluationSubmitted: boolean;
@@ -753,6 +781,8 @@ export interface ManagerPeerEvaluationReview {
 
 export interface CompetencyScoreSummary {
   criteriaName: string;
+  /** One of the employee's goals, rated — listed with the competencies. */
+  isGoal?: boolean;
   description?: string | null;
   numericScore?: number | null;
   weight: number;
@@ -762,6 +792,8 @@ export interface CompetencyScoreSummary {
 
 export interface KpiScoreSummary {
   kpiName: string;
+  /** One of the employee's goals, measured — listed with the KPIs. */
+  isGoal?: boolean;
   description?: string | null;
   targetValue?: number | null;
   actualValue?: number | null;
@@ -781,12 +813,14 @@ export interface EvaluationSummary {
 
 export interface PeerCompetencyScoreSummary {
   criteriaName: string;
+  isGoal?: boolean;
   averageScore?: number | null;
   responseCount: number;
 }
 
 export interface PeerKpiScoreSummary {
   kpiName: string;
+  isGoal?: boolean;
   averageTarget?: number | null;
   averageActual?: number | null;
   responseCount: number;
@@ -972,8 +1006,16 @@ export interface UpdateCheckInGoalUpdate extends CreateCheckInGoalUpdate {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────────
 
-/** True when the item takes an actual value measured against a target rather than a 0–100 score. */
-export const isKpiItem = (item: EvaluationItem): boolean => Boolean(item.kpiDefinitionId);
+/**
+ * True when the row takes an actual value measured against a target rather than a score — by its
+ * own flag, which every goal row carries. A goal row has no KPI definition, so the KPI id cannot
+ * decide it (a goal without a target is rated).
+ */
+export const isMeasuredItem = (item: EvaluationItem): boolean =>
+  item.scoringMethod ? item.scoringMethod === 'Measured' : Boolean(item.kpiDefinitionId);
+
+/** True for one of the employee's goals rather than a template item. */
+export const isGoalItem = (item: EvaluationItem): boolean => Boolean(item.employeeGoalId);
 
 /**
  * Resolves a 0–100 score to its grade band name, matching the server's own resolution.
@@ -1028,26 +1070,34 @@ export function scaleTop(ranges: EvaluationGradeRange[]): number {
 }
 
 /**
- * Turns a leg's sections into the payload the save endpoints want: only the items that carry
- * a value, keyed by `templateItemId`.
+ * Turns a leg's rows into the payload the save endpoints want: only the rows that carry a value,
+ * each named by both of its ids — its template item (none on a goal row) and its snapshot row.
+ * `values` is keyed by `criterionKey`; pass only the rows this evaluator may score.
  *
  * This filtering is required, not a nicety — a submit is refused if any row arrives with both
- * `numericScore` and `actualValue` null.
+ * `numericScore` and `actualValue` null. It used to be keyed by template item alone, so every goal
+ * row (which has none) collided under one empty key and none could be saved.
  */
 export function toItemScores(
+  items: EvaluationItem[],
   values: Record<string, { numericScore?: number | null; actualValue?: number | null; notes?: string | null; evidenceLinks?: string | null }>,
 ): EvaluationItemInput[] {
-  return Object.entries(values)
-    .filter(([, v]) => v && (v.numericScore !== null && v.numericScore !== undefined
-      ? true
-      : v.actualValue !== null && v.actualValue !== undefined))
-    .map(([templateItemId, v]) => ({
-      templateItemId,
-      numericScore: v.numericScore ?? null,
-      actualValue: v.actualValue ?? null,
-      notes: v.notes?.trim() ? v.notes : null,
-      evidenceLinks: v.evidenceLinks?.trim() ? v.evidenceLinks : null,
-    }));
+  return items
+    .filter((item) => {
+      const v = values[item.criterionKey];
+      return !!v && (v.numericScore != null || v.actualValue != null);
+    })
+    .map((item) => {
+      const v = values[item.criterionKey];
+      return {
+        templateItemId: item.templateItemId ?? null,
+        criterionConfigId: item.criterionConfigId || null,
+        numericScore: v.numericScore ?? null,
+        actualValue: v.actualValue ?? null,
+        notes: v.notes?.trim() ? v.notes : null,
+        evidenceLinks: v.evidenceLinks?.trim() ? v.evidenceLinks : null,
+      };
+    });
 }
 
 /** Counts scoreable items and how many carry a value — the "12 of 18 scored" progress line. */
@@ -1058,9 +1108,9 @@ export function countScored(
 ): { total: number; scored: number } {
   const scoreable = items.filter(isScoreable);
   const scored = scoreable.filter((item) => {
-    const v = values[item.templateItemId];
+    const v = values[item.criterionKey];
     if (!v) return false;
-    return isKpiItem(item)
+    return isMeasuredItem(item)
       ? v.actualValue !== null && v.actualValue !== undefined
       : v.numericScore !== null && v.numericScore !== undefined;
   });

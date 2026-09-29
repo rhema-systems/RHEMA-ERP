@@ -373,6 +373,12 @@ export interface CopyAppraisalTemplate {
 
 // ── Template sections and items ──────────────────────────────────────────────────
 
+/**
+ * What fills a template section: its own items (`Fixed`), or — on each appraisal — the employee's
+ * locked goals (`EmployeeGoals`). A template has at most one goals section, and it takes no items.
+ */
+export type AppraisalSectionKind = 'Fixed' | 'EmployeeGoals';
+
 /** A weighted group of items. Section weights must total 100 before a template activates. */
 export interface AppraisalTemplateSection extends AuditFields {
   tenantId: string;
@@ -382,6 +388,7 @@ export interface AppraisalTemplateSection extends AuditFields {
   description?: string | null;
   displayOrder: number;
   weight: number;
+  kind: AppraisalSectionKind;
 }
 
 export interface CreateAppraisalTemplateSection {
@@ -390,6 +397,8 @@ export interface CreateAppraisalTemplateSection {
   description?: string | null;
   displayOrder: number;
   weight: number;
+  /** Fixed when omitted; an update that omits it keeps the section's kind. */
+  kind?: AppraisalSectionKind;
 }
 
 export type UpdateAppraisalTemplateSection = CreateAppraisalTemplateSection & { id: string };

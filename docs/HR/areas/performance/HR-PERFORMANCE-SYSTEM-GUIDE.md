@@ -6,6 +6,9 @@
 **Updated 2026-09-29** for the performance closure's lane A (scoring and the settle path): Rule 2, § 1.5, P-6/P-39/P-40, chapter 30's commit and chapter 31's finalise wording, Appendix C. **And for lane P** (privacy and access): chapter 16's cascade rows and P-19, chapter 21's private notes, check-in rules and P-27, chapter 25's plan authorship, chapter 26's outcome release, chapter 28's nominations, chapter 29's Evidence tab, chapter 30's panel reads, chapter 36's PIP rules and the review meeting's right of reply. **And for lane B1** (one gate evaluator): Rule 3, Rule 9, § 1.6, chapter 4's P-3 and P-62–P-70, and chapters 23, 26–33, 37 and 38 — every step a write waits for, as the gates now hold it. **And for lane L-a** (the goal set's governance): § 1.4, § 1.7 and chapters 17–19 and 38 — a lock that freezes what a goal is and not its year, *lock goal set*, the approved-goal edit rule and *Send back*. **And for lane L-b** (goal rows and scoring): § 1.4 and
 chapters 8, 19, 24, 27–31, 33 and 38 — a template's goals section, filled by each employee's locked
 goals — and, found on the way, the remand's dead end (P-71: chapters 29 and 33, Appendices C and E).
+**And for lane L-c** (the screens): § 1.4; chapter 8's section kind, and P-8, now fixed; the *Lock
+set* button in chapters 18 and 19; chapters 27–31 and 33, where the forms, calibration, the sign-off
+and HR's appeal decision handle goal rows; and Appendix C, whose Rule 8 row had borrowed P-8's number.
 **The database was rebuilt on 2026-09-29**: Rule 2, Rule 9, the demo tables and the Efua arithmetic give its figures (Efua 88.56, Cynthia 87.00, Efua's appeal window to 6 October). The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
 **Seventh in the series**, after Recruitment, Employees, Leave, Attendance & Time, Company Schedule and Staff Travel.
 
@@ -491,7 +494,9 @@ a target, or a score on the grade bands.
 > overall grade scale. The year-end section takes the goals scoped to the full cycle, H2 or Q4; a goal
 > scoped to an earlier quarter or half (Q1, Q2, H1, Q3) is appraised at that period's interim review
 > and is not counted again at year end. **No template on the demo database has a goals section**, so
-> none of this shows in the demo; the template editor gains its control with lane L-c.
+> none of this shows in the demo. Since lane L-c the screens carry it: the template editor asks what
+> fills each section (chapter 8), the manager locks a set from the team desk (chapter 19), and the
+> forms, calibration and the HR review show each goal row with a **Goal** badge (chapters 27–31).
 **`TeamGovernanceStatus`** — `NotStarted`, `InProgress`, `AwaitingApproval`, `InvalidWeight`,
 `StructurallyComplete`. Derived from counts and weights only — never from anything a user typed.
 
@@ -1331,7 +1336,7 @@ Four tabs: **Structure**, **Details** (scope + approval dates), **Cycles (1)**, 
 | | Project Delivery Timeliness | KPI | 100 (0–120) | 50 | 5 |
 | Core Competencies (40) | Communication | Criterion | — | 50 | 5 |
 | | Teamwork | Criterion | — | 50 | 5 |
-| | *"What did you contribute this year that you are most proud of, and what support do you need from the Corporation next year?"* | Question | — | **0** | **0** |
+| | *"What did you contribute this year that you are most proud of, and what support do you need from the Corporation next year?"* | Question | — | **0** | *Not scored* |
 
 ### ▶ Walk it
 
@@ -1350,7 +1355,7 @@ Four tabs: **Structure**, **Details** (scope + approval dates), **Cycles (1)**, 
    section, and every scored line has grade bands. There is a fourth the server enforces — you cannot
    put the same criterion on a form twice, anywhere on it."*
 
-4. Point at the free-text question, weight **0**, bands **0**.
+4. Point at the free-text question: weight **0**, and *Not scored* where the bands would be.
 
    💬 *"And that last line is the one people ask for: a question with no score. It is weighted zero on
    purpose — the scored lines already total a hundred, so a weighted question would change every number
@@ -1383,18 +1388,30 @@ Four tabs: **Structure**, **Details** (scope + approval dates), **Cycles (1)**, 
 *Draft* cycle in some readings, because the assignment rows do not carry a cycle status and the client
 treats any live assignment as a freeze. Erring this way shows the reason rather than letting the write
 fail.
-**P-8.** The free-text question has **0 grade bands**, which is one of the three activation rules. The
+~~**P-8.** The free-text question has **0 grade bands**, which is one of the three activation rules. The
 template is already Approved and active so nothing is blocked today, but a re-activation attempt could
-be refused on it.
+be refused on it.~~ **Fixed 2026-09-29** (closure lane L-c): a free-text question with **weight 0** is
+never scored, so activation and submit-for-approval no longer ask it for bands — the demo template's
+question is weight 0 — and the editor shows *Not scored* where it used to flag the bands missing. A
+**weighted** question still needs them. The refusal names each item by its criterion, KPI or question;
+a criterion or KPI item used to be named by its id.
 **P-9.** `Delete` renders and 403s for `hr.head`.
 
 > **Changed 2026-09-29** (performance closure lane L-b). **A section can be a goals section** (§ 1.4).
 > The API takes a section *kind* and holds three rules: a template has one goals section; a goals
 > section takes no items (they would share its weight with the goals and count the section twice); and
 > a section with items cannot become one. A copy keeps the kind, and activation counts an empty goals
-> section complete. The editor has no control for the kind until lane L-c, so every section made on
-> this screen is fixed. A section write that breaks a rule — these three, or the template being on a
+> section complete. A section write that breaks a rule — these three, or the template being on a
 > live cycle — now answers **409 with the reason**; it used to be a bare 500.
+>
+> **Changed 2026-09-29** (performance closure lane L-c). **The section dialog asks *What fills this
+> section*:** *This template's items* — competencies, shared KPIs with one target for everyone, and
+> questions — or *Each employee's locked goals*, which takes no items: every appraisal gets one row per
+> goal the manager locked, weighted by the goals' own weights. The second choice is greyed out, with
+> the reason, when the template already has a goals section or the section being edited holds items.
+> A goals section's card carries an **Employee goals** badge and no *Add item*, and says how it fills;
+> a note above the structure explains the two kinds — *personal targets are goals, not template KPIs*.
+> The live checks leave an empty goals section alone and flag one that holds items.
 
 ---
 
@@ -2239,8 +2256,8 @@ states.
 > **Changed 2026-09-29** (performance closure lane L-a, decisions D-29 and D-30).
 > - **A lock is a flag, not a status.** It freezes what the goal is — title, measure, target, weight,
 >   period, success criteria, owner — and not its year: progress still moves a locked goal.
-> - **The manager locks the whole set** once it is complete (`POST api/EmployeeGoals/lock-set`; the
->   manager's button on the team desk comes with lane L-c): every live goal approved, the count
+> - **The manager locks the whole set** once it is complete (`POST api/EmployeeGoals/lock-set`; since
+>   lane L-c, the **Lock set** button on the team desk, chapter 19): every live goal approved, the count
 >   inside the cycle's minimum and maximum, the weights adding to 100. Each refusal names what is
 >   missing — *"the goal weights add up to 90%, not 100%"*. A rejected goal is not part of the set.
 > - **What an approved goal measures cannot be edited.** Its description, priority, dates and
@@ -2408,9 +2425,8 @@ Unbalanced weights.
 > count read the lock itself** — the goal's *Locked* flag — and no longer a status nothing writes. **A
 > locked goal can be overdue**: it is still running, so it stays on the Overdue tab and in the counts
 > once its due date passes (the old lock's status used to hide it). **The weight total leaves rejected
-> goals out**, as the set lock does — a rejected goal is not part of the set. The manager's **Lock goal
-> set** button on this desk comes with lane L-c; until then the set is locked through the API or by HR's
-> advance past goal setting (chapter 38).
+> goals out**, as the set lock does — a rejected goal is not part of the set. The manager locks the set
+> from this desk (lane L-c, below), or HR's advance past goal setting locks it (chapter 38).
 >
 > **Changed 2026-09-29** (performance closure lane L-b). **Where the template has a goals section, the
 > lock fills it.** Locking a goal or the whole set — or HR's advance past goal setting — writes one row
@@ -2418,6 +2434,16 @@ Unbalanced weights.
 > with any *draft* score on it. Once a goal's row is scored in a **submitted** evaluation the section
 > is settled: the unlock is refused — *"This goal has been scored in its appraisal, so it cannot be
 > unlocked."* — and a later lock adds no row.
+>
+> **Changed 2026-09-29** (performance closure lane L-c). **The Overview tab has a *Lock set* button**
+> on each report whose verdict is **Structurally complete**. It asks first — *"Lock this goal set?"* —
+> and says what the lock means: the goals become fixed for the year (title, measure, target and
+> weight), progress and check-ins still move them, and a goals section on the form is filled from the
+> set. A report whose every live goal is locked reads **Set locked** instead. The verdict does not
+> check the cycle's minimum and maximum goal count; the lock does (chapter 18), and a refusal's toast
+> names what is missing. A rejected goal keeps the verdict at *In progress*, so the button waits until
+> the employee reworks or deletes it — although the lock itself, like HR's advance, leaves a rejected
+> goal out.
 
 **The governance verdicts** (`TeamGovernanceStatus`), each with a hint under the badge:
 
@@ -2441,9 +2467,10 @@ three goals are agreed.)*
 2. Go to **Team Goals**. The **Overview** tab.
 3. Read the governance column down the page.
 
-   💬 *"Eight people report to the Head of Development. One of them — Efua — has a complete, balanced,
-   approved set. Seven have not started. That is not a report he had to ask for; it is the first thing
-   the screen tells him, and 'not started' is a fact about counts and weights, not somebody's opinion."*
+   💬 *"Eight people report to the Head of Development. Kojo Ansah has a complete, balanced, approved
+   set; Efua's is waiting on him — the goal she drafted a moment ago. Six have not started. That is not
+   a report he had to ask for; it is the first thing the screen tells him, and 'not started' is a fact
+   about counts and weights, not somebody's opinion."*
 
 4. Point at Efua's **Weight — 100%**.
 
@@ -2460,6 +2487,12 @@ three goals are agreed.)*
    💬 *"And that is the whole approval. No routing table, no definition, no configuration — his
    authority comes from the fact that the establishment says she reports to him, read from her record
    at the moment he pressed the button. If I signed in as HR and tried it, I would get a 403."*
+
+   ⚠ **Kojo Ansah's row has carried a *Lock set* button since you arrived, and Efua's carries one now**
+   — both sets are complete and, on the demo database, not locked (lane L-c). **Do not press it here.**
+   A lock is not one of Appendix E's writes, and a locked goal cannot be deleted, which is how writes 3
+   and 4 are put back. If it is pressed, unlock each goal (Employee Goals → **⋯** → **Unlock**) before
+   the reset.
 
 7. *(Optional, worth 20 seconds.)* Show **Reject** on another goal without confirming, to make the
    point that the feedback box is mandatory: *"The API refuses a rejection with no explanation, so the
@@ -3273,6 +3306,12 @@ confirmation.
   itself**, one row each, and the panel's actual and percentage for such a goal are taken from its row
   — the achievement is entered once. The panel's status, notes and evidence stay the employee's own. An
   assessment of a goal that is not the employee's is refused.)*
+  *(Since closure lane L-c the screen does it. A goals section's card says it holds the goals agreed
+  and locked for this cycle; each goal row is badged **Goal**, and a goal with a target takes an
+  **Actual achieved** against its own target while one without takes a **Score**. In the panel, such a
+  goal's actual and percentage are greyed out: "Scored on the form — the actual and the percentage
+  come from its row." The submitted view shows a measured goal's actual against its target, as it
+  does a KPI's.)*
 * **Questions** — the free-text item, with the template's question as its label
 * The submit confirmation: *"You will not be able to change it afterwards, and your manager will be able
   to see your scores alongside theirs."* — plus, on this cycle, *"Your peer nominations must also be
@@ -3364,6 +3403,9 @@ their weights are identical to what everyone else is scoring against. Two things
   *(Since closure lane L-b the same setting governs the employee's **goal rows**: shown, read-only, and
   a peer's score on one is refused when saved. For KPI items the server checks only the submission;
   lane D closes the draft.)*
+  *(Since closure lane L-c the screen takes which rows are read-only from the server and sends only
+  the rows you may score. Its note reads: "This cycle does not ask peers to score KPI targets or the
+  employee's goals — those rows are shown for context but cannot be scored.")*
 * **Anonymity is about the appraisee, not you.** `isAnonymous` means *they* will not see who said what.
   **Their manager always sees your name**, and the screen says so plainly rather than letting the word
   "anonymous" imply more than it means.
@@ -3482,6 +3524,13 @@ self-assessment* with the employee's number, their achieved grade and their note
 all is the cycle's decision (`showSelfScoreToManager`), and when it is off the aside is **dropped**
 rather than shown blank — with a line at the top of the page saying *"This cycle does not show you the
 employee's self-scores while you evaluate."*
+
+> **Changed 2026-09-29** (performance closure lane L-c). **The manager scores goal rows** on the same
+> form as the employee (chapter 27): each badged **Goal**, a measured goal taking the actual achieved
+> against its own target, with the employee's figure beside it where the cycle shows self-scores. On
+> the **Goals** tab, a goal scored on the form has its actual and percentage greyed out — the row is
+> where they are entered. Before this lane every goal row shared one key on this screen and the
+> employee's: a score typed on one showed on all of them, and the save could not name the row.
 
 ### ▶ Walk it
 
@@ -3656,6 +3705,11 @@ Leave one blank to leave it alone."*
 > a goals section, the per-criterion read lists the **goal rows** by their goal's title, and an
 > adjustment on one moves that row, not the overall: the overall adjustment is told apart by its own
 > flag, where a missing template item used to mean the overall.
+>
+> **Changed 2026-09-29** (performance closure lane L-c). **The dialog follows**: *Adjust individual
+> criteria* lists the goal rows, each badged **Goal**, and records one by its snapshot row; the
+> Decisions list and the dialog find the overall adjustment by its flag, so a recorded goal row no
+> longer shows up as the *Overall score*.
 
 ### ▶ Walk it
 
@@ -3872,6 +3926,8 @@ off."* *(Absent here: 10 + 20 + 70 = 100.)*
 > **Changed 2026-09-29** (performance closure lane L-b). **Goal rows are in the two tables**: a measured
 > goal with the KPIs (target, actual, achieved), a rated goal with the competencies (score, weight,
 > weighted), each named by the goal's title and flagged as a goal. They were left out of both.
+> *(Lane L-c)* The screen shows the flag: a **Goal** badge on each goal row, and the tables' titles
+> read **Competencies and rated goals** and **KPIs and measured goals** when a goal is in them.
 
 **The Finalise dialog:** *"The weighted final score is calculated and recorded, and the result is pushed
 onto the employee's talent records. This cannot be undone from here."* — plus an optional **HR remarks**
@@ -4213,6 +4269,11 @@ query string, which let anyone read anyone's appeal.
 > it. The appeal **page** still offers competencies only (Rule 9); lane C6 widens it. The remand
 > snapshot now keeps each row's actual value and its snapshot row, which a measured goal's score lives
 > in and which lane C5's restore will need.
+>
+> **Changed 2026-09-29** (performance closure lane L-c). **HR's decision screen restates a goal row**:
+> an upheld appeal's new score is sent by the row's snapshot row, and the before-and-after comparison
+> and the employee's outcome page list goal rows as they do criteria. Only an appeal made through the
+> API can name a goal row until lane C6 widens the appeal page.
 
 ### ⚠ Known gaps
 **P-47.** **KPI items are not appealable** (Rule 9) — `appealableKpis` is always empty.
@@ -5109,7 +5170,7 @@ mislabelled soft-skill switch (P-69) and an unenforced goal minimum (P-70). The 
 |---|---|---|
 | **P-39 / P-41** | ~~The panel's **overall** calibrated score is overwritten by HR sign-off~~ — **fixed 2026-09-29**; the grid and the HR review now agree, *except* on the two appraisals signed off before the fix (Cynthia Sarpong, Efua Seidu), which keep their signed-off figures | ch. 30, Rule 2 |
 | **P-43** | **Finalise is not disabled by the calibration gate**; on an uncalibrated appraisal it 422s | ch. 31, Rule 3 |
-| **P-8 / Rule 8** | Five appraisals have **no criterion snapshot** and open every evaluation screen empty | ch. 8, Rule 8 |
+| **Rule 8** | Five appraisals have **no criterion snapshot** and open every evaluation screen empty | Rule 8 |
 | **P-18 / Rule 5** | No TDC employee goal is aligned to anything, so every unit goal's cascade table is empty | ch. 16, Rule 5 |
 | **P-29 / Rule 6** | The conversations **diary is empty** for every persona, and the calibration **Open tab** is empty | ch. 23, ch. 30 |
 | **P-4 etc. / Rule 7** | Every **Delete** in the module renders for `hr.head` and answers 403 | throughout |

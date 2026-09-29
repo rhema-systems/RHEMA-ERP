@@ -159,7 +159,7 @@ export default function AppealOutcomePage() {
               </TableHeader>
               <TableBody>
                 {data.finalCriteriaScores.map((c) => (
-                  <TableRow key={c.templateItemId}>
+                  <TableRow key={c.criterionKey}>
                     <TableCell>
                       <div className="font-medium">{c.itemName}</div>
                       {c.managerComments && (

@@ -4518,6 +4518,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         TemplateItemId      = config.TemplateItemId,
         CriterionConfigId   = config.Id,
         CriterionKey        = config.CriterionKey(),
+        ScoringMethod       = config.EffectiveScoringMethod(),
         ItemName            = competency?.CriteriaName ?? kpiDef?.KpiName ?? config.ItemLabel ?? string.Empty,
         ItemDescription     = competency?.Description,
         ItemWeight          = config.WeightUsed,

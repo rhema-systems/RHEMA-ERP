@@ -1976,6 +1976,8 @@ public class SubmittedEvaluationItemDto
     public Guid? CriterionConfigId { get; set; }
     /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
     public Guid CriterionKey { get; set; }
+    /// <summary>Measured (an actual against a target) or rated — a goal row has no KPI id to tell by.</summary>
+    public CriterionScoringMethod ScoringMethod { get; set; }
     public string ItemName { get; set; } = string.Empty;
     public string? ItemDescription { get; set; }
     public Guid? KpiDefinitionId { get; set; }
@@ -2292,6 +2294,11 @@ public class ManagerEvaluationContextDto
     public DateTime? AppealRemandDeadline { get; set; }
     public bool IsRemandDeadlineExceeded { get; set; }
     public List<Guid> AppealedKpiIds { get; set; } = new();
+
+    /// <summary>
+    /// The appealed criteria's keys — the template item for a template row, the snapshot row for a
+    /// goal row (lane L). Named for the template item it held before goal rows existed.
+    /// </summary>
     public List<Guid> AppealedTemplateItemIds { get; set; } = new();
     
     /// <summary>

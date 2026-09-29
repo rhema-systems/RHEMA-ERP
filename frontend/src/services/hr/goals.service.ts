@@ -27,6 +27,7 @@ import type {
   GoalProgressEntry,
   GoalRiskSettings,
   KpiDefinition,
+  GoalSetLockResult,
   StrategicGoal,
   TeamGoalFlat,
   TeamGoalProgress,
@@ -538,6 +539,16 @@ class EmployeeGoalService {
 
   unlock(goalId: string): Promise<void> {
     return apiService.post<void>(`${this.baseUrl}/${goalId}/unlock`);
+  }
+
+  /**
+   * The direct manager locks an employee's whole goal set for a cycle. Refused with 422 — naming
+   * the reason — unless every live goal is approved, the count is inside the cycle's minimum and
+   * maximum, and the weights add up to 100. Where the appraisal form has a goals section, the lock
+   * fills it from the set.
+   */
+  lockSet(employeeId: string, appraisalCycleId: string): Promise<GoalSetLockResult> {
+    return apiService.post<GoalSetLockResult>(`${this.baseUrl}/lock-set`, { employeeId, appraisalCycleId });
   }
 
   // ── Progress entries ─────────────────────────────────────────────────────────────

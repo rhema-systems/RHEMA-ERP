@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import { CheckCircle2, Clock, Loader2, Pencil, RotateCcw, Trash2, TriangleAlert, Undo2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -601,7 +602,9 @@ function SummaryTables({
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between gap-2">
-              <CardTitle className="text-base">Competencies</CardTitle>
+              <CardTitle className="text-base">
+                {summary.competencyScores.some((s) => s.isGoal) ? 'Competencies and rated goals' : 'Competencies'}
+              </CardTitle>
               {summary.totalScore != null && (
                 <span className="text-sm text-muted-foreground">
                   Total {Number(summary.totalScore).toFixed(2)}
@@ -623,7 +626,14 @@ function SummaryTables({
                 {summary.competencyScores.map((s, i) => (
                   <TableRow key={`${s.criteriaName}-${i}`}>
                     <TableCell>
-                      <div className="font-medium">{s.criteriaName}</div>
+                      <div className="font-medium">
+                        {s.criteriaName}
+                        {s.isGoal && (
+                          <Badge variant="secondary" className="ml-2">
+                            Goal
+                          </Badge>
+                        )}
+                      </div>
                       {s.comments && (
                         <div className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
                           {s.comments}
@@ -646,7 +656,9 @@ function SummaryTables({
       {summary.kpiScores.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">KPIs</CardTitle>
+            <CardTitle className="text-base">
+              {summary.kpiScores.some((k) => k.isGoal) ? 'KPIs and measured goals' : 'KPIs'}
+            </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <Table>
@@ -662,7 +674,14 @@ function SummaryTables({
                 {summary.kpiScores.map((k, i) => (
                   <TableRow key={`${k.kpiName}-${i}`}>
                     <TableCell>
-                      <div className="font-medium">{k.kpiName}</div>
+                      <div className="font-medium">
+                        {k.kpiName}
+                        {k.isGoal && (
+                          <Badge variant="secondary" className="ml-2">
+                            Goal
+                          </Badge>
+                        )}
+                      </div>
                       {k.notes && (
                         <div className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
                           {k.notes}

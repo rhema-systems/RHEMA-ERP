@@ -935,6 +935,14 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             .Include(t => t.Sections)
                 .ThenInclude(s => s.TemplateItems)
                     .ThenInclude(i => i.GradeRanges)
+            // The names the refusal quotes; without them a criterion or KPI was named by its id.
+            .Include(t => t.Sections)
+                .ThenInclude(s => s.TemplateItems)
+                    .ThenInclude(i => i.Competency)
+            .Include(t => t.Sections)
+                .ThenInclude(s => s.TemplateItems)
+                    .ThenInclude(i => i.KpiDefinition)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(t => t.Id == templateId, cancellationToken);
 
         if (template == null) return;
@@ -965,6 +973,12 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
                 foreach (var item in section.TemplateItems)
                 {
+                    // A free-text question that carries no weight is never scored — the criterion
+                    // snapshot skips it — so it needs no grade bands (P-8). It used to block
+                    // activation and the submission for approval.
+                    if (item.CompetencyId == null && item.KpiDefinitionId == null && item.Weight == 0)
+                        continue;
+
                     if (!item.GradeRanges.Any())
                     {
                         var label = item.Competency?.CriteriaName

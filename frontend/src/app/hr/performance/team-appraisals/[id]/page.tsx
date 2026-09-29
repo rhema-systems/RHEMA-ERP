@@ -48,7 +48,7 @@ import {
   performanceAppraisalService,
 } from '@/services/hr/appraisal-run.service';
 import {
-  isKpiItem,
+  isMeasuredItem,
   toItemScores,
   type EvaluationItem,
   type ManagerEvaluationItem,
@@ -111,11 +111,11 @@ export default function ManagerEvaluationPage() {
     const seeded: ScoreValues = {};
     for (const section of context.sections) {
       for (const item of section.items) {
-        seeded[item.templateItemId] = {
-          // A KPI is entered as an actual. A number in its NumericScore is a calibration or
-          // appeal restatement (D-22), which the form must not send back as the manager's own:
+        seeded[item.criterionKey] = {
+          // A measured row is entered as an actual. A number in its NumericScore is a calibration
+          // or appeal restatement (D-22), which the form must not send back as the manager's own:
           // a re-evaluation replaces it.
-          numericScore: isKpiItem(item) ? null : item.managerNumericScore ?? null,
+          numericScore: isMeasuredItem(item) ? null : item.managerNumericScore ?? null,
           actualValue: item.managerActualValue ?? null,
           notes: item.managerNotes ?? null,
           evidenceLinks: item.managerEvidenceLinks ?? null,
@@ -147,15 +147,24 @@ export default function ManagerEvaluationPage() {
         sectionName: s.sectionName,
         sectionDescription: s.sectionDescription,
         sectionWeight: s.sectionWeight,
+        kind: s.kind,
         items: s.items,
       })),
     [context],
   );
 
+  const allItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
+
+  // The goals scored as rows of this form, whose assessment figures come from the rows.
+  const goalsOnForm = useMemo(
+    () => new Set(allItems.flatMap((i) => (i.employeeGoalId ? [i.employeeGoalId] : []))),
+    [allItems],
+  );
+
   const itemsById = useMemo(() => {
     const map = new Map<string, ManagerEvaluationItem>();
     for (const section of context?.sections ?? []) {
-      for (const item of section.items) map.set(item.templateItemId, item);
+      for (const item of section.items) map.set(item.criterionKey, item);
     }
     return map;
   }, [context]);
@@ -170,7 +179,7 @@ export default function ManagerEvaluationPage() {
         appraisalId,
         // Overwritten server-side from the token; sent to match the documented payload.
         managerId: '00000000-0000-0000-0000-000000000000',
-        itemScores: toItemScores(values),
+        itemScores: toItemScores(allItems, values),
         overallNotes: narrative.overallComments || null,
         recommendation: narrative.recommendationNotes || null,
         overallComments: narrative.overallComments || null,
@@ -355,13 +364,13 @@ export default function ManagerEvaluationPage() {
             values={values}
             disabled={readOnly}
             isItemHighlighted={(item) =>
-              remanded && context.appealedTemplateItemIds.includes(item.templateItemId)
+              remanded && context.appealedTemplateItemIds.includes(item.criterionKey)
             }
             onChange={(id, patch) =>
               setValues((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }))
             }
             renderItemAside={(item: EvaluationItem) => {
-              const full = itemsById.get(item.templateItemId);
+              const full = itemsById.get(item.criterionKey);
               if (!full) return null;
 
               // A KPI restated by calibration or an appeal is scored on the restated achievement,
@@ -393,7 +402,7 @@ export default function ManagerEvaluationPage() {
                     Their self-assessment
                   </p>
                   <p className="text-lg font-semibold tabular-nums">
-                    {isKpiItem(item)
+                    {isMeasuredItem(item)
                       ? `${full.employeeSelfActualValue ?? '—'}${item.kpiUnit ? ` ${item.kpiUnit}` : ''}`
                       : (full.employeeSelfNumericScore ?? '—')}
                     {full.employeeSelfAchievedGrade && (
@@ -421,6 +430,7 @@ export default function ManagerEvaluationPage() {
             values={goalValues}
             onChange={setGoalValues}
             readOnly={readOnly}
+            scoredOnForm={goalsOnForm}
           />
         </TabsContent>
 

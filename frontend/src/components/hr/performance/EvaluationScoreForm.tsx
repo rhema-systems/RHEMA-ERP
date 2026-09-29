@@ -11,10 +11,12 @@ import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import {
   countScored,
-  isKpiItem,
+  isGoalItem,
+  isMeasuredItem,
   kpiAchievementPercent,
   resolveGrade,
   scaleTop,
+  type AppraisalSectionKind,
   type EvaluationGradeRange,
   type EvaluationItem,
 } from '@/types/hr/appraisal-run';
@@ -39,13 +41,16 @@ export interface ScoreFormSection {
   sectionName: string;
   sectionDescription?: string | null;
   sectionWeight: number;
+  /** A goals section's rows are the employee's own locked goals. */
+  kind?: AppraisalSectionKind;
   items: EvaluationItem[];
 }
 
 interface EvaluationScoreFormProps {
   sections: ScoreFormSection[];
+  /** Keyed by `criterionKey`. */
   values: ScoreValues;
-  onChange: (templateItemId: string, patch: Partial<ScoreValue>) => void;
+  onChange: (criterionKey: string, patch: Partial<ScoreValue>) => void;
   /** Read-only once submitted, or when the phase has moved past this role. */
   disabled?: boolean;
   /**
@@ -63,15 +68,16 @@ interface EvaluationScoreFormProps {
  * The scoring form every evaluation leg reuses — self, manager and peer.
  *
  * All three score the *same* frozen snapshot the cycle took when it generated the appraisal,
- * keyed by `templateItemId`, so there is one form rather than three that drift apart. What
- * differs between legs is which existing scores get loaded in and what sits beside each row,
- * both of which the caller supplies.
+ * keyed by `criterionKey` — a template row's template item, a goal row's own snapshot row — so
+ * there is one form rather than three that drift apart. What differs between legs is which
+ * existing scores get loaded in and what sits beside each row, both of which the caller supplies.
  *
- * Two kinds of line, decided by whether the item carries a KPI:
- *   • **KPI items** take an *actual value* against a target, and the achievement percentage is
- *     previewed live. The server recomputes and stores its own figure — the preview only saves
- *     a round trip while the user types.
- *   • **Everything else** takes a 0–100 score, resolved against the item's grade bands.
+ * Two kinds of line, decided by the row's own scoring method:
+ *   • **Measured rows** — a KPI, or a goal with a target — take an *actual value* against the
+ *     target, and the achievement percentage is previewed live. The server recomputes and stores
+ *     its own figure — the preview only saves a round trip while the user types.
+ *   • **Rated rows** — a competency, or a goal with no target — take a score on the row's grade
+ *     bands (for a goal, the tenant's overall scale).
  *
  * The parent owns `values`; this component never holds score state, because a draft save and a
  * submit post the same object and the parent is what decides which.
@@ -132,15 +138,22 @@ export function EvaluationScoreForm({
               </div>
               <Badge variant="outline">Weight {section.sectionWeight}%</Badge>
             </div>
+            {section.kind === 'EmployeeGoals' && (
+              <p className="text-sm text-muted-foreground">
+                The goals agreed and locked for this cycle, each weighted within the section by its own
+                weight. A goal with a target is scored on what was achieved against it; one without is
+                rated on the grade scale.
+              </p>
+            )}
           </CardHeader>
           <CardContent className="space-y-6">
             {section.items.map((item, index) => (
-              <div key={item.templateItemId}>
+              <div key={item.criterionKey}>
                 {index > 0 && <Separator className="mb-6" />}
                 <ScoreRow
                   item={item}
-                  value={values[item.templateItemId] ?? {}}
-                  onChange={(patch) => onChange(item.templateItemId, patch)}
+                  value={values[item.criterionKey] ?? {}}
+                  onChange={(patch) => onChange(item.criterionKey, patch)}
                   disabled={disabled || (isItemDisabled?.(item) ?? false)}
                   highlighted={isItemHighlighted?.(item) ?? false}
                   aside={renderItemAside?.(item)}
@@ -169,12 +182,14 @@ function ScoreRow({
   highlighted: boolean;
   aside?: React.ReactNode;
 }) {
-  const kpi = isKpiItem(item);
-  const grade = kpi ? null : resolveGrade(value.numericScore, item.gradeRanges);
-  const achievement = kpi
+  const measured = isMeasuredItem(item);
+  const goal = isGoalItem(item);
+  const grade = measured ? null : resolveGrade(value.numericScore, item.gradeRanges);
+  const achievement = measured
     ? kpiAchievementPercent(value.actualValue, item.kpiTargetValue, item.kpiMinValue, item.kpiMaxValue)
     : null;
   const top = scaleTop(item.gradeRanges);
+  const key = item.criterionKey;
 
   return (
     <div className={cn('space-y-3 rounded-md', highlighted && 'bg-amber-50 p-3 dark:bg-amber-950/30')}>
@@ -187,20 +202,24 @@ function ScoreRow({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {highlighted && <Badge variant="destructive">Under appeal</Badge>}
-          {kpi && <Badge variant="secondary">KPI</Badge>}
+          {goal ? (
+            <Badge variant="secondary">Goal</Badge>
+          ) : (
+            measured && <Badge variant="secondary">KPI</Badge>
+          )}
           <Badge variant="outline">Weight {item.itemWeight}%</Badge>
         </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-3">
-          {kpi ? (
+          {measured ? (
             <div className="space-y-1.5">
-              <Label htmlFor={`v-${item.templateItemId}`}>
+              <Label htmlFor={`v-${key}`}>
                 Actual achieved{item.kpiUnit ? ` (${item.kpiUnit})` : ''}
               </Label>
               <Input
-                id={`v-${item.templateItemId}`}
+                id={`v-${key}`}
                 type="number"
                 step="any"
                 min={0}
@@ -214,15 +233,15 @@ function ScoreRow({
               <p className="text-xs text-muted-foreground">
                 {item.kpiTargetValue !== null && item.kpiTargetValue !== undefined
                   ? `Target ${item.kpiTargetValue}${item.kpiUnit ? ` ${item.kpiUnit}` : ''}`
-                  : 'No target set on this KPI'}
+                  : `No target set on this ${goal ? 'goal' : 'KPI'}`}
                 {achievement !== null && ` · ${achievement}% of target`}
               </p>
             </div>
           ) : (
             <div className="space-y-1.5">
-              <Label htmlFor={`s-${item.templateItemId}`}>Score (0–{top})</Label>
+              <Label htmlFor={`s-${key}`}>Score (0–{top})</Label>
               <Input
-                id={`s-${item.templateItemId}`}
+                id={`s-${key}`}
                 type="number"
                 min={0}
                 max={top}
@@ -245,9 +264,9 @@ function ScoreRow({
           )}
 
           <div className="space-y-1.5">
-            <Label htmlFor={`n-${item.templateItemId}`}>Comments</Label>
+            <Label htmlFor={`n-${key}`}>Comments</Label>
             <Textarea
-              id={`n-${item.templateItemId}`}
+              id={`n-${key}`}
               rows={2}
               disabled={disabled}
               value={value.notes ?? ''}
@@ -258,11 +277,11 @@ function ScoreRow({
 
           {item.requireEvidence && (
             <div className="space-y-1.5">
-              <Label htmlFor={`e-${item.templateItemId}`}>
+              <Label htmlFor={`e-${key}`}>
                 Evidence link <span className="text-muted-foreground">(required for this item)</span>
               </Label>
               <Input
-                id={`e-${item.templateItemId}`}
+                id={`e-${key}`}
                 disabled={disabled}
                 value={value.evidenceLinks ?? ''}
                 onChange={(e) => onChange({ evidenceLinks: e.target.value })}

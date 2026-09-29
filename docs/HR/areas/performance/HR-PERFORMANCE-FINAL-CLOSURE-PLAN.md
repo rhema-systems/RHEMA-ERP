@@ -33,8 +33,10 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    (`run-final-goalset.mjs` 157/157 twice; § 4 lane L's L-a State block — read § 1c first: a lock
    freezes what a goal is, not its year). ~~L-b~~ **Done 2026-09-29** (`run-final-goalkpis.mjs`
    244/244 twice; § 4 lane L's L-b State block — read its refinements: the period rule, what freezes
-   a goals section, and P-71, the remand's dead end, which waits for lane C). **L-c (screens) is
-   next**, then B2–B8. UAT was rebuilt on 2026-09-29 (Efua 88.56, Cynthia 87.00 — lane A's settle path).
+   a goals section, and P-71, the remand's dead end, which waits for lane C). ~~L-c~~ **Done
+   2026-09-29** (261/261 twice; § 4 lane L's L-c State block — read its demo impact: *Lock set* now
+   shows on five demo desks). **Lane L is complete; B2–B8 are next.** UAT was rebuilt on 2026-09-29
+   (Efua 88.56, Cynthia 87.00 — lane A's settle path).
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -114,7 +116,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | A | Scoring integrity and the settle path | 2.5 days | D-11, D-13, D-22 (A14–A16 only) | ☑ 2026-09-29 — 177/177 twice; staged |
 | P | Privacy and access *(new — the review)* | 2 days | D-26 (P18 only) | ☑ 2026-09-29 — 339/339 twice; staged |
 | B | One gate evaluator (B1 first); settings enforced or removed | 3.5 days | — | ◐ B1 ☑ 2026-09-29 — 256/256 twice; staged. B3–B5 done; B1 enforces nine of the fourteen settings; B2's rest and B6–B8 open |
-| L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ◐ L-a ☑ 2026-09-29 — 157/157 twice; L-b ☑ 2026-09-29 — 244/244 twice; staged. L-c open |
+| L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ☑ 2026-09-29 — L-a 157/157 twice; L-b 244/244 twice; L-c 261/261 twice (one suite holds L-b and L-c); staged |
 | C | One appeal machine | 2 days | D-22 | ☐ |
 | D | Peer nomination and evaluation integrity | 1 day | — | ☐ |
 | E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | 4 days | D-10, D-14, D-17, D-20 | ☐ |
@@ -137,8 +139,9 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 
 **Size:** about **53 working days, eleven weeks** (50 without lane N; lane L grew by three, D-31).
 **Migrations:** batch 1 sits at the start of lane A and batch 2 at the start of lane F; batch 3 is
-withdrawn (D-21). **Batch 1 is done and applied to UAT (2026-09-29, § 6 State); lanes A, P and B1
-and slices L-a and L-b are done (2026-09-29, each with its State block in § 4); L-c is next.** UAT was rebuilt
+withdrawn (D-21). **Batch 1 is done and applied to UAT (2026-09-29, § 6 State); lanes A, P, B1 and
+L are done (2026-09-29, each with its State block in § 4 — lane L has one per slice); B2–B8 are
+next.** UAT was rebuilt
 from the migration chain the same day and verified (S10's first rebuild, after lane B's gates).
 
 ---
@@ -862,9 +865,9 @@ because his final review is already held.
 - `EmployeeGoal.Weight` (int) is read by no scoring code.
 - Year-end `EmployeeGoalAppraisalAssessment` rows are stored beside the score.
 
-- [ ] L0 **The template model (D-15).** *(L-a deleted the Tier 1 override. L-b: the section kind on
+- [x] L0 **The template model (D-15).** *(L-a deleted the Tier 1 override. L-b: the section kind on
       the template's DTOs and the forms, and the template service's rules — one goals section, no
-      items in it, a copy keeps it. The editor's picker and text are L-c's.)*
+      items in it, a copy keeps it. L-c: the editor's picker and its text.)*
       - Templates are per population; assignment scopes already exist.
       - Section kinds are `Fixed` (competencies; shared KPIs with one target; free-text questions)
         and `EmployeeGoals`.
@@ -914,8 +917,8 @@ because his final review is already held.
       - Generation before lock leaves the section empty and the GoalSetting gate open.
       - Unlock removes rows while they are unscored and is refused once scored.
       - Goal edit and delete are refused while the goal is locked (EGS :243, :258).
-- [ ] L3 **Forms and scoring.** *(L-b built the server side — every site below but the frontend
-      bullet, keyed by the criterion key; the frontend bullet is L-c's.)* About 40 sites keyed by `TemplateItemId` move to the config id. The
+- [x] L3 **Forms and scoring.** *(L-b built the server side — every site below but the frontend
+      bullet, keyed by the criterion key; L-c built the frontend bullet.)* About 40 sites keyed by `TemplateItemId` move to the config id. The
       review's sweep lists them:
       - scoring core: PAS :848-861, :898-914 (`ToDictionary` throws on a null key), :980-982;
       - form builders: PAS :4624-4700, :4760-4818, :4874-4921; PES :464-475, :507-563;
@@ -933,7 +936,8 @@ because his final review is already held.
       (`appraisal-run.ts:946`). `AppraisalScoring` is unchanged. Goal achievement is entered once
       (`ActualValue`) and mirrored into `EmployeeGoalAppraisalAssessment` (self → `SelfFinal*`,
       manager → `ManagerFinal*`).
-- [ ] L4 **Template editor.**
+- [x] L4 **Template editor.** *(L-c. The third bullet had nothing to change: the cycle's coverage
+      preview names no criteria, and calibration's labels come from the snapshot since L-b.)*
       - A section kind picker. An `EmployeeGoals` section has no items and shows its weight and rule
         text; activation counts it complete.
       - **P-8:** activation and submit-for-approval (`AppraisalTemplateService.cs:922-931, :323`)
@@ -954,8 +958,8 @@ because his final review is already held.
         every cycle goal into `OverallPeriodScore` today).
       - A period-scoped goal (Q1, H1) is not counted again at year end.
 
-**Assertion** (`run-final-goalkpis.mjs` — L-b wrote it with every row below but the free-text item,
-which is L4's and L-c's):
+**Assertion** (`run-final-goalkpis.mjs` — L-b wrote it with every row below but the free-text item;
+L-c added that one, and the payload the screens send):
 - Two staff on one template with different locked goals are scored on different items with
   different targets.
 - Goal weights 60/40 → shares 0.6/0.4 of the section.
@@ -1015,7 +1019,7 @@ migration. What exists now:
   query would not need a memory grant that large — lane L-b touches the peer form anyway.
 - The evaluation saves accept goal assessments for any goal id — L-b (L3 rewrites them).
 - With `RequireManagerGoalApproval` off, a goal never becomes agreed and so cannot be locked — B2.
-- The manager's *Lock goal set* button — L-c.
+- The manager's *Lock goal set* button — L-c. *Done in L-c.*
 
 **Verified** (Staging API on the rebuilt `ErpSystemDB_UAT`):
 - `run-final-goalset.mjs` **157/157**, then **157/157 again** inside `run-all`.
@@ -1101,7 +1105,7 @@ migration: batch 1 had every column and index. What exists now:
 - **L-c:** the section-kind picker and its text; the forms keyed by criterion — `toItemScores` keys
   by template item, so a goal row cannot be saved from today's screens; the goal assessment panel
   for goals with rows; the snapshot labels on the coverage and calibration screens; the manager's
-  *Lock goal set* control.
+  *Lock goal set* control. *Done in L-c (its State block, below).*
 - The self and manager saves still include `appraisal.Goals`, which nothing reads now (lane J).
 
 **Verified** (Staging API on `ErpSystemDB_UAT`):
@@ -1114,6 +1118,87 @@ migration: batch 1 had every column and index. What exists now:
 
 **Demo impact:** none. No demo template has a goals section, and a template row scores, shows and
 calibrates as before. The guide carries L-b's notes and P-71.
+
+**L-c State (2026-09-29): DONE — built, verified on UAT, staged** (decisions D-15, D-16, D-31). No
+migration. What exists now:
+- **P-8** (`AppraisalTemplateService.ValidateTemplateWeightsAsync`): a free-text question with weight
+  0 is never scored, so activation and submit-for-approval no longer demand its grade bands; a
+  weighted question still needs them. The refusal names an item by its criterion, KPI or question —
+  the check never loaded the criterion or the KPI, so it named them by id.
+- **The submitted view** carries each row's `scoringMethod` (`SubmittedEvaluationItemDto`): a goal
+  row has no KPI, so the screen could not otherwise tell a measured goal from a rated one.
+- **The types** (`types/hr/appraisal-run.ts`, `appraisal.ts`, `calibration.ts`, `appeals.ts`,
+  `goals.ts`): every row carries `criterionKey`, a nullable `templateItemId` and `criterionConfigId`;
+  sections carry `kind`; `isMeasuredItem` reads the row's scoring method and `isGoalItem` its goal
+  (`isKpiItem` is gone); `toItemScores(items, values)` keys by criterion and sends both ids; a
+  calibration adjustment carries `criterionConfigId` and `isOverall`. `KpiTargetSource` was typed
+  with values the server never sends; it is `'Goal' | 'Template'`.
+- **The forms** (self, manager, peer) key by criterion: a goals section's card says what fills it, a
+  goal row carries a **Goal** badge, and the input follows the row's measured flag. The peer form
+  takes its locked rows from the server's `isScoreable` and sends only the rows the peer may score.
+- **The goal assessment panel** takes the goals on the form (`scoredOnForm`) and greys out their
+  actual and percentage — entered once, on the row.
+- **Calibration**: the overall adjustment is found by `isOverall`; a criterion adjustment sends its
+  template item or its snapshot row; goal rows carry the badge.
+- **Appeals (HR)**: the restatements are built from the review's appealed criteria by key and send
+  both ids; the comparison and the employee's outcome page key by criterion.
+- **The template editor** (L4): the section dialog asks what fills the section — *This template's
+  items* or *Each employee's locked goals* — and refuses the second, with the reason, when the
+  template has a goals section or the section holds items; the goals card has its badge, no *Add
+  item* and its rule text; a note explains the two kinds; a weight-0 question reads *Not scored*;
+  the live checks flag a goals section that holds items.
+- **The team desk**: *Lock set* on a report whose verdict is Structurally complete, behind a
+  confirmation, with the server's reason on a refusal (`employeeGoalService.lockSet`); *Set locked*
+  once every live goal is locked.
+- **HR's review**: the Goal badges, and the tables' titles say when goals are in them.
+
+**Where the build refines or extends the rows above** (each deliberate; say if one should go back):
+1. **L4's third bullet had nothing to change.** The cycle's coverage preview names no criteria, and
+   calibration's labels have come from the snapshot since L-b.
+2. **The *Lock set* button follows the desk's verdict, not the lock's rule.** A rejected goal keeps
+   the verdict at *In progress*, so the button waits for the employee to rework or delete it, though
+   the lock leaves a rejected goal out; the count limits are the lock's alone, and a refusal's toast
+   names them.
+3. **The P-8 refusal names its items** (it named a criterion or KPI by id).
+
+**Found on the way, carried:**
+- **The HR/Identity reconciliation sweep fails every five minutes on Grace Danquah** (TDC/00052,
+  `property.manager`). Her manager, Stephen Boateng (TDC/00007), has two active logins — the demo
+  persona seeder binds `head.estate` and `authorised.signatory` to the same post — and the sweep's
+  manager lookup (`HrIdentityReconciliationService.ResolveEligibleUserForEmployeeAsync`) expects one
+  (`SingleOrDefault`). Not performance, and not HR's code (the Estate team's seeder, the platform's
+  sweep): raised with the user for the cross-module register.
+- The manager page highlights an appealed goal row by key, but a remand never reopens the form —
+  P-71, lane C3. The appeal page still offers competencies only — C6.
+- **Not browser-walked.** The screens were checked by type, lint and the payload they send (the
+  suite's s6), not clicked. Nothing on the demo database has a goals section, so the first click
+  through one is lane K's walks or the next demo rehearsal with a scratch template.
+
+**Verified** (Staging API on `ErpSystemDB_UAT`):
+- `run-final-goalkpis.mjs` **261/261** — L-b's 244 and 17 new: P-8 both ways on a scratch template,
+  and a draft saved exactly as the screens send it (both ids on a template row, the snapshot row
+  alone on a goal row, the values read back, a mismatched pair refused) — then **261/261 again**
+  inside `run-all`.
+- Regression (`run-all.mjs`, eleven suites): interim reviews 133/133, attachments 65/65, slice C
+  51/51, slice D 22/22, **slice E 17/26 — the same 9 stale**, gates 32/32, lane A 182/182, lane P
+  340/340, lane B1 256/256, lane L-a 157/157, lanes L-b and L-c 261/261. **1516/1525.** API log: no
+  SQL timeout; every save error is defect #23's payroll-profile key (102, one per fixture employee);
+  the notification sender's failures are Staging's missing SMTP; and the reconciliation failure
+  above.
+- Frontend: a scoped `tsc` over the 18 changed files and every file that imports a changed module —
+  0 errors in them (the 52 it reports are in untouched modules: medical, civil engineering, estate,
+  portal, reports; a planted error was caught); ESLint clean on all 18.
+
+**Demo impact:** no score, form or calibration changes — no demo template has a goals section. Two
+things show:
+- **The team desk's *Lock set*.** Five APC2026 sets are complete (three agreed goals, weights 100)
+  and unlocked, so the button shows on `md.tdc`'s desk (Kojo Fiadzo), `gm.ops`'s (Kwasi Danquah),
+  `head.dev`'s (Kojo Ansah; Efua once chapter 19's LIVE WRITE 4 approves her fourth goal) and
+  `she.manager`'s (Cynthia Sarpong), and each would lock. The guide's chapter 19 walk says not to
+  press it — a locked goal cannot be deleted, which is how Appendix E puts back writes 3 and 4 — and
+  its step 3 script, stale since B1's re-run, now names Kojo Ansah's set.
+- **The editor**: the demo template's weight-0 question reads *Not scored* instead of a red *None*,
+  and a re-activation would no longer be refused on it.
 
 ### Lane C — One appeal machine
 

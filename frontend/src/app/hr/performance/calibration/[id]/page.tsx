@@ -16,6 +16,7 @@ import {
   Users,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -186,10 +187,13 @@ export default function CalibrationSessionDetailPage() {
     mutationFn: (row: CalibrationMatrixRow) => {
       // The panel is restating the final number, so the original recorded against the decision
       // is whatever the appraisal stood at going in.
-      const existing = row.adjustments.find((a) => !a.templateItemId);
+      // The overall restatement is told apart by its flag: a goal row's adjustment has no template
+      // item either, and was read as the overall.
+      const existing = row.adjustments.find((a) => a.isOverall);
       const payload = {
         performanceAppraisalId: row.appraisalId,
         templateItemId: null,
+        criterionConfigId: null,
         originalScore: row.preCalibrationScore ?? null,
         adjustedScore: Number(adjustScore),
         rationale: adjustRationale.trim() || null,
@@ -213,8 +217,9 @@ export default function CalibrationSessionDetailPage() {
 
   /**
    * One criterion's adjustment. Separate from the overall-score mutation because they are separate
-   * records server-side: `templateItemId` null is the overall restatement, non-null is the
-   * criterion. The rationale is shared — it is the same panel decision.
+   * records server-side: naming no criterion is the overall restatement; naming one — by template
+   * item, or by snapshot row for a goal — is the criterion. The rationale is shared — it is the
+   * same panel decision.
    */
   const saveCriterionAdjustment = useMutation({
     mutationFn: ({
@@ -226,10 +231,11 @@ export default function CalibrationSessionDetailPage() {
     }) => {
       const payload = {
         performanceAppraisalId: row.appraisalId,
-        templateItemId: criterion.templateItemId,
-        // A KPI is scored by its achievement, so that is the figure being moved.
+        templateItemId: criterion.templateItemId ?? null,
+        criterionConfigId: criterion.criterionConfigId,
+        // A measured row is scored by its achievement, so that is the figure being moved.
         originalScore: (criterion.isKpi ? criterion.managerAchievementPercent : criterion.managerScore) ?? null,
-        adjustedScore: Number(criterionScores[criterion.templateItemId]),
+        adjustedScore: Number(criterionScores[criterion.criterionKey]),
         rationale: adjustRationale.trim() || null,
       };
       return criterion.adjustmentId
@@ -673,7 +679,7 @@ export default function CalibrationSessionDetailPage() {
                           <div className="text-xs text-muted-foreground">{a.appraisalNumber}</div>
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
-                          {a.templateItemId ? (a.templateItemName ?? 'One criterion') : 'Overall score'}
+                          {a.isOverall ? 'Overall score' : (a.templateItemName ?? 'One criterion')}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {score(a.originalScore)}
@@ -789,12 +795,19 @@ export default function CalibrationSessionDetailPage() {
                 </p>
                 <div className="mt-3 space-y-3">
                   {(criteria.data ?? []).map((c) => (
-                    <div key={c.templateItemId} className="grid grid-cols-[1fr_auto_auto] items-end gap-2">
+                    <div key={c.criterionKey} className="grid grid-cols-[1fr_auto_auto] items-end gap-2">
                       <div className="space-y-1">
-                        <p className="text-sm">{c.templateItemName ?? 'Unnamed criterion'}</p>
+                        <p className="text-sm">
+                          {c.templateItemName ?? 'Unnamed criterion'}
+                          {c.isGoal && (
+                            <Badge variant="secondary" className="ml-2">
+                              Goal
+                            </Badge>
+                          )}
+                        </p>
                         {c.isKpi ? (
                           <p className="text-xs text-muted-foreground">
-                            Weight {c.weightUsed} · KPI achievement{' '}
+                            Weight {c.weightUsed} · {c.isGoal ? 'achievement' : 'KPI achievement'}{' '}
                             <span className="tabular-nums">{score(c.managerAchievementPercent)}%</span>
                             {c.managerActualValue != null && c.kpiTargetValue != null && (
                               <> (actual {c.managerActualValue} of target {c.kpiTargetValue})</>
@@ -816,11 +829,11 @@ export default function CalibrationSessionDetailPage() {
                         max={c.scaleTop}
                         step={1}
                         aria-label={`Calibrated ${c.isKpi ? 'achievement %' : 'score'} for ${c.templateItemName ?? 'criterion'}`}
-                        value={criterionScores[c.templateItemId] ?? ''}
+                        value={criterionScores[c.criterionKey] ?? ''}
                         onChange={(e) =>
                           setCriterionScores((prev) => ({
                             ...prev,
-                            [c.templateItemId]: e.target.value,
+                            [c.criterionKey]: e.target.value,
                           }))
                         }
                       />
@@ -828,7 +841,7 @@ export default function CalibrationSessionDetailPage() {
                         variant="outline"
                         size="sm"
                         disabled={
-                          !isValidCriterionScore(criterionScores[c.templateItemId] ?? '', c.scaleTop) ||
+                          !isValidCriterionScore(criterionScores[c.criterionKey] ?? '', c.scaleTop) ||
                           saveCriterionAdjustment.isPending
                         }
                         onClick={() =>

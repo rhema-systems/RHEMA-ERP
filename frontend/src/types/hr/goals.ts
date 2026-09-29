@@ -537,6 +537,14 @@ export type UpdateGoalProgressEntry = CreateGoalProgressEntry & {
 
 // ── Manager workspace (api/performance/team-goals) ───────────────────────────────
 
+/** What the manager's *lock goal set* did: how many goals it locked, of how many in the set. */
+export interface GoalSetLockResult {
+  employeeId: string;
+  appraisalCycleId: string;
+  goalsLocked: number;
+  goalsInSet: number;
+}
+
 export interface TeamMemberOverview {
   employeeId: string;
   employeeName: string;
