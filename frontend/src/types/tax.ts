@@ -248,6 +248,7 @@ export interface GenerateWhtCertificateDto {
 }
 
 export interface WhtCalculationRequest {
+    invoiceSettlements?: { vendorInvoiceId: string; grossSettlementAmount: number; exchangeRateId?: string }[];
     taxId: string;
     businessPartnerId: string;
     paymentDate: string;
@@ -259,6 +260,9 @@ export interface WhtCalculationRequest {
 }
 
 export interface WhtCalculationResult {
+    currentPaymentTaxableBase?: number;
+    catchUpTaxableBase?: number;
+    catchUpWithholdingAmount?: number;
     taxId: string;
     taxCode: string;
     taxName: string;

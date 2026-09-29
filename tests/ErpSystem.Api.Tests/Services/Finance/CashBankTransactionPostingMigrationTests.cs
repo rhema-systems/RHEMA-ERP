@@ -479,7 +479,7 @@ public sealed class CashBankTransactionPostingMigrationTests
         var act = () => service.PostAsync(fixture.Transaction.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Posting period is not open.");
+            .WithMessage("Posting period is not open.*");
         fixture.Transaction.JournalEntryId.Should().BeNull();
     }
 

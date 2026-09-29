@@ -861,6 +861,10 @@ public class VendorPaymentAllocation : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal WithholdingTaxFunctionalAmount { get; set; }
 
+    /// <summary>Frozen net supply component in functional currency; null denotes pre-v2 evidence.</summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? WithholdingTaxBaseFunctionalAmount { get; set; }
+
     public DateTime AllocationDate { get; set; } = DateTime.UtcNow;
 
     [MaxLength(500)]

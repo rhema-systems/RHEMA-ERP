@@ -31381,6 +31381,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("WithholdingTaxAmount")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<decimal?>("WithholdingTaxBaseFunctionalAmount")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<decimal>("WithholdingTaxFunctionalAmount")
                         .HasColumnType("decimal(18,2)");
 
@@ -242504,6 +242507,85 @@ namespace ErpSystem.Data.Migrations
             modelBuilder.Entity("SalaryLevel", b =>
                 {
                     b.Navigation("Notches");
+                });
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FiscalYear", b =>
+                {
+                    b.HasAlternateKey("TenantId", "Id");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.YearEndBookCloseCycle", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uniqueidentifier");
+                    b.Property<Guid>("TenantId").HasColumnType("uniqueidentifier");
+                    b.Property<Guid>("FiscalYearId").HasColumnType("uniqueidentifier");
+                    b.Property<Guid>("AccountingBookId").HasColumnType("uniqueidentifier");
+                    b.Property<string>("AccountingBookCode").IsRequired().HasMaxLength(20).HasColumnType("nvarchar(20)");
+                    b.Property<string>("FunctionalCurrencyCode").IsRequired().HasMaxLength(3).HasColumnType("nvarchar(3)");
+                    b.Property<int>("CycleNumber").HasColumnType("int");
+                    b.Property<string>("PeriodAuthoritySnapshotJson").IsRequired().HasColumnType("nvarchar(max)");
+                    b.Property<string>("IdempotencyKey").IsRequired().HasMaxLength(100).HasColumnType("nvarchar(100)");
+                    b.Property<Guid>("RetainedEarningsAccountId").HasColumnType("uniqueidentifier");
+                    b.Property<string>("Status").IsRequired().HasMaxLength(20).HasColumnType("nvarchar(20)");
+                    b.Property<Guid>("ClosedByUserId").HasColumnType("uniqueidentifier");
+                    b.Property<DateTime>("ClosedAtUtc").HasColumnType("datetime2");
+                    b.Property<string>("ClosingNotes").HasMaxLength(2000).HasColumnType("nvarchar(2000)");
+                    b.Property<Guid?>("ClosingJournalEntryId").HasColumnType("uniqueidentifier");
+                    b.Property<decimal>("NetIncomeTransferred").HasColumnType("decimal(18,2)");
+                    b.Property<Guid?>("ReversalJournalEntryId").HasColumnType("uniqueidentifier");
+                    b.Property<Guid?>("ReopenedByUserId").HasColumnType("uniqueidentifier");
+                    b.Property<DateTime?>("ReopenedAtUtc").HasColumnType("datetime2");
+                    b.Property<string>("ReopenReason").HasMaxLength(500).HasColumnType("nvarchar(500)");
+                    b.Property<byte[]>("RowVersion").IsConcurrencyToken().IsRequired().ValueGeneratedOnAddOrUpdate().HasColumnType("rowversion");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("datetime2");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("datetime2");
+                    b.Property<string>("CreatedBy").HasColumnType("nvarchar(max)");
+                    b.Property<string>("UpdatedBy").HasColumnType("nvarchar(max)");
+                    b.Property<Guid?>("CreatedById").HasColumnType("uniqueidentifier");
+                    b.Property<Guid?>("LastModifiedById").HasColumnType("uniqueidentifier");
+                    b.Property<bool>("IsDeleted").HasColumnType("bit");
+                    b.Property<DateTime?>("DeletedAt").HasColumnType("datetime2");
+                    b.Property<string>("DeletedBy").HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+                    b.HasIndex("TenantId", "IdempotencyKey").IsUnique();
+                    b.HasIndex("TenantId", "FiscalYearId", "AccountingBookId", "CycleNumber").IsUnique();
+                    b.HasIndex("TenantId", "FiscalYearId", "AccountingBookId").IsUnique().HasFilter("[Status] IN ('Closing', 'Closed')");
+                    b.HasIndex("TenantId", "AccountingBookId", "AccountingBookCode");
+                    b.HasIndex("TenantId", "RetainedEarningsAccountId");
+                    b.HasIndex("TenantId", "ClosingJournalEntryId", "AccountingBookId");
+                    b.HasIndex("TenantId", "ReversalJournalEntryId", "AccountingBookId");
+                    b.ToTable("YearEndBookCloseCycles", null, t =>
+                        {
+                            t.HasTrigger("TR_YearEndBookCloseCycles_ImmutableEvidence");
+                            t.HasCheckConstraint("CK_YearEndBookCloseCycles_NoDelete", "[IsDeleted] = 0");
+                            t.HasCheckConstraint("CK_YearEndBookCloseCycles_Status", "[Status] IN ('Closing', 'Closed', 'Reopened')");
+                            t.HasCheckConstraint("CK_YearEndBookCloseCycles_Cycle", "[CycleNumber] > 0");
+                            t.HasCheckConstraint("CK_YearEndBookCloseCycles_Reopen", "([Status] <> 'Reopened' AND [ReopenedAtUtc] IS NULL AND [ReopenedByUserId] IS NULL AND [ReopenReason] IS NULL AND [ReversalJournalEntryId] IS NULL) OR ([Status] = 'Reopened' AND [ReopenedAtUtc] IS NOT NULL AND [ReopenedByUserId] IS NOT NULL AND [ReopenReason] IS NOT NULL AND ([ClosingJournalEntryId] IS NULL OR [ReversalJournalEntryId] IS NOT NULL))");
+                        });
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant").WithMany()
+                        .HasForeignKey("TenantId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook").WithMany()
+                        .HasForeignKey("TenantId", "AccountingBookId", "AccountingBookCode")
+                        .HasPrincipalKey("TenantId", "Id", "Code").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FiscalYear", "FiscalYear").WithMany()
+                        .HasForeignKey("TenantId", "FiscalYearId").HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", "RetainedEarningsAccount").WithMany()
+                        .HasForeignKey("TenantId", "RetainedEarningsAccountId").HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", "ClosingJournalEntry").WithMany()
+                        .HasForeignKey("TenantId", "ClosingJournalEntryId", "AccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id", "AccountingBookId").OnDelete(DeleteBehavior.Restrict);
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", "ReversalJournalEntry").WithMany()
+                        .HasForeignKey("TenantId", "ReversalJournalEntryId", "AccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id", "AccountingBookId").OnDelete(DeleteBehavior.Restrict);
+                    b.Navigation("Tenant");
+                    b.Navigation("AccountingBook");
+                    b.Navigation("FiscalYear");
+                    b.Navigation("RetainedEarningsAccount");
+                    b.Navigation("ClosingJournalEntry");
+                    b.Navigation("ReversalJournalEntry");
                 });
 #pragma warning restore 612, 618
         }

@@ -933,6 +933,7 @@ public class VendorPaymentAllocationResultDto
 
 public class OutstandingVendorInvoiceDto
 {
+    public decimal NetSupplyAmount { get; set; }
     public bool? ApplySupplierWithholdingDefaults { get; set; }
     public Guid? WithholdingTaxId { get; set; }
     public decimal WithholdingTaxRate { get; set; }

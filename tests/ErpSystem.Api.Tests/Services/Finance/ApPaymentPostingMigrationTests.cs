@@ -212,13 +212,14 @@ public sealed partial class ApPaymentPostingMigrationTests
         var nextPayment = await calculator.CalculateApWithholdingAsync(new WhtCalculationRequestDto
         {
             TaxId = tax.Id, BusinessPartnerId = fixture.Supplier.Id,
-            PaymentDate = fixture.Payment.PaymentDate.AddDays(1), TaxableBase = 50m,
+            PaymentDate = fixture.Payment.PaymentDate.AddDays(1), TaxableBase = 51m,
             ContractReference = fixture.Invoice.WithholdingContractReference,
             SupplyCategory = fixture.Invoice.WithholdingSupplyCategory
         });
         nextPayment.CumulativeBefore.Should().Be(100m);
         nextPayment.ThresholdApplied.Should().BeTrue();
-        nextPayment.WithholdingAmount.Should().Be(5m);
+        nextPayment.WithholdingAmount.Should().Be(15.1m);
+        nextPayment.CatchUpWithholdingAmount.Should().Be(10m);
     }
 
     [Fact]
@@ -238,14 +239,14 @@ public sealed partial class ApPaymentPostingMigrationTests
     }
 
     [Fact]
-    public async Task WithholdingPayment_ShouldExcludeItsSavedBaseAndPostTheDeductionOnlyOnce()
+    public async Task WithholdingPayment_ShouldCatchUpThresholdAndExcludeItsSavedBaseOnReplay()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
-        var fixture = await SeedApprovedApPaymentAsync(db, tenantId, allocationAmount: 90m);
-        var tax = await SeedPaymentWithholdingTaxAsync(db, fixture, 150m);
-        fixture.Allocation.WithholdingTaxAmount = 10m;
-        fixture.Payment.WithholdingTaxAmount = 10m;
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId, allocationAmount: 85m);
+        var tax = await SeedPaymentWithholdingTaxAsync(db, fixture, 149m);
+        fixture.Allocation.WithholdingTaxAmount = 15m;
+        fixture.Payment.WithholdingTaxAmount = 15m;
         var book = await db.AccountingBooks.SingleAsync(value =>
             value.TenantId == tenantId && value.BookType == AccountingBookType.PrimaryFull);
         var priorJournal = new JournalEntry
@@ -272,7 +273,7 @@ public sealed partial class ApPaymentPostingMigrationTests
             TenantId = tenantId, PaymentNumber = "VP-WHT-PRIOR", BusinessPartnerId = fixture.Supplier.Id,
             PaymentDate = fixture.Payment.PaymentDate.AddDays(-1), TotalAmount = 50m,
             CurrencyCode = "GHS", ExchangeRate = 1m, Status = VendorPaymentStatus.Processed,
-            WithholdingTaxId = tax.Id, WithholdingTaxBaseAmount = 50m, JournalEntryId = priorJournal.Id
+            WithholdingTaxId = tax.Id, WithholdingTaxRate = 10m, WithholdingTaxBaseAmount = 50m, JournalEntryId = priorJournal.Id
         };
         priorJournal.SourceDocumentId = priorPayment.Id;
         db.JournalEntries.Add(priorJournal);
@@ -283,6 +284,7 @@ public sealed partial class ApPaymentPostingMigrationTests
             TenantId = tenantId, VendorPaymentId = priorPayment.Id, VendorPayment = priorPayment,
             VendorInvoiceId = priorInvoice.Id, VendorInvoice = priorInvoice,
             AllocatedAmount = 50m, PaymentCurrencyAmount = 50m, SettlementFunctionalAmount = 50m,
+            WithholdingTaxBaseFunctionalAmount = 50m,
             WithholdingTaxAmount = 0m, WithholdingTaxFunctionalAmount = 0m,
             AllocationDate = priorPayment.PaymentDate
         });
@@ -294,13 +296,13 @@ public sealed partial class ApPaymentPostingMigrationTests
         var replay = await service.PostAsync(fixture.Payment.Id);
 
         result.WithholdingTaxCumulativeBefore.Should().Be(50m);
-        result.WithholdingTaxBaseAmount.Should().Be(100m);
-        result.WithholdingTaxAmount.Should().Be(10m);
+        result.WithholdingTaxBaseAmount.Should().Be(150m, "the certificate includes the prior50 catch-up plus current100 net base");
+        result.WithholdingTaxAmount.Should().Be(15m);
         replay.JournalEntryId.Should().Be(result.JournalEntryId);
         var lines = await db.AccountTransactions.Where(line => line.JournalEntryId == result.JournalEntryId).ToListAsync();
         lines.Single(line => line.TransactionTag == "AP-Control").DebitAmount.Should().Be(100m);
-        lines.Single(line => line.TransactionTag == "AP-Bank").CreditAmount.Should().Be(90m);
-        lines.Single(line => line.TransactionTag == "AP-WHT").CreditAmount.Should().Be(10m);
+        lines.Single(line => line.TransactionTag == "AP-Bank").CreditAmount.Should().Be(85m);
+        lines.Single(line => line.TransactionTag == "AP-WHT").CreditAmount.Should().Be(15m);
         (await db.FinancePostingEvents.CountAsync(value => value.SourceDocumentId == fixture.Payment.Id && value.PostingAction == "Post")).Should().Be(1);
     }
 
@@ -416,7 +418,7 @@ public sealed partial class ApPaymentPostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-CrossCurrencyDeductions")]
     [Trait("Category", "AccountsPayable")]
-    public async Task CrossCurrencyApPayment_ShouldPostLineScopedDiscountAndWhtAtFrozenFunctionalValues()
+    public async Task CrossCurrencyApPayment_WithWht_ShouldRequireStatutoryEvidenceBeforePosting()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -463,9 +465,12 @@ public sealed partial class ApPaymentPostingMigrationTests
         fixture.Payment.WithholdingTaxAmount = 37.50m;
         fixture.Invoice.CurrencyCode = "USD";
         fixture.Invoice.ExchangeRate = 10m;
+        fixture.Invoice.SubTotal = 80m;
+        fixture.Invoice.TaxAmount = 0m;
         fixture.Invoice.TotalAmount = 80m;
         fixture.Invoice.BaseCurrencyAmount = 800m;
         fixture.Invoice.WithholdingTaxId = taxId;
+        fixture.Invoice.WithholdingTaxRate = 3.75m;
         fixture.Invoice.WithholdingContractReference = "CONTRACT-CROSS-CURRENCY-001";
         fixture.Invoice.WithholdingSupplyCategory = WhtSupplyCategory.Services;
         fixture.Allocation.AllocatedAmount = 75m;
@@ -502,7 +507,7 @@ public sealed partial class ApPaymentPostingMigrationTests
                 TaxId = taxId,
                 TaxCode = "WHT-SERVICES",
                 TaxName = "Services withholding tax",
-                TaxRate = 3.529411m,
+                TaxRate = 3.75m,
                 TaxableBase = 1_000m,
                 WithholdingAmount = 37.50m,
                 TaxPayableAccountId = withholdingAccount.Id,
@@ -512,21 +517,25 @@ public sealed partial class ApPaymentPostingMigrationTests
             });
         var (service, _) = CreateService(db, tenantId, fx.Object, wht.Object);
 
-        var result = await service.PostAsync(fixture.Payment.Id);
+        var act = () => service.PostAsync(fixture.Payment.Id);
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*statutory conversion evidence*");
+        wht.Verify(service => service.CalculateApWithholdingAsync(It.IsAny<WhtCalculationRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        (await db.FinancePostingEvents.CountAsync(row => row.SourceDocumentId == fixture.Payment.Id)).Should().Be(0);
+    }
 
-        var journal = await db.JournalEntries
-            .Include(entry => entry.Transactions)
-            .SingleAsync(entry => entry.Id == result.JournalEntryId);
-        journal.Transactions.Single(line => line.AccountId == fixture.ApAccount.Id).DebitAmount.Should().Be(1_000m);
-        journal.Transactions.Single(line => line.TransactionTag == "AP-Discount").Should().Match<AccountTransaction>(line =>
-            line.AccountId == discountAccountId && line.CreditAmount == 25m &&
-            line.TransactionCurrency == "USD" && line.TransactionCreditAmount == 2m);
-        journal.Transactions.Single(line => line.TransactionTag == "AP-WHT").Should().Match<AccountTransaction>(line =>
-            line.AccountId == withholdingAccount.Id && line.CreditAmount == 37.50m &&
-            line.TransactionCurrency == "USD" && line.TransactionCreditAmount == 3m);
-        journal.Transactions.Single(line => line.AccountId == fixture.BankGlAccount.Id).CreditAmount.Should().Be(937.50m);
-        journal.TotalDebitAmount.Should().Be(1_000m);
-        journal.TotalCreditAmount.Should().Be(1_000m);
+    [Fact]
+    public async Task ForeignPayment_ForGhsInvoiceWithWht_ShouldNotBypassStatutoryCurrencyGuard()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId);
+        await SeedPaymentWithholdingTaxAsync(db, fixture, null);
+        fixture.Payment.CurrencyCode = "USD";
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+        var act = () => service.PostAsync(fixture.Payment.Id);
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*statutory conversion evidence*");
+        (await db.FinancePostingEvents.CountAsync(row => row.SourceDocumentId == fixture.Payment.Id)).Should().Be(0);
     }
 
     [Fact]
@@ -895,7 +904,7 @@ public sealed partial class ApPaymentPostingMigrationTests
         var act = () => service.PostAsync(fixture.Payment.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Posting period is not open.");
+            .WithMessage("Posting period is not open.*");
         fixture.Payment.JournalEntryId.Should().BeNull();
     }
 

@@ -1498,7 +1498,11 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         if ((!fiscalPeriod.IsOpen || fiscalPeriod.IsClosed || fiscalPeriod.IsLocked) && !isYearEndClosePosting)
         {
             await RecordPostingBlockedByPeriodAuditAsync(tenantId, request, fiscalPeriod, postingDate, cancellationToken);
-            throw new InvalidOperationException("Posting period is not open.");
+            var periodState = fiscalPeriod.IsLocked ? "locked" : fiscalPeriod.IsClosed ? "closed" : "not open";
+            throw new InvalidOperationException(
+                $"Posting period is not open. Posting date {postingDate:yyyy-MM-dd}, book '{accountingBook.Code}', " +
+                $"fiscal period '{fiscalPeriod.PeriodCode}' ({fiscalPeriod.PeriodName}) is {periodState}. " +
+                "Ask Finance to open the tenant fiscal period through the approved workflow, or correct the document date.");
         }
 
         if (!isYearEndClosePosting)

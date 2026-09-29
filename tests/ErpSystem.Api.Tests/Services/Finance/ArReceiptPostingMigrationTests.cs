@@ -697,7 +697,7 @@ public sealed partial class ArReceiptPostingMigrationTests
         var act = () => service.PostAsync(fixture.Payment.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Posting period is not open.");
+            .WithMessage("Posting period is not open.*");
         fixture.Payment.JournalEntryId.Should().BeNull();
     }
 
