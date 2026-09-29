@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
+import { adjustmentSchema, type AdjustmentFormValues } from './adjustment-schema';
 import { ArrowLeft, Check, ChevronsUpDown, FileText, Loader2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -25,32 +25,6 @@ import { financeService } from '@/services/finance.service';
 import { cn, formatCurrency } from '@/lib/utils';
 import type { Account, Currency, SubledgerAdjustmentType, SubledgerModule } from '@/types/finance';
 import type { Customer } from '@/types/ar';
-
-const moduleSchema = z.enum(['AR', 'AP']);
-const purposeSchema = z.enum(['StandardAdjustment', 'FinanceCharge', 'Writeoff', 'OverpaymentWriteoff']);
-
-const adjustmentSchema = z.object({
-    module: moduleSchema,
-    purpose: purposeSchema,
-    businessPartnerId: z.string().min(1, 'Business Partner is required'),
-    businessPartnerRoleId: z.string().optional(),
-    adjustmentDate: z.string().min(1, 'Adjustment date is required'),
-    dueDate: z.string().optional(),
-    adjustmentType: z.enum(['Debit', 'Credit']),
-    amount: z.number().min(0.01, 'Amount must be greater than zero'),
-    currencyCode: z.string().min(3, 'Currency is required').max(3, 'Use a 3-letter currency code'),
-    exchangeRate: z.number().min(0.000001, 'Exchange rate must be greater than zero'),
-    contraAccountId: z.string(),
-    reference: z.string().max(100).optional(),
-    reason: z.string().min(1, 'Reason is required').max(500, 'Reason cannot exceed 500 characters'),
-    notes: z.string().max(2000).optional(),
-}).superRefine((value, ctx) => {
-    if (value.purpose === 'StandardAdjustment' && !value.contraAccountId) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['contraAccountId'], message: 'Contra account is required' });
-    }
-});
-
-type AdjustmentFormValues = z.infer<typeof adjustmentSchema>;
 
 interface SearchOption {
     id: string;
@@ -405,7 +379,7 @@ export default function NewSubledgerAdjustmentPage() {
                         <SelectItem value="Writeoff">Writeoff</SelectItem>
                         <SelectItem value="OverpaymentWriteoff">Overpayment writeoff (AR credit balance)</SelectItem>
                     </SelectContent></Select>
-                    {purpose !== 'StandardAdjustment' && <p className="text-sm text-muted-foreground">Uses the customer's configured account unless you select an eligible contra account override below. Posts a customer balance adjustment in the functional currency; individual invoice settlement and customer advances use their document workflows.</p>}
+                    {purpose !== 'StandardAdjustment' && <p className="text-sm text-muted-foreground">Select an expense account for a writeoff or a revenue account for finance charges and overpayment writeoffs.</p>}
                 </CardContent></Card>}
                 <Card>
                     <CardHeader>
@@ -535,7 +509,7 @@ export default function NewSubledgerAdjustmentPage() {
                         </div>
 
                         <div className="space-y-2 md:col-span-2">
-                            <Label>{purpose === 'StandardAdjustment' ? 'Contra GL Account' : 'Contra account override (optional)'}</Label>
+                            <Label>Contra GL Account</Label>
                             {accountsLoading ? (
                                 <Skeleton className="h-10 w-full" />
                             ) : (
@@ -545,7 +519,7 @@ export default function NewSubledgerAdjustmentPage() {
                                     options={accountOptions}
                                     value={selectedAccountId}
                                     selectedOption={selectedAccount}
-                                    placeholder={purpose === 'StandardAdjustment' ? 'Select contra account' : 'Use customer account mapping'}
+                                    placeholder="Select contra account"
                                     searchPlaceholder="Search accounts..."
                                     emptyText="No posting accounts found."
                                     onSelect={(id) => {

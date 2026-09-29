@@ -264,8 +264,11 @@ public sealed class FinanceSettlementDimensionServiceTests
             .FunctionalAmount.Should().Be(2m);
     }
 
-    [Fact]
-    public async Task CustomerPaymentAdapterKeepsVatWithholdingAndExactInvoiceLineEvidenceSeparate()
+    [Theory]
+    [InlineData(FinanceDimensionRouteId.FinanceArCustomerInvoice)]
+    [InlineData(FinanceDimensionRouteId.InventoryDisposalAuctionInvoice)]
+    [InlineData(FinanceDimensionRouteId.SalesOrderCustomerInvoice)]
+    public async Task CustomerPaymentAdapterKeepsVatWithholdingAndExactInvoiceLineEvidenceSeparate(FinanceDimensionRouteId sourceRoute)
     {
         var tenantId = Guid.NewGuid();
         await using var db = new ApplicationDbContext(
@@ -314,8 +317,12 @@ public sealed class FinanceSettlementDimensionServiceTests
         var finalSetId = Guid.NewGuid();
         var firstSnapshotId = Guid.NewGuid();
         var finalSnapshotId = Guid.NewGuid();
-        var invoiceRoute = FinanceDimensionRouteCatalog.GetRequired(FinanceDimensionRouteId.FinanceArCustomerInvoice);
+        var invoiceRoute = FinanceDimensionRouteCatalog.GetRequired(sourceRoute);
         db.AddRange(invoice, payment);
+        if (sourceRoute == FinanceDimensionRouteId.InventoryDisposalAuctionInvoice) db.Set<ErpSystem.Core.Entities.Inventory.InventoryDisposalAuctionInvoice>().Add(new()
+        { TenantId = tenantId, InventoryDisposalCaseId = Guid.NewGuid(), InvoiceId = invoice.Id });
+        if (sourceRoute == FinanceDimensionRouteId.SalesOrderCustomerInvoice) db.Set<ErpSystem.Core.Entities.Sales.SalesOrder>().Add(new()
+        { TenantId = tenantId, BusinessPartnerId = invoice.BusinessPartnerId, InvoiceId = invoice.Id });
         db.FinanceSourceDimensionAssignments.AddRange(
             SourceAssignment(tenantId, invoiceRoute, invoice.Id, firstLineId, firstSetId, firstSnapshotId),
             SourceAssignment(tenantId, invoiceRoute, invoice.Id, finalLineId, finalSetId, finalSnapshotId));

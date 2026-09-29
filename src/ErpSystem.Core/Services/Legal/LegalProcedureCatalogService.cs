@@ -6,18 +6,18 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
 {
     private static readonly LegalProcedureCatalogItem[] Procedures =
     [
-        new("General Legal Matters", "LegalProcedure", "Legal", "General legal intake, review, drafting, approval, execution, and record keeping.", "BookOpen", 6, "slate"),
-        new("Property Agreement Reviews", "LegalPropertyAgreementReview", "Source: Estate / Property Management -> Legal", "Draft rental, lease, and sale agreements received from Property Management for legal vetting, correction, approval, and controlled release.", "FileCheck2", 3, "emerald"),
-        new("Legal Opinions / Advisory", "LegalOpinionAdvisory", "Source: Legal - Advisory / Opinion Requests", "Legal opinion requests, issue summaries, research notes, advice memos, confidentiality, approvals, and closure routed through configured workflows.", "MessageSquare", 5, "indigo"),
-        new("External Counsel Management", "LegalExternalCounsel", "Source: Legal - External Counsel / Law Firm Oversight", "External counsel instructions, retainers, matter assignment, fees, performance, invoices, and closeout routed through configured workflows.", "Briefcase", 5, "zinc"),
-        new("Mortgages", "LegalMortgage", "Source: Legal - Mortgages", "Mortgage request review, document preparation, execution support, and completion tracking through configured workflows.", "FileSignature", 6, "cyan"),
-        new("Mortgage In Principle", "LegalMortgageInPrinciple", "Source: Legal - Mortgage In Principle", "Initial mortgage review, legal checks, recommendation, and approval routing through configured workflows.", "FileCheck2", 5, "emerald"),
-        new("Court Processes", "LegalCourtProcess", "Source: Legal - Court Processes", "Court process receipt, review, response preparation, filing, hearing, and follow-up through configured workflows.", "Scale", 7, "violet"),
-        new("Other Court Processes", "LegalOtherCourtProcess", "Source: Legal - Other Court Processes", "Non-standard court matters routed for configured legal action, evidence handling, and closure.", "Gavel", 5, "purple"),
-        new("Termination / Recognition", "LegalTerminationRecognition", "Source: Legal - Termination / Recognition", "Termination and recognition requests reviewed through configured legal workflows.", "ShieldCheck", 8, "amber"),
-        new("Assignment / Sublease / Vesting", "LegalAssignmentSubleaseVesting", "Source: Legal - Assignment / Sublease / Vesting", "Instrument review, party verification, drafting, consent checks, and completion through configured workflows.", "Landmark", 6, "teal"),
-        new("Leases / Deed of Variation / Renewal / Sublease", "LegalLeaseVariationRenewalSublease", "Source: Legal - Leases / Variation / Renewal / Sublease", "Lease drafting, variation, renewal, sublease review, approval, execution, and filing through configured workflows.", "FileText", 7, "sky"),
-        new("Transfers", "LegalTransfer", "Source: Legal - Transfers", "Transfer request validation, document review, approval, execution, registration, and records through configured workflows.", "BadgeCheck", 8, "blue")
+        new("General Legal Matters", "LegalProcedure", "BookOpen", 6, "slate"),
+        new("Property Agreement Reviews", "LegalPropertyAgreementReview", "FileCheck2", 3, "emerald"),
+        new("Legal Opinions / Advisory", "LegalOpinionAdvisory", "MessageSquare", 5, "indigo"),
+        new("External Counsel Management", "LegalExternalCounsel", "Briefcase", 5, "zinc"),
+        new("Mortgages", "LegalMortgage", "FileSignature", 6, "cyan"),
+        new("Mortgage In Principle", "LegalMortgageInPrinciple", "FileCheck2", 5, "emerald"),
+        new("Court Processes", "LegalCourtProcess", "Scale", 7, "violet"),
+        new("Other Court Processes", "LegalOtherCourtProcess", "Gavel", 5, "purple"),
+        new("Termination / Recognition", "LegalTerminationRecognition", "ShieldCheck", 8, "amber"),
+        new("Assignment / Sublease / Vesting", "LegalAssignmentSubleaseVesting", "Landmark", 6, "teal"),
+        new("Leases / Deed of Variation / Renewal / Sublease", "LegalLeaseVariationRenewalSublease", "FileText", 7, "sky"),
+        new("Transfers", "LegalTransfer", "BadgeCheck", 8, "blue")
     ];
 
     public IReadOnlyList<LegalProcedureCatalogItem> GetProcedures() => Procedures;
@@ -288,6 +288,13 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
         var fields = new List<LegalWorkspaceField>
         {
             Field("referenceNumber", "Legal reference number", "text"),
+            Field("legalFileNumber", "Legal file / matter number", "text"),
+            Field("legalFileRegisterStatus", "Legal file register status", "select", ["Pending registration", "Registered", "Returned for correction", "Closed"]),
+            Field("registryReceiptReference", "Registry receipt reference", "text"),
+            Field("registryReceiptDate", "Registry receipt date", "date"),
+            Field("secretaryRoutingDate", "Secretary routing date", "date"),
+            Field("holAssignmentDate", "Head of Legal assignment date", "date"),
+            Field("loOwnershipStatus", "Legal Officer ownership status", "select", ["Unassigned", "Assigned", "In review", "Returned", "Completed"]),
             Field("sourceProcedureCaseId", "Originating procedure case ID", "text"),
             Field("sourceEntityType", "Originating entity type", "text"),
             Field("sourceRecordReference", "Originating transaction reference", "text"),
@@ -303,16 +310,43 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
             Field("receivedDate", "Received date", "date"),
             Field("assignedLegalOfficer", "Assigned Legal Officer", "text"),
             Field("paymentStatus", "Payment status", "select", ["Not required", "Pending", "Paid", "Waived / exception approved"]),
+            Field("paymentDueDate", "Payment due date", "date"),
+            Field("clientPaymentDate", "Client payment date", "date"),
             Field("paymentReceiptReference", "Payment / receipt reference", "text"),
+            Field("financeVerificationStatus", "Finance verification status", "select", ["Not required", "Pending Finance verification", "Verified", "Rejected", "Exception approved"]),
+            Field("financeVerificationReference", "Finance verification reference", "text"),
             Field("cadastralPlanStatus", "Cadastral plan status", "select", ["Not required", "Pending", "Available", "Returned for correction"]),
             Field("scheduleStatus", "Schedule insertion status", "select", ["Not required", "Pending", "Inserted", "Returned for correction"]),
             Field("dueDiligenceStatus", "Due diligence status", "select", ["Not started", "In progress", "Cleared", "Issue found", "Returned"]),
+            Field("templateCode", "Document template code", "text"),
+            Field("generatedDocumentStatus", "Generated document status", "select", ["Not started", "Template selected", "Draft generated", "Under review", "Final generated", "Not required"]),
             Field("draftDocumentReference", "Draft document reference", "text"),
+            Field("draftVersionStatus", "Draft version status", "select", ["Not started", "Current draft", "Returned for correction", "Approved for execution", "Finalized"]),
+            Field("vettingCommentStatus", "Vetting comments status", "select", ["Not started", "Open comments", "Comments resolved", "No comments"]),
             Field("legalVettingStatus", "Legal vetting status", "select", ["Not started", "Under review", "Approved", "Returned for correction"]),
             Field("signatureStatus", "Signature status", "select", ["Not started", "Client signed", "Legal signed", "Head of Legal signed", "MD signed", "Fully signed"]),
+            Field("clientSignatureDate", "Client signature date", "date"),
+            Field("legalOfficerSignatureDate", "Legal Officer signature date", "date"),
+            Field("legalAdminSignatureDate", "Legal Admin signature date", "date"),
+            Field("headOfLegalSignatureDate", "Head of Legal signature date", "date"),
+            Field("managingDirectorSignatureDate", "Managing Director signature date", "date"),
             Field("sealStatus", "Seal / dating status", "select", ["Not required", "Pending", "Sealed", "Dated", "Sealed and dated"]),
+            Field("sealRegisterNumber", "Seal register number", "text"),
+            Field("sealedDate", "Sealed date", "date"),
             Field("dispatchStatus", "Dispatch / pickup status", "select", ["Not started", "Client notified", "Picked up", "Dispatched", "Filed"]),
+            Field("dispatchMethod", "Dispatch / collection method", "select", ["Not recorded", "Client pickup", "Courier", "Registered mail", "Internal handoff", "Portal release"]),
+            Field("dispatchReference", "Dispatch / collection reference", "text"),
+            Field("dispatchRecipient", "Dispatch recipient", "text"),
+            Field("collectionDate", "Collection / dispatch date", "date"),
             Field("estateReturnStatus", "Estate file return status", "select", ["Not required", "Pending return", "Returned to Estate", "Returned for correction"]),
+            Field("estateFileReturnDate", "Estate file return date", "date"),
+            Field("estateRecordsAmendmentStatus", "Estate records amendment status", "select", ["Not required", "Pending", "Confirmed", "Returned for correction"]),
+            Field("estateRecordsAmendmentDate", "Estate records amendment date", "date"),
+            Field("revenueUpdateStatus", "Revenue update status", "select", ["Not required", "Pending", "Updated", "Returned for correction"]),
+            Field("landsCommissionHandoff", "Lands Commission handoff status", "select", ["Not required", "Pending", "Sent", "Registered", "Returned"]),
+            Field("landsCommissionSubmissionDate", "Lands Commission submission date", "date"),
+            Field("landsCommissionRegistrationNumber", "Lands Commission registration number", "text"),
+            Field("landsCommissionReturnDate", "Lands Commission return date", "date"),
             Field("closeoutNotes", "Closeout notes", "textarea")
         };
 
@@ -323,6 +357,8 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
                 Field("courtProcessType", "Court process type", "select", ["Writ of Summons", "Motion", "Notice", "Order", "Letter", "Other"]),
                 Field("courtName", "Court name", "text"),
                 Field("caseNumber", "Court case number", "text"),
+                Field("courtVenue", "Court venue / location", "text"),
+                Field("judgeName", "Judge / adjudicator", "text"),
                 Field("claimantName", "Claimant / applicant", "text"),
                 Field("defendantName", "Defendant / respondent", "text"),
                 Field("claimAmount", "Claim / exposure amount", "currency"),
@@ -332,10 +368,15 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
                 Field("serviceDate", "Service date", "date"),
                 Field("responseDeadline", "Response / filing deadline", "date"),
                 Field("courtJacketReference", "Court jacket / docket reference", "text"),
+                Field("courtJacketMovementStatus", "Court jacket movement status", "select", ["Not opened", "Opened", "With Legal Officer", "Returned to Registry", "Closed"]),
+                Field("appearanceDeadline", "Appearance deadline", "date"),
                 Field("filingReference", "Court filing reference", "text"),
+                Field("filingReceiptReference", "Filing receipt reference", "text"),
                 Field("nextHearingDate", "Next hearing date", "date"),
+                Field("adjournmentHistory", "Adjournment / hearing history", "textarea"),
                 Field("judgmentDate", "Judgment / settlement date", "date"),
                 Field("judgmentSummary", "Judgment / settlement summary", "textarea"),
+                Field("litigationExposureAmount", "Litigation exposure / provision amount", "currency"),
                 Field("appealStatus", "Appeal status", "select", ["Not applicable", "Under consideration", "Filed", "Concluded"])
             ]);
         }
@@ -349,7 +390,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
                 Field("scheduleReference", "Schedule reference", "text"),
                 Field("clientExecutionDate", "Client execution date", "date"),
                 Field("witnessName", "Witness name", "text"),
-                Field("landsCommissionHandoff", "Lands Commission handoff status", "select", ["Not required", "Pending", "Sent", "Registered", "Returned"])
+                Field("registrationHandoffReference", "Registration handoff reference", "text")
             ]);
         }
 
@@ -370,8 +411,6 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
             fields.AddRange([
                 Field("mortgageType", "Mortgage type", "select", ["Consent to Mortgage", "Mortgage in Principle"]),
                 Field("mortgageeName", "Mortgagee / financial institution", "text"),
-                Field("paymentDueDate", "Payment due date", "date"),
-                Field("clientPaymentDate", "Client payment date", "date"),
                 Field("mortgageLetterReference", "Mortgage letter reference", "text"),
                 Field("mdSignatureRequired", "MD signature required", "select", ["Yes", "No"])
             ]);
@@ -417,6 +456,8 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
                 Field("advisorySubject", "Advisory subject", "text"),
                 Field("confidentialityLevel", "Confidentiality level", "select", ["Internal", "Restricted", "Privileged", "Board / Executive"]),
                 Field("legalRiskLevel", "Legal risk level", "select", ["Low", "Medium", "High", "Critical"]),
+                Field("opinionDueDate", "Opinion due date", "date"),
+                Field("recommendationStatus", "Recommendation / advice status", "select", ["Not started", "Drafting", "Under HOL review", "Approved", "Dispatched", "Closed"]),
                 Field("adviceRecipient", "Advice recipient", "text")
             ]);
         }
@@ -426,13 +467,16 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
             fields.AddRange([
                 Field("counselName", "External counsel / law firm", "text"),
                 Field("instructionReference", "Instruction / retainer reference", "text"),
+                Field("counselMatterStatus", "External counsel matter status", "select", ["Instruction pending", "In progress", "Deliverable received", "Invoice pending", "Closed"]),
+                Field("counselDeliverableDueDate", "Counsel deliverable due date", "date"),
                 Field("feeEstimate", "Fee estimate", "currency"),
+                Field("approvedCounselFee", "Approved counsel fee", "currency"),
                 Field("invoiceReference", "Invoice / AP reference", "text"),
                 Field("performanceRating", "Performance rating", "select", ["Not rated", "Good", "Satisfactory", "Needs attention"])
             ]);
         }
 
-        return fields;
+        return UniqueFields(fields);
     }
 
     private static IReadOnlyList<string> BuildOutputs(string entityType)
@@ -440,38 +484,38 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
         if (string.Equals(entityType, "LegalCourtProcess", StringComparison.OrdinalIgnoreCase)
             || string.Equals(entityType, "LegalOtherCourtProcess", StringComparison.OrdinalIgnoreCase))
         {
-            return ["Recorded court process", "Court jacket / docket", "Filed response or process", "Next-action / hearing tracker", "Legal closeout note"];
+            return ["Recorded court process", "Court jacket / docket", "Filed response or process", "Court calendar entry", "Judgment / outcome tracker", "Legal closeout note"];
         }
 
         if (string.Equals(entityType, "LegalTerminationRecognition", StringComparison.OrdinalIgnoreCase))
         {
-            return ["Termination notice", "21-day posting evidence", "Recognition document", "Executed signature pack", "Estate records update handoff"];
+            return ["Termination notice", "21-day posting evidence", "Recognition document", "Executed signature pack", "Dispatch / collection register entry", "Estate records update handoff"];
         }
 
         if (string.Equals(entityType, "LegalTransfer", StringComparison.OrdinalIgnoreCase))
         {
-            return ["Transfer fee confirmation", "Transfer declaration", "Executed transfer form", "Signed distribution pack", "Estate records amendment handoff"];
+            return ["Transfer fee confirmation", "Transfer declaration", "Executed transfer form", "Signed distribution pack", "Signature / sealing register entry", "Estate records amendment handoff"];
         }
 
         if (string.Equals(entityType, "LegalMortgage", StringComparison.OrdinalIgnoreCase)
             || string.Equals(entityType, "LegalMortgageInPrinciple", StringComparison.OrdinalIgnoreCase))
         {
-            return ["Payment confirmation", "Draft mortgage letter", "Vetted mortgage consent / in-principle letter", "Signed letter", "Estate file return note"];
+            return ["Payment confirmation", "Draft mortgage letter", "Vetted mortgage consent / in-principle letter", "Signed letter", "Dispatch / collection register entry", "Estate file return note"];
         }
 
         if (string.Equals(entityType, "LegalLeaseVariationRenewalSublease", StringComparison.OrdinalIgnoreCase))
         {
-            return ["Draft lease / variation / renewal / sublease", "Execution pack", "Signed and sealed instrument", "Registration handoff", "Estate file return note"];
+            return ["Draft lease / variation / renewal / sublease", "Execution pack", "Signed and sealed instrument", "Seal register entry", "Registration handoff", "Estate file return note"];
         }
 
         if (string.Equals(entityType, "LegalAssignmentSubleaseVesting", StringComparison.OrdinalIgnoreCase))
         {
-            return ["Draft consent / recognition instrument", "Vetted legal letter", "Signed and sealed instrument", "Client release note", "Estate file return note"];
+            return ["Draft consent / recognition instrument", "Vetted legal letter", "Signed and sealed instrument", "Client release note", "Dispatch / collection register entry", "Estate file return note"];
         }
 
         if (string.Equals(entityType, "LegalOpinionAdvisory", StringComparison.OrdinalIgnoreCase))
         {
-            return ["Issue summary", "Research / review note", "Legal opinion memo", "Approved advice", "Dispatch evidence"];
+            return ["Issue summary", "Research / review note", "Legal opinion memo", "Approved advice", "Confidential dispatch evidence"];
         }
 
         if (string.Equals(entityType, "LegalExternalCounsel", StringComparison.OrdinalIgnoreCase))
@@ -479,7 +523,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
             return ["Counsel instruction", "Retainer / fee record", "Deliverable review", "Invoice/AP handoff", "Performance closeout"];
         }
 
-        return ["Legal intake record", "Due diligence note", "Draft document", "Approved / signed document", "Dispatch or Estate return evidence"];
+        return ["Legal intake record", "Legal file movement entry", "Due diligence note", "Generated draft document", "Approved / signed document", "Dispatch or Estate return evidence"];
     }
 
     private static IReadOnlyList<LegalWorkspaceHandoff> BuildHandoffs(string entityType)
@@ -522,7 +566,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
         string owner,
         string summary,
         IReadOnlyList<string> checklist) =>
-        new(name, owner, summary, checklist);
+        new(name, owner, checklist);
 
     private static LegalWorkspaceDocument Doc(string name, string requiredFrom, bool isMandatory) =>
         new(name, requiredFrom, isMandatory);
@@ -533,6 +577,12 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
         string type,
         IReadOnlyList<string>? options = null) =>
         new(key, label, type, options);
+
+    private static IReadOnlyList<LegalWorkspaceField> UniqueFields(IEnumerable<LegalWorkspaceField> fields) =>
+        fields
+            .GroupBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
 
     private static LegalWorkspaceHandoff Handoff(string fromRole, string toRole, string trigger) =>
         new(fromRole, toRole, trigger);

@@ -194,6 +194,7 @@ class ArService {
         earlyPaymentDiscountPercentage?: number;
         earlyPaymentDiscountDueDate?: string;
         isDiscountAvailable?: boolean;
+        requiresTaxAdjustmentForDiscount?: boolean;
         discountAmount?: number;
     }[]> {
         return apiService.get<{
@@ -206,6 +207,7 @@ class ArService {
             earlyPaymentDiscountPercentage?: number;
             earlyPaymentDiscountDueDate?: string;
             isDiscountAvailable?: boolean;
+            requiresTaxAdjustmentForDiscount?: boolean;
             discountAmount?: number;
         }[]>(`${this.baseUrl}/payments/customer/${customerId}/outstanding-invoices`);
     }

@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Threading.RateLimiting;
 using ErpSystem.Api.Authorization;
 using ErpSystem.Api.HealthChecks;
@@ -527,6 +527,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Api.Services.Estate.IEstateSalesListingApplicationHandoffService, ErpSystem.Api.Services.Estate.EstateSalesListingApplicationHandoffService>();
             services.AddScoped<ErpSystem.Api.Services.Estate.IGroundRentAdministrationService, ErpSystem.Api.Services.Estate.GroundRentAdministrationService>();
             services.AddScoped<ErpSystem.Api.Services.Estate.EstateRecurringBillingService>();
+            services.AddScoped<ErpSystem.Api.Services.Estate.FacilitiesLeaseReminderService>();
             services.AddHostedService<ErpSystem.Api.Services.Estate.EstateRecurringBillingBackgroundService>();
             services
                 .AddOptions<ErpSystem.Api.Services.Estate.EstateGisNetworkSecurityOptions>()
@@ -903,6 +904,14 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 new ErpSystem.Api.Services.Finance.GL.FinanceOwnedSourceDimensionReadinessProvider(
                     provider.GetRequiredService<ApplicationDbContext>(),
                     ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.FinanceArCustomerInvoice));
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionReadinessProvider>(provider =>
+                new ErpSystem.Api.Services.Finance.GL.FinanceOwnedSourceDimensionReadinessProvider(
+                    provider.GetRequiredService<ApplicationDbContext>(),
+                    ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.InventoryDisposalAuctionInvoice));
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionReadinessProvider>(provider =>
+                new ErpSystem.Api.Services.Finance.GL.FinanceOwnedSourceDimensionReadinessProvider(
+                    provider.GetRequiredService<ApplicationDbContext>(),
+                    ErpSystem.Core.Finance.Integration.FinanceDimensionRouteId.SalesOrderCustomerInvoice));
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceDimensionReadinessProvider>(provider =>
                 new ErpSystem.Api.Services.Finance.GL.FinanceOwnedSourceDimensionReadinessProvider(
                     provider.GetRequiredService<ApplicationDbContext>(),
@@ -1437,6 +1446,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Crm.ICrmService, ErpSystem.Core.Services.Crm.CrmService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesAgreementService, ErpSystem.Api.Services.Sales.SalesAgreementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesOrderService, ErpSystem.Core.Services.Sales.SalesOrderService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesOrderInvoiceService, ErpSystem.Api.Services.Sales.SalesOrderInvoiceService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.IDeliveryService, ErpSystem.Core.Services.Sales.DeliveryService>();
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesSetupService, ErpSystem.Core.Services.Sales.SalesSetupService>();
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesAllocationService, ErpSystem.Core.Services.Sales.SalesAllocationService>();

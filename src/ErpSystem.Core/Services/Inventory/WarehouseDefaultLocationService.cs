@@ -100,7 +100,7 @@ public sealed class WarehouseDefaultLocationService(IUnitOfWork unitOfWork, ICur
     public static bool IsEligible(WarehouseLocation location) => location.IsActive && !location.IsDeleted &&
         string.Equals(location.LocationType, "Bin", StringComparison.OrdinalIgnoreCase) &&
         !location.IsConsignmentBin && !location.ConsignmentWarehouseId.HasValue &&
-        !location.IsQuarantineLocation && !location.IsInspectionLocation && !location.IsInTransitLocation &&
+        !location.IsQuarantineLocation && !location.IsInspectionLocation && !InventoryTransitProtection.IsProtected(location) &&
         !location.IsShippingLocation && !location.IsStagingLocation && !location.IsReturnLocation && !location.IsDamageLocation;
 
     private async Task<WarehouseLocation> ResolveAsync(Guid warehouseId, Guid actorId, CancellationToken cancellationToken)
@@ -133,10 +133,15 @@ public sealed class WarehouseDefaultLocationService(IUnitOfWork unitOfWork, ICur
         return chosen;
     }
 
-    private async Task<Warehouse> WarehouseAsync(Guid warehouseId, CancellationToken cancellationToken) =>
-        await unitOfWork.Repository<Warehouse>().GetQueryable(x => x.Id == warehouseId && x.TenantId == TenantId &&
+    private async Task<Warehouse> WarehouseAsync(Guid warehouseId, CancellationToken cancellationToken)
+    {
+        var warehouse = await unitOfWork.Repository<Warehouse>().GetQueryable(x => x.Id == warehouseId && x.TenantId == TenantId &&
             !x.IsDeleted && x.IsActive).SingleOrDefaultAsync(cancellationToken)
         ?? throw new InvalidOperationException("Select an active warehouse in the current tenant.");
+        if (InventoryTransitProtection.IsProtected(warehouse))
+            throw new InvalidOperationException(InventoryTransitProtection.Message);
+        return warehouse;
+    }
 
     private async Task RelocateValuationAsync(Guid warehouseId, InventoryItem item, WarehouseLocation location,
         decimal residual, Guid actorId, CancellationToken cancellationToken)

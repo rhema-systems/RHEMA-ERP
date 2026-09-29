@@ -13,12 +13,14 @@ public sealed class InventoryDisposalCaseConfiguration : IEntityTypeConfiguratio
             table.HasCheckConstraint("CK_InventoryDisposalCases_Amounts", "[TotalQuantity] > 0 AND [TotalValue] > 0 AND [ProceedsAmount] >= 0");
             table.HasCheckConstraint("CK_InventoryDisposalCases_Status", "[Status] BETWEEN 1 AND 11");
             table.HasCheckConstraint("CK_InventoryDisposalCases_Method", "[Method] BETWEEN 1 AND 5");
+            table.HasCheckConstraint("CK_InventoryDisposalCases_AccountingVersion", "[AccountingVersion] IN (0, 1)");
             table.HasTrigger("TR_InventoryDisposalCases_Guard");
         });
         builder.HasIndex(value => new { value.TenantId, value.DisposalNumber }).IsUnique();
         builder.HasIndex(value => new { value.TenantId, value.IdempotencyKey }).IsUnique();
         builder.HasIndex(value => new { value.TenantId, value.Status, value.RequestedAtUtc });
         builder.HasIndex(value => value.StockAdjustmentId).IsUnique().HasFilter("[StockAdjustmentId] IS NOT NULL AND [IsDeleted] = 0");
+        builder.HasIndex(value => value.PreparedStockAdjustmentId).IsUnique().HasFilter("[PreparedStockAdjustmentId] IS NOT NULL");
         builder.HasOne(value => value.Warehouse).WithMany().HasForeignKey(value => value.WarehouseId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(value => value.RequestedBy).WithMany().HasForeignKey(value => value.RequestedById).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(value => value.StockAdjustment).WithMany().HasForeignKey(value => value.StockAdjustmentId).OnDelete(DeleteBehavior.Restrict);

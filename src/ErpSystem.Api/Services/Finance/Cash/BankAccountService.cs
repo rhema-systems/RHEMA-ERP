@@ -19,15 +19,18 @@ public class BankAccountService : IBankAccountService
     private readonly ApplicationDbContext _context;
     private readonly ITenantSettingsService _tenantSettingsService;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IFinanceAccessScopeService? _financeAccessScopeService;
 
     public BankAccountService(
         ApplicationDbContext context,
         ITenantSettingsService tenantSettingsService,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        IFinanceAccessScopeService? financeAccessScopeService = null)
     {
         _context = context;
         _tenantSettingsService = tenantSettingsService;
         _currentUserService = currentUserService;
+        _financeAccessScopeService = financeAccessScopeService;
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -35,8 +38,13 @@ public class BankAccountService : IBankAccountService
     public async Task<BankAccountDto?> GetByIdAsync(Guid id)
     {
         var tenantId = TenantId;
-        var account = await _context.BankAccounts
-            .Where(a => a.TenantId == tenantId && a.Id == id && !a.IsDeleted)
+        var query = _context.BankAccounts
+            .Where(a => a.TenantId == tenantId && a.Id == id && !a.IsDeleted);
+        var permittedIds = await GetPermittedBankAccountIdsAsync(FinanceAccessLevel.Read);
+        if (permittedIds != null)
+            query = query.Where(a => permittedIds.Contains(a.Id));
+
+        var account = await query
             .Select(a => new BankAccountDto
             {
                 Id = a.Id,
@@ -70,8 +78,13 @@ public class BankAccountService : IBankAccountService
     public async Task<IEnumerable<BankAccountDto>> GetAllAsync()
     {
         var tenantId = TenantId;
-        return await _context.BankAccounts
-            .Where(a => a.TenantId == tenantId && !a.IsDeleted)
+        var query = _context.BankAccounts
+            .Where(a => a.TenantId == tenantId && !a.IsDeleted);
+        var permittedIds = await GetPermittedBankAccountIdsAsync(FinanceAccessLevel.Read);
+        if (permittedIds != null)
+            query = query.Where(a => permittedIds.Contains(a.Id));
+
+        return await query
             .Select(a => new BankAccountDto
             {
                 Id = a.Id,
@@ -103,8 +116,13 @@ public class BankAccountService : IBankAccountService
     public async Task<IEnumerable<BankAccountDto>> GetActiveAccountsAsync()
     {
         var tenantId = TenantId;
-        return await _context.BankAccounts
-            .Where(a => a.TenantId == tenantId && a.IsActive && !a.IsDeleted)
+        var query = _context.BankAccounts
+            .Where(a => a.TenantId == tenantId && a.IsActive && !a.IsDeleted);
+        var permittedIds = await GetPermittedBankAccountIdsAsync(FinanceAccessLevel.Read);
+        if (permittedIds != null)
+            query = query.Where(a => permittedIds.Contains(a.Id));
+
+        return await query
             .Select(a => new BankAccountDto
             {
                 Id = a.Id,
@@ -125,6 +143,16 @@ public class BankAccountService : IBankAccountService
     {
         var tenantId = TenantId;
         var currency = NormalizeCurrency(dto.Currency);
+        var accountNumber = dto.AccountNumber?.Trim()
+            ?? throw new ArgumentException("Bank account number is required.");
+        if (accountNumber.Length == 0)
+            throw new ArgumentException("Bank account number is required.");
+        var duplicateExists = await _context.BankAccounts.AnyAsync(account =>
+            account.TenantId == tenantId &&
+            !account.IsDeleted &&
+            account.AccountNumber == accountNumber);
+        if (duplicateExists)
+            throw new InvalidOperationException($"Bank account number '{accountNumber}' already exists for this tenant.");
 
         if (dto.GLAccountId.HasValue)
         {
@@ -139,7 +167,7 @@ public class BankAccountService : IBankAccountService
             var account = new BankAccount
             {
                 TenantId = tenantId,
-                AccountNumber = dto.AccountNumber,
+                AccountNumber = accountNumber,
                 AccountName = dto.AccountName,
                 BankName = dto.BankName,
                 BankBranch = dto.BankBranch,
@@ -189,6 +217,7 @@ public class BankAccountService : IBankAccountService
     public async Task<BankAccountDto> UpdateAsync(Guid id, UpdateBankAccountDto dto)
     {
         var tenantId = TenantId;
+        await EnsureBankAccountAccessAsync(id, FinanceAccessLevel.Administer);
         var account = await _context.BankAccounts
             .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == id && !a.IsDeleted)
             ?? throw new Exception("Bank account not found");
@@ -254,6 +283,7 @@ public class BankAccountService : IBankAccountService
     public async Task DeleteAsync(Guid id)
     {
         var tenantId = TenantId;
+        await EnsureBankAccountAccessAsync(id, FinanceAccessLevel.Administer);
         var account = await _context.BankAccounts
             .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == id && !a.IsDeleted)
             ?? throw new Exception("Bank account not found");
@@ -296,6 +326,7 @@ public class BankAccountService : IBankAccountService
     public async Task<BankAccountBalanceDto> GetBalanceAsync(Guid id)
     {
         var tenantId = TenantId;
+        await EnsureBankAccountAccessAsync(id, FinanceAccessLevel.Read);
         var account = await _context.BankAccounts
             .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == id && !a.IsDeleted)
             ?? throw new Exception("Bank account not found");
@@ -318,6 +349,7 @@ public class BankAccountService : IBankAccountService
         DateTime? toDate = null)
     {
         var tenantId = TenantId;
+        await EnsureBankAccountAccessAsync(id, FinanceAccessLevel.Read);
         var bankAccountExists = await _context.BankAccounts
             .AnyAsync(a => a.TenantId == tenantId && a.Id == id && !a.IsDeleted);
         if (!bankAccountExists)
@@ -329,10 +361,13 @@ public class BankAccountService : IBankAccountService
             .Where(t => t.TenantId == tenantId && t.BankAccountId == id && !t.IsDeleted);
 
         if (fromDate.HasValue)
-            query = query.Where(t => t.TransactionDate >= fromDate.Value);
+            query = query.Where(t => t.TransactionDate >= fromDate.Value.Date);
 
         if (toDate.HasValue)
-            query = query.Where(t => t.TransactionDate <= toDate.Value);
+        {
+            var endExclusive = toDate.Value.Date.AddDays(1);
+            query = query.Where(t => t.TransactionDate < endExclusive);
+        }
 
         return await query
             .Select(t => new CashTransactionDto
@@ -352,24 +387,20 @@ public class BankAccountService : IBankAccountService
 
     public async Task UpdateBalanceAsync(Guid id, decimal amount, bool isDebit)
     {
-        var tenantId = TenantId;
-        var account = await _context.BankAccounts
-            .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == id && !a.IsDeleted)
-            ?? throw new Exception("Bank account not found");
-
-        if (isDebit)
-        {
-            account.CurrentBalance -= amount;
-            account.AvailableBalance -= amount;
-        }
-        else
-        {
-            account.CurrentBalance += amount;
-            account.AvailableBalance += amount;
-        }
-
-        await _context.SaveChangesAsync();
+        await Task.CompletedTask;
+        throw new InvalidOperationException(
+            "Direct bank-balance mutation is disabled. Post or reverse the source document through IFinancePostingEngine so the GL and bank snapshot remain reconcilable.");
     }
+
+    private Task<IReadOnlyCollection<Guid>?> GetPermittedBankAccountIdsAsync(FinanceAccessLevel level)
+        => _financeAccessScopeService == null
+            ? Task.FromResult<IReadOnlyCollection<Guid>?>(null)
+            : _financeAccessScopeService.GetPermittedBankAccountIdsAsync(level);
+
+    private Task EnsureBankAccountAccessAsync(Guid bankAccountId, FinanceAccessLevel level)
+        => _financeAccessScopeService == null
+            ? Task.CompletedTask
+            : _financeAccessScopeService.EnsureBankAccountAccessAsync(bankAccountId, level);
 
     private async Task<string> BuildUniqueBankLiquidityCodeAsync(BankAccount account, Guid tenantId)
     {

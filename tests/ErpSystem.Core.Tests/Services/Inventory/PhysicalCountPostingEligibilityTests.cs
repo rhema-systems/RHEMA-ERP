@@ -1,3 +1,5 @@
+using System.Linq.Expressions;
+using Microsoft.EntityFrameworkCore.Query;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Interfaces;
@@ -211,6 +213,9 @@ public sealed class PhysicalCountPostingEligibilityTests
             var repository = new Mock<IPhysicalCountRepository>();
             repository.Setup(owner => owner.GetWithItemsAsync(Count.Id)).ReturnsAsync(Count);
             repository.Setup(owner => owner.GetByCountNumberAsync(Count.CountNumber)).ReturnsAsync(Count);
+            repository.Setup(owner => owner.GetQueryable(It.IsAny<Expression<Func<PhysicalCount, bool>>>()))
+                .Returns((Expression<Func<PhysicalCount, bool>> predicate) => new AsyncQuery<PhysicalCount>(new[] { Count }.Where(predicate.Compile())));
+
             var access = new Mock<IProcurementAccessControlService>();
             access.Setup(owner => owner.CheckCapabilityAsync(It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((ProcurementAccessCapabilityRequest request, string _, CancellationToken _) =>
@@ -227,6 +232,32 @@ public sealed class PhysicalCountPostingEligibilityTests
                 Mock.Of<IUnitOfWork>(), currentUser.Object, access.Object, Mock.Of<IStockAdjustmentService>(),
                 Mock.Of<IProcurementControlEventService>(), NullLogger<PhysicalCountService>.Instance,
                 Mock.Of<IWarehouseDefaultLocationService>());
+        }
+    }
+    private sealed class AsyncQuery<T> : EnumerableQuery<T>, IAsyncEnumerable<T>, IQueryable<T>
+    {
+        public AsyncQuery(IEnumerable<T> values) : base(values) { }
+        public AsyncQuery(Expression expression) : base(expression) { }
+        IQueryProvider IQueryable.Provider => new AsyncProvider(this);
+        public IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default) => new AsyncEnumerator<T>(this.AsEnumerable().GetEnumerator());
+    }
+    private sealed class AsyncEnumerator<T>(IEnumerator<T> enumerator) : IAsyncEnumerator<T>
+    {
+        public T Current => enumerator.Current;
+        public ValueTask<bool> MoveNextAsync() => ValueTask.FromResult(enumerator.MoveNext());
+        public ValueTask DisposeAsync() { enumerator.Dispose(); return ValueTask.CompletedTask; }
+    }
+    private sealed class AsyncProvider(IQueryProvider provider) : IAsyncQueryProvider
+    {
+        public IQueryable CreateQuery(Expression expression) => provider.CreateQuery(expression);
+        public IQueryable<T> CreateQuery<T>(Expression expression) => new AsyncQuery<T>(expression);
+        public object? Execute(Expression expression) => provider.Execute(expression);
+        public T Execute<T>(Expression expression) => provider.Execute<T>(expression);
+        public TResult ExecuteAsync<TResult>(Expression expression, CancellationToken cancellationToken = default)
+        {
+            var resultType = typeof(TResult).GetGenericArguments()[0];
+            var result = typeof(IQueryProvider).GetMethod(nameof(Execute), 1, new[] { typeof(Expression) })!.MakeGenericMethod(resultType).Invoke(provider, new object[] { expression });
+            return (TResult)typeof(Task).GetMethod(nameof(Task.FromResult))!.MakeGenericMethod(resultType).Invoke(null, new[] { result })!;
         }
     }
 }

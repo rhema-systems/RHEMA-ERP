@@ -73,6 +73,7 @@ import {
   type GroundRentAccount,
 } from '@/services/estate-ground-rent.service';
 import { useManagedAssetsPage } from './use-managed-assets-page';
+import { leaseExpiryAlert, leaseExpiryDate } from './property-workspace-utils';
 
 function formatMoney(value: number, currency: string) {
   return new Intl.NumberFormat(undefined, {
@@ -105,15 +106,6 @@ function formatDate(value?: string) {
     month: 'short',
     day: 'numeric',
   }).format(new Date(value));
-}
-
-function getLeaseExpiryDate(asset: EstateManagedAsset) {
-  const startDate = asset.dateOfTenancy || asset.rightOfEntryDate;
-  if (!startDate || !asset.leaseTermYears) return 'Not recorded';
-
-  const expiryDate = new Date(startDate);
-  expiryDate.setFullYear(expiryDate.getFullYear() + asset.leaseTermYears);
-  return formatDate(expiryDate.toISOString());
 }
 
 function getLeaseStatus(asset: EstateManagedAsset) {
@@ -815,6 +807,7 @@ export function LeaseSetupWorkspace() {
                     const billingAccount = billingAccountByAssetId.get(
                       asset.id
                     );
+                    const expiryAlert = leaseExpiryAlert(asset);
 
                     return (
                       <TableRow key={asset.id}>
@@ -832,11 +825,23 @@ export function LeaseSetupWorkspace() {
                           <div>
                             {asset.leaseTermYears
                               ? `${asset.leaseTermYears} years`
+                              : asset.externalLeaseTermMonths
+                              ? `${asset.externalLeaseTermMonths} months`
                               : 'Not recorded'}
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            Expires: {getLeaseExpiryDate(asset)}
+                            Expires: {formatDate(leaseExpiryDate(asset)?.toISOString())}
                           </div>
+                          {expiryAlert ? (
+                            <Badge
+                              variant="outline"
+                              className={expiryAlert.startsWith('Expired')
+                                ? 'mt-1 border-destructive text-destructive'
+                                : 'mt-1 border-amber-500 text-amber-700 dark:text-amber-300'}
+                            >
+                              {expiryAlert}
+                            </Badge>
+                          ) : null}
                         </TableCell>
                         <TableCell>
                           {asset.assetType !== EstateManagedAssetType.Land

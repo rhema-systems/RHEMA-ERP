@@ -13,6 +13,7 @@ public partial class PhysicalCountService
         var count = await _countRepository.GetByIdAsync(countId) ?? throw new ArgumentException("Count not found.");
         await EnsureAccessAsync(count, "procurement.inventory.count");
         EnsureCounterCanEdit(count, userId);
+        await EnsureCurrentCounterIdentityAsync(count, userId);
         var linked = await _unitOfWork.Repository<CentralDocumentVersion>().GetQueryable()
             .AnyAsync(v => v.Id == sheet.CentralDocumentVersionId && v.TenantId == count.TenantId && !v.IsDeleted &&
                 v.DocumentRecord.SourceRecordId == count.Id && v.DocumentRecord.SourceEntityType == "PhysicalCount" &&

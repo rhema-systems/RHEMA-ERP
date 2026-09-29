@@ -32,6 +32,55 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed partial class ArInvoicePostingMigrationTests
 {
     [Fact]
+    public async Task Distribution_preview_does_not_post_or_mutate_invoice_customer_or_audit()
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenant);
+        var balance = fixture.Customer.OutstandingBalance;
+        var status = fixture.Invoice.Status;
+        var audits = await db.AuditLogs.CountAsync();
+        var (service, _) = CreateService(db, tenant);
+
+        var preview = await service.GetDistributionPreviewAsync(fixture.Invoice.Id,
+            new(FinanceDimensionRouteId.FinanceArCustomerInvoice));
+
+        preview.IsEstimated.Should().BeTrue();
+        preview.IsBalanced.Should().BeTrue();
+        preview.TotalDebit.Should().Be(100m);
+        preview.Lines.Should().ContainSingle(line => line.AccountId == fixture.ArAccount.Id && line.Debit == 100m);
+        fixture.Invoice.Status.Should().Be(status);
+        fixture.Invoice.JournalEntryId.Should().BeNull();
+        fixture.Customer.OutstandingBalance.Should().Be(balance);
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        (await db.AuditLogs.CountAsync()).Should().Be(audits);
+        db.ChangeTracker.HasChanges().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Posted_distribution_uses_original_journal_even_if_current_account_defaults_change()
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenant);
+        var (service, _) = CreateService(db, tenant);
+        await service.PostAsync(fixture.Invoice.Id);
+        var settings = await db.FinanceSettings.SingleAsync(value => value.TenantId == tenant);
+        settings.ControlAccountArId = null;
+        await db.SaveChangesAsync();
+        var journals = await db.JournalEntries.CountAsync();
+
+        var preview = await service.GetDistributionPreviewAsync(fixture.Invoice.Id,
+            new(FinanceDimensionRouteId.FinanceArCustomerInvoice));
+
+        preview.IsEstimated.Should().BeFalse();
+        preview.IsBalanced.Should().BeTrue();
+        preview.Lines.Should().ContainSingle(line => line.AccountId == fixture.ArAccount.Id && line.Debit == 100m);
+        (await db.JournalEntries.CountAsync()).Should().Be(journals);
+        db.ChangeTracker.HasChanges().Should().BeFalse();
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
     [Trait("Category", "AccountsReceivable")]
     public async Task SentArInvoice_ShouldPostThroughFinancePostingEngineAndCreateAuditEvent()
@@ -883,7 +932,10 @@ public sealed partial class ArInvoicePostingMigrationTests
         ApplicationDbContext db,
         Guid tenantId,
         Mock<IWorkflowIntegrationService>? workflow = null,
-        ITaxCalculationEngine? taxEngine = null)
+        ITaxCalculationEngine? taxEngine = null,
+        IInventoryValuationService? valuation = null,
+        IInventoryTrackingControlService? tracking = null,
+        IFinanceSourceDimensionService? dimensions = null)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var auditService = new FinanceAuditService(
@@ -914,12 +966,14 @@ public sealed partial class ArInvoicePostingMigrationTests
             new UnitOfWork(db),
             currentUser.Object,
             taxEngine ?? Mock.Of<ITaxCalculationEngine>(),
-            Mock.Of<IInventoryValuationService>(),
+            valuation ?? Mock.Of<IInventoryValuationService>(),
             Mock.Of<ILogger<InvoiceService>>(),
             numbering.Object,
             postingEngine,
             auditService,
-            workflowIntegration: (workflow ?? DirectWorkflow()).Object);
+            sourceDimensions: dimensions,
+            workflowIntegration: (workflow ?? DirectWorkflow()).Object,
+            inventoryTracking: tracking);
 
         return (service, subledgerPostingMock);
     }

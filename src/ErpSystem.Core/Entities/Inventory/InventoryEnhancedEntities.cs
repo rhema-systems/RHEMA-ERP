@@ -370,6 +370,8 @@ public class GoodsReceiptNoteItem : TenantEntity
 /// </summary>
 public class InventoryTransfer : TenantEntity
 {
+    public Guid? CarrierBusinessPartnerId { get; set; }
+    public ErpSystem.Core.Entities.Procurement.BusinessPartner? CarrierBusinessPartner { get; set; }
     [Required]
     [MaxLength(50)]
     public string TransferNumber { get; set; } = string.Empty;
@@ -600,6 +602,13 @@ public class PhysicalCount : TenantEntity
     [MaxLength(50)]
     public string CountNumber { get; set; } = string.Empty;
 
+    public Guid? RootPhysicalCountId { get; set; }
+    public Guid? ParentPhysicalCountId { get; set; }
+    public int RecountAttempt { get; set; }
+    public DateTime? ObservationSubmittedAtUtc { get; set; }
+    [MaxLength(100)] public string? RecountRequestKey { get; set; }
+    [MaxLength(64)] public string? RecountRequestHash { get; set; }
+
     [MaxLength(200)]
     public string? Description { get; set; }
 
@@ -694,6 +703,7 @@ public class PhysicalCount : TenantEntity
     public virtual StockAdjustment? StockAdjustment { get; set; }
     public virtual ICollection<PhysicalCountItem> Items { get; set; } = new List<PhysicalCountItem>();
     public virtual ICollection<PhysicalCountAction> Actions { get; set; } = new List<PhysicalCountAction>();
+    public virtual ICollection<PhysicalCountCounter> Counters { get; set; } = new List<PhysicalCountCounter>();
 }
 
 /// <summary>
@@ -703,6 +713,11 @@ public class PhysicalCountItem : TenantEntity
 {
     [Required]
     public Guid PhysicalCountId { get; set; }
+
+    public Guid? RootPhysicalCountItemId { get; set; }
+    public Guid? PredecessorPhysicalCountItemId { get; set; }
+    public Guid? SupersededByPhysicalCountId { get; set; }
+    [MaxLength(2000)] public string? RecountReason { get; set; }
 
     [Required]
     public Guid InventoryItemId { get; set; }
@@ -724,6 +739,12 @@ public class PhysicalCountItem : TenantEntity
 
     [Column(TypeName = "decimal(18,4)")]
     public decimal CountedQuantity { get; set; } = 0;
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal DefectiveQuantity { get; set; } = 0;
+
+    [MaxLength(2000)]
+    public string? DefectiveNotes { get; set; }
 
     [Column(TypeName = "decimal(18,4)")]
     public decimal VarianceQuantity { get; set; } = 0; // Counted - System
@@ -1037,6 +1058,8 @@ public class LandedCostAllocation : TenantEntity
 /// </summary>
 public class PurchaseReturn : TenantEntity
 {
+    /// <summary>Zero retains legacy/unfinalized accounting; one seals exact receipt and invoice claims after the shared dispatch posting.</summary>
+    public int AccountingAllocationVersion { get; set; }
     // Captured by the server at submission; historical returns retain their approval obligation.
     public bool ApprovalRequired { get; set; } = true;
 

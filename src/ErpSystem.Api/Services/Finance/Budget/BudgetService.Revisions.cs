@@ -341,6 +341,14 @@ public partial class BudgetService
                 .ThenInclude(line => line.FiscalPeriod)
             .Include(revision => revision.Lines.Where(line => !line.IsDeleted))
                 .ThenInclude(line => line.SegmentValue)
+            .Include(revision => revision.Lines.Where(line => !line.IsDeleted))
+                .ThenInclude(line => line.FinanceDimensionSet)!
+                    .ThenInclude(set => set!.Items)
+                        .ThenInclude(item => item.FinanceDimensionDefinition)
+            .Include(revision => revision.Lines.Where(line => !line.IsDeleted))
+                .ThenInclude(line => line.FinanceDimensionSet)!
+                    .ThenInclude(set => set!.Items)
+                        .ThenInclude(item => item.FinanceDimensionValue)
             .AsSplitQuery();
         if (!asTracking)
             query = query.AsNoTracking();
@@ -356,6 +364,8 @@ public partial class BudgetService
             .Include(item => item.ControlDimensions.Where(control => !control.IsDeleted))
             .Include(item => item.BudgetReturns.Where(budgetReturn => !budgetReturn.IsDeleted))
                 .ThenInclude(budgetReturn => budgetReturn.BudgetEntries.Where(entry => !entry.IsDeleted))
+                    .ThenInclude(entry => entry.FinanceDimensionSet)!
+                        .ThenInclude(set => set!.Items)
             .AsSplitQuery()
             .SingleOrDefaultAsync(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted);
         if (scenario == null)
@@ -387,10 +397,11 @@ public partial class BudgetService
             throw new InvalidOperationException("Budget revision lines cannot contain zero adjustments.");
 
         var duplicateCell = dto.Lines
-            .GroupBy(line => (line.SegmentValueId, line.AccountId, line.FiscalPeriodId))
+            .GroupBy(line => (line.SegmentValueId, line.AccountId, line.FiscalPeriodId, line.FinanceDimensionSetId))
             .FirstOrDefault(group => group.Count() > 1);
         if (duplicateCell != null)
-            throw new InvalidOperationException("Each cost-centre, account and period can appear only once in a revision.");
+            throw new InvalidOperationException(
+                "Each return, account, period and controlling-dimension combination can appear only once in a revision.");
 
         var accountIds = dto.Lines.Select(line => line.AccountId).Distinct().ToArray();
         var validAccountIds = await _context.Accounts
@@ -431,6 +442,57 @@ public partial class BudgetService
                 throw new InvalidOperationException("One or more cost-centre values are invalid for this tenant.");
         }
 
+        var controlDimensionIds = source.ControlDimensions
+            .Where(item => !item.IsDeleted)
+            .OrderBy(item => item.DisplayOrder)
+            .Select(item => item.FinanceDimensionDefinitionId)
+            .ToHashSet();
+        var requestedSetIds = dto.Lines
+            .Where(line => line.FinanceDimensionSetId.HasValue)
+            .Select(line => line.FinanceDimensionSetId!.Value)
+            .Distinct()
+            .ToArray();
+        var dimensionSets = requestedSetIds.Length == 0
+            ? new Dictionary<Guid, FinanceDimensionSet>()
+            : await _context.FinanceDimensionSets.AsNoTracking()
+                .Include(set => set.Items.Where(item => !item.IsDeleted))
+                .Where(set => set.TenantId == TenantId && requestedSetIds.Contains(set.Id) && !set.IsDeleted)
+                .ToDictionaryAsync(set => set.Id);
+        if (dimensionSets.Count != requestedSetIds.Length)
+            throw new InvalidOperationException("One or more revision dimension combinations are invalid for this tenant.");
+
+        foreach (var line in dto.Lines)
+        {
+            if (controlDimensionIds.Count == 0)
+            {
+                if (line.FinanceDimensionSetId.HasValue)
+                    throw new InvalidOperationException(
+                        "A legacy account-period budget revision cannot introduce controlling dimensions.");
+                continue;
+            }
+
+            if (!line.FinanceDimensionSetId.HasValue
+                || !dimensionSets.TryGetValue(line.FinanceDimensionSetId.Value, out var dimensionSet))
+                throw new InvalidOperationException(
+                    "Every revision line must select the full controlling-dimension combination used by the official budget.");
+
+            var assignmentIds = dimensionSet.Items
+                .Where(item => !item.IsDeleted)
+                .Select(item => item.FinanceDimensionDefinitionId)
+                .ToHashSet();
+            if (!assignmentIds.SetEquals(controlDimensionIds))
+                throw new InvalidOperationException(
+                    "A revision dimension combination must contain exactly one value for every scenario control dimension.");
+
+            var combinationBelongsToSource = source.BudgetReturns
+                .Where(item => !item.IsDeleted && item.SegmentValueId == line.SegmentValueId)
+                .SelectMany(item => item.BudgetEntries.Where(entry => !entry.IsDeleted))
+                .Any(entry => entry.FinanceDimensionSetId == dimensionSet.Id);
+            if (!combinationBelongsToSource)
+                throw new InvalidOperationException(
+                    "A revision dimension combination must already be governed by the selected official budget return.");
+        }
+
         var netChange = decimal.Round(dto.Lines.Sum(line => line.AdjustmentAmountBase), 2);
         if (type == VirementType
             && (netChange != 0m
@@ -445,7 +507,8 @@ public partial class BudgetService
         var currentAmounts = BuildCurrentAmounts(source);
         foreach (var line in dto.Lines)
         {
-            var key = new BudgetCell(line.SegmentValueId, line.AccountId, line.FiscalPeriodId);
+            var key = new BudgetCell(
+                line.SegmentValueId, line.AccountId, line.FiscalPeriodId, line.FinanceDimensionSetId);
             var revisedAmount = currentAmounts.GetValueOrDefault(key) + line.AdjustmentAmountBase;
             if (revisedAmount < 0m)
                 throw new InvalidOperationException(
@@ -575,16 +638,15 @@ public partial class BudgetService
             }
 
             var matchingEntries = budgetReturn.BudgetEntries.Where(item =>
-                item.AccountId == adjustment.AccountId && item.FiscalPeriodId == adjustment.FiscalPeriodId).ToList();
+                item.AccountId == adjustment.AccountId
+                && item.FiscalPeriodId == adjustment.FiscalPeriodId
+                && item.FinanceDimensionSetId == adjustment.FinanceDimensionSetId).ToList();
             if (matchingEntries.Count > 1)
                 throw new InvalidOperationException(
                     "This revision line is ambiguous because the account and period contain multiple dimension-grained budget cells.");
             var entry = matchingEntries.SingleOrDefault();
             if (entry == null)
             {
-                if (successor.ControlDimensions.Any(item => !item.IsDeleted))
-                    throw new InvalidOperationException(
-                        "A revision cannot introduce a new dimension-grained cell without explicit controlling assignments.");
                 entry = new BudgetEntry
                 {
                     Id = Guid.NewGuid(),
@@ -592,6 +654,7 @@ public partial class BudgetService
                     BudgetReturnId = budgetReturn.Id,
                     AccountId = adjustment.AccountId,
                     FiscalPeriodId = adjustment.FiscalPeriodId,
+                    FinanceDimensionSetId = adjustment.FinanceDimensionSetId,
                     CurrencyCode = successor.BaseCurrencyCode,
                     ExchangeRate = 1m,
                     CreatedAt = now,
@@ -627,13 +690,28 @@ public partial class BudgetService
             .Select(line =>
             {
                 var current = currentAmounts.GetValueOrDefault(
-                    new BudgetCell(line.SegmentValueId, line.AccountId, line.FiscalPeriodId));
+                    new BudgetCell(
+                        line.SegmentValueId, line.AccountId, line.FiscalPeriodId, line.FinanceDimensionSetId));
                 return new BudgetRevisionLineDto
                 {
                     Id = line.Id,
                     SegmentValueId = line.SegmentValueId,
                     SegmentCode = line.SegmentValue?.SegmentValue ?? string.Empty,
                     SegmentName = line.SegmentValue?.Description ?? line.SegmentValue?.SegmentValue ?? "General",
+                    FinanceDimensionSetId = line.FinanceDimensionSetId,
+                    DimensionCombination = line.FinanceDimensionSet?.DisplayValue ?? string.Empty,
+                    DimensionAssignments = line.FinanceDimensionSet?.Items
+                        .Where(item => !item.IsDeleted)
+                        .OrderBy(item => item.DimensionCodeSnapshot)
+                        .Select(item => new BudgetDimensionAssignmentDto
+                        {
+                            FinanceDimensionDefinitionId = item.FinanceDimensionDefinitionId,
+                            FinanceDimensionValueId = item.FinanceDimensionValueId,
+                            DimensionCode = item.DimensionCodeSnapshot,
+                            DimensionName = item.FinanceDimensionDefinition?.Name ?? item.DimensionCodeSnapshot,
+                            ValueCode = item.DimensionValueCodeSnapshot,
+                            ValueName = item.FinanceDimensionValue?.Name ?? item.DimensionValueCodeSnapshot
+                        }).ToArray() ?? Array.Empty<BudgetDimensionAssignmentDto>(),
                     AccountId = line.AccountId,
                     AccountCode = line.Account?.AccountCode ?? string.Empty,
                     AccountName = line.Account?.AccountName ?? string.Empty,
@@ -712,6 +790,8 @@ public partial class BudgetService
             .Include(scenario => scenario.FiscalYear)
             .Include(scenario => scenario.BudgetReturns.Where(item => !item.IsDeleted))
                 .ThenInclude(item => item.BudgetEntries.Where(entry => !entry.IsDeleted))
+                    .ThenInclude(entry => entry.FinanceDimensionSet)!
+                        .ThenInclude(set => set!.Items)
             .AsSplitQuery()
             .SingleOrDefaultAsync(scenario => scenario.TenantId == TenantId && scenario.Id == id && !scenario.IsDeleted)
             ?? throw new KeyNotFoundException("Source budget scenario not found.");
@@ -723,7 +803,11 @@ public partial class BudgetService
                 .Where(entry => !entry.IsDeleted)
                 .Select(entry => new
                 {
-                    Key = new BudgetCell(budgetReturn.SegmentValueId, entry.AccountId, entry.FiscalPeriodId),
+                    Key = new BudgetCell(
+                        budgetReturn.SegmentValueId,
+                        entry.AccountId,
+                        entry.FiscalPeriodId,
+                        entry.FinanceDimensionSetId),
                     entry.AmountBase
                 }))
             .GroupBy(item => item.Key)
@@ -735,6 +819,7 @@ public partial class BudgetService
             Id = Guid.NewGuid(),
             TenantId = TenantId,
             SegmentValueId = line.SegmentValueId,
+            FinanceDimensionSetId = line.FinanceDimensionSetId,
             AccountId = line.AccountId,
             FiscalPeriodId = line.FiscalPeriodId,
             AdjustmentAmountBase = decimal.Round(line.AdjustmentAmountBase, 2),
@@ -756,6 +841,7 @@ public partial class BudgetService
             Lines = revision.Lines.Where(line => !line.IsDeleted).Select(line => new BudgetRevisionLineInputDto
             {
                 SegmentValueId = line.SegmentValueId,
+                FinanceDimensionSetId = line.FinanceDimensionSetId,
                 AccountId = line.AccountId,
                 FiscalPeriodId = line.FiscalPeriodId,
                 AdjustmentAmountBase = line.AdjustmentAmountBase,
@@ -833,5 +919,9 @@ public partial class BudgetService
         public byte[] RowVersion { get; init; } = [];
     }
 
-    private readonly record struct BudgetCell(Guid? SegmentValueId, Guid AccountId, Guid FiscalPeriodId);
+    private readonly record struct BudgetCell(
+        Guid? SegmentValueId,
+        Guid AccountId,
+        Guid FiscalPeriodId,
+        Guid? FinanceDimensionSetId);
 }

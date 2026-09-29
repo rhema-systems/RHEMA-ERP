@@ -246,6 +246,13 @@ public sealed class FinancialStatementLayoutService : IFinancialStatementLayoutS
 
         EnsureRevision(layout.Revision, request.ExpectedRevision, "layout");
         EnsureEditableLayout(layout);
+        if (layout.Versions.Any(version =>
+                !version.IsDeleted &&
+                version.Status == FinancialStatementLayoutVersionStatus.Submitted))
+        {
+            throw new InvalidOperationException(
+                "Layout metadata cannot change while a version is awaiting independent approval.");
+        }
         var before = new
         {
             layout.Name,
@@ -322,10 +329,11 @@ public sealed class FinancialStatementLayoutService : IFinancialStatementLayoutS
 
         if (layout.Versions.Any(version =>
                 !version.IsDeleted &&
-                version.Status == FinancialStatementLayoutVersionStatus.Draft))
+                version.Status is FinancialStatementLayoutVersionStatus.Draft
+                    or FinancialStatementLayoutVersionStatus.Submitted))
         {
             throw new InvalidOperationException(
-                "This layout already has a draft version. Publish or discard it before creating another draft.");
+                "This layout already has a Draft or Submitted version. Complete its review before creating another Draft.");
         }
 
         FinancialStatementLayoutVersion? source = null;
@@ -501,12 +509,12 @@ public sealed class FinancialStatementLayoutService : IFinancialStatementLayoutS
             cancellationToken);
     }
 
-    public async Task<FinancialStatementLayoutVersionDto> PublishVersionAsync(
+    public async Task<FinancialStatementLayoutVersionDto> SubmitVersionForApprovalAsync(
         Guid versionId,
-        PublishFinancialStatementLayoutVersionDto request,
+        SubmitFinancialStatementLayoutVersionDto request,
         CancellationToken cancellationToken = default)
     {
-        ValidateEffectiveDates(request.EffectiveFrom, request.EffectiveTo);
+        ArgumentNullException.ThrowIfNull(request);
         FinancialStatementLayoutVersionDto? result = null;
         var strategy = _context.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () =>
@@ -529,8 +537,195 @@ public sealed class FinancialStatementLayoutService : IFinancialStatementLayoutS
                     cancellationToken);
                 ThrowForValidationErrors(validation);
 
-                var effectiveFrom = request.EffectiveFrom?.Date ?? version.EffectiveFrom?.Date ?? DateTime.UtcNow.Date;
-                var effectiveTo = request.EffectiveTo?.Date ?? version.EffectiveTo?.Date;
+                var now = DateTime.UtcNow;
+                version.Status = FinancialStatementLayoutVersionStatus.Submitted;
+                version.SubmittedAt = now;
+                version.SubmittedById = TryGetUserId();
+                version.SubmittedByName = UserName;
+                version.LastDecisionAt = null;
+                version.LastDecisionById = null;
+                version.LastDecisionByName = null;
+                version.LastDecisionReason = null;
+                version.Revision++;
+                version.UpdatedAt = now;
+                version.UpdatedBy = UserName;
+                await _context.SaveChangesAsync(cancellationToken);
+                await RecordAuditAsync(
+                    FinanceAuditEvents.FinancialStatementLayoutVersionSubmitted,
+                    version.FinancialStatementLayoutId,
+                    new
+                    {
+                        versionId = version.Id,
+                        version.VersionNumber,
+                        version.Revision,
+                        version.SubmittedAt,
+                        version.SubmittedById,
+                        version.SubmittedByName,
+                        warnings = validation.Issues.Where(issue =>
+                            issue.Severity == FinancialStatementLayoutValidationSeverity.Warning)
+                    },
+                    cancellationToken);
+                if (transaction != null) await transaction.CommitAsync(cancellationToken);
+                result = MapVersion(version);
+            }
+            catch
+            {
+                if (transaction != null) await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        });
+        return result!;
+    }
+
+    public async Task<IReadOnlyList<FinancialStatementLayoutApprovalQueueItemDto>> GetPendingApprovalsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var currentUserId = TryGetUserId();
+        var currentUserName = UserName;
+        var rows = await _context.FinancialStatementLayoutVersions.AsNoTracking()
+            .Where(version => version.TenantId == TenantId
+                && !version.IsDeleted
+                && version.Status == FinancialStatementLayoutVersionStatus.Submitted
+                && !version.FinancialStatementLayout.IsDeleted
+                && !version.FinancialStatementLayout.IsProtectedStandard)
+            .OrderBy(version => version.SubmittedAt)
+            .Select(version => new FinancialStatementLayoutApprovalQueueItemDto
+            {
+                VersionId = version.Id,
+                LayoutId = version.FinancialStatementLayoutId,
+                LayoutCode = version.FinancialStatementLayout.Code,
+                LayoutName = version.FinancialStatementLayout.Name,
+                StatementType = version.FinancialStatementLayout.StatementType,
+                VersionNumber = version.VersionNumber,
+                Revision = version.Revision,
+                AccountingBookId = version.FinancialStatementLayout.AccountingBookId,
+                AccountingBookCode = version.FinancialStatementLayout.AccountingBook.Code,
+                AccountingBookName = version.FinancialStatementLayout.AccountingBook.Name,
+                EffectiveFrom = version.EffectiveFrom,
+                EffectiveTo = version.EffectiveTo,
+                SubmittedAt = version.SubmittedAt ?? version.UpdatedAt ?? version.CreatedAt,
+                SubmittedById = version.SubmittedById,
+                SubmittedByName = version.SubmittedByName ?? string.Empty
+            })
+            .ToListAsync(cancellationToken);
+
+        foreach (var row in rows)
+        {
+            row.CanDecide = !IsSameActor(
+                row.SubmittedById,
+                row.SubmittedByName,
+                currentUserId,
+                currentUserName);
+            if (!row.CanDecide)
+                row.DecisionDisabledReason = "The submitter cannot approve or reject their own layout version.";
+        }
+        return rows;
+    }
+
+    public async Task<FinancialStatementLayoutVersionDto> DecideVersionApprovalAsync(
+        Guid versionId,
+        DecideFinancialStatementLayoutVersionDto request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Decision == FinancialStatementLayoutApprovalDecision.Approve)
+        {
+            return await PublishVersionAsync(versionId, new PublishFinancialStatementLayoutVersionDto
+            {
+                ExpectedVersionRevision = request.ExpectedVersionRevision
+            }, cancellationToken);
+        }
+        if (request.Decision != FinancialStatementLayoutApprovalDecision.Reject)
+            throw new InvalidOperationException("Approval decision must be Approve or Reject.");
+
+        var reason = RequireText(request.Reason, "Rejection reason");
+        FinancialStatementLayoutVersionDto? result = null;
+        var strategy = _context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            _context.ChangeTracker.Clear();
+            await using var transaction = _context.Database.IsRelational()
+                ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+                : null;
+            try
+            {
+                var version = await LoadVersionAsync(versionId, asNoTracking: false, cancellationToken)
+                    ?? throw new KeyNotFoundException("Financial statement layout version was not found.");
+                EnsureSubmitted(version);
+                EnsureRevision(version.Revision, request.ExpectedVersionRevision, "layout version");
+                EnsureIndependentApprover(version);
+                var now = DateTime.UtcNow;
+                version.Status = FinancialStatementLayoutVersionStatus.Draft;
+                version.LastDecisionAt = now;
+                version.LastDecisionById = TryGetUserId();
+                version.LastDecisionByName = UserName;
+                version.LastDecisionReason = reason;
+                version.Revision++;
+                version.UpdatedAt = now;
+                version.UpdatedBy = UserName;
+                await _context.SaveChangesAsync(cancellationToken);
+                await RecordAuditAsync(
+                    FinanceAuditEvents.FinancialStatementLayoutVersionRejected,
+                    version.FinancialStatementLayoutId,
+                    new
+                    {
+                        versionId = version.Id,
+                        version.VersionNumber,
+                        version.Revision,
+                        version.SubmittedById,
+                        version.SubmittedByName,
+                        rejectedById = version.LastDecisionById,
+                        rejectedByName = version.LastDecisionByName,
+                        reason
+                    },
+                    cancellationToken);
+                if (transaction != null) await transaction.CommitAsync(cancellationToken);
+                result = MapVersion(version);
+            }
+            catch
+            {
+                if (transaction != null) await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        });
+        return result!;
+    }
+
+    public async Task<FinancialStatementLayoutVersionDto> PublishVersionAsync(
+        Guid versionId,
+        PublishFinancialStatementLayoutVersionDto request,
+        CancellationToken cancellationToken = default)
+    {
+        FinancialStatementLayoutVersionDto? result = null;
+        var strategy = _context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            _context.ChangeTracker.Clear();
+            await using var transaction = _context.Database.IsRelational()
+                ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+                : null;
+            try
+            {
+                var version = await LoadVersionAsync(versionId, asNoTracking: false, cancellationToken)
+                    ?? throw new KeyNotFoundException("Financial statement layout version was not found.");
+                EnsureSubmitted(version);
+                EnsureEditableLayout(version.FinancialStatementLayout);
+                EnsureRevision(version.Revision, request.ExpectedVersionRevision, "layout version");
+                EnsureIndependentApprover(version);
+                if (request.EffectiveFrom.HasValue || request.EffectiveTo.HasValue)
+                {
+                    throw new InvalidOperationException(
+                        "Effective dates cannot be changed during approval; set them on the Draft before submission.");
+                }
+                var validation = await ValidateDefinitionAsync(
+                    version.FinancialStatementLayout.StatementType,
+                    version.FinancialStatementLayout.AccountingBookId,
+                    ToInputRows(version.Rows),
+                    cancellationToken);
+                ThrowForValidationErrors(validation);
+
+                var effectiveFrom = version.EffectiveFrom?.Date ?? DateTime.UtcNow.Date;
+                var effectiveTo = version.EffectiveTo?.Date;
                 ValidateEffectiveDates(effectiveFrom, effectiveTo);
                 var priorVersions = await _context.FinancialStatementLayoutVersions
                     .Where(candidate => candidate.TenantId == TenantId
@@ -556,6 +751,10 @@ public sealed class FinancialStatementLayoutService : IFinancialStatementLayoutS
                 version.PublishedAt = now;
                 version.PublishedById = TryGetUserId();
                 version.PublishedByName = UserName;
+                version.LastDecisionAt = now;
+                version.LastDecisionById = version.PublishedById;
+                version.LastDecisionByName = UserName;
+                version.LastDecisionReason = null;
                 version.PublicationSnapshotSchemaVersion = FinancialStatementPublicationFingerprint.SnapshotSchemaVersion;
                 version.PublishedAccountingBookId = version.FinancialStatementLayout.AccountingBookId;
                 version.PublishedAccountingBookCode = version.FinancialStatementLayout.AccountingBook.Code;
@@ -575,6 +774,7 @@ public sealed class FinancialStatementLayoutService : IFinancialStatementLayoutS
                     version.FinancialStatementLayoutId,
                     new { versionId = version.Id, version.VersionNumber, version.EffectiveFrom,
                         version.EffectiveTo, version.HierarchyFingerprint, version.ResolutionFingerprint,
+                        version.SubmittedById, version.SubmittedByName,
                         resolvedAccountCount = snapshot.Accounts.Count,
                         retiredVersionIds = priorVersions.Select(item => item.Id).ToArray(),
                         warnings = validation.Issues.Where(issue => issue.Severity == FinancialStatementLayoutValidationSeverity.Warning) },
@@ -636,6 +836,321 @@ public sealed class FinancialStatementLayoutService : IFinancialStatementLayoutS
             new { clone.Code, clone.Name, clone.StandardSourceLayoutId, draftVersionId = draft.Id }, cancellationToken);
         return MapLayout((await LoadLayoutAsync(clone.Id, true, cancellationToken))!);
     }
+
+    public async Task<FinancialStatementLayoutReadinessDto> GetInitializationReadinessAsync(
+        Guid? accountingBookId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var books = await _context.AccountingBooks.AsNoTracking()
+            .Where(book => book.TenantId == TenantId
+                && !book.IsDeleted
+                && book.IsActive
+                && book.AllowsPosting
+                && (!accountingBookId.HasValue || accountingBookId == Guid.Empty || book.Id == accountingBookId))
+            .OrderBy(book => book.SortOrder)
+            .ThenBy(book => book.Code)
+            .Select(book => new { book.Id, book.Code, book.Name })
+            .ToListAsync(cancellationToken);
+
+        if (accountingBookId.HasValue && accountingBookId != Guid.Empty && books.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "The accounting book does not belong to the current tenant or is not active for posting.");
+        }
+
+        var bookIds = books.Select(book => book.Id).ToArray();
+        var readyLayouts = await _context.FinancialStatementLayouts.AsNoTracking()
+            .Where(layout => layout.TenantId == TenantId
+                && bookIds.Contains(layout.AccountingBookId)
+                && !layout.IsDeleted
+                && !layout.IsProtectedStandard
+                && layout.IsActive
+                && layout.IsDefault
+                && layout.Versions.Any(version => !version.IsDeleted
+                    && version.Status == FinancialStatementLayoutVersionStatus.Published))
+            .Select(layout => new { layout.AccountingBookId, layout.StatementType })
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var readiness = books.Select(book =>
+        {
+            var balanceSheetReady = readyLayouts.Any(layout =>
+                layout.AccountingBookId == book.Id
+                && layout.StatementType == FinancialStatementType.BalanceSheet);
+            var incomeStatementReady = readyLayouts.Any(layout =>
+                layout.AccountingBookId == book.Id
+                && layout.StatementType == FinancialStatementType.IncomeStatement);
+            var missing = new List<string>();
+            if (!balanceSheetReady) missing.Add("Published default Balance Sheet layout");
+            if (!incomeStatementReady) missing.Add("Published default Income Statement layout");
+            return new FinancialStatementLayoutBookReadinessDto
+            {
+                AccountingBookId = book.Id,
+                AccountingBookCode = book.Code,
+                AccountingBookName = book.Name,
+                BalanceSheetReady = balanceSheetReady,
+                IncomeStatementReady = incomeStatementReady,
+                MissingRequirements = missing
+            };
+        }).ToList();
+
+        return new FinancialStatementLayoutReadinessDto
+        {
+            IsReady = readiness.Count > 0 && readiness.All(book =>
+                book.BalanceSheetReady && book.IncomeStatementReady),
+            Books = readiness
+        };
+    }
+
+    public async Task<FinancialStatementLayoutInitializationResultDto> InitializeFromProtectedStandardsAsync(
+        InitializeFinancialStatementLayoutsDto request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var readinessBefore = await GetInitializationReadinessAsync(
+            request.AccountingBookId,
+            cancellationToken);
+        var bookIds = readinessBefore.Books.Select(book => book.AccountingBookId).ToArray();
+        var standards = await _context.FinancialStatementLayouts.AsNoTracking()
+            .Where(layout => layout.TenantId == TenantId
+                && bookIds.Contains(layout.AccountingBookId)
+                && !layout.IsDeleted
+                && layout.IsActive
+                && layout.IsProtectedStandard)
+            .OrderBy(layout => layout.AccountingBookId)
+            .ThenBy(layout => layout.StatementType)
+            .ToListAsync(cancellationToken);
+        var existingClones = await _context.FinancialStatementLayouts.AsNoTracking()
+            .Where(layout => layout.TenantId == TenantId
+                && bookIds.Contains(layout.AccountingBookId)
+                && !layout.IsDeleted
+                && !layout.IsProtectedStandard
+                && layout.StandardSourceLayoutId.HasValue)
+            .ToListAsync(cancellationToken);
+
+        var items = new List<FinancialStatementLayoutInitializationItemDto>();
+        foreach (var book in readinessBefore.Books)
+        {
+            foreach (var statementType in new[]
+                     {
+                         FinancialStatementType.BalanceSheet,
+                         FinancialStatementType.IncomeStatement
+                     })
+            {
+                var standard = standards.FirstOrDefault(layout =>
+                    layout.AccountingBookId == book.AccountingBookId
+                    && layout.StatementType == statementType);
+                if (standard == null)
+                {
+                    items.Add(new FinancialStatementLayoutInitializationItemDto
+                    {
+                        AccountingBookId = book.AccountingBookId,
+                        AccountingBookCode = book.AccountingBookCode,
+                        StatementType = statementType,
+                        Status = "Protected standard unavailable"
+                    });
+                    continue;
+                }
+
+                var clone = existingClones.FirstOrDefault(layout =>
+                    layout.StandardSourceLayoutId == standard.Id);
+                var created = false;
+                FinancialStatementLayoutDto tenantLayout;
+                if (clone == null)
+                {
+                    var statementCode = statementType == FinancialStatementType.BalanceSheet ? "BS" : "IS";
+                    var code = await BuildAvailableInitializationCodeAsync(
+                        $"{book.AccountingBookCode}_{statementCode}",
+                        standard.Id,
+                        cancellationToken);
+                    tenantLayout = await CloneProtectedStandardAsync(
+                        standard.Id,
+                        new CloneFinancialStatementLayoutDto
+                        {
+                            AccountingBookId = book.AccountingBookId,
+                            Code = code,
+                            Name = $"{book.AccountingBookName} {StatementTypeLabel(statementType)}"
+                        },
+                        cancellationToken);
+                    existingClones.Add(new FinancialStatementLayout
+                    {
+                        Id = tenantLayout.Id,
+                        StandardSourceLayoutId = standard.Id,
+                        AccountingBookId = tenantLayout.AccountingBookId
+                    });
+                    created = true;
+                }
+                else
+                {
+                    tenantLayout = (await GetLayoutAsync(clone.Id, cancellationToken))!;
+                }
+
+                var draft = tenantLayout.Versions
+                    .Where(version => version.Status == FinancialStatementLayoutVersionStatus.Draft)
+                    .OrderByDescending(version => version.VersionNumber)
+                    .FirstOrDefault();
+                var validation = draft == null
+                    ? null
+                    : await ValidateVersionAsync(draft.Id, cancellationToken);
+                items.Add(new FinancialStatementLayoutInitializationItemDto
+                {
+                    AccountingBookId = book.AccountingBookId,
+                    AccountingBookCode = book.AccountingBookCode,
+                    StatementType = statementType,
+                    ProtectedStandardLayoutId = standard.Id,
+                    TenantLayoutId = tenantLayout.Id,
+                    Created = created,
+                    Status = created ? "Draft clone created and validated" : "Existing tenant clone retained",
+                    Validation = validation
+                });
+            }
+        }
+
+        await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = FinanceAuditEvents.FinancialStatementLayoutsInitialized,
+            TenantId = TenantId,
+            SourceModule = "GENERAL_LEDGER",
+            SourceDocumentType = "FinancialStatementLayoutInitialization",
+            SourceDocumentId = request.AccountingBookId,
+            AfterValues = new
+            {
+                request.AccountingBookId,
+                createdCount = items.Count(item => item.Created),
+                items = items.Select(item => new
+                {
+                    item.AccountingBookId,
+                    item.StatementType,
+                    item.ProtectedStandardLayoutId,
+                    item.TenantLayoutId,
+                    item.Created,
+                    item.Status,
+                    isValid = item.Validation?.IsValid
+                })
+            },
+            Resource = "Finance.FinancialStatementLayoutInitialization",
+            ResourceId = request.AccountingBookId?.ToString() ?? "ALL_ACTIVE_POSTING_BOOKS"
+        }, cancellationToken);
+
+        return new FinancialStatementLayoutInitializationResultDto
+        {
+            CreatedCount = items.Count(item => item.Created),
+            Items = items,
+            Readiness = await GetInitializationReadinessAsync(request.AccountingBookId, cancellationToken)
+        };
+    }
+
+    public async Task DiscardUnusedDraftAsync(
+        Guid layoutId,
+        DiscardFinancialStatementLayoutDto request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var reason = RequireText(request.Reason, "Discard reason");
+        var strategy = _context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            _context.ChangeTracker.Clear();
+            await using var transaction = _context.Database.IsRelational()
+                ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+                : null;
+            try
+            {
+                var layout = await LoadLayoutAsync(layoutId, asNoTracking: false, cancellationToken)
+                    ?? throw new KeyNotFoundException("Financial statement layout was not found.");
+                EnsureRevision(layout.Revision, request.ExpectedRevision, "layout");
+                if (layout.IsProtectedStandard)
+                    throw new InvalidOperationException("Protected standard layouts cannot be discarded.");
+                if (layout.IsDefault)
+                    throw new InvalidOperationException("A default layout cannot be discarded. Assign another default first.");
+
+                // A soft-deleted version is still historical evidence. Include every version in the
+                // eligibility check so a formerly published definition can never become deletable by
+                // hiding its published version through a soft-delete flag.
+                var versions = layout.Versions.ToList();
+                if (versions.Count == 0 || versions.Any(version =>
+                        version.Status != FinancialStatementLayoutVersionStatus.Draft
+                        || version.PublishedAt.HasValue
+                        || version.PublishedById.HasValue
+                        || version.PublicationAccounts.Any(account => !account.IsDeleted)))
+                {
+                    throw new InvalidOperationException(
+                        "Only a never-published layout whose versions are all Draft can be discarded. Inactivate this layout instead.");
+                }
+
+                var isReferenced = await _context.FinancialStatementLayouts.AsNoTracking().AnyAsync(candidate =>
+                    candidate.TenantId == TenantId
+                    && !candidate.IsDeleted
+                    && candidate.StandardSourceLayoutId == layout.Id,
+                    cancellationToken);
+                if (isReferenced)
+                {
+                    throw new InvalidOperationException(
+                        "This layout is referenced by another tenant layout and cannot be discarded.");
+                }
+
+                await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+                {
+                    EventType = FinanceAuditEvents.FinancialStatementLayoutDiscarded,
+                    TenantId = TenantId,
+                    SourceModule = "GENERAL_LEDGER",
+                    SourceDocumentType = "FinancialStatementLayout",
+                    SourceDocumentId = layout.Id,
+                    Reason = reason,
+                    AfterValues = new
+                    {
+                        tombstone = true,
+                        layout.Id,
+                        layout.Code,
+                        layout.Name,
+                        layout.StatementType,
+                        layout.AccountingBookId,
+                        layout.StandardSourceLayoutId,
+                        layout.Revision,
+                        versionIds = versions.Select(version => version.Id).ToArray(),
+                        reason
+                    },
+                    Resource = "Finance.FinancialStatementLayout",
+                    ResourceId = layout.Id.ToString()
+                }, cancellationToken);
+
+                var rows = versions.SelectMany(version => version.Rows).ToList();
+                var mappings = rows.SelectMany(row => row.Mappings).ToList();
+                if (mappings.Count > 0) _context.FinancialStatementRowMappings.RemoveRange(mappings);
+                if (rows.Count > 0) _context.FinancialStatementRows.RemoveRange(rows);
+                _context.FinancialStatementLayoutVersions.RemoveRange(versions);
+                _context.FinancialStatementLayouts.Remove(layout);
+                await _context.SaveChangesAsync(cancellationToken);
+                if (transaction != null) await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                if (transaction != null) await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        });
+    }
+
+    private async Task<string> BuildAvailableInitializationCodeAsync(
+        string preferredCode,
+        Guid standardId,
+        CancellationToken cancellationToken)
+    {
+        var normalized = NormalizeCode(preferredCode);
+        if (!await _context.FinancialStatementLayouts.AnyAsync(layout =>
+                layout.TenantId == TenantId && !layout.IsDeleted && layout.Code == normalized,
+                cancellationToken))
+            return normalized;
+
+        var suffix = standardId.ToString("N")[..8].ToUpperInvariant();
+        var prefix = normalized.Length > 41 ? normalized[..41] : normalized;
+        return $"{prefix}_{suffix}";
+    }
+
+    private static string StatementTypeLabel(FinancialStatementType statementType)
+        => statementType == FinancialStatementType.BalanceSheet
+            ? "Balance Sheet"
+            : "Income Statement";
 
     private async Task<PublicationSnapshotBuild> BuildPublicationSnapshotAsync(
         FinancialStatementLayoutVersion version,
@@ -1789,6 +2304,13 @@ public sealed class FinancialStatementLayoutService : IFinancialStatementLayoutS
             PublishedAt = version.PublishedAt,
             PublishedById = version.PublishedById,
             PublishedByName = version.PublishedByName,
+            SubmittedAt = version.SubmittedAt,
+            SubmittedById = version.SubmittedById,
+            SubmittedByName = version.SubmittedByName,
+            LastDecisionAt = version.LastDecisionAt,
+            LastDecisionById = version.LastDecisionById,
+            LastDecisionByName = version.LastDecisionByName,
+            LastDecisionReason = version.LastDecisionReason,
             Notes = version.Notes,
             Revision = version.Revision,
             PublicationSnapshotSchemaVersion = version.PublicationSnapshotSchemaVersion,
@@ -1872,8 +2394,41 @@ public sealed class FinancialStatementLayoutService : IFinancialStatementLayoutS
         if (version.Status != FinancialStatementLayoutVersionStatus.Draft)
         {
             throw new InvalidOperationException(
-                "Published and retired layout versions are immutable. Create a new draft version.");
+                "Only a Draft layout version can be edited. Submitted, published and retired versions are immutable.");
         }
+    }
+
+    private static void EnsureSubmitted(FinancialStatementLayoutVersion version)
+    {
+        if (version.Status != FinancialStatementLayoutVersionStatus.Submitted)
+            throw new InvalidOperationException(
+                "Only a validated layout version submitted for independent approval can be published or rejected.");
+    }
+
+    private void EnsureIndependentApprover(FinancialStatementLayoutVersion version)
+    {
+        if (IsSameActor(
+                version.SubmittedById,
+                version.SubmittedByName,
+                TryGetUserId(),
+                UserName))
+        {
+            throw new InvalidOperationException(
+                "Maker-checker control prohibits the submitter from approving or rejecting this layout version.");
+        }
+    }
+
+    private static bool IsSameActor(
+        Guid? firstId,
+        string? firstName,
+        Guid? secondId,
+        string? secondName)
+    {
+        if (firstId.HasValue && secondId.HasValue)
+            return firstId.Value == secondId.Value;
+        return !string.IsNullOrWhiteSpace(firstName)
+            && !string.IsNullOrWhiteSpace(secondName)
+            && string.Equals(firstName.Trim(), secondName.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static void EnsureEditableLayout(FinancialStatementLayout layout)

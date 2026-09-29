@@ -74,7 +74,7 @@ public interface ISalesOrderService
     /// <summary>
     /// Generate an Invoice from a confirmed SO
     /// </summary>
-    Task<Guid> GenerateInvoiceAsync(Guid salesOrderId);
+    Task<Guid> GenerateInvoiceAsync(Guid salesOrderId, GenerateSalesOrderInvoiceRequest request);
 
     // ── Utilities ───────────────────────────────────────────────────────
 

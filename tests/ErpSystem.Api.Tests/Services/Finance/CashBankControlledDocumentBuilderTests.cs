@@ -208,6 +208,19 @@ public sealed class CashBankControlledDocumentBuilderTests
         var bankGl = Account(tenantId, "1100", "Operating Bank", AccountType.Asset);
         var counterGl = Account(tenantId, "5100", "Operating Expense", AccountType.Expense);
         var arGl = Account(tenantId, "1200", "Accounts Receivable", AccountType.Asset);
+        var accountingBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "IFRS",
+            Name = "IFRS Primary Book",
+            FunctionalCurrencyCode = "GHS",
+            BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            IsActive = true,
+            IsDefault = true,
+            AllowsPosting = true
+        };
         var bank = new BankAccount
         {
             Id = Guid.NewGuid(),
@@ -218,7 +231,7 @@ public sealed class CashBankControlledDocumentBuilderTests
             Currency = "GHS",
             GLAccountId = bankGl.Id
         };
-        var paymentJournal = Journal(tenantId, "JE-2026-0101", "Cash/bank payment", userId);
+        var paymentJournal = Journal(tenantId, "JE-2026-0101", "Cash/bank payment", userId, accountingBook.Id);
         paymentJournal.Transactions.Add(Line(tenantId, paymentJournal, counterGl, 1, 1_250m, 0m, "Expense allocation"));
         paymentJournal.Transactions.Add(Line(tenantId, paymentJournal, bankGl, 2, 0m, 1_250m, "Bank payment"));
         var cashPayment = new CashTransaction
@@ -247,7 +260,7 @@ public sealed class CashBankControlledDocumentBuilderTests
             CreatedBy = "accounts.officer"
         };
 
-        var receiptJournal = Journal(tenantId, "JE-2026-0102", "Customer receipt", userId);
+        var receiptJournal = Journal(tenantId, "JE-2026-0102", "Customer receipt", userId, accountingBook.Id);
         receiptJournal.Transactions.Add(Line(tenantId, receiptJournal, bankGl, 1, 800m, 0m, "Bank receipt"));
         receiptJournal.Transactions.Add(Line(tenantId, receiptJournal, arGl, 2, 0m, 800m, "Settle receivable"));
         var customer = new BusinessPartner
@@ -280,6 +293,7 @@ public sealed class CashBankControlledDocumentBuilderTests
 
         db.Tenants.Add(tenant);
         db.Users.Add(user);
+        db.AccountingBooks.Add(accountingBook);
         db.Accounts.AddRange(bankGl, counterGl, arGl);
         db.BankAccounts.Add(bank);
         db.JournalEntries.AddRange(paymentJournal, receiptJournal);
@@ -343,7 +357,12 @@ public sealed class CashBankControlledDocumentBuilderTests
             IsSegmented = false
         };
 
-    private static JournalEntry Journal(Guid tenantId, string number, string description, Guid postedBy)
+    private static JournalEntry Journal(
+        Guid tenantId,
+        string number,
+        string description,
+        Guid postedBy,
+        Guid accountingBookId)
         => new()
         {
             Id = Guid.NewGuid(),
@@ -356,6 +375,7 @@ public sealed class CashBankControlledDocumentBuilderTests
             TotalCreditAmount = 0m,
             IsBalanced = true,
             BookClassification = "IFRS",
+            AccountingBookId = accountingBookId,
             FiscalPeriodId = Guid.NewGuid(),
             PostingDate = new DateTime(2026, 8, 3),
             PostedByUserId = postedBy,
@@ -390,6 +410,7 @@ public sealed class CashBankControlledDocumentBuilderTests
             FiscalPeriodId = journal.FiscalPeriodId,
             PostingStatus = "Posted",
             BookClassification = "IFRS",
+            AccountingBookId = journal.AccountingBookId,
             LineNumber = lineNumber
         };
     }

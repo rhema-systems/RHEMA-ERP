@@ -5,6 +5,7 @@ using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using ErpSystem.Api.Services.Inventory;
 
 namespace ErpSystem.Api.Controllers.Inventory;
 
@@ -51,6 +52,17 @@ public sealed class InventoryDisposalsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
     });
 
+    [HttpGet("{id:guid}/waybill")]
+    public Task<ActionResult<byte[]>> Waybill(Guid id, CancellationToken cancellationToken) =>
+        ExecuteAsync<byte[]>(async () =>
+        {
+            var disposal = await _service.GetByIdAsync(id, cancellationToken);
+            var document = InventoryDisposalWaybillDocument.Generate(disposal);
+            var safeNumber = string.Concat(disposal.DisposalNumber.Where(character => char.IsLetterOrDigit(character) || character is '-' or '_'));
+            Response.Headers.CacheControl = "no-store";
+            return File(document, "application/pdf", $"{safeNumber}-waybill.pdf");
+        });
+
     [HttpPost("{id:guid}/audit-verification")]
     public Task<ActionResult<InventoryDisposalDto>> Verify(Guid id, [FromBody] VerifyInventoryDisposalRequest request,
         CancellationToken cancellationToken) => ExecuteMutationAsync(id, request, _service.VerifyAsync, cancellationToken);
@@ -86,6 +98,10 @@ public sealed class InventoryDisposalsController : ControllerBase
     [HttpPost("{id:guid}/execution/complete")]
     public Task<ActionResult<InventoryDisposalDto>> Complete(Guid id, [FromBody] CompleteInventoryDisposalRequest request,
         CancellationToken cancellationToken) => ExecuteMutationAsync(id, request, _service.CompleteAsync, cancellationToken);
+
+    [HttpPost("{id:guid}/auction-invoice")]
+    public Task<ActionResult<InventoryDisposalDto>> CreateAuctionInvoice(Guid id, [FromBody] CreateInventoryDisposalAuctionInvoiceRequest request,
+        CancellationToken cancellationToken) => ExecuteMutationAsync(id, request, _service.CreateAuctionInvoiceAsync, cancellationToken);
 
     private Task<ActionResult<InventoryDisposalDto>> ExecuteMutationAsync<TRequest>(
         Guid id,

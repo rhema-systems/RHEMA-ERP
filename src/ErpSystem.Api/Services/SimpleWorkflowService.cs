@@ -102,7 +102,8 @@ public class SimpleWorkflowService : IWorkflowService
     }
 
     public Task<WorkflowExecutionResult> StartApprovalWorkflowAsync(string entityType, Guid entityId) =>
-        StartApprovalWorkflowAsync(entityType, entityId, null);
+        StartApprovalWorkflowAsync(entityType, entityId, null, GetCurrentUserId(),
+            _currentUserService.TenantId ?? Guid.Empty);
 
     public async Task<bool> HasActiveApprovalWorkflowAsync(string entityType)
     {
@@ -159,16 +160,27 @@ public class SimpleWorkflowService : IWorkflowService
         string entityType,
         Guid entityId,
         Guid workflowDefinitionId) =>
-        StartApprovalWorkflowAsync(entityType, entityId, (Guid?)workflowDefinitionId);
+        StartApprovalWorkflowAsync(entityType, entityId, (Guid?)workflowDefinitionId, GetCurrentUserId(),
+            _currentUserService.TenantId ?? Guid.Empty);
+
+    public Task<WorkflowExecutionResult> StartApprovalWorkflowAsAsync(
+        string entityType,
+        Guid entityId,
+        Guid initiatedByUserId,
+        Guid tenantId)
+    {
+        if (initiatedByUserId == Guid.Empty || tenantId == Guid.Empty)
+            throw new InvalidOperationException("A real workflow initiator and tenant are required.");
+        return StartApprovalWorkflowAsync(entityType, entityId, null, initiatedByUserId, tenantId);
+    }
 
     private async Task<WorkflowExecutionResult> StartApprovalWorkflowAsync(
         string entityType,
         Guid entityId,
-        Guid? workflowDefinitionId)
+        Guid? workflowDefinitionId,
+        Guid initiatedById,
+        Guid tenantId)
     {
-        var initiatedById = GetCurrentUserId();
-        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
-
         var entityTypeRecord = await ResolveEntityTypeAsync(entityType, tenantId);
         // Idempotency/consistency: prevent multiple active workflow instances for the same entity.
         // If an instance is already running, return it instead of starting a duplicate.
@@ -228,7 +240,7 @@ public class SimpleWorkflowService : IWorkflowService
 
             // Self-heal: if the active step is an approval step and approvals are missing, materialize them.
             currentStepInstance ??= await EnsureCurrentStepInstanceAsync(existingActiveInstance, entityTypeRecord, entityId);
-            var existingDataContext = await BuildEntityContextAsync(entityTypeRecord, entityId);
+            var existingDataContext = await BuildEntityContextAsync(entityTypeRecord, entityId, tenantId);
             var startAdvanceResult = await AdvanceStartStepIfNeededAsync(existingActiveInstance, currentStepInstance, initiatedById, existingDataContext);
             if (startAdvanceResult != null)
             {
@@ -257,7 +269,7 @@ public class SimpleWorkflowService : IWorkflowService
             };
         }
 
-        var dataContext = await BuildEntityContextAsync(entityTypeRecord, entityId);
+        var dataContext = await BuildEntityContextAsync(entityTypeRecord, entityId, tenantId);
 
         var workflowInstance = await _workflowEngine.StartWorkflowAsync(
             definition.Id,
@@ -415,8 +427,14 @@ public class SimpleWorkflowService : IWorkflowService
         if (canApprove && isApprovalStep)
         {
             var approvalConfig = GetApprovalConfig(stepInstance);
-            var enforceSeparation = _sodPolicy is null || await _sodPolicy.IsRequiredForSourceAsync(
-                instance.TenantId, entityType, entityId);
+            // A workflow that explicitly requires an independent checker remains strict even when
+            // a tenant relaxes the broader Procurement SOD policy. In particular, a Business
+            // Partner maker must never gain approval eligibility merely by also holding an
+            // approver role (for example, System Administrator).
+            var configuredSeparation = approvalConfig is
+                { PreventInitiatorApproval: true } or { RequireDistinctApprovers: true };
+            var enforceSeparation = configuredSeparation || _sodPolicy is null ||
+                await _sodPolicy.IsRequiredForSourceAsync(instance.TenantId, entityType, entityId);
             var guardErrors = WorkflowApprovalGuardValidator.Validate(
                 approvalConfig,
                 instance.InitiatedById,
@@ -973,14 +991,17 @@ public class SimpleWorkflowService : IWorkflowService
         return instances.OrderByDescending(i => i.CreatedAt).FirstOrDefault();
     }
 
-    private async Task<Dictionary<string, object>> BuildEntityContextAsync(WorkflowEntityType entityTypeRecord, Guid entityId)
+    private async Task<Dictionary<string, object>> BuildEntityContextAsync(
+        WorkflowEntityType entityTypeRecord,
+        Guid entityId,
+        Guid? tenantIdOverride = null)
     {
         var context = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
             ["entityId"] = entityId,
             ["entityType"] = entityTypeRecord.Code ?? entityTypeRecord.Name
         };
-        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var tenantId = tenantIdOverride ?? _currentUserService.TenantId ?? Guid.Empty;
 
         if (IsEntityType(entityTypeRecord, QuantitySurveyWorkflowBindingRegistry.Boq, "QS BoQ"))
         {

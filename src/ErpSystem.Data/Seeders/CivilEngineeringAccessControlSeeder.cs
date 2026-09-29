@@ -10,8 +10,11 @@ public sealed class CivilEngineeringAccessControlSeeder(
     ApplicationDbContext context,
     ILogger<CivilEngineeringAccessControlSeeder> logger)
 {
-    public async Task SeedAsync(CancellationToken token = default)
+    public async Task SeedAsync(CancellationToken token = default, Guid? tenantId = null)
     {
+        if (tenantId.HasValue && !await context.Tenants.AsNoTracking()
+                .AnyAsync(value => value.Id == tenantId.Value && !value.IsDeleted, token))
+            throw new InvalidOperationException("The requested access-control seed tenant does not exist or is deleted.");
         var now = DateTime.UtcNow;
         foreach (var definition in CivilEngineeringAccessControlRegistry.Roles)
         {
@@ -120,7 +123,7 @@ public sealed class CivilEngineeringAccessControlSeeder(
         }
 
         await context.SaveChangesAsync(token);
-        await EnsureWorkflowEntityTypesAsync(now, token);
+        await EnsureWorkflowEntityTypesAsync(now, tenantId, token);
         logger.LogInformation(
             "Ensured {PermissionCount} Civil Engineering permissions, {RoleCount} shared security roles and {WorkflowEntityTypeCount} shared workflow entity types",
             CivilEngineeringAccessControlRegistry.Permissions.Count,
@@ -128,10 +131,10 @@ public sealed class CivilEngineeringAccessControlSeeder(
             CivilEngineeringWorkflowBindingRegistry.EntityTypes.Count);
     }
 
-    private async Task EnsureWorkflowEntityTypesAsync(DateTime now, CancellationToken token)
+    private async Task EnsureWorkflowEntityTypesAsync(DateTime now, Guid? selectedTenantId, CancellationToken token)
     {
         var tenantIds = await context.Tenants.AsNoTracking()
-            .Where(value => !value.IsDeleted)
+            .Where(value => !value.IsDeleted && (!selectedTenantId.HasValue || value.Id == selectedTenantId.Value))
             .Select(value => value.Id)
             .ToListAsync(token);
 

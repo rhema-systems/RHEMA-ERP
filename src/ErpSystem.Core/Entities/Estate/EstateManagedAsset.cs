@@ -74,6 +74,14 @@ public class EstateManagedAsset : TenantEntity
     [MaxLength(120)]
     public string? FloorLabel { get; set; }
 
+    public Guid? ResponsibleOfficerEmployeeId { get; set; }
+
+    [MaxLength(80)]
+    public string? ResponsibleOfficerEmployeeNumber { get; set; }
+
+    [MaxLength(240)]
+    public string? ResponsibleOfficerName { get; set; }
+
     public EstateManagedAssetType AssetType { get; set; } = EstateManagedAssetType.Property;
     public EstateManagedAssetStatus Status { get; set; } = EstateManagedAssetStatus.Available;
     public EstateManagedAssetSourceType SourceType { get; set; } = EstateManagedAssetSourceType.Manual;

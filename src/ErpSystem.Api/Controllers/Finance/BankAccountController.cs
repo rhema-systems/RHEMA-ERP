@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -50,6 +51,7 @@ public class BankAccountController : ControllerBase
     /// <response code="401">Not authenticated</response>
     /// <response code="500">Internal server error</response>
     [HttpGet]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<IEnumerable<BankAccountDto>>> GetAll()
     {
         var accounts = await _bankAccountService.GetAllAsync();
@@ -77,6 +79,7 @@ public class BankAccountController : ControllerBase
     /// <response code="401">Not authenticated</response>
     /// <response code="500">Internal server error</response>
     [HttpGet("active")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<IEnumerable<BankAccountDto>>> GetActive()
     {
         var accounts = await _bankAccountService.GetActiveAccountsAsync();
@@ -101,6 +104,7 @@ public class BankAccountController : ControllerBase
     /// <response code="404">Bank account not found</response>
     /// <response code="500">Internal server error</response>
     [HttpGet("{id}")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<BankAccountDto>> GetById(Guid id)
     {
         var account = await _bankAccountService.GetByIdAsync(id);
@@ -134,6 +138,7 @@ public class BankAccountController : ControllerBase
     /// <response code="404">Bank account not found</response>
     /// <response code="500">Internal server error</response>
     [HttpGet("{id}/balance")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<BankAccountBalanceDto>> GetBalance(Guid id)
     {
         try
@@ -174,6 +179,7 @@ public class BankAccountController : ControllerBase
     /// <response code="404">Bank account not found</response>
     /// <response code="500">Internal server error</response>
     [HttpGet("{id}/transactions")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<IEnumerable<CashTransactionDto>>> GetTransactions(
         Guid id,
         [FromQuery] DateTime? fromDate = null,
@@ -216,6 +222,7 @@ public class BankAccountController : ControllerBase
     /// <response code="401">Not authenticated</response>
     /// <response code="500">Internal server error</response>
     [HttpPost]
+    [Authorize(Policy = FinancePermissions.ManageBankAccounts)]
     public async Task<ActionResult<BankAccountDto>> Create([FromBody] CreateBankAccountDto dto)
     {
         try
@@ -252,6 +259,7 @@ public class BankAccountController : ControllerBase
     /// <response code="404">Bank account not found</response>
     /// <response code="500">Internal server error</response>
     [HttpPut("{id}")]
+    [Authorize(Policy = FinancePermissions.ManageBankAccounts)]
     public async Task<ActionResult<BankAccountDto>> Update(Guid id, [FromBody] UpdateBankAccountDto dto)
     {
         try
@@ -287,6 +295,7 @@ public class BankAccountController : ControllerBase
     /// <response code="404">Bank account not found</response>
     /// <response code="500">Internal server error</response>
     [HttpDelete("{id}")]
+    [Authorize(Policy = FinancePermissions.ManageBankAccounts)]
     public async Task<ActionResult> Delete(Guid id)
     {
         try

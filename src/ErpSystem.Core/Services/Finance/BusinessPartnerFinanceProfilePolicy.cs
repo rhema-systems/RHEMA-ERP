@@ -168,7 +168,16 @@ public static class BusinessPartnerFinanceProfilePolicy
             return false;
         }
 
-        if (!string.Equals(partner.RegistrationStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+        // The governed workflow records approval evidence in ApprovalStatus and transitions the
+        // operational lifecycle from PendingApproval to Active. Older seeded partners used
+        // RegistrationStatus=Approved, so accept both operational spellings while requiring the
+        // authoritative approval decision. Comparing RegistrationStatus only made newly approved
+        // partners appear unapproved to AP/AR even though the workflow had activated them.
+        var operationalRegistrationStatus =
+            string.Equals(partner.RegistrationStatus, "Active", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(partner.RegistrationStatus, "Approved", StringComparison.OrdinalIgnoreCase);
+        if (!operationalRegistrationStatus ||
+            !string.Equals(partner.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase))
         {
             failure = Failure("BUSINESS_PARTNER_NOT_APPROVED", "The Business Partner must be approved before it can be used for a new transaction.");
             return false;

@@ -244,13 +244,13 @@ export interface RatioCalculationResult {
     numerator?: number;
     denominator?: number;
     /** @deprecated Use numerator. */
-    numeratorValue: number;
+    numeratorValue?: number;
     /** @deprecated Use denominator. */
-    denominatorValue: number;
+    denominatorValue?: number;
     result: number;
     formattedResult?: string;
     /** @deprecated Use formattedResult. */
-    resultFormatted: string;
+    resultFormatted?: string;
     calculatedAt: string;
 }
 
@@ -273,6 +273,9 @@ export interface RatioTrendResult {
 export interface UnitAccountBudget {
     id: string;
     unitAccountId: string;
+    accountNumber: string;
+    accountName: string;
+    unitTypeCode: string;
     unitAccount?: UnitAccount;
     fiscalYearId: string;
     fiscalPeriodId: string;
@@ -282,7 +285,7 @@ export interface UnitAccountBudget {
     budgetVersion: string;
     isActive: boolean;
     createdAt: string;
-    createdBy: string;
+    createdBy?: string;
 }
 
 export interface BudgetVariance {

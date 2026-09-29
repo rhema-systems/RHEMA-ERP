@@ -185,7 +185,7 @@ public partial class InventoryTransferService : IInventoryTransferService
         {
             foreach (var item in dto.Items)
             {
-                EnsureInterBinLocations(item.SourceLocationId, item.DestinationLocationId);
+                ValidateOptionalInterBinLocations(item.SourceLocationId, item.DestinationLocationId);
             }
         }
 
@@ -283,7 +283,7 @@ public partial class InventoryTransferService : IInventoryTransferService
             var items = await _transferItemRepository.GetByTransferAsync(transfer.Id);
             foreach (var item in items)
             {
-                EnsureInterBinLocations(item.SourceLocationId, item.DestinationLocationId);
+                ValidateOptionalInterBinLocations(item.SourceLocationId, item.DestinationLocationId);
             }
         }
 
@@ -330,12 +330,12 @@ public partial class InventoryTransferService : IInventoryTransferService
             throw new InvalidOperationException("Add at least one item with a positive quantity before submitting the transfer.");
         foreach (var line in lines)
         {
-            if (!line.SourceLocationId.HasValue || !line.DestinationLocationId.HasValue)
-                throw new InvalidOperationException("Select a source and destination location for every transfer item.");
-            await EnsureLocationBelongsToWarehouseAsync(line.SourceLocationId.Value, transfer.SourceWarehouseId, "Source location");
-            await EnsureLocationBelongsToWarehouseAsync(line.DestinationLocationId.Value, transfer.DestinationWarehouseId, "Destination location");
+            if (line.SourceLocationId.HasValue)
+                await EnsureLocationBelongsToWarehouseAsync(line.SourceLocationId.Value, transfer.SourceWarehouseId, "Source location");
+            if (line.DestinationLocationId.HasValue)
+                await EnsureLocationBelongsToWarehouseAsync(line.DestinationLocationId.Value, transfer.DestinationWarehouseId, "Destination location");
             if (transfer.SourceWarehouseId == transfer.DestinationWarehouseId)
-                EnsureInterBinLocations(line.SourceLocationId, line.DestinationLocationId);
+                ValidateOptionalInterBinLocations(line.SourceLocationId, line.DestinationLocationId);
         }
 
         // The central owner distinguishes confirmed absence from lookup failures and retained workflows.
@@ -524,7 +524,7 @@ public partial class InventoryTransferService : IInventoryTransferService
             trackingNumber,
             shippedItems,
             control?.NegativeStockOverrideIds,
-            control?.PayloadSalt);
+            AllocationPayloadSalt(control?.PayloadSalt, control?.CarrierBusinessPartnerId, control?.VehicleNumber, control?.Picks));
         var key = MutationKey(control, $"internal-dispatch:{transfer.Id:N}:{payloadHash}");
         if (await IsActionReplayAsync(transfer.Id, InventoryTransferActionType.Dispatched, key, payloadHash))
         {
@@ -569,164 +569,8 @@ public partial class InventoryTransferService : IInventoryTransferService
         await _unitOfWork.SaveChangesAsync();
         shippedItems = dispatchQuantities;
 
-        // Deduct from source warehouse and mark as in-transit
-        foreach (var item in transfer.Items)
-        {
-            // Same-warehouse transfers behave like inter-bin transfers: require valid bin selections.
-            if (transfer.SourceWarehouseId == transfer.DestinationWarehouseId)
-            {
-                EnsureInterBinLocations(item.SourceLocationId, item.DestinationLocationId);
-            }
-
-            // Get shipped quantity for this item (from request, or remaining requested qty for full shipment)
-            decimal quantityToShip;
-            if (shippedItems != null)
-            {
-                if (!shippedItems.TryGetValue(item.Id, out var requestedShipQty))
-                    continue;
-                quantityToShip = requestedShipQty;
-            }
-            else
-            {
-                // If no specific quantity provided, ship the remaining requested amount
-                quantityToShip = item.RequestedQuantity - item.ShippedQuantity;
-            }
-
-            // Skip if nothing to ship for this item
-            if (quantityToShip <= 0)
-                continue;
-
-            // Validate quantity doesn't exceed what's remaining to ship
-            var remainingToShip = item.RequestedQuantity - item.ShippedQuantity;
-            if (quantityToShip > remainingToShip)
-                throw new InvalidOperationException($"Cannot ship {quantityToShip} - only {remainingToShip} remaining for item {item.InventoryItemId}");
-
-            WarehouseLocation? sourceLocation = null;
-            if (item.SourceLocationId.HasValue && item.SourceLocationId.Value != Guid.Empty)
-            {
-                sourceLocation = await EnsureLocationBelongsToWarehouseAsync(item.SourceLocationId.Value, transfer.SourceWarehouseId, "SourceLocationId");
-            }
-
-            WarehouseLocation? destinationLocation = null;
-            if (item.DestinationLocationId.HasValue && item.DestinationLocationId.Value != Guid.Empty)
-            {
-                destinationLocation = await EnsureLocationBelongsToWarehouseAsync(item.DestinationLocationId.Value, transfer.DestinationWarehouseId, "DestinationLocationId");
-            }
-
-            var effectiveSourceWarehouseId = sourceLocation?.InventoryWarehouseId ?? transfer.SourceWarehouseId;
-            var effectiveDestinationWarehouseId = destinationLocation?.InventoryWarehouseId ?? transfer.DestinationWarehouseId;
-
-            var sourceIsConsignment = await IsConsignmentWarehouseAsync(effectiveSourceWarehouseId);
-            var destIsConsignment = await IsConsignmentWarehouseAsync(effectiveDestinationWarehouseId);
-            if (sourceIsConsignment != destIsConsignment)
-            {
-                throw new InvalidOperationException("Transfers between owned and consignment inventory are not supported. Use a dedicated settlement/ownership conversion process.");
-            }
-
-            var decreaseAuthorization = await _negativeStockControls.PrepareDecreaseAsync(new InventoryStockDecreaseRequest
-            {
-                InventoryItemId = item.InventoryItemId,
-                WarehouseId = effectiveSourceWarehouseId,
-                LocationId = item.SourceLocationId,
-                Quantity = quantityToShip,
-                ReferenceType = "InventoryTransfer",
-                ReferenceNumber = transfer.TransferNumber,
-                ReferenceId = transfer.Id,
-                ReferenceLineId = item.Id,
-                NegativeStockOverrideId = control?.NegativeStockOverrideIds.GetValueOrDefault(item.Id),
-                CheckInventoryItemBalance = false,
-                CorrelationId = correlationId
-            });
-            var sourceQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(effectiveSourceWarehouseId, item.InventoryItemId);
-            if (sourceQty == null ||
-                (sourceQty.AvailableStock < quantityToShip && !decreaseAuthorization.EmergencyOverrideApplied))
-                throw new InvalidOperationException($"Insufficient stock for item {item.InventoryItemId}");
-
-            var trackingSequence = item.TrackingSequence + 1;
-            var shipmentTracking = ReadScanTrackingLines(item.ShipmentScanTrackingLinesJson, quantityToShip, item);
-            if (shipmentTracking.Sum(value => value.BaseQuantity) != quantityToShip)
-                throw new InvalidOperationException($"Scanned serial quantities no longer match the shipment quantity for {item.ItemCode}.");
-            for (var trackingIndex = 0; trackingIndex < shipmentTracking.Count; trackingIndex++)
-            {
-                var trackingLine = shipmentTracking[trackingIndex];
-                await _trackingControls.StageEventAsync(new InventoryTrackingMutationRequest
-                {
-                    InventoryItemId = item.InventoryItemId,
-                    WarehouseId = effectiveSourceWarehouseId,
-                    LocationId = item.SourceLocationId,
-                    Direction = InventoryTrackingDirection.TransferOut,
-                    Quantity = trackingLine.BaseQuantity,
-                    ReferenceType = "InventoryTransfer",
-                    ReferenceNumber = transfer.TransferNumber,
-                    ReferenceId = transfer.Id,
-                    ReferenceLineId = item.Id,
-                    EventKey = $"transfer:{transfer.Id:N}:{item.Id:N}:{trackingSequence}:out:{trackingIndex + 1}",
-                    LotNumber = trackingLine.LotNumber,
-                    BatchNumber = trackingLine.BatchNumber,
-                    SerialNumber = trackingLine.SerialNumber,
-                    ManufactureDate = trackingLine.ManufactureDate,
-                    ExpiryDate = trackingLine.ExpiryDate,
-                    TrackingExceptionId = trackingLine.InventoryTrackingExceptionId,
-                    CorrelationId = correlationId
-                });
-            }
-
-            var outboundValue = await DispatchCarryingValueAsync(transfer, item, action, effectiveSourceWarehouseId, quantityToShip);
-
-            // Bin-level tracking: if a source location is specified, it must have sufficient stock.
-            // This is required for inter-bin transfers and optional for inter-warehouse transfers.
-            if (sourceLocation != null)
-            {
-                await AdjustInventoryLocationQuantityAsync(item.SourceLocationId.Value, item.InventoryItemId, -quantityToShip);
-            }
-            else if (transfer.SourceWarehouseId == transfer.DestinationWarehouseId)
-            {
-                throw new InvalidOperationException("SourceLocationId is required for same-warehouse (inter-bin) transfers.");
-            }
-
-            sourceQty.CurrentStock -= quantityToShip;
-            sourceQty.AvailableStock -= quantityToShip;
-            sourceQty.AllocatedStock += quantityToShip; // Track as allocated during transit
-            sourceQty.LastMovementDate = DateTime.UtcNow;
-            await _warehouseQuantityRepository.UpdateAsync(sourceQty);
-
-            if (decreaseAuthorization.EmergencyOverrideApplied)
-            {
-                await _unitOfWork.SaveChangesAsync();
-                await _negativeStockControls.ClearMutationContextAsync();
-            }
-
-            item.ShippedQuantity += quantityToShip;
-            item.TrackingSequence = trackingSequence;
-            await _transferItemRepository.UpdateAsync(item);
-
-            // Create outbound movement
-            var outboundMovement = new StockMovement
-            {
-                InventoryItemId = item.InventoryItemId,
-                MovementType = "TransferOut",
-                Quantity = -quantityToShip,
-                UnitCost = outboundValue / quantityToShip,
-                TotalValue = -outboundValue,
-                ReferenceType = ReferenceType.Transfer,
-                ReferenceNumber = transfer.TransferNumber,
-                ReferenceId = transfer.Id,
-                WarehouseId = effectiveSourceWarehouseId,
-                LocationId = item.SourceLocationId,
-                LotNumber = item.LotNumber,
-                BatchNumber = item.BatchNumber,
-                SerialNumber = item.SerialNumber,
-                ManufactureDate = item.ManufactureDate,
-                ExpirationDate = item.ExpiryDate,
-                InventoryTrackingExceptionId = item.InventoryTrackingExceptionId,
-                Notes = $"Controlled dispatch {action.Sequence} to {transfer.DestinationWarehouse?.Name}",
-                ProcessedById = userId,
-                RunningBalance = sourceQty.CurrentStock,
-                TenantId = _currentUserProvider.TenantId
-            };
-            await _stockMovementRepository.AddAsync(outboundMovement);
-            await _consignmentSettlementService.TryCreateFromStockMovementAsync(outboundMovement);
-        }
+        await DispatchPickedAllocationsAsync(transfer, action, dispatchQuantities, control, trackingNumber, correlationId);
+        await _unitOfWork.SaveChangesAsync();
 
         var allItemsFullyShipped = transfer.Items.All(i => i.ShippedQuantity >= i.RequestedQuantity);
         // A partial dispatch is physically in transit too. Keeping it Approved hid
@@ -808,10 +652,11 @@ public partial class InventoryTransferService : IInventoryTransferService
             costsDto.CostAllocationMethod,
             costsDto.CostApportionmentBasis,
             costsDto.ExpenseGLAccount,
-            costsDto.CarrierName,
+            costsDto.CarrierBusinessPartnerId,
+            costsDto.VehicleNumber,
             costsDto.Comment
         }));
-        var dispatchPayloadHash = DispatchPayloadHash(transferId, costsDto.TrackingNumber, shippedItems, null, costPayloadSalt);
+        var dispatchPayloadHash = DispatchPayloadHash(transferId, costsDto.TrackingNumber, shippedItems, null, AllocationPayloadSalt(costPayloadSalt, costsDto.CarrierBusinessPartnerId, costsDto.VehicleNumber, costsDto.Items?.ToDictionary(x => x.ItemId, x => x.Picks)));
         var dispatchKey = MutationKey(new InventoryTransferMutationContext { IdempotencyKey = costsDto.IdempotencyKey }, string.Empty);
         if (await IsActionReplayAsync(transfer.Id, InventoryTransferActionType.Dispatched, dispatchKey, dispatchPayloadHash))
         {
@@ -828,7 +673,7 @@ public partial class InventoryTransferService : IInventoryTransferService
         transfer.CostAllocationMethod = costsDto.CostAllocationMethod;
         transfer.CostApportionmentBasis = costsDto.CostApportionmentBasis;
         transfer.ExpenseGLAccount = costsDto.ExpenseGLAccount;
-        transfer.CarrierName = Normalize(costsDto.CarrierName, 100);
+        // Carrier identity is resolved by the governed dispatch owner.
 
         // Perform the shipment
         var shipmentResult = await ShipAsync(transferId, userId, costsDto.TrackingNumber, shippedItems, new InventoryTransferMutationContext
@@ -837,7 +682,10 @@ public partial class InventoryTransferService : IInventoryTransferService
             IdempotencyKey = costsDto.IdempotencyKey,
             CorrelationId = costsDto.CorrelationId,
             Comment = Normalize(costsDto.Comment, 1000) ?? "Dispatch with governed transfer costs.",
-            PayloadSalt = costPayloadSalt
+            PayloadSalt = costPayloadSalt,
+            CarrierBusinessPartnerId = costsDto.CarrierBusinessPartnerId,
+            VehicleNumber = costsDto.VehicleNumber,
+            Picks = costsDto.Items?.ToDictionary(x => x.ItemId, x => x.Picks) ?? new()
         });
         if (!shipmentResult)
             return false;
@@ -912,7 +760,8 @@ public partial class InventoryTransferService : IInventoryTransferService
         {
             transferId,
             costsDto.TrackingNumber,
-            costsDto.CarrierName,
+            costsDto.CarrierBusinessPartnerId,
+            costsDto.VehicleNumber,
             costsDto.ShippingCost,
             costsDto.MiscellaneousCost,
             costsDto.MiscellaneousCostDescription,
@@ -960,8 +809,7 @@ public partial class InventoryTransferService : IInventoryTransferService
         if (!string.IsNullOrEmpty(costsDto.TrackingNumber))
             transfer.TrackingNumber = costsDto.TrackingNumber;
         
-        if (!string.IsNullOrEmpty(costsDto.CarrierName))
-            transfer.CarrierName = costsDto.CarrierName;
+        await SetCarrierAsync(transfer, costsDto.CarrierBusinessPartnerId, costsDto.VehicleNumber);
 
         transfer.CostsAllocated = false;
         await _transferRepository.UpdateAsync(transfer);
@@ -1097,6 +945,8 @@ public partial class InventoryTransferService : IInventoryTransferService
                     {
                         value.Id,
                         value.ReceivedQuantity,
+                        value.DestinationLocationId,
+                        allocations = value.Allocations.OrderBy(x => x.DispatchAllocationId).ThenBy(x => x.DestinationLocationId),
                         value.DamagedQuantity,
                         value.ShortageQuantity,
                         value.DiscrepancyReasonCode,
@@ -1218,6 +1068,10 @@ public partial class InventoryTransferService : IInventoryTransferService
     {
         foreach (var item in transfer.Items)
         {
+            var allocatedInput = receivedItems.FirstOrDefault(x => x.Id == item.Id);
+            if (allocatedInput is null) continue;
+            if (allocatedInput is not null && await ReceivePickedAllocationsAsync(transfer, item, allocatedInput, action, correlationId)) continue;
+
             // Same-warehouse transfers behave like inter-bin transfers: require valid bin selections.
             if (transfer.SourceWarehouseId == transfer.DestinationWarehouseId)
             {
@@ -1401,6 +1255,8 @@ public partial class InventoryTransferService : IInventoryTransferService
             {
                 transferId,
                 discrepancyIds = request.DiscrepancyIds.Distinct().OrderBy(value => value),
+                allocations = request.AllocationsByDiscrepancy.OrderBy(x => x.Key).Select(x => new { x.Key, Rows = x.Value.OrderBy(v => v.DispatchAllocationId).ThenBy(v => v.DestinationLocationId) }),
+                tracking = request.TrackingLinesByDiscrepancy.OrderBy(x => x.Key),
                 resolutionCode,
                 notes = Normalize(request.ResolutionNotes, 1000),
                 evidence = request.Evidence.OrderBy(value => value.CentralDocumentVersionId)
@@ -1453,6 +1309,7 @@ public partial class InventoryTransferService : IInventoryTransferService
                 new { ResolutionCode = resolutionCode });
             await _unitOfWork.SaveChangesAsync();
 
+            var allocatedResolutions = new List<(InventoryTransferDiscrepancy Discrepancy, bool ToSource)>();
             foreach (var discrepancy in discrepancies)
             {
                 var item = discrepancy.InventoryTransferItem;
@@ -1460,6 +1317,13 @@ public partial class InventoryTransferService : IInventoryTransferService
                 if (resolutionCode is InventoryTransferDiscrepancyResolutionCodes.ReturnedToSource or InventoryTransferDiscrepancyResolutionCodes.ReplacementReceived)
                 {
                     var toSource = resolutionCode == InventoryTransferDiscrepancyResolutionCodes.ReturnedToSource;
+                    if (await ResolvePickedDiscrepancyAsync(transfer, item, discrepancy, action,
+                        request.AllocationsByDiscrepancy.GetValueOrDefault(discrepancy.Id), request.TrackingLinesByDiscrepancy.GetValueOrDefault(discrepancy.Id), toSource, correlationId))
+                    {
+                        allocatedResolutions.Add((discrepancy, toSource));
+                    }
+                    else
+                    {
                     var warehouseId = toSource ? transfer.SourceWarehouseId : transfer.DestinationWarehouseId;
                     var locationId = toSource ? item.SourceLocationId : item.DestinationLocationId;
                     var location = locationId.HasValue
@@ -1535,6 +1399,7 @@ public partial class InventoryTransferService : IInventoryTransferService
                         RunningBalance = quantityRecord.CurrentStock
                     });
                     item.TrackingSequence = trackingSequence;
+                    }
                 }
 
                 discrepancy.Status = InventoryTransferDiscrepancyStatus.Resolved;
@@ -1560,6 +1425,19 @@ public partial class InventoryTransferService : IInventoryTransferService
                 }
             }
 
+            // A SQL line guard compares against the complete action, so stage aggregate line
+            // changes only after every immutable allocation for that action has been retained.
+            foreach (var resolution in allocatedResolutions)
+            {
+                var item = resolution.Discrepancy.InventoryTransferItem;
+                if (!resolution.ToSource)
+                {
+                    item.ReceivedQuantity += resolution.Discrepancy.DamagedQuantity + resolution.Discrepancy.ShortageQuantity;
+                    item.DamagedQuantity -= resolution.Discrepancy.DamagedQuantity;
+                    item.ShortageQuantity -= resolution.Discrepancy.ShortageQuantity;
+                }
+                item.TrackingSequence++;
+            }
             // Persist each governed resolution before clearing the parent summary flag. The SQL
             // trigger intentionally rejects a transfer claiming there are no open discrepancies
             // while its durable discrepancy row is still Open.
@@ -1693,18 +1571,30 @@ public partial class InventoryTransferService : IInventoryTransferService
             var expectedQuantity = operation == InventoryScanOperation.TransferShipment
                 ? item.RequestedQuantity - item.ShippedQuantity
                 : item.ShippedQuantity - item.ReceivedQuantity - item.DamagedQuantity - item.ShortageQuantity;
-            if (scans.Sum(value => value.BaseQuantity) != expectedQuantity)
-                throw new InvalidOperationException($"The complete transfer quantity for {item.ItemCode} must be scanned before applying the transaction.");
-            if (scans.Any(value => value.InventoryItemId != item.InventoryItemId) ||
-                scans.Select(value => value.LocationId).Distinct().Count() > 1)
-                throw new InvalidOperationException($"Scanned tracking lines for {item.ItemCode} must retain one item and transfer location.");
-            if (scan.LocationId.HasValue)
+            if (scans.Any(value => value.BaseQuantity <= 0 || decimal.Round(value.BaseQuantity, 4) != value.BaseQuantity) ||
+                scans.Sum(value => value.BaseQuantity) > expectedQuantity)
+                throw new InvalidOperationException($"Scan a positive quantity within the outstanding transfer quantity for {item.ItemCode}.");
+            if (scans.Any(value => value.InventoryItemId != item.InventoryItemId))
+                throw new InvalidOperationException($"Scanned tracking lines for {item.ItemCode} must retain the same item.");
+            EnsureUniqueScanSerials(scans);
+            var locations = scans.Select(value => value.LocationId).Distinct().ToList();
+            if (locations.Count > 1 && locations.Any(value => !value.HasValue))
+                throw new InvalidOperationException("Identify the bin on every scan when using multiple bins.");
+            foreach (var locationId in locations.Where(value => value.HasValue).Select(value => value!.Value))
             {
                 var warehouseId = operation == InventoryScanOperation.TransferShipment ? transfer.SourceWarehouseId : transfer.DestinationWarehouseId;
-                await EnsureLocationBelongsToWarehouseAsync(scan.LocationId.Value, warehouseId,
+                var location = await EnsureLocationBelongsToWarehouseAsync(locationId, warehouseId,
                     operation == InventoryScanOperation.TransferShipment ? "SourceLocationId" : "DestinationLocationId");
-                if (operation == InventoryScanOperation.TransferShipment) item.SourceLocationId = scan.LocationId;
-                else item.DestinationLocationId = scan.LocationId;
+                if (!location.IsActive || InventoryTransitProtection.IsProtected(location))
+                    throw new InvalidOperationException("Scan an active operational transfer bin.");
+                await EnsureWarehouseLocationsAsync("procurement.inventory.transfer", warehouseId, [locationId],
+                    $"{transfer.TransferNumber}:scan-metadata");
+            }
+            if (locations.Any(value => value.HasValue))
+            {
+                var singleLocation = locations.Count == 1 ? locations[0] : null;
+                if (operation == InventoryScanOperation.TransferShipment) item.SourceLocationId = singleLocation;
+                else item.DestinationLocationId = singleLocation;
             }
             if (operation == InventoryScanOperation.TransferShipment)
                 item.ShipmentScanTrackingLinesJson = JsonSerializer.Serialize(scans);
@@ -1812,6 +1702,8 @@ public partial class InventoryTransferService : IInventoryTransferService
         {
             if (item.ShippedQuantity <= 0)
                 continue;
+
+            if (await ReversePickedAllocationsAsync(transfer, item, action, correlationId)) continue;
 
             WarehouseLocation? sourceLocation = null;
             if (item.SourceLocationId.HasValue && item.SourceLocationId.Value != Guid.Empty)
@@ -2186,6 +2078,14 @@ public partial class InventoryTransferService : IInventoryTransferService
                 .Select(item => source ? item.SourceLocationId : item.DestinationLocationId)
                 .Distinct()
                 .ToArray();
+        var allocatedBins = source
+            ? await _unitOfWork.Repository<InventoryTransferDispatchAllocation>().GetQueryable().AsNoTracking()
+                .Where(x => x.TenantId == transfer.TenantId && !x.IsDeleted && x.InventoryTransferAction.InventoryTransferId == transfer.Id)
+                .Select(x => (Guid?)x.SourceLocationId).Distinct().ToArrayAsync()
+            : await _unitOfWork.Repository<InventoryTransferReceiptAllocation>().GetQueryable().AsNoTracking()
+                .Where(x => x.TenantId == transfer.TenantId && !x.IsDeleted && !x.ReturnedToSource && x.InventoryTransferAction.InventoryTransferId == transfer.Id)
+                .Select(x => (Guid?)x.DestinationLocationId).Distinct().ToArrayAsync();
+        if (allocatedBins.Length > 0) locationIds = allocatedBins;
         if (locationIds.Length == 0)
             locationIds = [null];
 
@@ -2271,7 +2171,7 @@ public partial class InventoryTransferService : IInventoryTransferService
             PermissionCode = permission,
             WarehouseId = warehouseId,
             LocationId = locationId,
-            RequireLocationScope = true,
+            RequireLocationScope = locationId.HasValue,
             SourceType = "InventoryTransfer",
             SourceReference = sourceReference
         };
@@ -2391,7 +2291,7 @@ public partial class InventoryTransferService : IInventoryTransferService
         await RevalidateLocationCapacityAsync(
             transfer.TenantId,
             receivedLines
-                .Where(line => line.ReceivedQuantity > 0)
+                .Where(line => line.ReceivedQuantity > 0 && line.Allocations.Count == 0)
                 .Select(line =>
                 {
                     var transferItem = transfer.Items.Single(item => item.Id == line.Id);
@@ -2490,6 +2390,21 @@ public partial class InventoryTransferService : IInventoryTransferService
         InventoryTransferItem item,
         IReadOnlyList<InventoryTransactionScanLineDto> proposedReceipt)
     {
+        var allocations = await _unitOfWork.Repository<InventoryTransferDispatchAllocation>().GetQueryable()
+            .AsNoTracking().Where(value => value.TenantId == transfer.TenantId &&
+                value.InventoryTransferItemId == item.Id && !value.IsDeleted).ToListAsync();
+        if (allocations.Count > 0)
+        {
+            var allocationIds = allocations.Select(value => value.Id).ToList();
+            var receipts = await _unitOfWork.Repository<InventoryTransferReceiptAllocation>().GetQueryable()
+                .AsNoTracking().Where(value => value.TenantId == transfer.TenantId &&
+                    allocationIds.Contains(value.DispatchAllocationId) && !value.IsDeleted).ToListAsync();
+            EnsureReceiptTrackingSnapshotMatchesDispatch(
+                allocations.SelectMany(value => ReadRetainedTrackingSnapshot(value.TrackingSnapshotJson)).ToList(),
+                receipts.SelectMany(value => ReadRetainedTrackingSnapshot(value.TrackingSnapshotJson)).ToList(),
+                proposedReceipt);
+            return;
+        }
         var dispatched = ReadScanTrackingLines(
             item.ShipmentScanTrackingLinesJson,
             item.ShippedQuantity,
@@ -2518,6 +2433,18 @@ public partial class InventoryTransferService : IInventoryTransferService
             .ToListAsync();
 
         EnsureReceiptTrackingSnapshotMatchesDispatch(dispatched, previouslyReceived, proposedReceipt);
+    }
+
+    private static List<InventoryTransactionScanLineDto> ReadRetainedTrackingSnapshot(string json) =>
+        JsonSerializer.Deserialize<List<InventoryTransactionScanLineDto>>(json)
+        ?? throw new InvalidOperationException("The retained transfer tracking snapshot is invalid.");
+
+    private static void EnsureUniqueScanSerials(IReadOnlyList<InventoryTransactionScanLineDto> scans)
+    {
+        var serials = scans.Where(value => !string.IsNullOrWhiteSpace(value.SerialNumber)).ToList();
+        if (serials.Any(value => value.BaseQuantity != 1) || serials
+            .GroupBy(value => NormalizeTrackingIdentityValue(value.SerialNumber)).Any(group => group.Count() > 1))
+            throw new InvalidOperationException("Each scanned serial must occur once with a quantity of one.");
     }
 
     private static void EnsureReceiptTrackingSnapshotMatchesDispatch(
@@ -2704,6 +2631,7 @@ public partial class InventoryTransferService : IInventoryTransferService
     private async Task<InventoryTransferDetailDto> MapToControlledDetailDtoAsync(InventoryTransfer transfer)
     {
         var dto = MapToDetailDto(transfer);
+        await PopulateDispatchAllocationsAsync(transfer, dto);
         dto.Actions = await _unitOfWork.Repository<InventoryTransferAction>().GetQueryable().AsNoTracking()
             .Where(value => value.InventoryTransferId == transfer.Id)
             .OrderBy(value => value.Sequence)
@@ -2803,7 +2731,7 @@ public partial class InventoryTransferService : IInventoryTransferService
         // Validate bin selections (optional for inter-warehouse; required for inter-bin/same-warehouse transfers)
         if (transfer.SourceWarehouseId == transfer.DestinationWarehouseId)
         {
-            EnsureInterBinLocations(dto.SourceLocationId, dto.DestinationLocationId);
+            ValidateOptionalInterBinLocations(dto.SourceLocationId, dto.DestinationLocationId);
         }
 
         // Location validation is handled above when resolving effective ownership warehouses.
@@ -2924,7 +2852,7 @@ public partial class InventoryTransferService : IInventoryTransferService
         // Validate bin selections (optional for inter-warehouse; required for inter-bin/same-warehouse transfers)
         if (transfer.SourceWarehouseId == transfer.DestinationWarehouseId)
         {
-            EnsureInterBinLocations(dto.SourceLocationId, dto.DestinationLocationId);
+            ValidateOptionalInterBinLocations(dto.SourceLocationId, dto.DestinationLocationId);
         }
 
         // Location validation is handled above when resolving effective ownership warehouses.

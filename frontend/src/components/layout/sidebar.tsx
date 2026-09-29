@@ -839,6 +839,11 @@ export const navigationItems: NavItem[] = [
             href: '/finance/budgeting/revisions',
             icon: RefreshCw,
           },
+          {
+            title: 'Budget Reconciliation',
+            href: '/finance/budgeting/reconciliation',
+            icon: ShieldCheck,
+          },
         ],
       },
       {

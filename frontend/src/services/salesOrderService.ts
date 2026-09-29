@@ -45,6 +45,11 @@ export interface SalesOrderSummaryDto {
 }
 
 export interface SalesOrderDetailDto {
+  rowVersion: string;
+  invoiceId?: string;
+  invoiceNumber?: string;
+  shippingAmount?: number;
+  taxGroupId?: string;
   id: string;
   orderNumber: string;
   orderDate: string;
@@ -90,6 +95,8 @@ export interface SalesOrderDetailDto {
 }
 
 export interface SalesOrderLineDto {
+  glAccountId?: string;
+  taxGroupId?: string;
   id: string;
   lineNumber: number;
   itemId?: string;
@@ -303,6 +310,11 @@ function normalizeSalesOrderSummary(raw: any): SalesOrderSummaryDto {
 
 function normalizeSalesOrderDetail(raw: any): SalesOrderDetailDto {
   return {
+    rowVersion: raw.rowVersion ?? '',
+    invoiceId: raw.invoiceId,
+    invoiceNumber: raw.invoiceNumber,
+    shippingAmount: raw.shippingAmount ?? 0,
+    taxGroupId: raw.taxGroupId,
     id: raw.id,
     orderNumber: raw.orderNumber ?? raw.documentNumber ?? '',
     orderDate: raw.orderDate ?? raw.documentDate ?? '',
@@ -339,6 +351,8 @@ function normalizeSalesOrderDetail(raw: any): SalesOrderDetailDto {
     deliveryProgress: raw.deliveryProgress ?? 0,
     lines: Array.isArray(raw.lines)
       ? raw.lines.map((line: any) => ({
+          glAccountId: line.glAccountId,
+          taxGroupId: line.taxGroupId,
           id: line.id,
           lineNumber: line.lineNumber ?? 0,
           itemId: line.itemId ?? line.inventoryItemId ?? line.productId,

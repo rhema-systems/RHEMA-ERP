@@ -437,6 +437,32 @@ public sealed class EstateManagedAssetsController : ControllerBase
         }
     }
 
+    [HttpGet("{id:guid}/completed-terminations")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Land Registry Officer")]
+    public async Task<IActionResult> GetCompletedTerminations(Guid id, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var asset = await _db.EstateManagedAssets.AsNoTracking().FirstOrDefaultAsync(item =>
+            item.Id == id && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+        if (asset is null) return NotFound();
+
+        var assetId = id.ToString();
+        var customerId = asset.CustomerBusinessPartnerId?.ToString();
+        var cases = await _db.ProcedureCases.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                && item.Module == "Legal" && item.EntityType == "LegalTerminationRecognition"
+                && item.Status == "Completed" && item.CompletedAt.HasValue
+                && (!asset.DateOfTenancy.HasValue || item.CompletedAt >= asset.DateOfTenancy.Value)
+                && item.Fields.Any(field => !field.IsDeleted
+                    && field.Key == "estateManagedAssetId" && field.Value == assetId)
+                && (customerId == null || item.Fields.Any(field => !field.IsDeleted
+                    && field.Key == "customerReference" && field.Value == customerId)))
+            .OrderByDescending(item => item.CompletedAt)
+            .Select(item => new { item.Id, item.ReferenceNumber, item.Title, item.CompletedAt })
+            .ToListAsync(cancellationToken);
+        return Ok(new { success = true, data = cases });
+    }
+
     [HttpPost("sales-handoffs/listing-applications")]
     [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Sales User,Sales Officer,Sales Manager")]
     public async Task<IActionResult> CreateListingApplicationFromSales(

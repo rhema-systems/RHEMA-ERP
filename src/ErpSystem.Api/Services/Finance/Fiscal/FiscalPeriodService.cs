@@ -3215,14 +3215,16 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 RecurringJournalOccurrenceStatus.Due,
                 RecurringJournalOccurrenceStatus.Generating,
                 RecurringJournalOccurrenceStatus.SubmissionFailed,
+                RecurringJournalOccurrenceStatus.PendingApproval,
+                RecurringJournalOccurrenceStatus.Approved,
                 RecurringJournalOccurrenceStatus.Failed,
                 RecurringJournalOccurrenceStatus.WaiverPending
             };
 
-            // Occurrence status is the authoritative generation lifecycle. PendingApproval and
-            // Approved are deliberately excluded: generation succeeded and the established
-            // journal approval/posting validations own those later stages. Waived and Superseded
-            // are also resolved outcomes and must not be re-opened by the close workspace.
+            // A generated recurring occurrence has no JournalEntry until it is posted, so the
+            // general journal checks cannot see PendingApproval or Approved rows. Keep every
+            // unresolved accounting event close-blocking here; only Posted, Waived, and
+            // Superseded are resolved outcomes.
             var occurrenceExceptions = await _unitOfWork.Repository<RecurringJournalOccurrence>()
                 .GetQueryable(item => item.TenantId == TenantId && !item.IsDeleted &&
                     item.EffectiveDate >= periodStart && item.EffectiveDate <= periodEnd &&

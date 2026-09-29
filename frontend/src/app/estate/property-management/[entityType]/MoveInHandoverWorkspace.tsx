@@ -19,6 +19,7 @@ import {
   estateLandManagementService,
   EstateManagedAssetStatus,
   type EstateManagedAsset,
+  type EstateCompletedTermination,
 } from '@/services/estate-land-management.service';
 import {
   assetMatchesWorkspacePrefill,
@@ -46,6 +47,9 @@ export function MoveInHandoverWorkspace() {
   const [actualDate, setActualDate] = React.useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
+  const [terminationCases, setTerminationCases] = React.useState<EstateCompletedTermination[]>([]);
+  const [terminationCaseId, setTerminationCaseId] = React.useState('');
+  const [terminationError, setTerminationError] = React.useState<string | null>(null);
   const {
     assets,
     setAssets,
@@ -70,12 +74,29 @@ export function MoveInHandoverWorkspace() {
   });
 
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId);
+  const needsLegalTermination = action === 'move-out' && selectedAsset != null
+    && [EstateManagedAssetStatus.Leased, EstateManagedAssetStatus.Occupied].includes(selectedAsset.status);
+
+  React.useEffect(() => {
+    if (!needsLegalTermination || !selectedAssetId) {
+      setTerminationCases([]);
+      setTerminationError(null);
+      return;
+    }
+    let active = true;
+    setTerminationError(null);
+    void estateLandManagementService.getCompletedTerminations(selectedAssetId)
+      .then((items) => { if (active) setTerminationCases(items); })
+      .catch(() => { if (active) setTerminationError('Unable to load completed Legal terminations.'); });
+    return () => { active = false; };
+  }, [needsLegalTermination, selectedAssetId]);
 
   const selectAsset = (asset: EstateManagedAsset) => {
     setSelectedAssetId(asset.id);
     setAction(asset.status === EstateManagedAssetStatus.Occupied ? 'move-out' : 'move-in');
     setActualDate((asset.rightOfEntryDate || asset.dateOfTenancy || new Date().toISOString()).slice(0, 10));
     setNotes('');
+    setTerminationCaseId('');
   };
 
   React.useEffect(() => {
@@ -98,6 +119,10 @@ export function MoveInHandoverWorkspace() {
       toast.error(`Enter the actual ${action === 'move-in' ? 'possession' : 'move-out'} date.`);
       return;
     }
+    if (needsLegalTermination && !terminationCaseId) {
+      toast.error('Select a completed Legal termination case before move-out.');
+      return;
+    }
 
     const status =
       action === 'move-in'
@@ -114,6 +139,7 @@ export function MoveInHandoverWorkspace() {
         status,
         actualDate: actualDate || null,
         releaseOccupant: action === 'move-out',
+        terminationCaseId: needsLegalTermination ? terminationCaseId : null,
         isAvailableForLease: action === 'move-out',
         isAvailableForSale: false,
         isPublishedToExternalPortal: false,
@@ -235,6 +261,27 @@ export function MoveInHandoverWorkspace() {
             <Label>Actual date</Label>
             <Input type="date" value={actualDate} onChange={(event) => setActualDate(event.target.value)} disabled={!selectedAsset} />
           </div>
+          {needsLegalTermination && selectedAsset ? (
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="handover-termination-case">Completed Legal termination</Label>
+              <Select value={terminationCaseId || undefined} onValueChange={setTerminationCaseId}>
+                <SelectTrigger id="handover-termination-case"><SelectValue placeholder="Select Legal case" /></SelectTrigger>
+                <SelectContent>
+                  {terminationCases.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>{item.referenceNumber || item.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {terminationError ? <p role="alert" className="text-sm text-destructive">{terminationError}</p> : null}
+              {terminationCases.length === 0 ? (
+                <Button asChild variant="link" size="sm" className="px-0">
+                  <Link href={buildPropertyWorkspaceHref('/legal/LegalTerminationRecognition', selectedAsset, 'Lease or rent termination', {
+                    estateManagedAssetId: selectedAsset.id,
+                  })}>Open Legal termination</Link>
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
           <div className="space-y-2 md:col-span-2">
             <Label>Notes / evidence reference</Label>
             <Textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} disabled={!selectedAsset} placeholder="Keys, access cards, inspection note, signed handover reference..." />

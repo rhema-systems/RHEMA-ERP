@@ -1447,6 +1447,100 @@ public sealed partial class ApInvoicePostingMigrationTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceGoLive-APBudget")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task UnpostedInvoiceWithActiveBudgetReservation_ShouldFailClosedWhenBudgetServiceIsUnavailable()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        db.FinanceBudgetReservations.Add(new FinanceBudgetReservation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            SourceDocumentType = "VendorInvoice",
+            SourceDocumentId = fixture.Invoice.Id,
+            Status = "Reserved",
+            EvaluationHash = new string('C', 64),
+            CurrencyCode = "GHS",
+            TransactionCurrencyCode = "GHS",
+            ReservedByUserId = Guid.NewGuid(),
+            ReservedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var act = () => service.VoidAsync(fixture.Invoice.Id, "cancel before posting");
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*budget commitments are not configured*");
+        (await db.VendorInvoices.SingleAsync(item => item.Id == fixture.Invoice.Id))
+            .Status.Should().Be(VendorInvoiceStatus.Approved);
+        (await db.FinanceBudgetReservations.SingleAsync()).Status.Should().Be("Reserved");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APBudget")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task PendingInvoiceVoid_ShouldCancelWorkflowAndReleaseReservationAtomically()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        fixture.Invoice.Status = VendorInvoiceStatus.PendingApproval;
+        fixture.Invoice.ApprovalStatus = "PendingApproval";
+        var reservation = new FinanceBudgetReservation
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            SourceDocumentType = "VendorInvoice", SourceDocumentId = fixture.Invoice.Id,
+            Status = "Reserved", EvaluationHash = new string('C', 64),
+            CurrencyCode = "GHS", TransactionCurrencyCode = "GHS",
+            ReservationVersion = 1,
+            ReservedByUserId = Guid.NewGuid(), ReservedAt = DateTime.UtcNow
+        };
+        db.FinanceBudgetReservations.Add(reservation);
+        await db.SaveChangesAsync();
+
+        var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(service => service.CancelWorkflowAsync(
+                "VendorInvoice", fixture.Invoice.Id, "duplicate invoice"))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.Cancelled,
+                WorkflowInstanceId = Guid.NewGuid()
+            });
+        var commitments = new Mock<IFinanceBudgetCommitmentService>();
+        commitments.Setup(service => service.ReleaseAsync(
+                reservation.Id,
+                It.Is<ReleaseFinanceBudgetReservationDto>(request =>
+                    request.ExpectedVersion == 1
+                    && request.IdempotencyKey.Contains("PrePostVoid")),
+                It.IsAny<CancellationToken>()))
+            .Callback(() =>
+            {
+                reservation.Status = "Released";
+                reservation.ReservedAmount = 0m;
+                reservation.ReleasedAt = DateTime.UtcNow;
+                reservation.ReservationVersion = 2;
+            })
+            .ReturnsAsync(new FinanceBudgetReservationDto
+            {
+                Id = reservation.Id,
+                Status = "Released",
+                Version = 2
+            });
+        var (service, _) = CreateService(db, tenantId, workflow.Object, commitments.Object);
+
+        var result = await service.VoidAsync(fixture.Invoice.Id, "duplicate invoice");
+
+        result.Status.Should().Be(VendorInvoiceStatus.Voided);
+        reservation.Status.Should().Be("Released");
+        workflow.VerifyAll();
+        commitments.VerifyAll();
+    }
+
+    [Fact]
     [Trait("Batch", "TDC-0508")]
     [Trait("Category", "AccountsPayable")]
     public async Task PostedApInvoice_ShouldVoidWithOneBalancedIdempotentReversal()

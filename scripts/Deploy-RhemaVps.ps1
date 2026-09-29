@@ -514,7 +514,7 @@ function New-ReleaseArtifacts {
             $resolvedSourceCommit -match '^[0-9a-f]{40}$') `
             "The reusable API source commit is invalid: $ReuseApiOutputFromCommit"
 
-        $apiInputPaths = @('src')
+        $apiInputPaths = @('src', 'tools/ErpSystem.MigrationModelCompiler')
         foreach ($candidate in @(
                 'global.json', 'NuGet.config', 'Directory.Build.props',
                 'Directory.Build.targets', 'Directory.Packages.props')) {
@@ -771,7 +771,8 @@ function Compare-MigrationState {
     $migrationRoot = Join-Path $RepositoryRoot 'src\ErpSystem.Data\Migrations'
     foreach ($migrationId in $missing) {
         $source = Get-Content (Join-Path $migrationRoot "$migrationId.cs") -Raw
-        if ($source -match 'THROW\s+\d+' -and $migrationId -notin $guardCoverage) {
+        if (($source -match 'THROW\s+\d+' -or $source -match '\b\w+Guards?\.Install\s*\(') -and
+            $migrationId -notin $guardCoverage) {
             $uncoveredGuards += $migrationId
         }
     }

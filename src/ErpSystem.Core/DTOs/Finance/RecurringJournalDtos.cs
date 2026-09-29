@@ -95,6 +95,15 @@ public sealed class RecurringJournalOccurrenceDto
     public DateTime? ReversedAt { get; set; }
     public string? ErrorMessage { get; set; }
     public string? AdjustmentExplanation { get; set; }
+    public DateTime? WaivedAt { get; set; }
+    public Guid? WaivedByUserId { get; set; }
+    public string? WaiverReason { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
+    public bool CanApprove { get; set; }
+    public bool CanReject { get; set; }
+    public bool CanPost { get; set; }
+    public bool CanRequestWaiver { get; set; }
+    public string? ActionDisabledReason { get; set; }
 }
 
 public sealed class RecurringJournalTemplateDto
@@ -142,6 +151,9 @@ public sealed class RecurringJournalTemplateDto
     public decimal TotalDebit { get; set; }
     public decimal TotalCredit { get; set; }
     public string RowVersion { get; set; } = string.Empty;
+    public bool CanApprove { get; set; }
+    public bool CanReject { get; set; }
+    public string? ActionDisabledReason { get; set; }
     public IReadOnlyList<RecurringJournalTemplateLineDto> Lines { get; set; } = [];
     public IReadOnlyList<RecurringJournalOccurrenceDto> Occurrences { get; set; } = [];
 }

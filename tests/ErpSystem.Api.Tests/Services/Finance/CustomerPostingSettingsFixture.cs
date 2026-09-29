@@ -40,7 +40,6 @@ internal static class CustomerPostingSettingsFixture
         var saved = await service.UpdateAsync(partnerId, new UpdateBusinessPartnerDto
         {
             PartnerName = partner.PartnerName,
-            Status = partner.RegistrationStatus,
             ReceivablesDefaults = defaults
         });
 

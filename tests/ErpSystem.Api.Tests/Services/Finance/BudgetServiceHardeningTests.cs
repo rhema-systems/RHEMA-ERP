@@ -418,6 +418,7 @@ public class BudgetServiceHardeningTests
         });
         var entry = CreateEntry(budgetReturn.Id, account.Id, period.Id, 10_000m);
         entry.FinanceDimensionSetId = dimensionSet.Id;
+        var primaryBook = db.AccountingBooks.Local.Single(book => book.IsDefault);
         var journal = new JournalEntry
         {
             Id = Guid.NewGuid(), TenantId = TenantId,
@@ -426,6 +427,7 @@ public class BudgetServiceHardeningTests
             EntryDate = new DateTime(2026, 9, 15),
             Description = "Dimension-cell position test",
             PostingStatus = "Posted",
+            AccountingBookId = primaryBook.Id,
             ApprovalStatus = "Approved",
             FiscalPeriodId = period.Id,
             TotalDebitAmount = 500m,
@@ -435,6 +437,7 @@ public class BudgetServiceHardeningTests
         {
             Id = Guid.NewGuid(), TenantId = TenantId,
             JournalEntryId = journal.Id,
+            AccountingBookId = primaryBook.Id,
             AccountId = account.Id,
             FiscalPeriodId = period.Id,
             FinanceDimensionSetId = dimensionSet.Id,
@@ -442,6 +445,42 @@ public class BudgetServiceHardeningTests
             DebitAmount = 500m,
             FunctionalCurrencyCode = "GHS",
             BookClassification = "IFRS",
+            PostingStatus = "Posted"
+        };
+        var parallelBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            Code = "LOCAL", Name = "Local statutory",
+            BookType = AccountingBookType.ParallelFull,
+            IsDefault = false, IsActive = true, AllowsPosting = true
+        };
+        var parallelJournal = new JournalEntry
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            JournalEntryNumber = "JE-2026-PARALLEL",
+            JournalType = "General",
+            EntryDate = journal.EntryDate,
+            Description = "Parallel-book representation",
+            PostingStatus = "Posted",
+            ApprovalStatus = "Approved",
+            AccountingBookId = parallelBook.Id,
+            BookClassification = parallelBook.Code,
+            FiscalPeriodId = period.Id,
+            TotalDebitAmount = 700m,
+            TotalCreditAmount = 700m
+        };
+        var parallelTransaction = new AccountTransaction
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            JournalEntryId = parallelJournal.Id,
+            AccountingBookId = parallelBook.Id,
+            AccountId = account.Id,
+            FiscalPeriodId = period.Id,
+            FinanceDimensionSetId = dimensionSet.Id,
+            TransactionDate = parallelJournal.EntryDate,
+            DebitAmount = 700m,
+            FunctionalCurrencyCode = "GHS",
+            BookClassification = parallelBook.Code,
             PostingStatus = "Posted"
         };
         var activeReservation = new FinanceBudgetReservation
@@ -491,7 +530,8 @@ public class BudgetServiceHardeningTests
         };
 
         db.AddRange(fiscalYear, period, scenario, budgetReturn, account, definition, value,
-            dimensionSet, entry, journal, transaction, activeReservation, consumedReservation);
+            dimensionSet, entry, journal, transaction, parallelBook, parallelJournal,
+            parallelTransaction, activeReservation, consumedReservation);
         await db.SaveChangesAsync();
 
         var result = await CreateService(db).GetConsolidatedViewAsync(scenario.Id, approvedOnly: true);
@@ -560,45 +600,70 @@ public class BudgetServiceHardeningTests
     }
 
     [Fact]
-    public async Task GetRevisionsAsync_ReturnsRegisterSummaryWithoutMaterializingDetailLines()
+    public async Task CreateRevisionAsync_AcceptsExactGovernedDimensionCombination()
     {
         await using var db = CreateContext();
         var fiscalYear = CreateFiscalYear();
+        var period = CreatePeriod(fiscalYear.Id);
+        var expense = CreateAccount(AccountType.Expense);
+        var revenue = CreateAccount(AccountType.Revenue);
+        var definition = CreateDimensionDefinition();
+        var value = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            FinanceDimensionDefinitionId = definition.Id,
+            Code = "FIN", Name = "Finance", IsActive = true,
+            EffectiveDate = new DateTime(2025, 1, 1)
+        };
+        var dimensionSet = new FinanceDimensionSet
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            CombinationHash = new string('D', 64),
+            DisplayValue = "DEPT: FIN — Finance"
+        };
+        dimensionSet.Items.Add(new FinanceDimensionSetItem
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            FinanceDimensionSetId = dimensionSet.Id,
+            FinanceDimensionDefinitionId = definition.Id,
+            FinanceDimensionValueId = value.Id,
+            DimensionCodeSnapshot = "DEPT",
+            DimensionNameSnapshot = "Department",
+            DimensionValueCodeSnapshot = "FIN",
+            DimensionValueNameSnapshot = "Finance"
+        });
         var official = CreateScenario("Approved");
         official.FiscalYearId = fiscalYear.Id;
-        official.Name = "FY2026 Official";
-        var revision = new BudgetRevision
+        official.IsActive = true;
+        official.ControlDimensions.Add(new BudgetScenarioControlDimension
         {
-            Id = Guid.NewGuid(),
-            TenantId = TenantId,
-            RevisionNumber = "BR-2026-00002",
-            RevisionType = "Virement",
-            SourceScenarioId = official.Id,
-            SourceScenario = official,
-            EffectiveDate = new DateTime(2026, 8, 1),
-            BoardResolutionReference = "TDC/BOARD/2026/052",
-            BoardResolutionDate = new DateTime(2026, 7, 28),
-            Justification = "Move approved funds between operating activities.",
-            Status = "Submitted",
-            RowVersion = new byte[8],
-            Lines =
-            [
-                CreateRevisionLine(Guid.NewGuid(), Guid.NewGuid(), -40m),
-                CreateRevisionLine(Guid.NewGuid(), Guid.NewGuid(), 25m),
-                CreateRevisionLine(Guid.NewGuid(), Guid.NewGuid(), 15m)
-            ]
-        };
-        db.AddRange(fiscalYear, official, revision);
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            BudgetScenarioId = official.Id,
+            FinanceDimensionDefinitionId = definition.Id,
+            DisplayOrder = 1
+        });
+        var budgetReturn = CreateReturn(official.Id, CurrentUserId);
+        budgetReturn.Status = "Approved";
+        var releaseEntry = CreateEntry(budgetReturn.Id, expense.Id, period.Id, 100m);
+        releaseEntry.FinanceDimensionSetId = dimensionSet.Id;
+        var increaseEntry = CreateEntry(budgetReturn.Id, revenue.Id, period.Id, 50m);
+        increaseEntry.FinanceDimensionSetId = dimensionSet.Id;
+        db.AddRange(fiscalYear, period, expense, revenue, definition, value, dimensionSet,
+            official, budgetReturn, releaseEntry, increaseEntry);
         await db.SaveChangesAsync();
 
-        var result = (await CreateService(db).GetRevisionsAsync()).Single();
+        var request = CreateRevisionRequest(
+            official.Id, period.Id, expense.Id, revenue.Id, -25m, 25m);
+        foreach (var line in request.Lines)
+            line.FinanceDimensionSetId = dimensionSet.Id;
 
-        result.SourceScenarioName.Should().Be("FY2026 Official");
-        result.FiscalYearName.Should().Be("FY2026");
-        result.IncreaseAmountBase.Should().Be(40m);
-        result.ReductionAmountBase.Should().Be(40m);
-        result.NetChangeAmountBase.Should().Be(0m);
-        result.Lines.Should().BeEmpty("the register endpoint returns summaries; detail lines have their own endpoint");
+        var result = await CreateService(db).CreateRevisionAsync(request);
+
+        result.Lines.Should().HaveCount(2).And.OnlyContain(line =>
+            line.FinanceDimensionSetId == dimensionSet.Id
+            && line.DimensionCombination == dimensionSet.DisplayValue);
+        result.Lines.SelectMany(line => line.DimensionAssignments).Should().OnlyContain(item =>
+            item.DimensionCode == "DEPT" && item.ValueCode == "FIN");
     }
 
     [Fact]
@@ -666,12 +731,61 @@ public class BudgetServiceHardeningTests
         successor.BudgetReturns.Single().BudgetEntries.Single(item => item.AccountId == revenue.Id).AmountBase.Should().Be(75m);
     }
 
+    [Fact]
+    public async Task BudgetReconciliation_FindsTerminalSourceOrphanAndIncompleteConsumption()
+    {
+        await using var db = CreateContext();
+        var invoice = new VendorInvoice
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            InvoiceNumber = "AP-VOID-001",
+            Status = VendorInvoiceStatus.Voided
+        };
+        var orphan = new FinanceBudgetReservation
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            SourceDocumentType = "VendorInvoice", SourceDocumentId = invoice.Id,
+            Status = "Reserved", CurrencyCode = "GHS", TransactionCurrencyCode = "GHS",
+            EvaluationHash = new string('A', 64), ReservedByUserId = CurrentUserId,
+            ReservedAt = DateTime.UtcNow
+        };
+        var incomplete = new FinanceBudgetReservation
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            SourceDocumentType = "ManualJournalEntry", SourceDocumentId = Guid.NewGuid(),
+            Status = "Consumed", CurrencyCode = "GHS", TransactionCurrencyCode = "GHS",
+            EvaluationHash = new string('B', 64), ReservedByUserId = CurrentUserId,
+            ReservedAt = DateTime.UtcNow, ConsumedByUserId = CurrentUserId,
+            ConsumedAt = DateTime.UtcNow
+        };
+        db.AddRange(invoice, orphan, incomplete);
+        await db.SaveChangesAsync();
+
+        var report = await CreateService(db).GetBudgetReconciliationAsync();
+
+        report.IsReconciled.Should().BeFalse();
+        report.Issues.Should().Contain(item =>
+            item.Code == "BUDGET_ORPHAN_RESERVATION_TERMINAL_SOURCE"
+            && item.ReservationId == orphan.Id);
+        report.Issues.Should().Contain(item =>
+            item.Code == "BUDGET_CONSUMED_POSTING_EVIDENCE_MISSING"
+            && item.ReservationId == incomplete.Id);
+    }
+
     private ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"budget-hardening-{Guid.NewGuid():N}")
             .Options;
-        return new ApplicationDbContext(options, TenantId);
+        var db = new ApplicationDbContext(options, TenantId);
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            Code = "PRIMARY", Name = "Primary book",
+            BookType = AccountingBookType.PrimaryFull,
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        });
+        return db;
     }
 
     private BudgetService CreateService(ApplicationDbContext db, IWorkflowService? workflow = null)

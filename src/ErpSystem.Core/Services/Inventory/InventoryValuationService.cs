@@ -63,7 +63,7 @@ public partial class InventoryValuationService : IInventoryValuationService
             throw new KeyNotFoundException($"Inventory item {inventoryItemId} not found");
 
         var balances = await _unitOfWork.Repository<InventoryBalance>()
-            .FindAsync(b => b.InventoryItemId == inventoryItemId);
+            .FindAsync(b => b.InventoryItemId == inventoryItemId && b.TenantId == _currentUserProvider.TenantId && !b.IsDeleted);
 
         var totalQuantity = balances.Sum(b => b.QuantityOnHand);
         var totalValue = balances.Sum(b => b.TotalValue);
@@ -303,7 +303,7 @@ public partial class InventoryValuationService : IInventoryValuationService
 
     private async Task<decimal> ConsumeFIFOLayersCoreAsync(
         Guid inventoryItemId, Guid warehouseId, Guid? locationId, decimal quantity,
-        List<InventoryMovement> movements, IReadOnlyCollection<InventoryLayer> pendingLayers)
+        List<InventoryMovement> movements, IReadOnlyCollection<InventoryLayer> pendingLayers, string? selectedLot = null)
     {
         if (quantity <= 0) throw new ArgumentOutOfRangeException(nameof(quantity));
         var query = _unitOfWork.Repository<InventoryLayer>()
@@ -314,6 +314,8 @@ public partial class InventoryValuationService : IInventoryValuationService
                        l.LocationId == locationId &&
                        !l.IsFullyConsumed &&
                        l.RemainingQuantity > 0);
+        selectedLot = string.IsNullOrWhiteSpace(selectedLot) ? null : selectedLot.Trim().ToUpperInvariant();
+        if (selectedLot is not null) query = query.Where(l => l.LotNumber != null && l.LotNumber.ToUpper() == selectedLot);
 
         var layers = await query
             .OrderBy(l => l.LayerDate)
@@ -327,7 +329,8 @@ public partial class InventoryValuationService : IInventoryValuationService
             layers = layers.Concat(pendingLayers.Where(layer =>
                     layer.TenantId == _currentUserProvider.TenantId && !layer.IsDeleted && layer.IsActive &&
                     layer.InventoryItemId == inventoryItemId && layer.WarehouseId == warehouseId &&
-                    layer.LocationId == locationId && !layer.IsFullyConsumed && layer.RemainingQuantity > 0))
+                    layer.LocationId == locationId && !layer.IsFullyConsumed && layer.RemainingQuantity > 0 &&
+                    (selectedLot is null || string.Equals(layer.LotNumber, selectedLot, StringComparison.OrdinalIgnoreCase))))
                 .DistinctBy(layer => layer.Id).OrderBy(layer => layer.LayerDate).ThenBy(layer => layer.CreatedAt)
                 .ThenBy(layer => new SqlGuid(layer.Id)).ToList();
 
@@ -525,7 +528,7 @@ public partial class InventoryValuationService : IInventoryValuationService
     private async Task RecalculateWACBalancesAsync(Guid inventoryItemId)
     {
         var balances = await _unitOfWork.Repository<InventoryBalance>()
-            .FindAsync(b => b.InventoryItemId == inventoryItemId);
+            .FindAsync(b => b.InventoryItemId == inventoryItemId && b.TenantId == _currentUserProvider.TenantId && !b.IsDeleted);
 
         foreach (var balance in balances)
         {
@@ -533,6 +536,7 @@ public partial class InventoryValuationService : IInventoryValuationService
             var movements = await _unitOfWork.Repository<InventoryMovement>()
                 .GetQueryable()
                 .Where(m => m.InventoryItemId == inventoryItemId &&
+                           m.TenantId == _currentUserProvider.TenantId && !m.IsDeleted &&
                            m.WarehouseId == balance.WarehouseId &&
                            m.LocationId == balance.LocationId &&
                            m.IsPosted)
@@ -545,6 +549,13 @@ public partial class InventoryValuationService : IInventoryValuationService
 
             foreach (var movement in movements)
             {
+                if (movement.MovementType == InventoryMovementType.InvoiceCostAdjustment)
+                {
+                    if (movement.Quantity != 0)
+                        throw new InvalidOperationException("Invoice cost adjustments cannot change stock quantity.");
+                    runningValue += movement.TotalValue; // This value-only event retains its signed ledger amount.
+                    continue;
+                }
                 if (movement.Direction == MovementDirection.In)
                 {
                     runningValue += movement.TotalValue;
@@ -552,14 +563,15 @@ public partial class InventoryValuationService : IInventoryValuationService
                 }
                 else
                 {
-                    var avgCost = runningQty > 0 ? runningValue / runningQty : 0;
-                    var issueCost = movement.Quantity * avgCost;
-                    runningValue -= issueCost;
+                    // Preserve the exact posted issue cost, including retained rounding cents.
+                    // Recalculation must not silently reprice an immutable outbound movement.
+                    runningValue -= movement.TotalValue;
                     runningQty -= movement.Quantity;
                 }
             }
 
             balance.QuantityOnHand = runningQty;
+            balance.QuantityAvailable = runningQty - balance.QuantityAllocated;
             balance.TotalValue = runningValue;
             balance.AverageUnitCost = runningQty > 0 ? runningValue / runningQty : 0;
             balance.LastRecalculatedAt = DateTime.UtcNow;
@@ -763,6 +775,8 @@ public partial class InventoryValuationService : IInventoryValuationService
         DateTime? expirationDate = null,
         string authorizationAction = "AuthorizeInventoryPosting")
     {
+        await InventoryTransitProtection.EnsureOrdinaryStockScopeAsync(
+            _unitOfWork, _currentUserProvider.TenantId, warehouseId, locationId);
         await _receiptSourceControl.EnforceInventoryPostingAsync(
             referenceType,
             referenceId,
@@ -861,6 +875,8 @@ public partial class InventoryValuationService : IInventoryValuationService
         string? serialNumber = null)
     {
         if (quantity <= 0) throw new ArgumentOutOfRangeException(nameof(quantity));
+        await InventoryTransitProtection.EnsureOrdinaryStockScopeAsync(
+            _unitOfWork, _currentUserProvider.TenantId, warehouseId, locationId);
         var item = await _unitOfWork.Repository<InventoryItem>()
             .GetQueryable(value => value.Id == inventoryItemId &&
                 value.TenantId == _currentUserProvider.TenantId && !value.IsDeleted)
@@ -887,9 +903,10 @@ public partial class InventoryValuationService : IInventoryValuationService
             case ValuationMethod.FIFO:
                 // Consume FIFO layers
                 var movements = new List<InventoryMovement>();
-                totalCost = await ConsumeFIFOLayersAsync(
+                totalCost = await ConsumeFIFOLayersCoreAsync(
                     inventoryItemId, warehouseId, locationId,
-                    quantity, movements);
+                    quantity, movements, Array.Empty<InventoryLayer>(),
+                    referenceType == ReferenceType.SalesInvoice ? lotNumber?.Trim() : null);
                 
                 // Update balance
                 balance.QuantityOnHand -= quantity;
@@ -940,6 +957,8 @@ public partial class InventoryValuationService : IInventoryValuationService
         if (voucher.TenantId != tenantId || voucher.Status != expectedState || !line.LocationId.HasValue ||
             line.Quantity <= 0 || line.TotalValue <= 0)
             throw new InvalidOperationException("Only a governed posted return (or its approved reversal) can update valuation.");
+        await InventoryTransitProtection.EnsureOrdinaryStockScopeAsync(
+            _unitOfWork, tenantId, voucher.WarehouseId, line.LocationId);
         var item = await _unitOfWork.Repository<InventoryItem>()
             .GetQueryable(value => value.Id == line.InventoryItemId && value.TenantId == tenantId && !value.IsDeleted)
             .SingleAsync();
@@ -1031,6 +1050,8 @@ public partial class InventoryValuationService : IInventoryValuationService
             throw new ArgumentOutOfRangeException(nameof(quantityDelta), "An adjustment quantity cannot be zero.");
         if (unitCost <= 0)
             throw new ArgumentOutOfRangeException(nameof(unitCost), "An adjustment requires a positive server-derived unit cost.");
+        await InventoryTransitProtection.EnsureOrdinaryStockScopeAsync(
+            _unitOfWork, _currentUserProvider.TenantId, warehouseId, locationId);
 
         decimal? retainedReversalValue = null;
         if (reversalAdjustmentLineId.HasValue)
@@ -1244,8 +1265,10 @@ public partial class InventoryValuationService : IInventoryValuationService
         var originalMovement = await _unitOfWork.Repository<InventoryMovement>()
             .GetByIdAsync(movementId);
 
-        if (originalMovement == null)
+        if (originalMovement == null || originalMovement.TenantId != _currentUserProvider.TenantId || originalMovement.IsDeleted)
             throw new KeyNotFoundException($"Movement {movementId} not found");
+        await InventoryTransitProtection.EnsureOrdinaryStockScopeAsync(
+            _unitOfWork, _currentUserProvider.TenantId, originalMovement.WarehouseId, originalMovement.LocationId);
 
         if (!originalMovement.IsPosted)
             throw new InvalidOperationException("Cannot reverse an unposted movement");

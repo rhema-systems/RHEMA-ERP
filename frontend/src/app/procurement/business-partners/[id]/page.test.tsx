@@ -1,11 +1,20 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import BusinessPartnerDetailPage from './page';
 import { businessPartnerService, type BusinessPartnerDetailDto } from '@/services/businessPartnerService';
 
+const workflowMocks = vi.hoisted(() => ({
+  refresh: vi.fn(),
+  useWorkflowSummary: vi.fn(),
+}));
+
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), back: vi.fn() }), useParams: () => ({ id: 'partner-role-test' }) }));
-vi.mock('@/services/businessPartnerService', () => ({ businessPartnerService: { getById: vi.fn(), getPostingOptions: vi.fn() } }));
+vi.mock('@/services/businessPartnerService', () => ({ businessPartnerService: {
+  getById: vi.fn(), getPostingOptions: vi.fn(), submitPartnerForApproval: vi.fn(),
+  approvePartner: vi.fn(), rejectPartner: vi.fn(),
+} }));
+vi.mock('@/hooks/useWorkflowSummary', () => ({ useWorkflowSummary: workflowMocks.useWorkflowSummary }));
 vi.mock('@/services/partnerConfigService', () => ({ licenseTypeService: { getActive: vi.fn().mockResolvedValue([]) } }));
 vi.mock('@/services/performanceTrackingService', () => ({ performanceTrackingService: {
   getMetricsByBusinessPartner: vi.fn().mockResolvedValue([]), getIncidentsByBusinessPartner: vi.fn().mockResolvedValue([]),
@@ -22,6 +31,15 @@ Object.assign(globalThis, { React, ResizeObserver: class { observe() {} unobserv
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(businessPartnerService.getPostingOptions).mockResolvedValue({ accounts: [], bankAccounts: [], taxGroups: [] });
+  workflowMocks.refresh.mockResolvedValue(undefined);
+  workflowMocks.useWorkflowSummary.mockReturnValue({
+    summary: {
+      entityType: 'BusinessPartner', entityId: 'partner-role-test', approvalRequired: true,
+      hasActiveInstance: false, hasWorkflowHistory: false, canCurrentUserApprove: false, pendingApprovers: [],
+    },
+    loading: false, error: undefined, refresh: workflowMocks.refresh,
+    visibility: { known: true, active: false, direct: false, approvalRequired: true, showTab: true, tabLabel: 'Workflow', showApprovalControls: true },
+  });
 });
 
 describe('business partner detail account roles', () => {
@@ -40,5 +58,61 @@ describe('business partner detail account roles', () => {
     const name = payables ? 'Accounts Payable' : 'Accounts Receivable';
     fireEvent.mouseDown(screen.getByRole('tab', { name }), { button: 0, ctrlKey: false });
     expect(await screen.findByText(`Current ${payables ? 'payables' : 'receivables'} account sources`)).toBeInTheDocument();
+  });
+});
+
+describe('business partner identity approval workflow', () => {
+  const pendingPartner = {
+    id: 'partner-role-test', partnerCode: 'SUP260001', partnerName: 'Akwaaba Technical Services Ltd', partnerType: 'Supplier',
+    status: 'PendingApproval', approvalStatus: 'Pending', documents: [], licenses: [],
+    isPreferred: false, isBlacklisted: false, createdAt: '2026-09-27T00:00:00Z',
+  } satisfies BusinessPartnerDetailDto;
+
+  it('lets the maker submit an identity that has no active workflow', async () => {
+    vi.mocked(businessPartnerService.getById).mockResolvedValue(pendingPartner);
+    vi.mocked(businessPartnerService.submitPartnerForApproval).mockResolvedValue(undefined);
+
+    render(<BusinessPartnerDetailPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Submit for approval' }));
+
+    await waitFor(() => expect(businessPartnerService.submitPartnerForApproval).toHaveBeenCalledWith('partner-role-test'));
+    expect(workflowMocks.refresh).toHaveBeenCalled();
+  });
+
+  it('shows decisions only to the checker assigned by workflow', async () => {
+    workflowMocks.useWorkflowSummary.mockReturnValue({
+      summary: {
+        entityType: 'BusinessPartner', entityId: 'partner-role-test', approvalRequired: true,
+        hasActiveInstance: true, hasWorkflowHistory: true, canCurrentUserApprove: true, pendingApprovers: [],
+      },
+      loading: false, error: undefined, refresh: workflowMocks.refresh,
+      visibility: { known: true, active: true, direct: false, approvalRequired: true, showTab: true, tabLabel: 'Workflow', showApprovalControls: true },
+    });
+    vi.mocked(businessPartnerService.getById).mockResolvedValue(pendingPartner);
+    vi.mocked(businessPartnerService.approvePartner).mockResolvedValue(undefined);
+
+    render(<BusinessPartnerDetailPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    await waitFor(() => expect(businessPartnerService.approvePartner).toHaveBeenCalledWith('partner-role-test'));
+  });
+
+  it('does not expose decision controls to the maker or another unassigned user', async () => {
+    workflowMocks.useWorkflowSummary.mockReturnValue({
+      summary: {
+        entityType: 'BusinessPartner', entityId: 'partner-role-test', approvalRequired: true,
+        hasActiveInstance: true, hasWorkflowHistory: true, canCurrentUserApprove: false, pendingApprovers: [],
+      },
+      loading: false, error: undefined, refresh: workflowMocks.refresh,
+      visibility: { known: true, active: true, direct: false, approvalRequired: true, showTab: true, tabLabel: 'Workflow', showApprovalControls: true },
+    });
+    vi.mocked(businessPartnerService.getById).mockResolvedValue(pendingPartner);
+
+    render(<BusinessPartnerDetailPage />);
+    await screen.findByText(/awaiting an independent approval/i);
+
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Submit for approval' })).not.toBeInTheDocument();
   });
 });

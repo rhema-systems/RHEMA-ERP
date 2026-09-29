@@ -73,6 +73,7 @@ public class CreateSupplierReturnLineItemDto
 
 public class SupplierDebitNoteDto
 {
+    public Guid? InventorySupplierReturnAccountingGroupId { get; set; }
     public bool ApprovalRequired { get; set; } = true;
     public Guid? InventoryPurchaseReturnId { get; set; }
     public Guid? ReturnDispatchPostingEventId { get; set; }

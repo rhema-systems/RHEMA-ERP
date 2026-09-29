@@ -27,7 +27,12 @@ export interface JournalBatchListItem {
     description: string;
     fiscalPeriodId: string;
     fiscalPeriodName?: string;
+    fiscalPeriodStartDate?: string;
+    fiscalPeriodEndDate?: string;
+    accountingBookId: string;
     bookClassification: string;
+    accountingBookName: string;
+    accountingBookType: 'PrimaryFull' | 'ParallelFull' | 'Delta';
     controlCurrencyCode: string;
     batchType: 'Standard' | 'Reversal';
     approvalStatus: JournalBatchApprovalStatus;
@@ -140,6 +145,16 @@ export interface JournalBatchDetail extends JournalBatchListItem {
     items: JournalBatchItem[];
     postingRuns: JournalBatchPostingRun[];
     attachmentIds: string[];
+    attachments: JournalBatchAttachment[];
+}
+
+export interface JournalBatchAttachment {
+    fileUploadRecordId: string;
+    fileName: string;
+    fileUrl: string;
+    contentType?: string;
+    fileSize: number;
+    uploadedAt: string;
 }
 
 export interface JournalBatchListResult {
@@ -152,11 +167,21 @@ export interface JournalBatchListResult {
 export interface CreateJournalBatch {
     description: string;
     fiscalPeriodId: string;
-    bookClassification: string;
+    accountingBookId: string;
     controlCurrencyCode: string;
     expectedDebitTotal: number;
     expectedJournalCount?: number;
     notes?: string;
+}
+
+export interface EligibleJournalBatchBook {
+    id: string;
+    code: string;
+    name: string;
+    purpose: string;
+    bookType: 'PrimaryFull' | 'Delta';
+    functionalCurrencyCode?: string;
+    isDefault: boolean;
 }
 
 export interface JournalBatchValidationIssue {
@@ -196,6 +221,7 @@ export interface JournalBatchImportPreview {
     isValid: boolean;
     templateVersion: string;
     fileName: string;
+    controlCurrencyCode: string;
     journalCount: number;
     lineCount: number;
     expectedDebitTotal: number;

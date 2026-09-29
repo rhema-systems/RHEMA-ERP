@@ -22,6 +22,8 @@ import {
 } from '@/services/inventoryManagementService';
 import { useToast } from '@/hooks/use-toast';
 import { getInventoryTransferProblemMessage } from '@/lib/inventory-transfer-controls';
+import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
+import type { InventoryTransferPickingOptionDto } from '@/services/inventoryManagementService';
 
 interface ShipTransferDialogProps {
   open: boolean;
@@ -33,6 +35,8 @@ interface ShipTransferDialogProps {
 
 interface ShipQuantity {
   itemId: string;
+  inventoryItemId: string;
+  picks: { sourceLocationId: string; quantity: number }[];
   requestedQuantity: number;
   alreadyShipped: number;
   toShip: number;
@@ -53,7 +57,11 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
   const [fullPage, setFullPage] = useState(false);
   const [transfer, setTransfer] = useState<InventoryTransferDetailDto | null>(null);
   const [trackingNumber, setTrackingNumber] = useState('');
-  const [carrierName, setCarrierName] = useState('');
+  const [carrierBusinessPartnerId, setCarrierBusinessPartnerId] = useState('');
+  const [vehicleNumber, setVehicleNumber] = useState('');
+  const [carriers, setCarriers] = useState<BusinessPartnerDto[]>([]);
+  const [pickingOptions, setPickingOptions] = useState<InventoryTransferPickingOptionDto[]>([]);
+  const loadSequence = useRef(0);
   const [dispatchComment, setDispatchComment] = useState('');
   const [shipQuantities, setShipQuantities] = useState<ShipQuantity[]>([]);
   const [extraColumns, setExtraColumns] = useState({ requested: false, shipped: false, uom: false });
@@ -77,7 +85,9 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
       setTransfer(null);
       setShipQuantities([]);
       setTrackingNumber('');
-      setCarrierName('');
+      setCarrierBusinessPartnerId('');
+      setVehicleNumber('');
+      setPickingOptions([]);
       setDispatchComment('');
       mutationKeyRef.current = null;
       setIncludeCosts(false);
@@ -88,14 +98,28 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
       setCostApportionmentBasis('Value');
       setExpenseGLAccount('');
     }
+    return () => { loadSequence.current++; };
   }, [open, transferId]);
 
   const loadTransferDetails = async () => {
     if (!transferId) return;
+    const sequence = ++loadSequence.current;
     try {
       setLoading(true);
-      const detail = await inventoryManagementService.getInventoryTransferById(transferId);
+      setTransfer(null);
+      const [detail, options, partners] = await Promise.all([
+        inventoryManagementService.getInventoryTransferById(transferId),
+        inventoryManagementService.getTransferPickingOptions(transferId),
+        businessPartnerService.getAllPartnersForDropdown(),
+      ]);
+      if (sequence !== loadSequence.current) return;
       setTransfer(detail);
+      setPickingOptions(options);
+      setCarriers(partners.filter(partner => (partner.isActive ?? partner.status === 'Active') && !partner.isBlacklisted &&
+        (partner.roleTypes?.includes('Supplier') || ['Supplier', 'Vendor', 'Manufacturer', 'Both', 'CustomerAndSupplier'].includes(partner.partnerType))));
+      setCarrierBusinessPartnerId(detail.carrierBusinessPartnerId || '');
+      setVehicleNumber(detail.vehicleNumber || '');
+      setTrackingNumber(detail.trackingNumber || '');
       setShippingCost(detail.shippingCost || 0);
       setMiscellaneousCost(detail.miscellaneousCost || 0);
       setMiscellaneousCostDescription(detail.miscellaneousCostDescription || '');
@@ -107,6 +131,11 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
       // Initialize ship quantities from items
       const quantities: ShipQuantity[] = detail.items.map(item => ({
         itemId: item.id,
+        inventoryItemId: item.inventoryItemId,
+        picks: [{ sourceLocationId: options.find(option => option.itemId === item.id && option.sourceLocationId === item.sourceLocationId)?.sourceLocationId ||
+          (options.filter(option => option.itemId === item.id && option.quantityAvailable > 0).length === 1
+            ? options.find(option => option.itemId === item.id && option.quantityAvailable > 0)!.sourceLocationId : ''),
+          quantity: Math.max(0, item.requestedQuantity - item.shippedQuantity) }],
         requestedQuantity: item.requestedQuantity,
         alreadyShipped: item.shippedQuantity,
         toShip: item.requestedQuantity - item.shippedQuantity, // Default to remaining qty
@@ -119,17 +148,24 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
       }));
       setShipQuantities(quantities);
     } catch (err) {
+      if (sequence !== loadSequence.current) return;
       console.error('Error loading transfer:', err);
-      toast({ title: 'Error', description: 'Failed to load transfer details', variant: 'destructive' });
+      toast({ title: 'Error', description: getInventoryTransferProblemMessage(err, 'Failed to load transfer picking options'), variant: 'destructive' });
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
   };
 
   const updateShipQuantity = (itemId: string, qty: number) => {
     setShipQuantities(prev => prev.map(q => 
-      q.itemId === itemId ? { ...q, toShip: Math.max(0, Math.min(qty, q.requestedQuantity - q.alreadyShipped)) } : q
+      q.itemId === itemId ? { ...q, toShip: Math.max(0, Math.min(qty, q.requestedQuantity - q.alreadyShipped)),
+        picks: q.picks.length === 1 ? [{ ...q.picks[0], quantity: Math.max(0, Math.min(qty, q.requestedQuantity - q.alreadyShipped)) }] : q.picks } : q
     ));
+  };
+
+  const updatePicks = (itemId: string, picks: ShipQuantity['picks']) => {
+    setShipQuantities(previous => previous.map(item => item.itemId === itemId
+      ? { ...item, picks, toShip: Number(picks.reduce((sum, pick) => sum + (Number.isFinite(pick.quantity) ? pick.quantity : 0), 0).toFixed(4)) } : item));
   };
 
   const mutationKeyFor = (kind: string, payload: unknown) => {
@@ -142,14 +178,44 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
 
   const handleShip = async () => {
     if (!transferId || !transfer) return;
+    if (transfer.requiresTransitReconciliation) return;
+    if (shipQuantities.some(item => !Number.isFinite(item.toShip) || item.toShip < 0 || item.picks.some(pick => !Number.isFinite(pick.quantity) || pick.quantity < 0 || Math.abs(pick.quantity - Number(pick.quantity.toFixed(4))) > 1e-8))) {
+      toast({ title: 'Validation', description: 'Enter valid non-negative picking quantities with at most four decimal places.', variant: 'destructive' });
+      return;
+    }
 
     // Filter items with quantity to ship
     const itemsToShip: ShipTransferItemDto[] = shipQuantities
       .filter(q => q.toShip > 0)
-      .map(q => ({ itemId: q.itemId, shippedQuantity: q.toShip }));
+      .map(q => ({ itemId: q.itemId, shippedQuantity: Number(q.toShip.toFixed(4)), picks: q.picks.filter(pick => pick.quantity > 0).map(pick => ({ ...pick, quantity: Number(pick.quantity.toFixed(4)) })) }));
 
     if (itemsToShip.length === 0) {
       toast({ title: 'Warning', description: 'Please enter quantities to ship', variant: 'destructive' });
+      return;
+    }
+
+    const pickedStock = new Map<string, { quantity: number; available: number }>();
+    for (const item of shipQuantities.filter(row => row.toShip > 0)) {
+      const picked = item.picks.reduce((sum, pick) => sum + pick.quantity, 0);
+      if (item.toShip > Number((item.requestedQuantity - item.alreadyShipped).toFixed(4)) || !Number.isFinite(picked) ||
+        Math.abs(picked - item.toShip) > 0.000001 || item.picks.some(pick => pick.quantity < 0) ||
+        new Set(item.picks.filter(pick => pick.quantity > 0).map(pick => pick.sourceLocationId)).size !== item.picks.filter(pick => pick.quantity > 0).length) {
+        toast({ title: 'Validation', description: `Check bin quantities for ${item.itemCode || item.itemName}. They must total the shipment and not exceed the remaining quantity.`, variant: 'destructive' });
+        return;
+      }
+      for (const pick of item.picks.filter(value => value.quantity > 0)) {
+        const option = pickingOptions.find(value => value.itemId === item.itemId && value.sourceLocationId === pick.sourceLocationId);
+        if (!option) {
+          toast({ title: 'Validation', description: `Select a source bin for ${item.itemCode || item.itemName}.`, variant: 'destructive' });
+          return;
+        }
+        const key = `${item.inventoryItemId}:${pick.sourceLocationId}`;
+        const existing = pickedStock.get(key);
+        pickedStock.set(key, { quantity: Number(((existing?.quantity || 0) + pick.quantity).toFixed(4)), available: Math.min(existing?.available ?? option.quantityAvailable, option.quantityAvailable) });
+      }
+    }
+    if ([...pickedStock.values()].some(stock => stock.quantity > stock.available)) {
+      toast({ title: 'Validation', description: 'Picked quantities exceed available stock in a source bin.', variant: 'destructive' });
       return;
     }
 
@@ -166,7 +232,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
 
       if (includeCosts) {
         const idempotencyKey = mutationKeyFor('dispatch-with-costs', {
-          trackingNumber, carrierName, shippingCost, miscellaneousCost,
+          trackingNumber, carrierBusinessPartnerId, vehicleNumber, shippingCost, miscellaneousCost,
           miscellaneousCostDescription, costAllocationMethod, costApportionmentBasis,
           expenseGLAccount, itemsToShip, dispatchComment,
         });
@@ -177,7 +243,8 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
           correlationId: `transfer-dispatch:${transferId}:${idempotencyKey}`,
           comment: dispatchComment.trim() || undefined,
           trackingNumber: trackingNumber || undefined,
-          carrierName: carrierName || undefined,
+          carrierBusinessPartnerId: carrierBusinessPartnerId || undefined,
+          vehicleNumber: vehicleNumber.trim() || undefined,
           shippingCost,
           miscellaneousCost,
           miscellaneousCostDescription: miscellaneousCostDescription || undefined,
@@ -190,13 +257,13 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
         await inventoryManagementService.shipTransferWithCosts(transferId, costsDto);
         toast({ title: 'Success', description: 'Transfer shipped with costs successfully' });
       } else {
-        const idempotencyKey = mutationKeyFor('dispatch', { trackingNumber, itemsToShip, dispatchComment });
+        const idempotencyKey = mutationKeyFor('dispatch', { trackingNumber, carrierBusinessPartnerId, vehicleNumber, itemsToShip, dispatchComment });
         await inventoryManagementService.shipTransfer(transferId, {
           rowVersion: transfer.rowVersion,
           idempotencyKey,
           correlationId: `transfer-dispatch:${transferId}:${idempotencyKey}`,
           comment: dispatchComment.trim() || undefined,
-        }, trackingNumber || undefined, itemsToShip);
+        }, trackingNumber || undefined, itemsToShip, { carrierBusinessPartnerId: carrierBusinessPartnerId || undefined, vehicleNumber: vehicleNumber.trim() || undefined });
         toast({ title: 'Success', description: 'Transfer shipped successfully' });
       }
 
@@ -240,7 +307,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
       setSavingDraft(true);
 
       const idempotencyKey = mutationKeyFor('save-shipping-costs', {
-        trackingNumber, carrierName, shippingCost, miscellaneousCost,
+        trackingNumber, carrierBusinessPartnerId, vehicleNumber, shippingCost, miscellaneousCost,
         miscellaneousCostDescription, costAllocationMethod, costApportionmentBasis,
         expenseGLAccount,
       });
@@ -250,7 +317,8 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
         correlationId: `transfer-shipping-costs:${transferId}:${idempotencyKey}`,
         comment: dispatchComment.trim() || undefined,
         trackingNumber: trackingNumber || undefined,
-        carrierName: carrierName || undefined,
+        carrierBusinessPartnerId: carrierBusinessPartnerId || undefined,
+          vehicleNumber: vehicleNumber.trim() || undefined,
         shippingCost,
         miscellaneousCost,
         miscellaneousCostDescription: miscellaneousCostDescription || undefined,
@@ -354,6 +422,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
           </div>
         ) : transfer ? (
           <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden pr-1">
+            {transfer.requiresTransitReconciliation && <p role="alert" className="rounded border border-amber-300 p-2 text-sm">This historical transfer needs transit reconciliation before dispatch or receipt.</p>}
             {/* Transfer Info */}
             <div className="grid grid-cols-2 gap-4 p-4 bg-muted rounded-lg">
               <div>
@@ -367,7 +436,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
             </div>
 
             {/* Tracking Number */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="trackingNumber">Tracking Number (Optional)</Label>
                 <Input
@@ -378,13 +447,16 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="carrierName">Carrier Name (Optional)</Label>
-                <Input
-                  id="carrierName"
-                  value={carrierName}
-                  onChange={(e) => setCarrierName(e.target.value)}
-                  placeholder="Enter carrier name"
-                />
+                <Label htmlFor="carrierBusinessPartnerId">Carrier supplier (optional)</Label>
+                <select id="carrierBusinessPartnerId" className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={carrierBusinessPartnerId} onChange={event => setCarrierBusinessPartnerId(event.target.value)}>
+                  <option value="">No external carrier</option>
+                  {carrierBusinessPartnerId && !carriers.some(partner => partner.id === carrierBusinessPartnerId) && <option value={carrierBusinessPartnerId} disabled>{transfer.carrierName || 'Previous carrier'} (unavailable)</option>}
+                  {carriers.map(partner => <option key={partner.id} value={partner.id}>{partner.partnerCode} · {partner.partnerName}</option>)}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="vehicleNumber">Vehicle number (optional)</Label>
+                <Input id="vehicleNumber" maxLength={100} value={vehicleNumber} onChange={event => setVehicleNumber(event.target.value)} />
               </div>
             </div>
 
@@ -546,8 +618,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
                 <TableHeader>
                   <TableRow>
                     <TableHead>Item</TableHead>
-                    <TableHead>From Bin</TableHead>
-                    <TableHead>To Bin</TableHead>
+                    <TableHead className="min-w-80">Source bin picks</TableHead>
                     {extraColumns.uom && <TableHead>UOM</TableHead>}
                     {extraColumns.requested && <TableHead className="text-right">Requested</TableHead>}
                     {extraColumns.shipped && <TableHead className="text-right">Already Shipped</TableHead>}
@@ -561,8 +632,24 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
                     return (
                       <TableRow key={item.itemId}>
                         <TableCell className="min-w-40 py-2"><div className="font-mono text-xs">{item.itemCode}</div><div className="text-sm text-muted-foreground">{item.itemName}</div></TableCell>
-                        <TableCell className="text-sm">{item.sourceLocationName || <span className="text-muted-foreground">-</span>}</TableCell>
-                        <TableCell className="text-sm">{item.destinationLocationName || <span className="text-muted-foreground">-</span>}</TableCell>
+                        <TableCell className="space-y-1 py-2">
+                          {item.picks.map((pick, index) => {
+                            const options = pickingOptions.filter(option => option.itemId === item.itemId);
+                            const selected = options.find(option => option.sourceLocationId === pick.sourceLocationId);
+                            return <div key={index} className="flex flex-wrap items-center gap-1">
+                              <select aria-label={`Source bin ${item.itemCode} ${index + 1}`} className="h-8 min-w-32 flex-1 rounded border bg-background px-1 text-sm" value={pick.sourceLocationId}
+                                onChange={event => updatePicks(item.itemId, item.picks.map((value, i) => i === index ? { ...value, sourceLocationId: event.target.value } : value))}>
+                                <option value="">Select bin</option>
+                                {options.map(option => <option key={option.sourceLocationId} value={option.sourceLocationId}>{option.sourceLocationName || option.sourceLocationId}</option>)}
+                              </select>
+                              <Input aria-label={`Pick quantity ${item.itemCode} ${index + 1}`} type="number" min="0" step="0.0001" value={pick.quantity} className="h-8 w-20 text-right"
+                                onChange={event => updatePicks(item.itemId, item.picks.map((value, i) => i === index ? { ...value, quantity: Number(event.target.value) } : value))} />
+                              <Button type="button" size="sm" variant="ghost" aria-label={`Remove pick ${item.itemCode} ${index + 1}`} onClick={() => updatePicks(item.itemId, item.picks.filter((_, i) => i !== index))}>×</Button>
+                              {selected && <span className="w-full text-xs text-muted-foreground">On hand {selected.quantityOnHand} · Allocated {selected.quantityAllocated} · Available {selected.quantityAvailable}</span>}
+                            </div>;
+                          })}
+                          <Button type="button" size="sm" variant="ghost" disabled={remaining <= 0} onClick={() => updatePicks(item.itemId, [...item.picks, { sourceLocationId: '', quantity: 0 }])}>Add bin</Button>
+                        </TableCell>
                         {extraColumns.uom && <TableCell>{item.unitOfMeasure}</TableCell>}
                         {extraColumns.requested && <TableCell className="text-right">{item.requestedQuantity.toFixed(2)}</TableCell>}
                         {extraColumns.shipped && <TableCell className="text-right">
@@ -579,6 +666,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
                             max={remaining}
                             step="0.01"
                             value={item.toShip}
+                            readOnly={item.picks.length !== 1}
                             onChange={(e) => updateShipQuantity(item.itemId, parseFloat(e.target.value) || 0)}
                             className="w-24 text-right"
                             disabled={remaining <= 0}
@@ -635,7 +723,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
                 Save Draft
               </Button>
             )}
-            <Button onClick={handleShip} disabled={saving || savingDraft || totalToShip <= 0}>
+            <Button onClick={handleShip} disabled={loading || !transfer || transfer.requiresTransitReconciliation || saving || savingDraft || totalToShip <= 0}>
               {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               <Send className="h-4 w-4 mr-2" />
               Ship Items

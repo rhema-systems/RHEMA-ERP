@@ -31,9 +31,39 @@ export interface SupplierReturnSourceGrn {
   warehouseName?: string;
   status: string | number;
   items: SupplierReturnSourceLine[];
+  purchaseOrderId?: string;
+  purchaseOrderNumber?: string;
+  returnSource?: {
+    purchaseOrderReceiptId?: string;
+    receiptNumber?: string;
+    lines: Array<{
+      goodsReceiptNoteItemId: string;
+      previouslyReturnedQuantity: number;
+      reservedReturnQuantity: number;
+      reservedInvoiceQuantity?: number;
+      remainingReturnableQuantity: number;
+      invoicedQuantity: number;
+      invoices: Array<{ invoiceId: string; invoiceNumber: string; baseQuantity: number; posted: boolean }>;
+    }>;
+  };
+}
+
+export interface SupplierReturnAccountingGroup {
+  id: string;
+  originalVendorInvoiceId?: string | null;
+  originalInvoiceNumber?: string | null;
+  baseQuantity: number;
+  carryingAmount: number;
+  originalAccrualAmount: number;
+  functionalCurrency: string;
+  dispatchJournalEntryId?: string | null;
+  supplierDebitNoteId?: string | null;
+  supplierDebitNoteNumber?: string | null;
+  financeResolutionCompleted: boolean;
 }
 
 export interface SupplierReturn {
+  accountingGroups?: SupplierReturnAccountingGroup[];
   supplierDebitNoteId?: string;
   financeResolutionCompleted?: boolean;
   approvalRequired?: boolean;

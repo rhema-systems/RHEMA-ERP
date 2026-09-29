@@ -314,6 +314,54 @@ public sealed class BusinessPartnerFinanceProfilesController : ControllerBase
     private Guid TenantId => _currentUser.TenantId;
     private Guid UserId => _currentUser.UserId;
 
+    [HttpGet("pending-approvals")]
+    [Authorize(Policy = FinancePermissions.ApproveBusinessPartnerFinanceProfiles)]
+    public async Task<ActionResult<IReadOnlyList<BusinessPartnerFinanceProfileApprovalQueueItemDto>>> GetPendingApprovals(
+        CancellationToken cancellationToken)
+    {
+        // This is an entitlement queue rather than a named workflow assignment: every independent
+        // Finance-profile approver may see the same submitted master-data decisions. Makers are
+        // excluded here and are also rejected by the decision endpoints below.
+        var ap = await _db.BusinessPartnerApProfileVersions.AsNoTracking()
+            .Where(profile => profile.TenantId == TenantId && !profile.IsDeleted &&
+                profile.Status == BusinessPartnerFinanceProfileStatus.Submitted &&
+                profile.SubmittedById.HasValue && profile.SubmittedById != UserId)
+            .Select(profile => new BusinessPartnerFinanceProfileApprovalQueueItemDto
+            {
+                BusinessPartnerId = profile.BusinessPartnerRole.BusinessPartnerId,
+                PartnerCode = profile.BusinessPartnerRole.BusinessPartner.PartnerCode,
+                PartnerName = profile.BusinessPartnerRole.BusinessPartner.PartnerName,
+                ProfileId = profile.Id, Ledger = "ap", VersionNumber = profile.VersionNumber,
+                EffectiveFrom = profile.EffectiveFrom, EffectiveTo = profile.EffectiveTo,
+                SubmittedById = profile.SubmittedById!.Value,
+                SubmittedAtUtc = profile.SubmittedAtUtc ?? profile.UpdatedAt ?? profile.CreatedAt
+            }).ToListAsync(cancellationToken);
+        var ar = await _db.BusinessPartnerArProfileVersions.AsNoTracking()
+            .Where(profile => profile.TenantId == TenantId && !profile.IsDeleted &&
+                profile.Status == BusinessPartnerFinanceProfileStatus.Submitted &&
+                profile.SubmittedById.HasValue && profile.SubmittedById != UserId)
+            .Select(profile => new BusinessPartnerFinanceProfileApprovalQueueItemDto
+            {
+                BusinessPartnerId = profile.BusinessPartnerRole.BusinessPartnerId,
+                PartnerCode = profile.BusinessPartnerRole.BusinessPartner.PartnerCode,
+                PartnerName = profile.BusinessPartnerRole.BusinessPartner.PartnerName,
+                ProfileId = profile.Id, Ledger = "ar", VersionNumber = profile.VersionNumber,
+                EffectiveFrom = profile.EffectiveFrom, EffectiveTo = profile.EffectiveTo,
+                SubmittedById = profile.SubmittedById!.Value,
+                SubmittedAtUtc = profile.SubmittedAtUtc ?? profile.UpdatedAt ?? profile.CreatedAt
+            }).ToListAsync(cancellationToken);
+        var rows = ap.Concat(ar).OrderBy(item => item.SubmittedAtUtc).ToList();
+        var submitterIds = rows.Select(item => item.SubmittedById).Distinct().ToArray();
+        var names = await _db.Users.AsNoTracking().Where(user => submitterIds.Contains(user.Id))
+            .Select(user => new { user.Id, user.FirstName, user.LastName, user.UserName })
+            .ToDictionaryAsync(user => user.Id, user => string.Join(" ", new[] { user.FirstName, user.LastName }
+                .Where(value => !string.IsNullOrWhiteSpace(value))).Trim(), cancellationToken);
+        foreach (var row in rows)
+            row.SubmittedBy = names.TryGetValue(row.SubmittedById, out var name) && !string.IsNullOrWhiteSpace(name)
+                ? name : row.SubmittedById.ToString();
+        return Ok(rows);
+    }
+
     private async Task<ActionResult?> ValidateApRequestAsync(
         Guid partnerId, SaveBusinessPartnerApProfileRequest request, CancellationToken cancellationToken)
     {
@@ -380,11 +428,29 @@ public sealed class BusinessPartnerFinanceProfilesController : ControllerBase
                 (!account.EffectiveDate.HasValue || account.EffectiveDate <= effectiveFrom) &&
                 (!account.ExpirationDate.HasValue || account.ExpirationDate > effectiveFrom), cancellationToken))
             return BadRequestProblem("AP_EXPENSE_ACCOUNT_INVALID", "Select an active, directly postable expense or asset account from the current tenant.");
-        if (taxGroupId.HasValue && !await _db.TaxGroups.AsNoTracking().AnyAsync(group =>
+        if (taxGroupId.HasValue)
+        {
+            var validTaxGroup = await _db.TaxGroups.AsNoTracking().AnyAsync(group =>
                 group.Id == taxGroupId.Value && group.TenantId == TenantId && !group.IsDeleted && group.IsActive &&
                 (group.Applicability == TaxApplicability.Purchases || group.Applicability == TaxApplicability.Both),
-                cancellationToken))
-            return BadRequestProblem("AP_TAX_GROUP_INVALID", "Select an active purchase tax group from the current tenant.");
+                cancellationToken);
+            if (!validTaxGroup)
+                return BadRequestProblem("AP_TAX_GROUP_INVALID", "Select an active purchase tax group from the current tenant.");
+
+            // WHT is governed independently by the profile's category defaults and recognized by
+            // the payment workflow. It must never masquerade as the AP invoice-line tax schedule.
+            var hasComponents = await _db.TaxGroupComponents.AsNoTracking().AnyAsync(component =>
+                component.TenantId == TenantId && !component.IsDeleted && component.TaxGroupId == taxGroupId.Value,
+                cancellationToken);
+            var hasInvoiceTaxComponent = await _db.TaxGroupComponents.AsNoTracking().AnyAsync(component =>
+                component.TenantId == TenantId && !component.IsDeleted && component.TaxGroupId == taxGroupId.Value &&
+                component.Tax.TenantId == TenantId && !component.Tax.IsDeleted && component.Tax.IsActive &&
+                component.Tax.Category != TaxCategory.Withholding && component.Tax.Category != TaxCategory.VatWithholding,
+                cancellationToken);
+            if (hasComponents && !hasInvoiceTaxComponent)
+                return BadRequestProblem("AP_TAX_GROUP_WITHHOLDING_ONLY",
+                    "Select a purchase VAT or other invoice-tax group. Configure supplier withholding separately under WHT defaults.");
+        }
         return null;
     }
 

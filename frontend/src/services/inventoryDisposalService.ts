@@ -1,4 +1,5 @@
 import axios from 'axios';
+import type { FinanceSourceDocumentDimensionInput } from '@/types/finance';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 const API_URL = `${API_BASE_URL}/inventory/disposals`;
@@ -18,6 +19,11 @@ export type InventoryDisposal = {
   approvalRequired: boolean; canEdit: boolean; canSubmit: boolean; canApprove: boolean;
   canStageExecution: boolean; canComplete: boolean; canCancel: boolean; currencyCode: string;
   postedStockValue?: number;
+  canGenerateWaybill?: boolean;
+  accountingVersion?: number;
+  auctionInvoiceId?: string;
+  auctionInvoiceNumber?: string;
+  canCreateAuctionInvoice?: boolean;
   requestedById: string; requestedByName: string; requestedAtUtc: string; auditVerifiedById?: string;
   auditVerifiedAtUtc?: string; auditFindings?: string; committeeMeetingAtUtc?: string;
   committeeReference?: string; authorityRoute: string; workflowInstanceId?: string; approvedById?: string;
@@ -49,6 +55,8 @@ const normalizeDisposal = (value: InventoryDisposal): InventoryDisposal => ({
     cancelled: 10, readyforexecution: 11,
   }) as InventoryDisposalStatus,
   method: enumValue(value.method, { auction: 1, sale: 2, writeoff: 3, donation: 4, destruction: 5 }) as InventoryDisposalMethod,
+  canGenerateWaybill: enumValue(value.method, { auction: 1, sale: 2, writeoff: 3, donation: 4, destruction: 5 }) !== 2 &&
+    [6, 7, 8, 11].includes(enumValue(value.status, { approved: 6, adjustmentpending: 7, completed: 8, readyforexecution: 11 })),
   actions: (value.actions ?? []).map(action => ({
     ...action,
     actionType: enumValue(action.actionType, {
@@ -68,6 +76,26 @@ const current = async (value: InventoryDisposal): Promise<InventoryDisposal> =>
   normalizeDisposal((await axios.get<InventoryDisposal>(`${API_URL}/${value.id}`, { headers: headers() })).data);
 
 export const inventoryDisposalService = {
+  async createAuctionInvoice(value: InventoryDisposal, request: { businessPartnerId: string; invoiceDate: string;
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
+    idempotencyKey: string; lines: Array<{ disposalLineId: string; unitPrice: number; taxTreatment: number; taxGroupId?: string }> }) {
+    return normalizeDisposal((await axios.post<InventoryDisposal>(`${API_URL}/${value.id}/auction-invoice`, {
+      ...request, rowVersion: value.rowVersion,
+    }, { headers: headers() })).data);
+  },
+  async downloadWaybill(value: InventoryDisposal) {
+    try {
+      return (await axios.get<Blob>(`${API_URL}/${value.id}/waybill`, {
+        headers: headers(), responseType: 'blob',
+      })).data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.data instanceof Blob) {
+        const body = await error.response.data.text();
+        try { error.response.data = JSON.parse(body); } catch { /* Keep the original transport error. */ }
+      }
+      throw error;
+    }
+  },
   async getAll(filters?: { status?: number; warehouseId?: string; take?: number }) {
     const values = (await axios.get<InventoryDisposal[]>(API_URL, { params: filters, headers: headers() })).data;
     return values.map(normalizeDisposal);

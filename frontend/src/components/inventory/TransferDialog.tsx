@@ -22,7 +22,7 @@ import { Plus, Trash2, Search, Package, AlertCircle, Barcode, Layers, Pencil, Ma
 import {
   inventoryManagementService,
   InventoryTransferDto, InventoryTransferDetailDto, InventoryTransferItemDto,
-  WarehouseDto, AddTransferItemDto, UpdateTransferItemDto, WarehouseLocationDto,
+  WarehouseDto, AddTransferItemDto, UpdateTransferItemDto,
   InventoryTransferEvidenceRequest, WarehouseInventoryItemDto
 } from '@/services/inventoryManagementService';
 import { documentManagementService, CentralDocumentRecord } from '@/services/document-management.service';
@@ -62,8 +62,6 @@ interface FormData {
 interface ItemFormData {
   inventoryItemId: string;
   requestedQuantity: number;
-  sourceLocationId: string;
-  destinationLocationId: string;
   lotNumber: string;
   batchNumber: string;
   serialNumber: string;
@@ -97,8 +95,6 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
   const [itemTrackingError, setItemTrackingError] = useState<string | null>(null);
   const [itemTrackingAttempt, setItemTrackingAttempt] = useState(0);
   const [loadingItems, setLoadingItems] = useState(false);
-  const [sourceLocations, setSourceLocations] = useState<WarehouseLocationDto[]>([]);
-  const [destinationLocations, setDestinationLocations] = useState<WarehouseLocationDto[]>([]);
   const [itemSearchTerm, setItemSearchTerm] = useState('');
   const [showAddItem, setShowAddItem] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -123,8 +119,6 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
   const [itemFormData, setItemFormData] = useState<ItemFormData>({
     inventoryItemId: '',
     requestedQuantity: 1,
-    sourceLocationId: '',
-    destinationLocationId: '',
     lotNumber: '',
     batchNumber: '',
     serialNumber: '',
@@ -163,21 +157,10 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
   useEffect(() => {
     if (formData.sourceWarehouseId && isEditable) {
       loadWarehouseInventoryItems(formData.sourceWarehouseId);
-      loadSourceLocations(formData.sourceWarehouseId);
     } else {
       setWarehouseInventoryItems([]);
-      setSourceLocations([]);
     }
   }, [formData.sourceWarehouseId, isEditable]);
-
-  // Load destination locations when destination warehouse changes
-  useEffect(() => {
-    if (formData.destinationWarehouseId && isEditable) {
-      loadDestinationLocations(formData.destinationWarehouseId);
-    } else {
-      setDestinationLocations([]);
-    }
-  }, [formData.destinationWarehouseId, isEditable]);
 
   const loadTransferDetails = async () => {
     if (!transfer?.id) return;
@@ -247,8 +230,6 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
     setItemFormData({
       inventoryItemId: '',
       requestedQuantity: 1,
-      sourceLocationId: '',
-      destinationLocationId: '',
       lotNumber: '',
       batchNumber: '',
       serialNumber: '',
@@ -259,26 +240,6 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
     });
     setShowAddItem(false);
     setEditingItemId(null);
-  };
-
-  const loadSourceLocations = async (warehouseId: string) => {
-    try {
-      const locations = await inventoryManagementService.getWarehouseLocations(warehouseId);
-      setSourceLocations((locations || []).filter(l => l.isActive));
-    } catch (err) {
-      console.error('Error loading source locations:', err);
-      setSourceLocations([]);
-    }
-  };
-
-  const loadDestinationLocations = async (warehouseId: string) => {
-    try {
-      const locations = await inventoryManagementService.getWarehouseLocations(warehouseId);
-      setDestinationLocations((locations || []).filter(l => l.isActive));
-    } catch (err) {
-      console.error('Error loading destination locations:', err);
-      setDestinationLocations([]);
-    }
   };
 
   const getStatusBadge = (status: string, approvalRequired?: boolean) => {
@@ -356,26 +317,9 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
     try {
       setSaving(true);
 
-      const isInterBin = !!formData.sourceWarehouseId &&
-        !!formData.destinationWarehouseId &&
-        formData.sourceWarehouseId === formData.destinationWarehouseId;
-
-      if (isInterBin) {
-        if (!itemFormData.sourceLocationId || !itemFormData.destinationLocationId) {
-          toast({ title: 'Validation', description: 'For inter-bin transfers, please select both a source bin and a destination bin.', variant: 'destructive' });
-          return;
-        }
-        if (itemFormData.sourceLocationId === itemFormData.destinationLocationId) {
-          toast({ title: 'Validation', description: 'Source bin and destination bin must be different.', variant: 'destructive' });
-          return;
-        }
-      }
-
       const dto: AddTransferItemDto = {
         inventoryItemId: itemFormData.inventoryItemId,
         requestedQuantity: itemFormData.requestedQuantity,
-        sourceLocationId: itemFormData.sourceLocationId || undefined,
-        destinationLocationId: itemFormData.destinationLocationId || undefined,
         lotNumber: itemFormData.lotNumber || undefined,
         batchNumber: itemFormData.batchNumber || undefined,
         serialNumber: itemFormData.serialNumber || undefined,
@@ -404,25 +348,8 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
     try {
       setSaving(true);
 
-      const isInterBin = !!formData.sourceWarehouseId &&
-        !!formData.destinationWarehouseId &&
-        formData.sourceWarehouseId === formData.destinationWarehouseId;
-
-      if (isInterBin) {
-        if (!itemFormData.sourceLocationId || !itemFormData.destinationLocationId) {
-          toast({ title: 'Validation', description: 'For inter-bin transfers, please select both a source bin and a destination bin.', variant: 'destructive' });
-          return;
-        }
-        if (itemFormData.sourceLocationId === itemFormData.destinationLocationId) {
-          toast({ title: 'Validation', description: 'Source bin and destination bin must be different.', variant: 'destructive' });
-          return;
-        }
-      }
-
       const dto: UpdateTransferItemDto = {
         requestedQuantity: itemFormData.requestedQuantity,
-        sourceLocationId: itemFormData.sourceLocationId || undefined,
-        destinationLocationId: itemFormData.destinationLocationId || undefined,
         lotNumber: itemFormData.lotNumber || undefined,
         batchNumber: itemFormData.batchNumber || undefined,
         serialNumber: itemFormData.serialNumber || undefined,
@@ -472,8 +399,6 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
     setItemFormData({
       inventoryItemId: item.inventoryItemId,
       requestedQuantity: item.requestedQuantity,
-      sourceLocationId: item.sourceLocationId || '',
-      destinationLocationId: item.destinationLocationId || '',
       lotNumber: item.lotNumber || '',
       batchNumber: item.batchNumber || '',
       serialNumber: item.serialNumber || '',
@@ -991,58 +916,12 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                       context={{
                         inventoryItemId: itemFormData.inventoryItemId,
                         warehouseId: formData.sourceWarehouseId,
-                        locationId: itemFormData.sourceLocationId,
                         referenceId: transfer?.id,
                         lotNumber: itemFormData.lotNumber,
                         batchNumber: itemFormData.batchNumber,
                         serialNumber: itemFormData.serialNumber,
                       }}
                     />
-                  </div>
-                </div>
-
-                {/* Bin/Location Selection */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Source Bin</Label>
-                    <Select
-                      value={itemFormData.sourceLocationId || '__none__'}
-                      onValueChange={(v) => setItemFormData({ ...itemFormData, sourceLocationId: v === '__none__' ? '' : v })}
-                      disabled={!formData.sourceWarehouseId}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select source bin (optional)" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-60">
-                        <SelectItem value="__none__">Not specified</SelectItem>
-                        {sourceLocations.map(loc => (
-                          <SelectItem key={loc.id} value={loc.id}>
-                            {loc.locationCode}{loc.name ? ` - ${loc.name}` : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Destination Bin</Label>
-                    <Select
-                      value={itemFormData.destinationLocationId || '__none__'}
-                      onValueChange={(v) => setItemFormData({ ...itemFormData, destinationLocationId: v === '__none__' ? '' : v })}
-                      disabled={!formData.destinationWarehouseId}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select destination bin (optional)" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-60">
-                        <SelectItem value="__none__">Not specified</SelectItem>
-                        {destinationLocations.map(loc => (
-                          <SelectItem key={loc.id} value={loc.id}>
-                            {loc.locationCode}{loc.name ? ` - ${loc.name}` : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                   </div>
                 </div>
 

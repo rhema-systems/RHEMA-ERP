@@ -10,7 +10,14 @@ public enum FinancialStatementLayoutVersionStatus
 {
     Draft = 1,
     Published = 2,
-    Retired = 3
+    Retired = 3,
+    Submitted = 4
+}
+
+public enum FinancialStatementLayoutApprovalDecision
+{
+    Approve = 1,
+    Reject = 2
 }
 
 public enum FinancialStatementRowType

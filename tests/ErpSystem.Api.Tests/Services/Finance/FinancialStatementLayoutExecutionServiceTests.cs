@@ -196,6 +196,43 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
     }
 
     [Fact]
+    [Trait("Category", "Governance")]
+    public async Task SubmittedVersion_CanBePreviewedButCannotExecuteAsPublished()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var context = CreateContext();
+        var book = SeedTenantAndBook(context, tenantId);
+        var cash = SeedAccount(context, tenantId, book.Id, "1000", "Cash", AccountType.Asset);
+        var layout = SeedLayout(context, tenantId, book, FinancialStatementType.BalanceSheet,
+            FinancialStatementLayoutVersionStatus.Submitted);
+        var version = layout.Versions.Single();
+        AddRow(version, tenantId, "CASH", "Cash", FinancialStatementRowType.Account, 10,
+            mapping: ExactMapping(tenantId, cash.Id));
+        SeedPostedTransaction(context, tenantId, cash.Id, new DateTime(2026, 7, 10), 100m, 0m);
+        await context.SaveChangesAsync();
+
+        var service = CreateService(context, tenantId);
+        var preview = await service.PreviewVersionAsync(version.Id,
+            new FinancialStatementLayoutPreviewRequestDto
+            {
+                PeriodEnd = new DateTime(2026, 7, 31),
+                IncludeAccountDetails = true
+            });
+        preview.Rows.Single().Amount.Should().Be(100m);
+        preview.VersionStatus.Should().Be(FinancialStatementLayoutVersionStatus.Submitted);
+
+        var execute = () => service.ExecutePublishedAsync(
+            new FinancialStatementLayoutExecutionRequestDto
+            {
+                StatementType = FinancialStatementType.BalanceSheet,
+                AccountingBookId = book.Id,
+                PeriodEnd = new DateTime(2026, 7, 31)
+            });
+        await execute.Should().ThrowAsync<KeyNotFoundException>()
+            .WithMessage("*no published version*");
+    }
+
+    [Fact]
     [Trait("Category", "Reporting")]
     public async Task ExecutePublished_ShouldResolveVersionEffectiveOnReportDate()
     {

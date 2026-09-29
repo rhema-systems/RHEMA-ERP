@@ -1147,6 +1147,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<EstateGroundRentCharge> EstateGroundRentCharges { get; set; }
     public DbSet<EstateGroundRentReview> EstateGroundRentReviews { get; set; }
     public DbSet<EstateFacilityDutyRoster> EstateFacilityDutyRosters { get; set; }
+    public DbSet<EstateFacilityDutyAttendance> EstateFacilityDutyAttendances { get; set; }
+    public DbSet<EstateFacilityProviderRate> EstateFacilityProviderRates { get; set; }
     public DbSet<EstateGisConfiguration> EstateGisConfigurations { get; set; }
     public DbSet<LandAcquisitionNote> LandAcquisitionNotes { get; set; }
     public DbSet<LandAcquisitionChecklistResponse> LandAcquisitionChecklistResponses { get; set; }
@@ -1266,6 +1268,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     {
         base.OnModelCreating(builder);
         ErpSystem.Data.Configurations.InventorySupplierReturnFinanceConfiguration.Configure(builder);
+        builder.ApplyConfiguration(new ErpSystem.Data.Configurations.InventorySupplierReturnAllocationConfiguration());
+        builder.ApplyConfiguration(new ErpSystem.Data.Configurations.InventorySupplierReturnAccountingGroupConfiguration());
+        builder.ApplyConfiguration(new ErpSystem.Data.Configurations.InventorySupplierReturnAccrualShareConfiguration());
         ErpSystem.Data.Configurations.BusinessPartnerPostingDefaultsConfiguration.Configure(builder);
         ErpSystem.Data.Configurations.BusinessPartnerFinanceProfileConfiguration.Configure(builder);
 
@@ -1281,6 +1286,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new JournalBatchPostingRunItemConfiguration());
         builder.ApplyConfiguration(new JournalBatchAttachmentConfiguration());
         builder.ApplyConfiguration(new JournalBatchImportSessionConfiguration());
+        builder.ApplyConfiguration(new FixedAssetCategoryConfiguration());
         builder.ApplyConfiguration(new VendorInvoiceOptionalApprovalConfiguration());
         builder.ApplyConfiguration<FinancePurchaseOrder>(new FinancePurchasingOptionalApprovalConfiguration());
         builder.ApplyConfiguration<FinancePurchaseOrderReceipt>(new FinancePurchasingOptionalApprovalConfiguration());
@@ -1309,6 +1315,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new InventoryValuationReconciliationConfiguration());
         builder.ApplyConfiguration(new InventoryValuationReconciliationActionConfiguration());
         builder.ApplyConfiguration(new InventoryDisposalCaseConfiguration());
+        builder.ApplyConfiguration(new InventoryDisposalAuctionInvoiceConfiguration());
         builder.ApplyConfiguration(new InventoryDisposalLineConfiguration());
         builder.ApplyConfiguration(new InventoryDisposalEvidenceConfiguration());
         builder.ApplyConfiguration(new InventoryDisposalCommitteeMemberConfiguration());
@@ -1334,8 +1341,16 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new InventoryTransferDiscrepancyEvidenceConfiguration());
         builder.ApplyConfiguration(new InventoryTransferControlRootConfiguration());
         builder.ApplyConfiguration(new InventoryTransferControlItemConfiguration());
+        builder.ApplyConfiguration(new InventoryTransferDispatchAllocationConfiguration());
+        builder.ApplyConfiguration(new InventoryTransferReceiptAllocationConfiguration());
+        builder.ApplyConfiguration(new InventoryTransferMovementAllocationConfiguration());
+        builder.ApplyConfiguration(new InventoryTransferStockProjectionAllocationConfiguration());
+        builder.ApplyConfiguration(new InventoryTransitWarehouseConfiguration());
+        builder.ApplyConfiguration(new InventoryTransitLocationConfiguration());
         builder.ApplyConfiguration(new InventoryCycleCountScheduleConfiguration());
         builder.ApplyConfiguration(new PhysicalCountControlConfiguration());
+        builder.ApplyConfiguration(new PhysicalCountCounterConfiguration());
+        builder.ApplyConfiguration(new PhysicalCountAdjustmentClaimConfiguration());
         builder.ApplyConfiguration(new WarehouseDefaultLocationConfiguration());
         builder.ApplyConfiguration(new PhysicalCountItemControlConfiguration());
         builder.ApplyConfiguration(new PhysicalCountActionConfiguration());
@@ -1375,6 +1390,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         if (Database.IsSqlServer())
         {
             ArchivedCheckConstraintBaselineModel.Apply(builder);
+            builder.Entity<PhysicalCountAction>().ToTable(table => table.HasCheckConstraint(
+                "CK_PhysicalCountActions_ActionType", "[ActionType] BETWEEN 1 AND 17"));
             builder.Entity<InventoryIssueVoucherAction>().ToTable(table => table.HasCheckConstraint(
                 "CK_InventoryIssueVoucherActions_ActionType", "[ActionType] IN (1,2,3)"));
             // Current QS architecture permits internal valuations; retain the historical archive verbatim.
@@ -1626,7 +1643,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<Invoice>(entity =>
         {
-            entity.ToTable("Invoices", table => table.HasTrigger("TR_Invoices_OptionalApproval"));
+            entity.ToTable("Invoices", table =>
+            {
+                table.HasTrigger("TR_Invoices_OptionalApproval");
+                table.HasTrigger("TR_Invoices_DisposalEconomics");
+            });
             entity.Property(e => e.ApprovalRequired).HasDefaultValue(true).ValueGeneratedNever();
             entity.Property(e => e.InvoiceNumber).HasMaxLength(50).IsRequired();
             entity.Property(e => e.CustomerName).HasMaxLength(200).IsRequired();
@@ -1785,7 +1806,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<InvoiceLineItem>(entity =>
         {
-            entity.ToTable("InvoiceLineItem");
+            entity.ToTable("InvoiceLineItem", table => table.HasTrigger("TR_InvoiceLineItem_DisposalEconomics"));
             entity.Property(e => e.Description).HasMaxLength(200).IsRequired();
             entity.Property(e => e.Quantity).HasColumnType("decimal(18,4)");
             entity.Property(e => e.UnitPrice).HasColumnType("decimal(18,2)");
@@ -1905,7 +1926,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<SalesOrder>(entity =>
         {
-            entity.ToTable("SalesOrders");
+            entity.ToTable("SalesOrders", table => table.HasTrigger("TR_SalesOrders_InvoiceSource"));
+            entity.Property(e => e.RowVersion).IsRowVersion();
+            entity.HasIndex(e => new { e.TenantId, e.InvoiceId }).IsUnique().HasFilter("[InvoiceId] IS NOT NULL");
             entity.HasOne(e => e.BusinessPartner)
                 .WithMany()
                 .HasForeignKey(e => e.BusinessPartnerId)
@@ -1942,7 +1965,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<SalesOrderLine>(entity =>
         {
-            entity.ToTable("SalesOrderLines");
+            entity.ToTable("SalesOrderLines", table => table.HasTrigger("TR_SalesOrderLines_InvoiceSource"));
             entity.HasOne(e => e.SalesOrder)
                 .WithMany(e => e.Lines)
                 .HasForeignKey(e => e.SalesOrderId)
@@ -2351,10 +2374,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasFilter("[IsDeleted] = 0 AND [AcceptedSupplyKind] IN (2, 3) AND [AcceptedSupplySourceId] IS NOT NULL");
         });
 
+        builder.ApplyConfiguration(new ProcurementReceiptCostBasisConfiguration());
+        builder.ApplyConfiguration(new VendorInvoiceReceiptCostAllocationConfiguration());
+        builder.ApplyConfiguration(new VendorInvoiceReceiptCostPostingLineConfiguration());
+        builder.ApplyConfiguration(new VendorInvoiceReceiptCostValuationConfiguration());
         builder.Entity<VendorInvoiceReceiptAllocation>(entity =>
         {
             entity.ToTable("VendorInvoiceReceiptAllocations", table => table.HasTrigger("TR_VendorInvoiceReceiptAllocations_Source"));
-            entity.HasIndex(value => new { value.TenantId, value.VendorInvoiceLineItemId }).IsUnique();
+            entity.HasIndex(value => new { value.TenantId, value.VendorInvoiceLineItemId, value.GoodsReceiptNoteItemId }).IsUnique();
             entity.HasIndex(value => new { value.TenantId, value.GoodsReceiptNoteItemId });
             entity.HasOne(value => value.VendorInvoice).WithMany().HasForeignKey(value => value.VendorInvoiceId).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(value => value.VendorInvoiceLineItem).WithMany().HasForeignKey(value => value.VendorInvoiceLineItemId).OnDelete(DeleteBehavior.NoAction);
@@ -3630,9 +3657,6 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
             entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.ParentClassificationId, item.DisplayOrder });
-            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.SystemRole })
-                .IsUnique()
-                .HasFilter("[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] <> 1 AND [SystemRole] <> 2");
             entity.Property(item => item.Code).HasMaxLength(50).IsRequired();
             entity.Property(item => item.Name).HasMaxLength(200).IsRequired();
             entity.Property(item => item.Description).HasMaxLength(1000);
@@ -3697,6 +3721,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.FinancialStatementLayoutId, e.VersionNumber }).IsUnique();
             entity.HasIndex(e => new { e.TenantId, e.FinancialStatementLayoutId, e.Status, e.EffectiveFrom, e.EffectiveTo });
             entity.Property(e => e.PublishedByName).HasMaxLength(200);
+            entity.Property(e => e.SubmittedByName).HasMaxLength(200);
+            entity.Property(e => e.LastDecisionByName).HasMaxLength(200);
+            entity.Property(e => e.LastDecisionReason).HasMaxLength(500);
             entity.Property(e => e.Notes).HasMaxLength(1000);
             entity.Property(e => e.PublicationSnapshotSchemaVersion).HasMaxLength(20);
             entity.Property(e => e.PublishedAccountingBookCode).HasMaxLength(20);
@@ -6498,6 +6525,29 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         ConfigureDecimalPrecision(builder);
         ConfigureQuantitySurveyRateDecimalPrecision(builder);
 
+        // Retained receipt/return evidence must preserve the source conversion and rate,
+        // and fractional provenance needs more precision than ordinary stock quantities.
+        // Keep these overrides local to the new evidence model; historical tables retain
+        // their existing global precision convention.
+        builder.Entity<ProcurementReceiptCostBasis>(entity =>
+        {
+            entity.Property(e => e.ConversionToBase).HasColumnType("decimal(18,8)");
+            entity.Property(e => e.ExchangeRateToFunctional).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.PurchaseUnitCost).HasColumnType("decimal(18,6)");
+        });
+        builder.Entity<InventorySupplierReturnAllocation>()
+            .Property(e => e.ConversionToBase).HasColumnType("decimal(18,8)");
+        builder.Entity<VendorInvoiceReceiptCostAllocation>(entity =>
+        {
+            entity.Property(e => e.InvoiceExchangeRateToFunctional).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.RevaluedReceiptBaseQuantity).HasColumnType("decimal(28,12)");
+        });
+        builder.Entity<VendorInvoiceReceiptCostValuation>(entity =>
+        {
+            entity.Property(e => e.AttributedReceiptBaseQuantity).HasColumnType("decimal(28,12)");
+            entity.Property(e => e.ValueChange).HasColumnType("decimal(18,2)");
+        });
+
         // The legacy global precision pass above intentionally normalizes most decimals to four
         // places, but Finance FX evidence requires the approved six-place quote and an eight-place
         // derived cross-rate. Re-apply these narrow overrides after that pass so the database model
@@ -9095,14 +9145,20 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     line.BudgetRevisionId,
                     line.SegmentValueId,
                     line.AccountId,
-                    line.FiscalPeriodId
+                    line.FiscalPeriodId,
+                    line.FinanceDimensionSetId
                 })
                 .IsUnique()
+                .HasDatabaseName("UX_BudgetRevisionLines_Cell")
                 .HasFilter("[IsDeleted] = 0");
             entity.HasOne(line => line.BudgetRevision)
                 .WithMany(revision => revision.Lines)
                 .HasForeignKey(line => line.BudgetRevisionId)
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(line => line.FinanceDimensionSet)
+                .WithMany()
+                .HasForeignKey(line => line.FinanceDimensionSetId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 
@@ -10528,6 +10584,22 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(item => new { item.TenantId, item.LinkedComplaintReference });
         });
 
+        builder.Entity<EstateFacilityDutyAttendance>(entity =>
+        {
+            entity.ToTable("EstateFacilityDutyAttendances");
+            entity.HasIndex(item => new { item.TenantId, item.DutyRosterId, item.DutyDate }).IsUnique();
+            entity.HasOne(item => item.DutyRoster).WithMany()
+                .HasForeignKey(item => item.DutyRosterId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EstateFacilityProviderRate>(entity =>
+        {
+            entity.ToTable("EstateFacilityProviderRates");
+            entity.Property(item => item.Rate).HasPrecision(18, 4);
+            entity.HasIndex(item => new { item.TenantId, item.BusinessPartnerId, item.IsActive });
+            entity.HasIndex(item => new { item.TenantId, item.ContractId });
+        });
+
         builder.Entity<LandAcquisitionNote>(entity =>
         {
             entity.ToTable("LandAcquisitionNotes");
@@ -11591,6 +11663,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne<Account>().WithMany().HasForeignKey(item => item.PurchasePriceVarianceAccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Account>().WithMany().HasForeignKey(item => item.UnrealisedPurchasePriceVarianceAccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Account>().WithMany().HasForeignKey(item => item.InventoryReturnsAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.InventoryDisposalAccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Account>().WithMany().HasForeignKey(item => item.AssemblyVarianceAccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Account>().WithMany().HasForeignKey(item => item.StandardCostRevaluationAccountId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable("InventoryItems", table =>

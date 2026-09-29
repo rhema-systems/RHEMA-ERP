@@ -99,6 +99,9 @@ public partial class VendorInvoiceService
     {
         "AP-Control" => "Accounts payable",
         "AP-GRV" => "Receipt accrual",
+        "AP-INVENTORY-COST" => "Inventory cost adjustment",
+        "AP-PRICE-VARIANCE" => "Purchase price variance",
+        "AP-RECEIPT-FX" => "Receipt exchange difference",
         "AP-LANDED-COST-ACCRUAL" => "Landed-cost accrual",
         "AP-Discount" => "Purchase discount",
         "AP-Expense" => "Expense",

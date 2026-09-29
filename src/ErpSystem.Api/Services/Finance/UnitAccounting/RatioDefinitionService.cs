@@ -245,6 +245,9 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             DateTime endDate,
             CancellationToken cancellationToken = default)
         {
+            if (endDate.Date < startDate.Date)
+                throw new ArgumentException("End date must be on or after start date.");
+
             var ratio = await _unitOfWork.Repository<RatioDefinition>()
                 .FirstOrDefaultAsync(r => r.Id == ratioId && r.TenantId == TenantId && !r.IsDeleted);
 
@@ -391,11 +394,17 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             {
                 case RatioComponentType.FinancialAccount:
                     if (!accountId.HasValue) return 0;
+                    var authority = await PrimaryBookCompatibilityAuthorityResolver.ResolveAsync(
+                        _unitOfWork, TenantId, cancellationToken);
+                    var endExclusive = endDate.Date.AddDays(1);
                     var transactions = await _unitOfWork.Repository<AccountTransaction>()
                         .GetQueryable(t => t.TenantId == TenantId
                             && t.AccountId == accountId.Value
-                            && t.TransactionDate >= startDate
-                            && t.TransactionDate <= endDate
+                            && t.AccountingBookId == authority.AccountingBookId
+                            && t.FunctionalCurrencyCode == authority.FunctionalCurrencyCode
+                            && (t.PostingStatus == "Posted" || t.PostingStatus == "Reversed")
+                            && t.TransactionDate >= startDate.Date
+                            && t.TransactionDate < endExclusive
                             && !t.IsDeleted)
                         .SumAsync(t => t.DebitAmount - t.CreditAmount, cancellationToken);
                     return transactions;
@@ -468,24 +477,25 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 throw new ArgumentException($"{componentType} ratio account '{accountId}' was not found for the current tenant.");
         }
 
-        private RatioComponentType ParseComponentType(string typeString)
+        private static RatioComponentType ParseComponentType(string typeString)
         {
             return typeString switch
             {
                 "FinancialAccount" => RatioComponentType.FinancialAccount,
                 "UnitAccount" => RatioComponentType.UnitAccount,
                 "Constant" => RatioComponentType.Constant,
-                _ => RatioComponentType.FinancialAccount
+                _ => throw new ArgumentException($"Unsupported ratio component type '{typeString}'.")
             };
         }
 
-        private RatioResultFormat ParseResultFormat(string formatString)
+        private static RatioResultFormat ParseResultFormat(string formatString)
         {
             return formatString switch
             {
                 "Percentage" => RatioResultFormat.Percentage,
                 "Currency" => RatioResultFormat.Currency,
-                _ => RatioResultFormat.Decimal
+                "Decimal" => RatioResultFormat.Decimal,
+                _ => throw new ArgumentException($"Unsupported ratio result format '{formatString}'.")
             };
         }
 

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   ArrowRight,
   BadgeCheck,
+  BarChart3,
   BookOpen,
   Briefcase,
   FileCheck2,
@@ -110,6 +111,14 @@ export default function LegalProceduresPage() {
             </h1>
           </div>
         </div>
+        <Button
+          variant="outline"
+          className="w-fit gap-2"
+          onClick={() => router.push('/legal/dashboard')}
+        >
+          <BarChart3 className="h-4 w-4" />
+          Legal dashboard
+        </Button>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

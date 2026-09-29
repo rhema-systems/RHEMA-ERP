@@ -9,7 +9,6 @@ export interface ApSupplierDefaultLine {
 }
 export interface ApSupplierDefaultValues {
   paymentTermId?: string;
-  apAccountId?: string;
   expenseAccountId?: string;
   taxGroupId?: string;
   lineItems: ApSupplierDefaultLine[];
@@ -18,6 +17,14 @@ export interface ApSupplierDefaultValues {
 export const apExpenseLineTypes = ['Expense', 'Service', 'Freight', 'Miscellaneous', 'FinanceCharge'] as const;
 export function isApExpenseLineType(type: string): boolean {
   return (apExpenseLineTypes as readonly string[]).includes(type);
+}
+
+/** Snapshots the header default onto a newly created line. Existing lines remain unchanged. */
+export function taxGroupForNewApInvoiceLine(
+  headerTaxGroupId: string | null | undefined,
+  isOpeningBalance: boolean
+): string {
+  return isOpeningBalance ? 'none' : (headerTaxGroupId || 'none');
 }
 
 /** Visible form assignments only. Explicit edits, including selecting No Tax, always win. */
@@ -31,7 +38,6 @@ export function planApSupplierDefaults(values: ApSupplierDefaultValues, defaults
     if (!edited.has(field) && (current || '') !== next) assignments.push({ field, value: next });
   };
   if (defaults.paymentTermId) assign('paymentTermId', values.paymentTermId, defaults.paymentTermId);
-  assign('apAccountId', values.apAccountId, posting.defaultApAccountId);
   assign('expenseAccountId', values.expenseAccountId, posting.defaultExpenseAccountId);
   if (!taxUnavailable) assign('taxGroupId', values.taxGroupId, posting.defaultTaxGroupId || 'none');
   values.lineItems.forEach((line, index) => {

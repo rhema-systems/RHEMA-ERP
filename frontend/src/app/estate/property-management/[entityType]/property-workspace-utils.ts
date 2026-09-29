@@ -26,6 +26,35 @@ export function formatEstateDate(value?: string | null) {
   }).format(new Date(value));
 }
 
+export function leaseExpiryDate(asset: EstateManagedAsset): Date | null {
+  const start = asset.dateOfTenancy || asset.rightOfEntryDate;
+  const months = asset.externalLeaseTermMonths ||
+    (asset.leaseTermYears ? asset.leaseTermYears * 12 : 0);
+  if (!start || months <= 0) return null;
+
+  const date = new Date(start);
+  if (Number.isNaN(date.getTime())) return null;
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + months;
+  const day = Math.min(
+    date.getUTCDate(),
+    new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
+  );
+  return new Date(Date.UTC(year, month, day));
+}
+
+export function leaseExpiryAlert(asset: EstateManagedAsset, asOf = new Date()) {
+  if (!isOccupiedLike(asset)) return null;
+  const expiry = leaseExpiryDate(asset);
+  if (!expiry) return null;
+  const today = Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate());
+  const days = Math.round((expiry.getTime() - today) / 86_400_000);
+  if (days < 0) return `Expired ${-days} day${days === -1 ? '' : 's'} ago`;
+  if (days === 0) return 'Expires today';
+  if (days <= 90) return `Expires in ${days} day${days === 1 ? '' : 's'}`;
+  return null;
+}
+
 export function formatEstateMoney(value?: number | null, currency = 'GHS') {
   if (value == null) return 'Not recorded';
   return new Intl.NumberFormat(undefined, {

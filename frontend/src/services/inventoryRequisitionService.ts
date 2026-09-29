@@ -29,8 +29,10 @@ export interface InventoryRequisitionDto {
   id: string;
   requisitionNumber: string;
   description?: string;
-  departmentId: string;
+  departmentId?: string;
   departmentName?: string;
+  organizationUnitId?: string;
+  organizationUnitName?: string;
   costCenter?: string;
   warehouseId: string;
   warehouseName: string;
@@ -99,7 +101,8 @@ export interface InventoryRequisitionItemDto {
 }
 
 export interface CreateInventoryRequisitionDto {
-  departmentId: string;
+  organizationUnitId: string;
+  departmentId?: string;
   departmentName?: string;
   costCenter?: string;
   warehouseId: string;
@@ -115,6 +118,7 @@ export interface CreateInventoryRequisitionDto {
 }
 
 export interface UpdateInventoryRequisitionDto {
+  organizationUnitId?: string;
   departmentId?: string;
   departmentName?: string;
   costCenter?: string;
@@ -240,7 +244,7 @@ export interface InventoryIssueVoucherDto {
   projectCode?: string;
   requestedById: string;
   requestedByName: string;
-  approvedById: string;
+  approvedById?: string | null;
   approvedByName: string;
   issuedById: string;
   issuedByName: string;

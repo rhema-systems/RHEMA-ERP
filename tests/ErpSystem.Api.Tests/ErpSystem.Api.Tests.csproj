@@ -30,6 +30,10 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' != 'true'">
+    <Compile Include="Services\QsUatActorSeederTests.cs" />
+    <Compile Include="Services\QsUatPreparationSeederTests.cs" />
+    <Compile Include="Services\EstateUatLandSeederTests.cs" />
+    <Compile Include="Controllers\Inventory\PhysicalCountReviewTests.cs" />
     <Compile Include="Services\Finance\ProcurementAutoInvoiceTests.cs" />
     <Compile Include="Services\Finance\CustomerBalanceAdjustmentPostingTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementSupplierInvoiceBoundaryTests.cs" />
@@ -41,6 +45,7 @@
     <Compile Include="Services\Finance\LandedCostSupplierInvoiceTests.cs" />
     <Compile Include="Services\Finance\FinanceSettingsWriteOffMappingTests.cs" />
     <Compile Include="Services\Finance\InventorySupplierReturnCreditTests.cs" />
+    <Compile Include="Services\Finance\InventorySupplierReturnGroupReadTests.cs" />
     <Compile Include="Controllers\Inventory\StockMovementCurrencyTests.cs" />
     <Compile Include="Authorization\FinancePermissionAuthorizationHandlerTests.cs" />
     <Compile Include="Configuration\StartupInitializationPolicyTests.cs" />
@@ -67,6 +72,7 @@
     <Compile Include="Controllers\Estate\PropertyListingEnquiryTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
     <Compile Include="Controllers\Finance\BusinessPartnerFinanceProfilesControllerTests.cs" />
+    <Compile Include="Services\Finance\BusinessPartnerFinanceProfilePolicyTests.cs" />
     <Compile Include="Controllers\InventoryGlobalSearchControllerTests.cs" />
     <Compile Include="Controllers\GlobalSearchEstateLegalTests.cs" />
     <Compile Include="Controllers\GlobalSearchSafetyTests.cs" />
@@ -176,6 +182,15 @@
     <Compile Include="Services\Estate\EstateWorkflowIntegrationRegressionTests.cs" />
     <Compile Include="Services\Estate\EstateRentPenaltyStatusTests.cs" />
     <Compile Include="Services\Estate\FacilitiesDutyRosterScheduleTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesComplaintHandoffServiceTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesProviderSelectionServiceTests.cs" />
+    <Compile Include="Services\Estate\EstateTerminationReleaseTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesMaintenanceCloseoutTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesProviderOptionsControllerTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesBudgetProjectionTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesLeaseReminderTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesArBillingControllerTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesPortalBillingFixtureTests.cs" />
     <Compile Include="Services\Estate\EstateRecurringBillingServiceTests.cs" />
     <Compile Include="Services\QuantitySurvey\**\*.cs" />
     <Compile Include="Services\Finance\BankAccountTenantIsolationTests.cs" />
@@ -184,6 +199,7 @@
     <Compile Include="Services\Finance\BudgetServiceHardeningTests.cs" />
     <Compile Include="Services\Finance\FinanceBudgetControlServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceBudgetCommitmentServiceTests.cs" />
+    <Compile Include="Services\Finance\FinanceBudgetSqlServerReleaseGateTests.cs" />
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
     <Compile Include="Services\Finance\FinancePostingAuthorityFixture.cs" />
@@ -211,6 +227,7 @@
     <Compile Include="Services\Finance\FinanceSourceDimensionAssignmentStoreTests.cs" />
     <Compile Include="Services\Finance\FinanceSourceDimensionServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceSettlementDimensionServiceTests.cs" />
+    <Compile Include="Services\Finance\SalesOrderInvoiceGuardTests.cs" />
     <Compile Include="Services\Finance\FinanceSourceDimensionsApArMigrationTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionRouteConsumerContractTests.cs" />
     <Compile Include="Services\Finance\ExternalFinanceDimensionAdapterContractTests.cs" />
@@ -274,12 +291,16 @@
     <Compile Include="Services\Finance\VendorPaymentBatchCreationTests.cs" />
     <Compile Include="Services\Finance\VendorInvoiceMatchExceptionServiceTests.cs" />
     <Compile Include="Services\Finance\ArInvoicePostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\ArInvoicePostingMigrationTests.Sales.cs" />
+    <Compile Include="Services\Finance\SupplierInvoiceCostDifferenceCalculatorTests.cs" />
+    <Compile Include="Services\Finance\SupplierInvoiceReceiptCostLifecycleTests.cs" />
     <Compile Include="Services\Finance\InvoiceTradeDiscountPolicyTests.cs" />
     <Compile Include="Services\Finance\ArReceiptPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\ArCreditNotePostingMigrationTests.cs" />
     <Compile Include="Services\Finance\ArCreditNoteProducerRelationalFixtureTests.cs" />
     <Compile Include="Services\Finance\CashBankTransactionPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\CashBankWorkflowApprovalHardeningTests.cs" />
+    <Compile Include="Services\Finance\CashBankPermissionContractTests.cs" />
     <Compile Include="Services\Finance\CashBankOperationalBalanceHardeningTests.cs" />
     <Compile Include="Services\Finance\BankingSettlementReleaseGateTests.cs" />
     <Compile Include="Services\Finance\CashierTillControlTests.cs" />
@@ -299,6 +320,7 @@
     <Compile Include="Services\Finance\FinanceCloseTemplateBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\CoreFinancialReportingFoundationTests.cs" />
     <Compile Include="Services\Finance\GhanaStatutoryTaxEngineTests.cs" />
+    <Compile Include="Services\Finance\TaxRuleGovernanceTests.cs" />
     <Compile Include="Services\Finance\WhtComplianceLifecycleTests.cs" />
     <Compile Include="Services\Finance\FxFunctionalCurrencyGovernanceTests.cs" />
     <Compile Include="Services\Finance\FxRealizedUnrealizedRevaluationTests.cs" />
@@ -335,6 +357,7 @@
     <Compile Include="Services\Finance\FinanceProducerCompatibilityC10Tests.cs" />
     <Compile Include="Services\Finance\BookBalanceConsumerAuthorityC2Tests.cs" />
     <Compile Include="Services\Finance\FixedAssetCapitalizationFoundationTests.cs" />
+    <Compile Include="Services\Finance\FixedAssetCategoryRoleFamilyTests.cs" />
     <Compile Include="Services\Finance\FixedAssetDepreciationFoundationTests.cs" />
     <Compile Include="Services\Finance\FixedAssetDepreciationConventionCalculatorTests.cs" />
     <Compile Include="Services\Finance\FixedAssetRevaluationImpairmentFoundationTests.cs" />

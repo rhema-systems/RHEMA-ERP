@@ -8,6 +8,8 @@ public sealed class InventoryItemPostingAccountsDto
     public HashSet<string> ProvidedFields { get; } = new(StringComparer.Ordinal);
 
     private Guid? _inventoryAccountId;
+    private Guid? _inventoryDisposalAccountId;
+    public Guid? InventoryDisposalAccountId { get => _inventoryDisposalAccountId; set { _inventoryDisposalAccountId = value; ProvidedFields.Add(nameof(InventoryDisposalAccountId)); } }
     public Guid? InventoryAccountId { get => _inventoryAccountId; set { _inventoryAccountId = value; ProvidedFields.Add(nameof(InventoryAccountId)); } }
     private Guid? _inventoryOffsetAccountId;
     public Guid? InventoryOffsetAccountId { get => _inventoryOffsetAccountId; set { _inventoryOffsetAccountId = value; ProvidedFields.Add(nameof(InventoryOffsetAccountId)); } }

@@ -1,8 +1,9 @@
 'use client';
 import { GlobalSearchRecordOpener } from '@/components/global-search/GlobalSearchRecordOpener';
+import { InventoryDisposalAuctionDialog } from '@/components/inventory/InventoryDisposalAuctionDialog';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronsUpDown, Eye, Maximize2, Minimize2, Pencil, Plus, RefreshCw, Trash2, XCircle } from 'lucide-react';
+import { Check, ChevronsUpDown, Download, Eye, Maximize2, Minimize2, Pencil, Plus, RefreshCw, Trash2, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -68,6 +69,22 @@ export default function InventoryDisposalsPage() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [busy, setBusy] = useState(false);
+  const downloadWaybill = async () => {
+    if (!selected?.canGenerateWaybill || busy) return;
+    setBusy(true);
+    try {
+      const document = await inventoryDisposalService.downloadWaybill(selected);
+      const url = URL.createObjectURL(document);
+      const link = window.document.createElement('a');
+      link.href = url;
+      link.download = `${selected.disposalNumber.replace(/[^a-z0-9_-]/gi, '_')}-waybill.pdf`;
+      window.document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) { toast.error(errorText(error)); }
+    finally { setBusy(false); }
+  };
   const createAttempt = useRef<{ payload: string; key: string } | undefined>(undefined);
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
   const [items, setItems] = useState<DisposalItem[]>([]);
@@ -79,6 +96,7 @@ export default function InventoryDisposalsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [registerPage, setRegisterPage] = useState(1);
   const [selected, setSelected] = useState<InventoryDisposal>();
+  const [auctionOpen, setAuctionOpen] = useState(false);
   const [mode, setMode] = useState<'new' | 'edit' | 'view'>();
   const [tab, setTab] = useState('details');
   const [fullscreen, setFullscreen] = useState(false);
@@ -107,7 +125,7 @@ export default function InventoryDisposalsPage() {
   const [accountId, setAccountId] = useState('');
   const editable = mode === 'new' || mode === 'edit';
   const currentItem = items.find(item => item.inventoryItemId === itemId);
-  const proceedsMethod = method === 1 || method === 2;
+  const proceedsMethod = method === 2 || (method === 1 && (selected?.accountingVersion ?? 0) === 0);
 
   const load = async () => {
     setLoading(true); setLoadError('');
@@ -278,13 +296,18 @@ export default function InventoryDisposalsPage() {
         <DialogHeader className="shrink-0 pr-6"><DialogTitle>{mode === 'new' ? 'New disposal' : mode === 'edit' ? 'Edit disposal' : selected?.disposalNumber}</DialogTitle>
           <DialogDescription>{editable ? 'Save a draft before continuing. Stock changes only when posted.' : (statuses[selected?.status || 1] + (selected?.approvalRequired === false ? ' · Approval not required' : ''))}</DialogDescription>
         </DialogHeader>
+        {mode === 'view' && selected?.canGenerateWaybill && <div className="flex justify-end"><Button variant="outline" size="sm" disabled={busy} onClick={downloadWaybill}><Download className="mr-2 h-4 w-4" />Waybill</Button></div>}
+        {mode === 'view' && selected && (selected.canCreateAuctionInvoice || selected.auctionInvoiceId) && <div className="flex justify-end gap-2">
+          {selected.canCreateAuctionInvoice && <Button variant="outline" size="sm" disabled={busy} onClick={() => setAuctionOpen(true)}>Create invoice</Button>}
+          {selected.auctionInvoiceId && <Button variant="outline" size="sm" asChild><a href={`/finance/ar/invoices/${selected.auctionInvoiceId}`}>Invoice {selected.auctionInvoiceNumber}</a></Button>}
+        </div>}
         <Tabs value={tab} onValueChange={value => { setTab(value); setFullscreen(false); }} className="flex min-h-0 flex-1 flex-col">
           <TabsList className="grid w-full shrink-0" style={{ gridTemplateColumns: 'repeat(' + tabs.length + ', minmax(0, 1fr))' }}>
             {tabs.map(value => <TabsTrigger key={value} value={value} className="min-w-0 capitalize">{value === 'documents' ? 'Supporting documents' : value === 'items' ? 'Items (' + lines.length + ')' : value}</TabsTrigger>)}
           </TabsList>
           <TabsContent value="details" className="min-h-0 flex-1 overflow-y-auto space-y-4 pr-1">
             <div className="grid grid-cols-2 gap-4"><div className="space-y-1"><Label>Warehouse</Label>{editable ? <SearchSelect label="Warehouse" value={warehouseId} options={warehouses.map(value => ({ value: value.id, label: value.name }))} onChange={setWarehouseId} disabled={mode === 'edit' || !!lines.length || busy} /> : <p>{selected?.warehouseName}</p>}</div>
-              <div className="space-y-1"><Label>Method</Label>{editable ? <Select value={String(method)} onValueChange={value => setMethod(Number(value) as InventoryDisposalMethod)}><SelectTrigger aria-label="Disposal method"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(methods).map(([key, label]) => <SelectItem key={key} value={key}>{label}</SelectItem>)}</SelectContent></Select> : <p>{methods[method]}</p>}</div>
+              <div className="space-y-1"><Label>Method</Label>{editable ? <Select value={String(method)} onValueChange={value => setMethod(Number(value) as InventoryDisposalMethod)}><SelectTrigger aria-label="Disposal method"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(methods).filter(([key]) => key !== '2' || selected?.method === 2).map(([key, label]) => <SelectItem key={key} value={key}>{label}</SelectItem>)}</SelectContent></Select> : <p>{methods[method]}</p>}</div>
             </div><div className="space-y-1"><Label htmlFor="disposal-reason">Reason</Label>{editable ? <Input id="disposal-reason" value={reason} onChange={event => setReason(event.target.value)} maxLength={1000} /> : <p>{reason}</p>}</div>
             <div className="space-y-1"><Label htmlFor="disposal-notes">Notes (optional)</Label>{editable ? <Textarea id="disposal-notes" value={notes} onChange={event => setNotes(event.target.value)} maxLength={2000} /> : <p>{notes || '—'}</p>}</div>
             {!editable && <div className="grid grid-cols-2 gap-4 text-sm"><div><Label>Requested by</Label><p>{selected?.requestedByName}</p></div><div><Label>{selected?.postedStockValue != null ? 'Posted stock value' : 'Estimated stock value'}</Label><p>{amountText(selected?.postedStockValue ?? selected?.totalValue ?? 0, currency)}</p></div></div>}
@@ -350,6 +373,7 @@ export default function InventoryDisposalsPage() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {selected && <InventoryDisposalAuctionDialog key={selected.id} disposal={selected} open={auctionOpen} onOpenChange={setAuctionOpen} onCreated={applyRecord} />}
     <ConfirmationDialog open={!!confirm} onOpenChange={open => !open && !busy && setConfirm(undefined)}
       title={confirm === 'post' ? 'Post disposal' : confirm === 'reject' ? 'Reject disposal' : 'Cancel disposal'}
       description={confirm === 'post' ? 'This removes the listed quantities from their bins and records the stock value and any proceeds.' : 'Enter a reason. The record and its history will be retained.'}

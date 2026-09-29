@@ -4,6 +4,9 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.DTOs.Workflow;
+using ErpSystem.Core.Enums;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -40,6 +43,23 @@ public sealed class RecurringJournalRecurrenceCalculatorTests
             new RecurrenceRule(NthWeek: -1, NthWeekday: (int)DayOfWeek.Friday));
         RecurringJournalRecurrenceCalculator.NextScheduledDate(template, new DateOnly(2027, 1, 1))
             .Should().Be(new DateOnly(2027, 1, 29));
+    }
+
+    [Fact]
+    public void Monthly_LastBusinessDay_SkipsWeekendAtMonthEnd()
+    {
+        var template = Template(RecurrenceFrequency.Monthly, new RecurrenceRule(LastBusinessDay: true));
+        RecurringJournalRecurrenceCalculator.NextScheduledDate(template, new DateOnly(2027, 7, 1))
+            .Should().Be(new DateOnly(2027, 7, 30));
+    }
+
+    [Fact]
+    public void SemiMonthly_RespectsMonthInterval()
+    {
+        var template = Template(RecurrenceFrequency.SemiMonthly, new RecurrenceRule(DaysOfMonth: [1, 15]));
+        template.Interval = 2;
+        RecurringJournalRecurrenceCalculator.NextScheduledDate(template, new DateOnly(2027, 1, 15))
+            .Should().Be(new DateOnly(2027, 3, 1));
     }
 
     [Fact]
@@ -98,10 +118,20 @@ public sealed class RecurringJournalRecurrenceCalculatorTests
         var audit = new Mock<IFinanceAuditService>();
         audit.Setup(service => service.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AuditLog());
+        var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(service => service.StartApprovalWorkflowAsAsync(
+                nameof(RecurringJournalOccurrence), It.IsAny<Guid>(), It.IsAny<Guid>(), tenantId))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = Guid.NewGuid()
+            });
         var processor = new RecurringJournalGenerationProcessor(
             db,
             new FakeCalendar(),
             audit.Object,
+            workflow.Object,
             Mock.Of<ILogger<RecurringJournalGenerationProcessor>>());
 
         var first = await processor.ProcessTenantAsync(tenantId, dueDate, "test-scheduler");
@@ -113,6 +143,7 @@ public sealed class RecurringJournalRecurrenceCalculatorTests
             "retries and multiple API nodes must not duplicate a scheduled accounting event");
         var occurrence = await db.RecurringJournalOccurrences.SingleAsync();
         occurrence.Status.Should().Be(RecurringJournalOccurrenceStatus.PendingApproval);
+        occurrence.WorkflowInstanceId.Should().NotBeNull("every generated occurrence must enter the shared approval workbench");
         occurrence.JournalEntryId.Should().BeNull("the scheduler may prepare work but must never post money");
         occurrence.TemplateSnapshotJson.Should().Contain("Monthly rates accrual");
         occurrence.TemplateSnapshotJson.Should().Contain("DEPT");

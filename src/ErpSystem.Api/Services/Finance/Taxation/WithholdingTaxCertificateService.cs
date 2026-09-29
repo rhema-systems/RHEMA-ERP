@@ -414,12 +414,19 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         CancellationToken cancellationToken = default)
         => ExecuteSerializableAsync(() => CreateRemittanceCoreAsync(dto ?? new CreateWhtRemittanceDto(), cancellationToken), cancellationToken);
 
-    public async Task<WhtRemittanceDto> SubmitRemittanceAsync(
+    public Task<WhtRemittanceDto> SubmitRemittanceAsync(
         Guid remittanceId,
         SubmitWhtRemittanceDto dto,
         CancellationToken cancellationToken = default)
+        => ExecuteSerializableAsync(
+            () => SubmitRemittanceCoreAsync(remittanceId, dto ?? new SubmitWhtRemittanceDto(), cancellationToken),
+            cancellationToken);
+
+    private async Task<WhtRemittanceDto> SubmitRemittanceCoreAsync(
+        Guid remittanceId,
+        SubmitWhtRemittanceDto dto,
+        CancellationToken cancellationToken)
     {
-        dto ??= new SubmitWhtRemittanceDto();
         var reference = RequireReason(dto.SubmissionReference, "Submission reference", 3);
         var remittance = await LoadRemittanceForUpdateAsync(remittanceId, cancellationToken);
         if (remittance.Status != WhtRemittanceStatus.Draft)
@@ -444,12 +451,19 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         return MapRemittance(remittance);
     }
 
-    public async Task<WhtRemittanceDto> MarkRemittancePaidAsync(
+    public Task<WhtRemittanceDto> MarkRemittancePaidAsync(
         Guid remittanceId,
         PayWhtRemittanceDto dto,
         CancellationToken cancellationToken = default)
+        => ExecuteSerializableAsync(
+            () => MarkRemittancePaidCoreAsync(remittanceId, dto ?? new PayWhtRemittanceDto(), cancellationToken),
+            cancellationToken);
+
+    private async Task<WhtRemittanceDto> MarkRemittancePaidCoreAsync(
+        Guid remittanceId,
+        PayWhtRemittanceDto dto,
+        CancellationToken cancellationToken)
     {
-        dto ??= new PayWhtRemittanceDto();
         var paymentReference = RequireReason(dto.PaymentReference, "Payment reference", 3);
         if (dto.PaymentDate == default)
         {
@@ -481,12 +495,19 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         return MapRemittance(remittance);
     }
 
-    public async Task<WhtRemittanceDto> CancelRemittanceAsync(
+    public Task<WhtRemittanceDto> CancelRemittanceAsync(
         Guid remittanceId,
         CancelWhtRemittanceDto dto,
         CancellationToken cancellationToken = default)
+        => ExecuteSerializableAsync(
+            () => CancelRemittanceCoreAsync(remittanceId, dto ?? new CancelWhtRemittanceDto(), cancellationToken),
+            cancellationToken);
+
+    private async Task<WhtRemittanceDto> CancelRemittanceCoreAsync(
+        Guid remittanceId,
+        CancelWhtRemittanceDto dto,
+        CancellationToken cancellationToken)
     {
-        dto ??= new CancelWhtRemittanceDto();
         var reason = RequireReason(dto.Reason, "Cancellation reason", 10);
         var remittance = await LoadRemittanceForUpdateAsync(remittanceId, cancellationToken);
         if (remittance.Status == WhtRemittanceStatus.Paid)

@@ -1,16 +1,19 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Data;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Shared.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.Finance
 {
@@ -30,7 +33,7 @@ namespace ErpSystem.Api.Controllers.Finance
     /// 2. **Create** -- Define new rules mapping tax groups to transaction conditions
     /// 3. **Read** -- List all rules (ordered by priority) or retrieve a single rule by ID
     /// 4. **Update** -- Modify rule criteria, priority, or active status
-    /// 5. **Delete** -- Permanently remove a rule that is no longer applicable
+    /// 5. **Deactivate** -- Soft-delete a rule that is no longer applicable while retaining audit history
     ///
     /// **Integration Pattern:**
     /// - Tax rules reference <see cref="TaxGroup"/> entities; each TaxGroup contains one or more TaxRates
@@ -49,6 +52,7 @@ namespace ErpSystem.Api.Controllers.Finance
         private readonly ApplicationDbContext _context;
         private readonly ITaxConfigurationService _taxService;
         private readonly ICurrentUserService _currentUserService;
+        private readonly IFinanceAuditService _financeAuditService;
 
         /// <summary>
         /// Initializes a new instance of <see cref="TaxRuleController"/> with required dependencies.
@@ -58,14 +62,17 @@ namespace ErpSystem.Api.Controllers.Finance
         public TaxRuleController(
             ApplicationDbContext context,
             ITaxConfigurationService taxService,
-            ICurrentUserService currentUserService)
+            ICurrentUserService currentUserService,
+            IFinanceAuditService financeAuditService)
         {
             _context = context;
             _taxService = taxService;
             _currentUserService = currentUserService;
+            _financeAuditService = financeAuditService;
         }
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
+        private string UserName => _currentUserService.UserName ?? "system";
 
         /// <summary>
         /// Seeds the system with default tax rules using the tax configuration service.
@@ -113,7 +120,7 @@ namespace ErpSystem.Api.Controllers.Finance
         ///
         /// **Business Rules:**
         /// - Returns all rules regardless of IsActive status; filtering is left to the client
-        /// - ProductCategoryName is currently a placeholder ("Category") pending full join implementation
+        /// - ProductCategoryName is omitted until an authoritative category adapter is available
         /// - Priority ordering is critical: lower values are evaluated first during tax resolution
         ///
         /// **Authorization:** Requires authenticated user
@@ -140,7 +147,7 @@ namespace ErpSystem.Api.Controllers.Finance
                     TaxGroupName = r.TaxGroup != null ? r.TaxGroup.Name : string.Empty,
                     TransactionType = r.TransactionType,
                     ProductCategoryId = r.ProductCategoryId,
-                    ProductCategoryName = "Category", // Placeholder until joined
+                    ProductCategoryName = null,
                     CustomerType = r.CustomerType,
                     ServiceType = r.ServiceType,
                     IsActive = r.IsActive
@@ -232,15 +239,22 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="401">Not authenticated</response>
         /// <response code="500">Internal server error (e.g., foreign key constraint violation)</response>
         [HttpPost]
-        public async Task<ActionResult<TaxRuleDto>> CreateTaxRule(CreateTaxRuleDto dto)
+        public Task<ActionResult<TaxRuleDto>> CreateTaxRule(CreateTaxRuleDto dto) =>
+            ExecuteRuleMutationAsync(() => CreateTaxRuleCoreAsync(dto));
+
+        private async Task<ActionResult<TaxRuleDto>> CreateTaxRuleCoreAsync(CreateTaxRuleDto dto)
         {
             var tenantId = TenantId;
+            var validationError = NormalizeAndValidate(dto);
+            if (validationError != null) return BadRequest(validationError);
             var taxGroupExists = await _context.TaxGroups
-                .AnyAsync(g => g.TenantId == tenantId && g.Id == dto.TaxGroupId && !g.IsDeleted);
+                .AnyAsync(g => g.TenantId == tenantId && g.Id == dto.TaxGroupId && g.IsActive && !g.IsDeleted);
             if (!taxGroupExists)
             {
-                return BadRequest("Tax group not found for this tenant.");
+                return BadRequest("An active tax group was not found for this tenant.");
             }
+            if (await HasConflictingActiveRuleAsync(dto, null))
+                return Conflict("An active tax rule already uses the same matching criteria. Deactivate or amend that rule before creating another.");
 
             var rule = new TaxRule
             {
@@ -255,11 +269,13 @@ namespace ErpSystem.Api.Controllers.Finance
                 ServiceType = dto.ServiceType,
                 IsActive = dto.IsActive,
                 CreatedAt = DateTime.UtcNow,
+                CreatedBy = UserName,
                 TenantId = tenantId
             };
 
             _context.TaxRules.Add(rule);
             await _context.SaveChangesAsync();
+            await RecordRuleAuditAsync(FinanceAuditEvents.TaxRuleCreated, rule, null, RuleSnapshot(rule));
 
             return CreatedAtAction(nameof(GetTaxRule), new { id = rule.Id }, new TaxRuleDto { Id = rule.Id, Name = rule.Name });
         }
@@ -296,19 +312,28 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">No tax rule found with the specified ID</response>
         /// <response code="500">Internal server error</response>
         [HttpPut("{id}")]
-        public async Task<IActionResult> UpdateTaxRule(Guid id, UpdateTaxRuleDto dto)
+        public Task<IActionResult> UpdateTaxRule(Guid id, UpdateTaxRuleDto dto) =>
+            ExecuteRuleMutationAsync(() => UpdateTaxRuleCoreAsync(id, dto));
+
+        private async Task<IActionResult> UpdateTaxRuleCoreAsync(Guid id, UpdateTaxRuleDto dto)
         {
             var tenantId = TenantId;
+            var validationError = NormalizeAndValidate(dto);
+            if (validationError != null) return BadRequest(validationError);
             var rule = await _context.TaxRules
                 .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == id && !r.IsDeleted);
             if (rule == null) return NotFound();
 
             var taxGroupExists = await _context.TaxGroups
-                .AnyAsync(g => g.TenantId == tenantId && g.Id == dto.TaxGroupId && !g.IsDeleted);
+                .AnyAsync(g => g.TenantId == tenantId && g.Id == dto.TaxGroupId && g.IsActive && !g.IsDeleted);
             if (!taxGroupExists)
             {
-                return BadRequest("Tax group not found for this tenant.");
+                return BadRequest("An active tax group was not found for this tenant.");
             }
+            if (await HasConflictingActiveRuleAsync(dto, id))
+                return Conflict("An active tax rule already uses the same matching criteria. Deactivate or amend that rule before activating this rule.");
+
+            var before = RuleSnapshot(rule);
 
             rule.Name = dto.Name;
             rule.Description = dto.Description;
@@ -320,14 +345,16 @@ namespace ErpSystem.Api.Controllers.Finance
             rule.ServiceType = dto.ServiceType;
             rule.IsActive = dto.IsActive;
             rule.UpdatedAt = DateTime.UtcNow;
+            rule.UpdatedBy = UserName;
 
             await _context.SaveChangesAsync();
+            await RecordRuleAuditAsync(FinanceAuditEvents.TaxRuleUpdated, rule, before, RuleSnapshot(rule));
 
             return NoContent();
         }
 
         /// <summary>
-        /// Permanently deletes a tax rule by its unique identifier.
+        /// Deactivates and soft-deletes a tax rule by its unique identifier.
         /// </summary>
         /// <remarks>
         /// **Common Use Cases:**
@@ -336,16 +363,14 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - Deleting test rules after development or QA validation
         ///
         /// **Integration Pattern:**
-        /// - Performs a hard delete (physical removal from the database)
+        /// - Retains the rule as soft-deleted audit evidence
         /// - The rule is immediately excluded from future tax calculations
         /// - Historical transactions that were processed under this rule are not affected;
         ///   their tax amounts remain as originally calculated
         ///
         /// **Business Rules:**
         /// - The rule must exist; attempting to delete a non-existent rule returns 404
-        /// - This is a hard delete, not a soft delete -- the record is permanently removed
-        /// - Consider deactivating (IsActive = false via PUT) instead of deleting if an audit
-        ///   trail of the rule's existence is required
+        /// - The rule is deactivated and soft-deleted; historical configuration evidence remains available
         /// - No cascading effects on existing transactions or journal entries
         ///
         /// **Authorization:** Requires authenticated user
@@ -357,18 +382,115 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">No tax rule found with the specified ID</response>
         /// <response code="500">Internal server error (e.g., foreign key constraint if rule is referenced elsewhere)</response>
         [HttpDelete("{id}")]
-        public async Task<IActionResult> DeleteTaxRule(Guid id)
+        public Task<IActionResult> DeleteTaxRule(Guid id) =>
+            ExecuteRuleMutationAsync(() => DeleteTaxRuleCoreAsync(id));
+
+        private async Task<IActionResult> DeleteTaxRuleCoreAsync(Guid id)
         {
             var tenantId = TenantId;
             var rule = await _context.TaxRules
                 .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == id && !r.IsDeleted);
             if (rule == null) return NotFound();
 
+            var before = RuleSnapshot(rule);
+            rule.IsActive = false;
             rule.IsDeleted = true;
             rule.DeletedAt = DateTime.UtcNow;
+            rule.DeletedBy = UserName;
+            rule.UpdatedAt = DateTime.UtcNow;
+            rule.UpdatedBy = UserName;
             await _context.SaveChangesAsync();
+            await RecordRuleAuditAsync(FinanceAuditEvents.TaxRuleDeactivated, rule, before, RuleSnapshot(rule));
 
             return NoContent();
+        }
+
+        private async Task<bool> HasConflictingActiveRuleAsync(CreateTaxRuleDto dto, Guid? excludeId)
+        {
+            if (!dto.IsActive)
+                return false;
+
+            return await _context.TaxRules.AnyAsync(rule =>
+                rule.TenantId == TenantId
+                && !rule.IsDeleted
+                && rule.IsActive
+                && (!excludeId.HasValue || rule.Id != excludeId.Value)
+                && rule.TransactionType == dto.TransactionType
+                && rule.ProductCategoryId == dto.ProductCategoryId
+                && rule.CustomerType == dto.CustomerType
+                && rule.ServiceType == dto.ServiceType);
+        }
+
+        private static string? NormalizeAndValidate(CreateTaxRuleDto dto)
+        {
+            dto.Name = dto.Name?.Trim() ?? string.Empty;
+            dto.Description = Normalize(dto.Description);
+            dto.TransactionType = Normalize(dto.TransactionType);
+            dto.CustomerType = Normalize(dto.CustomerType);
+            dto.ServiceType = Normalize(dto.ServiceType);
+            if (dto.Name.Length == 0)
+                return "Tax rule name is required.";
+            if (dto.Priority < 0)
+                return "Tax rule priority cannot be negative.";
+            if (dto.TaxGroupId == Guid.Empty)
+                return "Tax group is required.";
+            return null;
+        }
+
+        private static string? Normalize(string? value) =>
+            string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+        private static object RuleSnapshot(TaxRule rule) => new
+        {
+            rule.Id,
+            rule.Name,
+            rule.Description,
+            rule.Priority,
+            rule.TaxGroupId,
+            rule.TransactionType,
+            rule.ProductCategoryId,
+            rule.CustomerType,
+            rule.ServiceType,
+            rule.IsActive,
+            rule.IsDeleted
+        };
+
+        private Task RecordRuleAuditAsync(string eventType, TaxRule rule, object? before, object? after) =>
+            _financeAuditService.RecordAsync(new FinanceAuditEventDto
+            {
+                EventType = eventType,
+                TenantId = TenantId,
+                SourceModule = "Tax",
+                SourceDocumentType = "TaxRule",
+                SourceDocumentId = rule.Id,
+                Resource = "Finance.TaxRule",
+                ResourceId = rule.Id.ToString(),
+                BeforeValues = before,
+                AfterValues = after
+            });
+
+        private async Task<T> ExecuteRuleMutationAsync<T>(Func<Task<T>> action)
+        {
+            if (!_context.Database.IsRelational() || _context.Database.CurrentTransaction != null)
+                return await action();
+
+            var strategy = _context.Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync(async () =>
+            {
+                await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+                try
+                {
+                    var result = await action();
+                    await transaction.CommitAsync();
+                    return result;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync();
+                    _context.ChangeTracker.Clear();
+                    throw;
+                }
+            });
         }
     }
 }

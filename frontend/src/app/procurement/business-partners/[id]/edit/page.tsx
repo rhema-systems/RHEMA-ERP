@@ -56,7 +56,6 @@ const emptyForm: UpdateBusinessPartnerDto = {
   country: '',
   postalCode: '',
   notes: '',
-  status: 'Active',
   isPreferred: false,
   currency: '',
   paymentTerms: '',
@@ -83,6 +82,13 @@ export default function EditBusinessPartnerPage() {
   const [formData, setFormData] = useState<UpdateBusinessPartnerDto>(emptyForm);
   const [creditLimit, setCreditLimit] = useState('');
   const catalogues = useBusinessPartnerPostingCatalogues(partner?.partnerType);
+  const requestedTab = searchParams.get('tab');
+
+  useEffect(() => {
+    if (requestedTab && ['finance-profiles', 'accounts-payable', 'accounts-receivable'].includes(requestedTab)) {
+      setActiveTab(requestedTab);
+    }
+  }, [requestedTab]);
 
   useEffect(() => {
     let current = true;
@@ -115,7 +121,6 @@ export default function EditBusinessPartnerPage() {
           country: data.country || '',
           postalCode: data.physicalPostalCode || '',
           notes: data.notes || '',
-          status: data.status || 'Active',
           isPreferred: data.isPreferred,
           currency: data.currency || '',
           paymentTerms: data.paymentTerms || '',
@@ -283,28 +288,13 @@ export default function EditBusinessPartnerPage() {
                     {textField('tradingName', 'Trading Name')}
                     {textField('registrationNumber', 'Registration Number')}
                     <div className="space-y-1.5">
-                      <Label htmlFor="status">Status</Label>
-                      <Select
-                        value={formData.status}
-                        disabled={saving}
-                        onValueChange={(status) =>
-                          setFormData((previous) => ({ ...previous, status }))
-                        }
-                      >
-                        <SelectTrigger id="status">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {partner.status && !['Active', 'Inactive', 'Suspended'].includes(partner.status) && (
-                            <SelectItem value={partner.status}>{partner.status}</SelectItem>
-                          )}
-                          {['Active', 'Inactive', 'Suspended'].map((status) => (
-                            <SelectItem key={status} value={status}>
-                              {status}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <Label>Lifecycle status</Label>
+                      <div className="flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 text-sm">
+                        {partner.status || 'Pending approval'}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Status changes only through submit, approval, suspension, and reactivation actions.
+                      </p>
                     </div>
                     <div className="space-y-1.5 md:col-span-2">
                       <Label htmlFor="parentId">Parent Business Partner</Label>
@@ -457,10 +447,10 @@ export default function EditBusinessPartnerPage() {
                   <BusinessPartnerFinanceProfilesPanel businessPartnerId={id} paymentTerms={paymentTerms} withholdingTaxes={catalogues.withholdingTaxes} />
                 </TabsContent>
                 {hasPayables && <TabsContent value="accounts-payable" className="py-3">
-                  <BusinessPartnerCurrentAccountsPanel businessPartnerId={id} partnerType={formData.partnerType ?? partner.partnerType} ledger="payables" />
+                  <BusinessPartnerCurrentAccountsPanel businessPartnerId={id} partnerType={formData.partnerType ?? partner.partnerType} ledger="payables" onOpenFinanceProfiles={() => setActiveTab('finance-profiles')} />
                 </TabsContent>}
                 {hasCustomerRole(formData.partnerType) && <TabsContent value="accounts-receivable" className="py-3">
-                  <BusinessPartnerCurrentAccountsPanel businessPartnerId={id} partnerType={formData.partnerType ?? partner.partnerType} ledger="receivables" />
+                  <BusinessPartnerCurrentAccountsPanel businessPartnerId={id} partnerType={formData.partnerType ?? partner.partnerType} ledger="receivables" onOpenFinanceProfiles={() => setActiveTab('finance-profiles')} />
                 </TabsContent>}
               </div>
             </Tabs>

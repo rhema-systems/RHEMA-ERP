@@ -63,6 +63,9 @@ export interface EstateManagedAsset {
   isReadyForProjectManagement: boolean;
   blockName?: string;
   floorLabel?: string;
+  responsibleOfficerEmployeeId?: string | null;
+  responsibleOfficerEmployeeNumber?: string | null;
+  responsibleOfficerName?: string | null;
   assetType: EstateManagedAssetType;
   status: EstateManagedAssetStatus;
   sourceType: EstateManagedAssetSourceType;
@@ -332,10 +335,18 @@ export interface UpdateEstateManagedAssetOccupancy {
   status: EstateManagedAssetStatus;
   actualDate?: string | null;
   releaseOccupant?: boolean | null;
+  terminationCaseId?: string | null;
   isAvailableForLease?: boolean | null;
   isAvailableForSale?: boolean | null;
   isPublishedToExternalPortal?: boolean | null;
   notes?: string | null;
+}
+
+export interface EstateCompletedTermination {
+  id: string;
+  referenceNumber?: string | null;
+  title: string;
+  completedAt: string;
 }
 
 export interface EstateManagedAssetQuery {
@@ -633,6 +644,14 @@ export class EstateLandManagementService {
       );
     }
     return normalizeManagedAsset(response.data);
+  }
+
+  async getCompletedTerminations(assetId: string): Promise<EstateCompletedTermination[]> {
+    const response = await apiService.get<{
+      success?: boolean;
+      data?: EstateCompletedTermination[];
+    }>(`/estate/managed-assets/${assetId}/completed-terminations`);
+    return response.data || [];
   }
 
   async createManualLand(

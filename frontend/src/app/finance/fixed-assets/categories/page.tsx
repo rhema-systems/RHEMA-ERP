@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Edit, Plus, RefreshCw, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -32,6 +33,7 @@ export default function FixedAssetCategoriesPage() {
     name: '',
     code: '',
     description: '',
+    requiresMaintenance: false,
     defaultMethod: 'StraightLine',
     defaultUsefulLifeMonths: 36,
     defaultResidualValuePercent: 0,
@@ -104,6 +106,7 @@ export default function FixedAssetCategoriesPage() {
         name: '',
         code: '',
         description: '',
+        requiresMaintenance: false,
         defaultMethod: 'StraightLine',
         defaultUsefulLifeMonths: 36,
         defaultResidualValuePercent: 0,
@@ -183,6 +186,19 @@ export default function FixedAssetCategoriesPage() {
                     value={formData.description || ''}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   />
+                </div>
+                <div className="flex items-start gap-3 rounded-md border p-4 md:col-span-2">
+                  <Checkbox
+                    id="requiresMaintenance"
+                    checked={formData.requiresMaintenance}
+                    onCheckedChange={(checked) => setFormData({ ...formData, requiresMaintenance: checked === true })}
+                  />
+                  <div className="space-y-1">
+                    <Label htmlFor="requiresMaintenance">Requires maintenance</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Makes assets in this category available to Maintenance through the read-only integration feed.
+                    </p>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="defaultMethod">Default Depreciation Method</Label>
@@ -444,13 +460,14 @@ export default function FixedAssetCategoriesPage() {
                 <TableHead>Method</TableHead>
                 <TableHead>Useful Life</TableHead>
                 <TableHead>Residual %</TableHead>
+                <TableHead>Maintenance</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {categories.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                     No categories found.
                   </TableCell>
                 </TableRow>
@@ -462,6 +479,7 @@ export default function FixedAssetCategoriesPage() {
                     <TableCell>{category.defaultMethod}</TableCell>
                     <TableCell>{category.defaultUsefulLifeMonths} months</TableCell>
                     <TableCell>{category.defaultResidualValuePercent}%</TableCell>
+                    <TableCell>{category.requiresMaintenance ? 'Required' : 'Not required'}</TableCell>
                     <TableCell className="text-right">
                       <Link href={`/finance/fixed-assets/categories/${category.id}/edit`}>
                         <Button variant="ghost" size="icon" aria-label="Edit category">

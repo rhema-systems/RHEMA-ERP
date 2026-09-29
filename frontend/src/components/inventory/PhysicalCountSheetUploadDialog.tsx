@@ -72,14 +72,14 @@ export function PhysicalCountSheetUploadDialog({ count, onClose, onSaved, errorM
     <DialogContent className="flex h-[600px] max-h-[90dvh] flex-col overflow-hidden sm:max-w-[800px]">
       <DialogHeader className="shrink-0">
         <DialogTitle>Upload count sheet</DialogTitle>
-        <DialogDescription>{count.countNumber} · Fill only Counted Qty. Blank cells stay uncounted; 0 means none found.</DialogDescription>
+        <DialogDescription>{count.countNumber} · Fill Counted Qty and any defective details. Blank cells stay uncounted; 0 means none found.</DialogDescription>
       </DialogHeader>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
         <div className="space-y-2"><Label htmlFor="count-sheet-file">Completed Excel count sheet</Label><Input id="count-sheet-file" type="file" accept=".xlsx" disabled={busy || started} onChange={event => void selectFile(event.target.files?.[0])} /></div>
         {error && <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
         {rows.length > 0 && <>
           <p className="text-sm text-muted-foreground">{rows.length} quantities to save · {blankCount} blank rows skipped. Existing counts on the listed lines will be replaced.</p>
-          <Table><TableHeader><TableRow>{(includeLocation ? COUNT_SHEET_HEADERS : COUNT_SHEET_HEADERS_WITHOUT_LOCATION).map(header => <TableHead key={header}>{header}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.map(({ item, quantity }) => <TableRow key={item.id}><TableCell>{item.itemCode}</TableCell><TableCell>{item.itemName}</TableCell><TableCell>{item.unitOfMeasure}</TableCell>{includeLocation && <TableCell>{item.locationName || '—'}</TableCell>}<TableCell className="text-right">{quantity}</TableCell></TableRow>)}</TableBody></Table>
+          <Table><TableHeader><TableRow>{(includeLocation ? COUNT_SHEET_HEADERS : COUNT_SHEET_HEADERS_WITHOUT_LOCATION).map(header => <TableHead key={header}>{header}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.map(({ item, quantity, defectiveQuantity, defectiveNotes }) => <TableRow key={item.id}><TableCell>{item.itemCode}</TableCell><TableCell>{item.itemName}</TableCell><TableCell>{item.unitOfMeasure}</TableCell>{includeLocation && <TableCell>{item.locationName || '—'}</TableCell>}<TableCell className="text-right">{quantity}</TableCell><TableCell className="text-right">{defectiveQuantity}</TableCell><TableCell>{defectiveNotes}</TableCell></TableRow>)}</TableBody></Table>
           <p className="text-sm text-muted-foreground">Save uses this file for the count quantities and marks it as the current count sheet. Earlier files remain in history.</p>
         </>}
       </div>

@@ -8,8 +8,6 @@ public interface IEstateProcedureCatalogService
 public sealed record EstateProcedureCatalogItem(
     string Title,
     string EntityType,
-    string Source,
-    string Summary,
     string Icon,
     int StageCount,
     string Accent,

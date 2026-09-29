@@ -95,12 +95,13 @@ public sealed class FinanceDimensionAdministrationService
         await EnsureDefinitionShapeAsync(dto, cancellationToken);
         var classification = Canonical(dto.Classification, Classifications, "classification");
         var valueSourceType = Canonical(dto.ValueSourceType, ValueSources, "value source type");
+        if (!string.Equals(entity.Code, code, StringComparison.Ordinal))
+            throw new InvalidOperationException("A Finance dimension code is immutable after creation. Create a successor dimension if a different identity is required.");
         if (await _context.FinanceDimensionDefinitions.AnyAsync(item =>
                 item.TenantId == tenantId && item.Id != id && !item.IsDeleted && item.Code == code, cancellationToken))
             throw new InvalidOperationException($"Finance dimension '{code}' already exists.");
-        if (entity.Values.Any() && (!string.Equals(entity.Code, code, StringComparison.Ordinal)
-                                    || !string.Equals(entity.ValueSourceType, valueSourceType, StringComparison.Ordinal)))
-            throw new InvalidOperationException("A dimension code or value-source type cannot change after values exist.");
+        if (entity.Values.Any() && !string.Equals(entity.ValueSourceType, valueSourceType, StringComparison.Ordinal))
+            throw new InvalidOperationException("A dimension value-source type cannot change after values exist.");
 
         entity.Code = code;
         entity.Name = Text(dto.Name, 100);

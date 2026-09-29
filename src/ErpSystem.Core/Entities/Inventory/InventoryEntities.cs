@@ -124,6 +124,7 @@ public class InventoryItem : TenantEntity
 
     // Optional GL defaults; posting services fall back to Finance settings when unset.
     public Guid? InventoryAccountId { get; set; }
+    public Guid? InventoryDisposalAccountId { get; set; }
     public Guid? InventoryOffsetAccountId { get; set; }
     public Guid? CostOfGoodsSoldAccountId { get; set; }
     public Guid? SalesAccountId { get; set; }
@@ -253,6 +254,11 @@ public class InventoryCategory : TenantEntity
 /// </summary>
 public class StockMovement : TenantEntity
 {
+    public Guid? TransferDispatchAllocationId { get; set; }
+    public Guid? TransferReceiptAllocationId { get; set; }
+    [MaxLength(20)] public string? TransferLeg { get; set; }
+    public InventoryTransferDispatchAllocation? TransferDispatchAllocation { get; set; }
+    public InventoryTransferReceiptAllocation? TransferReceiptAllocation { get; set; }
     [Required]
     public Guid InventoryItemId { get; set; }
 

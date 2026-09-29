@@ -81,9 +81,13 @@ public static class FinanceAuditEvents
     public const string RecurringJournalTemplateRejected = "Finance.RecurringJournal.TemplateRejected";
     public const string RecurringJournalTemplatePaused = "Finance.RecurringJournal.TemplatePaused";
     public const string RecurringJournalTemplateResumed = "Finance.RecurringJournal.TemplateResumed";
+    public const string RecurringJournalTemplateCancelled = "Finance.RecurringJournal.TemplateCancelled";
+    public const string RecurringJournalTemplateVersionCreated = "Finance.RecurringJournal.TemplateVersionCreated";
     public const string RecurringJournalOccurrenceGenerated = "Finance.RecurringJournal.OccurrenceGenerated";
     public const string RecurringJournalOccurrenceApproved = "Finance.RecurringJournal.OccurrenceApproved";
     public const string RecurringJournalOccurrenceRejected = "Finance.RecurringJournal.OccurrenceRejected";
+    public const string RecurringJournalOccurrenceWaiverRequested = "Finance.RecurringJournal.OccurrenceWaiverRequested";
+    public const string RecurringJournalOccurrenceWaived = "Finance.RecurringJournal.OccurrenceWaived";
     public const string RecurringJournalOccurrencePosted = "Finance.RecurringJournal.OccurrencePosted";
     public const string RecurringJournalGenerationFailed = "Finance.RecurringJournal.GenerationFailed";
 
@@ -305,8 +309,12 @@ public static class FinanceAuditEvents
     public const string FinancialStatementLayoutVersionCreated = "Finance.Reporting.LayoutVersionCreated";
     public const string FinancialStatementLayoutRowsReplaced = "Finance.Reporting.LayoutRowsReplaced";
     public const string FinancialStatementLayoutVersionPublished = "Finance.Reporting.LayoutVersionPublished";
+    public const string FinancialStatementLayoutVersionSubmitted = "Finance.Reporting.LayoutVersionSubmitted";
+    public const string FinancialStatementLayoutVersionRejected = "Finance.Reporting.LayoutVersionRejected";
     public const string FinancialStatementLayoutImported = "Finance.Reporting.LayoutImported";
     public const string FinancialStatementLegacyLayoutMigrated = "Finance.Reporting.LegacyLayoutMigrated";
+    public const string FinancialStatementLayoutsInitialized = "Finance.Reporting.LayoutsInitialized";
+    public const string FinancialStatementLayoutDiscarded = "Finance.Reporting.LayoutDiscarded";
     public const string AdHocReportCreated = "Finance.Reporting.AdHocReportCreated";
     public const string AdHocReportUpdated = "Finance.Reporting.AdHocReportUpdated";
     public const string AdHocReportDeleted = "Finance.Reporting.AdHocReportDeleted";

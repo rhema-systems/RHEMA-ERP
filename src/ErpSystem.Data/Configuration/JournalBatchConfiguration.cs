@@ -33,6 +33,7 @@ public sealed class JournalBatchConfiguration : IEntityTypeConfiguration<Journal
             .HasFilter("[IsDeleted] = 0");
         entity.HasIndex(x => new { x.TenantId, x.ApprovalStatus, x.FiscalPeriodId });
         entity.HasIndex(x => new { x.TenantId, x.PostingStatus, x.FiscalPeriodId });
+        entity.HasIndex(x => new { x.TenantId, x.AccountingBookId, x.FiscalPeriodId });
         entity.HasIndex(x => new { x.TenantId, x.CreatedAt });
         entity.HasIndex(x => new { x.TenantId, x.ReversalOfJournalBatchId })
             .IsUnique()
@@ -41,6 +42,10 @@ public sealed class JournalBatchConfiguration : IEntityTypeConfiguration<Journal
         entity.HasOne(x => x.FiscalPeriod)
             .WithMany()
             .HasForeignKey(x => x.FiscalPeriodId)
+            .OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne(x => x.AccountingBook)
+            .WithMany()
+            .HasForeignKey(x => x.AccountingBookId)
             .OnDelete(DeleteBehavior.Restrict);
         entity.HasOne(x => x.ReversalOfJournalBatch)
             .WithMany(x => x.ReversalAttempts)

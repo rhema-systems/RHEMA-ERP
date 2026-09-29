@@ -27,6 +27,15 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { ProcedureCaseWorkspace } from '@/components/procedures/ProcedureCaseWorkspace';
+import { FacilitiesProviderRegister } from './FacilitiesProviderRegister';
+import { FacilitiesDutyLookup } from './FacilitiesDutyLookup';
+import { FacilitiesOperatingRegister } from './FacilitiesOperatingRegister';
+import { FacilitiesPropertyInvoices } from './FacilitiesPropertyInvoices';
+import {
+  EstateManagedAssetType,
+  estateLandManagementService,
+  type EstateManagedAsset,
+} from '@/services/estate-land-management.service';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -37,6 +46,10 @@ import {
   type CreateFacilitiesArInvoiceRequest,
   type CreateFacilitiesArPaymentRequest,
   type EstateFacilityDutyRosterItem,
+  type FacilitiesPropertyOption,
+  type FacilitiesStaffOption,
+  type FacilitiesIssueVoucherOption,
+  type FacilitiesUnitOption,
   type FacilitiesArInvoice,
   type FacilitiesArPayment,
   type FacilitiesBillingDmsPublication,
@@ -78,186 +91,6 @@ type OperationalHandoff = {
   checkpoints: string[];
 };
 
-const serviceProviderGates = [
-  {
-    title: 'Approved Supplier Source',
-    description:
-      'Facilities uses approved Procurement suppliers or business partners as the provider source.',
-  },
-  {
-    title: 'Contract And Compliance',
-    description:
-      'Procurement owns contracts, Legal supports contract review, and Facilities records operational readiness.',
-  },
-  {
-    title: 'Operational Assignment',
-    description:
-      'Facilities maps approved providers to service categories, properties, coverage, SLAs, emergency availability, and assignment readiness.',
-  },
-  {
-    title: 'Performance And AP',
-    description:
-      'Facilities records SLA, quality, complaints, and performance while Finance AP owns invoices, payments, supplier balances, and postings.',
-  },
-];
-
-const serviceProviderLifecycleStates = [
-  'Approved Supplier',
-  'Contract / Compliance Validated',
-  'Operational Profile Active',
-  'Assignment Readiness Approved',
-  'Linked To Facilities Workstreams',
-  'Performance Reviewed',
-  'Finance AP Referenced',
-  'Renew / Suspend / Close',
-];
-
-const staffCleanerGates = [
-  {
-    title: 'HR Employee Source',
-    description:
-      'Facilities references active HR or Payroll employee profiles instead of creating separate staff records.',
-  },
-  {
-    title: 'Administration User Link',
-    description:
-      'Administration User Management owns login accounts and User-Employee Links connects accounts to employee records when system access is needed.',
-  },
-  {
-    title: 'Roster And Duty Area',
-    description:
-      'Facilities assigns sites, floors, routes, shifts, supervisors, tools, and supplies.',
-  },
-  {
-    title: 'Attendance Exceptions',
-    description:
-      'Facilities records duty attendance follow-up, absence, lateness, replacement coverage, and exceptions.',
-  },
-  {
-    title: 'Quality And HR Escalation',
-    description:
-      'Facilities supervises duty quality, links complaints or maintenance issues, and sends HR escalation where staffing or conduct action is required.',
-  },
-];
-
-const staffCleanerLifecycleStates = [
-  'HR Employee Profile',
-  'User Link Checked',
-  'Facilities Duty Profile',
-  'Roster / Tools Assigned',
-  'Attendance Exceptions',
-  'Duty Quality Inspected',
-  'Linked Follow-up Routed',
-  'Duty Period Closed',
-];
-
-const assetOperationsGates = [
-  {
-    title: 'Source Asset Record',
-    description:
-      'Project handover, Finance Fixed Assets, Maintenance Management, Procurement, or Inventory supplies the asset source reference.',
-  },
-  {
-    title: 'Facilities Operating View',
-    description:
-      'Facilities tracks location, custodian, access, service impact, condition, warranty, inspection readiness, and operating status.',
-  },
-  {
-    title: 'Maintenance And Complaints',
-    description:
-      'Maintenance owns job cards and work orders while Facilities links service history, complaints, providers, and recurring defects.',
-  },
-  {
-    title: 'Finance Asset Actions',
-    description:
-      'Finance Fixed Assets owns capitalization, depreciation, valuation, transfer, disposal, and retirement.',
-  },
-];
-
-const assetOperationsLifecycleStates = [
-  'Project / Finance / Maintenance Source',
-  'Location / Custody Validated',
-  'Finance / Project Context Linked',
-  'Condition / Warranty Baseline',
-  'Documents Indexed',
-  'Maintenance / Complaint Links',
-  'Finance Or Operational Action',
-  'Operating Period Closed',
-];
-
-const documentIndexGates = [
-  {
-    title: 'Source Module Owner',
-    description:
-      'Legal, Procurement, Project Management, Maintenance, Finance, Estate, Helpdesk, Workflow, Property Management, or Facilities remains the source document owner.',
-  },
-  {
-    title: 'Metadata Template',
-    description:
-      'Facilities defines module metadata for documents so Central DMS can migrate records with consistent tags and required fields.',
-  },
-  {
-    title: 'Expiry And Access',
-    description:
-      'Facilities tracks expiry, renewal, confidentiality, retention, retrieval, and workspace visibility.',
-  },
-  {
-    title: 'Comments And Annotations',
-    description:
-      'Facilities records future comments, versioning, PDF viewer annotation, redline, and audit-readiness needs without becoming the repository.',
-  },
-  {
-    title: 'Central DMS',
-    description:
-      'Central Document Management owns repository, versioning, comments, PDF viewer annotations, and audit trail.',
-  },
-];
-
-const documentIndexLifecycleStates = [
-  'Source Document Referenced',
-  'Metadata Defined',
-  'Access / Ownership Validated',
-  'Lifecycle Controls Set',
-  'Facilities Workspace Linked',
-  'Comments / Annotation Ready',
-  'Index Published',
-  'Central DMS Ready',
-];
-
-const billingServiceChargeGates = [
-  {
-    title: 'Facilities Billing Source',
-    description:
-      'Facilities captures service charge, recovery, deposit, statement, arrears, adjustment, and dispute instructions with Source: Estate / Facilities.',
-  },
-  {
-    title: 'Property And Customer Context',
-    description:
-      'Property Management supplies property, unit, occupant, lease, service, and availability context when the billing action affects property operations.',
-  },
-  {
-    title: 'Finance AR Execution',
-    description:
-      'Finance AR owns customer accounts, invoices, receipts, allocations, statements, balances, deposits, and GL postings.',
-  },
-  {
-    title: 'DMS Filing',
-    description:
-      'Central DMS stores invoice, receipt, statement, demand notice, adjustment, approval, and dispute documents for versioning and audit.',
-  },
-];
-
-const billingServiceChargeLifecycleStates = [
-  'Billing Trigger Logged',
-  'Billable Party Validated',
-  'Charge Basis Defined',
-  'Instruction Approved',
-  'Sent To Finance AR',
-  'Finance Result Tracked',
-  'Arrears / Dispute Follow-up',
-  'DMS Published / Closed',
-];
-
 const todayInputValue = () => new Date().toISOString().slice(0, 10);
 
 const defaultDutyRosterForm = (): UpsertEstateFacilityDutyRosterRequest => ({
@@ -278,6 +111,8 @@ const defaultDutyRosterForm = (): UpsertEstateFacilityDutyRosterRequest => ({
   supervisorName: '',
   toolsIssued: '',
   suppliesIssued: '',
+  inventoryIssueVoucherId: null,
+  inventoryIssueVoucherNumber: null,
   checklist: 'Sweep / mop; disinfect touch points; empty bins; report defects',
   attendanceStatus: 'Pending',
   completionStatus: 'Scheduled',
@@ -318,14 +153,7 @@ function FacilitiesWorkflowOverview({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <CardTitle>{workspace.procedure.title} Workspace</CardTitle>
-            <CardDescription className="mt-2 max-w-4xl">
-              Dedicated Facilities workspace. This screen does not create a
-              generic procedure case; stages, checklists, documents, fields,
-              outputs, and handoffs are driven from the Facilities workflow /
-              catalog configuration.
-            </CardDescription>
           </div>
-          <Badge variant="outline">No generic case view</Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -334,7 +162,7 @@ function FacilitiesWorkflowOverview({
             <div className="text-2xl font-semibold">
               {workspace.stages.length}
             </div>
-            <div className="text-sm text-muted-foreground">workflow stages</div>
+            <div className="text-sm text-muted-foreground">stages</div>
           </div>
           <div className="rounded-md border border-border bg-background p-4">
             <div className="text-2xl font-semibold">{mandatoryDocuments}</div>
@@ -358,18 +186,13 @@ function FacilitiesWorkflowOverview({
 
         {workspace.stages.length === 0 ? (
           <div className="rounded-md border border-dashed border-border bg-muted/40 p-4">
-            <div className="font-medium">Workflow not configured</div>
-            <p className="mt-1 text-sm text-muted-foreground">
-              No Facilities stages, checklists, documents, fields, outputs, or
-              handoffs are predefined here. Configure and publish the workflow
-              in Administration &gt; Workflow Setup for this entity type.
-            </p>
+            <div className="font-medium">Setup required</div>
           </div>
         ) : null}
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)]">
           <div className="rounded-md border border-border bg-background p-4">
-            <div className="mb-3 font-medium">Operational stage board</div>
+            <div className="mb-3 font-medium">Stage board</div>
             <div className="space-y-3">
               {workspace.stages.map((stage, index) => (
                 <div
@@ -380,9 +203,6 @@ function FacilitiesWorkflowOverview({
                     <div>
                       <div className="font-medium">
                         {index + 1}. {stage.name}
-                      </div>
-                      <div className="mt-1 text-sm text-muted-foreground">
-                        {stage.summary}
                       </div>
                     </div>
                     <Badge variant="secondary" className="w-fit">
@@ -447,7 +267,7 @@ function FacilitiesWorkflowOverview({
 
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="rounded-md border border-border bg-background p-4">
-            <div className="mb-3 font-medium">Expected outputs</div>
+            <div className="mb-3 font-medium">Outputs</div>
             <div className="flex flex-wrap gap-2">
               {workspace.outputs.map((output) => (
                 <Badge key={output} variant="secondary">
@@ -457,7 +277,7 @@ function FacilitiesWorkflowOverview({
             </div>
           </div>
           <div className="rounded-md border border-border bg-background p-4">
-            <div className="mb-3 font-medium">Module handoffs</div>
+            <div className="mb-3 font-medium">Handoffs</div>
             <div className="space-y-2">
               {workspace.handoffs.map((handoff) => (
                 <div
@@ -493,10 +313,7 @@ function FacilitiesMaintenanceWorkspace({
     <div className="space-y-4">
       {workspace.stages.length === 0 ? (
         <div className="rounded-md border border-dashed border-border bg-muted/40 p-4">
-          <div className="font-medium">Workflow not configured</div>
-          <div className="mt-1 text-sm text-muted-foreground">
-            Configure and publish the Facilities workflow for this entity type.
-          </div>
+          <div className="font-medium">Setup required</div>
         </div>
       ) : null}
 
@@ -570,11 +387,12 @@ function addDays(date: Date, days: number) {
 
 const defaultArInvoiceForm: CreateFacilitiesArInvoiceRequest = {
   customerId: '',
+  propertyUnit: '',
   invoiceDate: dateInputValue(new Date()),
   dueDate: dateInputValue(addDays(new Date(), 30)),
   reference: '',
-  notes: 'Source: Estate / Facilities -> Finance AR',
-  currencyCode: 'USD',
+  notes: 'Facilities AR instruction',
+  currencyCode: 'GHS',
   exchangeRate: 1,
   lineItems: [
     {
@@ -595,77 +413,9 @@ const defaultArPaymentForm: CreateFacilitiesArPaymentRequest = {
   currencyCode: 'USD',
   exchangeRate: 1,
   transactionReference: '',
-  notes: 'Source: Estate / Facilities -> Finance AR',
+  notes: 'Facilities AR receipt',
   isCreditNote: false,
 };
-
-const maintenanceIntakeGates = [
-  {
-    title: 'Facilities Intake',
-    description:
-      'Facilities captures requester, location, evidence, SLA, safety, service impact, and Source: Estate / Facilities.',
-  },
-  {
-    title: 'Maintenance Execution',
-    description:
-      'Maintenance Management owns job cards, work orders, technicians, parts, execution, inspection, and technical closure.',
-  },
-  {
-    title: 'Linked Impact',
-    description:
-      'Facilities updates complaints, assets, providers, records, and Property Management when a unit block, release, occupancy, or handover effect exists.',
-  },
-  {
-    title: 'Facilities Closeout',
-    description:
-      'Facilities closes the intake after Maintenance status, inspection result, requester feedback, and linked updates are recorded.',
-  },
-];
-
-const maintenanceIntakeLifecycleStates = [
-  'Facilities Intake Logged',
-  'Location / Impact Validated',
-  'Priority / SLA Triage',
-  'Sent To Maintenance',
-  'Job Card / Work Order Linked',
-  'Execution Status Tracked',
-  'Feedback / Inspection Received',
-  'Facilities Intake Closed',
-];
-
-const complaintIntakeGates = [
-  {
-    title: 'Facilities Complaint Intake',
-    description:
-      'Facilities captures complainant, property, tenant, evidence, service impact, severity, SLA context, and Source: Estate / Facilities.',
-  },
-  {
-    title: 'Helpdesk Ticket Lifecycle',
-    description:
-      'Helpdesk owns complaint ticket SLA timers, assignment, escalation, investigation, resolution, reopening, and ticket closure history.',
-  },
-  {
-    title: 'Linked Facilities Actions',
-    description:
-      'Facilities routes linked maintenance, provider, staff, asset, document, or Property Management updates without duplicating Helpdesk ownership.',
-  },
-  {
-    title: 'Facilities Feedback Closeout',
-    description:
-      'Facilities closes the intake after Helpdesk status, complainant feedback, linked updates, recurrence checks, and reporting are recorded.',
-  },
-];
-
-const complaintIntakeLifecycleStates = [
-  'Complaint Intake Logged',
-  'Estate Context Validated',
-  'Severity / SLA Classified',
-  'Sent To Helpdesk',
-  'Ticket Status Tracked',
-  'Linked Action Coordinated',
-  'Feedback / Resolution Received',
-  'Facilities Complaint Closed',
-];
 
 function getOperationalHandoff(entityType: string): OperationalHandoff | null {
   if (entityType === 'EstateFacilityPropertySite') {
@@ -674,7 +424,7 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
       description:
         'Estate / Facilities keeps the operating view for sites, buildings, floors, common areas, occupancy impact, service zones, responsible officers, access, and site operating documents. Property Management remains the register owner for property/unit commercial records, leases, occupants, and availability.',
       sourceLabel:
-        'Source: Property Management / Project Handover -> Estate / Facilities',
+        'Property Management / Project Handover',
       icon: Database,
       primaryAction: {
         label: 'Open Property & Units',
@@ -710,7 +460,7 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
       title: 'Lease / Occupancy Coordination Handoff',
       description:
         'Estate / Facilities coordinates viewing readiness, handover access, services, move-in constraints, renewal/termination operational impact, and service-charge triggers. Property Management owns lease setup, tenant/occupant records, availability, and move-in/handover; Finance AR owns invoices and receipts.',
-      sourceLabel: 'Source: Property Management -> Estate / Facilities',
+      sourceLabel: 'Property Management',
       icon: FileText,
       primaryAction: {
         label: 'Open Lease Management',
@@ -745,8 +495,8 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
     return {
       title: 'Service Provider Operations Handoff',
       description:
-        'Estate / Facilities manages provider operating profiles, service coverage, assignment readiness, workstream links, SLA monitoring, and performance. Procurement owns supplier onboarding, contracts, rate cards, and supplier compliance; Legal supports contract review; Finance AP owns invoices, payments, balances, and postings.',
-      sourceLabel: 'Source: Procurement -> Estate / Facilities',
+        'Estate / Facilities manages provider operating profiles, service coverage, assignment readiness, workstream links, SLA monitoring, and performance. Procurement owns supplier onboarding, contracts, rate cards, supplier compliance, and supplier invoice workspaces; Inventory prepares landed-cost supplier invoice drafts from receipts; Finance owns settlement, balances, and postings.',
+      sourceLabel: 'Procurement',
       icon: Briefcase,
       primaryAction: {
         label: 'Open Procurement Suppliers',
@@ -755,15 +505,14 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
       secondaryActions: [
         { label: 'Procurement Contracts', href: '/procurement/contracts' },
         { label: 'Purchase Orders', href: '/procurement/purchase-orders' },
-        { label: 'AP Invoices', href: '/finance/ap/invoices' },
-        { label: 'AP Payments', href: '/finance/ap/payments' },
+        { label: 'Supplier Invoices', href: '/procurement/supplier-invoices' },
       ],
       checkpoints: [
         'Use approved Procurement suppliers or business partners as the provider source.',
         'Link Procurement contract, compliance, insurance, tax, license, and rate references.',
         'Use Facilities for service coverage, assignment readiness, approved workstreams, SLA monitoring, quality, and provider performance.',
         'Link Maintenance Intake, Complaint Management, Asset Operating View, Staff/Cleaner, or Document records when the provider is used.',
-        'Send invoice, payment, balance, posting, retention, and dispute processing to Finance AP.',
+        'Open provider supplier invoices from Procurement, landed-cost invoice preparation from Inventory, and settlement evidence from the linked supplier invoice.',
       ],
     };
   }
@@ -773,7 +522,7 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
       title: 'Staff & Cleaner Duty Operations Handoff',
       description:
         'HR / Payroll remains the source for employee records and employment status. Administration owns login accounts and User-Employee Links. Estate / Facilities manages duty areas, rosters, attendance follow-up, tools, supplies, supervision, service quality, linked workstream follow-up, and HR escalations.',
-      sourceLabel: 'Source: HR / Payroll -> Estate / Facilities',
+      sourceLabel: 'HR / Payroll',
       icon: ClipboardCheck,
       primaryAction: {
         label: 'Open Employee Profiles',
@@ -813,7 +562,7 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
       description:
         'Project Management can hand over delivered assets, Finance Fixed Assets owns the financial register, and Maintenance Management owns job cards, work orders, repairs, and inspections. Estate / Facilities keeps only the operating view for location, custodian, access, service impact, condition, warranty, documents, complaints, providers, and linked maintenance history.',
       sourceLabel:
-        'Source: Project Management / Finance Fixed Assets / Maintenance -> Estate / Facilities',
+        'Project Management / Finance Fixed Assets / Maintenance',
       icon: Database,
       primaryAction: {
         label: 'Open Fixed Assets Register',
@@ -847,8 +596,7 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
       title: 'Facilities Document Index & DMS Readiness Handoff',
       description:
         'Facilities indexes and controls retrieval metadata for source-module documents while Central Document Management owns the repository, versioning, comments, PDF viewer annotations, redlines, retention audit, and full document history. Facilities prepares metadata and readiness; it does not duplicate source documents.',
-      sourceLabel:
-        'Source: Source Module -> Estate / Facilities -> Central DMS',
+      sourceLabel: 'Central DMS',
       icon: FileText,
       primaryAction: {
         label: 'Open Property & Facilities Records',
@@ -888,7 +636,7 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
       title: 'Facilities Billing / Service Charge Handoff',
       description:
         'Estate / Facilities prepares billing instruction packages for facilities-origin service charges, common-area recoveries, utilities, provider pass-throughs, deposits, arrears, statements, demand notices, disputes, and adjustments. Finance AR owns customer accounts, invoices, receipts, allocations, balances, statements, deposits, and GL postings.',
-      sourceLabel: 'Source: Estate / Facilities -> Finance AR',
+      sourceLabel: 'Finance AR',
       icon: CreditCard,
       primaryAction: {
         label: 'Open Property Billing',
@@ -909,7 +657,7 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
         { label: 'Central DMS', href: '/document-management' },
       ],
       checkpoints: [
-        'State Source: Estate / Facilities on every downstream Finance AR instruction.',
+        'Include the Facilities reference on every downstream Finance AR instruction.',
         'Use Facilities for service charge setup, allocation basis, service evidence, common-area recovery, provider pass-throughs, arrears follow-up, and dispute explanation.',
         'Use Property Management when the charge affects unit, lease, occupant, availability, handover, or property records.',
         'Use Finance AR for customer accounts, invoices, receipts, allocations, balances, statements, deposits, and GL postings.',
@@ -923,7 +671,7 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
       title: 'Maintenance Intake Handoff',
       description:
         'Estate / Facilities captures requester, property, unit, asset, SLA, safety, service impact, and evidence here, then execution continues in the existing Maintenance Management job card and work order flow.',
-      sourceLabel: 'Source: Estate / Facilities',
+      sourceLabel: 'Facilities',
       icon: Wrench,
       primaryAction: {
         label: 'Create Maintenance Job Card',
@@ -935,7 +683,7 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
         { label: 'Maintenance Dashboard', href: '/maintenance/dashboard' },
       ],
       checkpoints: [
-        'State Source: Estate / Facilities in the job card or work order notes.',
+        'Include the Facilities reference in the job card or work order notes.',
         'Use the Facilities case reference, property/unit, evidence, priority, SLA, safety, and service-impact context in Maintenance.',
         'Let Maintenance Management own job cards, work orders, technicians, parts, execution, inspection, and technical closure.',
         'Return job card, work order, inspection, cost, and closure references to the Facilities intake.',
@@ -949,7 +697,7 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
       title: 'Complaint Management Handoff',
       description:
         'Estate / Facilities captures complainant, property, tenant, evidence, severity, SLA context, and service impact here; Helpdesk owns complaint ticket SLA, escalation, investigation, resolution, reopening, and closure history.',
-      sourceLabel: 'Source: Estate / Facilities',
+      sourceLabel: 'Facilities',
       icon: MessageSquare,
       primaryAction: {
         label: 'Create Complaint Ticket',
@@ -966,7 +714,7 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
         },
       ],
       checkpoints: [
-        'State Source: Estate / Facilities in the complaint ticket.',
+        'Include the Facilities reference in the complaint ticket.',
         'Use the Facilities case reference, property/unit, complainant, evidence, severity, SLA context, and service impact in Helpdesk.',
         'Let Helpdesk own ticket SLA timers, assignment, escalation, investigation, resolution, reopening, and closure history.',
         'Route linked repair work to Maintenance Intake and linked service issues to Provider, Staff, Asset, Records, or Property Management where required.',
@@ -992,6 +740,11 @@ export default function FacilitiesProcedureWorkspacePage() {
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [arInvoiceForm, setArInvoiceForm] =
     React.useState<CreateFacilitiesArInvoiceRequest>(defaultArInvoiceForm);
+  const [selectedBillingProperty, setSelectedBillingProperty] = React.useState<EstateManagedAsset | null>(null);
+  const searchBillingProperties = React.useCallback(async (query: string) =>
+    (await estateLandManagementService.getManagedAssets({ search: query, take: 30 }))
+      .filter((asset) => asset.assetType !== EstateManagedAssetType.Land && asset.customerBusinessPartnerId),
+  []);
   const [arInvoiceResult, setArInvoiceResult] =
     React.useState<FacilitiesArInvoice | null>(null);
   const [arInvoiceError, setArInvoiceError] = React.useState<string | null>(
@@ -1026,11 +779,20 @@ export default function FacilitiesProcedureWorkspacePage() {
     React.useState<UpsertEstateFacilityDutyRosterRequest>(
       defaultDutyRosterForm()
     );
+  const [selectedDutyStaff, setSelectedDutyStaff] = React.useState<FacilitiesStaffOption | null>(null);
+  const [selectedDutyProperty, setSelectedDutyProperty] = React.useState<FacilitiesPropertyOption | null>(null);
+  const [selectedDutyUnit, setSelectedDutyUnit] = React.useState<FacilitiesUnitOption | null>(null);
   const [dutyRosterError, setDutyRosterError] = React.useState<string | null>(
     null
   );
   const [isLoadingDutyRoster, setIsLoadingDutyRoster] = React.useState(false);
   const [isSavingDutyRoster, setIsSavingDutyRoster] = React.useState(false);
+  const searchDutyUnits = React.useCallback(
+    (query: string) => selectedDutyProperty
+      ? estateFacilitiesService.searchDutyUnits(selectedDutyProperty.id, query)
+      : Promise.resolve([]),
+    [selectedDutyProperty]
+  );
 
   const updateDutyRosterForm = (
     key: keyof UpsertEstateFacilityDutyRosterRequest,
@@ -1061,8 +823,13 @@ export default function FacilitiesProcedureWorkspacePage() {
     event.preventDefault();
     setDutyRosterError(null);
 
-    if (!dutyRosterForm.staffName.trim()) {
-      setDutyRosterError('Cleaner or staff name is required.');
+    if (!dutyRosterForm.staffName.trim() || !dutyRosterForm.employeeNumber?.trim()) {
+      setDutyRosterError('Select a cleaner or staff member from HR.');
+      return;
+    }
+
+    if (!dutyRosterForm.propertyReference?.trim()) {
+      setDutyRosterError('Select a property or site from Estate.');
       return;
     }
 
@@ -1101,6 +868,9 @@ export default function FacilitiesProcedureWorkspacePage() {
       }
       await loadDutyRoster();
       setDutyRosterForm(defaultDutyRosterForm());
+      setSelectedDutyStaff(null);
+      setSelectedDutyProperty(null);
+      setSelectedDutyUnit(null);
       setEditingDutyId(null);
     } catch (error) {
       setDutyRosterError(error instanceof Error ? error.message : 'Unable to save Facilities duty roster assignment.');
@@ -1111,6 +881,30 @@ export default function FacilitiesProcedureWorkspacePage() {
 
   const editDutyRosterItem = (item: EstateFacilityDutyRosterItem) => {
     setEditingDutyId(item.id);
+    setSelectedDutyStaff({
+      id: item.employeeProfileId || item.employeeNumber || item.id,
+      employeeProfileId: item.employeeProfileId || null,
+      employeeNumber: item.employeeNumber || '',
+      staffName: item.staffName,
+      department: null,
+      position: null,
+    });
+    setSelectedDutyUnit(item.propertyUnit ? {
+      id: item.id,
+      assetCode: item.propertyUnit,
+      name: item.propertyUnit,
+      projectUnitCode: null,
+      blockName: null,
+      floorLabel: null,
+      unitType: null,
+      assetType: '',
+    } : null);
+    setSelectedDutyProperty(null);
+    if (item.propertyReference) {
+      void estateFacilitiesService.searchDutyProperties(item.propertyReference).then((properties) => {
+        setSelectedDutyProperty(properties.find((property) => property.assetCode === item.propertyReference) || null);
+      }).catch(() => setDutyRosterError('Could not resolve the saved property. Select it again before changing the unit.'));
+    }
     setDutyRosterForm({
       employeeProfileId: item.employeeProfileId,
       employeeNumber: item.employeeNumber,
@@ -1130,6 +924,8 @@ export default function FacilitiesProcedureWorkspacePage() {
       supervisorName: item.supervisorName,
       toolsIssued: item.toolsIssued,
       suppliesIssued: item.suppliesIssued,
+      inventoryIssueVoucherId: item.inventoryIssueVoucherId,
+      inventoryIssueVoucherNumber: item.inventoryIssueVoucherNumber,
       checklist: item.checklist,
       attendanceStatus: item.attendanceStatus,
       completionStatus: item.completionStatus,
@@ -1204,8 +1000,8 @@ export default function FacilitiesProcedureWorkspacePage() {
     setArInvoiceError(null);
     setArInvoiceResult(null);
 
-    if (!arInvoiceForm.customerId.trim()) {
-      setArInvoiceError('Finance AR customer ID is required.');
+    if (!selectedBillingProperty || !arInvoiceForm.customerId.trim()) {
+      setArInvoiceError('Select a property with an assigned customer.');
       return;
     }
 
@@ -1420,24 +1216,18 @@ export default function FacilitiesProcedureWorkspacePage() {
     hasAnyPermission(['maintenance.access']);
   const hasConfiguredWorkflow = workspace.stages.length > 0;
   const showServiceProviderRegister =
-    hasConfiguredWorkflow &&
     procedure.entityType === 'EstateFacilityServiceProvider';
   const showStaffCleanerRegister =
     procedure.entityType === 'EstateFacilityStaffCleaner';
-  const showAssetOperationsRegister =
-    hasConfiguredWorkflow &&
-    procedure.entityType === 'EstateFacilityAssetRegister';
   const showBillingServiceChargeRegister =
-    hasConfiguredWorkflow &&
     procedure.entityType === 'EstateFacilityBillingServiceCharge';
-  const showDocumentIndexRegister =
-    hasConfiguredWorkflow && procedure.entityType === 'EstateFacilityDocument';
   const showMaintenanceIntakeRegister =
-    hasConfiguredWorkflow &&
     procedure.entityType === 'EstateFacilityMaintenance';
-  const useMaintenanceWorkspace = showMaintenanceIntakeRegister;
   const showComplaintIntakeRegister =
-    hasConfiguredWorkflow && procedure.entityType === 'EstateFacilityComplaint';
+    procedure.entityType === 'EstateFacilityComplaint';
+  const operatingMode = procedure.entityType === 'EstateFacilityPropertySite' ? 'site'
+    : procedure.entityType === 'EstateFacilityLease' ? 'lease' : null;
+  const useCaseWorkspace = showMaintenanceIntakeRegister || showComplaintIntakeRegister;
 
   return (
     <div className="space-y-6">
@@ -1452,23 +1242,19 @@ export default function FacilitiesProcedureWorkspacePage() {
         </Button>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-2">
-            <Badge variant="outline" className="w-fit">
-              {procedure.entityType}
-            </Badge>
             <div>
               <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">
                 {procedure.title}
               </h1>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Badge variant="secondary">{procedure.source}</Badge>
+          {hasConfiguredWorkflow ? (
             <Badge variant="secondary">{workspace.stages.length} stages</Badge>
-          </div>
+          ) : null}
         </div>
       </div>
 
-      {useMaintenanceWorkspace ? (
+      {useCaseWorkspace ? (
         <>
           <ProcedureCaseWorkspace
             module="Facilities"
@@ -1476,17 +1262,21 @@ export default function FacilitiesProcedureWorkspacePage() {
             defaultTitle={procedure.title}
             workspaceType="Case Workflow"
           />
-          <FacilitiesMaintenanceWorkspace
-            workspace={workspace}
-            operationalHandoff={operationalHandoff}
-            canOpenOperationalHandoff={canOpenOperationalHandoff}
-          />
+          {showMaintenanceIntakeRegister ? (
+            <FacilitiesMaintenanceWorkspace
+              workspace={workspace}
+              operationalHandoff={operationalHandoff}
+              canOpenOperationalHandoff={canOpenOperationalHandoff}
+            />
+          ) : null}
         </>
-      ) : (
+      ) : hasConfiguredWorkflow && !operatingMode ? (
         <FacilitiesWorkflowOverview workspace={workspace} />
-      )}
+      ) : null}
 
-      {operationalHandoff && !useMaintenanceWorkspace ? (
+      {operatingMode ? <FacilitiesOperatingRegister mode={operatingMode} /> : null}
+
+      {operationalHandoff && !operatingMode && !useCaseWorkspace && !showServiceProviderRegister && !showStaffCleanerRegister ? (
         <Card className="border-border bg-card text-card-foreground">
           <CardHeader>
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1557,159 +1347,7 @@ export default function FacilitiesProcedureWorkspacePage() {
       ) : null}
 
       {showServiceProviderRegister ? (
-        <Card className="border-border bg-card text-card-foreground">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Briefcase className="h-5 w-5 text-primary" />
-              <CardTitle>Service Provider Operations</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <div className="mb-3 text-sm font-medium">
-                Provider Lifecycle Chain
-              </div>
-              <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-7">
-                {serviceProviderLifecycleStates.map((state, index) => (
-                  <div
-                    key={state}
-                    className="rounded-md border border-border bg-background p-3"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <Badge variant="outline">{index + 1}</Badge>
-                      {index < serviceProviderLifecycleStates.length - 1 ? (
-                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                      ) : null}
-                    </div>
-                    <div className="mt-3 text-sm font-medium">{state}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {serviceProviderGates.map((gate) => (
-                <div
-                  key={gate.title}
-                  className="rounded-md border border-border bg-background p-4"
-                >
-                  <div className="font-medium">{gate.title}</div>
-                </div>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="default">Approved Supplier</Badge>
-              <Badge variant="secondary">Active Contract</Badge>
-              <Badge variant="secondary">Compliant</Badge>
-              <Badge variant="outline">Available</Badge>
-              <Badge variant="outline">Performance Reviewed</Badge>
-              <Badge variant="outline">Finance AP Referenced</Badge>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {showMaintenanceIntakeRegister && !useMaintenanceWorkspace ? (
-        <Card className="border-border bg-card text-card-foreground">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Wrench className="h-5 w-5 text-primary" />
-              <CardTitle>Maintenance Intake</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <div className="mb-3 text-sm font-medium">
-                Maintenance Intake Lifecycle Chain
-              </div>
-              <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-8">
-                {maintenanceIntakeLifecycleStates.map((state, index) => (
-                  <div
-                    key={state}
-                    className="rounded-md border border-border bg-background p-3"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <Badge variant="outline">{index + 1}</Badge>
-                      {index < maintenanceIntakeLifecycleStates.length - 1 ? (
-                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                      ) : null}
-                    </div>
-                    <div className="mt-3 text-sm font-medium">{state}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {maintenanceIntakeGates.map((gate) => (
-                <div
-                  key={gate.title}
-                  className="rounded-md border border-border bg-background p-4"
-                >
-                  <div className="font-medium">{gate.title}</div>
-                </div>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="default">Source: Estate / Facilities</Badge>
-              <Badge variant="secondary">Sent To Maintenance</Badge>
-              <Badge variant="secondary">Job Card Linked</Badge>
-              <Badge variant="outline">Work Order Linked</Badge>
-              <Badge variant="outline">Requester Feedback</Badge>
-              <Badge variant="outline">Facilities Closeout</Badge>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {showComplaintIntakeRegister ? (
-        <Card className="border-border bg-card text-card-foreground">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <MessageSquare className="h-5 w-5 text-primary" />
-              <CardTitle>Complaint Management</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <div className="mb-3 text-sm font-medium">
-                Complaint Intake Lifecycle Chain
-              </div>
-              <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-8">
-                {complaintIntakeLifecycleStates.map((state, index) => (
-                  <div
-                    key={state}
-                    className="rounded-md border border-border bg-background p-3"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <Badge variant="outline">{index + 1}</Badge>
-                      {index < complaintIntakeLifecycleStates.length - 1 ? (
-                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                      ) : null}
-                    </div>
-                    <div className="mt-3 text-sm font-medium">{state}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {complaintIntakeGates.map((gate) => (
-                <div
-                  key={gate.title}
-                  className="rounded-md border border-border bg-background p-4"
-                >
-                  <div className="font-medium">{gate.title}</div>
-                </div>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="default">Source: Estate / Facilities</Badge>
-              <Badge variant="secondary">Sent To Helpdesk</Badge>
-              <Badge variant="secondary">Ticket Linked</Badge>
-              <Badge variant="outline">Linked Action</Badge>
-              <Badge variant="outline">Feedback Received</Badge>
-              <Badge variant="outline">Facilities Closeout</Badge>
-            </div>
-          </CardContent>
-        </Card>
+        <FacilitiesProviderRegister />
       ) : null}
 
       {showStaffCleanerRegister ? (
@@ -1721,61 +1359,11 @@ export default function FacilitiesProcedureWorkspacePage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
-              <div className="mb-3 text-sm font-medium">
-                Staff Duty Lifecycle Chain
-              </div>
-              <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-8">
-                {staffCleanerLifecycleStates.map((state, index) => (
-                  <div
-                    key={state}
-                    className="rounded-md border border-border bg-background p-3"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <Badge variant="outline">{index + 1}</Badge>
-                      {index < staffCleanerLifecycleStates.length - 1 ? (
-                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                      ) : null}
-                    </div>
-                    <div className="mt-3 text-sm font-medium">{state}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {staffCleanerGates.map((gate) => (
-                <div
-                  key={gate.title}
-                  className="rounded-md border border-border bg-background p-4"
-                >
-                  <div className="font-medium">{gate.title}</div>
-                </div>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="default">
-                {'Source: HR / Payroll -> Estate / Facilities'}
-              </Badge>
-              <Badge variant="secondary">User Link Checked</Badge>
-              <Badge variant="secondary">Roster Assigned</Badge>
-              <Badge variant="secondary">Tools / Access Ready</Badge>
-              <Badge variant="outline">Late</Badge>
-              <Badge variant="outline">Absent</Badge>
-              <Badge variant="outline">Replacement Coverage</Badge>
-              <Badge variant="outline">Quality Follow-up</Badge>
-              <Badge variant="outline">HR Escalation</Badge>
-            </div>
-            <div className="rounded-md border border-border bg-background p-4">
+            <div className="space-y-3">
               <div className="mb-3">
                 <div className="font-medium">
                   Cleaner Timetable / Duty Roster
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  Assign cleaners or Facilities staff to apartments, units,
-                  floors, blocks, routes, or common areas. HR remains the
-                  employee source; Maintenance and Helpdesk are linked by
-                  reference when a duty creates a repair or complaint follow-up.
-                </p>
               </div>
               <form
                 className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"
@@ -1783,13 +1371,24 @@ export default function FacilitiesProcedureWorkspacePage() {
               >
                 <div className="space-y-1">
                   <Label htmlFor="duty-staff-name">Cleaner / staff name</Label>
-                  <Input
+                  <FacilitiesDutyLookup
                     id="duty-staff-name"
-                    value={dutyRosterForm.staffName}
-                    onChange={(event) =>
-                      updateDutyRosterForm('staffName', event.target.value)
-                    }
-                    placeholder="Name from HR"
+                    label="Cleaner / staff name"
+                    selectedLabel={selectedDutyStaff ? `${selectedDutyStaff.staffName} (${selectedDutyStaff.employeeNumber})` : undefined}
+                    search={estateFacilitiesService.searchDutyStaff}
+                    describe={(staff) => ({
+                      title: `${staff.staffName} (${staff.employeeNumber})`,
+                      detail: [staff.department, staff.position].filter(Boolean).join(' / '),
+                    })}
+                    onSelect={(staff) => {
+                      setSelectedDutyStaff(staff);
+                      setDutyRosterForm((current) => ({
+                        ...current,
+                        employeeProfileId: staff.employeeProfileId,
+                        employeeNumber: staff.employeeNumber,
+                        staffName: staff.staffName,
+                      }));
+                    }}
                   />
                 </div>
                 <div className="space-y-1">
@@ -1797,36 +1396,61 @@ export default function FacilitiesProcedureWorkspacePage() {
                   <Input
                     id="duty-employee-number"
                     value={dutyRosterForm.employeeNumber || ''}
-                    onChange={(event) =>
-                      updateDutyRosterForm('employeeNumber', event.target.value)
-                    }
-                    placeholder="Optional HR reference"
+                    readOnly
+                    placeholder="Selected from HR"
                   />
+                  {selectedDutyStaff?.department || selectedDutyStaff?.position ? (
+                    <p className="text-xs text-muted-foreground">{[selectedDutyStaff.department, selectedDutyStaff.position].filter(Boolean).join(' / ')}</p>
+                  ) : null}
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="duty-property">Property / site</Label>
-                  <Input
+                  <FacilitiesDutyLookup
                     id="duty-property"
-                    value={dutyRosterForm.propertyReference || ''}
-                    onChange={(event) =>
-                      updateDutyRosterForm(
-                        'propertyReference',
-                        event.target.value
-                      )
-                    }
-                    placeholder="Estate, block, or property"
+                    label="Property / site"
+                    selectedLabel={selectedDutyProperty ? `${selectedDutyProperty.name} (${selectedDutyProperty.assetCode})` : undefined}
+                    search={estateFacilitiesService.searchDutyProperties}
+                    describe={(property) => ({
+                      title: `${property.name} (${property.assetCode})`,
+                      detail: [property.projectTitle, property.location].filter(Boolean).join(' / '),
+                    })}
+                    onSelect={(property) => {
+                      setSelectedDutyProperty(property);
+                      setSelectedDutyUnit(null);
+                      setDutyRosterForm((current) => ({
+                        ...current,
+                        propertyReference: property.assetCode,
+                        propertyUnit: '',
+                        serviceAreaName: property.name,
+                      }));
+                    }}
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="duty-unit">Apartment / unit</Label>
-                  <Input
+                  <Label htmlFor="duty-unit">Unit / parcel</Label>
+                  <FacilitiesDutyLookup
                     id="duty-unit"
-                    value={dutyRosterForm.propertyUnit || ''}
-                    onChange={(event) =>
-                      updateDutyRosterForm('propertyUnit', event.target.value)
-                    }
-                    placeholder="Apartment, unit, floor, route"
+                    key={selectedDutyProperty?.id || 'no-property'}
+                    label="Unit / parcel"
+                    selectedLabel={selectedDutyUnit ? `${selectedDutyUnit.name} (${selectedDutyUnit.projectUnitCode || selectedDutyUnit.assetCode})` : undefined}
+                    disabled={!selectedDutyProperty}
+                    minimumQueryLength={0}
+                    search={searchDutyUnits}
+                    describe={(unit) => ({
+                      title: `${unit.name} (${unit.projectUnitCode || unit.assetCode})`,
+                      detail: [unit.blockName, unit.floorLabel, unit.unitType].filter(Boolean).join(' / '),
+                    })}
+                    onSelect={(unit) => {
+                      setSelectedDutyUnit(unit);
+                      setDutyRosterForm((current) => ({
+                        ...current,
+                        propertyUnit: unit.projectUnitCode || unit.assetCode,
+                        serviceAreaName: unit.name,
+                        serviceAreaType: unit.unitType || (String(unit.assetType).toLowerCase() === 'land' || unit.assetType === 0 ? 'Land parcel' : 'Property unit'),
+                      }));
+                    }}
                   />
+                  {selectedDutyProperty ? <p className="text-xs text-muted-foreground">Leave unselected for common areas or the whole site.</p> : null}
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="duty-area-type">Area type</Label>
@@ -1976,6 +1600,29 @@ export default function FacilitiesProcedureWorkspacePage() {
                     placeholder="Mop, bins, PPE"
                   />
                 </div>
+                <div className="space-y-1">
+                  <Label>Inventory issue voucher</Label>
+                  <FacilitiesDutyLookup<FacilitiesIssueVoucherOption>
+                    label="issued voucher"
+                    selectedLabel={dutyRosterForm.inventoryIssueVoucherNumber || undefined}
+                    search={estateFacilitiesService.searchIssueVouchers}
+                    describe={(voucher) => ({ title: voucher.voucherNumber, detail: voucher.supplies || voucher.status })}
+                    onSelect={(voucher) => setDutyRosterForm((current) => ({
+                      ...current,
+                      inventoryIssueVoucherId: voucher.id,
+                      inventoryIssueVoucherNumber: voucher.voucherNumber,
+                      suppliesIssued: voucher.supplies,
+                    }))}
+                  />
+                </div>
+                {dutyRosterForm.inventoryIssueVoucherNumber ? (
+                  <div className="flex items-end gap-2 md:col-span-2">
+                    <Input aria-label="Issued supplies" value={dutyRosterForm.suppliesIssued || ''} readOnly />
+                    <Button type="button" variant="outline" size="sm" onClick={() => setDutyRosterForm((current) => ({
+                      ...current, inventoryIssueVoucherId: null, inventoryIssueVoucherNumber: null, suppliesIssued: '',
+                    }))}>Clear voucher</Button>
+                  </div>
+                ) : null}
                 <div className="space-y-1 md:col-span-2 xl:col-span-4">
                   <Label htmlFor="duty-checklist">Checklist / notes</Label>
                   <Textarea
@@ -2100,63 +1747,6 @@ export default function FacilitiesProcedureWorkspacePage() {
         </Card>
       ) : null}
 
-      {showAssetOperationsRegister ? (
-        <Card className="border-border bg-card text-card-foreground">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Database className="h-5 w-5 text-primary" />
-              <CardTitle>Facilities Asset Operating View</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <div className="mb-3 text-sm font-medium">
-                Asset Operating View Lifecycle Chain
-              </div>
-              <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-8">
-                {assetOperationsLifecycleStates.map((state, index) => (
-                  <div
-                    key={state}
-                    className="rounded-md border border-border bg-background p-3"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <Badge variant="outline">{index + 1}</Badge>
-                      {index < assetOperationsLifecycleStates.length - 1 ? (
-                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                      ) : null}
-                    </div>
-                    <div className="mt-3 text-sm font-medium">{state}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {assetOperationsGates.map((gate) => (
-                <div
-                  key={gate.title}
-                  className="rounded-md border border-border bg-background p-4"
-                >
-                  <div className="font-medium">{gate.title}</div>
-                </div>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="default">
-                {
-                  'Source: Project Management / Finance Fixed Assets / Maintenance -> Estate / Facilities'
-                }
-              </Badge>
-              <Badge variant="secondary">Custodian Assigned</Badge>
-              <Badge variant="secondary">Under Warranty</Badge>
-              <Badge variant="outline">Needs Inspection</Badge>
-              <Badge variant="outline">Under Maintenance</Badge>
-              <Badge variant="outline">Service Impact</Badge>
-              <Badge variant="outline">Finance Action</Badge>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
       {showBillingServiceChargeRegister ? (
         <Card className="border-border bg-card text-card-foreground">
           <CardHeader>
@@ -2166,50 +1756,6 @@ export default function FacilitiesProcedureWorkspacePage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
-              <div className="mb-3 text-sm font-medium">
-                Billing / Service Charge Lifecycle Chain
-              </div>
-              <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-8">
-                {billingServiceChargeLifecycleStates.map((state, index) => (
-                  <div
-                    key={state}
-                    className="rounded-md border border-border bg-background p-3"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <Badge variant="outline">{index + 1}</Badge>
-                      {index <
-                      billingServiceChargeLifecycleStates.length - 1 ? (
-                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                      ) : null}
-                    </div>
-                    <div className="mt-3 text-sm font-medium">{state}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {billingServiceChargeGates.map((gate) => (
-                <div
-                  key={gate.title}
-                  className="rounded-md border border-border bg-background p-4"
-                >
-                  <div className="font-medium">{gate.title}</div>
-                </div>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="default">
-                {'Source: Estate / Facilities -> Finance AR'}
-              </Badge>
-              <Badge variant="secondary">Service Charge</Badge>
-              <Badge variant="secondary">AR Instruction</Badge>
-              <Badge variant="outline">Invoice Reference</Badge>
-              <Badge variant="outline">Receipt Reference</Badge>
-              <Badge variant="outline">Statement Reference</Badge>
-              <Badge variant="outline">Arrears Follow-up</Badge>
-              <Badge variant="outline">Central DMS</Badge>
-            </div>
             <form
               className="rounded-md border border-border bg-background p-4"
               onSubmit={createArInvoice}
@@ -2217,22 +1763,39 @@ export default function FacilitiesProcedureWorkspacePage() {
               <div className="mb-4">
                 <div className="font-medium">Create Finance AR Invoice</div>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Create a draft invoice through the existing Finance AR API.
-                  Finance AR remains responsible for posting, receipts,
-                  allocation, balances, and GL.
+                  Bill the selected property through Finance AR. Finance approval,
+                  receipts, balances, and posting remain in Finance.
                 </p>
               </div>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <div className="space-y-2">
-                  <Label htmlFor="ar-customer-id">Finance AR customer ID</Label>
-                  <Input
-                    id="ar-customer-id"
-                    value={arInvoiceForm.customerId}
-                    onChange={(event) =>
-                      updateArInvoiceForm('customerId', event.target.value)
-                    }
-                    placeholder="Customer GUID from Finance AR"
+                  <Label htmlFor="ar-property">Property or unit</Label>
+                  <FacilitiesDutyLookup<EstateManagedAsset>
+                    id="ar-property"
+                    label="Property or unit"
+                    selectedLabel={selectedBillingProperty
+                      ? `${selectedBillingProperty.name} (${selectedBillingProperty.assetCode})`
+                      : undefined}
+                    search={searchBillingProperties}
+                    describe={(asset) => ({
+                      title: `${asset.name} (${asset.assetCode})`,
+                      detail: asset.lesseeName || asset.location || undefined,
+                    })}
+                    onSelect={(asset) => {
+                      setSelectedBillingProperty(asset);
+                      setArInvoiceResult(null);
+                      setArInvoiceForm((current) => ({
+                        ...current,
+                        customerId: asset.customerBusinessPartnerId || '',
+                        propertyUnit: asset.assetCode,
+                        reference: asset.assetCode,
+                      }));
+                    }}
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ar-customer">Customer</Label>
+                  <Input id="ar-customer" value={selectedBillingProperty?.lesseeName || ''} readOnly placeholder="Select a property" />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="ar-invoice-reference">
@@ -2327,7 +1890,7 @@ export default function FacilitiesProcedureWorkspacePage() {
                     onChange={(event) =>
                       updateArInvoiceForm('notes', event.target.value)
                     }
-                    placeholder="Source: Estate / Facilities -> Finance AR"
+                    placeholder="Facilities AR instruction"
                   />
                 </div>
               </div>
@@ -2337,10 +1900,12 @@ export default function FacilitiesProcedureWorkspacePage() {
                 </div>
               ) : null}
               {arInvoiceResult ? (
-                <div className="mt-3 flex flex-col gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-300 sm:flex-row sm:items-center sm:justify-between">
+                <div className={`mt-3 flex flex-col gap-2 rounded-md p-3 text-sm sm:flex-row sm:items-center sm:justify-between ${arInvoiceResult.status === 'Sent' ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'border border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300'}`}>
                   <span>
-                    Finance AR invoice {arInvoiceResult.invoiceNumber} created
-                    with status {arInvoiceResult.status}.
+                    Finance AR invoice {arInvoiceResult.invoiceNumber}{' '}
+                    {arInvoiceResult.status === 'Sent'
+                      ? 'was sent and is available to the customer.'
+                      : `was created with status ${arInvoiceResult.status}. Finance must release it before it appears as a customer bill.`}
                   </span>
                   <Button asChild size="sm" variant="outline">
                     <Link href={`/finance/ar/invoices/${arInvoiceResult.id}`}>
@@ -2357,10 +1922,11 @@ export default function FacilitiesProcedureWorkspacePage() {
                     : 'Create AR invoice'}
                 </Button>
                 <Badge variant="outline">
-                  {'Source: Estate / Facilities -> Finance AR'}
+                  Finance AR
                 </Badge>
               </div>
             </form>
+            <FacilitiesPropertyInvoices propertyUnit={selectedBillingProperty?.assetCode} refreshKey={arInvoiceResult?.id} />
             <form
               className="rounded-md border border-border bg-background p-4"
               onSubmit={createArPayment}
@@ -2466,7 +2032,7 @@ export default function FacilitiesProcedureWorkspacePage() {
                     onChange={(event) =>
                       updateArPaymentForm('notes', event.target.value)
                     }
-                    placeholder="Source: Estate / Facilities -> Finance AR"
+                    placeholder="Facilities AR receipt"
                   />
                 </div>
               </div>
@@ -2496,7 +2062,7 @@ export default function FacilitiesProcedureWorkspacePage() {
                     : 'Record AR receipt'}
                 </Button>
                 <Badge variant="outline">
-                  {'Source: Estate / Facilities -> Finance AR'}
+                  Finance AR
                 </Badge>
               </div>
             </form>
@@ -2661,8 +2227,7 @@ export default function FacilitiesProcedureWorkspacePage() {
               {billingDmsPublication ? (
                 <div className="mt-3 flex flex-col gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-300 sm:flex-row sm:items-center sm:justify-between">
                   <span>
-                    Published as {billingDmsPublication.documentReference} /{' '}
-                    {billingDmsPublication.sourceLabel}
+                    Published as {billingDmsPublication.documentReference}
                   </span>
                   <Button asChild size="sm" variant="outline">
                     <Link
@@ -2681,7 +2246,7 @@ export default function FacilitiesProcedureWorkspacePage() {
                     : 'Publish to Central DMS'}
                 </Button>
                 <Badge variant="outline">
-                  {'Source: Estate / Facilities -> Finance AR -> Central DMS'}
+                  Central DMS
                 </Badge>
               </div>
             </form>
@@ -2689,59 +2254,6 @@ export default function FacilitiesProcedureWorkspacePage() {
         </Card>
       ) : null}
 
-      {showDocumentIndexRegister ? (
-        <Card className="border-border bg-card text-card-foreground">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <FileText className="h-5 w-5 text-primary" />
-              <CardTitle>Facilities Document Index & DMS Readiness</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <div className="mb-3 text-sm font-medium">
-                Document Index Lifecycle Chain
-              </div>
-              <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-8">
-                {documentIndexLifecycleStates.map((state, index) => (
-                  <div
-                    key={state}
-                    className="rounded-md border border-border bg-background p-3"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <Badge variant="outline">{index + 1}</Badge>
-                      {index < documentIndexLifecycleStates.length - 1 ? (
-                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                      ) : null}
-                    </div>
-                    <div className="mt-3 text-sm font-medium">{state}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {documentIndexGates.map((gate) => (
-                <div
-                  key={gate.title}
-                  className="rounded-md border border-border bg-background p-4"
-                >
-                  <div className="font-medium">{gate.title}</div>
-                </div>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="default">Indexed</Badge>
-              <Badge variant="secondary">Metadata Template</Badge>
-              <Badge variant="secondary">Expiry Tracked</Badge>
-              <Badge variant="secondary">Restricted Access</Badge>
-              <Badge variant="outline">Comments Ready</Badge>
-              <Badge variant="outline">Future Versioning</Badge>
-              <Badge variant="outline">PDF Viewer Annotation</Badge>
-              <Badge variant="outline">Central DMS Ready</Badge>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
     </div>
   );
 }

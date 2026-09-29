@@ -12,20 +12,27 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { journalBatchDataService } from '@/services/finance/journal-batch-data.service';
 import type { Currency, FiscalPeriod } from '@/types/finance';
+import type { EligibleJournalBatchBook } from '@/types/journal-batches';
 
 export default function NewJournalBatchPage() {
     const router = useRouter();
     const { toast } = useToast();
+    const { hasPermission } = useAuth();
+    const canCreate = hasPermission('Finance.JournalBatches.Create');
     const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
     const [currencies, setCurrencies] = useState<Currency[]>([]);
+    const [eligibleBooks, setEligibleBooks] = useState<EligibleJournalBatchBook[]>([]);
+    const [loadingBooks, setLoadingBooks] = useState(false);
+    const [bookError, setBookError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
     const [form, setForm] = useState({
         description: '',
         fiscalPeriodId: '',
-        bookClassification: 'IFRS',
+        accountingBookId: '',
         controlCurrencyCode: '',
         expectedDebitTotal: '',
         expectedJournalCount: '',
@@ -57,14 +64,52 @@ export default function NewJournalBatchPage() {
             }));
     }, [toast]);
 
+    useEffect(() => {
+        if (!form.fiscalPeriodId || !canCreate) {
+            setEligibleBooks([]);
+            setForm((current) => ({ ...current, accountingBookId: '' }));
+            setBookError(null);
+            return;
+        }
+
+        let cancelled = false;
+        setLoadingBooks(true);
+        setBookError(null);
+        journalBatchDataService.getEligibleBooks(form.fiscalPeriodId)
+            .then((books) => {
+                if (cancelled) return;
+                setEligibleBooks(books);
+                setForm((current) => {
+                    const currentIsEligible = books.some((book) => book.id === current.accountingBookId);
+                    const preferred = books.find((book) => book.isDefault) ?? books[0];
+                    return { ...current, accountingBookId: currentIsEligible ? current.accountingBookId : preferred?.id ?? '' };
+                });
+            })
+            .catch((error) => {
+                if (cancelled) return;
+                setEligibleBooks([]);
+                setForm((current) => ({ ...current, accountingBookId: '' }));
+                setBookError(error.message || 'Eligible accounting books could not be loaded.');
+            })
+            .finally(() => {
+                if (!cancelled) setLoadingBooks(false);
+            });
+
+        return () => { cancelled = true; };
+    }, [canCreate, form.fiscalPeriodId]);
+
     const openPeriods = useMemo(
         () => periods.filter((period) => period.periodStatus === 'Open' || period.status === 'Open' || period.isOpen),
         [periods],
     );
 
     const create = async () => {
-        if (!form.description.trim() || !form.fiscalPeriodId || !form.controlCurrencyCode || Number(form.expectedDebitTotal) <= 0) {
-            toast({ title: 'Complete required fields', description: 'Description, open period, control currency, and expected total are required.', variant: 'destructive' });
+        if (!canCreate) {
+            toast({ title: 'Permission required', description: 'You do not have permission to create journal batches.', variant: 'destructive' });
+            return;
+        }
+        if (!form.description.trim() || !form.fiscalPeriodId || !form.accountingBookId || !form.controlCurrencyCode || Number(form.expectedDebitTotal) <= 0) {
+            toast({ title: 'Complete required fields', description: 'Description, open period, eligible accounting book, control currency, and expected total are required.', variant: 'destructive' });
             return;
         }
         try {
@@ -72,7 +117,7 @@ export default function NewJournalBatchPage() {
             const created = await journalBatchDataService.createBatch({
                 description: form.description.trim(),
                 fiscalPeriodId: form.fiscalPeriodId,
-                bookClassification: form.bookClassification,
+                accountingBookId: form.accountingBookId,
                 controlCurrencyCode: form.controlCurrencyCode.toUpperCase(),
                 expectedDebitTotal: Number(form.expectedDebitTotal),
                 expectedJournalCount: form.expectedJournalCount ? Number(form.expectedJournalCount) : undefined,
@@ -110,7 +155,30 @@ export default function NewJournalBatchPage() {
                             <SelectContent>{openPeriods.map((period) => <SelectItem key={period.id} value={period.id}>{period.periodName}</SelectItem>)}</SelectContent>
                         </Select>
                     </div>
-                    <div className="space-y-2"><Label htmlFor="batch-accounting-book">Accounting book</Label><Select value={form.bookClassification} onValueChange={(value) => setForm({ ...form, bookClassification: value })}><SelectTrigger id="batch-accounting-book"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="IFRS">IFRS</SelectItem><SelectItem value="LOCAL_STATUTORY">Local statutory</SelectItem><SelectItem value="MANAGEMENT">Management</SelectItem></SelectContent></Select></div>
+                    <div className="space-y-2">
+                        <Label htmlFor="batch-accounting-book">Accounting book</Label>
+                        <Select
+                            value={form.accountingBookId}
+                            onValueChange={(value) => setForm({ ...form, accountingBookId: value })}
+                            disabled={!form.fiscalPeriodId || loadingBooks || eligibleBooks.length === 0}
+                        >
+                            <SelectTrigger id="batch-accounting-book">
+                                <SelectValue placeholder={loadingBooks ? 'Loading eligible books…' : 'Select an eligible book'} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {eligibleBooks.map((book) => (
+                                    <SelectItem key={book.id} value={book.id}>
+                                        {book.code} — {book.name} ({book.bookType})
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        {bookError && <p className="text-xs text-destructive">{bookError}</p>}
+                        {!bookError && form.fiscalPeriodId && !loadingBooks && eligibleBooks.length === 0 && (
+                            <p className="text-xs text-destructive">No active, postable primary or delta book has an open book period for this fiscal period.</p>
+                        )}
+                        <p className="text-xs text-muted-foreground">Parallel books are replication targets and cannot receive direct journal batches.</p>
+                    </div>
                     <div className="space-y-2"><Label htmlFor="batch-expected-total">Expected debit total</Label><Input id="batch-expected-total" type="number" min="0.01" step="0.01" value={form.expectedDebitTotal} onChange={(e) => setForm({ ...form, expectedDebitTotal: e.target.value })} /></div>
                     <div className="space-y-2"><Label htmlFor="batch-expected-count">Expected journal count (optional)</Label><Input id="batch-expected-count" type="number" min="1" value={form.expectedJournalCount} onChange={(e) => setForm({ ...form, expectedJournalCount: e.target.value })} /></div>
                     <div className="space-y-2">
@@ -132,7 +200,7 @@ export default function NewJournalBatchPage() {
                         </p>
                     </div>
                     <div className="space-y-2 md:col-span-2"><Label htmlFor="batch-notes">Notes</Label><Textarea id="batch-notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
-                    <div className="flex justify-end md:col-span-2"><Button onClick={create} disabled={saving}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Create batch</Button></div>
+                    <div className="flex justify-end md:col-span-2"><Button onClick={create} disabled={saving || !canCreate || loadingBooks || !form.accountingBookId}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Create batch</Button></div>
                 </CardContent>
             </Card>
         </div>

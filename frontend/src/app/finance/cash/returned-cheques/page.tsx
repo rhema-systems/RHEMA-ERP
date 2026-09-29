@@ -26,6 +26,7 @@ import { financeDataService } from '@/services/finance/finance-data.service';
 import type { CustomerPayment } from '@/types/ar';
 import type { BankDeposit, ReturnedChequeCase } from '@/types/cash-management';
 import type { FinanceSettings } from '@/types/finance';
+import { useAuth } from '@/hooks/use-auth';
 
 type ReturnedChequeChargeTreatment = 'CustomerRecoverable' | 'BankChargeExpense' | 'Split';
 
@@ -49,16 +50,18 @@ function createInitialForm(chargeTreatment: ReturnedChequeChargeTreatment) {
 function ReturnedChequeDimensionEditor({
     item,
     onSaved,
+    canEdit,
 }: {
     item: ReturnedChequeCase;
     onSaved: () => Promise<void>;
+    canEdit: boolean;
 }) {
     const initial = toFinanceSourceDimensionFormState(item.financeDimensions);
     const [defaultValues, setDefaultValues] = useState(initial.defaultValues);
     const [lineValues, setLineValues] = useState(initial.lineValues);
     const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
     const [saving, setSaving] = useState(false);
-    const editable = item.status === 'Draft' || item.status === 'Returned';
+    const editable = canEdit && (item.status === 'Draft' || item.status === 'Returned');
     const lines = item.financeDimensions?.lines.map((line, index) => ({
         id: line.sourceLineId,
         accountId: line.accountId,
@@ -133,6 +136,8 @@ function ReturnedChequeDimensionEditor({
 }
 
 export default function ReturnedChequesPage() {
+    const { hasPermission } = useAuth();
+    const canManageReturnedCheques = hasPermission('Finance.Banking.ReturnedCheques.Manage');
     const [items, setItems] = useState<ReturnedChequeCase[]>([]);
     const [payments, setPayments] = useState<CustomerPayment[]>([]);
     const [postedDeposits, setPostedDeposits] = useState<BankDeposit[]>([]);
@@ -280,9 +285,9 @@ export default function ReturnedChequesPage() {
                     <Button variant="ghost" size="icon" asChild><Link href="/finance/cash"><ArrowLeft className="h-4 w-4" /></Link></Button>
                     <div><h1 className="text-3xl font-bold">Returned Cheques</h1><p className="text-muted-foreground">Reopen AR and record bank debits for deposited customer cheques.</p></div>
                 </div>
-                <Button disabled={loading} onClick={toggleForm}><Plus className="mr-2 h-4 w-4" />Record returned cheque</Button>
+                {canManageReturnedCheques && <Button disabled={loading} onClick={toggleForm}><Plus className="mr-2 h-4 w-4" />Record returned cheque</Button>}
             </div>
-            {showForm && (
+            {showForm && canManageReturnedCheques && (
                 <Card>
                     <CardHeader><CardTitle>Bank return advice</CardTitle><CardDescription>The original deposit remains in history; approval creates the bank debit and reopens the customer balance.</CardDescription></CardHeader>
                     <CardContent>
@@ -338,7 +343,7 @@ export default function ReturnedChequesPage() {
                 <CardHeader><CardTitle>Returned-cheque register</CardTitle></CardHeader>
                 <CardContent>
                     {loading ? <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div> : items.length === 0 ? <div className="py-12 text-center text-muted-foreground"><RotateCcw className="mx-auto mb-3 h-9 w-9" />No returned cheques recorded.</div> : (
-                        <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="border-b text-left text-muted-foreground"><tr><th className="p-3">Case</th><th className="p-3">Customer / cheque</th><th className="p-3">Bank reference</th><th className="p-3">Return date</th><th className="p-3 text-right">Bank debit</th><th className="p-3">Status</th><th className="p-3"></th></tr></thead><tbody>{items.map(item => <tr key={item.id} className="border-b"><td className="p-3 font-medium">{item.caseNumber}</td><td className="p-3"><div>{item.customerName}</div><div className="text-xs text-muted-foreground">{item.chequeNumber} · {item.paymentNumber}</div></td><td className="p-3"><div>{item.bankAccountName}</div><div className="text-xs text-muted-foreground">{item.bankReference}</div></td><td className="p-3">{new Date(item.returnDate).toLocaleDateString()}</td><td className="p-3 text-right">{(item.returnedAmount + item.bankChargeAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td className="p-3"><Badge variant={item.status === 'Posted' ? 'default' : item.status === 'Rejected' ? 'destructive' : 'secondary'}>{item.status}</Badge></td><td className="p-3">{item.status === 'Submitted' && <Button size="sm" onClick={() => void cashManagementDataService.approveReturnedCheque(item.id).then(() => load()).catch(error => toast.error(error instanceof Error ? error.message : 'Approval failed.'))}>Approve</Button>}</td></tr>)}</tbody></table></div>
+                        <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="border-b text-left text-muted-foreground"><tr><th className="p-3">Case</th><th className="p-3">Customer / cheque</th><th className="p-3">Bank reference</th><th className="p-3">Return date</th><th className="p-3 text-right">Bank debit</th><th className="p-3">Status</th><th className="p-3"></th></tr></thead><tbody>{items.map(item => <tr key={item.id} className="border-b"><td className="p-3 font-medium">{item.caseNumber}</td><td className="p-3"><div>{item.customerName}</div><div className="text-xs text-muted-foreground">{item.chequeNumber} · {item.paymentNumber}</div></td><td className="p-3"><div>{item.bankAccountName}</div><div className="text-xs text-muted-foreground">{item.bankReference}</div></td><td className="p-3">{new Date(item.returnDate).toLocaleDateString()}</td><td className="p-3 text-right">{(item.returnedAmount + item.bankChargeAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td className="p-3"><Badge variant={item.status === 'Posted' ? 'default' : item.status === 'Rejected' ? 'destructive' : 'secondary'}>{item.status}</Badge></td><td className="p-3">{canManageReturnedCheques && item.status === 'Submitted' && <Button size="sm" onClick={() => void cashManagementDataService.approveReturnedCheque(item.id).then(() => load()).catch(error => toast.error(error instanceof Error ? error.message : 'Approval failed.'))}>Approve</Button>}</td></tr>)}</tbody></table></div>
                     )}
                     {items.length > 0 && (
                         <div className="mt-5 space-y-3 border-t pt-5">
@@ -349,7 +354,7 @@ export default function ReturnedChequesPage() {
                                         {item.caseNumber} · {item.customerName}
                                     </summary>
                                     <div className="mt-3 space-y-3">
-                                        <ReturnedChequeDimensionEditor item={item} onSaved={load} />
+                                        <ReturnedChequeDimensionEditor item={item} onSaved={load} canEdit={canManageReturnedCheques} />
                                         <SettlementDimensionEvidence evidence={item.settlementDimensionEvidence} />
                                     </div>
                                 </details>

@@ -5,6 +5,7 @@ namespace ErpSystem.Core.DTOs.Procurement;
 /// </summary>
 public class ProcurementSettingsDto
 {
+    public string? PurchasePriceDifferenceHandling { get; set; }
     public bool AutoCloseTenders { get; set; }
     public bool EnforceSegregationOfDuties { get; set; } = true;
     public Guid Id { get; set; }
@@ -49,6 +50,7 @@ public class ProcurementSettingsDto
 /// </summary>
 public class UpdateProcurementSettingsDto
 {
+    public string? PurchasePriceDifferenceHandling { get; set; }
     public bool? AutoCloseTenders { get; set; }
     public bool? EnforceSegregationOfDuties { get; set; }
     // Item Creation Settings
