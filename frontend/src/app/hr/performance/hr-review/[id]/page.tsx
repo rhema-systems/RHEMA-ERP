@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import { CheckCircle2, Clock, Loader2, Pencil, RotateCcw, Trash2, TriangleAlert, Undo2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -42,8 +43,9 @@ import type { EvaluationSummary } from '@/types/hr/appraisal-run';
  * HR's sign-off on one appraisal.
  *
  * Two outcomes, and they are not symmetrical:
- *   • **Finalise** recalculates the weighted score from all three legs, records the sign-off,
- *     and pushes the score onto the employee's talent records. Where it lands depends on the
+ *   • **Finalise** settles the score — the panel's restated overall where a calibration committed
+ *     one, otherwise the weighted mean of the submitted evaluations — records the sign-off, and
+ *     pushes the rating onto the employee's talent records. Where it lands depends on the
  *     cycle: `Governance` when an acknowledgment is required (the employee closes it out), or
  *     `Completed` when one is not.
  *   • **Return to manager** reopens the manager's evaluation and puts the appraisal back to
@@ -325,7 +327,8 @@ export default function HRReviewDetailPage() {
           <CheckCircle2 className="h-4 w-4" />
           <AlertTitle>Ready to finalise</AlertTitle>
           <AlertDescription>
-            All required evaluations are in. Finalising recalculates the weighted score and
+            All required evaluations are in. Finalising settles the score — the calibration
+            panel&apos;s overall where it restated one, otherwise the weighted evaluations — and
             {data.status === 'Governance'
               ? ' closes HR’s part of this appraisal.'
               : ' hands the appraisal on for acknowledgment.'}
@@ -599,7 +602,9 @@ function SummaryTables({
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between gap-2">
-              <CardTitle className="text-base">Competencies</CardTitle>
+              <CardTitle className="text-base">
+                {summary.competencyScores.some((s) => s.isGoal) ? 'Competencies and rated goals' : 'Competencies'}
+              </CardTitle>
               {summary.totalScore != null && (
                 <span className="text-sm text-muted-foreground">
                   Total {Number(summary.totalScore).toFixed(2)}
@@ -621,7 +626,14 @@ function SummaryTables({
                 {summary.competencyScores.map((s, i) => (
                   <TableRow key={`${s.criteriaName}-${i}`}>
                     <TableCell>
-                      <div className="font-medium">{s.criteriaName}</div>
+                      <div className="font-medium">
+                        {s.criteriaName}
+                        {s.isGoal && (
+                          <Badge variant="secondary" className="ml-2">
+                            Goal
+                          </Badge>
+                        )}
+                      </div>
                       {s.comments && (
                         <div className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
                           {s.comments}
@@ -644,7 +656,9 @@ function SummaryTables({
       {summary.kpiScores.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">KPIs</CardTitle>
+            <CardTitle className="text-base">
+              {summary.kpiScores.some((k) => k.isGoal) ? 'KPIs and measured goals' : 'KPIs'}
+            </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <Table>
@@ -660,7 +674,14 @@ function SummaryTables({
                 {summary.kpiScores.map((k, i) => (
                   <TableRow key={`${k.kpiName}-${i}`}>
                     <TableCell>
-                      <div className="font-medium">{k.kpiName}</div>
+                      <div className="font-medium">
+                        {k.kpiName}
+                        {k.isGoal && (
+                          <Badge variant="secondary" className="ml-2">
+                            Goal
+                          </Badge>
+                        )}
+                      </div>
                       {k.notes && (
                         <div className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
                           {k.notes}
@@ -676,6 +697,11 @@ function SummaryTables({
                       {k.achievementPercentage != null
                         ? `${Number(k.achievementPercentage).toFixed(1)}%`
                         : '—'}
+                      {k.achievementOverridden && (
+                        <div className="text-xs font-normal text-amber-700 dark:text-amber-400">
+                          Overridden by calibration/appeal
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

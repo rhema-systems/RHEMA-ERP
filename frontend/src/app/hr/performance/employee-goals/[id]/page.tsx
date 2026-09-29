@@ -12,6 +12,7 @@ import {
   MessageSquareWarning,
   Send,
   Target,
+  Undo2,
   Unlock,
   XCircle,
 } from 'lucide-react';
@@ -36,6 +37,8 @@ import {
   FieldRow,
 } from '@/components/hr/employee/tabs/fields';
 import { employeeGoalService } from '@/services/hr/goals.service';
+import { useAuth } from '@/hooks/use-auth';
+import { hasAnyPermissionAccess } from '@/lib/permissions';
 import { formatDate, formatDateTime, formatPercent, humanizeEnum } from '@/lib/hr/attendance-format';
 import { GOAL_PROGRESS_STATUS_OPTIONS } from '@/types/hr/goals';
 import type { GoalProgressEntry, GoalProgressStatus } from '@/types/hr/goals';
@@ -57,8 +60,13 @@ import type { GoalProgressEntry, GoalProgressStatus } from '@/types/hr/goals';
  */
 const SUBMITTABLE = new Set(['Draft', 'Rejected']);
 const APPROVABLE = new Set(['PendingApproval']);
+// What an approved goal measures cannot be edited; the manager sends it back instead (decision
+// D-30). Not once it is locked or completed — the server refuses both.
+const SENDABLE_BACK = new Set(['Approved', 'InProgress', 'OnTrack', 'AtRisk']);
 const LOCKABLE = new Set(['Approved', 'InProgress', 'AtRisk', 'OnTrack', 'Completed']);
-const PROGRESS_OPEN = new Set(['Approved', 'InProgress', 'AtRisk', 'OnTrack']);
+// A locked goal's year runs on — a lock freezes what the goal is, not its progress — and a goal
+// the old lock left in the Locked status reads as approved.
+const PROGRESS_OPEN = new Set(['Approved', 'InProgress', 'AtRisk', 'OnTrack', 'Locked']);
 
 // No `recordedById`: the recorder is the signed-in user, stamped server-side. It used to be a
 // picker defaulting to the goal's owner "so HR could record on someone's behalf", which is the
@@ -78,8 +86,10 @@ export default function EmployeeGoalDetailPage() {
   const id = params.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { user } = useAuth();
 
-  const [decision, setDecision] = useState<'approve' | 'reject' | null>(null);
+  // 'sendBack' is the same reject call on an approved goal, worded for what it does there.
+  const [decision, setDecision] = useState<'approve' | 'reject' | 'sendBack' | null>(null);
   const [feedback, setFeedback] = useState('');
   const [confirmLock, setConfirmLock] = useState(false);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
@@ -115,12 +125,16 @@ export default function EmployeeGoalDetailPage() {
       return employeeGoalService.unlock(id);
     },
     onSuccess: async (_d, action) => {
+      const done =
+        action === 'submit' ? 'submitted'
+        : action === 'reject' && decision === 'sendBack' ? 'sent back to the employee'
+        : `${action}ed`;
       await invalidate();
       setDecision(null);
       setFeedback('');
       setConfirmLock(false);
       setConfirmSubmit(false);
-      toast({ title: 'Done', description: `Goal ${action === 'submit' ? 'submitted' : `${action}ed`}.` });
+      toast({ title: 'Done', description: `Goal ${done}.` });
     },
     onError: (e) => {
       setDecision(null);
@@ -154,7 +168,14 @@ export default function EmployeeGoalDetailPage() {
     notes: '',
   };
 
-  const progressAllowed = PROGRESS_OPEN.has(goal.status) && !goal.isLocked;
+  const progressAllowed = PROGRESS_OPEN.has(goal.status);
+
+  // P8: an entry is corrected or withdrawn by whoever recorded it, or HR when HR is not the
+  // goal's owner — the server refuses everyone else, so they are not offered Edit or Remove.
+  const me = user?.employeeId ?? null;
+  const isDeskWriter = hasAnyPermissionAccess(user, ['HR.Performance.Write', 'HR.Performance.Admin']);
+  const mayAmendEntry = (entry: GoalProgressEntry) =>
+    (!!me && entry.recordedById === me) || (isDeskWriter && me !== goal.employeeId);
 
   return (
     <div className="space-y-6 p-6">
@@ -182,6 +203,12 @@ export default function EmployeeGoalDetailPage() {
                   Reject
                 </Button>
               </>
+            )}
+            {SENDABLE_BACK.has(goal.status) && !goal.isLocked && (
+              <Button size="sm" variant="outline" onClick={() => setDecision('sendBack')}>
+                <Undo2 className="mr-2 h-4 w-4" />
+                Send back
+              </Button>
             )}
             {LOCKABLE.has(goal.status) && !goal.isLocked && (
               <Button size="sm" variant="outline" onClick={() => setConfirmLock(true)}>
@@ -219,8 +246,9 @@ export default function EmployeeGoalDetailPage() {
           <Lock className="h-4 w-4" />
           <AlertTitle>Locked</AlertTitle>
           <AlertDescription>
-            Locked {formatDateTime(goal.lockedDate)}. Nothing on this goal can change, and no
-            further progress can be recorded, until it is unlocked.
+            Locked {formatDateTime(goal.lockedDate)}. What the goal measures — its title, target,
+            weight and period — cannot change until it is unlocked. Progress is still recorded
+            against it through the year.
           </AlertDescription>
         </Alert>
       )}
@@ -366,9 +394,7 @@ export default function EmployeeGoalDetailPage() {
         <h2 className="text-lg font-semibold">Progress entries</h2>
         {!progressAllowed && (
           <p className="text-sm text-muted-foreground">
-            {goal.isLocked
-              ? 'The goal is locked, so no further entries can be recorded.'
-              : `Entries are only accepted once the goal is approved — it is currently ${humanizeEnum(goal.status).toLowerCase()}.`}
+            {`Entries are only accepted once the goal is approved — it is currently ${humanizeEnum(goal.status).toLowerCase()}.`}
           </p>
         )}
         <ResourceCollectionTab<GoalProgressEntry, ProgressForm>
@@ -378,6 +404,8 @@ export default function EmployeeGoalDetailPage() {
           queryKey={['hr', 'employee-goals', id, 'progress']}
           invalidateKeys={[[...goalKey], ['hr', 'employee-goals']]}
           readOnly={!progressAllowed}
+          canEditItem={mayAmendEntry}
+          canRemoveItem={mayAmendEntry}
           dialogHint="The percentage and status recorded here become the goal's — marking an entry At risk is what puts the goal on the at-risk reports. 100% completes it."
           emptyDescription="Nothing recorded yet. Entries are what move the goal's progress."
           list={(goalId) => employeeGoalService.getProgressEntries(goalId)}
@@ -395,6 +423,8 @@ export default function EmployeeGoalDetailPage() {
           }}
           update={(goalId, entryId, values) => {
             const v = progressSchema.parse(values);
+            // The server keeps the entry's own goal and review event on an edit (P8); the two
+            // fields below are required by the type, not honoured.
             return employeeGoalService.updateProgressEntry(goalId, entryId, {
               id: entryId,
               employeeGoalId: goalId,
@@ -506,25 +536,33 @@ export default function EmployeeGoalDetailPage() {
             setFeedback('');
           }
         }}
-        title={decision === 'reject' ? 'Reject this goal?' : 'Approve this goal?'}
-        description={
-          decision === 'reject'
-            ? 'The goal returns to the employee, who can revise it and submit again.'
-            : 'The goal becomes live and progress can be recorded against it.'
+        title={
+          decision === 'sendBack'
+            ? 'Send this goal back for changes?'
+            : decision === 'reject'
+              ? 'Reject this goal?'
+              : 'Approve this goal?'
         }
-        confirmText={decision === 'reject' ? 'Reject' : 'Approve'}
-        variant={decision === 'reject' ? 'destructive' : 'default'}
+        description={
+          decision === 'sendBack'
+            ? 'What an approved goal measures cannot be edited. It returns to the employee to change, and comes back to you for approval. Its progress entries are kept.'
+            : decision === 'reject'
+              ? 'The goal returns to the employee, who can revise it and submit again.'
+              : 'The goal becomes live and progress can be recorded against it.'
+        }
+        confirmText={decision === 'sendBack' ? 'Send back' : decision === 'reject' ? 'Reject' : 'Approve'}
+        variant={decision === 'approve' ? 'default' : 'destructive'}
         // A rejection with no explanation is refused by the API, so the button waits for one.
-        confirmDisabled={decision === 'reject' && feedback.trim().length === 0}
+        confirmDisabled={decision !== 'approve' && feedback.trim().length === 0}
         isLoading={workflowMutation.isPending}
         onConfirm={async () => {
-          await workflowMutation.mutateAsync(decision === 'reject' ? 'reject' : 'approve');
+          await workflowMutation.mutateAsync(decision === 'approve' ? 'approve' : 'reject');
         }}
       >
         <div className="space-y-2">
           <Label htmlFor="feedback">
             Feedback
-            {decision === 'reject' && <span className="ml-0.5 text-red-500">*</span>}
+            {decision !== 'approve' && <span className="ml-0.5 text-red-500">*</span>}
           </Label>
           <Textarea
             id="feedback"
@@ -532,7 +570,7 @@ export default function EmployeeGoalDetailPage() {
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
             placeholder={
-              decision === 'reject'
+              decision !== 'approve'
                 ? 'Required — say what needs to change so the employee can act on it.'
                 : 'Optional comment, stored against the goal.'
             }

@@ -147,6 +147,12 @@ public class AppraisalTemplateSection : TenantEntity
 	
 	public int Weight { get; set; } // 0–100, should sum to 100 across sections
     
+    /// <summary>
+    /// What fills the section: the template's own items, or each employee's locked goal set
+    /// (lane L). Fixed by default — the seeders' sections carry no kind.
+    /// </summary>
+    public AppraisalSectionKind Kind { get; set; } = AppraisalSectionKind.Fixed;
+
     [ForeignKey(nameof(AppraisalTemplateId))]
     public virtual AppraisalTemplate AppraisalTemplate { get; set; } = null!;
     
@@ -226,6 +232,12 @@ public class AppraisalSettings : TenantEntity
     [MaxLength(100)]
     public string SettingsName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The tenant's default profile. At most one per tenant (a filtered unique index); it replaces
+    /// "the newest profile", which a harness-minted one could win (P-2, lane B6).
+    /// </summary>
+    public bool IsDefault { get; set; }
+
     // ═══════════════════════════════════════════
     //  SELF-EVALUATION SETTINGS
     // ═══════════════════════════════════════════
@@ -265,8 +277,6 @@ public class AppraisalSettings : TenantEntity
 
     [Column(TypeName = "decimal(3,2)")]
     public decimal ManagerEvaluationWeight { get; set; } = 0.7m;
-
-    public bool IsManagerAuthoritative { get; set; } = true;
 
     // ═══════════════════════════════════════════
     //  SCORING VISIBILITY CONTROLS
@@ -409,18 +419,6 @@ public class AppraisalSettings : TenantEntity
     /// If false, goal progress updates during review events are optional.
     /// </summary>
     public bool RequireGoalProgressUpdateAtReview { get; set; } = true;
-
-    // ═══════════════════════════════════════════
-    //  DEVELOPMENT PLAN SETTINGS
-    // ═══════════════════════════════════════════
-
-    /// <summary>
-    /// If true, the employee's year-end self-appraisal form includes a mandatory
-    /// development plan section and cannot be submitted until all objectives
-    /// are updated. If false, the development plan section is optional or hidden
-    /// in the year-end review.
-    /// </summary>
-    public bool RequireDevelopmentPlanUpdate { get; set; } = true;
 
     // ═══════════════════════════════════════════
     //  DEADLINE ENFORCEMENT
@@ -1439,7 +1437,7 @@ public class PerformanceAppraisal : TenantEntity
     public DateOnly StartDate { get; set; }
     public DateOnly EndDate { get; set; }
 
-    public AppraisalStatus Status { get; set; } = AppraisalStatus.Draft; // 6-value lifecycle: Draft→Active→Governance→Appealed→Completed→Closed
+    public AppraisalStatus Status { get; set; } = AppraisalStatus.Draft; // Draft→Active→Governance→Appealed→Completed→Closed, or Withdrawn
 	
 	public Guid? DevelopmentPlanId { get; set; } // Main annual development plan
 	
@@ -1466,6 +1464,14 @@ public class PerformanceAppraisal : TenantEntity
 	/// </summary>
 	[Column(TypeName = "decimal(5,2)")]
 	public decimal? PreCalibrationScore { get; set; }
+
+	/// <summary>
+	/// The overall score a committed calibration restated, when one did. The settle path reads it
+	/// ahead of the score computed from the evaluations (<c>OverallScore = CalibratedOverallScore ??
+	/// computed</c>, lane A), so HR sign-off cannot wipe a restatement (P-39). Null when no
+	/// calibration restated the overall.
+	/// </summary>
+	public decimal? CalibratedOverallScore { get; set; }
 
 	/// <summary>
 	/// Score after a successful appeal resolution.
@@ -1526,6 +1532,15 @@ public class PerformanceAppraisal : TenantEntity
     public DateTime? AppealRemandDeadline { get; set; }
     public DateTime? AppealRemandedDate { get; set; }
 
+	// --- Withdrawal (D-10) — set with Status = Withdrawn ---
+	[MaxLength(1000)]
+	public string? WithdrawnReason { get; set; }
+
+	/// <summary>The employee who withdrew it; null when no person did.</summary>
+	public Guid? WithdrawnById { get; set; }
+
+	public DateTime? WithdrawnDate { get; set; }
+
     [ForeignKey(nameof(AppraisalCycleId))]
     public virtual AppraisalCycle AppraisalCycle { get; set; } = null!;
 	
@@ -1544,6 +1559,9 @@ public class PerformanceAppraisal : TenantEntity
 	[ForeignKey(nameof(CalibrationSessionId))]
 	public virtual CalibrationSession? CalibrationSession { get; set; }
 
+	[ForeignKey(nameof(WithdrawnById))]
+	public virtual Employee? WithdrawnBy { get; set; }
+
     public virtual ICollection<EvaluatorEvaluation> EvaluatorEvaluations { get; set; } = new List<EvaluatorEvaluation>();
     public virtual ICollection<AppraisalEmployeeResponse> EmployeeResponses { get; set; } = new List<AppraisalEmployeeResponse>();
     public virtual ICollection<AppraisalCustomQuestionResponse> CustomQuestionResponses { get; set; } = new List<AppraisalCustomQuestionResponse>();
@@ -1558,6 +1576,7 @@ public class PerformanceAppraisal : TenantEntity
     /// <summary>Snapshot of the resolved criteria config at the time this appraisal was populated.</summary>
     public virtual ICollection<PerformanceAppraisalCriterionConfig> CriterionConfigs { get; set; } = new List<PerformanceAppraisalCriterionConfig>();
     public virtual ICollection<AppraisalManualAdvanceLog> ManualAdvanceLogs { get; set; } = new List<AppraisalManualAdvanceLog>();
+    public virtual ICollection<AppraisalScoreChange> ScoreChanges { get; set; } = new List<AppraisalScoreChange>();
 }
 
 /// <summary>
@@ -1569,8 +1588,11 @@ public class AppraisalManualAdvanceLog : TenantEntity
     [Required]
     public Guid PerformanceAppraisalId { get; set; }
 
-    [Required]
-    public Guid AdvancedByEmployeeId { get; set; }
+    /// <summary>
+    /// The HR officer who advanced it. Null when no person did: the nightly sweep (lane H), or a
+    /// waiver row written by a data migration.
+    /// </summary>
+    public Guid? AdvancedByEmployeeId { get; set; }
 
     public DateTime AdvancedDate { get; set; }
 
@@ -1597,7 +1619,48 @@ public class AppraisalManualAdvanceLog : TenantEntity
     public virtual PerformanceAppraisal Appraisal { get; set; } = null!;
 
     [ForeignKey(nameof(AdvancedByEmployeeId))]
-    public virtual Employee AdvancedBy { get; set; } = null!;
+    public virtual Employee? AdvancedBy { get; set; }
+}
+
+/// <summary>
+/// One change to an appraisal's settled overall score after its first settle — the rating history
+/// the HR review shows and the printed record carries (performance closure lane N2). Written by
+/// the settle path, never by hand.
+/// </summary>
+public class AppraisalScoreChange : TenantEntity
+{
+    [Required]
+    public Guid PerformanceAppraisalId { get; set; }
+
+    public decimal? FromScore { get; set; }
+
+    public decimal? ToScore { get; set; }
+
+    public Guid? FromGradeDefinitionId { get; set; }
+
+    public Guid? ToGradeDefinitionId { get; set; }
+
+    public AppraisalScoreChangeSource Source { get; set; }
+
+    /// <summary>The employee whose action changed the score; null for the nightly sweep.</summary>
+    public Guid? ChangedById { get; set; }
+
+    [MaxLength(1000)]
+    public string? Reason { get; set; }
+
+    public DateTime ChangedDate { get; set; }
+
+    [ForeignKey(nameof(PerformanceAppraisalId))]
+    public virtual PerformanceAppraisal Appraisal { get; set; } = null!;
+
+    [ForeignKey(nameof(FromGradeDefinitionId))]
+    public virtual AppraisalGradeDefinition? FromGrade { get; set; }
+
+    [ForeignKey(nameof(ToGradeDefinitionId))]
+    public virtual AppraisalGradeDefinition? ToGrade { get; set; }
+
+    [ForeignKey(nameof(ChangedById))]
+    public virtual Employee? ChangedBy { get; set; }
 }
 
 /// <summary>
@@ -1610,11 +1673,48 @@ public class PerformanceAppraisalCriterionConfig : TenantEntity
     [Required]
     public Guid PerformanceAppraisalId { get; set; }
 
-    [Required]
-    public Guid TemplateItemId { get; set; }
+    /// <summary>
+    /// The template item this row snapshots. Null on a goal row, which is built from a locked
+    /// <see cref="EmployeeGoal"/> instead (<see cref="EmployeeGoalId"/>, lane L).
+    /// </summary>
+    public Guid? TemplateItemId { get; set; }
 
     /// <summary>Effective weight used (copied from the template item).</summary>
     public int WeightUsed { get; set; }
+
+    /// <summary>
+    /// The template section the row belongs to, and that section's weight when the row was
+    /// snapshotted (performance closure A0). Frozen so that editing a section's weight later
+    /// cannot re-score an appraisal already generated. Null on rows written before the freeze
+    /// existed and not yet backfilled: those read the live section.
+    /// </summary>
+    public Guid? AppraisalTemplateSectionId { get; set; }
+
+    public int? SectionWeightUsed { get; set; }
+
+    // ── Goal rows (lane L) — null on a template row ──────────────────────────────
+
+    /// <summary>The locked goal this row was built from (an <c>EmployeeGoals</c> section).</summary>
+    public Guid? EmployeeGoalId { get; set; }
+
+    /// <summary>What the row is called on the forms: the goal's title when it was locked.</summary>
+    [MaxLength(300)]
+    public string? ItemLabel { get; set; }
+
+    /// <summary>
+    /// How the row is scored. Set on goal rows (D-16); null on a template row, whose item decides —
+    /// a KPI item is measured, anything else is rated.
+    /// </summary>
+    public CriterionScoringMethod? ScoringMethod { get; set; }
+
+    /// <summary>The goal's measurement type when it was locked.</summary>
+    public MeasurementType? MeasurementType { get; set; }
+
+    [MaxLength(50)]
+    public string? Unit { get; set; }
+
+    /// <summary>The row's order within its section; null on a template row, whose item carries it.</summary>
+    public int? DisplayOrder { get; set; }
 
     /// <summary>Snapshotted KPI target value at appraisal population time (after goal/template resolution).</summary>
     [Column(TypeName = "decimal(18,2)")]
@@ -1633,7 +1733,13 @@ public class PerformanceAppraisalCriterionConfig : TenantEntity
     public virtual PerformanceAppraisal PerformanceAppraisal { get; set; } = null!;
 
     [ForeignKey(nameof(TemplateItemId))]
-    public virtual AppraisalTemplateItem TemplateItem { get; set; } = null!;
+    public virtual AppraisalTemplateItem? TemplateItem { get; set; }
+
+    [ForeignKey(nameof(AppraisalTemplateSectionId))]
+    public virtual AppraisalTemplateSection? Section { get; set; }
+
+    [ForeignKey(nameof(EmployeeGoalId))]
+    public virtual EmployeeGoal? EmployeeGoal { get; set; }
 
     /// <summary>Snapshot of the effective grade bands for this criterion in this appraisal.</summary>
     public virtual ICollection<PerformanceAppraisalCriterionConfigGradeRange> GradeRanges { get; set; } = new List<PerformanceAppraisalCriterionConfigGradeRange>();
@@ -1926,9 +2032,6 @@ public class EvaluatorEvaluation : TenantEntity
     [Column(TypeName = "decimal(3,2)")]
     public decimal EvaluatorWeight { get; set; }
 
-    /// <summary>Is this the authoritative/final evaluation (typically manager post-calibration)?</summary>
-    public bool IsAuthoritative { get; set; }
-
     public DateTime? StartedDate { get; set; }
     public DateTime? SubmittedDate { get; set; }
 
@@ -1958,8 +2061,14 @@ public class CriterionScore : TenantEntity
 	[Required]
     public Guid EvaluatorEvaluationId { get; set; }
 
-	[Required]
-    public Guid TemplateItemId { get; set; }
+	/// <summary>The template item scored; null on a goal row (lane L), which has only <see cref="CriterionConfigId"/>.</summary>
+    public Guid? TemplateItemId { get; set; }
+
+	/// <summary>
+	/// The appraisal's criterion snapshot row this score is for. Null on appraisals generated
+	/// without a snapshot, which are still keyed by template item.
+	/// </summary>
+	public Guid? CriterionConfigId { get; set; }
 
 	/// <summary>
 	/// The resolved grade for this score (populated after scoring).
@@ -1987,7 +2096,10 @@ public class CriterionScore : TenantEntity
     public virtual EvaluatorEvaluation EvaluatorEvaluation { get; set; } = null!;
 
     [ForeignKey(nameof(TemplateItemId))]
-    public virtual AppraisalTemplateItem TemplateItem { get; set; } = null!;
+    public virtual AppraisalTemplateItem? TemplateItem { get; set; }
+
+    [ForeignKey(nameof(CriterionConfigId))]
+    public virtual PerformanceAppraisalCriterionConfig? CriterionConfig { get; set; }
 
 	[ForeignKey(nameof(GradeDefinitionId))]
 	public virtual AppraisalGradeDefinition? GradeDefinition { get; set; }
@@ -2085,9 +2197,18 @@ public class CalibrationRatingAdjustment : TenantEntity
 	[Required]
     public Guid PerformanceAppraisalId { get; set; }
 	
-	/// <summary>The specific template item being adjusted (null if adjusting overall score).</summary>
+	/// <summary>The specific template item being adjusted (null for the overall, and for a goal row).</summary>
 	public Guid? TemplateItemId { get; set; }
-	
+
+	/// <summary>The criterion snapshot row being adjusted; null for the overall.</summary>
+	public Guid? CriterionConfigId { get; set; }
+
+	/// <summary>
+	/// The adjustment restates the overall score, not one criterion. Explicit because a goal row
+	/// also has no template item, and a null item used to mean "the overall" (lane L).
+	/// </summary>
+	public bool IsOverall { get; set; }
+
 	[Column(TypeName = "decimal(5,2)")]
 	public decimal? OriginalScore { get; set; }
 
@@ -2111,13 +2232,17 @@ public class CalibrationRatingAdjustment : TenantEntity
 	[ForeignKey(nameof(TemplateItemId))]
 	public virtual AppraisalTemplateItem? TemplateItem { get; set; }
 
+	[ForeignKey(nameof(CriterionConfigId))]
+	public virtual PerformanceAppraisalCriterionConfig? CriterionConfig { get; set; }
+
 	[ForeignKey(nameof(AdjustedById))]
 	public virtual Employee AdjustedBy { get; set; } = null!;
 }
 
 /// <summary>
 /// HR review record for a finalized appraisal before it is released to the employee.
-/// Tracks HR's sign-off and any score modifications if settings allow.
+/// Tracks HR's sign-off. HR does not restate the score here: calibration and appeal are the two
+/// restatement paths (performance closure D-11).
 /// </summary>
 public class AppraisalHRReview : TenantEntity
 {
@@ -2134,15 +2259,6 @@ public class AppraisalHRReview : TenantEntity
 
 	[MaxLength(2000)]
 	public string? HRNotes { get; set; }
-
-	/// <summary>
-	/// If HRCanModifyScores = true, the HR-adjusted score is stored here.
-	/// </summary>
-	[Column(TypeName = "decimal(5,2)")]
-	public decimal? AdjustedOverallScore { get; set; }
-
-	[MaxLength(1000)]
-	public string? AdjustmentReason { get; set; }
 
 	[ForeignKey(nameof(AppraisalId))]
 	public virtual PerformanceAppraisal Appraisal { get; set; } = null!;
@@ -2235,6 +2351,9 @@ public class AppraisalAppeal : TenantEntity
 
     public DateTime? ResolvedDate { get; set; }
 
+    /// <summary>The appraisal's overall score when the appeal was filed, so the outcome can say what it moved from (lane A5).</summary>
+    public decimal? OriginalOverallScore { get; set; }
+
     [ForeignKey(nameof(PerformanceAppraisalId))]
     public virtual PerformanceAppraisal PerformanceAppraisal { get; set; } = null!;
 
@@ -2259,6 +2378,9 @@ public class AppraisalAppealItem : TenantEntity
 
     public Guid? TemplateItemId { get; set; }
 
+    /// <summary>The criterion snapshot row appealed — the key for a goal row, which has no template item (lane L).</summary>
+    public Guid? CriterionConfigId { get; set; }
+
 	[Required]
     [MaxLength(2000)]
     public string Reason { get; set; } = string.Empty;
@@ -2271,14 +2393,14 @@ public class AppraisalAppealItem : TenantEntity
 	[Column(TypeName = "decimal(5,2)")]
 	public decimal? OriginalScore { get; set; }
 
-	[Column(TypeName = "decimal(5,2)")]
-	public decimal? RevisedScore { get; set; }
-
     [ForeignKey(nameof(AppraisalAppealId))]
     public virtual AppraisalAppeal AppraisalAppeal { get; set; } = null!;
 
     [ForeignKey(nameof(TemplateItemId))]
     public virtual AppraisalTemplateItem? TemplateItem { get; set; }
+
+    [ForeignKey(nameof(CriterionConfigId))]
+    public virtual PerformanceAppraisalCriterionConfig? CriterionConfig { get; set; }
 }
 
 /// <summary>
@@ -2323,10 +2445,19 @@ public class AppraisalCriterionScoreSnapshot : TenantEntity
     [Required]
     public Guid AppraisalEvaluationSnapshotId { get; set; }
 
-    [Required]
-    public Guid TemplateItemId { get; set; }
+    /// <summary>The template item scored; null on a goal row (lane L), which has only <see cref="CriterionConfigId"/>.</summary>
+    public Guid? TemplateItemId { get; set; }
+
+    /// <summary>The appraisal's criterion snapshot row the score was for; null where the score had none.</summary>
+    public Guid? CriterionConfigId { get; set; }
 
     public int? NumericScore { get; set; }
+
+    /// <summary>
+    /// The actual value entered for a measured row at the remand, so a Rejected outcome can put it
+    /// back (lane C5). Null on snapshots taken before this column existed.
+    /// </summary>
+    public decimal? ActualValue { get; set; }
 
     [Column(TypeName = "decimal(10,2)")]
     public decimal WeightedScore { get; set; }
@@ -2350,7 +2481,10 @@ public class AppraisalCriterionScoreSnapshot : TenantEntity
     public virtual AppraisalEvaluationSnapshot EvaluationSnapshot { get; set; } = null!;
 
     [ForeignKey(nameof(TemplateItemId))]
-    public virtual AppraisalTemplateItem TemplateItem { get; set; } = null!;
+    public virtual AppraisalTemplateItem? TemplateItem { get; set; }
+
+    [ForeignKey(nameof(CriterionConfigId))]
+    public virtual PerformanceAppraisalCriterionConfig? CriterionConfig { get; set; }
 
     public virtual ICollection<AppraisalKpiEvaluationSnapshot> KpiSnapshots { get; set; } = new List<AppraisalKpiEvaluationSnapshot>();
 }
@@ -2499,6 +2633,9 @@ public class PipReviewMeeting : TenantEntity
 
     [Required]
     public DateTime MeetingDate { get; set; }
+
+    /// <summary>Stored, not inferred from the date (P-57). Its writers arrive with lane E7.</summary>
+    public PipMeetingStatus Status { get; set; } = PipMeetingStatus.Scheduled;
 
     public bool EmployeeAttended { get; set; } = true;
 

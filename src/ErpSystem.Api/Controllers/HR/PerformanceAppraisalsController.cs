@@ -329,6 +329,29 @@ public class PerformanceAppraisalsController : ControllerBase
     }
 
     /// <summary>
+    /// Performance closure A15 (D-13): what the settle path would store for every Completed or
+    /// Closed appraisal — overall, grade and rating — beside what is stored now, with the
+    /// employee's current talent-pool rating. Read-only: nothing is written, and a finalised score
+    /// is restated only through the audited reopen.
+    /// </summary>
+    [HttpGet("settle-dry-run")]
+    [ProducesResponseType(typeof(AppraisalSettleDryRunReportDto), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
+    public async Task<IActionResult> SettleDryRun(
+        [FromQuery] Guid? cycleId, [FromServices] IAppraisalScoreService scores, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await scores.DryRunAsync(cycleId, cancellationToken));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error running the settle dry run (cycle {CycleId})", cycleId);
+            return StatusCode(500, "An error occurred while running the settle dry run");
+        }
+    }
+
+    /// <summary>
     /// File an appeal for an appraisal
     /// </summary>
     [HttpPost("{id:guid}/appeal")]
@@ -425,242 +448,13 @@ public class PerformanceAppraisalsController : ControllerBase
         }
     }
 
-    #region Evaluator Evaluation Operations
-
-    /// <summary>
-    /// Add an evaluator evaluation to an appraisal
-    /// </summary>
-    [HttpPost("{appraisalId}/evaluations")]
-    [ProducesResponseType(typeof(EvaluatorEvaluationDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
-    public async Task<IActionResult> AddEvaluatorEvaluation(Guid appraisalId, [FromBody] CreateEvaluatorEvaluationDto createDto)
-    {
-        try
-        {
-            if (!ModelState.IsValid)
-                return BadRequest(ModelState);
-
-            var response = await _appraisalService.AddEvaluatorEvaluationAsync(appraisalId, createDto);
-            return Ok(response);
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(ex.Message);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error adding evaluator evaluation to appraisal {AppraisalId}", appraisalId);
-            return StatusCode(500, "An error occurred while adding the evaluator evaluation");
-        }
-    }
-
-    /// <summary>
-    /// Get all evaluator evaluations for an appraisal
-    /// </summary>
-    [HttpGet("{appraisalId}/evaluations")]
-    [ProducesResponseType(typeof(IEnumerable<EvaluatorEvaluationDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetEvaluatorEvaluations(Guid appraisalId)
-    {
-        if (!await CanAccessAppraisalAsync(appraisalId, HrPermissions.PerformanceReadPolicy, HttpContext.RequestAborted)) return Forbid();
-
-        try
-        {
-            var response = await _appraisalService.GetEvaluatorEvaluationsAsync(appraisalId);
-            return Ok(response);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving evaluator evaluations for appraisal {AppraisalId}", appraisalId);
-            return StatusCode(500, "An error occurred while retrieving evaluator evaluations");
-        }
-    }
-
-    /// <summary>
-    /// Update an evaluator evaluation
-    /// </summary>
-    [HttpPut("{appraisalId}/evaluations/{evaluationId}")]
-    [ProducesResponseType(typeof(EvaluatorEvaluationDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
-    public async Task<IActionResult> UpdateEvaluatorEvaluation(Guid appraisalId, Guid evaluationId, [FromBody] UpdateEvaluatorEvaluationDto updateDto)
-    {
-        try
-        {
-            if (evaluationId != updateDto.Id)
-            {
-                return BadRequest("ID mismatch");
-            }
-
-            if (!ModelState.IsValid)
-                return BadRequest(ModelState);
-
-            var response = await _appraisalService.UpdateEvaluatorEvaluationAsync(appraisalId, updateDto);
-            return Ok(response);
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(ex.Message);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating evaluator evaluation {EvaluationId} for appraisal {AppraisalId}", updateDto.Id, appraisalId);
-            return StatusCode(500, "An error occurred while updating the evaluator evaluation");
-        }
-    }
-
-    /// <summary>
-    /// Delete an evaluator evaluation
-    /// </summary>
-    [HttpDelete("{appraisalId}/evaluations/{evaluationId}")]
-    [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
-    public async Task<IActionResult> DeleteEvaluatorEvaluation(Guid appraisalId, Guid evaluationId)
-    {
-        try
-        {
-            var response = await _appraisalService.DeleteEvaluatorEvaluationAsync(appraisalId, evaluationId);
-            return Ok(response);
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting evaluator evaluation {EvaluationId} for appraisal {AppraisalId}", evaluationId, appraisalId);
-            return StatusCode(500, "An error occurred while deleting the evaluator evaluation");
-        }
-    }
-
-    #endregion
-
-    #region Criterion Score Operations
-
-    /// <summary>
-    /// Add a criterion score to an evaluator evaluation
-    /// </summary>
-    [HttpPost("evaluations/{evaluationId}/scores")]
-    [ProducesResponseType(typeof(CriterionScoreDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
-    public async Task<IActionResult> AddCriterionScore(Guid evaluationId, [FromBody] CreateCriterionScoreDto createDto)
-    {
-        try
-        {
-            if (!ModelState.IsValid)
-                return BadRequest(ModelState);
-
-            var response = await _appraisalService.AddCriterionScoreAsync(evaluationId, createDto);
-            return Ok(response);
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(ex.Message);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error adding criterion score to evaluation {EvaluationId}", evaluationId);
-            return StatusCode(500, "An error occurred while adding the criterion score");
-        }
-    }
-
-    /// <summary>
-    /// Get all criterion scores for an evaluator evaluation
-    /// </summary>
-    [HttpGet("evaluations/{evaluationId}/scores")]
-    [ProducesResponseType(typeof(IEnumerable<CriterionScoreDto>), StatusCodes.Status200OK)]
-    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
-    public async Task<IActionResult> GetCriterionScores(Guid evaluationId)
-    {
-        try
-        {
-            var response = await _appraisalService.GetCriterionScoresAsync(evaluationId);
-            return Ok(response);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving criterion scores for evaluation {EvaluationId}", evaluationId);
-            return StatusCode(500, "An error occurred while retrieving criterion scores");
-        }
-    }
-
-    /// <summary>
-    /// Update a criterion score
-    /// </summary>
-    [HttpPut("evaluations/{evaluationId}/scores/{scoreId}")]
-    [ProducesResponseType(typeof(CriterionScoreDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
-    public async Task<IActionResult> UpdateCriterionScore(Guid evaluationId, Guid scoreId, [FromBody] UpdateCriterionScoreDto updateDto)
-    {
-        try
-        {
-            if (scoreId != updateDto.Id)
-            {
-                return BadRequest("ID mismatch");
-            }
-
-            if (!ModelState.IsValid)
-                return BadRequest(ModelState);
-
-            var response = await _appraisalService.UpdateCriterionScoreAsync(evaluationId, updateDto);
-            return Ok(response);
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating criterion score {ScoreId} for evaluation {EvaluationId}", updateDto.Id, evaluationId);
-            return StatusCode(500, "An error occurred while updating the criterion score");
-        }
-    }
-
-    /// <summary>
-    /// Delete a criterion score
-    /// </summary>
-    [HttpDelete("evaluations/{evaluationId}/scores/{scoreId}")]
-    [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
-    public async Task<IActionResult> DeleteCriterionScore(Guid evaluationId, Guid scoreId)
-    {
-        try
-        {
-            var response = await _appraisalService.DeleteCriterionScoreAsync(evaluationId, scoreId);
-            return Ok(response);
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting criterion score {ScoreId} for evaluation {EvaluationId}", scoreId, evaluationId);
-            return StatusCode(500, "An error occurred while deleting the criterion score");
-        }
-    }
-
-    #endregion
+    // ⚠ Performance closure lane P1 (2026-09-29) removed eight routes here: add/read/update/delete
+    // an evaluator evaluation, and add/read/update/delete a criterion score. No screen called them.
+    // GET {appraisalId}/evaluations admitted the appraisee (CanAccessAppraisalAsync), so it handed
+    // them every evaluator row — peer names and scores under anonymity, the manager's total, notes
+    // and recommendation before sign-off; the writes could re-parent a record or score it outside
+    // the settle path. HR reads evaluator totals through GET {id}/hr-review and
+    // GET {appraisalId}/manager-peer-evaluations.
 
     #region Employee Response Operations
 
@@ -756,16 +550,27 @@ public class PerformanceAppraisalsController : ControllerBase
     /// As <see cref="CanAccessAppraisalAsync"/> minus the appraisee — the manager's side of the
     /// run (peer detail under anonymity, nomination decisions) is not the appraisee's to reach.
     /// </summary>
+    /// <remarks>
+    /// Not an HR officer who is the appraisee either (performance closure P14, the two-actor rule):
+    /// the policy test came first, so the desk read its own peers' names under anonymity and
+    /// approved its own nominations.
+    /// </remarks>
     private async Task<bool> CanManageAppraisalAsync(Guid appraisalId, string policy, CancellationToken ct)
     {
-        if (await HoldsPolicyAsync(policy)) return true;
-        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
+        var me = _currentUserService.EmployeeId is Guid id && id != Guid.Empty ? id : (Guid?)null;
 
-        return await _db.Set<PerformanceAppraisal>()
+        var parties = await _db.Set<PerformanceAppraisal>()
             .AsNoTracking()
             .Where(a => a.Id == appraisalId && a.TenantId == tenantId)
-            .AnyAsync(a => a.Employee.ManagerId == me, ct);
+            .Select(a => new { a.EmployeeId, a.Employee.ManagerId })
+            .FirstOrDefaultAsync(ct);
+
+        // An unknown id falls to the desk, so the action reports it missing rather than forbidden.
+        if (parties is null) return await HoldsPolicyAsync(policy);
+        if (me is Guid subject && parties.EmployeeId == subject) return false;
+        if (me is Guid manager && parties.ManagerId == manager) return true;
+        return await HoldsPolicyAsync(policy);
     }
 
     /// <summary>The employee themselves, their line manager, or a policy holder.</summary>
@@ -863,13 +668,23 @@ public class PerformanceAppraisalsController : ControllerBase
 
         try
         {
-            var removed = await _appraisalService.DeleteAttachmentAsync(appraisalId, attachmentId, cancellationToken);
+            // P9: the service decides between the uploader and the desk, and refuses after completion.
+            var isDesk = await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy);
+            var removed = await _appraisalService.DeleteAttachmentAsync(appraisalId, attachmentId, isDesk, cancellationToken);
             if (!removed) return NotFound(new { message = "Attachment not found" });
             return NoContent();
         }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "deleting an appraisal attachment");
         }
         catch (Exception ex)
         {
@@ -958,7 +773,11 @@ public class PerformanceAppraisalsController : ControllerBase
         try
         {
             var response = await _appraisalService.GetSelfEvaluationContextAsync(appraisalId);
-            return Ok(response);
+
+            // P12: the employee's entries are theirs until submitted, and the manager's to read
+            // only as the profile allows — see SelfEvaluationView.
+            var isDesk = await HoldsPolicyAsync(HrPermissions.PerformanceReadPolicy);
+            return Ok(Core.Services.HR.Appraisal.SelfEvaluationView.ForViewer(response, _currentUserService.EmployeeId, isDesk));
         }
         catch (ArgumentException ex)
         {
@@ -996,7 +815,7 @@ public class PerformanceAppraisalsController : ControllerBase
             saveDto.EmployeeId = employeeId;
 
             var response = await _appraisalService.SaveSelfEvaluationAsync(saveDto);
-            
+
             if (!response.Success)
             {
                 _logger.LogWarning("SaveSelfEvaluation returning 400 for appraisal {AppraisalId}: {Message}", appraisalId, response.Message);
@@ -1004,6 +823,12 @@ public class PerformanceAppraisalsController : ControllerBase
             }
 
             return Ok(response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A submission refused by the pipeline — the appraisal is not at the self-evaluation
+            // step (performance closure B1). It used to fall to the catch-all below as a 500.
+            return BusinessRuleRejected(ex, "submitting the self-evaluation");
         }
         catch (Exception ex)
         {
@@ -1335,7 +1160,11 @@ public class PerformanceAppraisalsController : ControllerBase
                 return BadRequest(new { message = "Appraisal ID mismatch" });
             }
 
-            var response = await _peerNominationService.BatchCreateAsync(batchDto);
+            // P14: the nominator is whoever is posting — the service records it and applies the
+            // cycle's nomination mode to it (it recorded every batch as the appraisee's).
+            if (!TryGetEmployeeId(out var nominatorId, out var problem)) return problem!;
+
+            var response = await _peerNominationService.BatchCreateAsync(batchDto, nominatorId);
             return CreatedAtAction(nameof(GetPeerNominationSummary), new { appraisalId }, response);
         }
         catch (ArgumentException ex)
@@ -1671,16 +1500,17 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(AppraisalAppealDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> SubmitAppeal(Guid id, [FromBody] SubmitAppealDto dto)
     {
         try
         {
             if (id != dto.AppraisalId)
                 return BadRequest(new { message = "Appraisal ID mismatch" });
-            
+
             var employeeId = _currentUserService.EmployeeId
                 ?? throw new UnauthorizedAccessException("Employee record not linked to current user");
-            
+
             var appeal = await _appraisalService.SubmitAppealAsync(dto, employeeId);
             return Ok(appeal);
         }
@@ -1694,7 +1524,9 @@ public class PerformanceAppraisalsController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { message = ex.Message });
+            // Appeals disabled, the window closed, not completed, already appealed — rules, answered
+            // 422 like every gated appraisal write (performance closure B1).
+            return BusinessRuleRejected(ex, "submitting an appeal");
         }
         catch (Exception ex)
         {

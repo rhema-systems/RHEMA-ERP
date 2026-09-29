@@ -28,6 +28,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
     private readonly IGenericRepository<EmploymentActionProposal> _actionProposalRepo;
     private readonly IGenericRepository<PerformanceImprovementPlan> _pipRepo;
     private readonly IAppraisalNotificationService               _notificationService;
+    private readonly IAppraisalLifecycleService                  _lifecycle;
     private readonly ICurrentUserProvider                        _currentUserProvider;
     private readonly ILogger<HRCycleDashboardQueryService>       _logger;
 
@@ -50,6 +51,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
         IGenericRepository<EmploymentActionProposal> actionProposalRepo,
         IGenericRepository<PerformanceImprovementPlan> pipRepo,
         IAppraisalNotificationService                notificationService,
+        IAppraisalLifecycleService                   lifecycle,
         ICurrentUserProvider                         currentUserProvider,
         ILogger<HRCycleDashboardQueryService>        logger)
     {
@@ -64,6 +66,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
         _actionProposalRepo = actionProposalRepo;
         _pipRepo            = pipRepo;
         _notificationService = notificationService;
+        _lifecycle           = lifecycle;
         _currentUserProvider = currentUserProvider;
         _logger           = logger;
     }
@@ -128,10 +131,15 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
                 .Include(a => a.Conversations)
                 .Include(a => a.HRReviews)
                 .Include(a => a.OverallGrade)
-                .Include(a => a.Goals)
                 .Include(a => a.Appeals)
                 .AsNoTracking()
                 .ToListAsync(ct);
+
+            // Where each appraisal is — the gates' answer, the one the write paths and the phase
+            // endpoint give (B1). It resolved here from this load, whose goals were only those
+            // linked to the appraisal and whose advance log was never read.
+            var gates = await _lifecycle.GetStatesAsync(appraisals.Select(a => a.Id).ToList(), ct);
+            var subs = gates.ToDictionary(g => g.Key, g => g.Value.SubStatus);
 
             // 3. Load grade definitions ─────────────────────────────────────────
             var allGrades = (await _gradeRepo.GetAllAsync())
@@ -203,8 +211,8 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
                 PeerWeight    = settings.PeerEvaluationWeight,
                 ManagerWeight = settings.ManagerEvaluationWeight,
 
-                PipelineProgress   = BuildPipelineProgress(appraisals, settings),
-                Deadlines          = BuildDeadlines(cycle, settings, appraisals, today),
+                PipelineProgress   = BuildPipelineProgress(appraisals, subs, settings),
+                Deadlines          = BuildDeadlines(cycle, settings, appraisals, subs, today),
                 GradeDistribution  = BuildGradeDistribution(appraisals, allGrades,
                                         out int scoredCount, out decimal? avgScore),
                 ScoredAppraisalCount = scoredCount,
@@ -213,7 +221,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
                 OutcomePipeline    = await BuildOutcomePipelineAsync(tenantId, appraisalIds, ct),
                 DepartmentBreakdown = BuildDepartmentBreakdown(appraisals, calibSessions,
                                          managerLookup, cycle.GoalSettingDeadline, today),
-                AttentionItems     = BuildAttentionItems(appraisals, settings, managerLookup, allGrades, cycle, today),
+                AttentionItems     = BuildAttentionItems(appraisals, subs, managerLookup, allGrades, cycle, today),
                 RecentActivity     = BuildActivity(appraisals, advanceLogs),
             };
 
@@ -253,16 +261,14 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
                 .ThenInclude(n => n.PeerEmployee)
             .Include(a => a.Conversations)
             .Include(a => a.HRReviews)
-            .Include(a => a.Goals)
             .AsNoTracking()
             .FirstOrDefaultAsync(ct);
 
         if (appraisal is null)
             throw new ArgumentException($"Appraisal '{appraisalId}' was not found in this cycle.");
 
-        var settings  = cycle.AppraisalSettings!;
-        var subStatus = AppraisalSubStatusResolver.Resolve(appraisal, settings);
-        var stepName  = SubStatusLabel(subStatus);
+        var subStatus = (await _lifecycle.GetStateAsync(appraisal.Id, ct)).SubStatus;
+        var stepName  = AppraisalGates.Label(subStatus);
 
         // Who can actually clear this step, and where they go to do it.
         var recipients = new List<(Guid EmployeeId, string Name)>();
@@ -384,15 +390,20 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
 
     // ── Section builders ──────────────────────────────────────────────────────
 
+    /// <summary>Past <paramref name="step"/> in the pipeline — a withdrawn appraisal is past nothing.</summary>
+    private static bool IsPast(IReadOnlyDictionary<Guid, AppraisalSubStatus> subs, PerformanceAppraisal a, AppraisalSubStatus step)
+        => subs.TryGetValue(a.Id, out var sub) && sub != AppraisalSubStatus.Withdrawn && (int)sub > (int)step;
+
     private static HRCyclePipelineProgressDto BuildPipelineProgress(
         List<PerformanceAppraisal> appraisals,
+        IReadOnlyDictionary<Guid, AppraisalSubStatus> subs,
         AppraisalSettings settings)
     {
         var p = new HRCyclePipelineProgressDto { TotalAppraisals = appraisals.Count };
 
         foreach (var a in appraisals)
         {
-            var sub = AppraisalSubStatusResolver.Resolve(a, settings);
+            if (!subs.TryGetValue(a.Id, out var sub)) continue;
             switch (sub)
             {
                 case AppraisalSubStatus.GoalSetting:
@@ -446,26 +457,15 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             }
         }
 
-        // Self-eval and peer-eval completed counts = those who are PAST those stages
-        p.SelfEvalCompletedCount = appraisals.Count(a =>
-        {
-            var sub = AppraisalSubStatusResolver.Resolve(a, settings);
-            return (int)sub > (int)AppraisalSubStatus.SelfEvaluation;
-        });
+        // Self-eval and peer-eval completed counts = those who are PAST those stages. The evaluation
+        // steps precede governance in either HR-review timing, so the enum's order is the pipeline's.
+        p.SelfEvalCompletedCount = appraisals.Count(a => IsPast(subs, a, AppraisalSubStatus.SelfEvaluation));
 
         p.PeerEvalCompletedCount = settings.RequirePeerReviews
-            ? appraisals.Count(a =>
-            {
-                var sub = AppraisalSubStatusResolver.Resolve(a, settings);
-                return (int)sub > (int)AppraisalSubStatus.PeerEvaluation;
-            })
+            ? appraisals.Count(a => IsPast(subs, a, AppraisalSubStatus.PeerEvaluation))
             : 0;
 
-        p.ManagerEvalCompletedCount = appraisals.Count(a =>
-        {
-            var sub = AppraisalSubStatusResolver.Resolve(a, settings);
-            return (int)sub > (int)AppraisalSubStatus.ManagerEvaluation;
-        });
+        p.ManagerEvalCompletedCount = appraisals.Count(a => IsPast(subs, a, AppraisalSubStatus.ManagerEvaluation));
 
         p.CalibrationCompletedCount = settings.RequireCalibration
             ? appraisals.Count(a => a.IsCalibrated)
@@ -487,6 +487,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
         AppraisalCycle cycle,
         AppraisalSettings settings,
         List<PerformanceAppraisal> appraisals,
+        IReadOnlyDictionary<Guid, AppraisalSubStatus> subs,
         DateOnly today)
     {
         var deadlines = new List<(string Name, DateOnly? Deadline, bool Enabled)>
@@ -514,7 +515,9 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             int affected  = appraisals.Count;
             int completed = name switch
             {
-                "Goal Setting"       => appraisals.Count(a => a.Goals.Any(g => g.Status != GoalStatus.Draft && g.Status != GoalStatus.PendingApproval && g.Status != GoalStatus.Rejected)),
+                // Past the goal-setting step by the gates: it counted appraisals with one approved
+                // goal linked to them, whatever the minimum and the setup conversations required.
+                "Goal Setting"       => appraisals.Count(a => IsPast(subs, a, AppraisalSubStatus.GoalSetting)),
                 "Peer Nomination"    => appraisals.Count(a => a.PeerNominations.Any(n => n.NominationStatus == PeerNominationStatus.Approved)),
                 "Self-Evaluation"    => appraisals.Count(a => a.EvaluatorEvaluations.Any(e => e.EvaluatorRole == EvaluatorRole.Self && e.SubmittedDate != null)),
                 "Peer Evaluation"    => appraisals.Count(a => a.EvaluatorEvaluations.Count(e => e.EvaluatorRole == EvaluatorRole.Peer && e.SubmittedDate != null) >= settings.MinPeerEvaluators),
@@ -769,7 +772,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
 
     private static List<HRCycleAttentionItemDto> BuildAttentionItems(
         List<PerformanceAppraisal> appraisals,
-        AppraisalSettings          settings,
+        IReadOnlyDictionary<Guid, AppraisalSubStatus> subs,
         Dictionary<Guid, string>   managerLookup,
         List<AppraisalGradeDefinition> grades,
         AppraisalCycle             cycle,
@@ -781,13 +784,13 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
         foreach (var a in appraisals)
         {
             if (a.Employee is null) continue;
+            if (!subs.TryGetValue(a.Id, out var subStatus)) continue;
 
             var deptName    = a.Employee.OrganizationUnit?.Name ?? string.Empty;
             var position    = a.Employee.Position?.Title ?? string.Empty;
             var managerId   = a.Employee.ManagerId;
             var managerName = managerId.HasValue && managerLookup.TryGetValue(managerId.Value, out var mn) ? mn : string.Empty;
             var gradeLabel  = a.OverallGradeDefinitionId.HasValue && gradeMap.TryGetValue(a.OverallGradeDefinitionId.Value, out var gl) ? gl : null;
-            var subStatus   = AppraisalSubStatusResolver.Resolve(a, settings);
 
             // PIP recommendation
             if (a.RecommendPIP)
@@ -842,7 +845,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
                     Department       = deptName,
                     ManagerName      = managerName,
                     Reason           = AttentionReason.OverdueAtStep,
-                    ReasonLabel      = $"Overdue: {SubStatusLabel(subStatus)}",
+                    ReasonLabel      = $"Overdue: {AppraisalGates.Label(subStatus)}",
                     Detail           = $"{days} day{(days == 1 ? "" : "s")} past deadline.",
                     Severity         = days > 7 ? AttentionSeverity.Critical : AttentionSeverity.Warning,
                     OverallScore     = a.OverallScore,
@@ -1047,20 +1050,6 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             _                                                    => AppraisalNotificationType.ActionRequired,
         };
 
-    private static string SubStatusLabel(AppraisalSubStatus sub) =>
-        sub switch
-        {
-            AppraisalSubStatus.GoalSetting         => "Goal Setting",
-            AppraisalSubStatus.PeerNomination      => "Peer Nomination",
-            AppraisalSubStatus.SelfEvaluation      => "Self-Evaluation",
-            AppraisalSubStatus.PeerEvaluation      => "Peer Evaluation",
-            AppraisalSubStatus.ManagerEvaluation   => "Manager Evaluation",
-            AppraisalSubStatus.PendingCalibration  => "Calibration",
-            AppraisalSubStatus.CalibrationInProgress => "Calibration (In Progress)",
-            AppraisalSubStatus.PendingHRReview     => "HR Review",
-            AppraisalSubStatus.HRReviewInProgress  => "HR Review (In Progress)",
-            AppraisalSubStatus.PendingConversation => "Final Conversation",
-            AppraisalSubStatus.PendingAcknowledgment => "Acknowledgment",
-            _                                       => sub.ToString(),
-        };
+    // The step names are AppraisalGates.Label — one list for the dashboard, the phase endpoint and
+    // the refusal texts, so all three name the same step (performance closure B1).
 }

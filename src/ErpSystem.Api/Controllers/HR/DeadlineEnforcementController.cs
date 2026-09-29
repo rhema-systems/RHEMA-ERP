@@ -97,6 +97,7 @@ public class DeadlineEnforcementController : ControllerBase
     [ProducesResponseType(typeof(ManualAdvanceResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> ManuallyAdvance(
         Guid appraisalId, [FromBody] ManualAdvanceRequest req, CancellationToken ct = default)
     {
@@ -125,8 +126,10 @@ public class DeadlineEnforcementController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
+            // An advance aimed at a step the appraisal is not at, among others — a rule, answered
+            // 422 with its message like every gated appraisal write (performance closure B1).
             _logger.LogWarning(ex, "Invalid advance for appraisal {AppraisalId}", appraisalId);
-            return BadRequest(ex.Message);
+            return UnprocessableEntity(new { message = ex.Message });
         }
         catch (Exception ex)
         {

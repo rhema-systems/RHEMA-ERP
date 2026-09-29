@@ -145,6 +145,7 @@ public partial class ApplicationDbContext
     public DbSet<AppraisalHRReview> AppraisalHRReviews { get; set; } = null!;
     public DbSet<AppraisalCustomQuestionResponse> AppraisalCustomQuestionResponses { get; set; } = null!;
     public DbSet<AppraisalManualAdvanceLog> AppraisalManualAdvanceLogs { get; set; } = null!;
+    public DbSet<AppraisalScoreChange> AppraisalScoreChanges { get; set; } = null!;
     public DbSet<CalibrationSession> CalibrationSessions { get; set; } = null!;
     public DbSet<CalibrationParticipant> CalibrationParticipants { get; set; } = null!;
     public DbSet<CalibrationRatingAdjustment> CalibrationRatingAdjustments { get; set; } = null!;
@@ -3269,9 +3270,15 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.AppraisalTemplateId);
             entity.HasIndex(x => x.CalibrationSessionId);
             entity.HasIndex(x => x.IsCalibrated);
+            entity.HasIndex(x => x.WithdrawnById);
 
             entity.Property(x => x.Status).HasConversion<int>();
             entity.Property(x => x.CurrentAppealStatus).HasConversion<int>();
+
+            entity.HasOne(x => x.WithdrawnBy)
+                .WithMany()
+                .HasForeignKey(x => x.WithdrawnById)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(x => x.AppraisalCycle)
                 .WithMany(x => x.PerformanceAppraisals)
@@ -3362,14 +3369,77 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithOne(x => x.PerformanceAppraisal)
                 .HasForeignKey(x => x.PerformanceAppraisalId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(x => x.ScoreChanges)
+                .WithOne(x => x.Appraisal)
+                .HasForeignKey(x => x.PerformanceAppraisalId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // The rating history (performance closure lane N2): one row per change to a settled
+        // overall score. The table name is spelled out because the demo manifest lists log tables
+        // by exact name (lane S6), and a misspelt entry is only "absent", never a failure.
+        builder.Entity<AppraisalScoreChange>(entity =>
+        {
+            entity.ToTable("AppraisalScoreChanges");
+
+            entity.HasIndex(x => x.PerformanceAppraisalId);
+            entity.HasIndex(x => x.ChangedDate);
+            entity.HasIndex(x => x.FromGradeDefinitionId);
+            entity.HasIndex(x => x.ToGradeDefinitionId);
+            entity.HasIndex(x => x.ChangedById);
+
+            entity.Property(x => x.Source).HasConversion<int>();
+
+            entity.HasOne(x => x.FromGrade)
+                .WithMany()
+                .HasForeignKey(x => x.FromGradeDefinitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ToGrade)
+                .WithMany()
+                .HasForeignKey(x => x.ToGradeDefinitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ChangedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ChangedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configured only to make the actor's FK Restrict now that it is optional (null = no person,
+        // e.g. the nightly sweep), like every other Employee reference here. While it was required,
+        // convention had made it Cascade.
+        builder.Entity<AppraisalManualAdvanceLog>(entity =>
+        {
+            entity.HasOne(x => x.AdvancedBy)
+                .WithMany()
+                .HasForeignKey(x => x.AdvancedByEmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<PerformanceAppraisalCriterionConfig>(entity =>
         {
             entity.HasIndex(x => x.PerformanceAppraisalId);
             entity.HasIndex(x => x.TemplateItemId);
+            entity.HasIndex(x => x.AppraisalTemplateSectionId);
+            entity.HasIndex(x => x.EmployeeGoalId);
+
+            // One snapshot row per template item, and one per goal, in an appraisal (lane L1).
+            // Filtered on the key being present — a goal row has no template item and a template
+            // row no goal — and on IsDeleted, so a soft-deleted row never holds a slot.
+            entity.HasIndex(x => new { x.PerformanceAppraisalId, x.TemplateItemId })
+                .IsUnique()
+                .HasFilter("[TemplateItemId] IS NOT NULL AND [IsDeleted] = 0")
+                .HasDatabaseName("UX_PerformanceAppraisalCriterionConfig_Appraisal_TemplateItem");
+            entity.HasIndex(x => new { x.PerformanceAppraisalId, x.EmployeeGoalId })
+                .IsUnique()
+                .HasFilter("[EmployeeGoalId] IS NOT NULL AND [IsDeleted] = 0")
+                .HasDatabaseName("UX_PerformanceAppraisalCriterionConfig_Appraisal_Goal");
 
             entity.Property(x => x.KpiTargetSource).HasConversion<int>().IsRequired(false);
+            entity.Property(x => x.ScoringMethod).HasConversion<int>().IsRequired(false);
+            entity.Property(x => x.MeasurementType).HasConversion<int>().IsRequired(false);
 
             entity.HasOne(x => x.PerformanceAppraisal)
                 .WithMany(x => x.CriterionConfigs)
@@ -3379,6 +3449,16 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.TemplateItem)
                 .WithMany()
                 .HasForeignKey(x => x.TemplateItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Section)
+                .WithMany()
+                .HasForeignKey(x => x.AppraisalTemplateSectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.EmployeeGoal)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeGoalId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasMany(x => x.GradeRanges)
@@ -3431,7 +3511,15 @@ private void ConfigureHREntities(ModelBuilder builder)
         {
             entity.HasIndex(x => x.EvaluatorEvaluationId);
             entity.HasIndex(x => x.TemplateItemId);
+            entity.HasIndex(x => x.CriterionConfigId);
             entity.HasIndex(x => x.GradeDefinitionId);
+
+            // One score per snapshot row per evaluation (lane L1). Scores on an appraisal with no
+            // snapshot have no config id and are not covered.
+            entity.HasIndex(x => new { x.EvaluatorEvaluationId, x.CriterionConfigId })
+                .IsUnique()
+                .HasFilter("[CriterionConfigId] IS NOT NULL AND [IsDeleted] = 0")
+                .HasDatabaseName("UX_CriterionScore_Evaluation_CriterionConfig");
 
             entity.HasOne(x => x.EvaluatorEvaluation)
                 .WithMany(x => x.CriterionScores)
@@ -3441,6 +3529,11 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.TemplateItem)
                 .WithMany()
                 .HasForeignKey(x => x.TemplateItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.CriterionConfig)
+                .WithMany()
+                .HasForeignKey(x => x.CriterionConfigId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(x => x.GradeDefinition)
@@ -3600,6 +3693,10 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.ConductedById);
             entity.HasIndex(x => x.MeetingDate);
 
+            entity.Property(x => x.Status)
+                .HasConversion<int>()
+                .HasDefaultValue(PipMeetingStatus.Scheduled);
+
             entity.HasOne(x => x.Pip)
                 .WithMany(x => x.ReviewMeetings)
                 .HasForeignKey(x => x.PipId)
@@ -3618,6 +3715,14 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.RequirePeerReviews);
             entity.HasIndex(x => x.RequireManagerEvaluation);
             entity.HasIndex(x => x.RequireHRReview);
+
+            // At most one default profile per tenant (P-2). EF counts this index as covering the
+            // tenant FK and drops the convention's unfiltered IX_AppraisalSettings_TenantId for it;
+            // nothing needs that one back, since a tenant holds a handful of profiles.
+            entity.HasIndex(x => x.TenantId, "UX_AppraisalSettings_Tenant_Default")
+                .IsUnique()
+                .HasFilter("[IsDefault] = 1 AND [IsDeleted] = 0")
+                .HasDatabaseName("UX_AppraisalSettings_Tenant_Default");
 
             entity.Property(x => x.PeerNominationMode).HasConversion<int>();
             entity.Property(x => x.PeerEvaluationOpenMode).HasConversion<int>();
@@ -3773,6 +3878,13 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.SubmittedDate);
             entity.HasIndex(x => x.ReviewedById);
 
+            // One open appeal per appraisal (lane C10): Submitted, UnderReview or Remanded.
+            // Named, because the unfiltered index on the same column stays for lookups.
+            entity.HasIndex(x => x.PerformanceAppraisalId, "UX_AppraisalAppeal_OneOpenPerAppraisal")
+                .IsUnique()
+                .HasFilter("[Status] IN (1, 2, 3) AND [IsDeleted] = 0")
+                .HasDatabaseName("UX_AppraisalAppeal_OneOpenPerAppraisal");
+
             entity.Property(x => x.Status).HasConversion<int>();
 
             entity.HasOne(x => x.PerformanceAppraisal)
@@ -3805,6 +3917,7 @@ private void ConfigureHREntities(ModelBuilder builder)
         {
             entity.HasIndex(x => x.AppraisalAppealId);
             entity.HasIndex(x => x.TemplateItemId);
+            entity.HasIndex(x => x.CriterionConfigId);
 
             entity.HasOne(x => x.AppraisalAppeal)
                 .WithMany(x => x.Items)
@@ -3814,6 +3927,11 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.TemplateItem)
                 .WithMany()
                 .HasForeignKey(x => x.TemplateItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.CriterionConfig)
+                .WithMany()
+                .HasForeignKey(x => x.CriterionConfigId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -3862,6 +3980,10 @@ private void ConfigureHREntities(ModelBuilder builder)
         {
             entity.HasIndex(x => x.AppraisalTemplateId);
             entity.HasIndex(x => x.DisplayOrder);
+
+            entity.Property(x => x.Kind)
+                .HasConversion<int>()
+                .HasDefaultValue(AppraisalSectionKind.Fixed);
 
             entity.HasOne(x => x.AppraisalTemplate)
                 .WithMany(x => x.Sections)
@@ -4155,6 +4277,21 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithOne(x => x.EmployeeGoal)
                 .HasForeignKey(x => x.EmployeeGoalId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Relationships stay as their [ForeignKey] attributes configure them; this block only
+        // declares the indexes. The single-column ones are the convention's own, spelled out so
+        // the composite below does not make EF drop the goal's as redundant. One assessment per
+        // goal per appraisal (lane L1): the goal service reads them with ToDictionary, which a
+        // duplicate would crash.
+        builder.Entity<EmployeeGoalAppraisalAssessment>(entity =>
+        {
+            entity.HasIndex(x => x.EmployeeGoalId);
+            entity.HasIndex(x => x.PerformanceAppraisalId);
+            entity.HasIndex(x => new { x.EmployeeGoalId, x.PerformanceAppraisalId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_EmployeeGoalAppraisalAssessment_Goal_Appraisal");
         });
 
         builder.Entity<GoalProgressEntry>(entity =>
@@ -4823,8 +4960,14 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.CalibrationSessionId);
             entity.HasIndex(x => x.PerformanceAppraisalId);
             entity.HasIndex(x => x.TemplateItemId);
+            entity.HasIndex(x => x.CriterionConfigId);
             entity.HasIndex(x => x.AdjustedById);
             entity.HasIndex(x => x.AdjustmentDate);
+
+            entity.HasOne(x => x.CriterionConfig)
+                .WithMany()
+                .HasForeignKey(x => x.CriterionConfigId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(x => x.CalibrationSession)
                 .WithMany(x => x.RatingAdjustments)
@@ -4914,6 +5057,7 @@ private void ConfigureHREntities(ModelBuilder builder)
         {
             entity.HasIndex(x => x.AppraisalEvaluationSnapshotId);
             entity.HasIndex(x => x.TemplateItemId);
+            entity.HasIndex(x => x.CriterionConfigId);
 
             entity.Property(x => x.KpiTargetSource).HasConversion<int>().IsRequired(false);
 
@@ -4925,6 +5069,11 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.TemplateItem)
                 .WithMany()
                 .HasForeignKey(x => x.TemplateItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.CriterionConfig)
+                .WithMany()
+                .HasForeignKey(x => x.CriterionConfigId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasMany(x => x.KpiSnapshots)

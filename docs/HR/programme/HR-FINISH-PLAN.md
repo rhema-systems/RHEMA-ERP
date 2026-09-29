@@ -41,6 +41,16 @@ sweep closed; coverage queue 3 real endpoints from empty.
 2a's six settings, lane 3's 3a / 3c / 3d-buildable rows, and **all of lane 5** that is not blocked on
 D-13 (47 of 49 fields). The coverage queue reads **0 BUILD**.
 
+▶ **Performance final closure (added 2026-09-28) has its own plan:**
+`docs/HR/areas/performance/HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md` — sixteen lanes (A → P → B1 → L
+→ B → C → D → E → F → G → H → I → J → M → N → S → K), nine decisions taken first and nineteen more
+settled the same day, two migration batches, about ten weeks. It absorbs P-1…P-70 (41 live),
+the settings audit, S-1…S-17 (none done yet), the three audits of 2026-09-28 and a same-day review
+of the plan. It owns this plan's lane 9 rows #9.3, #9.4 and #9.26 and lane 5b's score-adjustment
+question (its D-11); its F1 waits on lane 9's admin-door decision (its D-18). Performance has **no**
+reminder sweep today — it is not one of lane 10's eleven — and its lane H builds one.
+**Nothing built yet.**
+
 ▶ **Lane 11 (added 2026-09-25): probation is not absence.** About 1,800 long-serving staff on the
 demo database are on probation, because the employee import has no confirmation date. Two code sites
 also shut probationers out. The user asked for it as a fix separate from round 5, **not to be

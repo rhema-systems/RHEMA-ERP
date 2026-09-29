@@ -345,9 +345,15 @@ export interface UnitGoalDashboardMetrics {
   totalEmployeeGoalsCascaded: number;
 }
 
+/**
+ * The cascade in numbers — open to everyone who can read the unit goal. The per-employee rows
+ * (`…/employee-goals`) are the HR desk's and the unit line's only (performance closure P11).
+ */
 export interface UnitGoalCascadeStats {
   goalId: string;
   employeeGoalsCount: number;
+  /** Mean progress across the aligned employee goals; null when there are none. */
+  averageProgressPercent?: number | null;
 }
 
 export interface UnitGoalEmployeeGoalSummary {
@@ -530,6 +536,14 @@ export type UpdateGoalProgressEntry = CreateGoalProgressEntry & {
 };
 
 // ── Manager workspace (api/performance/team-goals) ───────────────────────────────
+
+/** What the manager's *lock goal set* did: how many goals it locked, of how many in the set. */
+export interface GoalSetLockResult {
+  employeeId: string;
+  appraisalCycleId: string;
+  goalsLocked: number;
+  goalsInSet: number;
+}
 
 export interface TeamMemberOverview {
   employeeId: string;

@@ -404,6 +404,12 @@ public class AppraisalTemplatesController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // A structural rule — a second goals section (lane L), a template in use — as the item
+            // endpoints report theirs; it fell through to the 500 below.
+            return Conflict(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error adding section to appraisal template {TemplateId}", templateId);
@@ -450,6 +456,10 @@ public class AppraisalTemplatesController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
         }
         catch (Exception ex)
         {

@@ -227,9 +227,11 @@ public sealed class AtRiskGoalsQueryService : IAtRiskGoalsQueryService
                 SubmittedDate     = r.SubmittedDate,
                 ApprovalDate      = r.ApprovalDate,
                 DaysRemaining     = r.DueDate.DayNumber - today.DayNumber,
+                // A locked goal is still running — a lock freezes what a goal is, not its year
+                // (decision D-29) — so it can be overdue like any other.
                 IsOverdue         = r.DueDate < today
                                     && r.Status != GoalStatus.Completed
-                                    && r.Status != GoalStatus.Locked,
+                                    && r.Status != GoalStatus.Rejected,
                 DaysPendingApproval = r.Status == GoalStatus.PendingApproval && r.SubmittedDate.HasValue
                     ? today.DayNumber - DateOnly.FromDateTime(r.SubmittedDate.Value).DayNumber
                     : 0,

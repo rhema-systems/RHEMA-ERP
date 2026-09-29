@@ -483,6 +483,12 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IEmploymentActionProposalService, EmploymentActionProposalService>();
         services.AddScoped<IPerformanceRatingResolver, PerformanceRatingResolver>();
         services.AddScoped<ITalentRatingSyncService, TalentRatingSyncService>();
+        // The appraisal's score in one place — the only writer of OverallScore (performance closure lane A).
+        services.AddScoped<IAppraisalScoreService, AppraisalScoreService>();
+        // The appraisal pipeline's one gate evaluator, and the status it implies (performance closure lane B1).
+        services.AddScoped<IAppraisalLifecycleService, AppraisalLifecycleService>();
+        // An appraisal's goals section: one snapshot row per locked goal (performance closure lane L-b).
+        services.AddScoped<IAppraisalGoalRowService, AppraisalGoalRowService>();
         services.AddScoped<IAppraisalOutcomeService, AppraisalOutcomeService>();
         services.AddScoped<IOutcomeRecommendationHandler, SuccessionNominationHandler>();
         services.AddScoped<IOutcomeRecommendationHandler, TrainingRequestHandler>();
@@ -775,6 +781,11 @@ public static class HrModuleServiceRegistration
         // resolver, for its unit-subtree walk: browsing a unit means the unit AND everything
         // under it, and that walk already existed here rather than being copied a fourth time.
         services.AddScoped<IStaffDirectoryService, StaffDirectoryService>();
+
+        // Developer Test Data (Administration → HR → HR Settings): seed-hr-all / seed-hr-demo as
+        // three buttons. A SINGLETON on purpose — it holds the one-run-at-a-time gate and the run
+        // log, and opens its own scope per phase, so no request's DbContext is ever used by a run.
+        services.AddSingleton<ErpSystem.Api.Services.IHrTestDataSeedService, ErpSystem.Api.Services.HrTestDataSeedService>();
 
         // The reminder sweep spans both halves of the area — disciplinary clocks and unanswered
         // grievance rungs. Scoped so the daily host and the run-now endpoint share one code path.

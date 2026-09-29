@@ -69,7 +69,7 @@ export function SubmittedEvaluationView({ data }: { data: ViewSubmittedEvaluatio
               </TableHeader>
               <TableBody>
                 {section.items.map((item) => (
-                  <TableRow key={item.templateItemId}>
+                  <TableRow key={item.criterionKey}>
                     <TableCell>
                       <div className="font-medium">{item.itemName}</div>
                       {item.notes && (
@@ -80,7 +80,8 @@ export function SubmittedEvaluationView({ data }: { data: ViewSubmittedEvaluatio
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{item.itemWeight}%</TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {item.kpiDefinitionId ? (
+                      {/* Measured by the row's own flag: a goal row carries no KPI id. */}
+                      {(item.scoringMethod ? item.scoringMethod === 'Measured' : !!item.kpiDefinitionId) ? (
                         <>
                           {item.actualValue ?? '—'}
                           {item.kpiUnit ? ` ${item.kpiUnit}` : ''}

@@ -3,6 +3,13 @@
 **Module:** Human Resources → Talent & Performance → **Performance**
 **Coverage:** 19 sidebar leaves · 46 desk routes · 12 Administration setup routes · 15 self-service portal routes — **62 screens**
 **Written:** 2026-09-17 · **Verified against** `ErpSystemDB_UAT` as it stands today, and against the source of every screen and service behind it.
+**Updated 2026-09-29** for the performance closure's lane A (scoring and the settle path): Rule 2, § 1.5, P-6/P-39/P-40, chapter 30's commit and chapter 31's finalise wording, Appendix C. **And for lane P** (privacy and access): chapter 16's cascade rows and P-19, chapter 21's private notes, check-in rules and P-27, chapter 25's plan authorship, chapter 26's outcome release, chapter 28's nominations, chapter 29's Evidence tab, chapter 30's panel reads, chapter 36's PIP rules and the review meeting's right of reply. **And for lane B1** (one gate evaluator): Rule 3, Rule 9, § 1.6, chapter 4's P-3 and P-62–P-70, and chapters 23, 26–33, 37 and 38 — every step a write waits for, as the gates now hold it. **And for lane L-a** (the goal set's governance): § 1.4, § 1.7 and chapters 17–19 and 38 — a lock that freezes what a goal is and not its year, *lock goal set*, the approved-goal edit rule and *Send back*. **And for lane L-b** (goal rows and scoring): § 1.4 and
+chapters 8, 19, 24, 27–31, 33 and 38 — a template's goals section, filled by each employee's locked
+goals — and, found on the way, the remand's dead end (P-71: chapters 29 and 33, Appendices C and E).
+**And for lane L-c** (the screens): § 1.4; chapter 8's section kind, and P-8, now fixed; the *Lock
+set* button in chapters 18 and 19; chapters 27–31 and 33, where the forms, calibration, the sign-off
+and HR's appeal decision handle goal rows; and Appendix C, whose Rule 8 row had borrowed P-8's number.
+**The database was rebuilt on 2026-09-29**: Rule 2, Rule 9, the demo tables and the Efua arithmetic give its figures (Efua 88.56, Cynthia 87.00, Efua's appeal window to 6 October). The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
 **Seventh in the series**, after Recruitment, Employees, Leave, Attendance & Time, Company Schedule and Staff Travel.
 
 ---
@@ -117,42 +124,52 @@ the policy and you change the year, not the software."*
 
 ---
 
-### Rule 2 — Calibration is a **gate**, and the panel's number does **not** survive HR sign-off
+### Rule 2 — Calibration is a **gate**, and the panel's number **survives** HR sign-off
+
+> **Changed 2026-09-29** (performance closure lane A). Until then the panel's number did *not*
+> survive sign-off; this rule said so. **The database was rebuilt the same day**, so the two
+> appraisals that were signed off before the fix — the evidence this rule used to point at — now
+> carry the panel's figures like every other: points 1 and 3 below describe the rebuilt database.
 
 This is the single most important thing to understand before you demonstrate calibration.
 
-Calibration does two separate jobs, and only one of them behaves the way an audience will assume.
+**1. The gate — the real feature.** Because the settings profile has *Require a calibration session*
+switched on, an appraisal **cannot be finalised by HR** until a calibration session covering it has
+been **committed**. Committing now calibrates the appraisals **at the calibration step** — the ones
+whose manager has submitted — including the people the panel discussed and left exactly as they
+were. The rest of the session's scope is left alone and **listed with the reason** in the commit's
+result ("the manager has not submitted", "under appeal", "already final, and this session made no
+adjustment to it"). On this database both panels (Operations Directorate, and Finance &
+Administration) were committed under that rule, so **4 of the 107 appraisals carry the stamp** —
+Kojo Fiadzo, Kwasi Danquah, Efua Seidu and Cynthia Sarpong, the four whose manager had submitted —
+and the other 103 were listed with the reason. *(Before the 2026-09-29 rebuild a commit stamped
+everyone in scope, and 76 carried it.)*
 
-**1. The gate — this works, and it is the real feature.** Because the settings profile has *Require a
-calibration session* switched on, an appraisal **cannot be finalised by HR** until a calibration
-session covering it has been **committed**. Committing marks everyone in the session's scope as
-calibrated — including the people the panel discussed and left exactly as they were. On this database
-two panels have been committed (Operations Directorate, and Finance & Administration), so **76 of the
-107 appraisals are through the gate and 31 are not.**
+**2. The number — it now survives.** A committed **overall** restatement is kept on the appraisal as
+its *calibrated overall*, and HR sign-off keeps it: the final score, the grade and the talent-pool
+rating all come from the panel's figure. A **per-criterion** restatement goes into the score through
+the item — a **KPI** included, where the panel restates the *achievement percentage* and every screen
+labels the row **"overridden by calibration/appeal"**.
 
-**2. The number — this does not survive.** When HR finalises an appraisal it **recalculates the
-weighted final score from the three evaluation legs**, overwriting whatever the panel wrote. The
-evidence is on this database: the Finance & Administration panel restated Cynthia Sarpong's overall
-score to **87.0**, and her finalised appraisal reads **88.74** — the recomputed figure. The calibration
-grid still shows 87.0, because the grid reads the *adjustment record*, not the appraisal.
+**3. What this database shows — both panels' restatements are in the scores.**
+- **Cynthia Sarpong** — the Finance & Administration panel restated her overall to **87.0**, and her
+  appraisal reads **87.00**: the calibrated overall is the final score. The calibration grid shows
+  87.0 too.
+- **Efua Seidu** — the Operations panel moved *Project Delivery Timeliness* from 92 to 88 (the row
+  carries `NumericScore 88` beside `ActualValue 92`), and her appraisal reads **88.56**, the panel's
+  88 counting.
 
-A **per-criterion** adjustment fares a little better, but not much. It writes the panel's figure onto
-the manager's criterion score, and that survives the recompute **for a competency item**. On a **KPI
-item it changes nothing**, because a KPI is scored from its *actual value* and the adjustment only
-writes the *numeric score*. Efua Seidu's appraisal proves it: the Operations panel moved *Project
-Delivery Timeliness* from 92 to 88; the row now carries `NumericScore 88` beside `ActualValue 92`; and
-her weighted contribution (27.6) and final score (89.40) are unchanged.
+Both stay *Exceeds*. *(Until the 2026-09-29 rebuild both still read the figures they had been signed
+off at before the fix — 88.74 and 89.40. Finalised scores are never restated automatically, decision
+D-13; the rebuild scored them afresh.)*
 
-**What to do on stage.** Demonstrate calibration as **governance** — the panel that reconciles ratings
-across a directorate, records its reasoning, and releases the appraisals to HR. Do **not** put the
-calibration grid and the HR review score side by side and invite the room to compare them.
+**What to do on stage.** Calibration now demonstrates end to end — restate an overall in a panel,
+commit, sign off in HR review, and the number that reaches the employee and the talent pool is the
+panel's. **Cynthia is the example of an overall restatement and Efua of a criterion restatement**:
+the grid, the HR review and the record agree on both.
 
-If someone asks directly, the honest answer is short and good:
-
-💬 *"Calibration in this release is the control gate and the audit trail — nothing reaches HR sign-off
-until a panel has released it, and every restatement is recorded with its reasoning against the
-panellist who made it. Writing the panel's number back over the computed score is the next increment;
-today HR signs off the arithmetic, and the panel's decision sits beside it on the record."*
+💬 *"The panel's decision is the final number: restate the overall and that is what HR signs off and
+what reaches the talent pools; restate a criterion and the score moves with it."*
 
 ---
 
@@ -171,6 +188,24 @@ perfectly clear —
 On this database the **only** appraisal in HR's *Ready* queue is Kwasi Danquah's (`TDC/00006`,
 head.dev) **and it is calibrated**, so the scripted walk in chapter 31 is safe. The rule matters if
 you improvise: do not open a second appraisal and press Finalise on it.
+
+> **Changed 2026-09-29** (performance closure lane B1, B4). **Finalise is now disabled until the
+> appraisal is at the HR-review step.** The page reads `canProceedToHRReview`, which now comes from
+> the gates the sign-off itself is held to — calibration included (it counted only the self, manager
+> and peer evaluations). A refusal that does reach the server names the step: *"HR cannot sign this
+> appraisal off yet: this appraisal is at Calibration — no calibration session has committed it."*
+>
+> Kwasi Danquah passes: the profile requires a mid-year conversation before the year-end evaluation,
+> and demo scenario 061 — re-run on this database on 2026-09-29 — holds his mid-year and his final
+> review, so the gates put him at *HR Review*, he is the *Ready* row, and LIVE WRITE 10 goes through.
+> On a database built before that re-run he sits at *Goal Setting* and the sign-off is refused; the
+> way through there is HR's audited advance past goal setting (chapter 38, with a reason) and
+> chapter 32's final conversation.
+>
+> ⚠ **Most of the cycle reads *Goal Setting*, as it did before the gates.** 102 of APC2026's 107
+> appraisals have no goals, or fewer than the three this profile asks for, so the gates hold them
+> there and the dashboard calls them overdue. What is new is that their self-evaluations are refused
+> too. That is the rule working, not a fault; say so if the dashboard is on screen.
 
 ---
 
@@ -221,10 +256,12 @@ her against it, and the cascade lands end to end. It is **🔴 LIVE WRITE 6**.
 ### Rule 6 — Two screens open empty, and neither is broken
 
 * **`/hr/performance/conversations` → My diary is empty for every persona.** The diary is deliberately
-  "scheduled or down to hold **and not yet held**", and all eight conversations on this database were
-  completed by the process that created them. Use the **About me** tab instead (as `staff`, Efua sees
-  her kick-off and her final review), or schedule one live from inside an appraisal — chapter 23 does
-  exactly that.
+  "scheduled or down to hold **and not yet held**", and all fourteen conversations on this database
+  were completed by the process that created them. Use the **About me** tab instead (as `staff`, Efua
+  sees her kick-off, her mid-year and her final review), or schedule one live from inside an appraisal —
+  chapter 23 does exactly that. *(Fourteen since 2026-09-29: closure lane B1 holds the self-evaluation
+  until the kick-off and mid-year are held, so the demo holds a mid-year for all five tracks, and Kwasi's
+  final review ahead of his live sign-off. It was eight.)*
 * **`/hr/performance/calibration` → Open is empty.** Both panels are Completed; the **Completed** tab
   has the two you want. Chapter 30 creates a third session live so the room sees the lifecycle from
   Pending.
@@ -287,6 +324,15 @@ by employee name, never by appraisal number.
 
 The upside is large: **Efua can file a real appeal live**, because her appraisal is Completed and
 unappealed. That is **🔴 LIVE WRITE 13**, and it is the strongest five minutes in Part V.
+
+> **Changed 2026-09-29** (performance closure lane B1). **The appeal window is enforced now** —
+> *Appeal window (days)* counted from the employee's acknowledgment (else HR's sign-off, else
+> completion) — and *Allow appeals* off refuses the appeal outright. The submit, the appeal page and
+> *My Appraisals* read one rule. **Efua acknowledged on 29 September 2026 (the day the database was
+> rebuilt), so LIVE WRITE 13 works until 6 October 2026**; after that her appeal is refused — *"The
+> appeal window closed on 6 Oct 2026…"* — until the database is rebuilt, which acknowledges it afresh.
+> Book 0's evening-before rebuild keeps the demo inside the window. The competency-only half of this
+> rule stands (closure lane C).
 
 ---
 
@@ -412,15 +458,45 @@ appraisal screen drops it rather than greying it out. Calibration and HR review 
 > with **no goals at all** therefore sits at `GoalSetting` for ever — which is why the 30 opened
 > appraisals and Kojo Ansah's all show *Goal setting* on the rail even though Kojo has submitted his
 > self-evaluation.
+>
+> **Changed 2026-09-29** (performance closure lane B1). The gate is now the profile's: at least
+> *Minimum goals per employee*, every one approved (a draft or pending goal holds it), the set locked
+> where the profile asks, and — on this profile — the kick-off and mid-year conversations held. The
+> rail and the refusal both give the reason. Since the demo scenarios' re-run on 29 September Kojo
+> Ansah has three approved goals and both conversations, so he reads *Peer Evaluation*; the opened
+> appraisals with no goals still read *Goal setting*.
 
 **`GoalStatus`** — one enum spanning two concerns, which is why the manager workspace splits them:
 `Draft`, `PendingApproval`, `Approved`, `Rejected`, `Locked` are the **approval lifecycle**;
 `InProgress`, `AtRisk`, `OnTrack`, `Completed` describe **execution**. A goal in an execution state has
 already passed approval.
 
+> **Changed 2026-09-29** (performance closure lane L-a, decision D-29). **A lock is no longer a
+> status.** Locking sets the goal's *Locked* flag and date and leaves its status alone: it freezes
+> what the goal is — title, measure, target, weight, owner — and **not its year**, so progress
+> entries, check-ins and interim reviews keep moving it. The `Locked` status used to be written by the
+> lock and read everywhere as "finished"; nothing writes it now, and a goal still in it reads as
+> approved and locked.
+
 **`GoalPriority`** — `Low`, `Medium`, `High`, `Critical`.
 **`GoalPeriod`** — `FullCycle`, `Q1`, `Q2`, `H1`, `Q3`, `Q4`, `H2`.
 **`MeasurementType`** — `NumericAbsolute`, `PercentageTarget`, `Boolean`, `Range`.
+**`AppraisalSectionKind`** — `Fixed`, `EmployeeGoals`. What fills a template section: its own items, or
+each employee's locked goals.
+**`CriterionScoringMethod`** — `Measured`, `Rated`. How one row of the form is scored: an actual against
+a target, or a score on the grade bands.
+
+> **Changed 2026-09-29** (performance closure lane L-b, decisions D-15 and D-16). **A template can have
+> a goals section.** It holds no items of its own: on each appraisal it is filled with one row per goal
+> in the employee's **locked** set — the goal's title, its own target and unit, and its weight rescaled
+> so that the set adds up to 100 within the section. A goal with a numeric target is **measured**
+> (its actual against the target, as a KPI item is); a goal without one is **rated** on the tenant's
+> overall grade scale. The year-end section takes the goals scoped to the full cycle, H2 or Q4; a goal
+> scoped to an earlier quarter or half (Q1, Q2, H1, Q3) is appraised at that period's interim review
+> and is not counted again at year end. **No template on the demo database has a goals section**, so
+> none of this shows in the demo. Since lane L-c the screens carry it: the template editor asks what
+> fills each section (chapter 8), the manager locks a set from the team desk (chapter 19), and the
+> forms, calibration and the HR review show each goal row with a **Goal** badge (chapters 27–31).
 **`TeamGovernanceStatus`** — `NotStarted`, `InProgress`, `AwaitingApproval`, `InvalidWeight`,
 `StructurallyComplete`. Derived from counts and weights only — never from anything a user typed.
 
@@ -505,9 +581,24 @@ Ansah gave 84 / 84 → **84.00**. Cynthia Sarpong gave 80 / 80 → **80.00**. Co
 =    9.44       +    16.40      +    63.56        =  89.40   →  Exceeds Expectations (76–90)
 ```
 
-**89.40 is what her appraisal reads.** You can put that arithmetic on the screen and it will match.
+**That is the arithmetic without the panel.** The Operations panel restated *Project Delivery
+Timeliness* from 92 to 88 (Rule 2), and the restatement counts: her manager's line becomes
+88% × 30 = 26.4, his score **89.60**, and the overall
 
-Three more facts worth carrying:
+```
+  (94.40 × 0.1) + (82.00 × 0.2) + (89.60 × 0.7)
+=    9.44       +    16.40      +    62.72        =  88.56   →  Exceeds Expectations (76–90)
+```
+
+**88.56 is what her appraisal reads** (since the 2026-09-29 rebuild — before it, the pre-fix 89.40).
+You can put both calculations on the screen: the first is what the people scored, the second what
+the panel decided.
+
+Four more facts worth carrying:
+
+* **Only submitted evaluations count.** A self-evaluation or peer review saved as a draft is never a
+  leg of the overall; nothing scored at all gives *no* score, not zero. (Before 2026-09-29 a saved
+  draft moved the final score.)
 
 * **Hitting target is full marks.** A KPI actual of 110 against a target of 100 scores 100%, not 110%.
   There is no extra credit, and an actual beyond the item's ceiling counts as attaining the ceiling.
@@ -543,6 +634,16 @@ Forty switches, grouped the way the editor groups them. The values below are the
 > gates, the acknowledgment branch, the goal ceiling, check-ins, the private journal, the interim-review
 > gates and the appeal re-evaluation deadline — all of those refuse something. Avoid the fourteen above.
 
+> **Changed 2026-09-29** (performance closure lane B1). **Nine of the fourteen are enforced now**:
+> *Goals need manager approval*, *Minimum goals per employee*, the three conversation switches,
+> *Allow acknowledgment before the final conversation*, both appeal switches and *Peer window opens*.
+> Every write — the self, peer and manager submissions, the calibration commit, HR's sign-off, the
+> acknowledgment, the appeal and HR's advance — is held to the step the appraisal is at, and a
+> refusal names that step, the same step the phase rail and the HR dashboard show. Still not to be
+> claimed: *Managers see peer scores*, *Managers see the self-score* and *Employees see the score
+> breakdown* (lane B2). *The manager's score is authoritative* and *Require a development plan update*
+> are gone — the closure's first migration removed them.
+
 | Group | Setting | Here |
 |---|---|---|
 | **Self-evaluation** | Require a self-evaluation | **On** |
@@ -557,7 +658,7 @@ Forty switches, grouped the way the editor groups them. The values below are the
 | | Peers may score KPIs | **Off** |
 | **Manager** | Require a manager evaluation | **On** |
 | | Weight | **0.70** |
-| | The manager's score is authoritative | On |
+| | ~~The manager's score is authoritative~~ | *removed (closure batch 1)* |
 | **Visibility** | Managers see the self-score | **On** |
 | | Managers see peer scores | On |
 | | Employees see the score breakdown | **On** |
@@ -569,7 +670,7 @@ Forty switches, grouped the way the editor groups them. The values below are the
 | | Employees may record a written response | **On** |
 | | Allow acknowledgment before the final conversation | **Off** |
 | **Appeals** | Allow appeals | **On** |
-| | Appeal window / re-evaluation window | **7 / 5 days** *(displayed, not enforced — Rule 9)* |
+| | Appeal window / re-evaluation window | **7 / 5 days** *(both enforced — the appeal window since lane B1, counted from the acknowledgment; Rule 9)* |
 | **Goals** | Require goal setting | **On** |
 | | Goals need manager approval | **On** |
 | | Minimum / maximum goals | **3 / 6** |
@@ -580,7 +681,7 @@ Forty switches, grouped the way the editor groups them. The values below are the
 | | Depth | **Light touch** |
 | | Require a mid-year self-assessment | On |
 | | Require a goal progress update at each review | On |
-| | Require a development plan update | On |
+| | ~~Require a development plan update~~ | *removed (closure batch 1)* |
 | **Deadlines** | Advance overdue appraisals on deadline | **Off** ← why the sweep reports zero |
 | | High / medium / low risk within | **2 / 5 / 7 days** |
 | | Manager workload threshold | 10 |
@@ -600,7 +701,7 @@ promising the wrong thing.
 
 | What | Mechanism | Who decides |
 |---|---|---|
-| **Employee goal** | **Bespoke** — `submit` / `approve` / `reject` / `lock` on the goal itself | The employee's **direct manager**, read from their HR record. Not configurable, and not on the workflow engine. |
+| **Employee goal** | **Bespoke** — `submit` / `approve` / `reject` / `lock` on the goal itself, and *lock goal set* over the employee's whole set for a cycle *(since closure lane L-a)*; `reject` also sends an approved goal back for changes | The employee's **direct manager**, read from their HR record. Not configurable, and not on the workflow engine. HR's audited advance past goal setting is the one other door (chapter 38). |
 | **Appraisal itself** | **Bespoke** — the phase machine plus HR sign-off | The appraisee, their peers, their manager, then HR |
 | **Appraisal template** | **Workflow engine** — `APPRAISAL_TEMPLATE` | HR, Manager or TenantAdmin (published definition) |
 | **Improvement plan** | **Workflow engine** — `PERFORMANCE_IMPROVEMENT_PLAN` | HR, Manager or TenantAdmin |
@@ -628,7 +729,7 @@ submit/approve on any of them without preparation.
 | `head.dev` | **Kwasi Danquah** (TDC/00006) | Head of Development | Manager, Employee | The manager's world: team appraisals, team goals, check-ins, the journal, the PIP. **Also the subject of the appraisal HR signs off.** |
 | `staff` | **Efua Seidu** (TDC/00017) | Project Coordinator | Employee | The employee's world: my goals, my appraisal, my journal, the appeal |
 | `md.tdc` | **Nana Nyaho** (TDC/00001) | Managing Director | Managing Director, Manager, Employee | Approves salary and employment-action proposals. **Excluded from the cycle** — his appraisal is a Board matter |
-| `new.hire` | **Kojo Ansah** (TDC/00063) | Supervising Architect | Employee | A part-finished appraisal — self-evaluation in, nothing else |
+| `new.hire` | **Kojo Ansah** (TDC/00063) | Supervising Architect | Employee | A part-finished appraisal — self-evaluation in, the two peers still to write |
 | `she.officer` | **Cynthia Sarpong** (TDC/00081) | Environmental Officer | Safety Officer, Employee | The appealed appraisal |
 | `gm.ops` | **Kojo Fiadzo** (TDC/00003) | General Manager – Operations | Manager, Employee | A completed appraisal at the top of the tree |
 | `she.manager` | **Josephine Appiah** (TDC/00071) | HSE Supervisor | SHE Manager, Employee | A peer evaluator |
@@ -721,11 +822,11 @@ This is the card. Everything below was verified on `ErpSystemDB_UAT` on 17 Septe
 
 | Person | Login | State | Self | Peers | Manager | Final | Grade |
 |---|---|---|---|---|---|---|---|
-| **Efua Seidu** TDC/00017 | `staff` | **Completed**, acknowledged | 94.40 | 84 / 80 | 90.80 | **89.40** | Exceeds Expectations |
+| **Efua Seidu** TDC/00017 | `staff` | **Completed**, acknowledged | 94.40 | 84 / 80 | 90.80 | **88.56** *(the panel's 88 on one criterion — Rule 2)* | Exceeds Expectations |
 | **Kojo Fiadzo** TDC/00003 | `gm.ops` | **Completed**, acknowledged | 94.00 | 81.5 / 77.5 | 91.40 | **89.28** | Exceeds Expectations |
-| **Cynthia Sarpong** TDC/00081 | `she.officer` | **Completed**, acknowledged, **appeal upheld** | 94.00 | 83 / 79 | 90.20 | **88.74** | Exceeds Expectations |
+| **Cynthia Sarpong** TDC/00081 | `she.officer` | **Completed**, acknowledged, **appeal upheld** | 94.00 | 83 / 79 | 90.20 | **87.00** *(the panel's overall — Rule 2)* | Exceeds Expectations |
 | **Kwasi Danquah** TDC/00006 | `head.dev` | **Governance — waiting on HR** ← *the one you finalise live* | 92.20 | 80 / 76 | 88.80 | — | — |
-| **Kojo Ansah** TDC/00063 | `new.hire` | **Active** — self-evaluation in, nothing else | 85.60 | — | — | — | — |
+| **Kojo Ansah** TDC/00063 | `new.hire` | **Active**, at *Peer Evaluation* — goals, both setup conversations and the self-evaluation in; the two peers still to write *(since 2026-09-29)* | 85.60 | — | — | — | — |
 
 Everyone else: 73 in Draft, 29 more Active (opened but untouched).
 
@@ -745,7 +846,7 @@ Everyone else: 73 in Draft, 29 more Active (opened but untouched).
 |---|---|---|
 | Check-ins | **1** | *Q3 one-to-one — Community 25 progress*, head.dev with Efua, held, **3 goal updates** |
 | Journal entries | **4** | 3 by head.dev about Efua (2 shared, 1 private) + 1 private note of Efua's own |
-| Conversations | **8** | 5 kick-offs (Feb) + 3 final reviews (Sept). **All completed** — see Rule 6 |
+| Conversations | **14** | 5 kick-offs (Feb) + 5 mid-years (Jul) + 4 final reviews (Sept — the three finished appraisals and Kwasi's). **All completed** — see Rule 6 |
 | Interim reviews | **107** | All mid-year, light-touch. 102 Pending, 5 Completed |
 | Calibration sessions | **2** | Operations Directorate (panel of 4, 1 adjustment) · Finance & Administration (panel of 3, 1 adjustment). Both **Completed and committed**; 76 appraisals calibrated |
 | Development plans | **3** | Efua (3 objectives, 2 feedback notes) · Cynthia (2 + 1) · Kojo Ansah (2 + 1). All **Active** |
@@ -763,7 +864,7 @@ presenting and reading.
 
 1. **107** appraisals in the cycle — 73 Draft, 30 Active, 1 with HR, 3 finished.
 2. **10 / 20 / 70** — the self, peer and manager weights.
-3. **89.40** — Efua's final score, and **Exceeds Expectations** is the band it falls in (76–90).
+3. **88.56** — Efua's final score, and **Exceeds Expectations** is the band it falls in (76–90).
 4. **2 to 4** peers, and **2** is the minimum that lets a self-evaluation be submitted.
 5. **76 of 107** calibrated; **1** appraisal is sitting in HR's Ready queue.
 6. **3 to 6** goals per person; Efua has **3**, weighted **40 / 30 / 30 = 100**.
@@ -997,32 +1098,45 @@ block the delete."*
 ### ⚠ Known gaps
 **P-2.** There is no "default profile" concept. `GET /default` returns the newest row, so creating a
 new profile silently becomes the default for anything that asks for one.
-**P-3.** `appealWindowDays` and `appealReevaluationWindowDays` are stored and displayed but **not
-enforced** on the appeal path (Rule 9).
+**P-3.** ~~`appealWindowDays` and `appealReevaluationWindowDays` are stored and displayed but **not
+enforced** on the appeal path (Rule 9).~~ **Fixed 2026-09-29** — the re-evaluation window was already
+enforced; the appeal window is since closure lane B1, counted from the acknowledgment.
 **P-4.** `Delete` renders for `hr.head` and answers 403 — it needs `HR.Performance.Admin`.
 **P-62.** **Three switches on this form are ghosts** — *Managers see peer scores*, *Allow
 acknowledgment before the final conversation* and *Require a development plan update* have **no reader
-anywhere** in the backend, the frontend or the tests.
+anywhere** in the backend, the frontend or the tests. *One left:* the acknowledgment switch is
+enforced since lane B1 and the development-plan switch was removed (batch 1); *Managers see peer
+scores* is lane B2's.
 **P-63.** **Two "visibility controls" are client-side only.** *Managers see the self-score* and
 *Employees see the score breakdown* are honoured by the React page; the API returns the values either
 way. Their neighbour *Peer reviews are anonymous* **is** enforced server-side, so on one card two
-controls are real and two are presentation.
-**P-64.** **Four governance switches are honoured by the analytics pipeline but not by the enforcing
-one** — *Goals need manager approval*, and the three conversation requirements. See P-67.
-**P-65.** **The appeal switches do not gate the appeal.** `SubmitAppealAsync` checks neither *Allow
-appeals* nor the window; both are read only into a `canFileAppeal` DTO flag the frontend never reads.
-**P-66.** ***Peer window opens* does not gate the peer form.** In `AfterSelfEval` the peer is *told*
-to wait — `IsEditableByRole` is a read-only query nothing calls before a write.
-**P-67.** **The module has two pipeline resolvers with different rules.** `GetCurrentPhase` enforces;
+controls are real and two are presentation. *(Lane B2.)*
+**P-64.** ~~**Four governance switches are honoured by the analytics pipeline but not by the enforcing
+one** — *Goals need manager approval*, and the three conversation requirements. See P-67.~~ **Fixed
+2026-09-29** (closure lane B1): all four refuse — the goal and setup-conversation switches hold the
+self-evaluation, the final conversation holds the acknowledgment and completion.
+**P-65.** ~~**The appeal switches do not gate the appeal.** `SubmitAppealAsync` checks neither *Allow
+appeals* nor the window; both are read only into a `canFileAppeal` DTO flag the frontend never reads.~~
+**Fixed server-side 2026-09-29** (closure lane B1): the submit refuses on either, by the rule the appeal
+page and *My Appraisals* also read. The portal's appeal button still keys off the status alone (lane I).
+**P-66.** ~~***Peer window opens* does not gate the peer form.** In `AfterSelfEval` the peer is *told*
+to wait — `IsEditableByRole` is a read-only query nothing calls before a write.~~ **Fixed 2026-09-29**
+(closure lane B1): the peer's draft and submission are refused before the self-evaluation in
+`AfterSelfEval`.
+**P-67.** ~~**The module has two pipeline resolvers with different rules.** `GetCurrentPhase` enforces;
 `AppraisalSubStatusResolver` — used by the dashboard and the deadline advance — has five extra gates.
-The dashboard therefore reports a stricter pipeline than the system enforces.
-**P-68.** ***The manager's score is authoritative* changes only a sort order.** It is copied to
-`EvaluatorEvaluation.IsAuthoritative`, whose sole reader is an `OrderByDescending`.
+The dashboard therefore reports a stricter pipeline than the system enforces.~~ **Fixed 2026-09-29**
+(closure lane B1): one gate evaluator, `AppraisalGates`, read by every write, the phase rail, the
+dashboard and the advance.
+**P-68.** ~~***The manager's score is authoritative* changes only a sort order.** It is copied to
+`EvaluatorEvaluation.IsAuthoritative`, whose sole reader is an `OrderByDescending`.~~ **Removed**
+(closure batch 1).
 **P-69.** ***Employees may rate their own soft skills* is mislabelled.** It does not decide whether the
 employee may score behavioural criteria — they always can, and the form always shows them. It decides
 whether the **submit is refused** unless every competency is scored. "May rate" is really "must rate".
-**P-70.** ***Minimum goals per employee* is not enforced**, while its sibling *Maximum* is. The minimum
-computes a `meetsMinGoalCount` flag the frontend never reads.
+**P-70.** ~~***Minimum goals per employee* is not enforced**, while its sibling *Maximum* is.~~ The minimum
+computes a `meetsMinGoalCount` flag the frontend never reads. *Enforced 2026-09-29* (closure lane B1):
+the self-evaluation is refused below the minimum. Showing the flag on the manager's desk is lane B2's.
 
 The full audit, with a `file:line` for every claim and a prioritised fix list, is in
 **[`HR-APPRAISAL-SETTINGS-AUDIT.md`](HR-APPRAISAL-SETTINGS-AUDIT.md)**.
@@ -1116,8 +1230,11 @@ A grade with no band shows *"Item-level only"* in the band column. The dialog ca
 the per-item bands live on `TemplateItemGradeRanges`, edited from the template editor.
 
 ### ⚠ Known gaps
-**P-6.** The overall bands are **not validated against each other**. Two overlapping bands resolve to
-whichever is found first. Keep them tidy by hand.
+**P-6.** ~~The overall bands are **not validated against each other**. Two overlapping bands resolve
+to whichever is found first. Keep them tidy by hand.~~ **Fixed 2026-09-29** (closure A2): saving a
+band refuses an overlap with another active band, a half band, a band outside 0–100 or inverted,
+and a band with no mapped rating. One resolver grades everywhere; a score between two published
+ranges (90.5 between 76–90 and 91–100) takes the lower band.
 
 ---
 
@@ -1219,7 +1336,7 @@ Four tabs: **Structure**, **Details** (scope + approval dates), **Cycles (1)**, 
 | | Project Delivery Timeliness | KPI | 100 (0–120) | 50 | 5 |
 | Core Competencies (40) | Communication | Criterion | — | 50 | 5 |
 | | Teamwork | Criterion | — | 50 | 5 |
-| | *"What did you contribute this year that you are most proud of, and what support do you need from the Corporation next year?"* | Question | — | **0** | **0** |
+| | *"What did you contribute this year that you are most proud of, and what support do you need from the Corporation next year?"* | Question | — | **0** | *Not scored* |
 
 ### ▶ Walk it
 
@@ -1238,7 +1355,7 @@ Four tabs: **Structure**, **Details** (scope + approval dates), **Cycles (1)**, 
    section, and every scored line has grade bands. There is a fourth the server enforces — you cannot
    put the same criterion on a form twice, anywhere on it."*
 
-4. Point at the free-text question, weight **0**, bands **0**.
+4. Point at the free-text question: weight **0**, and *Not scored* where the bands would be.
 
    💬 *"And that last line is the one people ask for: a question with no score. It is weighted zero on
    purpose — the scored lines already total a hundred, so a weighted question would change every number
@@ -1271,10 +1388,30 @@ Four tabs: **Structure**, **Details** (scope + approval dates), **Cycles (1)**, 
 *Draft* cycle in some readings, because the assignment rows do not carry a cycle status and the client
 treats any live assignment as a freeze. Erring this way shows the reason rather than letting the write
 fail.
-**P-8.** The free-text question has **0 grade bands**, which is one of the three activation rules. The
+~~**P-8.** The free-text question has **0 grade bands**, which is one of the three activation rules. The
 template is already Approved and active so nothing is blocked today, but a re-activation attempt could
-be refused on it.
+be refused on it.~~ **Fixed 2026-09-29** (closure lane L-c): a free-text question with **weight 0** is
+never scored, so activation and submit-for-approval no longer ask it for bands — the demo template's
+question is weight 0 — and the editor shows *Not scored* where it used to flag the bands missing. A
+**weighted** question still needs them. The refusal names each item by its criterion, KPI or question;
+a criterion or KPI item used to be named by its id.
 **P-9.** `Delete` renders and 403s for `hr.head`.
+
+> **Changed 2026-09-29** (performance closure lane L-b). **A section can be a goals section** (§ 1.4).
+> The API takes a section *kind* and holds three rules: a template has one goals section; a goals
+> section takes no items (they would share its weight with the goals and count the section twice); and
+> a section with items cannot become one. A copy keeps the kind, and activation counts an empty goals
+> section complete. A section write that breaks a rule — these three, or the template being on a
+> live cycle — now answers **409 with the reason**; it used to be a bare 500.
+>
+> **Changed 2026-09-29** (performance closure lane L-c). **The section dialog asks *What fills this
+> section*:** *This template's items* — competencies, shared KPIs with one target for everyone, and
+> questions — or *Each employee's locked goals*, which takes no items: every appraisal gets one row per
+> goal the manager locked, weighted by the goals' own weights. The second choice is greyed out, with
+> the reason, when the template already has a goals section or the section being edited holds items.
+> A goals section's card carries an **Employee goals** badge and no *Add item*, and says how it fills;
+> a note above the structure explains the two kinds — *personal targets are goals, not template KPIs*.
+> The live checks leave an empty goals section alone and flag one that holds items.
 
 ---
 
@@ -1915,6 +2052,12 @@ Description · Success criteria · Target value · Unit · Due date.
 **Supporting evidence** attachment panel, and **"Employee goals cascaded from this goal"** — Employee ·
 Goal · Priority · Status · Progress · Due.
 
+> **Changed 2026-09-29** (performance closure lane P, P11). The per-employee rows are shown to HR,
+> the manager who raised the goal, and the head of the goal's unit or of any unit above it. Everyone
+> else — the page is open to the whole tenant — sees the cascade in numbers instead: *"N employee
+> goals aligned to this goal"* and the cascade progress, naming nobody. Before, any member of staff
+> could read which colleague was behind on which goal.
+
 ### ▶ Walk it
 
 1. Open **Unit Goals**. Three rows, all linked.
@@ -1951,7 +2094,8 @@ Goal · Priority · Status · Progress · Due.
 
 > ⚠ **The attachment entitlement here is weaker than anywhere else in the module**: a unit goal's
 > attachments are readable by **anyone authenticated in the tenant**, because a departmental target is
-> not personal data. Do not attach anything sensitive to a unit goal.
+> not personal data. Do not attach anything sensitive to a unit goal. This is deliberate (closure
+> decision D-26), and the upload card says so beside the Attach button.
 
 > **A quirk worth knowing if you ever script against it:** `UnitGoals/dashboard/paged` binds
 > `priority` as an **integer** while every other endpoint takes the enum name. The client converts it;
@@ -1959,7 +2103,9 @@ Goal · Priority · Status · Progress · Due.
 
 ### ⚠ Known gaps
 **P-18.** Employee-goal cascade counts read 0 on every unit goal (Rule 5).
-**P-19.** Unit-goal attachments are tenant-readable rather than entitlement-scoped.
+**P-19.** Unit-goal attachments are tenant-readable rather than entitlement-scoped. *Kept by decision
+(D-26, closure P18): a departmental target is not personal data, and the upload card has said so since
+2026-08-09.*
 
 ---
 
@@ -1997,7 +2143,14 @@ as you go"*, a cycle picker, and **New goal**.
 * A progress bar with the percentage
 * Buttons, which depend on the status:
   * **Edit** and **Submit for approval** — only while Draft or Rejected, and not locked
-  * **Record progress** — only while the goal is live (Approved / InProgress / OnTrack / AtRisk)
+  * **Record progress** — only while the goal is live (Approved / InProgress / OnTrack / AtRisk),
+    **locked or not**
+
+> **Changed 2026-09-29** (performance closure lane L-a). **Record progress stays on a locked goal**
+> (decision D-29): the lock freezes what the goal is, and its year runs on — the button used to vanish
+> the moment a goal was locked. **Editing a draft no longer wipes what the dialog does not show**: the
+> KPI link, the minimum and maximum, the success criteria and the alignment used to be cleared by
+> every save from this page.
 
 **Efua's three cards, as they stand:**
 
@@ -2091,13 +2244,32 @@ workflow. HR-shaped: an employee picker, the whole cascade, the KPI library.
 **Two rules govern the set rather than any single goal**, and both are shown above the table:
 
 * **The weights should total 100.** Nothing blocks a submit that leaves them unbalanced, but it is what
-  the manager's governance view flags.
+  the manager's governance view flags — and, since closure lane L-a, **the manager cannot lock the set
+  until it does** (below).
 * **A goal must be aligned to something for the cascade to mean anything.** Unaligned goals are allowed,
   and called out.
 
-**Status only ever moves through submit / approve / reject / lock.** Editing a goal never changes its
+**Status only ever moves through submit / approve / reject.** Editing a goal never changes its
 status — the API ignores a status sent on an edit — so the row actions here are the only route between
 states.
+
+> **Changed 2026-09-29** (performance closure lane L-a, decisions D-29 and D-30).
+> - **A lock is a flag, not a status.** It freezes what the goal is — title, measure, target, weight,
+>   period, success criteria, owner — and not its year: progress still moves a locked goal.
+> - **The manager locks the whole set** once it is complete (`POST api/EmployeeGoals/lock-set`; since
+>   lane L-c, the **Lock set** button on the team desk, chapter 19): every live goal approved, the count
+>   inside the cycle's minimum and maximum, the weights adding to 100. Each refusal names what is
+>   missing — *"the goal weights add up to 90%, not 100%"*. A rejected goal is not part of the set.
+> - **What an approved goal measures cannot be edited.** Its description, priority, dates and
+>   alignment can; its title, measure, target, weight, period and success criteria cannot — *"Ask
+>   your manager to send it back to you for changes."* The manager's **Send back** (on the detail
+>   page) returns an approved or running goal, not locked and not completed, to the employee with a
+>   reason; its progress entries are kept.
+> - **An edit never changes a goal's owner, cycle or appraisal link.** It used to copy all three from
+>   the form, so an edit could move a goal into a colleague's set, and every edit made in the UI
+>   cleared the link.
+> - **Unlocking returns a goal left in the old Locked status to Approved**, so it can be locked
+>   again.
 
 ### 👁 On the page
 
@@ -2135,10 +2307,13 @@ with a **Locked** badge beside the status where applicable, and a **⋯** menu p
 Dialog hint: *"New goals start as a draft. Submitting is what sends them to the manager."*
 
 ### 👁 The detail page (`/employee-goals/[id]`)
-* Header with status, plus **Submit**, **Approve**, **Reject**, **Lock** / **Unlock** offered **on
-  status alone** — so a manager-only action attempted by someone else comes back 403 *with the reason*
-  rather than being hidden as if it did not exist.
-* Banners: *Returned by the manager* (with the feedback) · *Locked*
+* Header with status, plus **Submit**, **Approve**, **Reject**, **Send back** *(an approved or running
+  goal, not locked — since closure lane L-a)*, **Lock** / **Unlock** offered **on status alone** — so a
+  manager-only action attempted by someone else comes back 403 *with the reason* rather than being
+  hidden as if it did not exist.
+* Banners: *Returned by the manager* (with the feedback) · *Locked* — *"What the goal measures — its
+  title, target, weight and period — cannot change until it is unlocked. Progress is still recorded
+  against it through the year."*
 * **Goal** card — description, success criteria, manager feedback
 * **At a glance** — progress, weight, priority, **aligned to**, measured as, target, range, from
   template, period, runs
@@ -2153,9 +2328,9 @@ Dialog hint: *"New goals start as a draft. Submitting is what sends them to the 
 2. Pick **Efua Seidu** in the employee picker. The cycle preselects.
 3. Point at **Total weight — 100%**.
 
-   💬 *"A hundred. The system does not refuse an unbalanced set — there are good reasons to run at
-   ninety in a half-year — but it is the first thing her manager's governance screen tells him about,
-   and it is the first thing HR sees here."*
+   💬 *"A hundred. The system lets her submit an unbalanced set — the weights settle as the goals are
+   agreed — but her manager cannot lock the set until it adds up to a hundred, and it is the first
+   thing his governance screen tells him about, and the first thing HR sees here."*
 
 4. Point at the **Aligned to** column: all three read **Standalone**.
 
@@ -2246,6 +2421,30 @@ Unbalanced weights.
 | **Locked** | Goals frozen against change |
 | **Progress** | Employee · Average progress · Goals · Not started · On track · At risk · Completed · Overdue |
 
+> **Changed 2026-09-29** (performance closure lane L-a, decision D-29). **The Locked tab and the locked
+> count read the lock itself** — the goal's *Locked* flag — and no longer a status nothing writes. **A
+> locked goal can be overdue**: it is still running, so it stays on the Overdue tab and in the counts
+> once its due date passes (the old lock's status used to hide it). **The weight total leaves rejected
+> goals out**, as the set lock does — a rejected goal is not part of the set. The manager locks the set
+> from this desk (lane L-c, below), or HR's advance past goal setting locks it (chapter 38).
+>
+> **Changed 2026-09-29** (performance closure lane L-b). **Where the template has a goals section, the
+> lock fills it.** Locking a goal or the whole set — or HR's advance past goal setting — writes one row
+> per locked goal onto the employee's appraisal (§ 1.4); unlocking a goal takes its row out again,
+> with any *draft* score on it. Once a goal's row is scored in a **submitted** evaluation the section
+> is settled: the unlock is refused — *"This goal has been scored in its appraisal, so it cannot be
+> unlocked."* — and a later lock adds no row.
+>
+> **Changed 2026-09-29** (performance closure lane L-c). **The Overview tab has a *Lock set* button**
+> on each report whose verdict is **Structurally complete**. It asks first — *"Lock this goal set?"* —
+> and says what the lock means: the goals become fixed for the year (title, measure, target and
+> weight), progress and check-ins still move them, and a goals section on the form is filled from the
+> set. A report whose every live goal is locked reads **Set locked** instead. The verdict does not
+> check the cycle's minimum and maximum goal count; the lock does (chapter 18), and a refusal's toast
+> names what is missing. A rejected goal keeps the verdict at *In progress*, so the button waits until
+> the employee reworks or deletes it — although the lock itself, like HR's advance, leaves a rejected
+> goal out.
+
 **The governance verdicts** (`TeamGovernanceStatus`), each with a hint under the badge:
 
 | Verdict | Means |
@@ -2257,8 +2456,10 @@ Unbalanced weights.
 | **Structurally complete** | approved, balanced, done |
 
 **Kwasi Danquah's eight direct reports**: Efua Seidu (3 goals), Patrick Appiah, Kwabena Sowah, Kwaku
-Owusu, Yaw Bruce-Quaye, **Kojo Ansah**, Mohammed Bruce-Quaye, Prince Nyaho — **seven of whom have no
-goals at all**, and therefore read **Not started**.
+Owusu, Yaw Bruce-Quaye, **Kojo Ansah** (3 goals), Mohammed Bruce-Quaye, Prince Nyaho — **six of whom
+have no goals at all**, and therefore read **Not started**. *(Kojo Ansah's three came with the demo
+scenarios' re-run on 2026-09-29: closure lane B1's gates hold the self-evaluation until the profile's
+three goals are agreed.)*
 
 ### ▶ Walk it
 
@@ -2266,9 +2467,10 @@ goals at all**, and therefore read **Not started**.
 2. Go to **Team Goals**. The **Overview** tab.
 3. Read the governance column down the page.
 
-   💬 *"Eight people report to the Head of Development. One of them — Efua — has a complete, balanced,
-   approved set. Seven have not started. That is not a report he had to ask for; it is the first thing
-   the screen tells him, and 'not started' is a fact about counts and weights, not somebody's opinion."*
+   💬 *"Eight people report to the Head of Development. Kojo Ansah has a complete, balanced, approved
+   set; Efua's is waiting on him — the goal she drafted a moment ago. Six have not started. That is not
+   a report he had to ask for; it is the first thing the screen tells him, and 'not started' is a fact
+   about counts and weights, not somebody's opinion."*
 
 4. Point at Efua's **Weight — 100%**.
 
@@ -2285,6 +2487,12 @@ goals at all**, and therefore read **Not started**.
    💬 *"And that is the whole approval. No routing table, no definition, no configuration — his
    authority comes from the fact that the establishment says she reports to him, read from her record
    at the moment he pressed the button. If I signed in as HR and tried it, I would get a 403."*
+
+   ⚠ **Kojo Ansah's row has carried a *Lock set* button since you arrived, and Efua's carries one now**
+   — both sets are complete and, on the demo database, not locked (lane L-c). **Do not press it here.**
+   A lock is not one of Appendix E's writes, and a locked goal cannot be deleted, which is how writes 3
+   and 4 are put back. If it is pressed, unlock each goal (Employee Goals → **⋯** → **Unlock**) before
+   the reset.
 
 7. *(Optional, worth 20 seconds.)* Show **Reject** on another goal without confirming, to make the
    point that the feedback box is mandatory: *"The API refuses a rejection with no explanation, so the
@@ -2430,6 +2638,11 @@ one of your own people anyway): Employee · Title · Type · Scheduled for · Ag
 On this database `head.dev` has **one** check-in: *Q3 one-to-one — Community 25 progress*, with Efua,
 **held on 14 September**.
 
+> ⚠ **On this database its shared and private notes are empty**, and its held date is the day the demo
+> scenarios last ran, not 14 September — the scenario sent a field name the endpoint drops (fixed
+> 2026-09-29). Steps 5 and 6 below read those notes: re-run demo scenario 060, which records the
+> check-in as held again with its notes, or rebuild (Book 0's evening-before rebuild does).
+
 ### 👁 On the detail page
 
 | Block | What is in it |
@@ -2438,12 +2651,19 @@ On this database `head.dev` has **one** check-in: *Q3 one-to-one — Community 2
 | **Three fields** | Scheduled · Cycle · Follow-up |
 | **Objectives this was about** | Which of the cycle's company goals the conversation served. **Replace-set** — each save sends the whole list. Read-only once held |
 | **Agenda** | Free text, set when the check-in was scheduled |
-| **Shared notes** / **Action items** / **Private notes** / **Employee comments** | Four cards, shown once held. **Private notes are shown only to whoever conducted the check-in** |
+| **Shared notes** / **Action items** / **Private notes** / **Employee comments** | Four cards, shown once held. **Private notes reach only whoever conducted the check-in, and HR** — the server leaves them out of every other reader's copy, and always out of the subject's, even when the subject is an HR officer (closure lane P, 2026-09-29) |
 | **Goal updates** | Goal · Progress · Status, with an **Update a goal** button — and the standing line *"Recording an update here moves the goal itself, so it shows up in progress and at-risk reporting."* |
 
 **The "Record as held" dialog** carries **Shared notes** *("What you both agreed. The employee can see
-this.")*, **Action items**, **Private notes** *("Your own record.")* — and warns: *"These three fields
-are replaced wholesale each time, not merged — paste back anything you want to keep."*
+this.")*, **Action items**, **Private notes** *("Your own record.")* — and warns: *"These fields are
+replaced wholesale each time, not merged — paste back anything you want to keep."*
+
+> **Changed 2026-09-29** (closure lane P, P6). **Record as held** is offered to the conductor and to
+> HR, never to the check-in's subject (the subject sees *Not yet held*), and the **Private notes**
+> field to the conductor alone — the server writes private notes only from the conductor, so HR
+> closing a meeting it did not hold cannot overwrite them. Who the check-in is about and who holds it
+> are fixed once it exists, and it can be opened only about yourself, a direct report, or — for HR —
+> anyone in the tenant.
 
 **The "Update a goal" dialog**: Goal *(the employee's own, for this cycle)* · Progress % · Status ·
 Note · and a **"This changes the goal"** confirmation line.
@@ -2463,9 +2683,9 @@ Note · and a **"This changes the goal"** confirmation line.
 5. Read the **Agenda**, then the **Shared notes** and **Action items**.
 6. Point at **Private notes**.
 
-   💬 *"And that box is his. It comes back on every read of this check-in — including the employee's —
-   so the screen shows it only to the person who ran the meeting. That is a rule in the code, not a
-   convention."*
+   💬 *"And that box is his. When Efua opens this check-in, the server does not send it to her at
+   all — not hidden on her screen, absent from what her browser receives. That is a rule in the code,
+   not a convention."*
 
 7. Scroll to **Goal updates**. Three rows: the layout at 70% *On track*, the turnaround at 55%
    *At risk*, the certification at 40% *In progress*.
@@ -2494,6 +2714,8 @@ Note · and a **"This changes the goal"** confirmation line.
 | Record as held | `POST api/CheckIns/{id}/complete` | stamps it held, **now**; the three note fields are replaced wholesale |
 | Goal updates | `GET/POST/PUT/DELETE api/CheckIns/{id}/goal-updates[/{id}]` | writes `CheckInGoalUpdates` **and applies the figures to `EmployeeGoals`** |
 | Objectives | `PUT api/PerformanceLinks/check-ins/{id}/objectives` | **replace-set**; `[]` clears it |
+| Attachments | `GET/POST/DELETE api/CheckIns/{id}/attachments[/{id}]` | a file is removed by whoever attached it, or HR — never as the check-in's subject — and only until the check-in is held (closure P9) |
+| Goal updates, ownership | `POST …/goal-updates` | **only a goal of the check-in's subject** (404 otherwise); an edit never moves an update to another check-in or goal (closure P7 — anyone could open a check-in about themselves and move a colleague's goal through it) |
 
 > **Deleting a goal update does not undo what it did.** The toast says so: *"The goal keeps the figures
 > this update put on it."* That is honest rather than convenient — the goal has moved on, and rolling it
@@ -2502,8 +2724,10 @@ Note · and a **"This changes the goal"** confirmation line.
 ### ⚠ Known gaps
 **P-26.** There is exactly **one** check-in on this database, so the "I run" tab has one row and the
 "About me" tab is empty for everyone except Efua.
-**P-27.** `privateNotes` come back on **every** read of a check-in, including the employee's. The client
-hides them; the API does not.
+**P-27.** ~~`privateNotes` come back on **every** read of a check-in, including the employee's. The client
+hides them; the API does not.~~ **Fixed on every path** — by id, the employee's and the conductor's
+lists, by employee, by conductor, upcoming, and HR's paged list, which was never redacted (closure lane
+P, P15; `run-final-privacy.mjs`).
 
 ---
 
@@ -2638,13 +2862,23 @@ badges and an **Open** link.
   three things to act on. These go into the notification the employee gets.")*
 * **Save** while open; **Record as held** to complete
 
-**On this database:** eight conversations, **all completed** — five kick-offs dated 10 February 2026
-(one per track) and three final reviews dated 11 September 2026 (the three finished appraisals).
+**On this database:** fourteen conversations, **all completed** — five kick-offs dated 10 February 2026
+and five mid-years dated 14 July (one of each per track), and four final reviews in September (the
+three finished appraisals, and Kwasi's ahead of his live sign-off). *(It was eight — five kick-offs and
+three final reviews — until closure lane B1 made the mid-year a condition of the self-evaluation.)*
+
+> ⚠ **On this database, until it is rebuilt, the kick-off notes and the three finished appraisals'
+> final-review notes are empty** — the demo scenario sent field names the endpoint drops, and a held
+> conversation cannot be completed again (fixed in the scenario 2026-09-29). Steps 2 and 3 below read
+> them, so rebuild before walking this chapter (Book 0's evening-before rebuild does). The mid-years
+> and Kwasi's final review have theirs.
 
 ### ▶ Walk it
 
-1. In **window B** as `staff`, open **Conversations** → **About me**. Two rows: a **Kick-off** in
-   February and a **Final review** in September.
+1. In **window B** as `staff`, open **Conversations** → **About me**. Three rows: a **Kick-off** in
+   February, a **Mid-year** in July and a **Final review** in September. *(Changed 2026-09-29 —
+   closure lane B1 holds the self-evaluation until both setup conversations are held, so the demo
+   holds a mid-year for every track. It was two rows before.)*
 2. Open the **Kick-off**.
 
    💬 *"The tenth of February. Goals agreed and weighted, evidence sources named for each — the scheme
@@ -2653,8 +2887,10 @@ badges and an **Open** link.
 
 3. Open the **Final review**. Read the *Notes* and the *Key takeaways*.
 
-   💬 *"And the same meeting at the other end of the year. Her manager's assessment, and her own comment
-   back — which is on the record because she gave it, not because somebody typed it for her."*
+   💬 *"And the same meeting at the other end of the year: her manager's assessment, and what they
+   agreed. Her own answer is not typed in here by someone else — she gives it herself, on the appraisal,
+   when she acknowledges it."* *(Changed 2026-09-29: a conversation holds only the manager's notes and
+   takeaways; the employee's comment is her acknowledgment, chapter 32.)*
 
 4. Switch to `head.dev`, open **My diary**, and expect it to be **empty**. Say so.
 
@@ -2687,6 +2923,13 @@ badges and an **Open** link.
 
 Anything keyed on an id is **403** unless the caller is HR, the appraisee, the appraisee's manager, or
 whoever scheduled or is holding the meeting.
+
+> **Changed 2026-09-29** (performance closure lane B1). **A held conversation can move the appraisal
+> on.** The kick-off and mid-year conversations the profile requires are part of *goal setting*: the
+> self-evaluation is refused until they are held. The final review conversation stands before the
+> acknowledgment, and on a cycle with no acknowledgment, **recording it as held completes the
+> appraisal** and settles its score — it used to leave it in Governance for good. A conversation held
+> on a Draft appraisal does not open it.
 
 ### ⚠ Known gaps
 **P-29.** *My diary* is empty for every persona on this database (Rule 6).
@@ -2770,6 +3013,11 @@ manager can close, and may require a **progress update on every live goal** befo
 > with two goals weighted 30 and 10 divides by 40, so a single goal scored 80 yields 80, not a diluted
 > 24.
 
+> **Changed 2026-09-29** (performance closure lane L-b, L7). **A full interim appraisal scores the
+> locked goal set only.** Its scoring tab listed every goal of the cycle — drafts and rejected goals
+> included — and the finalise scored whatever it was sent. Both now take the employee's agreed, locked
+> goals, and a finalise that names any other goal is refused with 422.
+
 ### ⚠ Known gaps
 **P-31.** All 102 live checkpoints sit at **Pending** — nobody has submitted one. The *Awaiting manager*
 tile on the cycle's Interim reviews tab therefore reads 0, and the detail pages open with empty
@@ -2825,6 +3073,13 @@ employee has not been told"* banner where applicable, and three tabs:
 
 The objective dialog: Title · **What good looks like** · **Actions agreed** *("Training, mentoring,
 stretch work — whatever was agreed")* · Target date · Status.
+
+> **Changed 2026-09-29** (closure lane P, P10). A plan records **who wrote it**. The employee may
+> complete, cancel or delete only a plan they wrote themselves; on one their manager or HR set for
+> them, the status picker offers neither Completed nor Cancelled and the server answers 403 — they work
+> it, the manager closes it. A plan written before that date has no author and counts as set for the
+> employee (the three on this database). The plan's edit route no longer moves a plan to another
+> employee or changes its status; status moves only through the picker's own route.
 
 Alongside it, on the employee's own plan, sits **Development skill suggestions** — competencies this
 person's *goals* say they need, each listed with the goals that asked for it. Not generic
@@ -2888,7 +3143,7 @@ between them.*
 
 **The two appraisals you will use:**
 
-* **Efua Seidu** (`staff`) — **finished**. Score 89.40, acknowledged. Use her for *reading* a completed
+* **Efua Seidu** (`staff`) — **finished**. Score 88.56, acknowledged. Use her for *reading* a completed
   appraisal, and for the live appeal.
 * **Kwasi Danquah** (`head.dev`) — **with HR**. Self 92.20, peers 80 and 76, manager 88.80, calibrated,
   no final score yet. Use him for the live sign-off.
@@ -2945,6 +3200,15 @@ Steps the cycle does not require are **dropped** from the rail rather than greye
 | **My peer nominations** | Only when the cycle nominates in *Employee* mode. Nominate, see who was approved |
 | **Outcome** | Empty until HR finalises. Then: **Final score · Finalised · Acknowledged**, **How the score was made up** (Self / Peers / Manager), **HR remarks**, and **Your response** |
 
+> **Changed 2026-09-29** (closure lane P, P2). **The outcome is released to the employee, not merely
+> hidden from them.** Until it is released — Completed or Closed, or in governance with every required
+> calibration committed and HR's sign-off given — the server sends the employee's own copy of their
+> appraisal, their lists, their trend and the HR review **without** the overall and calibrated scores,
+> the grade, the ranks, the manager's recommendations and narrative, the manager's and peers' scores
+> and HR's remarks; each carries `outcomeReleased: false`, and *My Appraisals* shows *"Not yet
+> released"*. Their own self-evaluation score is theirs throughout. HR and the manager see everything
+> as before. With anonymous peer reviews on, no payload of the employee's names a peer.
+
 ### ▶ Walk it
 
 1. In **window B**, sign in as `staff`. Go to **My Self-Service → Performance → My Appraisals**.
@@ -2990,6 +3254,13 @@ Steps the cycle does not require are **dropped** from the rail rather than greye
 > nothing on the record contradicted that. The `/me` route refuses anyone but the appraisal's own
 > employee (404, never 403), which is the only thing making the record mean what it says.
 
+> **Changed 2026-09-29** (performance closure lane B1). **The row's *Next step* is the step the
+> appraisal is at**, the one the employee's next write is held to: *Goal setting — …* with the reason
+> (too few goals, one waiting for approval, a conversation not yet held), *Nominate your peer
+> reviewers*, *Complete self-evaluation*, or *Acknowledge appraisal* — the last only once every step
+> before it is done, where it used to appear the moment the manager submitted (and the acknowledgment
+> was then refused). *Can file an appeal* follows the enforced appeal rule (Rule 9).
+
 ### ⚠ Known gaps
 **P-34.** The *Outcome* tab is empty until HR finalises, including the score breakdown — correct, since
 the manager's scores are not the appraisee's to read before sign-off, but it means an in-flight
@@ -3030,7 +3301,17 @@ confirmation.
     * **Evidence link** — only on items whose criterion demands evidence
 * **The goal assessment panel** — the year-end verdict on the goals the cycle spent the year cascading.
   Per goal: **Final actual · Final progress % · Final status · Assessment notes · Evidence**. A counter
-  reads *n of N assessed*, and goals left blank are **not recorded either way**
+  reads *n of N assessed*, and goals left blank are **not recorded either way**.
+  *(Since closure lane L-b, where the template has a goals section the goals are scored **on the form
+  itself**, one row each, and the panel's actual and percentage for such a goal are taken from its row
+  — the achievement is entered once. The panel's status, notes and evidence stay the employee's own. An
+  assessment of a goal that is not the employee's is refused.)*
+  *(Since closure lane L-c the screen does it. A goals section's card says it holds the goals agreed
+  and locked for this cycle; each goal row is badged **Goal**, and a goal with a target takes an
+  **Actual achieved** against its own target while one without takes a **Score**. In the panel, such a
+  goal's actual and percentage are greyed out: "Scored on the form — the actual and the percentage
+  come from its row." The submitted view shows a measured goal's actual against its target, as it
+  does a KPI's.)*
 * **Questions** — the free-text item, with the template's question as its label
 * The submit confirmation: *"You will not be able to change it afterwards, and your manager will be able
   to see your scores alongside theirs."* — plus, on this cycle, *"Your peer nominations must also be
@@ -3080,6 +3361,13 @@ when the cycle requires employee-driven nomination; all competencies rated when 
 target/min/max, and its number wins — so the *Final progress %* field disables itself and says why once
 an actual value is present.
 
+> **Changed 2026-09-29** (performance closure lane B1). **Submit is refused until the appraisal is at
+> the self-evaluation step** — the goals set as the profile requires (the minimum, the manager's
+> approval), the kick-off and mid-year conversations held, and the peer nominations in — with a 422
+> naming the step and the reason, e.g. *"The self-evaluation cannot be submitted yet: this appraisal is
+> at Goal Setting — the mid-year conversation has not been held."* **Save draft** works at any point.
+> The goals counted are the employee's in the cycle, including any agreed before the appraisal existed.
+
 ### ⚠ Known gaps
 **P-35.** Efua's self-evaluation is already submitted, so this chapter is a **read**. If you want a live
 self-evaluation, use `new.hire` — but his is submitted too. The only genuinely open self-evaluations
@@ -3112,6 +3400,12 @@ their weights are identical to what everyone else is scoring against. Two things
 * **KPI rows may be read-only.** When the cycle's settings do not let peers score KPIs — as on this
   profile — those items still appear, so the criterion is visible in context, but cannot be scored. The
   server enforces the same rule when validating the submission.
+  *(Since closure lane L-b the same setting governs the employee's **goal rows**: shown, read-only, and
+  a peer's score on one is refused when saved. For KPI items the server checks only the submission;
+  lane D closes the draft.)*
+  *(Since closure lane L-c the screen takes which rows are read-only from the server and sends only
+  the rows you may score. Its note reads: "This cycle does not ask peers to score KPI targets or the
+  employee's goals — those rows are shown for context but cannot be scored.")*
 * **Anonymity is about the appraisee, not you.** `isAnonymous` means *they* will not see who said what.
   **Their manager always sees your name**, and the screen says so plainly rather than letting the word
   "anonymous" imply more than it means.
@@ -3151,6 +3445,20 @@ first.
 creates each peer's evaluation record and notifies them. A nomination can be removed until the
 invitation has been sent — which approval does.
 
+> **Changed 2026-09-29** (closure lane P, P14). **The nominated peer can read their nomination but
+> never change or delete it** — they could mark it approved or withdraw one they did not want. A
+> nomination records **who actually made it**, from the login (the batch recorded every one as the
+> appraisee's, whoever sent it). In a cycle that nominates in **Manager** mode the appraisee is
+> refused both nominate routes (*"In this cycle your manager chooses your peer evaluators."*).
+
+> **Changed 2026-09-29** (performance closure lane B1). **The peer form has a window.** With *Peer
+> window opens* set to after the self-evaluation, a peer's draft and submission are refused until the
+> employee has submitted; alongside it (as on this profile), from the self-evaluation step. Either way
+> the window closes when the manager submits. The nominations count towards the minimum once made —
+> a pending one counts, a rejected one does not — so the self-evaluation waits only for the employee's
+> own step, nominating. A peer's submission that is the last step (no manager evaluation, nothing
+> after) completes the appraisal.
+
 ### ⚠ Known gaps
 **P-36.** Every peer evaluation on this database is already submitted, so the forms open read-only.
 
@@ -3186,8 +3494,9 @@ where the two evaluation columns read **Outstanding / Draft saved / Not started 
 **Save draft** and **Submit**.
 
 > **Submitting is one-way and does more than save.** It assigns the HR reviewer, moves the appraisal to
-> **Governance**, and locks every later write. A remand is the only route back, and it clears the
-> submission first. That is why it sits behind a confirmation and why draft-saving is the prominent
+> **Governance**, and locks every later write. HR's **return to manager** at the sign-off (chapter 31)
+> is the only route back: it clears the submission first. ⚠ An appeal **remand does not** (P-71) — the
+> guide said it did. That is why it sits behind a confirmation and why draft-saving is the prominent
 > action.
 
 **The phase rail**, then banners: *Re-evaluation after an appeal* (with the appealed items highlighted
@@ -3205,7 +3514,7 @@ it needs changing.*
 | **Nominations** | Only when the cycle nominates in *Manager* mode |
 | **History** | The employee's score across previous cycles |
 | **Conversations** | The panel that schedules and completes appraisal conversations |
-| **Evidence** | Attachments — *"Evidence behind the ratings — reports, certificates, correspondence. Scanned on upload; max 10 MB."* |
+| **Evidence** | Attachments — *"Evidence behind the ratings — reports, certificates, correspondence. Scanned on upload; max 10 MB."* **Remove** is offered on a file to whoever attached it, or to HR, and on nothing once the appraisal is complete — the server refuses the rest (closure P9, 2026-09-29; it removed anyone's file, at any stage) |
 
 Below the tabs, when the cycle nominates in *Employee* mode, a separate card: **Peer nominations
 awaiting your approval** — because the employee nominates, but approving is still the manager's call.
@@ -3215,6 +3524,13 @@ self-assessment* with the employee's number, their achieved grade and their note
 all is the cycle's decision (`showSelfScoreToManager`), and when it is off the aside is **dropped**
 rather than shown blank — with a line at the top of the page saying *"This cycle does not show you the
 employee's self-scores while you evaluate."*
+
+> **Changed 2026-09-29** (performance closure lane L-c). **The manager scores goal rows** on the same
+> form as the employee (chapter 27): each badged **Goal**, a measured goal taking the actual achieved
+> against its own target, with the employee's figure beside it where the cycle shows self-scores. On
+> the **Goals** tab, a goal scored on the form has its actual and percentage greyed out — the row is
+> where they are entered. Before this lane every goal row shared one key on this screen and the
+> employee's: a score typed on one showed on all of them, and the save could not name the row.
 
 ### ▶ Walk it
 
@@ -3292,6 +3608,15 @@ employee's self-scores while you evaluate."*
 > The `managerId` in the payload is **overwritten server-side from the token** — it is sent only to match
 > the documented shape.
 
+> **Changed 2026-09-29** (performance closure lane B1, decision 5). **The manager submits after the
+> employee.** *Submit* is refused until the appraisal is at the manager-evaluation step — the
+> self-evaluation and the minimum of peer evaluations in — with a 422 naming what is outstanding
+> (*"…this appraisal is at Self-Evaluation — the employee has not submitted their self-evaluation"*).
+> Drafts save at any point. If a step will not be completed, HR's audited advance (chapter 38) is the
+> way past it; a self-evaluation waived that way leaves the employee's draft a draft, counted nowhere.
+> Where the submission leaves the appraisal is the gates' call: Completed when nothing follows, the
+> employee's end when only the conversation or the acknowledgment does, Governance otherwise.
+
 ### ⚠ Known gaps
 **P-37.** Uploading on the **Evidence** tab needs the malware scanner running. Without it every upload
 answers **422** — correct behaviour (every `hr-*` category is scan-mandatory and tenant policy cannot
@@ -3327,7 +3652,8 @@ otherwise.
   Convened    stamps that the panel actually met
   Close       no further adjustments; the panel is notified the ratings are ready
   COMMIT      irreversible. Writes the agreed ratings onto the appraisals AND lifts the
-              calibration gate on everyone in scope — including the people left alone
+              calibration gate on everyone at the calibration step (manager submitted) —
+              including the people left alone. The rest are listed as skipped, with why.
 ```
 
 ### 👁 On the list
@@ -3374,6 +3700,17 @@ and hides a disclosure: **Adjust individual criteria (n)**, each with its weight
 a field, and a **Record** button. *"Each criterion is recorded separately from the overall score above.
 Leave one blank to leave it alone."*
 
+> **Changed 2026-09-29** (performance closure lane L-b). **The Decisions list names the criterion** — an
+> item adjustment read *one criterion*, because the list never loaded the item. Where the template has
+> a goals section, the per-criterion read lists the **goal rows** by their goal's title, and an
+> adjustment on one moves that row, not the overall: the overall adjustment is told apart by its own
+> flag, where a missing template item used to mean the overall.
+>
+> **Changed 2026-09-29** (performance closure lane L-c). **The dialog follows**: *Adjust individual
+> criteria* lists the goal rows, each badged **Goal**, and records one by its snapshot row; the
+> Decisions list and the dialog find the overall adjustment by its flag, so a recorded goal row no
+> longer shows up as the *Overall score*.
+
 ### ▶ Walk it
 
 1. Open **Calibration**. The **Open** tab is empty — go to **Completed**. Two sessions.
@@ -3415,8 +3752,11 @@ Leave one blank to leave it alone."*
    **Open session**.
 
    💬 *"Opening does two things. It records me as facilitator, and it links every appraisal in scope to
-   the session — so from this moment every one of those appraisals reports 'calibration in progress' on
-   its own phase rail. Nothing can be adjusted before that, because there is nothing to adjust against."*
+   the session — so from this moment every one of them that has reached calibration reports
+   'calibration in progress'. Nothing can be adjusted before that, because there is nothing to adjust
+   against."*
+   *(Corrected 2026-09-29: only an appraisal at the calibration step reads "in progress"; the rest show
+   their own step. None of this department's nine has reached calibration.)*
 
 8. Press **Mark convened**. Go to the **Grid** and press **Adjust** on any row. Read the dialog, expand
    **Adjust individual criteria**, and then **Cancel** — you do not need to record one.
@@ -3433,8 +3773,10 @@ Leave one blank to leave it alone."*
 
 10. Press **Commit ratings**, read the confirmation out loud, and confirm.
 
-    > *"This writes the agreed scores onto the appraisals and marks everyone in scope as calibrated —
-    > including the N the panel left as they are. It cannot be undone."*
+    > *"This writes the agreed scores onto the N appraisal(s) whose manager has submitted and marks
+    > them calibrated — including the M the panel left as they are. The other K are not at the
+    > calibration step yet and are left alone; the result lists them. It cannot be undone."*
+    > *(Wording since 2026-09-29; before that a commit stamped everyone in scope.)*
 
     💬 *"Committed. Those appraisals are now through the gate, and HR can sign them off."*
 
@@ -3449,23 +3791,46 @@ Leave one blank to leave it alone."*
 | Close | `POST …/{id}/complete` — adjustments refused afterwards; the panel is notified |
 | **Commit** | `POST …/{id}/apply-adjustments` — **only from Completed, and irreversible** |
 | Grid | `GET …/{id}/matrix` — **every appraisal the session covers, not only the adjusted ones** |
-| Per-criterion detail | `GET …/{id}/appraisals/{appraisalId}/criteria` — a *read*, so panellists get it, not just HR |
+| Per-criterion detail | `GET …/{id}/appraisals/{appraisalId}/criteria` — a *read*, so panellists get it, not just HR; **404 for an appraisal outside the session's scope** (any session id used to open any appraisal's criteria) |
 | Adjustments | `GET/POST/PUT/DELETE …/{id}/adjustments[/{id}]` — **422 while the session is Pending, Completed or Cancelled**, and 422 if the appraisal is outside scope |
 | Panel | `…/{id}/participants[/{id}]`, `PATCH …/attendance` |
 | Attachments | `…/{id}/attachments` — HR only, through the scan gate |
 
-**Reads work for any authenticated user; every write needs an HR role.** Deleting a session needs
-`HR.Performance.Admin` — 403 for `hr.head`.
+**Reads are HR's and the panel's; every write needs an HR role.** *(Changed 2026-09-29, closure lane
+P, P3 — reads were open to any authenticated user.)* A session is readable by the performance desk and
+by its panellists — the participants and the facilitator — and the lists (by cycle, paged) give
+everyone else only the sessions they sit on. The per-criterion read answers only for an appraisal in
+the session's scope. **A panellist's own appraisal is left out of every read** — their matrix row,
+its adjustments and criteria, and the grid's counts and average, which would otherwise let them work
+their own score out. Panellists reach the detail page from the *"session complete"* notification.
+Deleting a session needs `HR.Performance.Admin` — 403 for `hr.head`.
 
 **Scope resolution:** every appraisal in the cycle whose employee sits in the named unit **or any unit
 beneath it**; or, when a level is named instead, everyone at that level. Anything already linked to the
 session, or carrying one of its adjustments, is pulled in even if the scope has since changed.
 
+> **Changed 2026-09-29** (performance closure lane B1). **The commit calibrates the appraisals at the
+> calibration step by the gates** — the manager's evaluation in, and, where HR reviews *before*
+> calibration, HR's sign-off given — plus one it already calibrated that this session restates, or a
+> final one it adjusts. The rest are listed with the step each is at (*"Not at the calibration step: it
+> is at HR Review — HR has not signed it off."*), and **leave the session**: opening linked them to it,
+> and a skipped appraisal used to stay pinned to a panel that had already sat, reading "in progress".
+> On a cycle with no calibration step the commit skips everything. **A commit that is the last step
+> completes the appraisal** and settles its score — it used to leave it in Governance for good. The
+> confirmation dialog still counts every appraisal in Governance as *at the step*, so where some are
+> already calibrated, or wait on HR under HR-first timing, its *N* runs high; the result's skipped list
+> is the truth (lane I aligns the dialog).
+
 ### ⚠ Known gaps
-**P-39.** **The overall calibrated score does not survive HR sign-off** (Rule 2). HR's finalise
-recalculates from the evaluation legs.
-**P-40.** **A per-criterion adjustment on a KPI item does nothing to the score.** It writes
-`NumericScore`; a KPI is scored from `ActualValue`. Competency items are fine.
+**P-39.** ~~**The overall calibrated score does not survive HR sign-off** (Rule 2). HR's finalise
+recalculates from the evaluation legs.~~ **Fixed 2026-09-29** (closure A3): the calibrated overall
+is kept and sign-off settles *from* it. Cynthia Sarpong's record predates the fix (Rule 2).
+**P-40.** ~~**A per-criterion adjustment on a KPI item does nothing to the score.** It writes
+`NumericScore`; a KPI is scored from `ActualValue`. Competency items are fine.~~ **Fixed 2026-09-29**
+(closure A4) — and it was wider than written: *no* item adjustment reached the overall, because the
+overall re-summed the stored weighted scores. The settle recomputes every item from its raw inputs,
+and a KPI restatement is an achievement percentage, labelled on every screen. Efua Seidu's record
+predates the fix (Rule 2).
 **P-41.** The grid's **Calibrated** column reads the *adjustment record*, not the appraisal — so it can
 legitimately disagree with the score on the HR review screen. Do not put them side by side.
 **P-42.** **Only 76 of 107 appraisals are calibrated.** The two panels cover two directorates; anyone
@@ -3489,9 +3854,11 @@ is visible from the queue rather than only after opening a record.
 
 **Two outcomes, and they are not symmetrical:**
 
-* **Finalise** recalculates the weighted score from all three legs, records the sign-off, and **pushes
-  the score onto the employee's talent records**. Where it lands depends on the cycle: `Governance` when
-  an acknowledgment is required — the employee closes it out — or `Completed` when one is not.
+* **Finalise** settles the score — **the panel's restated overall where a calibration committed one**,
+  otherwise the weighted mean of the submitted evaluations (since 2026-09-29; before, it recalculated
+  over the panel's figure, Rule 2) — records the sign-off, and **pushes the rating onto the employee's
+  talent records**. Where it lands depends on the cycle: `Governance` when an acknowledgment is
+  required — the employee closes it out — or `Completed` when one is not.
 * **Return to manager** reopens the manager's evaluation and puts the appraisal back to `Active`.
   **Remarks are mandatory**: they are the whole message the manager gets.
 
@@ -3534,8 +3901,9 @@ actions:
 
 * *Not ready to finalise* — **"Finalising is blocked because the employee has not submitted a
   self-evaluation, and only 1 of 2 peer evaluations are in."**
-* *Ready to finalise* — **"All required evaluations are in. Finalising recalculates the weighted score
-  and hands the appraisal on for acknowledgment."**
+* *Ready to finalise* — **"All required evaluations are in. Finalising settles the score — the
+  calibration panel's overall where it restated one, otherwise the weighted evaluations — and hands
+  the appraisal on for acknowledgment."**
 * *Finalised <date> by <name>* — with the acknowledgment state and HR's remarks
 
 Plus, where the weights are wrong: *"Evaluator weights do not total 100% — they come to N%. The final
@@ -3554,6 +3922,12 @@ off."* *(Absent here: 10 + 20 + 70 = 100.)*
 | **Peer feedback** | Every peer, attributed, with their scores and comments |
 | **History** | Previous years next to this one |
 | **Outcomes** | The recommendation panel, **with approve / reject / dismiss** |
+
+> **Changed 2026-09-29** (performance closure lane L-b). **Goal rows are in the two tables**: a measured
+> goal with the KPIs (target, actual, achieved), a rated goal with the competencies (score, weight,
+> weighted), each named by the goal's title and flagged as a goal. They were left out of both.
+> *(Lane L-c)* The screen shows the flag: a **Goal** badge on each goal row, and the tables' titles
+> read **Competencies and rated goals** and **KPIs and measured goals** when a goal is in them.
 
 **The Finalise dialog:** *"The weighted final score is calculated and recorded, and the result is pushed
 onto the employee's talent records. This cannot be undone from here."* — plus an optional **HR remarks**
@@ -3625,7 +3999,7 @@ you type something.
 | Queue | `GET api/PerformanceAppraisals/hr-review-list?cycleId=&status=` |
 | Detail | `GET …/{id}/hr-review` |
 | Phase | `GET api/AppraisalWorkflow/{id}/phase` |
-| **Finalise** | `POST …/{id}/approve` — recalculates the score, writes the HR review record **and** the HR evaluator record, sets the status, and best-effort syncs the talent rating |
+| **Finalise** | `POST …/{id}/approve` — writes the HR review record **and** the HR evaluator record, sets the status and settles the score in one transaction (calibrated overall first, else the submitted legs), then syncs the talent rating after the commit |
 | **Return** | `POST …/{id}/return-to-manager` — remarks required |
 | Assign HR reviewer | `POST …/{id}/progress-to-hr-review` — a repair route, offered only when no reviewer was resolved at submission time |
 | Correct dates | `PUT api/PerformanceAppraisals/{id}` |
@@ -3648,8 +4022,20 @@ policy rather than on being the named reviewer. Worth knowing; not worth mention
 > forward-only state machine. The dialog says it plainly: *"An appraisal raised against the wrong person
 > is removed and regenerated, not moved onto somebody else."*
 
+> **Changed 2026-09-29** (performance closure lane B1, B4). **The sign-off is held to the HR-review
+> step**, the same gates the rest of the pipeline uses: the self-evaluation and the peer minimum only
+> when the profile requires them (both were demanded regardless), calibration first only where HR
+> reviews after it — under *HR review runs: before calibration*, HR signs off first and the panel comes
+> after (such a cycle could not be finalised at all). *Ready for HR* on the list, *Finalise* on the page
+> and the server's refusal all read the gates. Where the sign-off leaves the appraisal is theirs too:
+> Completed when it was the last step, otherwise waiting on the panel, the final conversation or the
+> acknowledgment — it chose between Governance and Completed on the acknowledgment switch alone, which
+> completed appraisals a required final conversation still held. The employee is told when the sign-off
+> releases the outcome to them, not while a panel may still restate it.
+
 ### ⚠ Known gaps
-**P-43.** **Finalise is not disabled by the calibration gate** (Rule 3).
+**P-43.** ~~**Finalise is not disabled by the calibration gate** (Rule 3).~~ **Fixed 2026-09-29**
+(closure lane B1/B4): the button reads the gates.
 **P-44.** Finalising **cannot be undone** from the UI. There is no un-finalise.
 **P-45.** *Remove* is the only route that deletes an appraisal, and it is Admin-tier — established by
 probe, not assumed, which is why the control is permission-gated rather than shown and refused.
@@ -3709,10 +4095,23 @@ appraisal.
 `POST api/PerformanceAppraisals/{id}/acknowledge` — the employee id in the body is ignored; the token
 decides. `POST performance-appraisals/me/{id}/responses` for the written answer.
 
+> **Changed 2026-09-29** (performance closure lane B1). **The acknowledgment waits for the final
+> review conversation.** With *Allow acknowledgment before the final conversation* off (as here), it is
+> refused until a FinalReview conversation has been held — *"The appraisal cannot be acknowledged yet:
+> this appraisal is at Final Conversation — the final review conversation has not been held."* — and
+> until then the row's *Next step* is empty, not *Acknowledge*. Holding the conversation moves it on;
+> on a cycle with no acknowledgment, holding it completes the appraisal and settles its score.
+>
+> Kwasi's final review conversation is already held — demo scenario 061, re-run on this database on
+> 2026-09-29 — so the sign-off in chapter 31 lands him at *Acknowledgment* and the walk runs as
+> written. On a database built before that, his manager (`gm.ops`) holds one first, from the
+> conversations panel on his appraisal (chapter 23), or LIVE WRITE 12 is refused.
+
 ### ⚠ Known gaps
-**P-46.** The cycle's *Allow acknowledgment before the final conversation* switch is **off** on this
+**P-46.** ~~The cycle's *Allow acknowledgment before the final conversation* switch is **off** on this
 profile, which reads as though a final conversation is required first. In practice the acknowledge
-endpoint does not check for one.
+endpoint does not check for one.~~ **Fixed 2026-09-29** (closure lane B1): the acknowledgment is refused
+until the final conversation is held, unless the switch lets it go first.
 
 ---
 
@@ -3774,7 +4173,7 @@ number.
   score** column with a justification field
 * Where it does not: a lock banner — *"The settings profile **Standard Annual Appraisal** does not let HR
   change scores while resolving an appeal. To change a score, remand the appeal and let the manager
-  re-evaluate."*
+  re-evaluate."* ⚠ **Do not take its advice on stage** — a remand is a dead end until lane C3 (P-71).
 * Three buttons: **Send back to the manager** · **Reject the appeal** · **Uphold the appeal**
 * After a remand, a **Before and after the remand** comparison — pre- and post-remand overall, and a
   per-criterion table with Before · After · Δ · Appealed — and a single **Final decision** of Upheld or
@@ -3833,11 +4232,12 @@ number.
       `Upheld. The Development Control minutes of 2 August confirm the officer presented unaided and
       answered technical questions on the drainage design. The communication assessment is recorded as
       understated and a note to that effect goes on the file.`
-    * **Or remand it**, and then explain that the ball is now with Kwasi Danquah, that the appraisal has
-      gone back to Active with a snapshot frozen for comparison, and that the final decision waits on
-      his re-submission. *(If you remand, Appendix E tells you how to finish it.)*
+    * **Or reject it** — *Reject the appeal*, with your reasons. The original score stands.
 
-    **Recommended: uphold.** It closes the loop inside the session.
+    **Recommended: uphold.** It closes the loop inside the session. ⚠ **Do not remand it** (P-71): a
+    remand re-opens the appraisal but not Kwasi Danquah's evaluation, so he cannot re-score it, and the
+    only way out is HR's post-remand decision. If a remand does happen, finish it in the same sitting
+    (Appendix E, row 13).
 
 11. Switch back to `staff` and show **appeal-outcome**: HR's decision, her own words, and the final
     scores with the contested one marked.
@@ -3858,14 +4258,28 @@ most one appeal per appraisal, so the appeal id is never a path parameter.
 | Pick up | `POST …/{id}/begin-appeal-review` |
 | Decide | `POST …/{id}/resolve-appeal` |
 | Post-remand comparison | `GET …/{id}/post-remand-review` |
-| Post-remand decision | `POST …/{id}/finalize-post-remand-appeal` — Upheld or Rejected only; **400 while the manager's re-evaluation is outstanding** |
+| Post-remand decision | `POST …/{id}/finalize-post-remand-appeal` — Upheld or Rejected only. ⚠ It does **not** wait for a re-evaluation — the remand never re-opened the manager's evaluation — and *Rejected* keeps the current scores rather than restoring the snapshot's (P-71) |
 
 **The appellant's three reads resolve the employee from the token.** They used to take it from the
 query string, which let anyone read anyone's appeal.
 
+> **Changed 2026-09-29** (performance closure lane L-b). **A goal row can be appealed** — named by its
+> snapshot row, which must be this appraisal's. The employee's status page lists it as a *Goal* with
+> its target and the manager's actual; HR's review and the outcome name it; an upheld appeal can restate
+> it. The appeal **page** still offers competencies only (Rule 9); lane C6 widens it. The remand
+> snapshot now keeps each row's actual value and its snapshot row, which a measured goal's score lives
+> in and which lane C5's restore will need.
+>
+> **Changed 2026-09-29** (performance closure lane L-c). **HR's decision screen restates a goal row**:
+> an upheld appeal's new score is sent by the row's snapshot row, and the before-and-after comparison
+> and the employee's outcome page list goal rows as they do criteria. Only an appeal made through the
+> API can name a goal row until lane C6 widens the appeal page.
+
 ### ⚠ Known gaps
 **P-47.** **KPI items are not appealable** (Rule 9) — `appealableKpis` is always empty.
-**P-48.** **The appeal window is not enforced** (Rule 9).
+**P-48.** ~~**The appeal window is not enforced** (Rule 9).~~ **Fixed 2026-09-29** (closure lane B1):
+the submit refuses outside the window — counted from the acknowledgment — or with appeals off, and
+the appeal page's *can appeal* and *My Appraisals* read the same rule.
 **P-49.** The `Weight` column on the appeal review reads from the appraisal's frozen snapshot; where a
 snapshot row is missing it falls back to **0**.
 **P-50.** The one pre-existing appeal — Cynthia Sarpong's — was filed **against a KPI item** through the
@@ -4201,6 +4615,13 @@ Support provided · Measurement criteria · Review schedule)* — each with a pl
 
 The page header says it: *"Saved as a draft. It binds nobody until it has been approved."*
 
+> **Changed 2026-09-29** (closure lane P, P4). A manager opens a plan — and `prepare`, which carries the
+> source appraisal's score — **only for a direct report**; HR for anyone except themselves. The
+> supervisor is the employee's line manager unless HR names someone else, and the **HR owner must be
+> an HR officer with an active login** (422 otherwise): the supervisor and HR owner can read and manage
+> the plan, so naming them used to hand anyone the plan. **The employee does not see a draft**, or one
+> out for approval, in their list or by id — the Draft status's own contract — until it is in force.
+
 ### 👁 The detail page
 
 Header with **Open the appraisal**, the status badge, and the workflow actions. Banners:
@@ -4238,6 +4659,13 @@ here is written onto the goals themselves when the form is saved**. That is why 
 a meeting rather than on the goals tab: what changed and the conversation that agreed it stay together.
 **The employee's comments**: their right of reply — *"Replaces whatever is above — this field holds one
 comment, not a thread."*
+
+> **Changed 2026-09-29** (closure lane P, P13). The reply is **the employee's own write**: the
+> comment box is shown to the plan's employee only, and the server refuses anyone else — the
+> supervisor, the HR owner and HR included (it said *"anyone on the plan can enter it here on their
+> behalf"*). The supervisor's save carries the whole form back, but the server takes neither the reply
+> nor the conductor from it: **whoever books a review holds it**, whatever the body names. The
+> employee sees the record read-only — no Save or Record meeting.
 
 > ⚠ A meeting has **no stored status**. "Completed" is derived from its date being in the past, so the
 > **Complete** button saves the notes and stamps nothing extra. It is a save with a fuller name.
@@ -4289,7 +4717,7 @@ comment, not a thread."*
 | Detail | `GET api/Pip/{id}/detail` — plan, goals, attachments and meetings in one call |
 | Prepare | `GET api/Pip/prepare?employeeId=&appraisalId=` |
 | Create | `POST api/Pip` — returns the new id; created as a **Draft** |
-| Amend | `PUT api/Pip/{id}` — **422 while out for approval or once closed** |
+| Amend | `PUT api/Pip/{id}` — **a draft only** (422 otherwise), and the plan's content only: its employee, source appraisal, supervisor, HR owner, status and outcome are never taken from the body (closure P5, 2026-09-29) |
 | Submit / Approve / Reject / Recall | **workflow engine**, `PERFORMANCE_IMPROVEMENT_PLAN`, published; approvers **HR, Manager, TenantAdmin** |
 | Running states | `PATCH api/Pip/{id}/status` — Draft / PendingApproval / Active are refused; this moves a **live** plan between its running states |
 | Outcome | `POST api/Pip/{id}/outcome` — `Extended` needs `newEndDate` |
@@ -4297,8 +4725,10 @@ comment, not a thread."*
 | Meetings | `api/PipMeeting` — `prepare`, `schedule`, create, update, `complete`, `schedule/{pipId}`, `{id}/comment` |
 | Attachments | `api/Pip/attachments/{id}/download` — streamed, entitlement checked per request |
 
-**Who can see one:** HR, the employee it is about, the named supervisor and the named HR owner. Anything
-keyed on a plan id is 403 for anybody else.
+**Who can see one:** HR, the employee it is about (once it is in force), the named supervisor and the
+named HR owner. Anything keyed on a plan id is 403 for anybody else. **The employee is the employee
+whatever else they hold**: an HR officer on a plan reads it and never manages it (closure P4, the
+two-actor rule — the desk exemption used to come first).
 
 **Only a draft can be deleted.** A plan that has been in force is **cancelled**, not erased.
 
@@ -4430,6 +4860,13 @@ Stuck at · Score · Action** — where *Action* is a **Nudge** button. The reas
 > a cycle they are legitimately empty; that is not an error state, and each chart says so in words
 > rather than drawing an empty axis.
 
+> **Changed 2026-09-29** (performance closure lane B1). **The stage counts, the attention rows and
+> Nudge read the same gates as every write** — the dashboard used to run its own, stricter resolver
+> while the writes enforced a looser one. A row's step (*"Overdue: Goal Setting"*) is the step the
+> phase rail shows and a refused write names, with the same reason; goals are counted by employee and
+> cycle, so a goal agreed before generation counts. *Goal Setting* is still most of APC2026 — most
+> staff have no agreed goals — as it was.
+
 ### ⚠ Known gaps
 **P-58.** With four scored appraisals the distributions are a single bar. Honest, but not impressive —
 consider skipping the *Scores* tab if the room is small and sceptical.
@@ -4502,8 +4939,30 @@ resolved.
 Both sit on **`HR.Performance.Write`**, and the advancing officer comes from the token and is written to
 the audit log.
 
-> ⚠ The advance endpoint **returns 200 with `success: false` and an `errorMessage`** for a refused
-> advance, as well as 400 for a malformed one. The screen checks the flag rather than the status code.
+> ⚠ A refused advance answers **422** with the reason when it names a step the appraisal is not at,
+> and **400** with the reason for a finished or appealed appraisal. *(Corrected 2026-09-29 — this said
+> 200 with `success: false`; the controller has always turned that into a 400.)*
+
+> **Changed 2026-09-29** (performance closure lane B1). **An advance moves the appraisal past the step
+> it is at, and no other**: naming a different step is refused (*"This appraisal is at Goal Setting,
+> not Manager Evaluation…"*), so leave the picker on *Whatever is blocking*. **Before the manager's
+> evaluation the advance is a waiver**: the log row it writes is what lets the appraisal past goal
+> setting, peer nomination, the self-evaluation or the peer minimum, however few goals, nominations or
+> peers it has — and a waived self-evaluation leaves the employee's draft a draft, counted nowhere (it
+> used to submit the draft for them). From the manager's evaluation on, it still writes the record the
+> step needs — the evaluation, the calibration stamp, the sign-off, the conversation, the
+> acknowledgment — because a return to the manager or a remand re-opens those steps, and a waiver
+> would outlive the re-opening. The major status then follows the gates, a Draft appraisal is opened,
+> and completion settles the score. The sweep resolves and advances each appraisal the same way.
+>
+> **Changed 2026-09-29** (performance closure lane L-a). **The advance past goal setting locks the
+> agreed set.** The goals the employee submitted are approved on HR's recorded reason, and every
+> approved or running goal is locked, so the year is appraised on what was agreed; a draft (never put
+> to the manager) and a rejected goal (refused by them) are left out. It used to approve drafts and
+> rejected goals along with the rest and lock nothing. The log lists each part — *"Approved 1
+> submitted goal(s) on HR's recorded reason."*, *"Locked the agreed goal set: 2 goal(s)."*, *"Left 2
+> draft or rejected goal(s) out of the set."*, then the waiver. Where the template has a goals section
+> the log adds *"Built the goals section: 2 goal row(s)."* (lane L-b, § 1.4).
 
 ### ⚠ Known gaps
 **P-60.** The single-advance form asks for an **appraisal id** — a GUID, pasted from the address bar.
@@ -4658,9 +5117,9 @@ Every route in the module, its gate, and who should open it.
 
   APPRAISALS   107   73 Draft · 30 Active · 1 Governance · 3 Completed · 76 calibrated
 
-    Efua Seidu     COMPLETE     self 94.40  peers 84/80    mgr 90.80   FINAL 89.40  Exceeds
+    Efua Seidu     COMPLETE     self 94.40  peers 84/80    mgr 90.80   FINAL 88.56  Exceeds
     Kojo Fiadzo    COMPLETE     self 94.00  peers 81.5/77.5 mgr 91.40  FINAL 89.28  Exceeds
-    Cynthia S.     COMPLETE     self 94.00  peers 83/79    mgr 90.20   FINAL 88.74  Exceeds  + appeal UPHELD
+    Cynthia S.     COMPLETE     self 94.00  peers 83/79    mgr 90.20   FINAL 87.00  Exceeds  + appeal UPHELD
     Kwasi Danquah  WITH HR  ←   self 92.20  peers 80/76    mgr 88.80   FINAL —      (finalise this one)
     Kojo Ansah     ACTIVE       self 85.60  —              —           —
 
@@ -4693,7 +5152,7 @@ Every route in the module, its gate, and who should open it.
 
 # APPENDIX C — Known gaps, ranked
 
-Sixty-one findings, ordered by how likely each is to matter in front of an audience.
+Sixty-two findings, ordered by how likely each is to matter in front of an audience.
 
 ### The settings audit — read this before you describe the policy screen
 
@@ -4709,9 +5168,9 @@ mislabelled soft-skill switch (P-69) and an unenforced goal minimum (P-70). The 
 
 | # | Gap | Where |
 |---|---|---|
-| **P-39 / P-41** | The panel's **overall** calibrated score is overwritten by HR sign-off, and the calibration grid still shows the panel's figure — so the two screens legitimately disagree | ch. 30, Rule 2 |
+| **P-39 / P-41** | ~~The panel's **overall** calibrated score is overwritten by HR sign-off~~ — **fixed 2026-09-29**; the grid and the HR review now agree, *except* on the two appraisals signed off before the fix (Cynthia Sarpong, Efua Seidu), which keep their signed-off figures | ch. 30, Rule 2 |
 | **P-43** | **Finalise is not disabled by the calibration gate**; on an uncalibrated appraisal it 422s | ch. 31, Rule 3 |
-| **P-8 / Rule 8** | Five appraisals have **no criterion snapshot** and open every evaluation screen empty | ch. 8, Rule 8 |
+| **Rule 8** | Five appraisals have **no criterion snapshot** and open every evaluation screen empty | Rule 8 |
 | **P-18 / Rule 5** | No TDC employee goal is aligned to anything, so every unit goal's cascade table is empty | ch. 16, Rule 5 |
 | **P-29 / Rule 6** | The conversations **diary is empty** for every persona, and the calibration **Open tab** is empty | ch. 23, ch. 30 |
 | **P-4 etc. / Rule 7** | Every **Delete** in the module renders for `hr.head` and answers 403 | throughout |
@@ -4720,12 +5179,13 @@ mislabelled soft-skill switch (P-69) and an unenforced goal minimum (P-70). The 
 
 | # | Gap |
 |---|---|
-| **P-40** | A per-criterion calibration adjustment on a **KPI item** writes `NumericScore`, which a KPI is not scored from — so it changes nothing |
+| ~~**P-40**~~ | ~~A per-criterion calibration adjustment on a **KPI item** writes `NumericScore`, which a KPI is not scored from — so it changes nothing~~ — **fixed 2026-09-29** (every item adjustment now reaches the score) |
 | **P-47** | **KPI items are not appealable** — `appealableKpis` is always empty |
-| **P-48** | The **appeal window is not enforced**; eligibility is "Completed and unappealed" |
+| ~~**P-48**~~ | ~~The **appeal window is not enforced**; eligibility is "Completed and unappealed"~~ — **fixed 2026-09-29** (closure lane B1; Rule 9) |
+| **P-71** | **A remand is a dead end** *(found 2026-09-29, lane L-b)*. It snapshots the manager's evaluation and re-opens the appraisal, but leaves the manager's evaluation marked submitted, so every save of the re-evaluation is refused; the post-remand decision does not wait for one, and *Rejected* keeps the current scores rather than the snapshot's. Fixed in lane C (C3, C5) — decided 2026-09-29; until then, uphold or reject, never remand |
 | **P-28** | **Journal entry dates are ignored** on create; the server stamps the creation date |
 | **P-55** | PIP goal **status and progress supplied at creation are not honoured** |
-| **P-6** | Overall grade bands are **not validated against each other**; overlaps resolve to whichever is found first |
+| ~~**P-6**~~ | ~~Overall grade bands are **not validated against each other**; overlaps resolve to whichever is found first~~ — **fixed 2026-09-29** (refused at save) |
 | **P-49** | The appeal review's Weight column falls back to **0** where a snapshot row is missing |
 | **P-13** | Generation **skips** anyone who already has an appraisal, and cannot repair a bad one |
 
@@ -4814,7 +5274,7 @@ either accept it or rebuild the demonstration database.
 | **10** | 31 | **Finalised Kwasi Danquah's appraisal** | **Cannot.** There is no un-finalise |
 | **11** | 32 | Recorded his written response | **Cannot** from the UI |
 | **12** | 32 | He acknowledged it | **Cannot** |
-| **13** | 33 | Efua filed an appeal | **Resolve it in the same sitting** (Upheld or Rejected) — that returns her appraisal to Completed. ⚠ If you **remand** it, her appraisal drops back to `Active` and stays there until her manager re-submits and HR rules again. Do not leave a remand open |
+| **13** | 33 | Efua filed an appeal | **Resolve it in the same sitting** (Upheld or Rejected) — that returns her appraisal to Completed. ⚠ **Do not remand it** (P-71): her appraisal drops back to `Active`, her manager cannot re-score it, and only HR's post-remand decision — which does not wait for him — returns it to Completed. If a remand happens, make that decision (*Rejected*) in the same sitting |
 | **14** | 35 | Set 4% on her salary proposal | Editable only while *Proposed* — clear it **before** you submit, or it locks |
 | **15** | 35 | Submitted that proposal | **Recall** it from the same screen |
 | **16** | 35 | `md.tdc` approved it | **Cannot** — but you can leave it Approved rather than marking it applied |

@@ -16,6 +16,7 @@ import {
   Users,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -49,8 +50,10 @@ import type { CalibrationCriterion, CalibrationMatrixRow } from '@/types/hr/cali
  * **The lifecycle is four steps, and the last two are different decisions.** Opening links every
  * appraisal in scope to the session so their phase reads "calibration in progress". Completing
  * closes the room. *Committing* is separate and irreversible: it writes the agreed ratings onto
- * the appraisals and lifts the calibration gate on everyone in scope — including the people the
- * panel discussed and left alone, who are calibrated too and would otherwise sit blocked.
+ * the appraisals at the calibration step (their manager has submitted) and lifts the gate on them —
+ * including the people the panel discussed and left alone, who are calibrated too and would
+ * otherwise sit blocked. Appraisals not at that step are left alone and listed in the commit's
+ * result with the reason (performance closure A4).
  *
  * ⚠ Adjustments are only accepted while the session is open. Once it is completed the grid is
  * read-only, and the only remaining action is to commit it.
@@ -163,7 +166,15 @@ export default function CalibrationSessionDetailPage() {
         title: 'Ratings committed',
         description:
           `${result.appraisalsCalibrated} appraisal(s) calibrated, ` +
-          `${result.scoresChanged} score(s) changed from ${result.adjustmentsApplied} adjustment(s).`,
+          `${result.scoresChanged} score(s) changed from ${result.adjustmentsApplied} adjustment(s).` +
+          (result.appraisalsSkipped > 0
+            ? ` ${result.appraisalsSkipped} left as they were: ` +
+              result.skipped
+                .slice(0, 3)
+                .map((s) => `${s.employeeName ?? 'an appraisal'} (${s.reason})`)
+                .join('; ') +
+              (result.appraisalsSkipped > 3 ? '; …' : '.')
+            : ''),
       });
       setCommitOpen(false);
       refresh();
@@ -176,10 +187,13 @@ export default function CalibrationSessionDetailPage() {
     mutationFn: (row: CalibrationMatrixRow) => {
       // The panel is restating the final number, so the original recorded against the decision
       // is whatever the appraisal stood at going in.
-      const existing = row.adjustments.find((a) => !a.templateItemId);
+      // The overall restatement is told apart by its flag: a goal row's adjustment has no template
+      // item either, and was read as the overall.
+      const existing = row.adjustments.find((a) => a.isOverall);
       const payload = {
         performanceAppraisalId: row.appraisalId,
         templateItemId: null,
+        criterionConfigId: null,
         originalScore: row.preCalibrationScore ?? null,
         adjustedScore: Number(adjustScore),
         rationale: adjustRationale.trim() || null,
@@ -203,8 +217,9 @@ export default function CalibrationSessionDetailPage() {
 
   /**
    * One criterion's adjustment. Separate from the overall-score mutation because they are separate
-   * records server-side: `templateItemId` null is the overall restatement, non-null is the
-   * criterion. The rationale is shared — it is the same panel decision.
+   * records server-side: naming no criterion is the overall restatement; naming one — by template
+   * item, or by snapshot row for a goal — is the criterion. The rationale is shared — it is the
+   * same panel decision.
    */
   const saveCriterionAdjustment = useMutation({
     mutationFn: ({
@@ -216,9 +231,11 @@ export default function CalibrationSessionDetailPage() {
     }) => {
       const payload = {
         performanceAppraisalId: row.appraisalId,
-        templateItemId: criterion.templateItemId,
-        originalScore: criterion.managerScore ?? null,
-        adjustedScore: Number(criterionScores[criterion.templateItemId]),
+        templateItemId: criterion.templateItemId ?? null,
+        criterionConfigId: criterion.criterionConfigId,
+        // A measured row is scored by its achievement, so that is the figure being moved.
+        originalScore: (criterion.isKpi ? criterion.managerAchievementPercent : criterion.managerScore) ?? null,
+        adjustedScore: Number(criterionScores[criterion.criterionKey]),
         rationale: adjustRationale.trim() || null,
       };
       return criterion.adjustmentId
@@ -283,10 +300,23 @@ export default function CalibrationSessionDetailPage() {
   const data = session.data;
   const grid = matrix.data;
 
+  // Only appraisals at the calibration step are committed; the rest are reported as skipped.
   const uncommitted = useMemo(
-    () => (grid?.rows ?? []).filter((r) => !r.isCalibrated).length,
+    () => (grid?.rows ?? []).filter((r) => !r.isCalibrated && r.appraisalStatus === 'Governance').length,
     [grid],
   );
+
+  // What a commit will do, for its confirmation: the server calibrates what is in governance (and a
+  // final appraisal only when this session adjusted it), and lists everything else as skipped.
+  const commitCounts = useMemo(() => {
+    const rows = grid?.rows ?? [];
+    const atStep = rows.filter((r) => r.appraisalStatus === 'Governance');
+    return {
+      atStep: atStep.length,
+      leftAlone: atStep.filter((r) => (r.adjustments ?? []).length === 0).length,
+      notAtStep: rows.length - atStep.length,
+    };
+  }, [grid]);
 
   if (session.isLoading) {
     return (
@@ -626,7 +656,7 @@ export default function CalibrationSessionDetailPage() {
                 <EmptyState
                   icon={SlidersHorizontal}
                   title="No adjustments recorded"
-                  description="A session with no adjustments is still meaningful: committing it confirms every rating in scope as it stands."
+                  description="A session with no adjustments is still meaningful: committing it confirms every rating at the calibration step as it stands."
                 />
               ) : (
                 <Table>
@@ -649,7 +679,7 @@ export default function CalibrationSessionDetailPage() {
                           <div className="text-xs text-muted-foreground">{a.appraisalNumber}</div>
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
-                          {a.templateItemId ? (a.templateItemName ?? 'One criterion') : 'Overall score'}
+                          {a.isOverall ? 'Overall score' : (a.templateItemName ?? 'One criterion')}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {score(a.originalScore)}
@@ -765,26 +795,45 @@ export default function CalibrationSessionDetailPage() {
                 </p>
                 <div className="mt-3 space-y-3">
                   {(criteria.data ?? []).map((c) => (
-                    <div key={c.templateItemId} className="grid grid-cols-[1fr_auto_auto] items-end gap-2">
+                    <div key={c.criterionKey} className="grid grid-cols-[1fr_auto_auto] items-end gap-2">
                       <div className="space-y-1">
-                        <p className="text-sm">{c.templateItemName ?? 'Unnamed criterion'}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Weight {c.weightUsed} · manager scored{' '}
-                          <span className="tabular-nums">{score(c.managerScore)}</span>
+                        <p className="text-sm">
+                          {c.templateItemName ?? 'Unnamed criterion'}
+                          {c.isGoal && (
+                            <Badge variant="secondary" className="ml-2">
+                              Goal
+                            </Badge>
+                          )}
                         </p>
+                        {c.isKpi ? (
+                          <p className="text-xs text-muted-foreground">
+                            Weight {c.weightUsed} · {c.isGoal ? 'achievement' : 'KPI achievement'}{' '}
+                            <span className="tabular-nums">{score(c.managerAchievementPercent)}%</span>
+                            {c.managerActualValue != null && c.kpiTargetValue != null && (
+                              <> (actual {c.managerActualValue} of target {c.kpiTargetValue})</>
+                            )}
+                            . Enter the achievement % the panel agrees — it overrides the actual.
+                          </p>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            Weight {c.weightUsed} · manager scored{' '}
+                            <span className="tabular-nums">{score(c.managerScore)}</span>
+                            {c.scaleTop < 100 && <> · scale 0–{c.scaleTop}</>}
+                          </p>
+                        )}
                       </div>
                       <Input
                         className="w-24"
                         type="number"
                         min={0}
-                        max={100}
-                        step="0.01"
-                        aria-label={`Calibrated score for ${c.templateItemName ?? 'criterion'}`}
-                        value={criterionScores[c.templateItemId] ?? ''}
+                        max={c.scaleTop}
+                        step={1}
+                        aria-label={`Calibrated ${c.isKpi ? 'achievement %' : 'score'} for ${c.templateItemName ?? 'criterion'}`}
+                        value={criterionScores[c.criterionKey] ?? ''}
                         onChange={(e) =>
                           setCriterionScores((prev) => ({
                             ...prev,
-                            [c.templateItemId]: e.target.value,
+                            [c.criterionKey]: e.target.value,
                           }))
                         }
                       />
@@ -792,7 +841,7 @@ export default function CalibrationSessionDetailPage() {
                         variant="outline"
                         size="sm"
                         disabled={
-                          !isValidScore(criterionScores[c.templateItemId] ?? '') ||
+                          !isValidCriterionScore(criterionScores[c.criterionKey] ?? '', c.scaleTop) ||
                           saveCriterionAdjustment.isPending
                         }
                         onClick={() =>
@@ -860,9 +909,12 @@ export default function CalibrationSessionDetailPage() {
           <DialogHeader>
             <DialogTitle>Commit the ratings</DialogTitle>
             <DialogDescription>
-              This writes the agreed scores onto the appraisals and marks everyone in scope as
-              calibrated — including the {(grid?.totalEmployees ?? 0) - (grid?.adjustedCount ?? 0)}{' '}
-              the panel left as they are. It cannot be undone.
+              This writes the agreed scores onto the {commitCounts.atStep} appraisal(s) whose manager
+              has submitted and marks them calibrated — including the {commitCounts.leftAlone} the
+              panel left as they are.
+              {commitCounts.notAtStep > 0 &&
+                ` The other ${commitCounts.notAtStep} are not at the calibration step yet and are left alone; the result lists them.`}{' '}
+              It cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -887,6 +939,13 @@ function isValidScore(raw: string): boolean {
   if (!raw.trim()) return false;
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 && n <= 100;
+}
+
+/** A criterion score is a whole number on the item's own scale — the server refuses anything else. */
+function isValidCriterionScore(raw: string, scaleTop: number): boolean {
+  if (!raw.trim()) return false;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 && n <= scaleTop;
 }
 
 function Delta({ value }: { value?: number | null }) {

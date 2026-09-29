@@ -56602,6 +56602,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal?>("OriginalOverallScore")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<Guid>("PerformanceAppraisalId")
                         .HasColumnType("uniqueidentifier");
 
@@ -56644,6 +56647,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
+                    b.HasIndex(new[] { "PerformanceAppraisalId" }, "UX_AppraisalAppeal_OneOpenPerAppraisal")
+                        .IsUnique()
+                        .HasDatabaseName("UX_AppraisalAppeal_OneOpenPerAppraisal")
+                        .HasFilter("[Status] IN (1, 2, 3) AND [IsDeleted] = 0");
+
                     b.ToTable("AppraisalAppeals");
                 });
 
@@ -56663,6 +56671,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CriterionConfigId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("DeletedAt")
@@ -56689,9 +56700,6 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
 
-                    b.Property<decimal?>("RevisedScore")
-                        .HasColumnType("decimal(18,4)");
-
                     b.Property<bool?>("ScoreAdjusted")
                         .HasColumnType("bit");
 
@@ -56710,6 +56718,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AppraisalAppealId");
+
+                    b.HasIndex("CriterionConfigId");
 
                     b.HasIndex("TemplateItemId");
 
@@ -57005,6 +57015,9 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal?>("ActualValue")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<Guid>("AppraisalEvaluationSnapshotId")
                         .HasColumnType("uniqueidentifier");
 
@@ -57015,6 +57028,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CriterionConfigId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("DeletedAt")
@@ -57048,7 +57064,7 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int?>("NumericScore")
                         .HasColumnType("int");
 
-                    b.Property<Guid>("TemplateItemId")
+                    b.Property<Guid?>("TemplateItemId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("TenantId")
@@ -57066,6 +57082,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AppraisalEvaluationSnapshotId");
+
+                    b.HasIndex("CriterionConfigId");
 
                     b.HasIndex("TemplateItemId");
 
@@ -57737,13 +57755,6 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<decimal?>("AdjustedOverallScore")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<string>("AdjustmentReason")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
                     b.Property<Guid>("AppraisalId")
                         .HasColumnType("uniqueidentifier");
 
@@ -57881,7 +57892,7 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
 
-                    b.Property<Guid>("AdvancedByEmployeeId")
+                    b.Property<Guid?>("AdvancedByEmployeeId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("AdvancedDate")
@@ -58235,6 +58246,87 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("AppraisalReviewEvents");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Performance.AppraisalScoreChange", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ChangedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("ChangedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("FromGradeDefinitionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("FromScore")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PerformanceAppraisalId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ToGradeDefinitionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("ToScore")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChangedById");
+
+                    b.HasIndex("ChangedDate");
+
+                    b.HasIndex("FromGradeDefinitionId");
+
+                    b.HasIndex("PerformanceAppraisalId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("ToGradeDefinitionId");
+
+                    b.ToTable("AppraisalScoreChanges", (string)null);
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Performance.AppraisalSettings", b =>
                 {
                     b.Property<Guid>("Id")
@@ -58307,10 +58399,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("InterimReviewDepth")
                         .HasColumnType("int");
 
-                    b.Property<bool>("IsDeleted")
+                    b.Property<bool>("IsDefault")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("IsManagerAuthoritative")
+                    b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
                     b.Property<Guid?>("LastModifiedById")
@@ -58350,9 +58442,6 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("int");
 
                     b.Property<bool>("RequireCalibration")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("RequireDevelopmentPlanUpdate")
                         .HasColumnType("bit");
 
                     b.Property<bool>("RequireEmployeeAcknowledgment")
@@ -58440,7 +58529,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("SettingsName");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex(new[] { "TenantId" }, "UX_AppraisalSettings_Tenant_Default")
+                        .IsUnique()
+                        .HasDatabaseName("UX_AppraisalSettings_Tenant_Default")
+                        .HasFilter("[IsDefault] = 1 AND [IsDeleted] = 0");
 
                     b.ToTable("AppraisalSettings");
                 });
@@ -58653,6 +58745,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
+                    b.Property<int>("Kind")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
@@ -58772,6 +58869,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("CreatedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("CriterionConfigId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
 
@@ -58779,6 +58879,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsOverall")
                         .HasColumnType("bit");
 
                     b.Property<Guid?>("LastModifiedById")
@@ -58813,6 +58916,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("AdjustmentDate");
 
                     b.HasIndex("CalibrationSessionId");
+
+                    b.HasIndex("CriterionConfigId");
 
                     b.HasIndex("PerformanceAppraisalId");
 
@@ -59245,6 +59350,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("CreatedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("CriterionConfigId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
 
@@ -59274,7 +59382,7 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int?>("NumericScore")
                         .HasColumnType("int");
 
-                    b.Property<Guid>("TemplateItemId")
+                    b.Property<Guid?>("TemplateItemId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("TenantId")
@@ -59291,6 +59399,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CriterionConfigId");
+
                     b.HasIndex("EvaluatorEvaluationId");
 
                     b.HasIndex("GradeDefinitionId");
@@ -59298,6 +59408,11 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TemplateItemId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("EvaluatorEvaluationId", "CriterionConfigId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_CriterionScore_Evaluation_CriterionConfig")
+                        .HasFilter("[CriterionConfigId] IS NOT NULL AND [IsDeleted] = 0");
 
                     b.ToTable("CriterionScores");
                 });
@@ -59768,6 +59883,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
+                    b.HasIndex("EmployeeGoalId", "PerformanceAppraisalId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_EmployeeGoalAppraisalAssessment_Goal_Appraisal")
+                        .HasFilter("[IsDeleted] = 0");
+
                     b.ToTable("EmployeeGoalAppraisalAssessments");
                 });
 
@@ -59868,9 +59988,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<decimal>("EvaluatorWeight")
                         .HasColumnType("decimal(18,4)");
-
-                    b.Property<bool>("IsAuthoritative")
-                        .HasColumnType("bit");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -60405,6 +60522,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
 
+                    b.Property<decimal?>("CalibratedOverallScore")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<Guid?>("CalibrationSessionId")
                         .HasColumnType("uniqueidentifier");
 
@@ -60531,6 +60651,16 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid?>("WithdrawnById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("WithdrawnDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("WithdrawnReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<int>("Year")
                         .HasColumnType("int");
 
@@ -60560,6 +60690,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
+                    b.HasIndex("WithdrawnById");
+
                     b.HasIndex("Year");
 
                     b.ToTable("PerformanceAppraisals");
@@ -60569,6 +60701,9 @@ namespace ErpSystem.Data.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AppraisalTemplateSectionId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAt")
@@ -60586,8 +60721,18 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int?>("DisplayOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("EmployeeGoalId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
+
+                    b.Property<string>("ItemLabel")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<decimal?>("KpiMaxValue")
                         .HasColumnType("decimal(18,4)");
@@ -60604,14 +60749,27 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("MeasurementType")
+                        .HasColumnType("int");
+
                     b.Property<Guid>("PerformanceAppraisalId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("TemplateItemId")
+                    b.Property<int?>("ScoringMethod")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SectionWeightUsed")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("TemplateItemId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -60624,11 +60782,25 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AppraisalTemplateSectionId");
+
+                    b.HasIndex("EmployeeGoalId");
+
                     b.HasIndex("PerformanceAppraisalId");
 
                     b.HasIndex("TemplateItemId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("PerformanceAppraisalId", "EmployeeGoalId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PerformanceAppraisalCriterionConfig_Appraisal_Goal")
+                        .HasFilter("[EmployeeGoalId] IS NOT NULL AND [IsDeleted] = 0");
+
+                    b.HasIndex("PerformanceAppraisalId", "TemplateItemId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PerformanceAppraisalCriterionConfig_Appraisal_TemplateItem")
+                        .HasFilter("[TemplateItemId] IS NOT NULL AND [IsDeleted] = 0");
 
                     b.ToTable("PerformanceAppraisalCriterionConfigs");
                 });
@@ -61026,6 +61198,11 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("Status")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -200229,6 +200406,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.HR.Performance.PerformanceAppraisalCriterionConfig", "CriterionConfig")
+                        .WithMany()
+                        .HasForeignKey("CriterionConfigId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Performance.AppraisalTemplateItem", "TemplateItem")
                         .WithMany()
                         .HasForeignKey("TemplateItemId")
@@ -200241,6 +200423,8 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("AppraisalAppeal");
+
+                    b.Navigation("CriterionConfig");
 
                     b.Navigation("TemplateItem");
 
@@ -200381,17 +200565,23 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.HR.Performance.PerformanceAppraisalCriterionConfig", "CriterionConfig")
+                        .WithMany()
+                        .HasForeignKey("CriterionConfigId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Performance.AppraisalTemplateItem", "TemplateItem")
                         .WithMany()
                         .HasForeignKey("TemplateItemId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("CriterionConfig");
 
                     b.Navigation("EvaluationSnapshot");
 
@@ -200689,8 +200879,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "AdvancedBy")
                         .WithMany()
                         .HasForeignKey("AdvancedByEmployeeId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.HR.Performance.PerformanceAppraisal", "Appraisal")
                         .WithMany("ManualAdvanceLogs")
@@ -200794,6 +200983,46 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
 
                     b.Navigation("UpdatedDevelopmentPlan");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Performance.AppraisalScoreChange", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ChangedBy")
+                        .WithMany()
+                        .HasForeignKey("ChangedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Performance.AppraisalGradeDefinition", "FromGrade")
+                        .WithMany()
+                        .HasForeignKey("FromGradeDefinitionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Performance.PerformanceAppraisal", "Appraisal")
+                        .WithMany("ScoreChanges")
+                        .HasForeignKey("PerformanceAppraisalId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Performance.AppraisalGradeDefinition", "ToGrade")
+                        .WithMany()
+                        .HasForeignKey("ToGradeDefinitionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Appraisal");
+
+                    b.Navigation("ChangedBy");
+
+                    b.Navigation("FromGrade");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("ToGrade");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Performance.AppraisalSettings", b =>
@@ -200932,6 +201161,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.HR.Performance.PerformanceAppraisalCriterionConfig", "CriterionConfig")
+                        .WithMany()
+                        .HasForeignKey("CriterionConfigId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Performance.PerformanceAppraisal", "PerformanceAppraisal")
                         .WithMany()
                         .HasForeignKey("PerformanceAppraisalId")
@@ -200952,6 +201186,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("AdjustedBy");
 
                     b.Navigation("CalibrationSession");
+
+                    b.Navigation("CriterionConfig");
 
                     b.Navigation("PerformanceAppraisal");
 
@@ -201124,6 +201360,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Performance.CriterionScore", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Performance.PerformanceAppraisalCriterionConfig", "CriterionConfig")
+                        .WithMany()
+                        .HasForeignKey("CriterionConfigId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Performance.EvaluatorEvaluation", "EvaluatorEvaluation")
                         .WithMany("CriterionScores")
                         .HasForeignKey("EvaluatorEvaluationId")
@@ -201138,14 +201379,15 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.HR.Performance.AppraisalTemplateItem", "TemplateItem")
                         .WithMany()
                         .HasForeignKey("TemplateItemId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("CriterionConfig");
 
                     b.Navigation("EvaluatorEvaluation");
 
@@ -201580,6 +201822,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "WithdrawnBy")
+                        .WithMany()
+                        .HasForeignKey("WithdrawnById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("AppraisalCycle");
 
                     b.Navigation("CalibrationSession");
@@ -201593,10 +201840,22 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Template");
 
                     b.Navigation("Tenant");
+
+                    b.Navigation("WithdrawnBy");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Performance.PerformanceAppraisalCriterionConfig", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Performance.AppraisalTemplateSection", "Section")
+                        .WithMany()
+                        .HasForeignKey("AppraisalTemplateSectionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Performance.EmployeeGoal", "EmployeeGoal")
+                        .WithMany()
+                        .HasForeignKey("EmployeeGoalId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Performance.PerformanceAppraisal", "PerformanceAppraisal")
                         .WithMany("CriterionConfigs")
                         .HasForeignKey("PerformanceAppraisalId")
@@ -201606,8 +201865,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.HR.Performance.AppraisalTemplateItem", "TemplateItem")
                         .WithMany()
                         .HasForeignKey("TemplateItemId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
@@ -201615,7 +201873,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.Navigation("EmployeeGoal");
+
                     b.Navigation("PerformanceAppraisal");
+
+                    b.Navigation("Section");
 
                     b.Navigation("TemplateItem");
 
@@ -239386,6 +239648,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("PeerNominations");
 
                     b.Navigation("ReviewEvents");
+
+                    b.Navigation("ScoreChanges");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Performance.PerformanceAppraisalCriterionConfig", b =>

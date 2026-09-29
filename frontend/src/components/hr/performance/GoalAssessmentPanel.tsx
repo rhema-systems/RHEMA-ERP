@@ -35,6 +35,11 @@ interface GoalAssessmentPanelProps {
   values: GoalAssessmentValues;
   onChange: (values: GoalAssessmentValues) => void;
   readOnly?: boolean;
+  /**
+   * The goals scored as rows of the form itself — the template's goals section. Their actual and
+   * percentage are entered once, on the row, and the server copies them here.
+   */
+  scoredOnForm?: ReadonlySet<string>;
 }
 
 /**
@@ -51,6 +56,11 @@ interface GoalAssessmentPanelProps {
  * sit — but it means a typed percentage would silently vanish, so the field is disabled and says
  * why once an actual value is present.
  *
+ * **A goal scored on the form is entered there.** Where the template has a goals section, each
+ * locked goal is a row of the form; its actual and percentage are the row's, copied here by the
+ * server, so the two fields are read-only for it and only the status, notes and evidence are this
+ * panel's.
+ *
  * ⚠ Only goals the user has actually filled something in for are sent. Sending every goal would
  * write a row of nulls for each untouched one, which reads later as "assessed, with no answer".
  */
@@ -60,6 +70,7 @@ export function GoalAssessmentPanel({
   values,
   onChange,
   readOnly = false,
+  scoredOnForm,
 }: GoalAssessmentPanelProps) {
   const { data: goals, isLoading } = useQuery({
     queryKey: ['hr', 'appraisal-goals', appraisalId],
@@ -160,6 +171,8 @@ export function GoalAssessmentPanel({
             !!goal.kpiDefinitionId &&
             goal.measurementType !== 'Boolean' &&
             v.finalActualValue != null;
+          // Entered once, as the goal's row on the form; the server copies the figures here.
+          const onForm = scoredOnForm?.has(goal.id) ?? false;
 
           return (
             <div key={goal.id} className="space-y-3 rounded-lg border p-4">
@@ -217,7 +230,7 @@ export function GoalAssessmentPanel({
                     id={`actual-${goal.id}`}
                     type="number"
                     step="0.01"
-                    disabled={readOnly}
+                    disabled={readOnly || onForm}
                     value={v.finalActualValue ?? ''}
                     onChange={(e) =>
                       set(goal.id, {
@@ -234,7 +247,7 @@ export function GoalAssessmentPanel({
                     type="number"
                     min={0}
                     max={100}
-                    disabled={readOnly || derivesPercent}
+                    disabled={readOnly || derivesPercent || onForm}
                     value={v.finalProgressPercent ?? ''}
                     onChange={(e) =>
                       set(goal.id, {
@@ -242,10 +255,16 @@ export function GoalAssessmentPanel({
                       })
                     }
                   />
-                  {derivesPercent && (
+                  {onForm ? (
                     <p className="text-xs text-muted-foreground">
-                      Calculated from the actual value against this KPI&apos;s target.
+                      Scored on the form — the actual and the percentage come from its row.
                     </p>
+                  ) : (
+                    derivesPercent && (
+                      <p className="text-xs text-muted-foreground">
+                        Calculated from the actual value against this KPI&apos;s target.
+                      </p>
+                    )
                   )}
                 </div>
 

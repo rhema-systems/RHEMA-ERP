@@ -95,6 +95,13 @@ export interface ResourceCollectionTabProps<TItem, TForm extends FieldValues> {
    */
   canEditItem?: (item: TItem) => boolean;
   /**
+   * Per-row Remove, the same idea as {@link canEditItem}: when supplied, Remove shows only on rows
+   * it returns true for. Performance closure P8 — a goal progress entry is corrected or withdrawn
+   * only by whoever recorded it, or HR, so the other party is not offered a button the server
+   * refuses.
+   */
+  canRemoveItem?: (item: TItem) => boolean;
+  /**
    * Open a row's own detail view (round 5 lane E4). When supplied, clicking a row calls it and the
    * row menu gains an item for it at the top; the menu's own clicks do not reach the row.
    */
@@ -190,6 +197,7 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   allowUpdate = true,
   allowCreate = true,
   canEditItem,
+  canRemoveItem,
   onOpenItem,
   openItemLabel = 'Open',
   columns,
@@ -439,7 +447,7 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
                                     </DropdownMenuItem>
                                   );
                                 })}
-                              {canRemove && (
+                              {canRemove && (!canRemoveItem || canRemoveItem(item)) && (
                                 <>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem

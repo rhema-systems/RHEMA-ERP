@@ -39,7 +39,7 @@ import { CycleSelect } from '@/components/hr/performance/CycleSelect';
 import { TeamGoalTable } from '@/components/hr/performance/TeamGoalTable';
 import { employeeGoalService, teamGoalsService } from '@/services/hr/goals.service';
 import { formatPercent, humanizeEnum } from '@/lib/hr/attendance-format';
-import type { TeamGoalFlat } from '@/types/hr/goals';
+import type { TeamGoalFlat, TeamMemberOverview } from '@/types/hr/goals';
 
 /**
  * The manager's goal workspace: everything they have to act on for their direct reports in
@@ -104,6 +104,31 @@ export default function TeamGoalsPage() {
 
   const unbalanced = overviewRows.filter((r) => r.totalGoals > 0 && !r.isWeightBalanced).length;
   const notStarted = overviewRows.filter((r) => r.totalGoals === 0).length;
+
+  // The manager's *lock goal set* (performance closure lane L-c): the set's goals become fixed for
+  // the year — what each measures, not its progress — and a goals section on the appraisal form is
+  // filled from them. The server holds the rule and names the reason when it refuses.
+  const [locking, setLocking] = useState<TeamMemberOverview | null>(null);
+  const lockSet = useMutation({
+    mutationFn: (row: TeamMemberOverview) => employeeGoalService.lockSet(row.employeeId, cycleId),
+    onSuccess: async (result, row) => {
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'team-goals'] });
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'employee-goals'] });
+      setLocking(null);
+      toast({
+        title: 'Goal set locked',
+        description: `${row.employeeName}: ${result.goalsLocked} of ${result.goalsInSet} goal(s) locked now.`,
+      });
+    },
+    onError: (e: any) => {
+      setLocking(null);
+      toast({
+        title: 'The set was not locked',
+        description: e?.message || 'The request was refused.',
+        variant: 'destructive',
+      });
+    },
+  });
 
   const decide = useMutation({
     mutationFn: async ({ row, action }: { row: TeamGoalFlat; action: 'approve' | 'reject' }) =>
@@ -282,6 +307,7 @@ export default function TeamGoalsPage() {
                             <TableHead className="text-right">At risk</TableHead>
                             <TableHead className="text-right">Overdue</TableHead>
                             <TableHead className="text-right">Weight</TableHead>
+                            <TableHead className="w-[130px]" />
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -341,6 +367,21 @@ export default function TeamGoalsPage() {
                                 >
                                   {r.totalWeight}%
                                 </span>
+                              </TableCell>
+                              <TableCell>
+                                {r.totalGoals > 0 && r.lockedCount >= r.totalGoals - r.rejectedCount ? (
+                                  <Badge variant="secondary">
+                                    <Lock className="mr-1 h-3 w-3" />
+                                    Set locked
+                                  </Badge>
+                                ) : (
+                                  r.governanceStatus === 'StructurallyComplete' && (
+                                    <Button size="sm" variant="outline" onClick={() => setLocking(r)}>
+                                      <Lock className="mr-1 h-4 w-4" />
+                                      Lock set
+                                    </Button>
+                                  )
+                                )}
                               </TableCell>
                             </TableRow>
                           ))}
@@ -483,6 +524,24 @@ export default function TeamGoalsPage() {
           </Tabs>
         </>
       )}
+
+      <ConfirmationDialog
+        open={locking !== null}
+        onOpenChange={(open) => {
+          if (!open) setLocking(null);
+        }}
+        title="Lock this goal set?"
+        description={
+          locking
+            ? `${locking.employeeName}'s ${locking.totalGoals - locking.rejectedCount} goal(s) become fixed for the year — title, measure, target and weight. Progress and check-ins still move them. Where the appraisal form has a goals section, it is filled from this set.`
+            : ''
+        }
+        confirmText="Lock the set"
+        onConfirm={async () => {
+          if (locking) await lockSet.mutateAsync(locking);
+        }}
+        isLoading={lockSet.isPending}
+      />
 
       <ConfirmationDialog
         open={decision !== null}

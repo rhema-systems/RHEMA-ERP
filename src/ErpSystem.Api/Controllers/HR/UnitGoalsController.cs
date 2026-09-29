@@ -25,6 +25,7 @@ public class UnitGoalsController : ControllerBase
     private readonly ICentralDocumentRepositoryFileService _centralDocuments;
     private readonly IFileStorageService _fileStorageService;
     private readonly ApplicationDbContext _db;
+    private readonly IHrAudienceResolver _audience;
     private readonly ILogger<UnitGoalsController> _logger;
 
     public UnitGoalsController(
@@ -34,6 +35,7 @@ public class UnitGoalsController : ControllerBase
         ICentralDocumentRepositoryFileService centralDocuments,
         IFileStorageService fileStorageService,
         ApplicationDbContext db,
+        IHrAudienceResolver audience,
         ILogger<UnitGoalsController> logger)
     {
         _unitGoalService = unitGoalService;
@@ -42,6 +44,7 @@ public class UnitGoalsController : ControllerBase
         _centralDocuments = centralDocuments;
         _fileStorageService = fileStorageService;
         _db = db;
+        _audience = audience;
         _logger = logger;
     }
 
@@ -227,7 +230,9 @@ public class UnitGoalsController : ControllerBase
     /// <remarks>
     /// <para><b>Reads stay open to the tenant deliberately.</b> A unit goal is a departmental
     /// target and the entire point of the cascade is that people can see what their unit is aiming
-    /// at and align to it — restricting reads would defeat the feature.</para>
+    /// at and align to it — restricting reads would defeat the feature. The one exception is the
+    /// per-employee cascade (<see cref="CanSeeCascadeRowsAsync"/>): which colleague is behind on
+    /// which goal is not a departmental target.</para>
     ///
     /// <para><b>Writes were open too, which was a hole.</b> Every endpoint on this controller was
     /// plain <c>[Authorize]</c>, so any authenticated employee could rewrite or delete any
@@ -417,11 +422,43 @@ public class UnitGoalsController : ControllerBase
         }
     }
 
-    /// <summary>Get projected employee goal summaries cascaded from this unit goal</summary>
+    /// <summary>
+    /// Who sees the per-employee rows of a unit goal's cascade (performance closure P11): the desk,
+    /// the manager who raised the goal, and the head of the goal's unit or of any unit above it.
+    /// Everyone else reads the counts (<c>cascade-stats</c>). The rows name each colleague with
+    /// their goal, status and progress, and were open to every authenticated user.
+    /// </summary>
+    private async Task<bool> CanSeeCascadeRowsAsync(Guid goalId, CancellationToken ct)
+    {
+        if (await HoldsPolicyAsync(HrPermissions.PerformanceReadPolicy)) return true;
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        var goal = await _db.Set<UnitGoal>()
+            .AsNoTracking()
+            .Where(g => g.Id == goalId && g.TenantId == tenantId)
+            .Select(g => new { g.CreatedByManagerId, g.OrganizationUnitId })
+            .FirstOrDefaultAsync(ct);
+        if (goal is null) return false;
+        if (goal.CreatedByManagerId == me) return true;
+
+        var line = (await _audience.UnitAncestryAsync(tenantId, goal.OrganizationUnitId, ct)).ToList();
+        return await _db.Set<Core.Entities.HR.OrganizationUnit>()
+            .AsNoTracking()
+            .AnyAsync(u => u.TenantId == tenantId && line.Contains(u.Id) && u.HeadEmployeeId == me, ct);
+    }
+
+    /// <summary>
+    /// Get projected employee goal summaries cascaded from this unit goal — the desk and the
+    /// managers in the unit's line (P11); everyone else is refused and reads <c>cascade-stats</c>.
+    /// </summary>
     [HttpGet("{id:guid}/employee-goals")]
     [ProducesResponseType(typeof(IEnumerable<UnitGoalEmployeeGoalSummaryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetEmployeeGoalSummaries(Guid id, CancellationToken cancellationToken = default)
     {
+        if (!await CanSeeCascadeRowsAsync(id, cancellationToken)) return Forbid();
+
         try
         {
             var summaries = await _unitGoalService.GetEmployeeGoalSummariesAsync(id, cancellationToken);
@@ -434,7 +471,10 @@ public class UnitGoalsController : ControllerBase
         }
     }
 
-    /// <summary>Cascade integrity check — employee goal count for the create/edit page</summary>
+    /// <summary>
+    /// The cascade in numbers — how many employee goals align to this unit goal and their mean
+    /// progress. Open to the tenant like the goal itself: it names nobody (P11).
+    /// </summary>
     [HttpGet("{id:guid}/cascade-stats")]
     [ProducesResponseType(typeof(UnitGoalCascadeStatsDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetCascadeStats(Guid id, CancellationToken cancellationToken = default)

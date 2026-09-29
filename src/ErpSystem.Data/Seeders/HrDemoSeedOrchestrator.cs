@@ -66,8 +66,45 @@ public class HrDemoSeedOrchestrator
         Func<CancellationToken, Task<bool>> AlreadySeeded,
         Func<CancellationToken, Task> RunAsync);
 
+    // The five steps of this orchestrator's own "Foundation" section — the people and the
+    // vocabulary other modules need. Named so the Developer Test Data screen's Workforce tier can
+    // run exactly these, and none of the demo-only area seeders after them.
+    public const string LeaveCalendarStep = "Leave types and the Ghana holiday calendar";
+    public const string WorkforceStep = "Demo workforce (staffs the establishment)";
+    public const string EstablishmentApprovedStep = "TDC establishment approved (without it no position vacancy can be opened)";
+    public const string LegacyOrgLookupsStep = "Legacy org lookups (contract types, divisions, work stations)";
+    public const string SalaryScaleStep = "Salary scale 2026 (payroll grades and notches)";
+
+    public static readonly IReadOnlyList<string> WorkforceStepNames = new[]
+    {
+        LeaveCalendarStep, WorkforceStep, EstablishmentApprovedStep, LegacyOrgLookupsStep, SalaryScaleStep,
+    };
+
+    /// <summary>
+    /// The probes of the named steps (or every step), evaluated without running anything. <c>null</c>
+    /// when there is no database or no DEFAULT tenant.
+    /// </summary>
+    public async Task<IReadOnlyList<HrSeedStepState>?> GetStateAsync(
+        IReadOnlyCollection<string>? onlySteps = null, CancellationToken ct = default)
+    {
+        if (!await _context.Database.CanConnectAsync(ct)) return null;
+        var tenantId = await _context.Set<Tenant>().Where(t => t.Code == "DEFAULT").Select(t => (Guid?)t.Id)
+            .FirstOrDefaultAsync(ct);
+        if (tenantId is null) return null;
+
+        var states = new List<HrSeedStepState>();
+        foreach (var step in BuildSteps(tenantId.Value).Where(s => onlySteps is null || onlySteps.Contains(s.Name)))
+            states.Add(new HrSeedStepState(step.Name, await step.AlreadySeeded(ct)));
+        return states;
+    }
+
+    /// <param name="progress">Told the outcome of each step as it happens. The command line passes nothing.</param>
+    /// <param name="onlySteps">Run only these steps (by name); <c>null</c> runs them all, as the command line does.</param>
     /// <returns><c>true</c> when the run completed, whether or not individual steps failed.</returns>
-    public async Task<bool> SeedAsync(CancellationToken ct = default)
+    public async Task<bool> SeedAsync(
+        CancellationToken ct = default,
+        IProgress<HrSeedStepOutcome>? progress = null,
+        IReadOnlyCollection<string>? onlySteps = null)
     {
         if (!await _context.Database.CanConnectAsync(ct))
         {
@@ -101,7 +138,7 @@ public class HrDemoSeedOrchestrator
 
         _logger.LogInformation("Seeding HR/SHE DEMONSTRATION data into the DEFAULT tenant ({TenantId}).", tenantId);
 
-        var steps = BuildSteps(tenantId);
+        var steps = BuildSteps(tenantId).Where(s => onlySteps is null || onlySteps.Contains(s.Name)).ToList();
 
         int ran = 0, skipped = 0;
         var failures = new List<(string Step, string Error)>();
@@ -117,12 +154,14 @@ public class HrDemoSeedOrchestrator
             {
                 _logger.LogError(ex, "  [FAIL] {Step} — could not check whether it was already seeded.", step.Name);
                 failures.Add((step.Name, $"probe threw: {ex.Message}"));
+                progress?.Report(new HrSeedStepOutcome(step.Name, HrSeedStepResult.Failed, $"probe threw: {ex.Message}"));
                 continue;
             }
 
             if (already)
             {
                 _logger.LogInformation("  [skip] {Step} — already seeded.", step.Name);
+                progress?.Report(new HrSeedStepOutcome(step.Name, HrSeedStepResult.Skipped));
                 skipped++;
                 continue;
             }
@@ -131,6 +170,7 @@ public class HrDemoSeedOrchestrator
             try
             {
                 await step.RunAsync(ct);
+                progress?.Report(new HrSeedStepOutcome(step.Name, HrSeedStepResult.Ran));
                 ran++;
             }
             catch (Exception ex)
@@ -140,6 +180,7 @@ public class HrDemoSeedOrchestrator
                 // unrelated seeder fail on somebody else's rows, so it is discarded here.
                 _logger.LogError(ex, "  [FAIL] {Step} — {Message}", step.Name, ex.Message);
                 failures.Add((step.Name, ex.Message));
+                progress?.Report(new HrSeedStepOutcome(step.Name, HrSeedStepResult.Failed, ex.Message));
                 DiscardPendingChanges();
             }
         }
@@ -180,13 +221,13 @@ public class HrDemoSeedOrchestrator
         // ── Foundation ──────────────────────────────────────────────────────────────────────────
 
         new SeedStep(
-            "Leave types and the Ghana holiday calendar",
+            LeaveCalendarStep,
             ct => _context.Set<LeaveType>().IgnoreQueryFilters()
                           .AnyAsync(t => t.TenantId == tenantId && !t.IsDeleted, ct),
             ct => new TdcDemoLeaveCalendarSeeder(_context, Log<TdcDemoLeaveCalendarSeeder>()).SeedAsync(ct)),
 
         new SeedStep(
-            "Demo workforce (staffs the establishment)",
+            WorkforceStep,
             // Keyed on the register THIS seeder issues into, not on "any employee": the estate
             // module contributes 24 fixtures to a fresh database, so an any-employee probe would
             // skip the step for ever.
@@ -201,7 +242,7 @@ public class HrDemoSeedOrchestrator
             // establishment register, which is the first screen the recruitment walkthrough opens.
             // This approves the TDC establishment; the gaps themselves are then opened by the
             // product's own reconcile from scenario 050 §14.
-            "TDC establishment approved (without it no position vacancy can be opened)",
+            EstablishmentApprovedStep,
             ct => _context.Set<EmployeePosition>().IgnoreQueryFilters()
                           .AnyAsync(p => p.TenantId == tenantId && !p.IsDeleted
                                       && p.EstablishmentApprovedOn != null, ct),
@@ -210,7 +251,7 @@ public class HrDemoSeedOrchestrator
         new SeedStep(
             // Three lookup tables that have no API door at all (DbSet, table and migration only):
             // nothing else can ever fill them, so they are seeded here rather than by a scenario.
-            "Legacy org lookups (contract types, divisions, work stations)",
+            LegacyOrgLookupsStep,
             ct => _context.Set<EmployeeContractType>().IgnoreQueryFilters()
                           .AnyAsync(t => t.TenantId == tenantId && !t.IsDeleted, ct),
             ct => new TdcDemoLegacyOrgSeeder(_context, Log<TdcDemoLegacyOrgSeeder>()).SeedAsync(ct)),
@@ -220,7 +261,7 @@ public class HrDemoSeedOrchestrator
             // tables, which are the master; the projection carries it into HR on the next read.
             // Keyed on a notch the demo-smoke scenario never wrote: 141 invents five per grade, the
             // scale runs to twenty and beyond. The seeder itself is an ensure — it updates the five.
-            "Salary scale 2026 (payroll grades and notches)",
+            SalaryScaleStep,
             ct => _context.Set<PayrollGradeNotch>().IgnoreQueryFilters()
                           .AnyAsync(n => n.TenantId == tenantId && !n.IsDeleted && n.GradeId == "M1" && n.Notch == "20", ct),
             ct => new TdcSalaryScaleSeeder(_context, Log<TdcSalaryScaleSeeder>()).SeedAsync(ct)),
@@ -362,10 +403,22 @@ public class HrDemoSeedOrchestrator
             // scenario first, and this step also assigns a recruiter to the live vacancies the
             // scenario leaves unassigned — which is what the ageing and recruiter-load charts group by.
             // Probed on a FILLED vacancy: the scenario never fills one.
+            //
+            // ⚠ "Done" is not enough of a guard — it must also wait until the scenario HAS run. On a
+            // freshly built database there is no Filled vacancy in the FIRST pass either, so this step
+            // ran there, before scenario 050: it took REQ-2026-00001… and VAC-000001/2 from the
+            // records the runbook quotes, wrote no scorecards (no question bank yet), backfilled no
+            // dossiers for the scenario's applicants, and closed the check-provider guard below before
+            // the scenario's check items existed. Six runbook counts failed on every fresh build
+            // (2026-09-18 and 2026-09-28). The question bank is the scenario's own output that this
+            // seeder depends on (it warns without one), so its absence means "not yet", and the step
+            // is skipped until the second pass.
             "Recruitment history — the closed 2026 cycles behind the analytics charts",
-            ct => _context.Set<JobVacancy>().IgnoreQueryFilters()
-                          .AnyAsync(v => v.TenantId == tenantId && !v.IsDeleted
-                                      && v.VacancyStatus == ErpSystem.Core.Enums.JobVacancyStatus.Filled, ct),
+            async ct => await _context.Set<JobVacancy>().IgnoreQueryFilters()
+                                .AnyAsync(v => v.TenantId == tenantId && !v.IsDeleted
+                                            && v.VacancyStatus == ErpSystem.Core.Enums.JobVacancyStatus.Filled, ct)
+                        || !await _context.Set<JobInterviewQuestionDetail>().IgnoreQueryFilters()
+                                .AnyAsync(q => q.TenantId == tenantId && !q.IsDeleted, ct),
             ct => new TdcDemoRecruitmentHistorySeeder(_context, Log<TdcDemoRecruitmentHistorySeeder>()).SeedAsync(ct)),
 
         new SeedStep(

@@ -141,6 +141,15 @@ export const hrSetupGroups: HrSetupGroup[] = [
         icon: Landmark,
         description: 'Account roles, the HR money events that post to Finance, and the posting register.',
       },
+      {
+        // seed-hr-all / seed-hr-demo as three buttons, for developers on other modules. Refused in
+        // production, and beside real staff for the workforce and logins tiers.
+        title: 'Developer Test Data',
+        href: '/administration/hr/settings/test-data',
+        icon: Database,
+        description:
+          'Seed the HR organisation, a synthetic workforce and demo logins for development and test databases.',
+      },
     ],
   },
   {

@@ -819,10 +819,13 @@ public class TdcDemoRecruitmentHistorySeeder
         // ── One overdue advert, so the dashboard's SLA panel has something to alert on ───────────
         //
         // The panel lists ACTIVE vacancies (Published or Approved — JobVacancyRepository) whose
-        // application deadline has passed. The API cannot produce one: a deadline is only ever set
-        // forward, and by the time it passes in real life the vacancy has moved on. So exactly one
-        // published vacancy is pushed six days past its deadline here. Everything else keeps a
-        // future deadline, including the one the "deadline approaching" panel is meant to show.
+        // SHORTLISTING deadline has passed — since G-15.4 (2026-09-15); before that it read the
+        // application deadline, which is what this block used to satisfy, so the card stayed empty
+        // on every build since. The API cannot produce one: a deadline is only ever set forward, and
+        // by the time it passes in real life the vacancy has moved on. So exactly one published
+        // vacancy is pushed past both deadlines here — applications closed six days ago and
+        // shortlisting was due yesterday. Everything else keeps future deadlines, including the one
+        // the "deadline approaching" panel is meant to show.
         //
         // ⚠ It has to be THIS vacancy, not simply the newest. The public careers board filters on
         // `ApplicationDeadline == null || ApplicationDeadline >= now`, so a past deadline takes a
@@ -849,7 +852,7 @@ public class TdcDemoRecruitmentHistorySeeder
         if (overdue is not null)
         {
             overdue.ApplicationDeadline = now.Date.AddDays(-6);
-            overdue.ShortlistingDeadline = now.Date.AddDays(4);
+            overdue.ShortlistingDeadline = now.Date.AddDays(-1);
             overdue.ShortlistingSlaBreached = true;
             overdue.UpdatedAt = now;
             overdue.UpdatedBy = By;

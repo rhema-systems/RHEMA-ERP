@@ -231,7 +231,9 @@ export function TeamObjectivesTab({ teamId }: { teamId: string }) {
             // screen sends the objective's own summary if it has one and lets the refusal explain
             // itself when it does not — the message names the percentage.
             label: 'Complete',
-            visible: (o) => o.status !== 'Completed' && o.status !== 'Cancelled',
+            // Only an objective that was approved: the server refuses Draft and PendingApproval,
+            // which this used to offer — completing an undertaking nobody signed off.
+            visible: (o) => o.status === 'Active' || o.status === 'OnHold',
             run: async (o) => {
               const full = await teamActivityService.getObjectiveById(o.id);
               return teamActivityService.changeObjectiveStatus(o.id, 'Completed', {

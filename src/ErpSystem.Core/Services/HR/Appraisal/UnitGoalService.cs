@@ -228,16 +228,27 @@ public class UnitGoalService : IUnitGoalService
     public async Task<UnitGoalCascadeStatsDto> GetCascadeStatsAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        return await _unitGoalRepository.GetQueryable()
+        // The same employee goals the per-employee read lists (tenant-scoped), so the count
+        // everyone sees agrees with the rows the desk and the unit's line see (P11).
+        var stats = await _unitGoalRepository.GetQueryable()
             .AsNoTracking()
             .Where(g => g.TenantId == tenantId && g.Id == id)
-            .Select(g => new UnitGoalCascadeStatsDto
+            .Select(g => new
             {
-                GoalId             = g.Id,
-                EmployeeGoalsCount = g.EmployeeGoals.Count()
+                g.Id,
+                Count = g.EmployeeGoals.Count(eg => eg.TenantId == tenantId),
+                Average = g.EmployeeGoals.Where(eg => eg.TenantId == tenantId).Average(eg => (decimal?)eg.ProgressPercent),
             })
-            .FirstOrDefaultAsync(cancellationToken)
-            ?? new UnitGoalCascadeStatsDto { GoalId = id, EmployeeGoalsCount = 0 };
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return stats is null
+            ? new UnitGoalCascadeStatsDto { GoalId = id, EmployeeGoalsCount = 0 }
+            : new UnitGoalCascadeStatsDto
+            {
+                GoalId                 = stats.Id,
+                EmployeeGoalsCount     = stats.Count,
+                AverageProgressPercent = stats.Average is decimal average ? Math.Round(average, 1) : null,
+            };
     }
 
     public async Task<IEnumerable<UnitGoalEmployeeGoalSummaryDto>> GetEmployeeGoalSummariesAsync(Guid unitGoalId, CancellationToken cancellationToken = default)

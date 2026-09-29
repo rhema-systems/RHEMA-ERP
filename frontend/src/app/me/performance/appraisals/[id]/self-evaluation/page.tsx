@@ -71,7 +71,7 @@ export default function SelfEvaluationPage() {
     const seededAnswers: Record<string, string> = {};
     for (const section of context.sections) {
       for (const item of section.items) {
-        seeded[item.templateItemId] = {
+        seeded[item.criterionKey] = {
           numericScore: item.existingNumericScore ?? null,
           actualValue: item.existingActualValue ?? null,
           notes: item.existingNotes ?? null,
@@ -93,9 +93,19 @@ export default function SelfEvaluationPage() {
         sectionName: s.sectionName,
         sectionDescription: s.sectionDescription,
         sectionWeight: s.sectionWeight,
+        kind: s.kind,
         items: s.items,
       })),
     [context],
+  );
+
+  const allItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
+
+  // The goals scored as rows of this form: the goal assessment panel takes their figures from the
+  // rows rather than asking for them twice.
+  const goalsOnForm = useMemo(
+    () => new Set(allItems.flatMap((i) => (i.employeeGoalId ? [i.employeeGoalId] : []))),
+    [allItems],
   );
 
   const customQuestions = useMemo(
@@ -116,7 +126,7 @@ export default function SelfEvaluationPage() {
         appraisalId,
         // Overwritten server-side from the token; sent to match the documented payload.
         employeeId: context?.employeeId ?? '',
-        itemScores: toItemScores(values),
+        itemScores: toItemScores(allItems, values),
         isDraft,
         customQuestionResponses,
         // The year-end verdict on the goals the cycle spent the year cascading. This was posted
@@ -247,6 +257,7 @@ export default function SelfEvaluationPage() {
         values={goalValues}
         onChange={setGoalValues}
         readOnly={readOnly}
+        scoredOnForm={goalsOnForm}
       />
 
       {customQuestions.length > 0 && (

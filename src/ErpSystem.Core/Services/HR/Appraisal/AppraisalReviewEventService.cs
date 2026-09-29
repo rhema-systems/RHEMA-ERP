@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -46,7 +47,8 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
     /// Statuses a goal may receive progress in — approved and still running. Mirrors
     /// <c>EmployeeGoalService.LiveExecutionStatuses</c>; a goal that is draft, awaiting approval,
     /// rejected or already complete keeps its status and the entry is still recorded against the
-    /// review as a note.
+    /// review as a note. A locked goal moves like any other — a lock freezes what a goal is, not its
+    /// year (decision D-29) — and one the old lock left in the Locked status reads as approved.
     /// </summary>
     private static readonly HashSet<GoalStatus> LiveExecutionStatuses = new()
     {
@@ -54,6 +56,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         GoalStatus.InProgress,
         GoalStatus.OnTrack,
         GoalStatus.AtRisk,
+        GoalStatus.Locked,
     };
 
     /// <summary>
@@ -201,8 +204,12 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
         var employeeId = ev.Appraisal.EmployeeId;
 
+        // The agreed, locked goal set (closure plan L7): the context listed every goal of the
+        // cycle, drafts and rejected ones included, and the finalize scored whatever it was sent.
         var goals = await _goalRepository
-            .GetQueryable(g => g.TenantId == GetTenantId() && g.EmployeeId == employeeId && g.AppraisalCycleId == ev.AppraisalCycleId)
+            .GetQueryable(g => g.TenantId == GetTenantId() && g.EmployeeId == employeeId && g.AppraisalCycleId == ev.AppraisalCycleId
+                            && g.Status != GoalStatus.Rejected
+                            && (g.IsLocked || g.Status == GoalStatus.Locked))
             .ToListAsync(cancellationToken);
 
         var tenantId = GetTenantId();
@@ -256,6 +263,12 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         var scoredGoals = await GetScorableGoalsAsync(
             ev, dto.Scores.Select(s => s.EmployeeGoalId).Distinct().ToList(), cancellationToken);
 
+        // A full interim appraisal scores the locked goal set only, as its context lists it (L7).
+        var outsideSet = scoredGoals.Values.Count(g => !GoalSetRules.IsLive(g.Status) || !GoalSetRules.IsLocked(g.IsLocked, g.Status));
+        if (outsideSet > 0)
+            throw new InvalidOperationException(
+                $"{outsideSet} goal(s) named here are not in the employee's locked goal set; a full interim appraisal scores the agreed, locked goals.");
+
         // Record a score per goal as a GoalProgressEntry tied to this review event, and carry it
         // onto the goal — a full interim appraisal is the period's verdict on those goals, so
         // leaving them reading their pre-review percentage made the scores invisible everywhere
@@ -277,7 +290,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
             });
 
             var goal = scoredGoals[s.EmployeeGoalId];
-            if (LiveExecutionStatuses.Contains(goal.Status) && !goal.IsLocked)
+            if (LiveExecutionStatuses.Contains(goal.Status))
             {
                 ApplyProgressToGoal(goal, s.Score, entryStatus);
                 await _goalRepository.UpdateAsync(goal);
@@ -528,7 +541,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         await _progressEntryRepository.AddAsync(entity);
 
         // The entry is only half the write — the goal itself has to move. See ApplyProgressToGoal.
-        if (LiveExecutionStatuses.Contains(goal.Status) && !goal.IsLocked)
+        if (LiveExecutionStatuses.Contains(goal.Status))
         {
             ApplyProgressToGoal(goal, entity.ProgressPercent, entity.Status);
             await _goalRepository.UpdateAsync(goal);

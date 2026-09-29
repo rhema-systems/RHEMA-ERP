@@ -62,7 +62,7 @@ public class CheckInsController : ControllerBase
             var result = await _checkInService.GetByEmployeeIdAsync(employeeId, cycleId, cancellationToken);
             // The employee's own list: they are the subject, not the conductor, so the private
             // notes are not theirs to read.
-            return Ok(Redact(result));
+            return Ok(await RedactAsync(result));
         }
         catch (Exception ex)
         {
@@ -117,15 +117,21 @@ public class CheckInsController : ControllerBase
         return UnprocessableEntity(new { message = ex.Message });
     }
 
-    private bool IsHr =>
-        User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
-
     /// <summary>W3: whether the caller holds the given performance policy (seed and role fallback both count).</summary>
     private async Task<bool> HoldsPolicyAsync(string policy)
     {
         var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
         return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
     }
+
+    private bool? _isDesk;
+
+    /// <summary>
+    /// The HR desk: whoever holds the performance Read policy (performance closure P15). This was a
+    /// role-name test — SuperAdmin or "HR" — so TenantAdmin, "Admin" and "HR User" were refused
+    /// here while `GET paged`, which the policy gates, showed them every private note.
+    /// </summary>
+    private async Task<bool> IsDeskAsync() => _isDesk ??= await HoldsPolicyAsync(HrPermissions.PerformanceReadPolicy);
 
     /// <summary>The employee the check-in is about, their line manager, or a policy holder.</summary>
     private async Task<bool> CanAccessEmployeeAsync(Guid employeeId, CancellationToken ct)
@@ -145,37 +151,86 @@ public class CheckInsController : ControllerBase
     /// check-in belong to whoever is holding it. The employee's record of the meeting is the
     /// conductor's, not theirs to amend.
     /// </summary>
+    /// <remarks>
+    /// An HR officer who is the check-in's subject (and not its conductor) is the subject here, not
+    /// the desk: the two-actor rule (performance closure P6).
+    /// </remarks>
     private async Task<bool> CanManageCheckInAsync(Guid checkInId, CancellationToken ct)
     {
-        if (await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy)) return true;
-        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
+        var me = _currentUserService.EmployeeId is Guid id && id != Guid.Empty ? id : (Guid?)null;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
 
-        return await _db.Set<CheckIn>()
+        var parties = await _db.Set<CheckIn>()
             .AsNoTracking()
-            .AnyAsync(c => c.Id == checkInId && c.TenantId == tenantId && c.ConductedById == me, ct);
+            .Where(c => c.Id == checkInId && c.TenantId == tenantId)
+            .Select(c => new { c.EmployeeId, c.ConductedById })
+            .FirstOrDefaultAsync(ct);
+
+        // An unknown id falls to the desk, so the action reports it missing (404) rather than 403.
+        if (parties is null) return await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy);
+        if (me is Guid conductor && parties.ConductedById == conductor) return true;
+        if (me is Guid subject && parties.EmployeeId == subject) return false;
+        return await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy);
     }
 
     /// <summary>
-    /// Blanks the conductor's private notes for anyone who is not the conductor (or HR).
+    /// Who a new check-in may be about (performance closure P6): the caller themselves (a
+    /// self-requested check-in), one of their direct reports, or anyone in the tenant for the desk.
+    /// It checked only the conductor, so any colleague could open a check-in about anyone.
+    /// </summary>
+    private async Task<bool> CanOpenCheckInForAsync(Guid employeeId, CancellationToken ct)
+    {
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty)
+        {
+            if (me == employeeId) return true;
+            if (await _db.Set<Core.Entities.HR.Employee>()
+                    .AsNoTracking()
+                    .AnyAsync(e => e.Id == employeeId && e.TenantId == tenantId && e.ManagerId == me, ct))
+                return true;
+        }
+
+        // The desk may open one about anyone — in its own tenant.
+        if (!await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy)) return false;
+        return await _db.Set<Core.Entities.HR.Employee>()
+            .AsNoTracking()
+            .AnyAsync(e => e.Id == employeeId && e.TenantId == tenantId, ct);
+    }
+
+    /// <summary>
+    /// Blanks the conductor's private notes for anyone who is not the conductor or the HR desk —
+    /// and always for the check-in's subject, desk or not.
     /// </summary>
     /// <remarks>
     /// <c>PrivateNotes</c> is on <c>CheckInDto</c> and was returned by every read, so an employee
     /// could see their manager's private record of the meeting simply by calling the API — the
     /// Next.js screen hides the field, which is not the same as it being private. Suppression
     /// belongs here, where the caller is known, rather than in a client that can be bypassed.
+    /// ⚠ The subject rule (P15): an HR officer who is the check-in's subject read their own
+    /// manager's private notes about them through the desk exemption.
     /// </remarks>
-    private CheckInDto Redact(CheckInDto dto)
+    private async Task<CheckInDto> RedactAsync(CheckInDto dto)
     {
-        if (IsHr) return dto;
-        if (_currentUserService.EmployeeId is Guid me && dto.ConductedById == me) return dto;
+        var me = _currentUserService.EmployeeId;
+        if (me is Guid conductor && dto.ConductedById == conductor) return dto;
+        if (me is Guid subject && dto.EmployeeId == subject)
+        {
+            dto.PrivateNotes = null;
+            return dto;
+        }
+        if (await IsDeskAsync()) return dto;
         dto.PrivateNotes = null;
         return dto;
     }
 
-    private IEnumerable<CheckInDto> Redact(IEnumerable<CheckInDto> dtos) => dtos.Select(Redact).ToList();
+    private async Task<List<CheckInDto>> RedactAsync(IEnumerable<CheckInDto> dtos)
+    {
+        var result = new List<CheckInDto>();
+        foreach (var dto in dtos) result.Add(await RedactAsync(dto));
+        return result;
+    }
 
-    /// <summary>Every check-in in the tenant — HR's view.</summary>
+    /// <summary>Every check-in in the tenant — HR's view. Redacted like every other read (P15).</summary>
     [HttpGet("paged")]
     [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(PagedResult<CheckInDto>), StatusCodes.Status200OK)]
@@ -184,6 +239,7 @@ public class CheckInsController : ControllerBase
         try
         {
             var result = await _checkInService.GetPagedAsync(pageNumber, pageSize, cancellationToken);
+            result.Items = await RedactAsync(result.Items);
             return Ok(result);
         }
         catch (Exception ex)
@@ -205,7 +261,7 @@ public class CheckInsController : ControllerBase
         try
         {
             var result = await _checkInService.GetByIdAsync(id, cancellationToken);
-            return Ok(Redact(result));
+            return Ok(await RedactAsync(result));
         }
         catch (ArgumentException ex)
         {
@@ -229,7 +285,7 @@ public class CheckInsController : ControllerBase
         try
         {
             var result = await _checkInService.GetByEmployeeIdAsync(employeeId, cycleId, cancellationToken);
-            return Ok(Redact(result));
+            return Ok(await RedactAsync(result));
         }
         catch (Exception ex)
         {
@@ -247,12 +303,12 @@ public class CheckInsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetByConductedBy(Guid conductedById, [FromQuery] Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
-        if (!IsHr && _currentUserService.EmployeeId != conductedById) return Forbid();
+        if (_currentUserService.EmployeeId != conductedById && !await IsDeskAsync()) return Forbid();
 
         try
         {
             var result = await _checkInService.GetByConductedByIdAsync(conductedById, cycleId, cancellationToken);
-            return Ok(Redact(result));
+            return Ok(await RedactAsync(result));
         }
         catch (Exception ex)
         {
@@ -272,7 +328,7 @@ public class CheckInsController : ControllerBase
         try
         {
             var result = await _checkInService.GetUpcomingAsync(employeeId, daysAhead, cancellationToken);
-            return Ok(Redact(result));
+            return Ok(await RedactAsync(result));
         }
         catch (Exception ex)
         {
@@ -302,6 +358,9 @@ public class CheckInsController : ControllerBase
             // Booking a meeting in someone ELSE's name is the desk's act, not any colleague's.
             return Forbid();
         }
+
+        // P6: and who it is about — the caller, a direct report of theirs, or anyone for the desk.
+        if (!await CanOpenCheckInForAsync(createDto.EmployeeId, cancellationToken)) return Forbid();
 
         try
         {
@@ -338,7 +397,7 @@ public class CheckInsController : ControllerBase
         try
         {
             var result = await _checkInService.UpdateAsync(updateDto, cancellationToken);
-            return Ok(Redact(result));
+            return Ok(await RedactAsync(result));
         }
         catch (ArgumentException ex)
         {
@@ -388,7 +447,7 @@ public class CheckInsController : ControllerBase
         try
         {
             var result = await _checkInService.CompleteAsync(checkInId, request.SharedNotes, request.PrivateNotes, request.ActionItems, cancellationToken);
-            return Ok(Redact(result));
+            return Ok(await RedactAsync(result));
         }
         catch (ArgumentException ex)
         {
@@ -513,11 +572,8 @@ public class CheckInsController : ControllerBase
     /// HR, the employee the check-in is about, or whoever is conducting it.
     /// </summary>
     /// <remarks>
-    /// ⚠ Scoped to the attachment endpoints only. The rest of this controller has no entitlement
-    /// test at all — any authenticated user can read any check-in by id, private notes included —
-    /// which is a real hole but a wider one than this slice set out to close. What is not
-    /// acceptable is adding a *new* file-download surface with no gate, so these four endpoints
-    /// carry the rule the whole controller ought to. Widening it to the rest is its own change.
+    /// The whole controller's read and goal-update gate since W3 (it began as the attachment
+    /// endpoints' own rule). The private notes are a second, per-field rule — <see cref="RedactAsync(CheckInDto)"/>.
     /// </remarks>
     private async Task<bool> CanAccessCheckInAsync(Guid checkInId, string policy, CancellationToken ct)
     {
@@ -631,13 +687,23 @@ public class CheckInsController : ControllerBase
 
         try
         {
-            var result = await _checkInService.DeleteAttachmentAsync(checkInId, attachmentId, cancellationToken);
+            // P9: the service decides between the uploader and the desk, and refuses after completion.
+            var isDesk = await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy);
+            var result = await _checkInService.DeleteAttachmentAsync(checkInId, attachmentId, isDesk, cancellationToken);
             if (!result) return NotFound(new { message = "Attachment not found" });
             return NoContent();
         }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "deleting a check-in attachment");
         }
         catch (Exception ex)
         {

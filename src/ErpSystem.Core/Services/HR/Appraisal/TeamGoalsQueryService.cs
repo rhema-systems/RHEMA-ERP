@@ -124,7 +124,8 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
                 DraftCount           = cycleGoals.Count(g => g.EmployeeId == e.Id && g.Status == GoalStatus.Draft),
                 PendingApprovalCount = cycleGoals.Count(g => g.EmployeeId == e.Id && g.Status == GoalStatus.PendingApproval),
                 RejectedCount        = cycleGoals.Count(g => g.EmployeeId == e.Id && g.Status == GoalStatus.Rejected),
-                LockedCount          = cycleGoals.Count(g => g.EmployeeId == e.Id && g.Status == GoalStatus.Locked),
+                // A lock is the flag (decision D-29); the old lock's Locked status still counts.
+                LockedCount          = cycleGoals.Count(g => g.EmployeeId == e.Id && (g.IsLocked || g.Status == GoalStatus.Locked)),
 
                 // ApprovedWorkflow = Status >= Approved AND Status != Rejected
                 // Covers: Approved, InProgress, OnTrack, AtRisk, Completed, Locked
@@ -139,17 +140,20 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
                 CompletedCount  = cycleGoals.Count(g => g.EmployeeId == e.Id && g.Status == GoalStatus.Completed),
 
                 // ── Overdue count ────────────────────────────────────────────
-                // DueDate < today AND not Completed AND not Locked.
-                // Status is single source of truth — IsLocked flag is NOT used.
+                // DueDate < today AND not Completed AND not Rejected. A locked goal is still
+                // running — a lock freezes what a goal is, not its year (decision D-29) — so it can
+                // be overdue like any other; the rejected exclusion matches the Overdue tab's.
                 OverdueCount = cycleGoals.Count(g =>
                     g.EmployeeId == e.Id
                     && g.DueDate < today
                     && g.Status != GoalStatus.Completed
-                    && g.Status != GoalStatus.Locked),
+                    && g.Status != GoalStatus.Rejected),
 
                 // ── Weight sum ───────────────────────────────────────────────
+                // The set's weight: live goals only, as GoalSetRules.WeightTotal and the lock read
+                // it. Rejected goals used to be added in here and left out everywhere else.
                 TotalWeight = cycleGoals
-                    .Where(g => g.EmployeeId == e.Id)
+                    .Where(g => g.EmployeeId == e.Id && g.Status != GoalStatus.Rejected)
                     .Sum(g => (int?)g.Weight) ?? 0,
             })
             .ToListAsync(cancellationToken);
@@ -266,17 +270,16 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
             managerId, appraisalCycleId, today);
 
         // ── Overdue rule ─────────────────────────────────────────────────────
-        // DueDate < today AND Status is not Completed, Locked, or Rejected.
+        // DueDate < today AND Status is not Completed or Rejected.
         //   • Completed: goal is done — not overdue.
-        //   • Locked: goal is frozen by HR/cycle-close — not actionable.
         //   • Rejected: goal was rejected in workflow — work item terminated; not overdue.
-        // Status field is the single source of truth.
-        // The legacy IsLocked boolean flag is intentionally NOT consulted.
+        // A locked goal is still running: a lock freezes what a goal is, not its year
+        // (performance closure decision D-29), so it can be overdue like any other. The old
+        // lock's Locked status meant "finished" and was left out here; it now reads as approved.
         var raw = await BuildBaseGoalQuery(appraisalCycleId, managerId, tenantId)
             .Where(r =>
                 r.DueDate < today
                 && r.Status != GoalStatus.Completed
-                && r.Status != GoalStatus.Locked
                 && r.Status != GoalStatus.Rejected)
             .ToListAsync(cancellationToken);
 
@@ -307,8 +310,9 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
             "TeamGoalsQueryService.GetLockedGoalsAsync: managerId={ManagerId}, cycleId={CycleId}",
             managerId, appraisalCycleId);
 
+        // A lock is the flag (decision D-29); the old lock's Locked status still counts.
         var raw = await BuildBaseGoalQuery(appraisalCycleId, managerId, tenantId)
-            .Where(r => r.Status == GoalStatus.Locked)
+            .Where(r => r.IsLocked || r.Status == GoalStatus.Locked)
             .ToListAsync(cancellationToken);
 
         return EnrichWithComputedFields(raw, riskSettings, utcNow)
@@ -420,9 +424,10 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
                 .ThenBy(g => g.Title)
                 .Select(g =>
                 {
+                    // A locked goal is still running (decision D-29), so it can be overdue.
                     var isOverdue = g.DueDate < today
                         && g.Status != GoalStatus.Completed
-                        && g.Status != GoalStatus.Locked;
+                        && g.Status != GoalStatus.Rejected;
 
                     return new TeamProgressGoalItemDto
                     {
@@ -524,6 +529,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
                 SubmittedDate   = g.SubmittedDate,
                 ApprovalDate    = g.ApprovalDate,
                 LockedDate      = g.LockedDate,
+                IsLocked        = g.IsLocked,
             };
     }
 
@@ -573,19 +579,17 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
                 ApprovalDate    = r.ApprovalDate,
                 // DayNumber-based difference avoids time-of-day noise in DateOnly comparison
                 DaysRemaining   = r.DueDate.DayNumber - today.DayNumber,
-                // Status is the single source of truth — IsLocked flag is not consulted.
-                // Rejected goals are also excluded: a rejected goal can never be "overdue"
+                // Rejected goals are excluded: a rejected goal can never be "overdue"
                 // in an actionable sense — the workflow itself terminated the work item.
+                // A locked goal is still running (decision D-29), so it can be overdue.
                 IsOverdue       = r.DueDate < today
                                   && r.Status != GoalStatus.Completed
-                                  && r.Status != GoalStatus.Locked
                                   && r.Status != GoalStatus.Rejected,
                 // Positive integer: how many calendar days past the due date.
                 // Null for all non-overdue goals — computed once here, consumed by the
                 // Overdue tab sort (OrderByDescending) and the UI badge.
                 DaysOverdue     = r.DueDate < today
                                   && r.Status != GoalStatus.Completed
-                                  && r.Status != GoalStatus.Locked
                                   && r.Status != GoalStatus.Rejected
                                   ? today.DayNumber - r.DueDate.DayNumber
                                   : null,
@@ -696,5 +700,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         public DateTime? ApprovalDate { get; init; }
         /// <summary>Populated for Locked tab sort; null for non-locked goals.</summary>
         public DateTime? LockedDate { get; init; }
+        /// <summary>The lock itself (decision D-29): the flag, not a status.</summary>
+        public bool IsLocked { get; init; }
     }
 }

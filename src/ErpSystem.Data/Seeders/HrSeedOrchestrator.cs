@@ -41,10 +41,30 @@ public class HrSeedOrchestrator
     private sealed record SeedStep(
         string Name,
         Func<CancellationToken, Task<bool>> AlreadySeeded,
-        Func<CancellationToken, Task> RunAsync);
+        Func<CancellationToken, Task> RunAsync,
+        bool AlwaysRuns = false);
 
+    /// <summary>
+    /// Every step's probe, evaluated without running anything — what the Developer Test Data screen
+    /// shows. <c>null</c> when there is no database or no DEFAULT tenant to seed against.
+    /// </summary>
+    public async Task<IReadOnlyList<HrSeedStepState>?> GetStateAsync(CancellationToken ct = default)
+    {
+        if (!await _context.Database.CanConnectAsync(ct)) return null;
+        var tenantId = await _context.Set<Tenant>().Where(t => t.Code == "DEFAULT").Select(t => (Guid?)t.Id)
+            .FirstOrDefaultAsync(ct);
+        if (tenantId is null) return null;
+
+        var states = new List<HrSeedStepState>();
+        foreach (var step in BuildSteps(tenantId.Value))
+            states.Add(new HrSeedStepState(step.Name, !step.AlwaysRuns && await step.AlreadySeeded(ct), step.AlwaysRuns));
+        return states;
+    }
+
+    /// <param name="progress">Told the outcome of each step as it happens (the Developer Test Data
+    /// screen's run log). The command line passes nothing.</param>
     /// <returns><c>true</c> when every step either ran or was skipped; <c>false</c> on a hard stop.</returns>
-    public async Task<bool> SeedAsync(CancellationToken ct = default)
+    public async Task<bool> SeedAsync(CancellationToken ct = default, IProgress<HrSeedStepOutcome>? progress = null)
     {
         if (!await _context.Database.CanConnectAsync(ct))
         {
@@ -79,18 +99,30 @@ public class HrSeedOrchestrator
                 _logger.LogError(ex,
                     "Could not check '{Step}'. The HR schema is probably missing — run 'rebuild-db' first.",
                     step.Name);
+                progress?.Report(new HrSeedStepOutcome(step.Name, HrSeedStepResult.Failed, ex.Message));
                 return false;
             }
 
             if (already)
             {
                 _logger.LogInformation("  [skip] {Step} — already seeded.", step.Name);
+                progress?.Report(new HrSeedStepOutcome(step.Name, HrSeedStepResult.Skipped));
                 skipped++;
                 continue;
             }
 
             _logger.LogInformation("  [run ] {Step} …", step.Name);
-            await step.RunAsync(ct);
+            try
+            {
+                await step.RunAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                // Reported, then rethrown: the command line has always stopped here, and still does.
+                progress?.Report(new HrSeedStepOutcome(step.Name, HrSeedStepResult.Failed, ex.Message));
+                throw;
+            }
+            progress?.Report(new HrSeedStepOutcome(step.Name, HrSeedStepResult.Ran));
             ran++;
         }
 
@@ -216,7 +248,8 @@ public class HrSeedOrchestrator
         new SeedStep(
             "Number sequences (reconcile)",
             _ => Task.FromResult(false),
-            ct => new NumberSequenceSeeder(_context, Log<NumberSequenceSeeder>()).SeedAsync(ct)),
+            ct => new NumberSequenceSeeder(_context, Log<NumberSequenceSeeder>()).SeedAsync(ct),
+            AlwaysRuns: true),
     };
 
     /// <summary>

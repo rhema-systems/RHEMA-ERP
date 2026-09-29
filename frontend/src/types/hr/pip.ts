@@ -309,6 +309,8 @@ export interface PipMeetingForm {
   meetingId?: string | null;
   pipId: string;
   pipNumber: string;
+  /** The plan's subject — the only person who writes `employeeComments` (P13). */
+  employeeId: string;
   employeeName: string;
   employeePosition: string;
   employeePhotoUrl?: string | null;

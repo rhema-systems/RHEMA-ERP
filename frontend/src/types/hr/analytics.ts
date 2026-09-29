@@ -252,6 +252,8 @@ export interface PerformanceTrendPoint {
   overallScore?: number | null;
   rating?: PerformanceRating | null;
   status?: string | null;
+  /** Released to the appraisee (P2); on their own trend the score is null until then. */
+  outcomeReleased?: boolean;
 }
 
 export interface EmployeePerformanceTrend {

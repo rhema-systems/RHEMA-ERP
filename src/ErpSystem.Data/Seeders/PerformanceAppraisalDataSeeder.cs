@@ -159,7 +159,6 @@ public sealed class PerformanceAppraisalDataSeeder
             PeerEvaluationOpenMode = PeerEvaluationOpenMode.WithSelfEval,
             RequireManagerEvaluation = true,
             ManagerEvaluationWeight = 0.7m,
-            IsManagerAuthoritative = true,
             ShowSelfScoreToManager = true,
             ShowPeerScoresToManager = true,
             ShowScoreBreakdownToEmployee = true,
@@ -186,7 +185,6 @@ public sealed class PerformanceAppraisalDataSeeder
             InterimReviewDepth = InterimReviewDepth.LightTouch,
             RequireMidYearSelfAssessment = true,
             RequireGoalProgressUpdateAtReview = true,
-            RequireDevelopmentPlanUpdate = true,
             AutoLockOnDeadline = false,
             CreatedAt = now
         };
