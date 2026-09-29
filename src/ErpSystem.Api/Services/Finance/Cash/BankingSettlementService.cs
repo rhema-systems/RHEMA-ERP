@@ -948,6 +948,11 @@ public sealed class BankingSettlementService : IBankingSettlementService
         CancellationToken cancellationToken = default)
     {
         var deposit = await LoadDepositForActionAsync(id, cancellationToken);
+        if (deposit.Status == BankDepositStatus.Posted)
+        {
+            return await GetDepositAsync(id, cancellationToken)
+                ?? throw new InvalidOperationException("Failed to reload the posted deposit.");
+        }
         if (deposit.Status != BankDepositStatus.Approved)
         {
             throw new InvalidOperationException("Only a fully approved deposit can be posted.");
@@ -1214,8 +1219,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
             {
                 if (transaction is not null)
                     await transaction.RollbackAsync(cancellationToken);
-                if (transaction is not null)
-                    _context.ChangeTracker.Clear();
+                _context.ChangeTracker.Clear();
                 throw;
             }
         });
@@ -1319,19 +1323,21 @@ public sealed class BankingSettlementService : IBankingSettlementService
 
         await ValidateAndFreezeReturnedChequeDimensionsAsync(id, cancellationToken);
 
-        var result = await _workflow.SubmitAsync(ReturnedChequeWorkflowEntityType, id);
-        item.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId ?? item.WorkflowInstanceId;
-        item.Status = result.Outcome == WorkflowOutcome.Approved
-            ? ReturnedChequeCaseStatus.Approved
-            : ReturnedChequeCaseStatus.Submitted;
-        item.SubmittedAt = DateTime.UtcNow;
-        item.SubmittedById = UserId;
-        StampModified(item);
-        await _context.SaveChangesAsync(cancellationToken);
-        if (item.Status == ReturnedChequeCaseStatus.Approved)
+        await ExecuteDimensionMutationAsync(async () =>
         {
-            await PostReturnedChequeAsync(item, cancellationToken);
-        }
+            var result = await _workflow.SubmitAsync(ReturnedChequeWorkflowEntityType, id);
+            item.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId ?? item.WorkflowInstanceId;
+            item.Status = result.Outcome == WorkflowOutcome.Approved
+                ? ReturnedChequeCaseStatus.Approved
+                : ReturnedChequeCaseStatus.Submitted;
+            item.SubmittedAt = DateTime.UtcNow;
+            item.SubmittedById = UserId;
+            StampModified(item);
+            if (item.Status == ReturnedChequeCaseStatus.Approved)
+                await PostReturnedChequeAsync(item, cancellationToken);
+            else
+                await _context.SaveChangesAsync(cancellationToken);
+        }, cancellationToken);
         return await GetReturnedChequeAsync(id, cancellationToken)
             ?? throw new InvalidOperationException("Failed to reload the returned cheque.");
     }
@@ -1342,6 +1348,17 @@ public sealed class BankingSettlementService : IBankingSettlementService
         CancellationToken cancellationToken = default)
     {
         var item = await LoadReturnedChequeForActionAsync(id, cancellationToken);
+        if (item.Status == ReturnedChequeCaseStatus.Posted)
+        {
+            return await GetReturnedChequeAsync(id, cancellationToken)
+                ?? throw new InvalidOperationException("Failed to reload the posted returned cheque.");
+        }
+        if (item.Status == ReturnedChequeCaseStatus.Approved)
+        {
+            await PostReturnedChequeAsync(item, cancellationToken);
+            return await GetReturnedChequeAsync(id, cancellationToken)
+                ?? throw new InvalidOperationException("Failed to reload the returned cheque.");
+        }
         if (item.Status != ReturnedChequeCaseStatus.Submitted)
         {
             throw new InvalidOperationException("Only submitted returned-cheque cases can be approved.");
@@ -1354,22 +1371,25 @@ public sealed class BankingSettlementService : IBankingSettlementService
 
         await ValidateAndFreezeReturnedChequeDimensionsAsync(id, cancellationToken);
 
-        var result = await _workflow.ProcessApprovalAsync(ReturnedChequeWorkflowEntityType, id, UserId, "Approve", comments);
-        item.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId ?? item.WorkflowInstanceId;
-        item.Status = result.Outcome == WorkflowOutcome.Approved
-            ? ReturnedChequeCaseStatus.Approved
-            : ReturnedChequeCaseStatus.Submitted;
-        if (item.Status == ReturnedChequeCaseStatus.Approved)
+        await ExecuteDimensionMutationAsync(async () =>
         {
-            item.ApprovedAt = DateTime.UtcNow;
-            item.ApprovedById = UserId;
-        }
-        StampModified(item);
-        await _context.SaveChangesAsync(cancellationToken);
-        if (item.Status == ReturnedChequeCaseStatus.Approved)
-        {
-            await PostReturnedChequeAsync(item, cancellationToken);
-        }
+            var result = await _workflow.ProcessApprovalAsync(
+                ReturnedChequeWorkflowEntityType, id, UserId, "Approve", comments);
+            item.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId ?? item.WorkflowInstanceId;
+            item.Status = result.Outcome == WorkflowOutcome.Approved
+                ? ReturnedChequeCaseStatus.Approved
+                : ReturnedChequeCaseStatus.Submitted;
+            if (item.Status == ReturnedChequeCaseStatus.Approved)
+            {
+                item.ApprovedAt = DateTime.UtcNow;
+                item.ApprovedById = UserId;
+            }
+            StampModified(item);
+            if (item.Status == ReturnedChequeCaseStatus.Approved)
+                await PostReturnedChequeAsync(item, cancellationToken);
+            else
+                await _context.SaveChangesAsync(cancellationToken);
+        }, cancellationToken);
         return await GetReturnedChequeAsync(id, cancellationToken)
             ?? throw new InvalidOperationException("Failed to reload the returned cheque.");
     }
@@ -1422,44 +1442,124 @@ public sealed class BankingSettlementService : IBankingSettlementService
         {
             throw new InvalidOperationException("A bank deposit must have a positive net amount.");
         }
+        var settings = await GetSettingsAsync(cancellationToken);
+        var allocationEvidence = new List<(BankDepositAllocation Allocation, SourcePostingEvidence Evidence)>();
+        foreach (var allocation in loaded.Allocations.OrderBy(item => item.CreatedAt))
+        {
+            allocationEvidence.Add((
+                allocation,
+                await ResolveLiquiditySourceEvidenceAsync(allocation.LiquidityAccountEntry, cancellationToken)));
+        }
+        if (allocationEvidence.Count == 0)
+            throw new InvalidOperationException("A bank deposit must contain source journal evidence.");
+        var authority = allocationEvidence[0].Evidence;
+        if (allocationEvidence.Any(item =>
+                item.Evidence.AccountingBookId != authority.AccountingBookId ||
+                !item.Evidence.AccountingBookCode.Equals(authority.AccountingBookCode, StringComparison.OrdinalIgnoreCase) ||
+                !item.Evidence.FunctionalCurrency.Equals(authority.FunctionalCurrency, StringComparison.OrdinalIgnoreCase) ||
+                !item.Evidence.TransactionCurrency.Equals(authority.TransactionCurrency, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException(
+                "All bank-deposit sources must share one accounting book, functional currency, and transaction currency.");
+        if (!authority.TransactionCurrency.Equals(loaded.Currency, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The deposit currency does not match its immutable source journal evidence.");
+        var postingRate = await ResolveApprovedPostingRateAsync(
+            authority.FunctionalCurrency,
+            authority.TransactionCurrency,
+            loaded.DepositDate,
+            allocationEvidence.Select(item => item.Allocation.LiquidityAccountEntry.LiquidityAccount.GLAccountId)
+                .Append(loaded.BankAccount.GLAccountId.Value).ToArray(),
+            settings,
+            cancellationToken);
 
         var sourceDimensions = _sourceDimensions is null
             ? new Dictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>>()
             : (await _sourceDimensions.GetPostingDimensionsAsync(
                 DepositProducer(), loaded.Id, cancellationToken)).ToDictionary(item => item.Key, item => item.Value);
 
-        var lines = new List<FinancePostingLineDto>
+        var lines = new List<FinancePostingLineDto>();
+        var bankFunctionalAmount = RoundMoney(loaded.NetAmount * postingRate.Multiplier);
+        lines.Add(MoneyLine(
+            loaded.BankAccount.GLAccountId.Value,
+            loaded.NetAmount,
+            true,
+            authority.TransactionCurrency,
+            authority.FunctionalCurrency,
+            postingRate,
+            $"Bank deposit {loaded.DepositNumber}",
+            loaded.DepositReference,
+            loaded.Id,
+            sourceDimensions.GetValueOrDefault(loaded.Id) ?? Array.Empty<FinancePostingDimensionValueDto>()));
+        foreach (var (allocation, evidence) in allocationEvidence)
         {
-            new()
-            {
-                AccountId = loaded.BankAccount.GLAccountId.Value,
-                DebitAmount = loaded.NetAmount,
-                CreditAmount = 0m,
-                TransactionCurrency = loaded.Currency,
-                TransactionDebitAmount = loaded.NetAmount,
-                Description = $"Bank deposit {loaded.DepositNumber}",
-                SourceReferenceNumber = loaded.DepositReference,
-                SourceDocumentLineId = loaded.Id,
-                Dimensions = sourceDimensions.GetValueOrDefault(loaded.Id)
-                    ?? Array.Empty<FinancePostingDimensionValueDto>()
-            }
-        };
-        foreach (var allocation in loaded.Allocations.OrderBy(item => item.CreatedAt))
+            var isDeduction = allocation.AllocationType == BankDepositAllocationType.Deduction;
+            var dimensions = sourceDimensions.GetValueOrDefault(allocation.Id)
+                ?? Array.Empty<FinancePostingDimensionValueDto>();
+            var description = allocation.Notes ?? allocation.LiquidityAccountEntry.Description
+                ?? $"Deposit source {allocation.LiquidityAccountEntry.EntryNumber}";
+            lines.Add(MoneyLine(
+                allocation.LiquidityAccountEntry.LiquidityAccount.GLAccountId,
+                allocation.Amount,
+                isDeduction,
+                authority.TransactionCurrency,
+                authority.FunctionalCurrency,
+                postingRate,
+                description,
+                allocation.LiquidityAccountEntry.ReferenceNumber,
+                allocation.Id,
+                dimensions));
+
+            var originalCarrying = RoundMoney(evidence.FunctionalAmount * allocation.Amount / evidence.NativeAmount);
+            var currentFunctional = RoundMoney(allocation.Amount * postingRate.Multiplier);
+            var carryingDifference = originalCarrying - currentFunctional;
+            if (carryingDifference == 0m)
+                continue;
+            var holdingAdjustmentDebit = isDeduction
+                ? carryingDifference > 0m
+                : carryingDifference < 0m;
+            var adjustmentAmount = Math.Abs(carryingDifference);
+            var fxAccountId = holdingAdjustmentDebit
+                ? settings.RealizedFxGainAccountId
+                : settings.RealizedFxLossAccountId;
+            if (!fxAccountId.HasValue)
+                throw new InvalidOperationException(
+                    "Configure realized FX gain and loss accounts before settling foreign-currency deposits.");
+            lines.Add(FunctionalLine(
+                allocation.LiquidityAccountEntry.LiquidityAccount.GLAccountId,
+                adjustmentAmount,
+                holdingAdjustmentDebit,
+                authority.FunctionalCurrency,
+                $"Preserve source carrying amount for {allocation.LiquidityAccountEntry.EntryNumber}",
+                allocation.LiquidityAccountEntry.ReferenceNumber,
+                allocation.Id,
+                dimensions));
+            lines.Add(FunctionalLine(
+                fxAccountId.Value,
+                adjustmentAmount,
+                !holdingAdjustmentDebit,
+                authority.FunctionalCurrency,
+                $"Realized FX on bank deposit {loaded.DepositNumber}",
+                allocation.LiquidityAccountEntry.ReferenceNumber,
+                allocation.Id,
+                dimensions));
+        }
+        var depositImbalance = RoundMoney(lines.Sum(value => value.DebitAmount) - lines.Sum(value => value.CreditAmount));
+        if (depositImbalance != 0m)
         {
-            lines.Add(new FinancePostingLineDto
-            {
-                AccountId = allocation.LiquidityAccountEntry.LiquidityAccount.GLAccountId,
-                DebitAmount = allocation.AllocationType == BankDepositAllocationType.Deduction ? allocation.Amount : 0m,
-                CreditAmount = allocation.AllocationType == BankDepositAllocationType.Receipt ? allocation.Amount : 0m,
-                TransactionCurrency = loaded.Currency,
-                TransactionDebitAmount = allocation.AllocationType == BankDepositAllocationType.Deduction ? allocation.Amount : 0m,
-                TransactionCreditAmount = allocation.AllocationType == BankDepositAllocationType.Receipt ? allocation.Amount : 0m,
-                Description = allocation.Notes ?? allocation.LiquidityAccountEntry.Description,
-                SourceReferenceNumber = allocation.LiquidityAccountEntry.ReferenceNumber,
-                SourceDocumentLineId = allocation.Id,
-                Dimensions = sourceDimensions.GetValueOrDefault(allocation.Id)
-                    ?? Array.Empty<FinancePostingDimensionValueDto>()
-            });
+            var accountId = depositImbalance > 0m
+                ? settings.RealizedFxGainAccountId
+                : settings.RealizedFxLossAccountId;
+            if (!accountId.HasValue)
+                throw new InvalidOperationException(
+                    "Configure realized FX gain and loss accounts before settling foreign-currency rounding differences.");
+            lines.Add(FunctionalLine(
+                accountId.Value,
+                Math.Abs(depositImbalance),
+                depositImbalance < 0m,
+                authority.FunctionalCurrency,
+                $"FX rounding on bank deposit {loaded.DepositNumber}",
+                loaded.DepositReference,
+                loaded.Id,
+                sourceDimensions.GetValueOrDefault(loaded.Id) ?? Array.Empty<FinancePostingDimensionValueDto>()));
         }
 
         var posting = await _postingEngine.PostAsync(new FinancePostingRequestV2Dto
@@ -1472,7 +1572,8 @@ public sealed class BankingSettlementService : IBankingSettlementService
             SourceDocumentReference = loaded.DepositNumber,
             Description = $"Bank deposit {loaded.DepositNumber} / {loaded.DepositReference}",
             PostingDate = loaded.DepositDate,
-            FunctionalCurrencyCode = loaded.Currency,
+            AccountingBookCode = authority.AccountingBookCode,
+            FunctionalCurrencyCode = authority.FunctionalCurrency,
             JournalType = "Bank Deposit",
             IdempotencyKey = $"bank-deposit:{tenantId:N}:{loaded.Id:N}:post",
             Lines = lines
@@ -1495,7 +1596,11 @@ public sealed class BankingSettlementService : IBankingSettlementService
                 BankAccountId = loaded.BankAccountId,
                 Amount = loaded.NetAmount,
                 Currency = loaded.Currency,
-                BaseAmount = loaded.NetAmount,
+                BaseAmount = bankFunctionalAmount,
+                ExchangeRateId = postingRate.ExchangeRateId,
+                ExchangeRate = postingRate.ExchangeRateId.HasValue ? postingRate.Multiplier : null,
+                ExchangeRateSource = postingRate.Source,
+                ExchangeRateDate = postingRate.RateDate,
                 ReferenceNumber = loaded.DepositReference,
                 PayeeOrPayer = "Bank deposit",
                 Description = $"Settlement batch {loaded.DepositNumber}",
@@ -1542,16 +1647,146 @@ public sealed class BankingSettlementService : IBankingSettlementService
         {
             throw new InvalidOperationException("The bank account must be linked to a GL account.");
         }
-        if (settings.ControlAccountArId == null)
-        {
-            throw new InvalidOperationException("Configure the AR control account before posting returned cheques.");
-        }
         if (loaded.ExpenseChargeAmount > 0 && settings.ReturnedChequeBankChargeAccountId == null)
         {
             throw new InvalidOperationException("Configure the returned-cheque bank charge expense account.");
         }
+        if (!loaded.CustomerPayment.LiquidityAccountEntryId.HasValue)
+            throw new InvalidOperationException(
+                "The returned cheque has no immutable receipt-liquidity evidence.");
+        var receiptEntry = await _context.LiquidityAccountEntries
+            .AsNoTracking()
+            .Include(value => value.LiquidityAccount)
+            .SingleOrDefaultAsync(value => value.TenantId == tenantId &&
+                value.Id == loaded.CustomerPayment.LiquidityAccountEntryId.Value && !value.IsDeleted,
+                cancellationToken)
+            ?? throw new InvalidOperationException(
+                "The returned cheque's receipt-liquidity evidence was not found.");
+        var authority = await ResolveLiquiditySourceEvidenceAsync(receiptEntry, cancellationToken);
+        if (!authority.TransactionCurrency.Equals(loaded.CustomerPayment.CurrencyCode, StringComparison.OrdinalIgnoreCase) ||
+            !authority.TransactionCurrency.Equals(loaded.BankAccount.Currency, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "The returned cheque, source receipt, and bank account must share one transaction currency.");
+        if (loaded.CustomerPayment.JournalEntryId != authority.JournalEntryId)
+            throw new InvalidOperationException(
+                "The returned cheque's liquidity evidence does not reference its original receipt journal.");
+        if (loaded.BankDepositBatchId.HasValue)
+        {
+            var depositJournalEntryId = await _context.BankDepositBatches.AsNoTracking()
+                .Where(value => value.TenantId == tenantId && value.Id == loaded.BankDepositBatchId.Value &&
+                    value.Status == BankDepositStatus.Posted && value.JournalEntryId.HasValue)
+                .Select(value => value.JournalEntryId)
+                .SingleOrDefaultAsync(cancellationToken);
+            if (!depositJournalEntryId.HasValue)
+                throw new InvalidOperationException(
+                    "The returned cheque's deposit lineage is not an immutable posted journal.");
+            var depositAuthority = await _context.JournalEntries.AsNoTracking()
+                .Include(value => value.AccountingBook)
+                .Include(value => value.Transactions)
+                .SingleOrDefaultAsync(value => value.TenantId == tenantId &&
+                    value.Id == depositJournalEntryId.Value && !value.IsDeleted &&
+                    value.ReplicatedFromJournalEntryId == null && !value.IsReversed &&
+                    value.PostingStatus == "Posted", cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "The returned cheque's deposit lineage is not an immutable posted journal.");
+            var depositCurrencies = depositAuthority.Transactions.Where(value => !value.IsDeleted)
+                .Select(value => new
+                {
+                    Functional = value.FunctionalCurrencyCode,
+                    Transaction = value.TransactionCurrency ?? value.FunctionalCurrencyCode
+                }).Distinct().ToArray();
+            if (depositAuthority.AccountingBookId != authority.AccountingBookId ||
+                !depositAuthority.BookClassification.Equals(authority.AccountingBookCode, StringComparison.OrdinalIgnoreCase) ||
+                depositCurrencies.Any(value =>
+                    !value.Functional.Equals(authority.FunctionalCurrency, StringComparison.OrdinalIgnoreCase) ||
+                    (!value.Transaction.Equals(authority.TransactionCurrency, StringComparison.OrdinalIgnoreCase) &&
+                     !value.Transaction.Equals(authority.FunctionalCurrency, StringComparison.OrdinalIgnoreCase))) ||
+                !depositAuthority.Transactions.Any(value =>
+                    !value.IsDeleted && value.AccountId == loaded.BankAccount.GLAccountId.Value &&
+                    string.Equals(value.TransactionCurrency ?? value.FunctionalCurrencyCode,
+                        authority.TransactionCurrency, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException(
+                    "The returned cheque's receipt and deposit journals have mixed book or currency evidence.");
+        }
 
         var activeAllocations = loaded.CustomerPayment.Allocations.Where(value => !value.IsReversal).ToArray();
+        if (activeAllocations.Length == 0)
+            throw new InvalidOperationException("The returned cheque has no active invoice-allocation evidence to reopen.");
+        if (activeAllocations.Any(value =>
+                !NormalizeCurrency(value.InvoiceCurrencyCode).Equals(
+                    authority.TransactionCurrency, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException(
+                "Cross-currency returned cheques require allocation-specific native reversal evidence.");
+
+        var originalControlLines = await _context.AccountTransactions.AsNoTracking()
+            .Where(value => value.TenantId == tenantId && !value.IsDeleted &&
+                value.JournalEntryId == authority.JournalEntryId && value.AccountingBookId == authority.AccountingBookId &&
+                value.TransactionTag == "AR-Control" && value.CreditAmount > 0m)
+            .ToListAsync(cancellationToken);
+        if (originalControlLines.Count == 0)
+            throw new InvalidOperationException(
+                "The original receipt journal has no immutable AR-control line evidence.");
+        var originalControlAccountIds = originalControlLines.Select(value => value.AccountId).Distinct().ToArray();
+        var expectedSettlementFunctional = RoundMoney(activeAllocations.Sum(value => value.SettlementFunctionalAmount));
+        var postedSettlementFunctional = RoundMoney(originalControlLines.Sum(value => value.CreditAmount));
+        if (expectedSettlementFunctional <= 0m ||
+            Math.Abs(expectedSettlementFunctional - postedSettlementFunctional) > 0.01m)
+            throw new InvalidOperationException(
+                "The original receipt AR-control lines do not reconcile to frozen allocation evidence.");
+
+        var allocationIds = activeAllocations.Select(value => value.Id).ToArray();
+        var realizedFxEvidence = await _context.FxRealizedSettlements.AsNoTracking()
+            .Where(value => value.TenantId == tenantId && !value.IsDeleted && value.Status == "Posted" &&
+                value.SourceModule == "AR" && value.SettlementDocumentType == nameof(CustomerPayment) &&
+                value.SettlementDocumentId == loaded.CustomerPayment.Id &&
+                allocationIds.Contains(value.SettlementAllocationId))
+            .ToListAsync(cancellationToken);
+        if (realizedFxEvidence.GroupBy(value => value.SettlementAllocationId).Any(group => group.Count() != 1))
+            throw new InvalidOperationException(
+                "A returned-cheque allocation has ambiguous realized-FX evidence.");
+
+        var arEvidence = new Dictionary<Guid, ReturnedChequeArEvidence>();
+        foreach (var allocation in activeAllocations)
+        {
+            var grossNative = RoundMoney(
+                allocation.AllocatedAmount + allocation.DiscountAmount +
+                allocation.WithholdingTaxAmount + allocation.VatWithholdingAmount);
+            if (grossNative <= 0m)
+                throw new InvalidOperationException(
+                    $"Returned-cheque allocation {allocation.Id} has no positive original AR quantity.");
+            var fx = realizedFxEvidence.SingleOrDefault(value => value.SettlementAllocationId == allocation.Id);
+            Guid controlAccountId;
+            decimal historicalGross;
+            if (fx != null)
+            {
+                if (!fx.JournalEntryId.HasValue || !fx.PostingEventId.HasValue ||
+                    !fx.FunctionalCurrencyCode.Equals(authority.FunctionalCurrency, StringComparison.OrdinalIgnoreCase) ||
+                    !fx.TransactionCurrency.Equals(authority.TransactionCurrency, StringComparison.OrdinalIgnoreCase) ||
+                    Math.Abs(fx.SettledForeignAmount - grossNative) > 0.01m ||
+                    Math.Abs(fx.SettlementFunctionalAmount - allocation.SettlementFunctionalAmount) > 0.01m ||
+                    fx.HistoricalFunctionalAmount <= 0m)
+                    throw new InvalidOperationException(
+                        $"Returned-cheque allocation {allocation.Id} has incomplete or inconsistent realized-FX evidence.");
+                controlAccountId = fx.ControlAccountId;
+                historicalGross = RoundMoney(fx.HistoricalFunctionalAmount);
+            }
+            else
+            {
+                if (originalControlAccountIds.Length != 1)
+                    throw new InvalidOperationException(
+                        $"Returned-cheque allocation {allocation.Id} cannot identify its original AR control account.");
+                controlAccountId = originalControlAccountIds.Single();
+                historicalGross = RoundMoney(allocation.SettlementFunctionalAmount);
+            }
+            if (!originalControlAccountIds.Contains(controlAccountId))
+                throw new InvalidOperationException(
+                    $"Returned-cheque allocation {allocation.Id} does not reconcile to its original AR control account.");
+
+            arEvidence.Add(allocation.Id, new ReturnedChequeArEvidence(
+                controlAccountId,
+                RoundMoney(historicalGross * allocation.AllocatedAmount / grossNative),
+                RoundMoney(historicalGross * allocation.DiscountAmount / grossNative)));
+        }
         var activeAppliedAmount = activeAllocations.Sum(value => value.AllocatedAmount + value.DiscountAmount);
         var discountToReverse = activeAllocations.Sum(value => value.DiscountAmount);
         // Reverse the receipt's actual discount account, even if its customer or
@@ -1594,9 +1829,11 @@ public sealed class BankingSettlementService : IBankingSettlementService
         {
             foreach (var share in AllocateEvidenceAmount(loaded.ReturnedAmount, principalEvidence))
             {
+                var allocationEvidence = ResolveReturnedChequeArEvidence(
+                    share.Evidence.SettlementAllocationId, arEvidence);
                 lines.Add(new FinancePostingLineDto
                 {
-                    AccountId = settings.ControlAccountArId.Value,
+                    AccountId = allocationEvidence.ControlAccountId,
                     DebitAmount = share.Amount,
                     TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
                     TransactionDebitAmount = share.Amount,
@@ -1604,34 +1841,44 @@ public sealed class BankingSettlementService : IBankingSettlementService
                     SourceReferenceNumber = loaded.BankReference,
                     SourceDocumentLineId = share.Evidence.SettlementSourceLineId,
                     Dimensions = await _settlementDimensions!.ResolvePostingDimensionsAsync(
-                        ReturnedChequeProducer(), share.Evidence.Id, settings.ControlAccountArId.Value,
+                        ReturnedChequeProducer(), share.Evidence.Id, allocationEvidence.ControlAccountId,
                         loaded.ReturnDate, cancellationToken)
                 });
             }
         }
         else
         {
-            var customerLineId = ReturnedChequeCustomerLineId(loaded.Id);
-            lines.Add(new FinancePostingLineDto
+            if (Math.Abs(activeAllocations.Sum(value => value.AllocatedAmount) - loaded.ReturnedAmount) > 0.01m)
+                throw new InvalidOperationException(
+                    "The returned amount does not reconcile to original receipt allocations.");
+            foreach (var allocation in activeAllocations)
             {
-                AccountId = settings.ControlAccountArId.Value,
-                DebitAmount = loaded.ReturnedAmount,
-                TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
-                TransactionDebitAmount = loaded.ReturnedAmount,
-                Description = $"Reopen customer receivable for returned cheque {loaded.ChequeNumber}",
-                SourceReferenceNumber = loaded.BankReference,
-                SourceDocumentLineId = customerLineId,
-                Dimensions = sourceDimensions.GetValueOrDefault(customerLineId)
-                    ?? Array.Empty<FinancePostingDimensionValueDto>()
-            });
+                var customerLineId = ReturnedChequeCustomerLineId(loaded.Id);
+                lines.Add(new FinancePostingLineDto
+                {
+                    AccountId = arEvidence[allocation.Id].ControlAccountId,
+                    DebitAmount = allocation.AllocatedAmount,
+                    TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
+                    TransactionDebitAmount = allocation.AllocatedAmount,
+                    Description = $"Reopen customer receivable for returned cheque {loaded.ChequeNumber}",
+                    SourceReferenceNumber = loaded.BankReference,
+                    SourceDocumentLineId = authority.SourceLineId,
+                    Dimensions = sourceDimensions.GetValueOrDefault(customerLineId)
+                        ?? Array.Empty<FinancePostingDimensionValueDto>()
+                });
+            }
         }
 
         if (loaded.CustomerRecoverableChargeAmount > 0m)
         {
+            var chargeControlAccounts = arEvidence.Values.Select(value => value.ControlAccountId).Distinct().ToArray();
+            if (chargeControlAccounts.Length != 1)
+                throw new InvalidOperationException(
+                    "A customer-recoverable return charge cannot identify one original AR control account.");
             var customerLineId = ReturnedChequeCustomerLineId(loaded.Id);
             lines.Add(new FinancePostingLineDto
             {
-                AccountId = settings.ControlAccountArId.Value,
+                AccountId = chargeControlAccounts.Single(),
                 DebitAmount = loaded.CustomerRecoverableChargeAmount,
                 TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
                 TransactionDebitAmount = loaded.CustomerRecoverableChargeAmount,
@@ -1683,15 +1930,17 @@ public sealed class BankingSettlementService : IBankingSettlementService
             {
                 foreach (var share in AllocateEvidenceAmount(discountToReverse, discountEvidence))
                 {
+                    var allocationEvidence = ResolveReturnedChequeArEvidence(
+                        share.Evidence.SettlementAllocationId, arEvidence);
                     var arDimensions = await _settlementDimensions!.ResolvePostingDimensionsAsync(
-                        ReturnedChequeProducer(), share.Evidence.Id, settings.ControlAccountArId.Value,
+                        ReturnedChequeProducer(), share.Evidence.Id, allocationEvidence.ControlAccountId,
                         loaded.ReturnDate, cancellationToken);
                     var discountDimensions = await _settlementDimensions.ResolvePostingDimensionsAsync(
                         ReturnedChequeProducer(), share.Evidence.Id, discountReversalAccountId!.Value,
                         loaded.ReturnDate, cancellationToken);
                     lines.Add(new FinancePostingLineDto
                     {
-                        AccountId = settings.ControlAccountArId.Value,
+                        AccountId = allocationEvidence.ControlAccountId,
                         DebitAmount = share.Amount,
                         TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
                         TransactionDebitAmount = share.Amount,
@@ -1715,6 +1964,10 @@ public sealed class BankingSettlementService : IBankingSettlementService
             }
             else
             {
+                if (activeAllocations.Length != 1)
+                    throw new InvalidOperationException(
+                        "Discount reversal lacks allocation-specific AR-control evidence.");
+                var allocationEvidence = arEvidence[activeAllocations[0].Id];
                 var customerLineId = ReturnedChequeCustomerLineId(loaded.Id);
                 var discountDimensions = _sourceDimensions is null
                     ? sourceDimensions.GetValueOrDefault(customerLineId)
@@ -1724,7 +1977,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
                         discountReversalAccountId!.Value, loaded.ReturnDate, cancellationToken);
                 lines.Add(new FinancePostingLineDto
                 {
-                    AccountId = settings.ControlAccountArId.Value,
+                    AccountId = allocationEvidence.ControlAccountId,
                     DebitAmount = discountToReverse,
                     TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
                     TransactionDebitAmount = discountToReverse,
@@ -1748,6 +2001,129 @@ public sealed class BankingSettlementService : IBankingSettlementService
             }
         }
 
+        var postingAccountIds = lines.Select(value => value.AccountId)
+            .Append(loaded.BankAccount.GLAccountId.Value).Distinct().ToArray();
+        var postingRate = await ResolveApprovedPostingRateAsync(
+            authority.FunctionalCurrency,
+            authority.TransactionCurrency,
+            loaded.ReturnDate,
+            postingAccountIds,
+            settings,
+            cancellationToken);
+        foreach (var line in lines)
+        {
+            var nativeDebit = line.DebitAmount;
+            var nativeCredit = line.CreditAmount;
+            var nativeAmount = nativeDebit > 0m ? nativeDebit : nativeCredit;
+            var functionalAmount = RoundMoney(nativeAmount * postingRate.Multiplier);
+            line.DebitAmount = nativeDebit > 0m ? functionalAmount : 0m;
+            line.CreditAmount = nativeCredit > 0m ? functionalAmount : 0m;
+            line.TransactionCurrency = authority.TransactionCurrency;
+            line.TransactionDebitAmount = nativeDebit > 0m ? nativeAmount : 0m;
+            line.TransactionCreditAmount = nativeCredit > 0m ? nativeAmount : 0m;
+            if (!authority.TransactionCurrency.Equals(authority.FunctionalCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                line.ForeignCurrencyAmount = nativeAmount;
+                line.ExchangeRateId = postingRate.ExchangeRateId;
+                line.ExchangeRate = postingRate.Multiplier;
+                line.ExchangeRateSource = postingRate.Source;
+                line.ExchangeRateDate = postingRate.RateDate;
+            }
+        }
+
+        foreach (var allocation in activeAllocations)
+        {
+            var evidence = arEvidence[allocation.Id];
+            var currentPrincipalFunctional = RoundMoney(allocation.AllocatedAmount * postingRate.Multiplier);
+            var principalCarryingDifference = evidence.PrincipalHistoricalFunctional - currentPrincipalFunctional;
+            if (principalCarryingDifference == 0m)
+                continue;
+            var adjustmentDebit = principalCarryingDifference > 0m;
+            var adjustmentAmount = Math.Abs(principalCarryingDifference);
+            var fxAccountId = adjustmentDebit
+                ? settings.RealizedFxGainAccountId
+                : settings.RealizedFxLossAccountId;
+            if (!fxAccountId.HasValue)
+                throw new InvalidOperationException(
+                    "Configure realized FX gain and loss accounts before returning a foreign-currency cheque.");
+            var customerLineId = ReturnedChequeCustomerLineId(loaded.Id);
+            var dimensions = sourceDimensions.GetValueOrDefault(customerLineId)
+                ?? Array.Empty<FinancePostingDimensionValueDto>();
+            lines.Add(FunctionalLine(
+                evidence.ControlAccountId,
+                adjustmentAmount,
+                adjustmentDebit,
+                authority.FunctionalCurrency,
+                $"Restore original receivable carrying amount for {loaded.ChequeNumber}",
+                loaded.BankReference,
+                authority.SourceLineId,
+                dimensions));
+            lines.Add(FunctionalLine(
+                fxAccountId.Value,
+                adjustmentAmount,
+                !adjustmentDebit,
+                authority.FunctionalCurrency,
+                $"Realized FX on returned cheque {loaded.ChequeNumber}",
+                loaded.BankReference,
+                authority.SourceLineId,
+                dimensions));
+        }
+
+        if (discountToReverse > 0m && discountReversalAccountId.HasValue)
+        {
+            foreach (var allocation in activeAllocations.Where(value => value.DiscountAmount > 0m))
+            {
+                var evidence = arEvidence[allocation.Id];
+                var currentDiscountFunctional = RoundMoney(allocation.DiscountAmount * postingRate.Multiplier);
+                var discountCarryingDifference = evidence.DiscountHistoricalFunctional - currentDiscountFunctional;
+                if (discountCarryingDifference == 0m)
+                    continue;
+                var customerLineId = ReturnedChequeCustomerLineId(loaded.Id);
+                var dimensions = sourceDimensions.GetValueOrDefault(customerLineId)
+                    ?? Array.Empty<FinancePostingDimensionValueDto>();
+                var adjustmentAmount = Math.Abs(discountCarryingDifference);
+                var arDebit = discountCarryingDifference > 0m;
+                lines.Add(FunctionalLine(
+                    evidence.ControlAccountId,
+                    adjustmentAmount,
+                    arDebit,
+                    authority.FunctionalCurrency,
+                    $"Restore original discount carrying amount for {loaded.ChequeNumber}",
+                    loaded.BankReference,
+                    customerLineId,
+                    dimensions));
+                lines.Add(FunctionalLine(
+                    discountReversalAccountId.Value,
+                    adjustmentAmount,
+                    !arDebit,
+                    authority.FunctionalCurrency,
+                    $"Reverse original discount carrying amount for {loaded.ChequeNumber}",
+                    loaded.BankReference,
+                    customerLineId,
+                    dimensions));
+            }
+        }
+        var returnImbalance = RoundMoney(lines.Sum(value => value.DebitAmount) - lines.Sum(value => value.CreditAmount));
+        if (returnImbalance != 0m)
+        {
+            var accountId = returnImbalance > 0m
+                ? settings.RealizedFxGainAccountId
+                : settings.RealizedFxLossAccountId;
+            if (!accountId.HasValue)
+                throw new InvalidOperationException(
+                    "Configure realized FX gain and loss accounts before settling foreign-currency rounding differences.");
+            var customerLineId = ReturnedChequeCustomerLineId(loaded.Id);
+            lines.Add(FunctionalLine(
+                accountId.Value,
+                Math.Abs(returnImbalance),
+                returnImbalance < 0m,
+                authority.FunctionalCurrency,
+                $"FX rounding on returned cheque {loaded.ChequeNumber}",
+                loaded.BankReference,
+                customerLineId,
+                sourceDimensions.GetValueOrDefault(customerLineId) ?? Array.Empty<FinancePostingDimensionValueDto>()));
+        }
+
         var posting = await _postingEngine.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "CASHBANK",
@@ -1758,7 +2134,8 @@ public sealed class BankingSettlementService : IBankingSettlementService
             SourceDocumentReference = loaded.CaseNumber,
             Description = $"Returned cheque {loaded.ChequeNumber}: {loaded.ReturnReason}",
             PostingDate = loaded.ReturnDate,
-            FunctionalCurrencyCode = loaded.CustomerPayment.CurrencyCode,
+            AccountingBookCode = authority.AccountingBookCode,
+            FunctionalCurrencyCode = authority.FunctionalCurrency,
             JournalType = "Returned Cheque",
             IdempotencyKey = $"returned-cheque:{tenantId:N}:{loaded.Id:N}:post",
             Lines = lines
@@ -1805,7 +2182,11 @@ public sealed class BankingSettlementService : IBankingSettlementService
             BankAccountId = loaded.BankAccountId,
             Amount = totalBankCredit,
             Currency = loaded.CustomerPayment.CurrencyCode,
-            BaseAmount = totalBankCredit,
+            BaseAmount = RoundMoney(totalBankCredit * postingRate.Multiplier),
+            ExchangeRateId = postingRate.ExchangeRateId,
+            ExchangeRate = postingRate.ExchangeRateId.HasValue ? postingRate.Multiplier : null,
+            ExchangeRateSource = postingRate.Source,
+            ExchangeRateDate = postingRate.RateDate,
             ReferenceNumber = loaded.BankReference,
             PayeeOrPayer = "Returned customer cheque",
             Description = $"Cheque {loaded.ChequeNumber}: {loaded.ReturnReason}",
@@ -2268,8 +2649,18 @@ public sealed class BankingSettlementService : IBankingSettlementService
         var settings = await GetSettingsAsync(cancellationToken);
         var bankAccountId = item.BankAccount.GLAccountId
             ?? throw new InvalidOperationException("The returned-cheque bank account must be linked to a GL account before Finance dimensions can be captured.");
-        var controlAccountId = settings.ControlAccountArId
-            ?? throw new InvalidOperationException("Configure the AR control account before capturing returned-cheque dimensions.");
+        if (!item.CustomerPayment.JournalEntryId.HasValue)
+            throw new InvalidOperationException(
+                "The returned cheque's original receipt journal is required before Finance dimensions can be captured.");
+        var controlAccountIds = await _context.AccountTransactions.AsNoTracking()
+            .Where(value => value.TenantId == TenantId && !value.IsDeleted &&
+                value.JournalEntryId == item.CustomerPayment.JournalEntryId.Value &&
+                value.TransactionTag == "AR-Control" && value.CreditAmount > 0m)
+            .Select(value => value.AccountId).Distinct().ToArrayAsync(cancellationToken);
+        if (controlAccountIds.Length != 1)
+            throw new InvalidOperationException(
+                "The original receipt must identify exactly one AR control account for returned-cheque dimensions.");
+        var controlAccountId = controlAccountIds.Single();
         var lines = new List<FinanceSourceDocumentLineContext>
         {
             new(ReturnedChequeBankLineId(item.Id), bankAccountId),
@@ -2933,7 +3324,252 @@ public sealed class BankingSettlementService : IBankingSettlementService
     private static decimal RoundMoney(decimal amount) =>
         decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
 
+    private static ReturnedChequeArEvidence ResolveReturnedChequeArEvidence(
+        Guid? allocationId,
+        IReadOnlyDictionary<Guid, ReturnedChequeArEvidence> evidence)
+    {
+        if (allocationId.HasValue && evidence.TryGetValue(allocationId.Value, out var resolved))
+            return resolved;
+        if (evidence.Count == 1)
+            return evidence.Values.Single();
+        throw new InvalidOperationException(
+            "Returned-cheque settlement evidence does not identify its original AR allocation.");
+    }
+
+    private async Task<SourcePostingEvidence> ResolveLiquiditySourceEvidenceAsync(
+        LiquidityAccountEntry entry,
+        CancellationToken cancellationToken)
+    {
+        Guid? journalEntryId = null;
+        if (entry.SourceDocumentType == nameof(CustomerPayment))
+        {
+            journalEntryId = await _context.Set<CustomerPayment>()
+                .Where(item => item.TenantId == TenantId && item.Id == entry.SourceDocumentId && !item.IsDeleted)
+                .Select(item => item.JournalEntryId)
+                .SingleOrDefaultAsync(cancellationToken);
+        }
+
+        var sourceJournals = await _context.JournalEntries
+            .AsNoTracking()
+            .Include(item => item.AccountingBook)
+            .Include(item => item.Transactions)
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted &&
+                item.ReplicatedFromJournalEntryId == null && !item.IsReversed &&
+                item.PostingStatus == "Posted" &&
+                (journalEntryId.HasValue
+                    ? item.Id == journalEntryId.Value
+                    : item.SourceDocumentType == entry.SourceDocumentType && item.SourceDocumentId == entry.SourceDocumentId))
+            .ToListAsync(cancellationToken);
+        if (sourceJournals.Count != 1)
+            throw new InvalidOperationException(
+                $"Liquidity entry {entry.EntryNumber} must resolve to exactly one primary posted source journal.");
+        var journal = sourceJournals[0];
+
+        if (!string.Equals(journal.PostingStatus, "Posted", StringComparison.OrdinalIgnoreCase) || journal.IsReversed)
+            throw new InvalidOperationException(
+                $"Liquidity entry {entry.EntryNumber} does not reference an unreversed posted journal.");
+        if (journal.AccountingBook == null || journal.AccountingBook.TenantId != TenantId ||
+            !string.Equals(journal.BookClassification, journal.AccountingBook.Code, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"Liquidity entry {entry.EntryNumber} has inconsistent accounting-book evidence.");
+
+        var transactionCurrency = NormalizeCurrency(entry.Currency);
+        var candidates = journal.Transactions.Where(line =>
+            !line.IsDeleted && line.AccountId == entry.LiquidityAccount.GLAccountId &&
+            line.AccountingBookId == journal.AccountingBookId &&
+            string.Equals(NormalizeCurrency(line.TransactionCurrency ?? line.FunctionalCurrencyCode),
+                transactionCurrency, StringComparison.OrdinalIgnoreCase) &&
+            (entry.Direction == LiquidityEntryDirection.Increase
+                ? line.TransactionDebitAmount.GetValueOrDefault(line.DebitAmount) > 0m
+                : line.TransactionCreditAmount.GetValueOrDefault(line.CreditAmount) > 0m)).ToArray();
+        if (candidates.Length != 1)
+            throw new InvalidOperationException(
+                $"Liquidity entry {entry.EntryNumber} must resolve to exactly one source journal line.");
+
+        var line = candidates[0];
+        var functionalCurrency = NormalizeCurrency(line.FunctionalCurrencyCode);
+        var nativeAmount = entry.Direction == LiquidityEntryDirection.Increase
+            ? line.TransactionDebitAmount.GetValueOrDefault(line.DebitAmount)
+            : line.TransactionCreditAmount.GetValueOrDefault(line.CreditAmount);
+        var functionalAmount = entry.Direction == LiquidityEntryDirection.Increase
+            ? line.DebitAmount
+            : line.CreditAmount;
+        if (nativeAmount <= 0m || functionalAmount <= 0m || Math.Abs(entry.Amount - nativeAmount) > 0.01m)
+            throw new InvalidOperationException(
+                $"Liquidity entry {entry.EntryNumber} does not agree with its source journal amounts.");
+
+        if (!transactionCurrency.Equals(functionalCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!line.ExchangeRateId.HasValue || !line.ExchangeRate.HasValue || line.ExchangeRate.Value <= 0m)
+                throw new InvalidOperationException(
+                    $"Liquidity entry {entry.EntryNumber} has no immutable foreign-exchange evidence.");
+            var approvedRate = await _context.ExchangeRates.AsNoTracking().SingleOrDefaultAsync(rate =>
+                rate.TenantId == TenantId && rate.Id == line.ExchangeRateId.Value && !rate.IsDeleted,
+                cancellationToken);
+            if (approvedRate == null ||
+                approvedRate.ApprovalStatus is not (RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved) ||
+                !approvedRate.BaseCurrencyCode.Equals(functionalCurrency, StringComparison.OrdinalIgnoreCase) ||
+                !approvedRate.TargetCurrencyCode.Equals(transactionCurrency, StringComparison.OrdinalIgnoreCase) ||
+                RoundRate(approvedRate.InverseRate) != RoundRate(line.ExchangeRate.Value))
+                throw new InvalidOperationException(
+                    $"Liquidity entry {entry.EntryNumber} has rejected or inconsistent foreign-exchange evidence.");
+        }
+
+        return new SourcePostingEvidence(
+            journal.Id,
+            line.Id,
+            journal.AccountingBookId,
+            journal.AccountingBook.Code,
+            functionalCurrency,
+            transactionCurrency,
+            nativeAmount,
+            functionalAmount,
+            line.ExchangeRateId,
+            line.ExchangeRate);
+    }
+
+    private async Task<ApprovedPostingRate> ResolveApprovedPostingRateAsync(
+        string functionalCurrency,
+        string transactionCurrency,
+        DateTime postingDate,
+        IReadOnlyCollection<Guid> accountIds,
+        FinanceSettings settings,
+        CancellationToken cancellationToken)
+    {
+        if (transactionCurrency.Equals(functionalCurrency, StringComparison.OrdinalIgnoreCase))
+            return new ApprovedPostingRate(null, 1m, null, null);
+
+        var policies = new List<(ExchangeRateType Type, ExchangeRateQuoteSide Side)>();
+        foreach (var accountId in accountIds.Distinct())
+        {
+            var type = ExchangeRateType.Daily;
+            var side = ExchangeRateQuoteSide.Mid;
+            if (settings.DirectionalExchangeRatePolicyEnabled)
+            {
+                var link = await _context.AccountCurrencyLinks.AsNoTracking().FirstOrDefaultAsync(link =>
+                    link.TenantId == TenantId && link.AccountId == accountId && !link.IsDeleted && link.IsActive &&
+                    link.LinkedCurrencyCode == transactionCurrency && link.EffectiveDate.Date <= postingDate.Date &&
+                    (!link.EffectiveEndDate.HasValue || link.EffectiveEndDate.Value.Date >= postingDate.Date),
+                    cancellationToken);
+                if (link != null)
+                {
+                    if (!Enum.TryParse<ExchangeRateType>(
+                            link.TransactionRateType?.Replace("-", string.Empty).Replace("_", string.Empty).Replace(" ", string.Empty),
+                            true, out type))
+                        type = ExchangeRateType.Daily;
+                    side = link.TransactionQuoteSide;
+                }
+                else
+                {
+                    side = settings.DefaultTransactionQuoteSide;
+                }
+            }
+            policies.Add((type, side));
+        }
+        var distinctPolicies = policies.Distinct().ToArray();
+        if (distinctPolicies.Length != 1)
+            throw new InvalidOperationException(
+                $"Foreign-currency Cash lines for {transactionCurrency} have conflicting account rate policies.");
+        var policy = distinctPolicies.Single();
+        var rate = await _context.ExchangeRates.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted && item.IsActive && item.Rate > 0m &&
+                item.BaseCurrencyCode == functionalCurrency && item.TargetCurrencyCode == transactionCurrency &&
+                item.RateType == policy.Type && item.QuoteSide == policy.Side &&
+                item.ApprovalStatus != RateApprovalStatus.Pending && item.ApprovalStatus != RateApprovalStatus.Rejected &&
+                item.EffectiveDate.Date <= postingDate.Date &&
+                (!item.EndDate.HasValue || item.EndDate.Value.Date >= postingDate.Date))
+            .OrderByDescending(item => item.EffectiveDate)
+            .ThenByDescending(item => item.Priority)
+            .ThenByDescending(item => item.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException(
+                $"No active approved exchange rate exists for {transactionCurrency} to {functionalCurrency} on {postingDate:yyyy-MM-dd}.");
+        if (rate.InverseRate <= 0m)
+            throw new InvalidOperationException("The approved exchange rate has no positive target-to-functional reciprocal.");
+        return new ApprovedPostingRate(rate.Id, rate.InverseRate, rate.RateSource, rate.EffectiveDate.Date);
+    }
+
+    private static FinancePostingLineDto MoneyLine(
+        Guid accountId,
+        decimal nativeAmount,
+        bool isDebit,
+        string transactionCurrency,
+        string functionalCurrency,
+        ApprovedPostingRate rate,
+        string description,
+        string? reference,
+        Guid sourceLineId,
+        IReadOnlyList<FinancePostingDimensionValueDto> dimensions)
+    {
+        var functionalAmount = RoundMoney(nativeAmount * rate.Multiplier);
+        var isForeign = !transactionCurrency.Equals(functionalCurrency, StringComparison.OrdinalIgnoreCase);
+        return new FinancePostingLineDto
+        {
+            AccountId = accountId,
+            DebitAmount = isDebit ? functionalAmount : 0m,
+            CreditAmount = isDebit ? 0m : functionalAmount,
+            TransactionCurrency = transactionCurrency,
+            TransactionDebitAmount = isDebit ? nativeAmount : 0m,
+            TransactionCreditAmount = isDebit ? 0m : nativeAmount,
+            ForeignCurrencyAmount = isForeign ? nativeAmount : null,
+            ExchangeRateId = isForeign ? rate.ExchangeRateId : null,
+            ExchangeRate = isForeign ? rate.Multiplier : null,
+            ExchangeRateSource = isForeign ? rate.Source : null,
+            ExchangeRateDate = isForeign ? rate.RateDate : null,
+            Description = description,
+            SourceReferenceNumber = reference,
+            SourceDocumentLineId = sourceLineId,
+            Dimensions = dimensions
+        };
+    }
+
+    private static FinancePostingLineDto FunctionalLine(
+        Guid accountId,
+        decimal amount,
+        bool isDebit,
+        string functionalCurrency,
+        string description,
+        string? reference,
+        Guid sourceLineId,
+        IReadOnlyList<FinancePostingDimensionValueDto> dimensions) => new()
+    {
+        AccountId = accountId,
+        DebitAmount = isDebit ? amount : 0m,
+        CreditAmount = isDebit ? 0m : amount,
+        TransactionCurrency = functionalCurrency,
+        TransactionDebitAmount = isDebit ? amount : 0m,
+        TransactionCreditAmount = isDebit ? 0m : amount,
+        Description = description,
+        SourceReferenceNumber = reference,
+        SourceDocumentLineId = sourceLineId,
+        Dimensions = dimensions
+    };
+
+    private static decimal RoundRate(decimal amount) =>
+        decimal.Round(amount, 6, MidpointRounding.AwayFromZero);
+
     private readonly record struct RateEvidence(Guid? ExchangeRateId, decimal ExchangeRate);
+    private sealed record SourcePostingEvidence(
+        Guid JournalEntryId,
+        Guid SourceLineId,
+        Guid AccountingBookId,
+        string AccountingBookCode,
+        string FunctionalCurrency,
+        string TransactionCurrency,
+        decimal NativeAmount,
+        decimal FunctionalAmount,
+        Guid? ExchangeRateId,
+        decimal? ExchangeRate);
+    private sealed record ApprovedPostingRate(
+        Guid? ExchangeRateId,
+        decimal Multiplier,
+        string? Source,
+        DateTime? RateDate);
+
+    private sealed record ReturnedChequeArEvidence(
+        Guid ControlAccountId,
+        decimal PrincipalHistoricalFunctional,
+        decimal DiscountHistoricalFunctional);
 
     private sealed record DepositAllocationListRow(
         Guid BankDepositBatchId,
