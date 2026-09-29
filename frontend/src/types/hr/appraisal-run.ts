@@ -431,6 +431,11 @@ export interface SelfEvaluationContext {
   selfEvaluationSubmittedDate?: string | null;
   isEditable: boolean;
   selfEvaluationDeadline?: string | null;
+  /**
+   * Submitted, but its entries are not this reader's to see yet — the line manager, while the
+   * cycle shows self scores only after they submit their own evaluation (closure B2).
+   */
+  selfEntriesWithheld: boolean;
   allowSelfSoftSkillRating: boolean;
   settings?: AppraisalSettings | null;
   sections: SelfEvaluationSection[];
@@ -517,6 +522,8 @@ export interface ViewSubmittedEvaluation {
   requireHRReview: boolean;
   hrReviewComplete: boolean;
   allowSelfSoftSkillRating: boolean;
+  /** The employee's entries are withheld from this reader (the line manager before they submit — B2). */
+  entriesWithheld: boolean;
   sections: SubmittedEvaluationSection[];
   attachments: SubmittedAttachment[];
 }
@@ -580,6 +587,13 @@ export interface ManagerEvaluationContext {
   isManagerEvaluationSubmitted: boolean;
   managerEvaluationSubmittedDate?: string | null;
   isEditable: boolean;
+  /** The employee has submitted their self-evaluation; a draft is never on this form (B2). */
+  selfEvaluationSubmitted: boolean;
+  /**
+   * Submitted, but the cycle shows self scores to the manager only once they have submitted their
+   * own evaluation — the `employeeSelf*` fields are empty until then (B2).
+   */
+  selfScoresWithheld: boolean;
   selfEvaluationWeight: number;
   managerEvaluationWeight: number;
   peerEvaluationWeight: number;
@@ -774,6 +788,11 @@ export interface ManagerPeerEvaluationReview {
   allowKpiEvaluation: boolean;
   totalPeerEvaluators: number;
   submittedEvaluations: number;
+  /**
+   * The peers' scores and comments are withheld until the manager has submitted their own
+   * evaluation (the cycle's `showPeerScoresToManager` is off — B2). Who they are is still listed.
+   */
+  scoresWithheld: boolean;
   peerEvaluations: PeerEvaluatorDetail[];
 }
 
@@ -854,6 +873,16 @@ export interface HRReview {
    * manager evaluation, peer summary, manager/peer/final score, grade or HR remarks.
    */
   outcomeReleased?: boolean;
+  /**
+   * The appraisee's copy carries each evaluator's criteria and totals. False before the release,
+   * and after it when the cycle shows the employee only the overall, the grade and the narrative
+   * (`showScoreBreakdownToEmployee` off — B2). Always true for HR and the manager.
+   */
+  scoreBreakdownShown: boolean;
+  /** The self-evaluation is withheld from this reader (the manager before they submit, or a draft — B2). */
+  selfScoresWithheld: boolean;
+  /** The peer scores are withheld from the manager until they submit their own evaluation (B2). */
+  peerScoresWithheld: boolean;
   isSelfEvaluationComplete: boolean;
   isManagerEvaluationComplete: boolean;
   requiresPeerReviews: boolean;

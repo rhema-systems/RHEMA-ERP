@@ -186,7 +186,8 @@ public class EmployeeGoalsController : ControllerBase
 
         try
         {
-            var result = await _employeeGoalService.GetByAppraisalIdAsync(appraisalId, cancellationToken);
+            // B2: each side of the goal assessments follows AppraisalVisibility for this caller.
+            var result = await _employeeGoalService.GetByAppraisalIdAsync(appraisalId, _currentUserService.EmployeeId, cancellationToken);
             return Ok(result);
         }
         catch (Exception ex)

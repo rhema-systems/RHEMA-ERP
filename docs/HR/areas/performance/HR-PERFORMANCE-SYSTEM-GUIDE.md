@@ -644,6 +644,17 @@ Forty switches, grouped the way the editor groups them. The values below are the
 > breakdown* (lane B2). *The manager's score is authoritative* and *Require a development plan update*
 > are gone — the closure's first migration removed them.
 
+> **Changed 2026-09-29** (performance closure lane B2, slice B-v). **The last three are enforced now**,
+> by the server, on every read of an evaluation (one rule, `AppraisalVisibility`). *Managers see the
+> self-score* and *Managers see peer scores* off: the line manager reads the employee's and the peers'
+> entries only once they have submitted their own evaluation — on the evaluation form, the submitted
+> self-evaluation, the HR review, the peer feedback and the goal assessments. *Employees see the score
+> breakdown* off: once the outcome is released the employee reads the overall, the grade and the
+> manager's narrative, not the criteria — on the HR review, the goal assessments and the three appeal
+> pages. And whatever the switches, nobody but its author reads a self or peer draft, and the employee
+> reads no manager score before HR's sign-off (the appeal page and the goal assessments used to show
+> them). Every switch on this profile now does what it says.
+
 | Group | Setting | Here |
 |---|---|---|
 | **Self-evaluation** | Require a self-evaluation | **On** |
@@ -1106,11 +1117,14 @@ enforced; the appeal window is since closure lane B1, counted from the acknowled
 acknowledgment before the final conversation* and *Require a development plan update* have **no reader
 anywhere** in the backend, the frontend or the tests. *One left:* the acknowledgment switch is
 enforced since lane B1 and the development-plan switch was removed (batch 1); *Managers see peer
-scores* is lane B2's.
-**P-63.** **Two "visibility controls" are client-side only.** *Managers see the self-score* and
+scores* is lane B2's. **Fixed 2026-09-29** (closure lane B2, slice B-v): *Managers see peer scores*
+withholds the peers' scores and comments from the manager until they have submitted.
+**P-63.** ~~**Two "visibility controls" are client-side only.** *Managers see the self-score* and
 *Employees see the score breakdown* are honoured by the React page; the API returns the values either
 way. Their neighbour *Peer reviews are anonymous* **is** enforced server-side, so on one card two
-controls are real and two are presentation. *(Lane B2.)*
+controls are real and two are presentation.~~ **Fixed 2026-09-29** (closure lane B2, slice B-v): both
+are withheld by the server on every read that carried them — five for the manager, five for the
+employee.
 **P-64.** ~~**Four governance switches are honoured by the analytics pipeline but not by the enforcing
 one** — *Goals need manager approval*, and the three conversation requirements. See P-67.~~ **Fixed
 2026-09-29** (closure lane B1): all four refuse — the goal and setup-conversation switches hold the
@@ -3520,10 +3534,20 @@ Below the tabs, when the cycle nominates in *Employee* mode, a separate card: **
 awaiting your approval** — because the employee nominates, but approving is still the manager's call.
 
 **The comparison column is the point of the Evaluation tab.** Beside each row sits a panel headed *Their
-self-assessment* with the employee's number, their achieved grade and their note. Whether it appears at
-all is the cycle's decision (`showSelfScoreToManager`), and when it is off the aside is **dropped**
-rather than shown blank — with a line at the top of the page saying *"This cycle does not show you the
-employee's self-scores while you evaluate."*
+self-assessment* with the employee's number, their achieved grade and their note. It appears once the
+employee has **submitted** — a self-evaluation draft is never on this form (until then each row reads
+*"… has not submitted their self-evaluation yet"*). When the cycle's *Managers see the self-score* is
+off, the server withholds it until the manager has submitted their own evaluation: the aside is
+**dropped** rather than shown blank, with a line at the top of the page saying *"This cycle shows you
+{name}'s self-scores once you have submitted your own evaluation."* After the submission the comparison
+is there. The **Peer feedback** tab follows *Managers see peer scores* the same way — names and the
+submitted count always, the scores and comments once the manager has submitted.
+
+> **Changed 2026-09-29** (performance closure lane B2, slice B-v). The switch used to be a React check
+> on this page alone — the server sent the self-scores whatever it said, a draft's included, and four
+> other reads the manager can open (the submitted self-evaluation, the self-evaluation context, the HR
+> review, the goal assessments) carried them too; when it was off, the page hid the comparison for good,
+> even after the manager had submitted. Nothing changes on the demo, whose profile shows both.
 
 > **Changed 2026-09-29** (performance closure lane L-c). **The manager scores goal rows** on the same
 > form as the employee (chapter 27): each badged **Goal**, a measured goal taking the actual achieved

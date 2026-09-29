@@ -144,7 +144,12 @@ export default function AppealOutcomePage() {
             <EmptyState
               icon={ScrollText}
               title="No itemised scores"
-              description="This appraisal has no scored criteria on record."
+              description={
+                // The server sends none when the cycle shows the overall only (closure B2).
+                data.scoreBreakdownShown
+                  ? 'This appraisal has no scored criteria on record.'
+                  : 'This cycle shows you the final result, not each criterion’s score.'
+              }
             />
           ) : (
             <Table>

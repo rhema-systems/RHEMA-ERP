@@ -36,7 +36,12 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    a goals section, and P-71, the remand's dead end, which waits for lane C). ~~L-c~~ **Done
    2026-09-29** (261/261 twice; § 4 lane L's L-c State block — read its demo impact: *Lock set* now
    shows on five demo desks). **Lane L is complete; B2–B8 are next.** UAT was rebuilt on 2026-09-29
-   (Efua 88.56, Cynthia 87.00 — lane A's settle path).
+   (Efua 88.56, Cynthia 87.00 — lane A's settle path), then migrated in place to round 4's merge
+   (104 history rows; `run-all` 1516/1525). **B2–B8 were source-checked the same night** — § 1d
+   (D-32 tolerance to batch 2, D-33 two slices) and lane B's *source check* block. ~~Slice **B-v**
+   (visibility)~~ **Done 2026-09-29** (`run-final-settings.mjs` 246/246 twice; lane B's B-v State
+   block — one visibility rule, `AppraisalVisibility`, on every read of an evaluation). **Slice B-w**
+   is next.
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -107,6 +112,13 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | D-30 | **Editing an approved goal.** The update copies owner, cycle and appraisal link from the payload — a UI edit clears the link, an edit can move a goal to another employee — and an approved goal's weight or target changes with no re-approval | **What an approved goal measures cannot be edited**; to change it, the manager rejects it back to the employee (the existing path). Owner, cycle and appraisal link never change through an edit | L-a |
 | D-31 | **Lane L's size and order.** The check found the plan's five days to be seven or eight | **Three slices, each built, verified and staged on its own:** L-a governance (the lock, "lock goal set", governance at lock, edit hardening, the unlock fix, HR's advance, L0); L-b scoring (goal rows, the config-id keying, the forms, assessments, interim reviews); L-c screens (the section-kind picker, the frontend sites, snapshot labels, the manager's lock-set control, the lane suite) | Lane L |
 
+### 1d. Decisions from lane B2–B8's source check — settled with the user, 2026-09-29
+
+| # | Question | Decision (2026-09-29) | Affects |
+|---|---|---|---|
+| D-32 | **`KpiDefinition.TolerancePercent`.** At the seeded 5 %, four of the five demo tracks' scores move (Kwasi Danquah's sign-off in Book 3; Efua Seidu, Cynthia Sarpong and Kojo Fiadzo on the next rebuild — five submitted KPI rows sit 2–4 % under target). The criterion snapshot keeps a KPI's target, floor and ceiling (A12) but not its tolerance, so a live read would let a later edit of the definition restate scores | **Defer to batch 2** (lane F): a tolerance column on `PerformanceAppraisalCriterionConfigs`, captured at generation like the target, read by `KpiAchievementPercent`. The demo numbers are re-baselined once, then. B2–B8 ships with no migration | B2, F (batch 2), S |
+| D-33 | **Lane B2–B8's size.** The source check widened the visibility rows (four more reads, two pre-sign-off leaks) and found `RequireEvidence` with no door and its links dropped — about three days | **Two slices, each built, verified and staged on its own.** **B-v** visibility: one rule for what a reader of an appraisal may see, applied on every read — the three flags and the two leaks. **B-w** write paths: goal approval, the mid-year's move, the conversation type, peer KPI scores, the soft-skill label, evidence, B6, B8. The new settings suite grows with each; B7's flips land across both | Lane B |
+
 ---
 
 ## 2. Lane status
@@ -115,7 +127,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 |---|---|---|---|---|
 | A | Scoring integrity and the settle path | 2.5 days | D-11, D-13, D-22 (A14–A16 only) | ☑ 2026-09-29 — 177/177 twice; staged |
 | P | Privacy and access *(new — the review)* | 2 days | D-26 (P18 only) | ☑ 2026-09-29 — 339/339 twice; staged |
-| B | One gate evaluator (B1 first); settings enforced or removed | 3.5 days | — | ◐ B1 ☑ 2026-09-29 — 256/256 twice; staged. B3–B5 done; B1 enforces nine of the fourteen settings; B2's rest and B6–B8 open |
+| B | One gate evaluator (B1 first); settings enforced or removed | 3.5 days (+1, D-33) | D-32, D-33 | ◐ B1 ☑ 2026-09-29 — 256/256 twice; staged. B3–B5 done; B1 enforces nine of the fourteen settings. B2's rest and B6–B8 in two slices (D-33): B-v ☑ 2026-09-29 — 246/246 twice; staged. B-w ☐; the tolerance moves to batch 2 (D-32) |
 | L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ☑ 2026-09-29 — L-a 157/157 twice; L-b 244/244 twice; L-c 261/261 twice (one suite holds L-b and L-c); staged |
 | C | One appeal machine | 2 days | D-22 | ☐ |
 | D | Peer nomination and evaluation integrity | 1 day | — | ☐ |
@@ -708,7 +720,8 @@ Write path → step required (`EnsureAt`), then `SyncLifecycleAsync`:
         an evidence link (the "required" marker at `EvaluationScoreForm.tsx:255` becomes true).
   - [ ] `KpiDefinition.TolerancePercent` → used by `KpiAchievementPercent` (within tolerance = 100%).
         The demo KPIs carry 5 (`PerformanceAppraisalDataSeeder.cs:115`), so the demo scores move —
-        lane S re-baselines them.
+        lane S re-baselines them. **Moved to batch 2 (D-32)**: the snapshot needs the tolerance column
+        first, or a later edit of the definition restates scores.
 - [x] B3 *(Done with batch 1, 8ff0f448f — dropping the columns took the code, the form and the
       seeder lines with it; B1 re-checked: no live reference outside the legacy migration archive.)*
       Remove `IsManagerAuthoritative` and `RequireDevelopmentPlanUpdate`: entity, DTOs, MAP,
@@ -852,6 +865,139 @@ and 24 Active with no goals, 5 with fewer than the three the profile asks for �
 reads them overdue. That is the strict reading of this profile, not a fault; a spread is lane S's,
 and B8's report is HR's list to waive. Book 3's live sign-off of Kwasi lands him at Acknowledgment,
 because his final review is already held.
+
+**B2–B8 source check (2026-09-29, after round 4 merged; line numbers as of `f8899d915`).** Every open
+row was live — none had been fixed on the way. Six go further than the rows above say:
+- **The visibility flags reach more reads than listed.** Self scores reach the line manager through
+  `manager-evaluation-context` (PAS `MapManagerItem` :4450-4454), `view-submitted-evaluation` (PAS
+  :1333, the whole submitted self-evaluation), `hr-review` (PAS :3565 — `SelfEvaluation`, `SelfScore`)
+  and `EmployeeGoals/by-appraisal` (EGS :118-160 — the goal self-assessment); peer scores through
+  `manager-peer-evaluations` (PAS :2073) and `hr-review` (`PeerEvaluationSummary`, `PeerScore`). All
+  admit the line manager (`CanAccessAppraisalAsync`, PAC). Lane P's `SelfEvaluationView` hides a
+  submitted self-evaluation from the manager **for good** when the flag is off; the setting's contract
+  is *until the manager has submitted*, and the React check on the manager's form hides it for good too.
+- **Two leaks ignore the flags altogether.** `appeal-page-data` (PAS :2206) returns the manager's
+  per-criterion scores and the overall with no release check — callable before HR's sign-off.
+  `EmployeeGoals/by-appraisal` returns the **manager's** goal assessment to the appraisee at any time,
+  and the employee's goal self-assessment to the manager as a **draft** (it is written on every self
+  save, `SaveGoalAssessmentsAsync`, PAS :1255) — lane P12's rule, missed on this read.
+- **`RequireEvidence` has no door and its links are dropped.** The competency DTOs (AppraisalDTOs
+  :253-290) and the mapping never carry it, the criteria page cannot set it, the seeder writes false.
+  `EvaluationItemInputDto.EvidenceLinks` arrives on every self, manager and peer save and **no save
+  stores it** — `CriterionScore.EvidenceLinks` is read in five places and written nowhere.
+- **`AllowPeerKpiEvaluation` reaches the score.** The peer draft save refuses a goal row (L7) but not
+  a template KPI item (PES :283), and `ScoreEvaluatorAsync` scores every row present — a KPI score
+  saved in a draft counts in the peer total, so in the overall.
+- **`RequireManagerGoalApproval` off** also lets the GoalSetting gate count **drafts** toward the
+  minimum (`AppraisalGates` :253 guards the draft check with the flag). With B2's "submit lands
+  Approved", a draft is the employee's unsubmitted work; `GoalSetRules.LockBlocker` already refuses it.
+- **The team desk's governance status** (`TeamGoalsQueryService.DeriveGovernanceStatus`) ignores the
+  profile's minimum and maximum: one goal at weight 100 on a 3-goal profile reads *Structurally
+  complete*. `EmployeeGoalSummaryDto.MeetsMinGoalCount` exists; no screen reads it.
+
+Confirmed as written: the mid-year sits in the GoalSetting blocker (`AppraisalGates` :275) — the
+gates suite never asserts it, so its move breaks no assertion; `CreateAppraisalConversationDto.Type`
+defaults to `KickOff` (a body without a type creates a kick-off, which the gate counts — the fix is a
+nullable `Type` with `[Required]`, since `[Required]` on a non-nullable enum is a no-op); the
+`AllowSelfSoftSkillRating` local (PAS :1130) is dead and the form's label false (employees may always
+rate soft skills; the flag makes it compulsory); nothing validates Min ≤ Max (peers, goals) or the
+deadline bands (`DeadlineRiskHighDays` < `Medium` < `Low`); **UAT holds 117 profiles and no default**
+(batch 1's backfill ran on the rebuilt, empty UAT) so `GET /default` answers with the newest —
+today a harness gates profile — and the list page badges it. `AppealReevaluationWindowDays` only sets
+the remand deadline (PAS :2935), which P-71 leaves unreachable: B7 covers it in lane C.
+
+Demo impact, measured on UAT: APC2026's profile has all three visibility flags **on**, goal approval
+on (3–6 goals), all three conversations required, peer KPI scoring and the soft-skill switch off, and
+ordered deadline bands. `061` sends a type on every conversation and its peers score the two
+competencies only, so nothing breaks; the mid-year's move only relaxes the scenario order. The
+tolerance moves four tracks (D-32).
+
+Found on the way, not lane B's: *Quality Defect Rate* is a lower-is-better KPI and
+`KpiAchievementPercent` assumes higher is better (lane S, or v2's KPI direction); the appeal page
+offers competencies only, never a goal row (lane C).
+
+- [x] **Slice B-v — visibility (D-33).** *(2026-09-29 — the B-v State block below.)* One rule for what a reader of an appraisal may see
+      (`AppraisalVisibility`, beside `AppraisalRelease`), applied on every read above:
+      - the line manager sees self entries once the self-evaluation is submitted, and then only when
+        `ShowSelfScoreToManager` is on **or they have submitted their own evaluation**; peer scores
+        likewise per `ShowPeerScoresToManager`. The two-actor rule: the line manager is the manager
+        even when they hold the desk;
+      - the appraisee sees the manager's and peers' legs only once the outcome is released (P2's rule),
+        and then criterion by criterion only when `ShowScoreBreakdownToEmployee` is on — otherwise the
+        overall, the grade and the narrative;
+      - nobody but the author reads a draft (the goal assessments' self side and manager side alike);
+      - the reads: manager context, `view-submitted-evaluation`, `self-evaluation-context` (lane P's
+        view re-based on the rule), `manager-peer-evaluations`, `hr-review`, `by-appraisal`, the three
+        appeal reads (the page answers nothing before release); the screens say what is withheld, and
+        the manager's form shows the self column once they have submitted.
+- [ ] **Slice B-w — write paths, B6, B8 (D-33).** Goal submit lands Approved when approval is off
+      (no line manager needed then) and the gate holds drafts either way; the mid-year from the
+      GoalSetting blocker to the manager's submission; `Type` required on a new conversation; peer
+      KPI rows refused on the draft save and dropped at submit; the soft-skill label and the dead
+      local; `RequireEvidence` given a door (DTOs, mapping, criteria page), the saves storing
+      `EvidenceLinks`, the three submits refusing a scored item without one; the team desk's
+      governance status and row through `GoalSetRules` with the minimum and maximum; B6 (the
+      validation, `IsDefault` on the DTOs, a make-default door, `GET /default` by the flag, the
+      list page's badge, the seeder flagging *Standard Annual Appraisal* — S1's line, brought
+      forward); B8 (a read-only transition report for HR beside the audited advance).
+- B7 lands across both slices in a new suite, **`run-final-settings.mjs`**: each setting B2 enforces,
+  flipped both ways, plus the flips B1's suite never made (`RequireSelfEvaluation` off, goal approval
+  off with goal setting on, the mid-year, peer KPI off, the soft-skill switch on).
+
+**B-v State (2026-09-29): DONE — built, verified on UAT, staged.** No migration. What exists now:
+- **`AppraisalVisibility`** (`Services/HR/Appraisal/AppraisalVisibility.cs`) — pure static, beside
+  `AppraisalRelease`: `ReaderOf` (the appraisee first, then the line manager, else the desk — the
+  controllers admit nobody else to these reads), `For` → an `AppraisalView` (`SelfEntries`,
+  `PeerScores`, `ManagerScores`, `ManagerNarrative`), `ForManager` (the manager's form, whoever opens
+  it), and the facts three ways: `From(appraisal, settings)` for a read that has loaded them,
+  `From(gateState, lineManagerId)` for one that holds the lifecycle state, `LoadAsync` — one
+  projection — for the rest.
+- **Every read of an evaluation asks it:** the manager's form (no self draft ever; the self entries
+  as the view says; `SelfEvaluationSubmitted`/`SelfScoresWithheld`), `view-submitted-evaluation`
+  (`EntriesWithheld`), `self-evaluation-context` (lane P's `SelfEvaluationView` re-based on the view,
+  applied in the service; `SelfEntriesWithheld`), `manager-peer-evaluations` (drafts never; scores
+  and comments as the view says; `ScoresWithheld`), `hr-review` (per leg; `ScoreBreakdownShown`,
+  `SelfScoresWithheld`, `PeerScoresWithheld`; the narrative-only manager leg for a released appraisee
+  without the breakdown), `EmployeeGoals/by-appraisal` (each side of the goal assessments), the appeal
+  page (nothing before the release; item scores with the breakdown only), the appeal status and the
+  appeal outcome (`ScoreBreakdownShown`).
+- Frontend: the manager's form shows the self column once the manager has submitted (the server's
+  flag, not the switch); the peer panel, the employee's outcome card and the three appeal pages say
+  what is withheld.
+
+**Where the build refines the rows above** (each deliberate; say if one should go back):
+1. **A manager's draft reaches the desk**, as the HR review always showed it; it never reaches the
+   appraisee (the release). The row said "nobody but the author reads a draft" for both sides of
+   the goal assessments — that holds for the self side and for peers.
+2. **The desk reads no self draft either** — on the HR review and the goal assessments, as P12 made it
+   on the self-evaluation context. HR's review page is used after the submissions, so nothing it
+   needs is lost.
+3. **Peer comments go with peer scores** — the switch says "scores"; the rationale is anchoring, and a
+   comment anchors as a number does. Who the peers are and whether each has submitted stay listed.
+4. **A self or peer draft is withheld whatever the switches** — the manager's form showed a draft's
+   scores, the peer review a draft peer's.
+5. **The appraisal's attachments are not withheld** — the Evidence tab is the appraisal's, shared by
+   both parties, not the self-evaluation's. (The self evidence links on the items go with the entries.)
+
+**Found on the way, carried:** a peer scoring a goal row (`AllowPeerKpiEvaluation` on) does not appear
+on `manager-peer-evaluations`, which lists competency items only (lane D); the appeal page offers
+competencies only, never a goal row (lane C, already noted).
+
+**Verified** (Staging API on `ErpSystemDB_UAT`, after the round-4 merge was migrated in place):
+- `run-final-settings.mjs` **246/246, then 246/246** — 29 presence pairs against 30 marker absences;
+  V2's manager moves from withheld to shown on the same six reads once they submit.
+- Regression (`run-all.mjs`, twelve suites): interim reviews 133/133, attachments 65/65, **slice C
+  49/51 — two assertions read the employee's DRAFT goal self-assessment as the manager**, the leak
+  this slice closes: re-pointed to the employee's own read, with the manager's absence as the pair,
+  then **52/52**; slice D 22/22, **slice E 17/26 — the same 9 stale**, gates 32/32, lane A 182/182,
+  lane P 340/340, lane B1 256/256, lane L-a 157/157, lanes L-b/L-c 261/261, lane B2 246/246.
+  **1763/1772** with slice C's re-run.
+- API log: no unhandled exception; the errors are UAT's missing SMTP, defect #23's payroll-profile FK
+  (one per fixture employee) and the HR/Identity reconciliation's TDC/00007.
+- Frontend: scoped `tsc` over the 16 touched and dependent files, 0 errors (a planted error in a
+  probe file was caught); ESLint clean.
+- Demo: APC2026's profile shows all three, and its 98 unsubmitted self-evaluations hold no draft
+  entries, so no walk changes.
 
 ### Lane L — Goal-driven KPI scoring
 
@@ -2169,7 +2315,12 @@ table there. Backfills are for databases that already hold data.
   - the `PerformanceSweepRun` and `PerformanceSweepDispatch` tables;
   - the `AppraisalOutcomeRecommendation` filtered unique index (appraisal, type) where not
     Cancelled/Rejected. **Existing duplicates are resolved first, in the same guarded script**, or
-    the index creation fails.
+    the index creation fails;
+  - a KPI tolerance column on `PerformanceAppraisalCriterionConfigs` (D-32), snapshotted at
+    generation from the template item's `KpiDefinition.TolerancePercent` and read by
+    `KpiAchievementPercent` (B2's tolerance bullet, moved here). Existing rows: backfill from the
+    definition or leave null (= no tolerance, today's scoring) — decide at the scaffold; the demo is
+    re-baselined once, after it.
 - **Batch 3: withdrawn by the review** (D-21). `AppraisalNotification` stays: it is the record for
   people without a login.
 

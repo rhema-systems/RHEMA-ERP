@@ -772,12 +772,10 @@ public class PerformanceAppraisalsController : ControllerBase
 
         try
         {
-            var response = await _appraisalService.GetSelfEvaluationContextAsync(appraisalId);
-
-            // P12: the employee's entries are theirs until submitted, and the manager's to read
-            // only as the profile allows — see SelfEvaluationView.
-            var isDesk = await HoldsPolicyAsync(HrPermissions.PerformanceReadPolicy);
-            return Ok(Core.Services.HR.Appraisal.SelfEvaluationView.ForViewer(response, _currentUserService.EmployeeId, isDesk));
+            // P12/B2: the employee's entries are theirs until submitted, and the line manager's to read
+            // only as the profile allows — the service applies AppraisalVisibility for this caller.
+            var response = await _appraisalService.GetSelfEvaluationContextAsync(appraisalId, _currentUserService.EmployeeId);
+            return Ok(response);
         }
         catch (ArgumentException ex)
         {
@@ -853,7 +851,7 @@ public class PerformanceAppraisalsController : ControllerBase
 
         try
         {
-            var response = await _appraisalService.GetViewSubmittedEvaluationAsync(appraisalId);
+            var response = await _appraisalService.GetViewSubmittedEvaluationAsync(appraisalId, _currentUserService.EmployeeId);
             return Ok(response);
         }
         catch (InvalidOperationException ex)
@@ -1095,7 +1093,7 @@ public class PerformanceAppraisalsController : ControllerBase
 
         try
         {
-            var response = await _appraisalService.GetManagerPeerEvaluationReviewAsync(appraisalId);
+            var response = await _appraisalService.GetManagerPeerEvaluationReviewAsync(appraisalId, _currentUserService.EmployeeId);
             return Ok(response);
         }
         catch (ArgumentException ex)

@@ -148,6 +148,12 @@ export default function FileAppealPage() {
               <CardTitle className="text-base">What are you contesting?</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              {!data.scoreBreakdownShown && (
+                <p className="text-sm text-muted-foreground">
+                  This cycle shows you the final result, not each criterion&apos;s score. You can
+                  still name the criteria you want reconsidered and say why.
+                </p>
+              )}
               {data.appealableCompetencies.length === 0 ? (
                 <EmptyState
                   icon={Gavel}
@@ -182,8 +188,11 @@ export default function FileAppealPage() {
                             <p className="mt-1 text-xs text-muted-foreground">{item.description}</p>
                           )}
                           <p className="mt-1 text-xs text-muted-foreground tabular-nums">
-                            Scored {item.numericScore ?? '—'} · weight {item.weight}
-                            {item.weightedScore != null
+                            {/* The cycle may show the overall only (closure B2): then the server
+                                sends the item without the manager's score. */}
+                            {data.scoreBreakdownShown ? `Scored ${item.numericScore ?? '—'} · ` : ''}
+                            weight {item.weight}
+                            {data.scoreBreakdownShown && item.weightedScore != null
                               ? ` · contributes ${item.weightedScore.toFixed(1)}`
                               : ''}
                           </p>

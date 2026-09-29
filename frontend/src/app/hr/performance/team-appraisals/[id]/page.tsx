@@ -59,8 +59,10 @@ import {
  *
  * The employee's own scores sit beside each row rather than on a separate tab — the whole
  * point of a manager evaluation is the comparison, and putting the two a click apart makes it
- * an act of memory. Whether the self-score is visible at all is the cycle's decision
- * (`showSelfScoreToManager`), so the aside is dropped rather than shown blank when it is off.
+ * an act of memory. When the self-score is visible is the server's decision (closure B2): never
+ * while the self-evaluation is a draft, and — when the cycle's `showSelfScoreToManager` is off —
+ * not until the manager has submitted their own evaluation. The aside is dropped rather than
+ * shown blank while the scores are withheld.
  *
  * ⚠ **Submitting is one-way and does more than save.** It assigns the HR reviewer, moves the
  * appraisal to Governance, and locks every later write — a remand is the only route back.
@@ -169,7 +171,8 @@ export default function ManagerEvaluationPage() {
     return map;
   }, [context]);
 
-  const showSelfScores = context?.settings?.showSelfScoreToManager !== false;
+  // The server withholds them (B2); the switch alone used to hide them for good, even after submitting.
+  const showSelfScores = context?.selfScoresWithheld !== true;
   const readOnly = context?.isManagerEvaluationSubmitted === true || context?.isEditable === false;
   const remanded = context?.isRemandedAppeal === true;
 
@@ -319,9 +322,10 @@ export default function ManagerEvaluationPage() {
         </Alert>
       )}
 
-      {!context.isManagerEvaluationSubmitted && !showSelfScores && (
+      {context.selfScoresWithheld && (
         <p className="text-sm text-muted-foreground">
-          This cycle does not show you the employee&apos;s self-scores while you evaluate.
+          This cycle shows you {context.employeeName.split(' ')[0]}&apos;s self-scores once you have
+          submitted your own evaluation.
         </p>
       )}
 
@@ -390,7 +394,9 @@ export default function ManagerEvaluationPage() {
                 return (
                   <div className="space-y-1">
                     <p className="text-muted-foreground">
-                      {context.employeeName.split(' ')[0]} has not scored this yet.
+                      {context.selfEvaluationSubmitted
+                        ? `${context.employeeName.split(' ')[0]} did not score this.`
+                        : `${context.employeeName.split(' ')[0]} has not submitted their self-evaluation yet.`}
                     </p>
                     {override}
                   </div>

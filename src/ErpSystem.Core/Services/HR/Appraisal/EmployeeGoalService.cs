@@ -113,7 +113,8 @@ public class EmployeeGoalService : IEmployeeGoalService
         return entities.ToDtoList();
     }
 
-    public async Task<IEnumerable<EmployeeGoalDto>> GetByAppraisalIdAsync(Guid appraisalId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<EmployeeGoalDto>> GetByAppraisalIdAsync(
+        Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var appraisal = await _appraisalRepository.GetQueryable()
@@ -123,6 +124,16 @@ public class EmployeeGoalService : IEmployeeGoalService
 
         if (appraisal == null)
             return Enumerable.Empty<EmployeeGoalDto>();
+
+        // B2: the goal assessments carry both sides of the evaluation, and this read handed both to
+        // anyone it admitted — the manager's side to the appraisee before HR's sign-off, and the
+        // employee's side to the manager while it was a draft, whatever the profile's switches said.
+        // Each side now follows the rule every read of an evaluation shares.
+        var visibility = await AppraisalVisibility.LoadAsync(
+            _appraisalRepository.GetQueryable().Where(a => a.TenantId == tenantId), appraisalId, cancellationToken);
+        if (visibility == null)
+            return Enumerable.Empty<EmployeeGoalDto>();
+        var view = AppraisalVisibility.For(visibility, viewerEmployeeId);
 
         var entities = await BaseQuery()
             .Where(g => g.EmployeeId == appraisal.EmployeeId
@@ -143,16 +154,22 @@ public class EmployeeGoalService : IEmployeeGoalService
             foreach (var dto in dtos)
             {
                 if (!assessmentMap.TryGetValue(dto.Id, out var a)) continue;
-                dto.SelfFinalProgressPercent  = a.SelfFinalProgressPercent;
-                dto.SelfFinalStatus           = a.SelfFinalStatus;
-                dto.SelfFinalActualValue      = a.SelfFinalActualValue;
-                dto.SelfAssessmentNotes       = a.SelfAssessmentNotes;
-                dto.SelfEvidenceLinks         = a.SelfEvidenceLinks;
-                dto.ManagerFinalProgressPercent = a.ManagerFinalProgressPercent;
-                dto.ManagerFinalStatus          = a.ManagerFinalStatus;
-                dto.ManagerFinalActualValue     = a.ManagerFinalActualValue;
-                dto.ManagerAssessmentNotes      = a.ManagerAssessmentNotes;
-                dto.ManagerEvidenceLinks        = a.ManagerEvidenceLinks;
+                if (view.SelfEntries)
+                {
+                    dto.SelfFinalProgressPercent  = a.SelfFinalProgressPercent;
+                    dto.SelfFinalStatus           = a.SelfFinalStatus;
+                    dto.SelfFinalActualValue      = a.SelfFinalActualValue;
+                    dto.SelfAssessmentNotes       = a.SelfAssessmentNotes;
+                    dto.SelfEvidenceLinks         = a.SelfEvidenceLinks;
+                }
+                if (view.ManagerScores)
+                {
+                    dto.ManagerFinalProgressPercent = a.ManagerFinalProgressPercent;
+                    dto.ManagerFinalStatus          = a.ManagerFinalStatus;
+                    dto.ManagerFinalActualValue     = a.ManagerFinalActualValue;
+                    dto.ManagerAssessmentNotes      = a.ManagerAssessmentNotes;
+                    dto.ManagerEvidenceLinks        = a.ManagerEvidenceLinks;
+                }
             }
         }
 

@@ -41,6 +41,12 @@ settings as a policy reference; this document says which of them the code obeys.
 >   takes its read-only rows from the server's own per-row `isScoreable`, where it re-derived them
 >   from the KPI id (which no goal row carries), so `AllowPeerKpiEvaluation`'s goal rows are read-only
 >   on screen too; and HR's appeal screen can send a `HRCanModifyScores` restatement for a goal row.
+> - **Lane B2, slice B-v** (one visibility rule, `AppraisalVisibility`) **moved three verdicts**: the
+>   two client-side-only settings (#4 `ShowSelfScoreToManager`, #5 `ShowScoreBreakdownToEmployee`)
+>   and the last ghost (#1 `ShowPeerScoresToManager`) are enforced by the server on every read of an
+>   evaluation — marked *"Since lane B2"*. **The profile now: 48 enforced, 0 advisory, 0 client-side
+>   only, 0 ghosts — of 48.** (`KpiDefinition.TolerancePercent`, a KPI field rather than a profile
+>   field, moved to migration batch 2 — closure plan D-32.)
 >
 > Line numbers below are as of 2026-09-17; lanes A and B1 rewrote much of `PerformanceAppraisalService.cs`,
 > and `AppraisalAdvanceHelpers.cs` is gone — its resolver is `AppraisalGates.cs`.
@@ -104,6 +110,12 @@ scores and comments unconditionally
 
 **Effect of switching it off: none.** The anchoring-bias control it describes does not exist.
 
+*Since lane B2 (slice B-v, 2026-09-29) — enforced.* Off, the line manager reads no peer's scores or
+comments — on the peer review or the HR review — until they have submitted their own evaluation; who
+the peers are and how many have submitted stay listed, so a missing response can still be chased. A
+peer's draft reaches nobody, whatever the switch; the desk reads every submitted peer throughout
+(`AppraisalVisibility.ForManager`; `run-final-settings.mjs`, stories m and s on both profiles).
+
 ### 2. `AllowAcknowledgmentWithoutConversation`
 
 > *"If false, the employee cannot acknowledge the appraisal until the AppraisalConversation of type
@@ -163,6 +175,15 @@ self-evaluation is submitted, and from the manager afterwards when this setting 
 second path, not the manager's form: `MapManagerEvaluationItem` still sends the self scores
 unconditionally, so the verdict above stands until lane B2.
 
+*Since lane B2 (slice B-v, 2026-09-29) — enforced.* One rule (`AppraisalVisibility`) on every read
+that carries the self-evaluation to the line manager: the manager's form, the submitted
+self-evaluation, the self-evaluation context, the HR review and the goal assessments. Off, the manager
+reads the employee's entries only once they have submitted their own evaluation — the switch's own
+words; P12's first cut hid them from the manager for good — and a self-evaluation draft is on none of
+them, for the manager or the desk (the manager's form used to show a draft's scores). The page takes its
+cue from the server's `selfScoresWithheld` and shows the comparison once the manager has submitted
+(`run-final-settings.mjs`, stories d, m and s).
+
 ### 5. `ShowScoreBreakdownToEmployee`
 
 > *"If false, only the overall score/grade and narrative comments are shown to the employee."*
@@ -175,6 +196,13 @@ unconditionally, so the verdict above stands until lane B2.
 
 **Effect of switching it off:** the employee's screen hides the breakdown. The API still returns it to
 their own browser.
+
+*Since lane B2 (slice B-v, 2026-09-29) — enforced.* The appraisee's copy of the HR review, the goal
+assessments, the appeal page, the appeal status and the appeal outcome carry the manager's and the
+peers' criteria only when this switch is on; off, the overall, the grade and the manager's narrative.
+Whatever the switch, none of them carries the manager's leg before HR's sign-off (lane P's release
+rule) — the appeal page and the goal assessments did, the latter as a draft
+(`run-final-settings.mjs`, stories r and b).
 
 > **Note the contrast.** `PeerReviewsAnonymous`, sitting two switches away on the same form, *is*
 > enforced server-side. So on this screen two "visibility controls" are real security and two are CSS.
@@ -383,6 +411,9 @@ Grouped by what they actually do, with the strongest evidence line for each.
 > **Status 2026-09-29 (closure lane B1).** Items **3, 4 and 5 are done**; item 1 is down to
 > `ShowPeerScoresToManager` (ghost 2 is enforced, ghost 3 removed in batch 1); item 7's refusal is
 > done and its governance-view half is lane B2's; items 2 and 6 are lane B2's.
+> **Then lane B2, slice B-v (2026-09-29): items 1 and 2 are done** — the last ghost and both
+> visibility controls are enforced in the server's one visibility rule. Item 6 and item 7's
+> governance view are slice B-w's.
 
 ### 1. Delete or implement the three ghosts *(half a day either way)*
 `ShowPeerScoresToManager`, `AllowAcknowledgmentWithoutConversation`, `RequireDevelopmentPlanUpdate`.

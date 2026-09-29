@@ -35,7 +35,8 @@ import {
  * whether the appraisal is waiting on me, my peers or my manager. The phase can.
  *
  * The outcome tab stays empty until HR finalises. That is deliberate on the server's side too:
- * the manager's scores are not readable by the appraisee before sign-off.
+ * the manager's scores are not readable by the appraisee before sign-off (closure P2), on this
+ * page's HR-review read, the goal assessments or the appeal page (B2).
  */
 export default function MyAppraisalDetailPage() {
   const params = useParams<{ id: string }>();
@@ -444,7 +445,9 @@ export default function MyAppraisalDetailPage() {
                 </Card>
               )}
 
-              {settings?.showScoreBreakdownToEmployee && (
+              {/* The server's answer, not the setting: it withholds the breakdown when the cycle
+                  shows the overall only (closure B2), so the card would otherwise sit empty. */}
+              {hrReview?.scoreBreakdownShown && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base">How the score was made up</CardTitle>

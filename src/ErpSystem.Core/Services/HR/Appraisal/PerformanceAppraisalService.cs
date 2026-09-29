@@ -918,7 +918,8 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
     /// Gets the complete context for an employee's self-evaluation page
     /// Includes appraisal info, KPIs with targets, grade ranges, and existing evaluations
     /// </summary>
-    public async Task<SelfEvaluationContextDto> GetSelfEvaluationContextAsync(Guid appraisalId, CancellationToken cancellationToken = default)
+    public async Task<SelfEvaluationContextDto> GetSelfEvaluationContextAsync(
+        Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default)
     {
         // Get appraisal with all related data
         var appraisal = await TenantAppraisalQuery()
@@ -963,7 +964,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         // Get soft skill self-rating flag
         bool allowSelfSoftSkillRating = appraisal.AppraisalCycle?.AppraisalSettings?.AllowSelfSoftSkillRating ?? false;
 
-        return new SelfEvaluationContextDto
+        var context = new SelfEvaluationContextDto
         {
             AppraisalId = appraisal.Id,
             AppraisalNumber = appraisal.AppraisalNumber,
@@ -982,6 +983,12 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             Settings = appraisal.AppraisalCycle?.AppraisalSettings?.ToDto(),
             Sections = BuildSelfEvaluationSections(appraisal, selfEvaluation, appraisal.CustomQuestionResponses)
         };
+
+        // P12/B2: the employee's entries are theirs until submitted, and then the line manager's only
+        // as the profile allows — the rule every read of an evaluation shares (AppraisalVisibility).
+        var facts = await AppraisalVisibility.LoadAsync(TenantAppraisalQuery(), appraisal.Id, cancellationToken)
+            ?? throw new ArgumentException($"Appraisal with ID '{appraisalId}' not found");
+        return SelfEvaluationView.ForViewer(context, AppraisalVisibility.For(facts, viewerEmployeeId));
     }
 
     /// <summary>
@@ -1330,7 +1337,8 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
     /// <summary>
     /// Get read-only view of submitted self-evaluation
     /// </summary>
-    public async Task<ViewSubmittedEvaluationDto> GetViewSubmittedEvaluationAsync(Guid appraisalId, CancellationToken cancellationToken = default)
+    public async Task<ViewSubmittedEvaluationDto> GetViewSubmittedEvaluationAsync(
+        Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default)
     {
         var appraisal = await TenantAppraisalQuery()
             .Include(a => a.Employee)
@@ -1385,7 +1393,13 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         var hrEvaluation = await TenantEvaluationQuery()
             .FirstOrDefaultAsync(e => e.AppraisalId == appraisalId && e.EvaluatorRole == EvaluatorRole.HR, cancellationToken);
 
-        return new ViewSubmittedEvaluationDto
+        // B2: the line manager reads the submitted self-evaluation only as the profile allows — the
+        // rule on their own form. The read used to hand it over whatever ShowSelfScoreToManager said.
+        var facts = await AppraisalVisibility.LoadAsync(TenantAppraisalQuery(), appraisal.Id, cancellationToken)
+            ?? throw new InvalidOperationException($"Appraisal {appraisalId} not found");
+        var view = AppraisalVisibility.For(facts, viewerEmployeeId);
+
+        var submitted = new ViewSubmittedEvaluationDto
         {
             AppraisalId = appraisal.Id,
             AppraisalCycleName = appraisal.AppraisalCycle.CycleName,
@@ -1422,6 +1436,22 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                 })
                 .ToList(),
         };
+
+        if (!view.SelfEntries)
+        {
+            // The form's structure stays; the employee's answers go.
+            foreach (var item in submitted.Sections.SelectMany(s => s.Items))
+            {
+                item.NumericScore = null;
+                item.ActualValue = null;
+                item.Notes = null;
+                item.EvidenceLinks = null;
+                item.AchievementPercent = null;
+            }
+            submitted.EntriesWithheld = true;
+        }
+
+        return submitted;
     }
 
     /// <summary>
@@ -1685,8 +1715,24 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         bool isManagerEvaluationSubmitted = managerEvaluation?.SubmittedDate.HasValue ?? false;
         // Editable if not submitted and status is appropriate for manager evaluation (Open, PeerEvaluation, or ManagerEvaluation)
         // Editable if manager has not yet submitted and appraisal is in an active workflow state
-        bool isEditable = !isManagerEvaluationSubmitted && 
+        bool isEditable = !isManagerEvaluationSubmitted &&
             (appraisal.Status == AppraisalStatus.Active || appraisal.Status == AppraisalStatus.Draft);
+
+        // B2: the employee's self-evaluation reaches the manager's form once it is submitted — never
+        // as a draft (P12) — and then only as the profile allows: ShowSelfScoreToManager, or the
+        // manager's own evaluation submitted. The form always showed it, whatever the switch said, and
+        // a draft's scores with it. Whoever opens the manager's form sees what the manager sees.
+        var selfSubmitted = selfEvaluation?.SubmittedDate.HasValue ?? false;
+        var managerView = AppraisalVisibility.ForManager(new AppraisalVisibilityFacts(
+            appraisal.EmployeeId,
+            appraisal.Employee.ManagerId,
+            selfSubmitted,
+            isManagerEvaluationSubmitted,
+            OutcomeReleased: false, // the manager's view does not depend on the release
+            settings?.ShowSelfScoreToManager ?? true,
+            settings?.ShowPeerScoresToManager ?? true,
+            settings?.ShowScoreBreakdownToEmployee ?? true));
+        var selfShown = managerView.SelfEntries ? selfEvaluation : null;
 
         // Pre-compute appealed criteria IDs (passed to section builder so it can mark items)
         var appealedCriteriaIds = new List<Guid>();
@@ -1733,6 +1779,8 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             IsManagerEvaluationSubmitted = isManagerEvaluationSubmitted,
             ManagerEvaluationSubmittedDate = managerEvaluation?.SubmittedDate,
             IsEditable = isEditable,
+            SelfEvaluationSubmitted = selfSubmitted,
+            SelfScoresWithheld = selfSubmitted && !managerView.SelfEntries,
             SelfEvaluationWeight = settings?.SelfEvaluationWeight ?? 0,
             ManagerEvaluationWeight = settings?.ManagerEvaluationWeight ?? 0,
             PeerEvaluationWeight = settings?.PeerEvaluationWeight ?? 0,
@@ -1749,7 +1797,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             RecommendPIP = appraisal.RecommendPIP,
             RecommendTermination = appraisal.RecommendTermination,
             RecommendationNotes = appraisal.RecommendationNotes,
-            Sections = BuildManagerEvaluationSections(appraisal, selfEvaluation, managerEvaluation, appealedCriteriaIds)
+            Sections = BuildManagerEvaluationSections(appraisal, selfShown, managerEvaluation, appealedCriteriaIds)
         };
 
         return result;
@@ -2070,7 +2118,8 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
     /// <summary>
     /// Gets detailed peer evaluations for manager to review
     /// </summary>
-    public async Task<ManagerPeerEvaluationReviewDto> GetManagerPeerEvaluationReviewAsync(Guid appraisalId, CancellationToken cancellationToken = default)
+    public async Task<ManagerPeerEvaluationReviewDto> GetManagerPeerEvaluationReviewAsync(
+        Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default)
     {
         var appraisal = await TenantAppraisalQuery()
             .Include(a => a.AppraisalCycle)
@@ -2090,6 +2139,14 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         var isAnonymous = settings?.PeerReviewsAnonymous ?? false;
         var allowKpiEvaluation = settings?.AllowPeerKpiEvaluation ?? false;
 
+        // B2: the line manager reads the peers' scores only as the profile allows —
+        // ShowPeerScoresToManager, or their own evaluation submitted; the desk reads them throughout.
+        // A peer's draft is nobody's to read: the body used to carry its scores, which only the
+        // screen declined to show.
+        var facts = await AppraisalVisibility.LoadAsync(TenantAppraisalQuery(), appraisalId, cancellationToken)
+            ?? throw new ArgumentException("Appraisal not found");
+        var scoresShown = AppraisalVisibility.For(facts, viewerEmployeeId).PeerScores;
+
         var peerEvaluationsList = appraisal.EvaluatorEvaluations
             .Where(e => e.EvaluatorRole == EvaluatorRole.Peer)
             .ToList();
@@ -2098,8 +2155,9 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 
         foreach (var peerEval in peerEvaluationsList)
         {
+            var entriesShown = scoresShown && peerEval.SubmittedDate.HasValue;
             var competencyScores = peerEval.CriterionScores
-                .Where(cs => cs.TemplateItem?.CompetencyId != null)
+                .Where(cs => entriesShown && cs.TemplateItem?.CompetencyId != null)
                 .Select(cs => new PeerCompetencyScoreDto
                 {
                     CriterionScoreId = cs.Id,
@@ -2125,7 +2183,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                 EvaluatorPosition = peerEval.Evaluator.Position?.Title, // Always show to managers
                 IsSubmitted = peerEval.SubmittedDate.HasValue,
                 SubmittedDate = peerEval.SubmittedDate,
-                TotalScore = peerEval.TotalScore,
+                TotalScore = entriesShown ? peerEval.TotalScore : null,
                 CompetencyScores = competencyScores,
                 KpiEvaluations = kpiEvaluations
             });
@@ -2138,6 +2196,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             AllowKpiEvaluation = allowKpiEvaluation,
             TotalPeerEvaluators = peerEvaluationsList.Count,
             SubmittedEvaluations = peerEvaluationsList.Count(e => e.SubmittedDate.HasValue),
+            ScoresWithheld = !scoresShown,
             PeerEvaluations = peerDetails
         };
     }
@@ -2225,14 +2284,21 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         // Whether they may appeal, by the same rule the submit is held to (B1).
         var state = await _lifecycle.GetStateAsync(appraisal.Id, cancellationToken);
         var (canAppeal, cannotAppealReason, _) = AppraisalGates.CanFileAppeal(state.Facts, state.Settings, DateTime.UtcNow);
-        
+
+        // B2: this page carried the manager's scores and the overall whenever it was asked — before
+        // HR's sign-off included, where the release rule (P2) withholds them everywhere else. Before
+        // the release there is nothing to appeal and nothing to show; after it, the manager's score on
+        // each item only when the profile shows the employee the breakdown.
+        var view = AppraisalVisibility.For(AppraisalVisibility.From(state, lineManagerId: null), employeeId);
+        var released = view.ManagerNarrative;
+
         // Get manager evaluation (final scores)
         var managerEval = appraisal.EvaluatorEvaluations.FirstOrDefault(e => e.EvaluatorRole == EvaluatorRole.Manager);
-        
+
         var appealableKpis = new List<AppealableKpiDto>();
         var appealableCompetencies = new List<AppealableCompetencyDto>();
-        
-        if (managerEval != null)
+
+        if (managerEval != null && released)
         {
             // KPI appeals are deprecated - EmployeeKpiTarget has been replaced by EmployeeGoal
             // appealableKpis remains empty
@@ -2251,23 +2317,24 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                     TemplateItemId = score.TemplateKey(),
                     ItemName = score.TemplateItem?.Competency?.CriteriaName ?? string.Empty,
                     Description = score.TemplateItem?.Competency?.Description,
-                    NumericScore = score.NumericScore,
+                    NumericScore = view.ManagerScores ? score.NumericScore : null,
                     Weight = appraisal.CriterionConfigs
                                 .FirstOrDefault(cc => cc.TemplateItemId == score.TemplateItemId)?.WeightUsed ?? 0,
-                    WeightedScore = score.WeightedScore
+                    WeightedScore = view.ManagerScores ? score.WeightedScore : null
                 });
             }
         }
-        
+
         return new AppealPageDataDto
         {
             AppraisalId = appraisal.Id,
             AppraisalNumber = appraisal.AppraisalNumber,
             CycleName = appraisal.AppraisalCycle?.CycleName ?? "",
-            FinalScore = appraisal.OverallScore,
-            FinalGrade = await GradeNameAsync(appraisal.OverallGradeDefinitionId, cancellationToken),
+            FinalScore = released ? appraisal.OverallScore : null,
+            FinalGrade = released ? await GradeNameAsync(appraisal.OverallGradeDefinitionId, cancellationToken) : null,
             CanAppeal = canAppeal,
             CannotAppealReason = cannotAppealReason,
+            ScoreBreakdownShown = view.ManagerScores,
             AppealableKpis = appealableKpis,
             AppealableCompetencies = appealableCompetencies
         };
@@ -2530,6 +2597,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
     {
         var appraisal = await TenantAppraisalQuery()
             .Include(a => a.AppraisalCycle)
+                .ThenInclude(c => c.AppraisalSettings)
             .FirstOrDefaultAsync(a => a.Id == appraisalId, cancellationToken);
         
         if (appraisal == null)
@@ -2550,7 +2618,11 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         
         if (appeal == null)
             throw new InvalidOperationException("Appeal not found.");
-        
+
+        // B2: the manager's score on each appealed item is part of the breakdown the profile may keep
+        // from the employee (ShowScoreBreakdownToEmployee); the item and the reason stay.
+        var breakdownShown = appraisal.AppraisalCycle?.AppraisalSettings?.ShowScoreBreakdownToEmployee ?? true;
+
         // Load appealed items details
         var appealedItemsView = new List<AppealedItemViewDto>();
         
@@ -2580,7 +2652,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                     ItemType = "Competency",
                     ItemName = competency?.CriteriaName ?? item.TemplateItem?.Competency?.CriteriaName ?? "Item",
                     Reason = item.Reason,
-                    OriginalScore = score?.NumericScore,
+                    OriginalScore = breakdownShown ? score?.NumericScore : null,
                     TargetValue = null,
                     ActualValue = null
                 });
@@ -2601,9 +2673,9 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                     ItemType = "Goal",
                     ItemName = item.CriterionConfig?.ItemLabel ?? "Goal",
                     Reason = item.Reason,
-                    OriginalScore = score?.NumericScore,
+                    OriginalScore = breakdownShown ? score?.NumericScore : null,
                     TargetValue = item.CriterionConfig?.KpiTargetValue,
-                    ActualValue = score?.ActualValue
+                    ActualValue = breakdownShown ? score?.ActualValue : null
                 });
             }
         }
@@ -2626,6 +2698,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             // fall back to the current score.
             OriginalScore = appeal.OriginalOverallScore ?? appraisal.OverallScore,
             AdjustedScore = appraisal.AdjustedScore,
+            ScoreBreakdownShown = breakdownShown,
             AppealedItems = appealedItemsView
         };
     }
@@ -3263,6 +3336,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                 .ThenInclude(e => e.Position)
             .Include(a => a.Employee.OrganizationUnit)
             .Include(a => a.AppraisalCycle)
+                .ThenInclude(c => c.AppraisalSettings)
             .Include(a => a.Appeals)
                 .ThenInclude(ap => ap.Items)
                     .ThenInclude(i => i.TemplateItem)
@@ -3371,13 +3445,16 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             }
         }
 
-        // Build final criterion scores, by criterion key (lane L3)
+        // Build final criterion scores, by criterion key (lane L3) — the manager's criterion by
+        // criterion, which the profile may keep from the employee (ShowScoreBreakdownToEmployee, B2).
         var appealedKeys = latestAppeal.Items
             .Where(i => i.TemplateItemId.HasValue || i.CriterionConfigId.HasValue)
             .Select(i => i.CriterionKey())
             .ToHashSet();
 
-        foreach (var score in managerEval.CriterionScores)
+        result.ScoreBreakdownShown = appraisal.AppraisalCycle?.AppraisalSettings?.ShowScoreBreakdownToEmployee ?? true;
+
+        foreach (var score in result.ScoreBreakdownShown ? managerEval.CriterionScores : Enumerable.Empty<CriterionScore>())
         {
             var competency = score.TemplateItem?.Competency;
             var key = score.CriterionKey();
@@ -3596,13 +3673,11 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         if (settings == null)
             throw new InvalidOperationException("Appraisal cycle settings not found.");
 
-        var outcomeReleased = AppraisalRelease.IsReleased(
-            appraisal.Status,
-            appraisal.IsCalibrated,
-            appraisal.HRReviews.Any(r => !r.IsDeleted && r.ReviewCompletedDate != null && r.IsApproved),
-            appraisal.AppealRemandedDate != null,
-            settings.RequireCalibration,
-            settings.RequireHRReview);
+        // What this reader may see of each leg (B2) — the rule every read of an evaluation shares. The
+        // release (P2) is part of it: the appraisee's copy carries the other legs only once released.
+        var visibility = AppraisalVisibility.From(appraisal, settings);
+        var view = AppraisalVisibility.For(visibility, requestingEmployeeId);
+        var outcomeReleased = visibility.OutcomeReleased;
 
         // By criterion key, so goal rows are found too (lane L3).
         var configsByKey = appraisal.CriterionConfigs
@@ -3610,7 +3685,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             .ToDictionary(g => g.Key, g => g.First());
 
         // Check if the requester is the appraisee and peer reviews are anonymous
-        var isAppraiseeViewing = requestingEmployeeId.HasValue && requestingEmployeeId.Value == appraisal.EmployeeId;
+        var isAppraiseeViewing = view.Reader == AppraisalReader.Appraisee;
         var shouldHidePeerDetails = isAppraiseeViewing && settings.PeerReviewsAnonymous;
 
         // Get evaluations
@@ -3696,9 +3771,20 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         // grade — and HR's remarks, a draft included — in the body the page merely declined to show.
         var withholdOutcome = isAppraiseeViewing && !outcomeReleased;
 
+        // B2: once released, the appraisee sees each evaluator's criteria only when the profile shows
+        // the breakdown; otherwise the manager's leg is its narrative alone. The line manager sees the
+        // self and peer legs as the profile allows, and nobody but the employee a self draft (P12).
+        var managerShown = managerSummary == null ? null
+            : view.ManagerScores ? managerSummary
+            : view.ManagerNarrative ? new EvaluationSummaryDto { GeneralComments = managerSummary.GeneralComments }
+            : null;
+
         return new HRReviewDto
         {
             OutcomeReleased = outcomeReleased,
+            ScoreBreakdownShown = !isAppraiseeViewing || view.ManagerScores,
+            SelfScoresWithheld = selfEvaluation != null && !view.SelfEntries,
+            PeerScoresWithheld = view.Reader == AppraisalReader.LineManager && !view.PeerScores,
             AppraisalId = appraisal.Id,
             AppraisalNumber = appraisal.AppraisalNumber,
             EmployeeId = appraisal.EmployeeId,
@@ -3717,15 +3803,15 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             WeightTotalValid = Math.Abs(totalWeight - 1.0m) < 0.01m,
             TotalWeight = totalWeight,
             IsCycleActive = appraisal.AppraisalCycle.Status == AppraisalCycleStatus.Open,
-            SelfEvaluation = selfSummary,
-            ManagerEvaluation = withholdOutcome ? null : managerSummary,
-            PeerEvaluationSummary = withholdOutcome ? null : peerSummary,
+            SelfEvaluation = view.SelfEntries ? selfSummary : null,
+            ManagerEvaluation = managerShown,
+            PeerEvaluationSummary = view.PeerScores ? peerSummary : null,
             SelfWeight = settings.SelfEvaluationWeight,
             ManagerWeight = settings.ManagerEvaluationWeight,
             PeerWeight = settings.PeerEvaluationWeight,
-            SelfScore = selfEvaluation?.TotalScore,
-            ManagerScore = withholdOutcome ? null : managerEvaluation?.TotalScore,
-            PeerScore = withholdOutcome ? null
+            SelfScore = view.SelfEntries ? selfEvaluation?.TotalScore : null,
+            ManagerScore = view.ManagerScores ? managerEvaluation?.TotalScore : null,
+            PeerScore = !view.PeerScores ? null
                 : peerEvaluations.Any() ? peerEvaluations.Where(e => e.SubmittedDate.HasValue).Average(e => e.TotalScore) : null,
             FinalScore = withholdOutcome ? null : appraisal.OverallScore,
             FinalGrade = withholdOutcome ? null : await GradeNameAsync(appraisal.OverallGradeDefinitionId, cancellationToken),

@@ -144,7 +144,10 @@ export default function AppealStatusPage() {
                 <TableRow>
                   <TableHead>Item</TableHead>
                   <TableHead>Your reason</TableHead>
-                  <TableHead className="text-right">Original score</TableHead>
+                  {/* Not shown when the cycle shows the overall only (closure B2). */}
+                  {data.scoreBreakdownShown && (
+                    <TableHead className="text-right">Original score</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -154,9 +157,11 @@ export default function AppealStatusPage() {
                     <TableCell className="max-w-md text-sm text-muted-foreground">
                       {item.reason}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {item.originalScore ?? '—'}
-                    </TableCell>
+                    {data.scoreBreakdownShown && (
+                      <TableCell className="text-right tabular-nums">
+                        {item.originalScore ?? '—'}
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>

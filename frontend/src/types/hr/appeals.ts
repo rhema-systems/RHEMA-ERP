@@ -68,6 +68,12 @@ export interface AppealPageData {
   canAppeal: boolean;
   /** Populated whenever `canAppeal` is false — show it rather than an empty form. */
   cannotAppealReason?: string | null;
+  /**
+   * Each item carries the manager's score. False when the cycle shows the employee only the
+   * overall, grade and narrative (B2): the items are listed without their scores. Before the
+   * outcome is released nothing is listed and there is no score.
+   */
+  scoreBreakdownShown: boolean;
   appealableKpis: AppealableKpi[];
   appealableCompetencies: AppealableCompetency[];
 }
@@ -128,6 +134,8 @@ export interface AppealStatusView {
   originalScore?: number | null;
   /** The post-appeal score. Equals `originalScore` when nothing was changed. */
   adjustedScore?: number | null;
+  /** The appealed items carry the manager's score and actual — false when the cycle shows the overall only (B2). */
+  scoreBreakdownShown: boolean;
   appealedItems: AppealedItemView[];
 }
 
@@ -385,6 +393,8 @@ export interface EmployeeAppealOutcome {
   finalOverallScore: number;
   /** The overall the appeal was filed against; null on appeals filed before it was kept. */
   originalOverallScore?: number | null;
+  /** `finalCriteriaScores` is filled — false (and the list empty) when the cycle shows the overall only (B2). */
+  scoreBreakdownShown: boolean;
   finalCriteriaScores: FinalCriterionScore[];
   finalKpiScores: FinalKpiScore[];
 

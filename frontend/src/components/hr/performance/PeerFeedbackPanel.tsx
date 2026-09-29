@@ -20,6 +20,10 @@ import { performanceAppraisalService } from '@/services/hr/appraisal-run.service
  *
  * Unsubmitted peers are listed too, with no scores. Knowing who has not responded is the point
  * of the count at the top.
+ *
+ * When the cycle's `showPeerScoresToManager` is off, the server withholds every peer's scores and
+ * comments until the manager has submitted their own evaluation (closure B2) — the names and the
+ * submitted count stay, so the manager can still chase a missing response.
  */
 export function PeerFeedbackPanel({ appraisalId }: { appraisalId: string }) {
   const { data, isLoading, isError } = useQuery({
@@ -60,6 +64,12 @@ export function PeerFeedbackPanel({ appraisalId }: { appraisalId: string }) {
               ? 'Anonymous to the employee — you can see the names, they cannot.'
               : 'The employee will see this feedback attributed to each peer.'}
           </span>
+          {data.scoresWithheld && (
+            <span className="w-full text-muted-foreground">
+              This cycle shows you the peers&apos; scores and comments once you have submitted your
+              own evaluation.
+            </span>
+          )}
         </CardContent>
       </Card>
 

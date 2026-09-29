@@ -94,16 +94,17 @@ public interface IPerformanceAppraisalService
     Task<IEnumerable<MyAppraisalDto>> GetMyAppraisalsAsync(Guid employeeId, string? cycleFilter = null, CancellationToken cancellationToken = default);
     
     // Self-evaluation operations
-    Task<SelfEvaluationContextDto> GetSelfEvaluationContextAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+    /// <param name="viewerEmployeeId">The caller's employee id: what the entries show depends on who reads them (AppraisalVisibility).</param>
+    Task<SelfEvaluationContextDto> GetSelfEvaluationContextAsync(Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default);
     Task<SelfEvaluationResultDto> SaveSelfEvaluationAsync(SaveSelfEvaluationDto saveDto, CancellationToken cancellationToken = default);
-    Task<ViewSubmittedEvaluationDto> GetViewSubmittedEvaluationAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+    Task<ViewSubmittedEvaluationDto> GetViewSubmittedEvaluationAsync(Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default);
     
     // Manager evaluation operations
     Task<IEnumerable<TeamAppraisalCycleSummaryDto>> GetTeamAppraisalCyclesAsync(Guid managerId, CancellationToken cancellationToken = default);
     Task<IEnumerable<TeamMemberAppraisalDto>> GetTeamMemberAppraisalsAsync(Guid cycleId, Guid managerId, CancellationToken cancellationToken = default);
     Task<ManagerEvaluationContextDto> GetManagerEvaluationContextAsync(Guid appraisalId, Guid managerId, CancellationToken cancellationToken = default);
     Task<ManagerEvaluationResultDto> SaveManagerEvaluationAsync(SaveManagerEvaluationDto saveDto, CancellationToken cancellationToken = default);
-    Task<ManagerPeerEvaluationReviewDto> GetManagerPeerEvaluationReviewAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+    Task<ManagerPeerEvaluationReviewDto> GetManagerPeerEvaluationReviewAsync(Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default);
     
     // HR Review operations
     Task<HRReviewDto> GetHRReviewAsync(Guid appraisalId, Guid? requestingEmployeeId = null, CancellationToken cancellationToken = default);
@@ -825,7 +826,8 @@ public interface IEmployeeGoalService
 {
     Task<EmployeeGoalDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IEnumerable<EmployeeGoalDto>> GetByEmployeeIdAsync(Guid employeeId, Guid? cycleId = null, CancellationToken cancellationToken = default);
-    Task<IEnumerable<EmployeeGoalDto>> GetByAppraisalIdAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+    /// <param name="viewerEmployeeId">The caller's employee id: the goal assessments' self and manager sides follow AppraisalVisibility.</param>
+    Task<IEnumerable<EmployeeGoalDto>> GetByAppraisalIdAsync(Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<EmployeeGoalDto>> GetPendingApprovalAsync(Guid managerId, Guid? cycleId = null, CancellationToken cancellationToken = default);
     Task<PagedResult<EmployeeGoalDto>> GetPagedAsync(int pageNumber, int pageSize, Guid? employeeId = null, Guid? cycleId = null, CancellationToken cancellationToken = default);
     Task<EmployeeGoalDto> CreateAsync(CreateEmployeeGoalDto createDto, CancellationToken cancellationToken = default);

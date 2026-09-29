@@ -531,7 +531,13 @@ public class AppealStatusViewDto
     public decimal? OriginalScore { get; set; }
     public decimal? AdjustedScore { get; set; }
     public bool HasScoreAdjustment => OriginalScore.HasValue && AdjustedScore.HasValue && OriginalScore != AdjustedScore;
-    
+
+    /// <summary>
+    /// The appealed items carry the manager's score and actual. False when the profile shows the
+    /// employee only the overall (<c>ShowScoreBreakdownToEmployee</c> off — performance closure B2).
+    /// </summary>
+    public bool ScoreBreakdownShown { get; set; } = true;
+
     // Appealed items
     public List<AppealedItemViewDto> AppealedItems { get; set; } = new();
 }
@@ -2114,17 +2120,24 @@ public class SelfEvaluationContextDto
     public DateTime? SelfEvaluationSubmittedDate { get; set; }
     public bool IsEditable { get; set; }
     public DateOnly? SelfEvaluationDeadline { get; set; }
-    
+
+    /// <summary>
+    /// The self-evaluation is submitted but its entries are not this reader's to see yet — the line
+    /// manager, while the profile hides self scores until they have submitted their own evaluation
+    /// (performance closure B2). The entries on the items are then empty.
+    /// </summary>
+    public bool SelfEntriesWithheld { get; set; }
+
     /// <summary>
     /// Settings that control self-evaluation behavior
     /// </summary>
     public bool AllowSelfSoftSkillRating { get; set; }
-    
+
     /// <summary>
     /// Full appraisal settings (includes peer review configuration)
     /// </summary>
     public AppraisalSettingsDto? Settings { get; set; }
-    
+
     /// <summary>
     /// Template sections in display order. Each section carries its weight
     /// and contains the items the employee must score.
@@ -2308,6 +2321,20 @@ public class ManagerEvaluationContextDto
     public bool IsManagerEvaluationSubmitted { get; set; }
     public DateTime? ManagerEvaluationSubmittedDate { get; set; }
     public bool IsEditable { get; set; }
+
+    /// <summary>
+    /// The employee has submitted their self-evaluation. Until they have, no self score is on this
+    /// form — a draft is theirs alone (P12, B2).
+    /// </summary>
+    public bool SelfEvaluationSubmitted { get; set; }
+
+    /// <summary>
+    /// The employee's self-evaluation is submitted, but the profile shows self scores to the manager
+    /// only after they have submitted their own evaluation (<c>ShowSelfScoreToManager</c> off —
+    /// performance closure B2). The <c>EmployeeSelf*</c> fields on every item are then empty. A
+    /// self-evaluation that is still a draft is never on this form.
+    /// </summary>
+    public bool SelfScoresWithheld { get; set; }
     
     /// <summary>
     /// Weight breakdown
@@ -2458,6 +2485,13 @@ public class ViewSubmittedEvaluationDto
     // Settings
     public bool AllowSelfSoftSkillRating { get; set; }
 
+    /// <summary>
+    /// The entries are withheld from this reader — the line manager, while the profile hides self
+    /// scores until they have submitted their own evaluation (performance closure B2). The sections
+    /// keep their items, without the employee's scores, actuals, notes or evidence.
+    /// </summary>
+    public bool EntriesWithheld { get; set; }
+
     // Self-Evaluation Data — sections in DisplayOrder (replaces flat SoftSkillScores + KpiEvaluations)
     public List<SubmittedEvaluationSectionDto> Sections { get; set; } = new();
     public List<SubmittedAttachmentDto> Attachments { get; set; } = new();
@@ -2568,6 +2602,27 @@ public class HRReviewDto
     /// score, grade or HR remarks; HR and the manager see them throughout.
     /// </summary>
     public bool OutcomeReleased { get; set; }
+
+    /// <summary>
+    /// The appraisee's copy carries the score breakdown — each evaluator's criteria and totals.
+    /// False before the outcome is released, and after it when the profile shows the employee only
+    /// the overall, the grade and the narrative (<c>ShowScoreBreakdownToEmployee</c> off — B2).
+    /// Always true for HR and the manager.
+    /// </summary>
+    public bool ScoreBreakdownShown { get; set; } = true;
+
+    /// <summary>
+    /// The self-evaluation is withheld from this reader: the line manager before they have submitted
+    /// their own evaluation when the profile hides self scores (B2), or anyone but the employee while
+    /// it is still a draft (P12).
+    /// </summary>
+    public bool SelfScoresWithheld { get; set; }
+
+    /// <summary>
+    /// The peer scores are withheld from the line manager until they have submitted their own
+    /// evaluation (<c>ShowPeerScoresToManager</c> off — B2).
+    /// </summary>
+    public bool PeerScoresWithheld { get; set; }
 
     // Precondition Flags
     public bool IsSelfEvaluationComplete { get; set; }
@@ -2758,11 +2813,19 @@ public class HRReviewListItemDto
 /// </summary>
 public class ManagerPeerEvaluationReviewDto
 {
-    public Guid AppraisalId { get; set; }  
+    public Guid AppraisalId { get; set; }
     public bool IsAnonymous { get; set; } // Indicates if appraisee can see peer details, not whether manager can
     public bool AllowKpiEvaluation { get; set; }
     public int TotalPeerEvaluators { get; set; }
     public int SubmittedEvaluations { get; set; }
+
+    /// <summary>
+    /// The peers' scores and comments are withheld from the line manager until they have submitted
+    /// their own evaluation (<c>ShowPeerScoresToManager</c> off — performance closure B2). Who the
+    /// peers are and whether each has submitted are still listed.
+    /// </summary>
+    public bool ScoresWithheld { get; set; }
+
     public List<PeerEvaluatorDetailDto> PeerEvaluations { get; set; } = new();
 }
 
@@ -2839,7 +2902,15 @@ public class AppealPageDataDto
     public string? FinalGrade { get; set; }
     public bool CanAppeal { get; set; }
     public string? CannotAppealReason { get; set; }
-    
+
+    /// <summary>
+    /// Each item carries the manager's score. False when the profile shows the employee only the
+    /// overall, the grade and the narrative (<c>ShowScoreBreakdownToEmployee</c> off — performance
+    /// closure B2): the items are listed to appeal, without their scores. Before the outcome is
+    /// released nothing is listed and there is no score to show.
+    /// </summary>
+    public bool ScoreBreakdownShown { get; set; } = true;
+
     public List<AppealableKpiDto> AppealableKpis { get; set; } = new();
     public List<AppealableCompetencyDto> AppealableCompetencies { get; set; } = new();
 }
@@ -3221,6 +3292,13 @@ public class EmployeeAppealOutcomeDto
     public decimal FinalOverallScore { get; set; }
     /// <summary>The overall score the appeal was filed against; null on appeals filed before it was kept.</summary>
     public decimal? OriginalOverallScore { get; set; }
+
+    /// <summary>
+    /// <see cref="FinalCriteriaScores"/> is filled. False when the profile shows the employee only
+    /// the overall, the grade and the narrative (<c>ShowScoreBreakdownToEmployee</c> off —
+    /// performance closure B2); the list is then empty.
+    /// </summary>
+    public bool ScoreBreakdownShown { get; set; } = true;
     public List<FinalCriterionScoreDto> FinalCriteriaScores { get; set; } = new();
     public List<FinalKpiScoreDto> FinalKpiScores { get; set; } = new();
     
