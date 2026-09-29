@@ -49,7 +49,9 @@ the settings audit, S-1…S-17 (none done yet), the three audits of 2026-09-28 a
 of the plan. It owns this plan's lane 9 rows #9.3, #9.4 and #9.26 and lane 5b's score-adjustment
 question (its D-11); its F1 waits on lane 9's admin-door decision (its D-18). Performance has **no**
 reminder sweep today — it is not one of lane 10's eleven — and its lane H builds one.
-**Nothing built yet.**
+**Built so far (2026-09-29):** migration batch 1 and lanes A, P, B1 (with B3–B5) and L (slices L-a,
+L-b, L-c), all merged upstream in round 4 (PR #278). **Next: B2–B8.** The closure plan's START
+HERE block and § 2 carry the live state.
 
 ▶ **Lane 11 (added 2026-09-25): probation is not absence.** About 1,800 long-serving staff on the
 demo database are on probation, because the employee import has no confirmation date. Two code sites
