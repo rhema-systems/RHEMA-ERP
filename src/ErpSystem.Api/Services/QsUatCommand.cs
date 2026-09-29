@@ -87,6 +87,8 @@ public static class QsUatCommand
         var output = Path.Combine(builder.Environment.ContentRootPath, "qs-uat-preparation.json");
         await File.WriteAllTextAsync(output, System.Text.Json.JsonSerializer.Serialize(report,
             new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
-        Console.WriteLine("QS_UAT_PREPARATION|COMPLETED|Review qs-uat-preparation.json; independent configuration approval remains required.");
+        Console.WriteLine(preparation.IndependentConfigurationReviewRequired
+            ? "QS_UAT_PREPARATION|COMPLETED|Review qs-uat-preparation.json; independent configuration approval remains required."
+            : "QS_UAT_PREPARATION|COMPLETED|All 17 QS decisions auto-approved and profile published for this test database. Review qs-uat-preparation.json; end-to-end transactions remain for UAT.");
     }
 }

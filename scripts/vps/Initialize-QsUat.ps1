@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory=$true)]
     [ValidatePattern('^RhemaERP_VpsTest_[A-Za-z0-9_]+$')][string]$ExpectedDatabase,
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [switch]$AutoApproveQsUat
 )
 # Explicit, additive Test VPS setup. No service restart or production target.
 $ErrorActionPreference='Stop'
@@ -40,7 +41,7 @@ try {
     try {
         $result=Invoke-RhemaFreshApiCli -ApiExecutable 'C:\RhemaERP\api\ErpSystem.Api.exe' -ContentRoot $work `
             -ConnectionString $connectionString -Command 'seed-qs-uat' -ExpectedQsDatabase $ExpectedDatabase `
-            -OperationalUatPassword $secret -TimeoutSeconds 1200
+            -OperationalUatPassword $secret -TimeoutSeconds 1200 -AutoApproveQsUat:$AutoApproveQsUat
     } catch {
         $safeEvidence=$_.Exception.Data['SafeCliEvidence']
         if($safeEvidence){$safeEvidence | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $work 'command-evidence.json') -Encoding UTF8}
@@ -51,8 +52,20 @@ try {
     $report=Join-Path $work 'qs-uat-preparation.json'
     if(!(Test-Path -LiteralPath $report)){throw 'QS preparation returned without its required evidence report.'}
     Write-Output "QS_UAT_PREPARATION_REPORT|$report"
-    Write-Output 'QS_CONFIGURATION|INDEPENDENT_REVIEW_REQUIRED'
-    Write-Output 'Preparation completed. Review the proposed decisions and complete their evidenced approval before publishing the QS profile.'
+    if($AutoApproveQsUat){
+        $prepared=Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+        if($prepared.Database -cne $ExpectedDatabase -or !$prepared.Preparation.ProfileId -or
+            $prepared.Preparation.IndependentConfigurationReviewRequired -ne $false -or
+            @($prepared.Preparation.Unresolved).Count -ne 0 -or
+            @($prepared.Preparation.PreparedDecisions | Select-Object -Unique).Count -ne 17) {
+            throw 'QS auto-approval did not verify all 17 decisions and profile publication. Review the preparation report.'
+        }
+        Write-Output 'QS_CONFIGURATION|AUTO_APPROVED_TEST_ONLY'
+        Write-Output 'Preparation completed with explicit test-only QS decision auto-approval and profile publication.'
+    }else{
+        Write-Output 'QS_CONFIGURATION|INDEPENDENT_REVIEW_REQUIRED'
+        Write-Output 'Preparation completed. Review the proposed decisions and complete their evidenced approval before publishing the QS profile.'
+    }
 }finally{
     if($secureSecret){$secureSecret.Dispose()}
     $secret=$null;$connectionString=$null;$target=$null;$service=$null;$values=$null

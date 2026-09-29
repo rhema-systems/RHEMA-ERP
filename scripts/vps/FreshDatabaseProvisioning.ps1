@@ -69,7 +69,8 @@ function Invoke-RhemaFreshApiCli {
           [ValidateSet('apply-migrations','seed-db','seed-deployment-uat','seed-operational-uat','seed-qs-uat')][string]$Command,
           [int]$TimeoutSeconds = 3600,
           [string]$OperationalUatPassword,
-          [string]$ExpectedQsDatabase)
+          [string]$ExpectedQsDatabase,
+          [switch]$AutoApproveQsUat)
     if ($Command -eq 'seed-qs-uat') {
         $qsTarget = New-Object System.Data.SqlClient.SqlConnectionStringBuilder $ConnectionString
         if ($ExpectedQsDatabase -cnotmatch '^RhemaERP_(VpsTest|QsUatVerify)_[A-Za-z0-9_]+$' -or
@@ -110,6 +111,7 @@ function Invoke-RhemaFreshApiCli {
         $start.EnvironmentVariables['DOTNET_ENVIRONMENT']='Test'
         $start.EnvironmentVariables['QsUat__Enabled']='true'
         $start.EnvironmentVariables['QsUat__ExpectedDatabase']=$ExpectedQsDatabase
+        $start.EnvironmentVariables['QsUat__AutoApprove']= if($AutoApproveQsUat) { 'true' } else { 'false' }
         $start.EnvironmentVariables['DOTNET_GCHeapHardLimit']='0x200000000'
     }
     if (-not [string]::IsNullOrWhiteSpace($OperationalUatPassword)) {

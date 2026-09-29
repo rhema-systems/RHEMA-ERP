@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.QuantitySurvey;
 using ErpSystem.Core.DTOs.Reports;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.DocumentManagement;
+using ErpSystem.Core.Entities.QuantitySurvey;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.QuantitySurvey;
@@ -16,8 +17,10 @@ namespace ErpSystem.Api.Services;
 
 /// <summary>
 /// Explicit test-environment preparation. Configurations are authored as the real bootstrap
-/// identity; QS decisions remain drafts for independent, evidence-backed owner approval.
-/// No project, contract, BOQ, certificate, stock or financial transaction is created.
+/// identity; by default QS decisions remain drafts for independent, evidence-backed owner
+/// approval. An explicit target-guarded auto-approval switch is available for the isolated
+/// UAT database only. No project, contract, BOQ, certificate, stock or financial transaction
+/// is created.
 /// </summary>
 public sealed class QsUatPreparationSeeder(
     ApplicationDbContext db,
@@ -26,9 +29,11 @@ public sealed class QsUatPreparationSeeder(
     IQuantitySurveyConfigurationService configurationOwner,
     QuantitySurveyConfigurationProfileSeeder profileSeeder,
     QuantitySurveyStatutoryReportSeeder reportSeeder,
-    IReportTemplateLifecycleService reportTemplateOwner)
+    IReportTemplateLifecycleService reportTemplateOwner,
+    IConfiguration configuration)
 {
     internal const string SeedMarker = "QS-UAT-PREPARATION-V1";
+    internal const string AutoApprovalMarker = "QS-UAT-AUTO-APPROVAL-V1";
     private const string SeedName = "QS UAT bootstrap";
     internal static readonly string[] RequiredActors =
         ["uat.qs.preparer", "uat.qs.reviewer", "uat.qs.engineer", "financereviewer", "uat.qs.approver", "procurementapprover"];
@@ -87,12 +92,29 @@ public sealed class QsUatPreparationSeeder(
         await reportSeeder.SeedTenantAsync(tenantId, token);
         var templates = await PrepareMetadataTemplatesAsync(tenantId, actorId, token);
         var reportTemplates = await PrepareReportTemplatesAsync(tenantId, actorId, token);
+        var autoApprove = configuration.GetValue<bool>("QsUat:AutoApprove");
         var profile = await db.QuantitySurveyConfigurationProfiles.AsNoTracking()
             .Where(p => p.TenantId == tenantId && !p.IsDeleted && p.ProfileCode == "TDC-QUANTITY-SURVEY" &&
                 p.LifecycleStatus == QuantitySurveyConfigurationProfileStatus.Draft)
             .SingleOrDefaultAsync(token);
         if (profile is null)
+        {
+            if (autoApprove)
+            {
+                var published = await db.QuantitySurveyConfigurationProfiles.AsNoTracking()
+                    .SingleOrDefaultAsync(p => p.TenantId == tenantId && !p.IsDeleted &&
+                        p.ProfileCode == "TDC-QUANTITY-SURVEY" && p.IsDefault &&
+                        p.LifecycleStatus == QuantitySurveyConfigurationProfileStatus.Published &&
+                        p.EffectiveFrom <= DateTime.UtcNow && (!p.EffectiveTo.HasValue || p.EffectiveTo >= DateTime.UtcNow), token)
+                    ?? throw new InvalidOperationException("QS_UAT_AUTO_APPROVAL_NO_PROFILE: no seeded draft or current published profile exists.");
+                var verified = await configurationOwner.GetProfileAsync(published.Id, token);
+                if (!verified.Validation.IsValid || verified.Decisions.Count != QuantitySurveyConfigurationDecisionRegistry.Definitions.Count ||
+                    verified.Decisions.Any(d => d.ApprovalReference != AutoApprovalMarker || !d.IsComplete))
+                    throw new InvalidOperationException("QS_UAT_AUTO_APPROVAL_EXISTING_PROFILE: existing configuration was preserved; it is not a complete UAT auto-approved profile.");
+                return new(workflows, published.Id, verified.Decisions.Select(d => d.DecisionKey).ToArray(), [], [], false);
+            }
             return new(workflows, null, [], ["No editable QS draft. Existing published/historical configuration was preserved."], [], true);
+        }
 
         var lookup = (await configurationOwner.GetLookupsAsync(token)).Sources;
         var references = ResolveReferences(lookup, workflows, templates, reportTemplates, profile.EffectiveFrom);
@@ -127,14 +149,192 @@ public sealed class QsUatPreparationSeeder(
             }, $"qs-uat-prepare-{profile.Id:N}-{decision.DecisionKey}", token);
             prepared.Add(decision.DecisionKey);
         }
-        return new(workflows, profile.Id, prepared, unresolved, proposals, true);
+        if (autoApprove)
+        {
+            if (unresolved.Count > 0)
+                throw new InvalidOperationException("QS_UAT_AUTO_APPROVAL_UNRESOLVED: all 17 decisions must have valid controlled values before auto-approval.");
+            await AutoApproveAndPublishAsync(profile.Id, tenantId, actorId, token);
+        }
+        return new(workflows, profile.Id, prepared, unresolved, proposals, !autoApprove);
     }
+
+    internal Task AutoApproveAndPublishAsync(Guid profileId, Guid tenantId, Guid actorId,
+        CancellationToken token) => db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+    {
+        var database = db.Database.GetDbConnection().Database;
+        ValidateTarget(configuration["QsUat:ExpectedDatabase"] ?? "", database,
+            configuration.GetValue<bool>("QsUat:Enabled") && configuration.GetValue<bool>("QsUat:AutoApprove"));
+        if (!actor.IsAuthenticated || actor.TenantId != tenantId || actor.UserName != "qs.uat.bootstrap" ||
+            !Guid.TryParse(actor.UserId, out var currentActor) || currentActor != actorId || !actor.IsInRole("SuperAdmin"))
+            throw new InvalidOperationException("QS_UAT_AUTO_APPROVAL_ACTOR: only the dedicated bootstrap identity can run this UAT operation.");
+
+        // Re-query on retry; evidence, approvals and owner-controlled publication
+        // either commit together or all roll back.
+        db.ChangeTracker.Clear();
+        await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, token);
+        var profile = await db.QuantitySurveyConfigurationProfiles
+            .SingleAsync(value => value.TenantId == tenantId && value.Id == profileId && !value.IsDeleted, token);
+        if (profile.LifecycleStatus == QuantitySurveyConfigurationProfileStatus.Published)
+        {
+            var existing = await configurationOwner.GetProfileAsync(profileId, token);
+            if (!existing.Validation.IsValid || existing.Decisions.Count != QuantitySurveyConfigurationDecisionRegistry.Definitions.Count ||
+                existing.Decisions.Any(d => d.ApprovalReference != AutoApprovalMarker || !d.IsComplete))
+                throw new InvalidOperationException("QS_UAT_AUTO_APPROVAL_EXISTING_PROFILE: existing configuration was preserved.");
+            return;
+        }
+        if (profile.LifecycleStatus != QuantitySurveyConfigurationProfileStatus.Draft)
+            throw new InvalidOperationException("QS_UAT_AUTO_APPROVAL_PROFILE_STATE: only the seeded draft profile may be auto-approved.");
+
+        var decisions = await db.QuantitySurveyConfigurationDecisions
+            .Where(value => value.TenantId == tenantId && value.ProfileId == profileId && !value.IsDeleted)
+            .OrderBy(value => value.DecisionKey)
+            .ToListAsync(token);
+        ValidateAutoApprovalDecisions(decisions, actorId, (await configurationOwner.GetLookupsAsync(token)).Sources);
+        if (await db.QuantitySurveyConfigurationEvidenceLinks.AnyAsync(e => e.TenantId == tenantId &&
+                e.ProfileId == profileId && !e.IsDeleted, token))
+            throw new InvalidOperationException("QS_UAT_AUTO_APPROVAL_EXISTING_EVIDENCE: existing review evidence was preserved.");
+
+        var now = DateTime.UtcNow;
+        var reference = $"QS-UAT-CONFIG-{profile.Id:N}";
+        var record = await db.CentralDocumentRecords.SingleOrDefaultAsync(value =>
+            value.TenantId == tenantId && value.DocumentReference == reference && !value.IsDeleted, token);
+        if (record is null)
+        {
+            record = new CentralDocumentRecord
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, DocumentReference = reference,
+                Title = "QS UAT system auto-approval memorandum", SourceModule = "QuantitySurvey",
+                SourceLabel = AutoApprovalMarker, SourceEntityType = "QuantitySurveyConfigurationProfile",
+                SourceRecordReference = $"{profile.ProfileCode}/v{profile.Version}", SourceRecordId = profile.Id,
+                RepositoryStatus = "Not linked", CurrentVersion = "v1.0", VersionStatus = "Published",
+                LifecycleStatus = "Active", RetentionStatus = "Current", PublishedAt = now,
+                PublishedById = actorId, Notes = "Metadata-only system memorandum recording the operator's explicit -AutoApproveQsUat authorization for all 17 seeded decisions on " + database + ". This is UAT setup, not independent business sign-off. Decision values and approval states are retained in the QS audit revisions. No uploaded or signed file is asserted.",
+                CreatedAt = now, CreatedBy = "QS UAT bootstrap", CreatedById = actorId
+            };
+            db.CentralDocumentRecords.Add(record);
+            db.CentralDocumentVersions.Add(new CentralDocumentVersion
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, DocumentRecordId = record.Id,
+                VersionNumber = "v1.0", Status = "Published",
+                CreatedByUserId = actorId, PublishedAt = now, PublishedById = actorId,
+                ChangeSummary = "System-generated UAT authorization memorandum. Explicit operator opt-in; not a human reviewer signature.",
+                CreatedAt = now, CreatedBy = SeedName, CreatedById = actorId
+            });
+            await db.SaveChangesAsync(token);
+        }
+        if (record.SourceLabel != AutoApprovalMarker || record.SourceRecordId != profileId ||
+            record.CreatedById != actorId || record.LifecycleStatus != "Active" || record.VersionStatus != "Published")
+            throw new InvalidOperationException("QS_UAT_AUTO_APPROVAL_EVIDENCE_CONFLICT: existing document was preserved.");
+        var version = await db.CentralDocumentVersions.SingleAsync(value =>
+            value.TenantId == tenantId && value.DocumentRecordId == record.Id &&
+            value.VersionNumber == record.CurrentVersion && !value.IsDeleted && value.Status == "Published", token);
+
+        foreach (var decision in decisions)
+        {
+            var evidence = await db.QuantitySurveyConfigurationEvidenceLinks.AnyAsync(value =>
+                value.TenantId == tenantId && value.ProfileId == profile.Id && value.DecisionId == decision.Id &&
+                value.CentralDocumentRecordId == record.Id && value.CentralDocumentVersionId == version.Id && !value.IsDeleted, token);
+            if (!evidence)
+            {
+                db.QuantitySurveyConfigurationEvidenceLinks.Add(new QuantitySurveyConfigurationEvidenceLink
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, ProfileId = profile.Id, DecisionId = decision.Id,
+                    CentralDocumentRecordId = record.Id, CentralDocumentVersionId = version.Id,
+                    EvidenceType = "Approval memorandum", ExternalReference = reference,
+                    LinkedById = actorId, LinkedAt = now, CreatedAt = now,
+                    CreatedBy = "QS UAT bootstrap", CreatedById = actorId
+                });
+                db.QuantitySurveyConfigurationRevisions.Add(new QuantitySurveyConfigurationRevision
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, ProfileId = profile.Id, DecisionId = decision.Id,
+                    Action = QuantitySurveyAuditEventMap.LinkEvidence, Result = "Succeeded",
+                    CorrelationId = $"qs-uat-auto-evidence-{decision.DecisionKey.ToLowerInvariant()}",
+                    ActorUserId = actorId, ActorName = "QS UAT bootstrap", ActorRoles = "SuperAdmin",
+                    Reason = "Explicit test-only auto-approval evidence.", AfterJson = $"{{\"decisionKey\":\"{decision.DecisionKey}\",\"evidence\":\"{reference}\"}}",
+                    CreatedAt = now, CreatedBy = "QS UAT bootstrap", CreatedById = actorId
+                });
+            }
+
+            var alreadyApproved = decision.Status == QuantitySurveyConfigurationDecisionStatus.Approved &&
+                decision.ApprovalStatus == QuantitySurveyConfigurationApprovalStatus.Approved &&
+                decision.EvidenceStatus == QuantitySurveyConfigurationEvidenceStatus.Verified &&
+                decision.ApprovalReference == AutoApprovalMarker;
+            if (!alreadyApproved)
+            {
+                var before = ApprovalSnapshot(decision);
+                decision.Status = QuantitySurveyConfigurationDecisionStatus.Approved;
+                decision.ApprovalStatus = QuantitySurveyConfigurationApprovalStatus.Approved;
+                decision.EvidenceStatus = QuantitySurveyConfigurationEvidenceStatus.Verified;
+                decision.DecisionDate ??= now;
+                decision.EffectiveFrom ??= profile.EffectiveFrom;
+                decision.ApprovedById = actorId;
+                decision.ApprovedAt = now;
+                decision.ApprovalReference = AutoApprovalMarker;
+                decision.SourceLineage = AutoApprovalMarker;
+                decision.Notes = "Explicit test-only auto-approval authorized for the isolated QS UAT database.";
+                decision.UpdatedAt = now; decision.UpdatedBy = "QS UAT bootstrap"; decision.LastModifiedById = actorId;
+                db.QuantitySurveyConfigurationRevisions.Add(new QuantitySurveyConfigurationRevision
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, ProfileId = profile.Id, DecisionId = decision.Id,
+                    Action = QuantitySurveyAuditEventMap.ApproveDecision, Result = "Succeeded",
+                    CorrelationId = $"qs-uat-auto-approve-{decision.DecisionKey.ToLowerInvariant()}",
+                    ActorUserId = actorId, ActorName = "QS UAT bootstrap", ActorRoles = "SuperAdmin",
+                    Reason = "Explicit test-only auto-approval authorized by the UAT owner.",
+                    BeforeJson = before, AfterJson = ApprovalSnapshot(decision),
+                    CreatedAt = now, CreatedBy = "QS UAT bootstrap", CreatedById = actorId
+                });
+            }
+        }
+
+        await db.SaveChangesAsync(token);
+        await configurationOwner.PublishProfileAsync(profileId, new QuantitySurveyLifecycleRequest
+        {
+            RowVersion = Convert.ToBase64String(profile.RowVersion),
+            Reason = "Explicit test-only auto-publication authorized by the UAT operator: " + AutoApprovalMarker
+        }, $"qs-uat-auto-publish-{profile.Id:N}", token);
+        await transaction.CommitAsync(token);
+    });
+
+    internal static void ValidateAutoApprovalDecisions(IReadOnlyList<QuantitySurveyConfigurationDecision> decisions,
+        Guid actorId, IReadOnlyDictionary<string, IReadOnlyList<QuantitySurveyLookupOptionDto>> lookups)
+    {
+        var required = QuantitySurveyConfigurationDecisionRegistry.Definitions.Select(d => d.DecisionKey).ToHashSet();
+        if (decisions.Count != required.Count || !required.SetEquals(decisions.Select(d => d.DecisionKey)))
+            throw new InvalidOperationException("QS_UAT_AUTO_APPROVAL_DECISION_COUNT: the seeded profile must contain all 17 decisions exactly once.");
+        foreach (var decision in decisions)
+        {
+            if (decision.SourceLineage != SeedMarker || decision.LastModifiedById != actorId ||
+                decision.Status != QuantitySurveyConfigurationDecisionStatus.Draft ||
+                decision.ApprovalStatus != QuantitySurveyConfigurationApprovalStatus.Pending ||
+                decision.ApprovedById.HasValue || decision.EvidenceStatus != QuantitySurveyConfigurationEvidenceStatus.Missing)
+                throw new InvalidOperationException($"QS_UAT_AUTO_APPROVAL_USER_OWNED: {decision.DecisionKey} was changed or reviewed and was preserved.");
+            var value = QuantitySurveyConfigurationDecisionRegistry.ParseValue(decision.ValueJson);
+            var validation = QuantitySurveyConfigurationDecisionRegistry.Validate(decision.DecisionKey, decision.SchemaVersion, value);
+            if (!validation.IsValid)
+                throw new InvalidOperationException($"QS_UAT_AUTO_APPROVAL_INVALID_VALUE: {decision.DecisionKey} is not valid.");
+            foreach (var field in QuantitySurveyConfigurationDecisionRegistry.GetRequired(decision.DecisionKey).Fields.Where(f => f.LookupSource != null))
+            {
+                if (!value.TryGetProperty(field.Name, out var selected)) continue;
+                var allowed = lookups.TryGetValue(field.LookupSource!, out var options)
+                    ? options.Where(o => field.LookupGroup == null || string.Equals(o.Group, field.LookupGroup, StringComparison.OrdinalIgnoreCase))
+                        .Select(o => o.Value).ToHashSet(StringComparer.OrdinalIgnoreCase) : [];
+                var values = selected.ValueKind == JsonValueKind.Array ? selected.EnumerateArray().Select(v => v.GetString() ?? "") : [selected.GetString() ?? ""];
+                if (values.Any(v => !allowed.Contains(v)))
+                    throw new InvalidOperationException($"QS_UAT_AUTO_APPROVAL_STALE_SELECTION: {decision.DecisionKey} contains an inactive, missing or cross-tenant selection.");
+            }
+        }
+    }
+
+    private static string ApprovalSnapshot(QuantitySurveyConfigurationDecision decision) => JsonSerializer.Serialize(new
+    {
+        decision.DecisionKey, decision.Status, decision.ApprovalStatus, decision.EvidenceStatus,
+        Value = QuantitySurveyConfigurationDecisionRegistry.ParseValue(decision.ValueJson), decision.ApprovedById,
+        decision.ApprovedAt, decision.ApprovalReference, decision.SourceLineage, decision.EffectiveFrom, decision.EffectiveTo
+    });
 
     internal static void ValidateTarget(string expected, string actual, bool testMode)
     {
-        if (!testMode || string.IsNullOrWhiteSpace(expected) || !string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase) ||
-            new[] { "master", "model", "msdb", "tempdb" }.Contains(actual, StringComparer.OrdinalIgnoreCase))
-            throw new InvalidOperationException("QS UAT preparation requires explicit test mode and the exact non-system target database.");
+        QsUatActorSeeder.ValidateTarget(actual, expected, "Test", testMode);
     }
 
     internal static void ValidateActors(IReadOnlyDictionary<string, Guid> users)

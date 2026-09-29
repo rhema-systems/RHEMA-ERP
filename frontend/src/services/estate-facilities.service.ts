@@ -199,6 +199,15 @@ export interface FacilitiesArInvoice {
   notes?: string | null;
 }
 
+type FinanceArInvoiceResponse = Omit<FacilitiesArInvoice, 'customerId'> & {
+  businessPartnerId: string;
+};
+
+function facilitiesInvoice(invoice: FinanceArInvoiceResponse): FacilitiesArInvoice {
+  const { businessPartnerId, ...details } = invoice;
+  return { ...details, customerId: businessPartnerId };
+}
+
 export interface CreateFacilitiesArPaymentRequest {
   customerId: string;
   paymentDate: string;
@@ -419,9 +428,10 @@ class EstateFacilitiesService {
   }
 
   async releaseArInvoice(id: string, propertyUnit: string): Promise<FacilitiesArInvoice> {
-    return apiService.post<FacilitiesArInvoice>(
+    const invoice = await apiService.post<FinanceArInvoiceResponse>(
       `/estate/facilities/ar-billing/invoices/${id}/release`, { propertyUnit }
     );
+    return facilitiesInvoice(invoice);
   }
 
   async searchDutyStaff(search: string): Promise<FacilitiesStaffOption[]> {
@@ -508,14 +518,16 @@ class EstateFacilitiesService {
   async createArInvoice(
     request: CreateFacilitiesArInvoiceRequest
   ): Promise<FacilitiesArInvoice> {
-    return apiService.post<FacilitiesArInvoice>(
+    const { customerId, propertyUnit, ...details } = request;
+    const invoice = await apiService.post<FinanceArInvoiceResponse>(
       '/estate/facilities/ar-billing/invoices',
       {
-        invoice: request,
+        invoice: { ...details, businessPartnerId: customerId },
         sourceRecordReference: request.reference || null,
-        propertyUnit: request.propertyUnit,
+        propertyUnit,
       }
     );
+    return facilitiesInvoice(invoice);
   }
 
   async createArPayment(

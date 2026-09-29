@@ -39,7 +39,7 @@ public sealed class FacilitiesArBillingControllerTests
 
         var result = await controller.CreateInvoice(
             new EstateFacilitiesArInvoiceRequest(
-                new InvoiceCreateDto { CustomerId = Guid.NewGuid() }, null, "UNIT-001"),
+                new InvoiceCreateDto { BusinessPartnerId = Guid.NewGuid() }, null, "UNIT-001"),
             CancellationToken.None);
 
         result.Result.Should().BeOfType<BadRequestObjectResult>();
@@ -60,13 +60,13 @@ public sealed class FacilitiesArBillingControllerTests
             tenantId);
         var invoice = new InvoiceDto
         {
-            Id = Guid.NewGuid(), InvoiceNumber = "FAC-001", CustomerId = Guid.NewGuid(),
+            Id = Guid.NewGuid(), InvoiceNumber = "FAC-001", BusinessPartnerId = Guid.NewGuid(),
             CustomerName = "Customer", TotalAmount = 100m, CurrencyCode = "GHS", Status = "Draft"
         };
         db.EstateManagedAssets.Add(new EstateManagedAsset
         {
             TenantId = tenantId, AssetCode = "UNIT-001", ProjectUnitCode = "APT-101", Name = "Unit 1",
-            CustomerBusinessPartnerId = invoice.CustomerId
+            CustomerBusinessPartnerId = invoice.BusinessPartnerId
         });
         await db.SaveChangesAsync();
         var invoices = new Mock<IInvoiceService>();
@@ -85,7 +85,7 @@ public sealed class FacilitiesArBillingControllerTests
                     It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new InvoiceDto
                 {
-                    Id = invoice.Id, InvoiceNumber = invoice.InvoiceNumber, CustomerId = invoice.CustomerId,
+                    Id = invoice.Id, InvoiceNumber = invoice.InvoiceNumber, BusinessPartnerId = invoice.BusinessPartnerId,
                     CustomerName = invoice.CustomerName, TotalAmount = invoice.TotalAmount,
                     CurrencyCode = invoice.CurrencyCode, Status = "Sent"
                 });
@@ -98,7 +98,7 @@ public sealed class FacilitiesArBillingControllerTests
 
         var result = await controller.CreateInvoice(
             new EstateFacilitiesArInvoiceRequest(
-                new InvoiceCreateDto { CustomerId = invoice.CustomerId, Reference = "SERVICE" },
+                new InvoiceCreateDto { BusinessPartnerId = invoice.BusinessPartnerId, Reference = "SERVICE" },
                 null, "UNIT-001"),
             CancellationToken.None);
 
@@ -134,7 +134,7 @@ public sealed class FacilitiesArBillingControllerTests
         await db.SaveChangesAsync();
         var invoice = new InvoiceDto
         {
-            Id = invoiceId, InvoiceNumber = "INV-FAC", CustomerId = customerId,
+            Id = invoiceId, InvoiceNumber = "INV-FAC", BusinessPartnerId = customerId,
             Reference = "SERVICE FAC-UNIT", Notes = "Source: Estate / Facilities -> Finance AR",
             Status = "PendingApproval"
         };
@@ -150,7 +150,7 @@ public sealed class FacilitiesArBillingControllerTests
                     It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new InvoiceDto
                 {
-                    Id = invoiceId, InvoiceNumber = invoice.InvoiceNumber, CustomerId = customerId,
+                    Id = invoiceId, InvoiceNumber = invoice.InvoiceNumber, BusinessPartnerId = customerId,
                     Status = "Sent"
                 });
         var user = new Mock<ICurrentUserService>();

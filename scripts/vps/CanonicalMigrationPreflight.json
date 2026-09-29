@@ -2,6 +2,15 @@
   "schemaVersion": 1,
   "probes": [
     {
+      "sqlFile": "HrMedicalBoardMigrationPreflight.sql",
+      "migrations": [
+        {
+          "id": "20260926143546_AddMedicalBoardCases",
+          "sourceSha256": "50FDDCC9B58480C00FA8582EF78685DDB3D00D5D4E2F9D21949BB9632E6A5689"
+        }
+      ]
+    },
+    {
       "sqlFile": "FinanceCanonicalMigrationPreflight.sql",
       "migrations": [
         {

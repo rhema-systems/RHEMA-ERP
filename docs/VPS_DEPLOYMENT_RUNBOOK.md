@@ -91,6 +91,35 @@ If only the report fails, it explicitly distinguishes that from deployment failu
 The default target remains the previously cut-over test database
 `RhemaERP_VpsTest_20260926_173800`; the report checks the actual service target.
 
+For the explicitly authorized QS UAT configuration auto-approval, run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-QsUatVps.ps1 -ExpectedDatabase 'RhemaERP_VpsTest_20260926_173800' -PrepareQsUat -AutoApproveQsUat
+```
+
+This opt-in prepares the existing controlled selections, then approves all 17
+untouched seeded QS decisions and publishes the configuration through the normal
+profile owner. It accepts only the explicitly named test database. Existing user
+edits/reviews and unresolved or inactive selections stop auto-approval. Normal
+deployment without these switches continues to require independent review.
+
+Evidence, approval revisions and publication commit together. The DMS evidence is
+a clearly labelled metadata-only system memorandum recording the operator's UAT
+authorization, with no fictitious uploaded file or human signature. Audit revisions
+retain decision values and before/after approval states. Rerunning the command
+recognizes the published UAT profile without adding duplicate evidence or approvals.
+The initializer checks the child report before printing
+`QS_CONFIGURATION|AUTO_APPROVED_TEST_ONLY`. `QsEndToEndVerified` remains false until
+the actual QS business walkthrough is performed; this switch approves configuration
+decisions only. If deployment already passed and preparation was interrupted, rerun
+`scripts\vps\Initialize-QsUat.ps1` with `-ExpectedDatabase` and `-AutoApproveQsUat`,
+then run `scripts\vps\Get-QsUatReadiness.ps1` for that same database.
+
+The reviewed Medical Board preflight also covers the newly merged HR migration.
+It checks legacy employee links and the new unique indexes; its rollback-only
+restriction on multiple cases is not imposed on an upgrade. Migration source hashes
+remain pinned, so an unreviewed source change still stops deployment.
+
 Do not run normal `-DryRun` as a prerequisite for an upgrade with pending
 migrations: it verifies the already-deployed migration parity. Normal deployment
 performs the read-only upgrade preflight itself. Run the wrapper with `-File`
