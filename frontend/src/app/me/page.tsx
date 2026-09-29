@@ -63,6 +63,7 @@ const TILE_SECTIONS: { title: string; tiles: Tile[] }[] = [
     tiles: [
       { label: 'My Leave', hint: 'Balances, requests and approvals', href: '/me/leave', icon: TreePalm },
       { label: 'My Attendance', hint: 'Punch in and out, see your month', href: '/me/attendance', icon: Clock },
+      { label: 'My Duties', hint: 'Facilities shifts, areas and checklists', href: '/me/duties', icon: ClipboardList },
       { label: 'My Payslips', hint: 'What payroll has published for you', href: '/me/payslips', icon: Banknote },
       { label: 'My Travel', hint: 'Raise and track travel requests', href: '/me/travel', icon: Plane },
       { label: 'My Appraisals', hint: 'Reviews and self-evaluations', href: '/me/performance/appraisals', icon: Target },

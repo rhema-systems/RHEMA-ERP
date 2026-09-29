@@ -107,7 +107,7 @@ export default function LegalProceduresPage() {
         <div className="space-y-2">
           <div>
             <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">
-              Legal Workspaces
+              Legal Matters
             </h1>
           </div>
         </div>

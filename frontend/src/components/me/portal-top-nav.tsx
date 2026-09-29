@@ -75,6 +75,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'Leave Planner', href: '/me/leave/planner' },
       { label: 'My Encashments', href: '/me/leave/encashments' },
       { label: 'My Attendance', href: '/me/attendance' },
+      { label: 'My Duties', href: '/me/duties' },
       // Slice 7: travel lives in the portal.
       { label: 'My Travel', href: '/me/travel' },
       // Slice 10: the read-only payslip adapter over payroll's published snapshots.

@@ -3233,7 +3233,7 @@ export const navigationItems: NavItem[] = [
     accessMode: 'any',
     children: [
       { title: 'Dashboard', href: '/legal/dashboard', icon: BarChart3 },
-      { title: 'Procedures', href: '/legal', icon: ClipboardList },
+      { title: 'Legal Matters', href: '/legal', icon: ClipboardList },
       {
         title: 'Property Agreement Reviews',
         href: '/legal/LegalPropertyAgreementReview',

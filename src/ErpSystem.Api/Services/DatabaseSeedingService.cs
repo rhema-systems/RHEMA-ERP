@@ -8193,17 +8193,33 @@ namespace ErpSystem.Web.Services
 
         public async Task SeedEstateAcquisitionLandBankParcelsAsync()
         {
-            var tenant = await _context.Tenants
-                .FirstOrDefaultAsync(item => item.Code == "DEFAULT" && !item.IsDeleted)
-                ?? await _context.Tenants
-                    .FirstOrDefaultAsync(item => item.Status == TenantStatus.Active && !item.IsDeleted);
-            if (tenant is null)
+            var tenants = await _context.Tenants
+                .Where(item =>
+                    !item.IsDeleted
+                    && (item.Code == "DEFAULT" || item.Status == TenantStatus.Active))
+                .OrderByDescending(item => item.Code == "DEFAULT")
+                .ThenBy(item => item.Name)
+                .ToListAsync();
+            if (tenants.Count == 0)
             {
-                _logger.LogWarning("Skipping Estate acquisition land bank parcel seeding because no tenant exists.");
+                _logger.LogWarning("Skipping Estate acquisition land bank parcel seeding because no active tenant exists.");
                 return;
             }
 
-            await EnsureEstateAcquisitionLandBankParcelsSeededAsync(tenant.Id);
+            var seededTenantIds = new HashSet<Guid>();
+            foreach (var tenant in tenants)
+            {
+                if (!seededTenantIds.Add(tenant.Id))
+                {
+                    continue;
+                }
+
+                await EnsureEstateAcquisitionLandBankParcelsSeededAsync(tenant.Id);
+            }
+
+            _logger.LogInformation(
+                "Estate acquisition land bank parcel seeding ensured for {TenantCount} tenant(s).",
+                seededTenantIds.Count);
         }
 
         private async Task EnsureEstateAcquisitionLandBankParcelsSeededAsync(Guid tenantId)

@@ -139,7 +139,12 @@ export function PropertyUnitRegister() {
   const [importOpen, setImportOpen] = React.useState(false);
 
   React.useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('import') === 'land') setImportOpen(true);
+    const importType = new URLSearchParams(window.location.search).get(
+      'import'
+    );
+    if (importType === 'land' || importType === 'property') {
+      setImportOpen(true);
+    }
   }, []);
   const {
     assets,
@@ -177,26 +182,26 @@ export function PropertyUnitRegister() {
   ) => {
     try {
       setSendingListingId(asset.id);
-      if (asset.externalListingType === 'None') {
-        const listingType =
-          asset.isAvailableForSale
-              ? 'Sale'
-              : 'Rent';
-        await estateLandManagementService.updateExternalListing(asset.id, {
-          isPublishedToExternalPortal: false,
-          externalListingType: listingType,
-          externalListingStatus: 'Draft',
-          externalListingPrice: null,
-          externalSalePrice: null,
-          externalMonthlyRent: null,
-          externalLeaseTermMonths: null,
-          externalListingCurrency: asset.currency || 'GHS',
-          externalListingNotes: null,
-        });
-        toast.success(
-          'Project-handoff property sent to Portal Listings for commercial setup.'
-        );
+      if (asset.externalListingType !== 'None') {
+        toast.info('This property is already in Portal Listings.');
+        return;
       }
+
+      const listingType = asset.isAvailableForSale ? 'Sale' : 'Rent';
+      await estateLandManagementService.updateExternalListing(asset.id, {
+        isPublishedToExternalPortal: false,
+        externalListingType: listingType,
+        externalListingStatus: 'Draft',
+        externalListingPrice: null,
+        externalSalePrice: null,
+        externalMonthlyRent: null,
+        externalLeaseTermMonths: null,
+        externalListingCurrency: asset.currency || 'GHS',
+        externalListingNotes: null,
+      });
+      toast.success(
+        'Property sent to Portal Listings for commercial setup.'
+      );
       router.push(
         `/estate/property-management/listings?assetId=${encodeURIComponent(asset.id)}`
       );
@@ -205,6 +210,33 @@ export function PropertyUnitRegister() {
         error instanceof Error
           ? error.message
           : 'Unable to send the property to Portal Listings.'
+      );
+    } finally {
+      setSendingListingId(null);
+    }
+  };
+
+  const recallFromPortalListings = async (asset: EstateManagedAsset) => {
+    try {
+      setSendingListingId(asset.id);
+      await estateLandManagementService.updateExternalListing(asset.id, {
+        isPublishedToExternalPortal: false,
+        externalListingType: 'None',
+        externalListingStatus: 'Draft',
+        externalListingPrice: null,
+        externalSalePrice: null,
+        externalMonthlyRent: null,
+        externalLeaseTermMonths: null,
+        externalListingCurrency: asset.currency || 'GHS',
+        externalListingNotes: null,
+      });
+      toast.success('Property recalled from Portal Listings.');
+      await loadAssets();
+    } catch (error: unknown) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Unable to recall the property from Portal Listings.'
       );
     } finally {
       setSendingListingId(null);
@@ -257,7 +289,7 @@ export function PropertyUnitRegister() {
             </div>
             <div className="flex items-center gap-2">
               <Button type="button" onClick={() => setImportOpen(true)}>
-                <Upload className="mr-2 h-4 w-4" /> Import Excel
+                <Upload className="mr-2 h-4 w-4" /> Import Property
               </Button>
               <Badge variant="outline">Estates Records</Badge>
             </div>
@@ -359,7 +391,7 @@ export function PropertyUnitRegister() {
                     <TableHead>File reference</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Source</TableHead>
-                    <TableHead className="text-right">Routing</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -457,27 +489,56 @@ export function PropertyUnitRegister() {
                             </div>
                           ) : null}
                         </TableCell>
-                        <TableCell className="text-right">
-                          {isPortalListing || canSendProjectProperty ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              disabled={sendingListingId === asset.id}
-                              onClick={() =>
-                                void sendProjectPropertyToPortalListings(asset)
-                              }
-                            >
-                              {sendingListingId === asset.id ? (
-                                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                              ) : (
+                        <TableCell>
+                          {isPortalListing ? (
+                            <div className="flex min-w-56 justify-end gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={sendingListingId === asset.id}
+                                onClick={() =>
+                                  router.push(
+                                    `/estate/property-management/listings?assetId=${encodeURIComponent(asset.id)}`
+                                  )
+                                }
+                              >
                                 <Globe2 className="mr-2 h-3.5 w-3.5" />
-                              )}
-                              {isPortalListing
-                                ? 'View listing'
-                                : 'Send to portal'}
-                            </Button>
+                                Open listing
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={sendingListingId === asset.id}
+                                onClick={() =>
+                                  void recallFromPortalListings(asset)
+                                }
+                              >
+                                {sendingListingId === asset.id ? (
+                                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                                ) : null}
+                                Recall
+                              </Button>
+                            </div>
+                          ) : canSendProjectProperty ? (
+                            <div className="flex min-w-44 justify-end">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={sendingListingId === asset.id}
+                                onClick={() =>
+                                  void sendProjectPropertyToPortalListings(asset)
+                                }
+                              >
+                                {sendingListingId === asset.id ? (
+                                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Globe2 className="mr-2 h-3.5 w-3.5" />
+                                )}
+                                Send to portal
+                              </Button>
+                            </div>
                           ) : (
-                            <span className="px-3 text-muted-foreground">
+                            <span className="block min-w-32 px-3 text-right text-muted-foreground">
                               —
                             </span>
                           )}

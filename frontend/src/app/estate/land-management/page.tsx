@@ -16,8 +16,9 @@ import {
   Link2,
   Loader2,
   MapPin,
-  Upload,
+  Plus,
   Search,
+  Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -45,6 +46,7 @@ import {
   type LandAcquisitionItem,
 } from '@/services/estate-acquisition.service';
 import DemarcateLandDialog from './DemarcateLandDialog';
+import ExistingLandDialog from './ExistingLandDialog';
 import GisAssetLinkDialog from './GisAssetLinkDialog';
 import LandDocumentsPanel from './LandDocumentsPanel';
 
@@ -195,6 +197,7 @@ export default function EstateLandManagementPage() {
     React.useState<EstateManagedAsset | null>(null);
   const [gisLinkAsset, setGisLinkAsset] =
     React.useState<EstateManagedAsset | null>(null);
+  const [existingLandOpen, setExistingLandOpen] = React.useState(false);
   const [markingReadyKey, setMarkingReadyKey] = React.useState<string | null>(
     null
   );
@@ -411,6 +414,10 @@ export default function EstateLandManagementPage() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button type="button" onClick={() => setExistingLandOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add New Land
+          </Button>
           <Button asChild variant="outline">
             <Link href="/estate/gis">
               <Globe2 className="mr-2 h-4 w-4" />
@@ -1025,6 +1032,19 @@ export default function EstateLandManagementPage() {
           const assetId = gisLinkAsset?.id;
           await loadLandRecords(search);
           if (assetId) setSelectedKey(`asset:${assetId}`);
+        }}
+      />
+      <ExistingLandDialog
+        open={existingLandOpen}
+        onOpenChange={setExistingLandOpen}
+        onCreated={async (asset) => {
+          await loadLandRecords(search);
+          setAssets((current) => [
+            asset,
+            ...current.filter((item) => item.id !== asset.id),
+          ]);
+          setRecordPage(1);
+          setSelectedKey(`asset:${asset.id}`);
         }}
       />
     </div>

@@ -32,6 +32,9 @@ public class LandAcquisitionsController : ControllerBase
     private const string AcquiringOwnerName = "TDC";
     private const string WorkflowEntityType = "LandAcquisition";
     private const double OwnershipCoordinateToleranceFeet = 5d;
+    private const int MaxWorkspaceFields = 256;
+    private const int MaxWorkspaceKeyLength = 100;
+    private const int MaxWorkspacePayloadBytes = 200_000;
     private static readonly JsonSerializerOptions WorkflowStepJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -213,6 +216,24 @@ public class LandAcquisitionsController : ControllerBase
         if (request.ProcedureId < 0 || request.ProcedureId > 16)
         {
             return BadRequest("Invalid acquisition procedure.");
+        }
+
+        var stageDefinition = StageDefinitions.First(stage => stage.Order == request.ProcedureId);
+        if (!string.IsNullOrWhiteSpace(request.WorkspaceKind) &&
+            !string.Equals(request.WorkspaceKind, stageDefinition.WorkspaceKind, StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("The workspace kind does not match the acquisition procedure.");
+        }
+
+        if (request.Values is null)
+        {
+            return BadRequest("Workspace values are required.");
+        }
+
+        var workspacePayloadProblem = ValidateWorkspacePayload(request.Values);
+        if (workspacePayloadProblem != null)
+        {
+            return BadRequest(workspacePayloadProblem);
         }
 
         var tenantId = GetTenantId();
@@ -662,6 +683,11 @@ public class LandAcquisitionsController : ControllerBase
             return NotFound(new { success = false, message = "Land acquisition document was not found." });
         }
 
+        if (!await CanViewStageAsync(acquisition, (int)document.Procedure, GetUserId(), IsWorkflowAdministrator()))
+        {
+            return Forbid();
+        }
+
         var stream = await _fileStorageService.DownloadFileAsync(document.FilePath, document.Id);
         return File(stream, ContentTypeFor(document.FileName), document.FileName);
     }
@@ -679,15 +705,15 @@ public class LandAcquisitionsController : ControllerBase
             return NotFound("Land acquisition was not found.");
         }
 
-        if (!await CanAccessStageAsync(acquisition, acquisition.StageOrder, GetUserId(), IsWorkflowAdministrator()))
-        {
-            return Forbid();
-        }
-
         var document = acquisition.Documents.FirstOrDefault(item => item.Id == documentId && !item.IsDeleted);
         if (document == null)
         {
             return NotFound(new { success = false, message = "Land acquisition document was not found." });
+        }
+
+        if (!await CanViewStageAsync(acquisition, (int)document.Procedure, GetUserId(), IsWorkflowAdministrator()))
+        {
+            return Forbid();
         }
 
         var contentType = ContentTypeFor(document.FileName);
@@ -1171,6 +1197,24 @@ public class LandAcquisitionsController : ControllerBase
             .Include(item => item.StatutoryConsent)
             .Include(item => item.StampDutyAssessment)
             .Include(item => item.StampDutyPayment);
+
+    private static string? ValidateWorkspacePayload(Dictionary<string, object?> values)
+    {
+        if (values.Count > MaxWorkspaceFields)
+        {
+            return $"Workspace payload cannot contain more than {MaxWorkspaceFields} fields.";
+        }
+
+        if (values.Keys.Any(key => string.IsNullOrWhiteSpace(key) || key.Length > MaxWorkspaceKeyLength))
+        {
+            return $"Workspace field keys are required and cannot exceed {MaxWorkspaceKeyLength} characters.";
+        }
+
+        var payloadSize = JsonSerializer.SerializeToUtf8Bytes(values).Length;
+        return payloadSize > MaxWorkspacePayloadBytes
+            ? $"Workspace payload cannot exceed {MaxWorkspacePayloadBytes:N0} bytes."
+            : null;
+    }
 
     private void ApplyWorkspace(LandAcquisition acquisition, LandAcquisitionWorkspaceRequest request)
     {

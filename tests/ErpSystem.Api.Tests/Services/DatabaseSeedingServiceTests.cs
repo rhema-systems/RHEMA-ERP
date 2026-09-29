@@ -381,6 +381,53 @@ public partial class DatabaseSeedingServiceTests
     }
 
     [Fact]
+    public async Task SeedEstateAcquisitionLandBankParcelsAsync_ShouldSeedEveryActiveTenant()
+    {
+        await using var context = CreateContext();
+        var tenants = new[]
+        {
+            new Tenant
+            {
+                Id = Guid.NewGuid(),
+                Name = "Default Estate Tenant",
+                Code = "DEFAULT",
+                Status = TenantStatus.Active,
+                ContactEmail = "default-estate@test.local",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "Tests"
+            },
+            new Tenant
+            {
+                Id = Guid.NewGuid(),
+                Name = "Live Estate Tenant",
+                Code = "LIVE",
+                Status = TenantStatus.Active,
+                ContactEmail = "live-estate@test.local",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "Tests"
+            }
+        };
+        context.Tenants.AddRange(tenants);
+        await context.SaveChangesAsync();
+
+        var service = new DatabaseSeedingService(
+            context,
+            CreateUserManager(),
+            CreateRoleManager(),
+            NullLogger<DatabaseSeedingService>.Instance,
+            CreateEnvironment());
+
+        await service.SeedEstateAcquisitionLandBankParcelsAsync();
+
+        foreach (var tenant in tenants)
+        {
+            (await context.EstateManagedAssets.CountAsync(item => item.TenantId == tenant.Id)).Should().Be(12);
+            (await context.LandAcquisitions.CountAsync(item => item.TenantId == tenant.Id)).Should().Be(12);
+            (await context.EstateLandDemarcations.CountAsync(item => item.TenantId == tenant.Id)).Should().Be(28);
+        }
+    }
+
+    [Fact]
     public async Task SeedDefaultTenantModulesAsync_ShouldEnableProjectsForQsAndCivilReports()
     {
         await using var context = CreateContext();
