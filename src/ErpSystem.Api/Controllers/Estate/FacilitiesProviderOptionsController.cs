@@ -79,14 +79,9 @@ public sealed class FacilitiesProviderOptionsController(
         if (!providerExists)
             return NotFound();
 
-        var supplierIds = await db.ApSupplierIdentityLinks.AsNoTracking()
-            .Where(link => link.TenantId == tenantId && !link.IsDeleted
-                && link.BusinessPartnerId == id && link.Supplier.TenantId == tenantId)
-            .Select(link => link.SupplierId)
-            .ToListAsync(cancellationToken);
         var invoices = await db.VendorInvoices.AsNoTracking()
             .Where(invoice => invoice.TenantId == tenantId && !invoice.IsDeleted
-                && supplierIds.Contains(invoice.SupplierId))
+                && invoice.BusinessPartnerId == id)
             .OrderByDescending(invoice => invoice.InvoiceDate)
             .ThenByDescending(invoice => invoice.CreatedAt)
             .Select(invoice => new

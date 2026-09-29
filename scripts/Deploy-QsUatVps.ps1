@@ -5,7 +5,8 @@ param(
     [ValidatePattern('^[0-9a-fA-F]{7,40}$')]
     [string]$ExpectedCommit,
     [uri]$PublicBaseUrl='https://63.141.230.56',
-    [switch]$PrepareQsUat
+    [switch]$PrepareQsUat,
+    [switch]$AutoApproveQsUat
 )
 # Run this file on the VPS release checkout after updating master. The existing
 # deployer performs its own preflight, backups, migration and release checks.
@@ -15,6 +16,10 @@ $deploymentPassed=$false
 $preparationRunning=$false
 $locationPushed=$false
 try {
+    if($AutoApproveQsUat -and !$PrepareQsUat){throw 'AutoApproveQsUat requires PrepareQsUat.'}
+    if($PrepareQsUat -and $ExpectedDatabase -cnotmatch '^RhemaERP_VpsTest_[A-Za-z0-9_]+$') {
+        throw 'QS preparation requires an explicitly selected RhemaERP_VpsTest database.'
+    }
     if(-not $PublicBaseUrl.IsAbsoluteUri -or $PublicBaseUrl.Scheme -notin @('https','http') -or
         $PublicBaseUrl.UserInfo -or $PublicBaseUrl.Query -or $PublicBaseUrl.Fragment -or $PublicBaseUrl.AbsolutePath -ne '/') {
         throw 'Public URL must be an HTTP(S) origin.'
@@ -34,8 +39,10 @@ try {
 
     if($PrepareQsUat) {
         $preparationRunning=$true
-        & $powershell -NoProfile -ExecutionPolicy Bypass `
-            -File (Join-Path $PSScriptRoot 'vps\Initialize-QsUat.ps1') -ExpectedDatabase $ExpectedDatabase
+        $prepareArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',
+            (Join-Path $PSScriptRoot 'vps\Initialize-QsUat.ps1'),'-ExpectedDatabase',$ExpectedDatabase)
+        if($AutoApproveQsUat){$prepareArguments+='-AutoApproveQsUat'}
+        & $powershell @prepareArguments
         if($LASTEXITCODE -ne 0){throw 'QS test preparation failed; retain its evidence before retrying.'}
         $preparationRunning=$false
     }
