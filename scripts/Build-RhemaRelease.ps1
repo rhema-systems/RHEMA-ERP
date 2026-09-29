@@ -373,8 +373,8 @@ try {
             'public/syncfusion/ej2-pdfviewer-lib/pdfium.wasm',
             'node_modules/next/package.json', 'package.json', 'package-lock.json',
             'next.config.js')) {
-        Assert-True (@($frontendEntries | Where-Object { $_.EndsWith(
-            $expectedEntry, [StringComparison]::OrdinalIgnoreCase) }).Count -eq 1) `
+        Assert-True (@($frontendEntries | Where-Object { [string]::Equals(
+            $_, $expectedEntry, [StringComparison]::OrdinalIgnoreCase) }).Count -eq 1) `
             "Frontend ZIP is missing or duplicates $expectedEntry."
     }
     Assert-True (@($frontendEntries | Where-Object { $_ -match '(^|/)\.next/cache/' }).Count -eq 0) `
