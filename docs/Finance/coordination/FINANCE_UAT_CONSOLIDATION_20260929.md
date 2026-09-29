@@ -43,13 +43,23 @@ Postflight confirmed all three migration-history rows and expected columns. Exis
 - API build: 0 warnings, 0 errors before the final integration-fixture correction; the subsequent test build completed with no errors and repository-existing warnings.
 - UAT migration preflight, deployment, schema postflight, and database consistency check: passed.
 
+## Authenticated browser smoke — 2026-09-29
+
+- Replaced the stale frontend previously listening on `http://localhost:3002` with this consolidated branch and connected it to the UAT API at `http://127.0.0.1:5012/api`; the existing authenticated browser session remained intact.
+- Verified the active Default-tenant session is `System Administrator` with the `SuperAdmin` role.
+- Fixed-asset categories render the Maintenance column, and the create form exposes `Requires maintenance` defaulted off with the read-only-feed explanation.
+- AP and AR invoice forms load governed currency, tax, account, dimension, discount, readiness, and totals controls from the UAT API. The configured default tax treatment is present on the initial line and on an added AP line; the AR initial line also inherits it.
+- The Finance Approval Workbench, governed opening balances, recurring journals, journal batches, budget reconciliation, bank accounts, currency master, and tax-definition register loaded without an authentication or API error.
+- The WHT-SERV detail shows the configured 7.5% rate and GHS 2,000 threshold. Its edit dialog is internally scrollable and keeps Cancel/Update actions visible; it was closed without saving.
+- No invoice, journal, approval, posting, reversal, tax, currency, budget, bank, or asset record was created or changed during this read-only smoke.
+- The UAT tenant currently has no fixed-asset categories in the signed-in Default-tenant view and no recurring journal or bank-account records, so populated-list behavior was not exercised in this browser pass.
+
 ## Remaining UAT/cutover gates
 
 These are not code defects in this package, but still require operational completion before production certification:
 
-- Run authenticated browser smoke tests with separate creator/importer, approver, and poster/reverser users.
+- Complete maker/checker browser evidence with separate creator/importer, approver, and poster/reverser users. The SuperAdmin smoke above verifies integrated loading but cannot prove separation of duties across identities.
 - Rehearse deployment and rollback against a production-shaped backup and obtain accountant/security sign-off.
 - Resolve or formally waive the unavailable ClamAV dependency that causes readiness health to return 503.
 - Resolve or accept the pre-existing repository-wide frontend TypeScript baseline outside the changed Finance files.
 - Review tenant-specific role grants and close or formally accept the documented Finance security limitation.
-
