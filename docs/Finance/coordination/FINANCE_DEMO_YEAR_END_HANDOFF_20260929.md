@@ -1,52 +1,58 @@
-# D05/D06 year-end book close handoff — 2026-09-29
+# D05/D06 year-end V2 correction handoff — 2026-09-29
 
 ## Scope and base
 
-- Branch: codex/finance-demo-year-end-20260929
-- Exact base: 52ce3a71595ba18d26d40658c1a368743c44a853
-- Scope: Finance year-end service, its internal posting-engine authority, fiscal-year endpoint/client contracts, new book-close cycle persistence, deletion guard and focused tests.
-- No deployment, push, live database write or migration application performed.
+- Branch: `codex/finance-demo-year-end-v2-20260929`
+- Exact base: `acba892d48568231745736066a375456816b6fda`
+- Accounting-book authority: `FINANCE_ACCOUNTING_BOOK_MODEL_V2_20260921.md`
+- Owned implementation: year-end period-authority capture in `GeneralLedgerService`, the server-only year-end posting leaf in `FinancePostingEngine`, the shared-period reopen sequencing guard in `FiscalPeriodService`, focused year-end/period-reopen tests, and this handoff.
+- No schema, model snapshot, migration, database, deployment, push, or remote change is part of this correction.
 
-## Implementation
+## Corrected V2 authority
 
-Explicit tenant/book selection is required; UI defaults only to the real active primary/default book. Nominal balances are filtered by AccountingBookId and checked against the selected book's functional currency. Each independently approved book-period closure is captured in the immutable cycle. Year-end postings use a validated server-only cycle entry point, never a client replication-suppression flag; ordinary primary replication and the ordinary direct-parallel prohibition remain in place.
+Tenant `FiscalPeriod` is the sole posting-calendar and period-close authority. Year-end no longer reads or requires `AccountingBookPeriod`; zero legacy book-period rows is the normal supported state, and any retained legacy rows are irrelevant to the decision.
 
-The SQL Server path wraps cycle creation, posting, balance updates and cycle completion in one serializable transaction with the same tenant posting-representation application lock as ordinary posting. Closing is idempotent by tenant/key and frozen request identity. Reopen targets an exact cycle and original posting evidence, uses its original book/currency and native line amounts, appends reversal evidence, and leaves period reopening to the existing approval workflow. Reclose requires a new key and creates a new cycle.
+Every non-deleted tenant fiscal period must cover the fiscal year exactly once without gaps or overlaps and must be consistently closed and unlocked (`PeriodStatus == Closed`, `IsClosed`, not `IsOpen`, not `IsLocked`). The close must retain the real `FiscalPeriodService` lifecycle evidence:
 
-Legacy fiscal-year-wide closes are preserved and fail closed pending a separately approved book-authority reconciliation. New book closes do not overwrite global FiscalYear.IsClosed or its legacy journal fields. Fiscal-year deletion now checks cycle evidence even for a no-activity close.
+- exactly one current closed `FinanceCloseCycle` for the period;
+- exactly one active, non-superseded `FinanceCloseCertification` for that cycle;
+- signed preparation and review/approval timestamps;
+- distinct preparer and approver identities;
+- reviewer and approver identity/time consistency;
+- close-cycle preparation/close timestamps matching the certification; and
+- fiscal-period closer matching the certification approver.
 
-Coordinator review correction: the shared internal YearEndClosingPlan closes each account + historical FinanceDimensionSetId + SegmentString bucket separately. Retained earnings is deliberately split by the same coding buckets, preserving dimension-level balancing instead of aggregating into an uncoded equity line. The posting leaf independently derives and compares the full line plan; only that exact plan can reuse the original frozen snapshot (or immutable historical set for legacy lines). Current dimension defaults, renamed master data and current activity flags do not recode historical closing balances. Ordinary posting dimension validation is unchanged. Reversals retain the resulting exact closing-line coding.
+The year-end book cycle freezes a deterministic JSON snapshot of those exact tenant-period and maker-checker fields. The server-only posting leaf independently re-derives the snapshot inside the same serializable close/reopen transaction and requires exact equality. This prevents a forged leaf call or changed period/certification evidence from using the closed-period bypass.
 
-## Migration and coordinator-owned snapshot
+The existing per-book year-end behavior remains unchanged: each exact book has its own immutable close cycle, nominal balances and currency are book-scoped, ordinary Primary replication is suppressed only for the bounded year-end leaf, and reopening reverses the exact original close journal with its original native amounts, coding, dimensions, and journal lineage. Locked or legacy globally closed fiscal years remain fail-closed.
 
-Migration 20260930000100_YearEndBookCloseCycles is hand-authored and UNAPPLIED. Root owns ApplicationDbContextModelSnapshot.cs, which this branch deliberately does not edit.
+A shared tenant period cannot be reopened while any non-reopened book-year close cycle remains for the same tenant and fiscal year. The real period-reopen impact validation fingerprints those deterministically ordered retained cycles and instructs Finance to reopen every affected book-year first. Only after those book reversals are complete may the shared period certificate be superseded. Cycles belonging to another tenant are excluded.
 
-Snapshot integration must add:
+## Preserved accounting behavior
 
-- YearEndBookCloseCycle entity and all inherited TenantEntity columns, matching the entity and migration.
-- FiscalYear alternate key (TenantId, Id).
-- Cycle composite foreign keys to FiscalYear (TenantId, Id), AccountingBook (TenantId, Id, Code), retained earnings Account (TenantId, Id), and closing/reversal JournalEntry (TenantId, Id, AccountingBookId); restricted deletes.
-- Unique tenant/year/book/cycle number and tenant/idempotency key indexes; unique tenant/year/book filtered to Status IN ('Closing', 'Closed').
-- RowVersion concurrency token, column lengths/decimal type, four check constraints and trigger metadata TR_YearEndBookCloseCycles_ImmutableEvidence.
-- Model/table configuration is in ApplicationDbContext.cs and is the exact source of truth for regeneration.
+The shared internal `YearEndClosingPlan` still closes each account plus historical `FinanceDimensionSetId` and `SegmentString` bucket separately. Retained earnings is split across the same buckets, preserving dimension-level balance. The posting leaf independently re-derives the full plan. Current dimension defaults, renamed master data, and current active flags do not recode frozen historical balances.
 
-The migration adds the immutable-evidence trigger and fails downgrade if any evidence exists. It does not synthesize book-period approvals or convert legacy close history.
+## Focused regression intent
 
-## Verification checkpoint
+`FiscalYearCloseTests` now proves:
 
-- PASS: git diff --check (line-ending conversion warnings only).
-- PASS: TypeScript/TSX syntax transpilation for all four changed frontend files.
-- PASS: existing frontend ESLint configuration over those four files: zero errors, zero warnings.
-- Initial cold focused build compiled Core/Data/API but did not execute tests. Test compilation failed on one nullable-Guid assertion (corrected) and migration class absence from the build's file list (file was authored after initial evaluation began; it is normally included by Data's default compile glob).
-- Incremental focused rerun is queued after other Finance workers and coordinator WHT; no passing runtime-test result is claimed at this checkpoint.
-- Full client typecheck/browser UAT, SQL Server rollback/concurrent-close tests, trigger execution, migration replay and generated snapshot diff are not yet verified.
+- BASE, Parallel, and Delta book isolation and exact functional currencies;
+- zero `AccountingBookPeriod` rows can close successfully;
+- deliberately inconsistent legacy book-period rows are ignored;
+- open, missing-coverage, locked, inconsistent, missing-evidence, and self-approved tenant fiscal-period states fail closed;
+- a governed tenant-period reopen supersedes cycle N/certificate N and the subsequent year-end capture uses only current reclose cycle N+1;
+- a real tenant-period reopen request is blocked by same-tenant/year active book-year cycles, succeeds after they are reopened, and ignores another tenant's cycle;
+- the captured close evidence is stable and a changed source period is rejected at the posting leaf;
+- exact closing-plan, bound-cycle, source, currency, book, tenant, and reversal forgeries are rejected;
+- close retry, reopen/reclose, original reversal lineage, frozen dimensions, no-activity close, unposted selected-book activity, and ordinary closed-book blocking remain intact.
 
-Focused tests cover BASE100 / parallel200 / delta30 isolation, independent USD parallel close, immutable reopen/reclose, retry, independent book-period approval, locked/legacy rejection, currency/retained-earnings errors, pending journals, forged leaf calls, closed-book ordinary posting, preserved normal replication, endpoint permissions, migration operation shape and no-activity cycles. FiscalYearDeletionGuardTests adds zero-journal cycle retention coverage.
+## Verification state
 
-Additional queued regressions cover USD parallel reopening, five bound-cycle identity forgeries, four closing-plan payload forgeries, renamed/inactive historical dimensions with coded retained-earnings buckets and coded close/reopen/reclose, and ordinary posting rejection after both global and exact-book periods are reopened. These tests are authored but not yet executed.
+- Static diff validation: PASS (`git diff --check`; line-ending conversion warnings only).
+- Focused compilation/tests: PASS, 56/56 `FiscalYearCloseTests` + `AccountingPeriodClosePostingDateTests` using `TdcFastEfBuild=true`.
+- No SQL/UAT/database certification is claimed.
+- Independent coordinator review remains required before integration.
 
-Compatibility-only test edit: FxRealizedUnrealizedRevaluationTests.ThrowAfterSuccessfulRevaluationPostingEngine forwards the newly added IFinancePostingEngine.PostYearEndAsync member; its existing revaluation behavior is unchanged.
+## Release boundaries
 
-## Required release gates
-
-Independent high-risk review is required before integration. Coordinator must integrate the model snapshot and validate migration/model consistency. Apply schema only with separate authorization; otherwise new-cycle queries will not operate. Read-only UAT currently reports zero AccountingBookPeriods, so this workflow correctly refuses close until the existing governed setup and independent approval workflow creates the required book-period authority. No fabricated approvals or silent global IFRS-to-BASE rewrite are included.
+The existing year-end schema/migration is already integrated and is not changed here. This correction does not revive Primary replacement, effective Primary designation, or per-book period workflows. The tenant fiscal calendar remains shared across the perpetual Primary, explicit Delta layers, and atomically replicated Parallel representations.

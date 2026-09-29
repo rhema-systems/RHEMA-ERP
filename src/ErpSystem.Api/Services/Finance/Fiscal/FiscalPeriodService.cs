@@ -4672,6 +4672,32 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             if (!hasSignedCertificate)
                 blockers.Add("The latest close cycle has no active signed maker-checker certificate to supersede.");
 
+            var activeBookYearCloseCycles = await _unitOfWork.Repository<YearEndBookCloseCycle>()
+                .GetQueryable(item => item.TenantId == TenantId &&
+                    item.FiscalYearId == period.FiscalYearId &&
+                    !item.IsDeleted &&
+                    item.Status != "Reopened")
+                .OrderBy(item => item.AccountingBookCode)
+                .ThenBy(item => item.CycleNumber)
+                .ThenBy(item => item.Id)
+                .Select(item => new PeriodReopenImpactBookYearCycle(
+                    item.Id,
+                    item.AccountingBookId,
+                    item.AccountingBookCode,
+                    item.CycleNumber,
+                    item.Status,
+                    item.ClosingJournalEntryId,
+                    item.ReversalJournalEntryId,
+                    item.ClosedAtUtc))
+                .ToListAsync(cancellationToken);
+            if (activeBookYearCloseCycles.Count > 0)
+            {
+                var affectedCycles = string.Join(", ", activeBookYearCloseCycles.Select(item =>
+                    $"{item.AccountingBookCode} cycle {item.CycleNumber} ({item.Status})"));
+                blockers.Add(
+                    $"Reopen every active book-year close before reopening the shared tenant period: {affectedCycles}.");
+            }
+
             var laterPeriods = await _unitOfWork.Repository<FiscalPeriod>()
                 .GetQueryable(item => item.TenantId == TenantId &&
                     item.FiscalYearId == period.FiscalYearId &&
@@ -4717,6 +4743,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 fiscalYear?.IsLocked ?? false,
                 closedCycle.Id,
                 closedCycle.CycleNumber,
+                activeBookYearCloseCycles,
                 laterPeriods,
                 warnings);
             var snapshotJson = JsonSerializer.Serialize(snapshot);
@@ -4819,8 +4846,19 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             bool FiscalYearIsLocked,
             Guid FinanceCloseCycleId,
             int CloseCycleNumber,
+            IReadOnlyList<PeriodReopenImpactBookYearCycle> ActiveBookYearCloseCycles,
             IReadOnlyList<PeriodReopenImpactPeriod> AffectedPeriods,
             IReadOnlyList<string> Warnings);
+
+        private sealed record PeriodReopenImpactBookYearCycle(
+            Guid YearEndBookCloseCycleId,
+            Guid AccountingBookId,
+            string AccountingBookCode,
+            int CycleNumber,
+            string Status,
+            Guid? ClosingJournalEntryId,
+            Guid? ReversalJournalEntryId,
+            DateTime ClosedAtUtc);
 
         private sealed record PeriodReopenImpactValidation(
             PeriodReopenImpactSnapshot Snapshot,

@@ -94,13 +94,11 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         if (period == null || period.FiscalYear.IsLocked || period.FiscalYear.IsClosed
             || request.PostingDate.Date != period.FiscalYear.EndDate.Date || period.IsLocked)
             throw new InvalidOperationException("Year-end posting date and fiscal-year authority do not match.");
-        var bookPeriod = await _context.AccountingBookPeriods.AsNoTracking().SingleOrDefaultAsync(item =>
-            item.TenantId == tenantId && item.AccountingBookId == cycle.AccountingBookId
-            && item.FiscalPeriodId == period.Id && !item.IsDeleted, cancellationToken);
-        if (bookPeriod == null || bookPeriod.PeriodStatus != AccountingBookPeriodStatus.Closed || bookPeriod.PendingStatus != null
-            || bookPeriod.RequestedByUserId == null || bookPeriod.DecidedByUserId == null
-            || bookPeriod.RequestedByUserId == bookPeriod.DecidedByUserId || bookPeriod.DecidedAtUtc == null)
-            throw new InvalidOperationException("Year-end posting requires independently approved closed accounting-book period authority.");
+        var currentPeriodAuthority = await YearEndTenantPeriodAuthority.CaptureAsync(
+            _context, tenantId, cycle.FiscalYearId, cancellationToken);
+        if (!string.Equals(cycle.PeriodAuthoritySnapshotJson, currentPeriodAuthority, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "Year-end posting requires unchanged captured tenant fiscal-period close authority.");
         var validation = await ValidatePostingRequestAsync(tenantId, request, cycle.AccountingBookCode,
             producerContext: null, allowHistoricalMappingException: reverse, cancellationToken, cycle);
         if (validation.AccountingBookId != cycle.AccountingBookId)
@@ -3803,4 +3801,164 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
         ExchangeRateType RateType,
         ExchangeRateQuoteSide QuoteSide,
         bool IsOverride);
+}
+
+internal static class YearEndTenantPeriodAuthority
+{
+    private const string SnapshotVersion = "TENANT-FISCAL-PERIOD-CLOSE-V2";
+
+    internal static async Task<string> CaptureAsync(
+        ApplicationDbContext context,
+        Guid tenantId,
+        Guid fiscalYearId,
+        CancellationToken cancellationToken = default)
+    {
+        var year = await context.FiscalYears.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.Id == fiscalYearId && !item.IsDeleted,
+            cancellationToken)
+            ?? throw new InvalidOperationException("The tenant fiscal year is unavailable.");
+        if (year.IsLocked)
+            throw new InvalidOperationException("The tenant fiscal year is locked.");
+        if (year.IsClosed)
+            throw new InvalidOperationException("The tenant fiscal year is already globally closed.");
+
+        var periods = await context.FiscalPeriods.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && item.FiscalYearId == fiscalYearId && !item.IsDeleted)
+            .OrderBy(item => item.StartDate)
+            .ThenBy(item => item.EndDate)
+            .ThenBy(item => item.Id)
+            .ToListAsync(cancellationToken);
+        if (periods.Count == 0)
+            throw new InvalidOperationException("The fiscal year has no tenant fiscal periods.");
+
+        var expectedStart = year.StartDate.Date;
+        foreach (var period in periods)
+        {
+            if (period.StartDate.Date != expectedStart || period.EndDate.Date < period.StartDate.Date
+                || period.EndDate.Date > year.EndDate.Date)
+                throw new InvalidOperationException(
+                    "Tenant fiscal periods must cover the fiscal year exactly once without gaps or overlaps.");
+            expectedStart = period.EndDate.Date.AddDays(1);
+            if (!period.IsClosed || period.IsOpen || period.IsLocked
+                || !string.Equals(period.PeriodStatus, "Closed", StringComparison.Ordinal)
+                || period.ClosedByUserId == null || period.ClosedDate == null)
+                throw new InvalidOperationException(
+                    $"Fiscal period '{period.PeriodCode}' is not an unlocked, consistently closed tenant period.");
+        }
+        if (expectedStart != year.EndDate.Date.AddDays(1))
+            throw new InvalidOperationException(
+                "Tenant fiscal periods must cover the fiscal year exactly once without gaps or overlaps.");
+
+        var periodIds = periods.Select(item => item.Id).ToArray();
+        var closeCycles = await context.FinanceCloseCycles.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && periodIds.Contains(item.FiscalPeriodId)
+                && !item.IsDeleted && item.Status == FinanceCloseStatuses.Closed)
+            .ToListAsync(cancellationToken);
+        var cycleIds = closeCycles.Select(item => item.Id).ToArray();
+        var certifications = await context.FinanceCloseCertifications.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && cycleIds.Contains(item.FinanceCloseCycleId)
+                && !item.IsDeleted && !item.IsSuperseded)
+            .ToListAsync(cancellationToken);
+
+        var snapshots = new List<TenantPeriodCloseEvidence>(periods.Count);
+        foreach (var period in periods)
+        {
+            var cycleRows = closeCycles.Where(item => item.FiscalPeriodId == period.Id).ToArray();
+            if (cycleRows.Length != 1)
+                throw new InvalidOperationException(
+                    $"Fiscal period '{period.PeriodCode}' must retain exactly one current closed Finance close cycle.");
+            var cycle = cycleRows[0];
+            var certificateRows = certifications.Where(item => item.FinanceCloseCycleId == cycle.Id).ToArray();
+            if (certificateRows.Length != 1)
+                throw new InvalidOperationException(
+                    $"Fiscal period '{period.PeriodCode}' must retain one active Finance close certification.");
+            var certificate = certificateRows[0];
+            if (cycle.PreparedAt == null || cycle.ClosedAt == null
+                || certificate.PreparedByUserId == null || certificate.PreparedAt == null
+                || certificate.ReviewedByUserId == null || certificate.ReviewedAt == null
+                || certificate.ApprovedByUserId == null || certificate.ApprovedAt == null
+                || certificate.PreparedByUserId == certificate.ApprovedByUserId
+                || certificate.ReviewedByUserId != certificate.ApprovedByUserId
+                || certificate.ReviewedAt != certificate.ApprovedAt
+                || cycle.PreparedAt != certificate.PreparedAt
+                || cycle.ClosedAt != certificate.ApprovedAt
+                || period.ClosedByUserId != certificate.ApprovedByUserId
+                || string.IsNullOrWhiteSpace(certificate.PreparerDeclaration)
+                || string.IsNullOrWhiteSpace(certificate.ReviewerDeclaration))
+                throw new InvalidOperationException(
+                    $"Fiscal period '{period.PeriodCode}' lacks consistent independent preparation and approval evidence.");
+
+            snapshots.Add(new TenantPeriodCloseEvidence(
+                period.Id,
+                period.PeriodCode,
+                period.PeriodNumber,
+                period.StartDate,
+                period.EndDate,
+                period.PeriodStatus,
+                period.IsOpen,
+                period.IsClosed,
+                period.IsLocked,
+                period.IsGlobalLockSuspended,
+                period.ClosedDate.Value,
+                period.ClosedByUserId.Value,
+                cycle.Id,
+                cycle.CycleNumber,
+                cycle.TemplateCode,
+                cycle.CloseType,
+                cycle.TemplateVersion,
+                cycle.PreparedAt.Value,
+                cycle.ClosedAt.Value,
+                certificate.Id,
+                certificate.PreparedByUserId.Value,
+                certificate.PreparedAt.Value,
+                certificate.ReviewedByUserId.Value,
+                certificate.ReviewedAt.Value,
+                certificate.ApprovedByUserId.Value,
+                certificate.ApprovedAt.Value));
+        }
+
+        return System.Text.Json.JsonSerializer.Serialize(new TenantFiscalYearCloseAuthority(
+            SnapshotVersion,
+            tenantId,
+            fiscalYearId,
+            year.StartDate,
+            year.EndDate,
+            snapshots));
+    }
+
+    private sealed record TenantFiscalYearCloseAuthority(
+        string Version,
+        Guid TenantId,
+        Guid FiscalYearId,
+        DateTime FiscalYearStart,
+        DateTime FiscalYearEnd,
+        IReadOnlyList<TenantPeriodCloseEvidence> Periods);
+
+    private sealed record TenantPeriodCloseEvidence(
+        Guid FiscalPeriodId,
+        string PeriodCode,
+        int PeriodNumber,
+        DateTime StartDate,
+        DateTime EndDate,
+        string PeriodStatus,
+        bool IsOpen,
+        bool IsClosed,
+        bool IsLocked,
+        bool IsGlobalLockSuspended,
+        DateTime ClosedDate,
+        Guid ClosedByUserId,
+        Guid FinanceCloseCycleId,
+        int FinanceCloseCycleNumber,
+        string TemplateCode,
+        string CloseType,
+        int TemplateVersion,
+        DateTime CyclePreparedAt,
+        DateTime CycleClosedAt,
+        Guid CertificationId,
+        Guid PreparedByUserId,
+        DateTime PreparedAt,
+        Guid ReviewedByUserId,
+        DateTime ReviewedAt,
+        Guid ApprovedByUserId,
+        DateTime ApprovedAt);
 }

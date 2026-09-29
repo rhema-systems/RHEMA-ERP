@@ -27,12 +27,14 @@ public sealed class FiscalYearCloseTests
         var delta = await AddBookActivityAsync(f, "IFRS_ADJUSTMENTS", AccountingBookType.Delta, 30m, "GHS");
         var result = await f.GlService.CloseFiscalYearAsync(CloseRequest(f));
         result.Success.Should().BeTrue();
+        (await f.Db.AccountingBookPeriods.CountAsync()).Should().Be(0);
         result.NetIncomeTransferred.Should().Be(100m);
         result.AccountingBookId.Should().Be(f.Book.Id);
         var cycle = await f.Db.YearEndBookCloseCycles.SingleAsync();
         cycle.AccountingBookCode.Should().Be("BASE");
         cycle.FunctionalCurrencyCode.Should().Be("GHS");
-        cycle.PeriodAuthoritySnapshotJson.Should().Contain("DecidedByUserId");
+        cycle.PeriodAuthoritySnapshotJson.Should().Contain("TENANT-FISCAL-PERIOD-CLOSE-V2")
+            .And.Contain("FinanceCloseCycleId").And.Contain("ApprovedByUserId");
         f.FiscalYear.IsClosed.Should().BeFalse();
         f.FiscalYear.ClosingJournalEntryId.Should().BeNull();
         var journal = await f.Db.JournalEntries.Include(x => x.Transactions).SingleAsync(x => x.Id == result.ClosingJournalEntryId);
@@ -181,20 +183,81 @@ public sealed class FiscalYearCloseTests
 
     [Theory]
     [InlineData("Open")]
-    [InlineData("Missing")]
-    [InlineData("Pending")]
+    [InlineData("MissingPeriodCoverage")]
+    [InlineData("Locked")]
+    [InlineData("Inconsistent")]
+    [InlineData("MissingCloseEvidence")]
     [InlineData("SelfApproved")]
-    public async Task Close_RequiresCompleteIndependentBookPeriodApproval(string defect)
+    public async Task Close_RequiresCompleteGovernedTenantPeriodAuthority(string defect)
     {
         var f = await FixtureWithPostedActivityAsync();
-        var authority = await f.Db.AccountingBookPeriods.SingleAsync();
-        if (defect == "Open") authority.PeriodStatus = AccountingBookPeriodStatus.Open;
-        if (defect == "Missing") f.Db.AccountingBookPeriods.Remove(authority);
-        if (defect == "Pending") authority.PendingStatus = AccountingBookPeriodStatus.Open;
-        if (defect == "SelfApproved") authority.DecidedByUserId = authority.RequestedByUserId;
+        var certification = await f.Db.FinanceCloseCertifications.SingleAsync();
+        if (defect == "Open")
+        {
+            f.Period.PeriodStatus = "Open";
+            f.Period.IsOpen = true;
+            f.Period.IsClosed = false;
+        }
+        if (defect == "MissingPeriodCoverage") f.Period.EndDate = new DateTime(2026, 6, 30);
+        if (defect == "Locked") f.Period.IsLocked = true;
+        if (defect == "Inconsistent") f.Period.IsClosed = false;
+        if (defect == "MissingCloseEvidence")
+        {
+            f.Db.FinanceCloseCertifications.Remove(certification);
+            f.Db.FinanceCloseCycles.Remove(await f.Db.FinanceCloseCycles.SingleAsync());
+        }
+        if (defect == "SelfApproved") certification.PreparedByUserId = certification.ApprovedByUserId;
         await f.Db.SaveChangesAsync();
         (await f.GlService.CloseFiscalYearAsync(CloseRequest(f))).Success.Should().BeFalse();
         (await f.Db.YearEndBookCloseCycles.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Close_IgnoresIrrelevantLegacyBookPeriodRows()
+    {
+        var f = await FixtureWithPostedActivityAsync();
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(
+            f.Db, f.FiscalYear.TenantId, f.Period, f.Book.Code);
+        var legacy = f.Db.AccountingBookPeriods.Local.Single();
+        legacy.PeriodStatus = AccountingBookPeriodStatus.Open;
+        legacy.PendingStatus = AccountingBookPeriodStatus.Closed;
+        legacy.RequestedByUserId = Guid.NewGuid();
+        legacy.DecidedByUserId = legacy.RequestedByUserId;
+        await f.Db.SaveChangesAsync();
+
+        var result = await f.GlService.CloseFiscalYearAsync(CloseRequest(f));
+
+        result.Success.Should().BeTrue();
+        (await f.Db.AccountingBookPeriods.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Close_CapturesCurrentTenantPeriodRecloseCycleAfterGovernedReopen()
+    {
+        var f = await FixtureWithPostedActivityAsync();
+        var originalCycle = await f.Db.FinanceCloseCycles.SingleAsync();
+        var originalCertification = await f.Db.FinanceCloseCertifications.SingleAsync();
+        var reopenedAt = DateTime.UtcNow.AddMinutes(-2);
+        originalCycle.Status = FinanceCloseStatuses.Reopened;
+        originalCycle.ReopenedAt = reopenedAt;
+        originalCycle.ReopenedByUserId = Guid.NewGuid();
+        originalCycle.ReopenReason = "Approved correction required a governed tenant period reopen.";
+        originalCertification.IsSuperseded = true;
+        originalCertification.SupersededAt = reopenedAt;
+        originalCertification.SupersededReason = "Superseded by the approved tenant period reopen.";
+        f.Period.HasBeenReopened = true;
+        f.Period.ReopenCount = 1;
+        f.Period.LastReopenedDate = reopenedAt;
+        f.Period.LastReopenedByUserId = originalCycle.ReopenedByUserId;
+        f.Period.ReopenReason = originalCycle.ReopenReason;
+        var currentCycle = SeedGovernedTenantPeriodClose(f.Db, f.Period, cycleNumber: 2);
+        await f.Db.SaveChangesAsync();
+
+        var result = await f.GlService.CloseFiscalYearAsync(CloseRequest(f));
+
+        result.Success.Should().BeTrue();
+        var snapshot = (await f.Db.YearEndBookCloseCycles.SingleAsync()).PeriodAuthoritySnapshotJson;
+        snapshot.Should().Contain(currentCycle.Id.ToString()).And.NotContain(originalCycle.Id.ToString());
     }
 
     [Fact]
@@ -264,8 +327,6 @@ public sealed class FiscalYearCloseTests
         var f = await FixtureWithPostedActivityAsync();
         await f.GlService.CloseFiscalYearAsync(CloseRequest(f));
         f.Period.IsClosed = false; f.Period.IsOpen = true; await f.Db.SaveChangesAsync();
-        (await f.Db.AccountingBookPeriods.SingleAsync()).PeriodStatus = AccountingBookPeriodStatus.Open;
-        await f.Db.SaveChangesAsync();
         var request = ActivityRequest(f.FiscalYear.TenantId, "LATE", new[] {
             new FinancePostingLineDto { AccountId = f.Cash.Id, DebitAmount = 10m },
             new FinancePostingLineDto { AccountId = f.Revenue.Id, CreditAmount = 10m } });
@@ -302,6 +363,37 @@ public sealed class FiscalYearCloseTests
             .Should().ThrowAsync<InvalidOperationException>().WithMessage("*does not match its exact book-close cycle*");
         (await f.Db.FinancePostingEvents.CountAsync(x => x.SourceDocumentType == "YearEndCloseReversal")).Should().Be(0);
         cycle.Status.Should().Be("Closed");
+    }
+
+    [Fact]
+    public async Task YearEndLeaf_RejectsTenantCloseEvidenceChangedAfterCapture()
+    {
+        var f = await FixtureWithPostedActivityAsync();
+        var closed = await f.GlService.CloseFiscalYearAsync(CloseRequest(f));
+        var cycle = await f.Db.YearEndBookCloseCycles.SingleAsync();
+        f.Period.ClosedDate = f.Period.ClosedDate!.Value.AddSeconds(1);
+        await f.Db.SaveChangesAsync();
+        var request = new FinancePostingRequestV2Dto
+        {
+            SourceModule = "GL",
+            SourceDocumentType = "YearEndCloseReversal",
+            SourceDocumentId = cycle.Id,
+            SourceDocumentTenantId = cycle.TenantId,
+            AccountingBookCode = cycle.AccountingBookCode,
+            FunctionalCurrencyCode = cycle.FunctionalCurrencyCode,
+            ReversalOfJournalEntryId = closed.ClosingJournalEntryId,
+            PostingAction = "Reverse",
+            FiscalPeriodId = f.Period.Id,
+            PostingDate = f.FiscalYear.EndDate,
+            AllowPostingToClosedPeriod = true,
+            IdempotencyKey = $"GL:YearEndCloseReversal:{cycle.TenantId:N}:{cycle.AccountingBookId:N}:{cycle.Id:N}"
+        };
+
+        await f.Engine.Invoking(item => item.PostYearEndAsync(request, cycle.Id))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*unchanged captured tenant fiscal-period close authority*");
+        (await f.Db.FinancePostingEvents.CountAsync(item =>
+            item.SourceDocumentType == "YearEndCloseReversal")).Should().Be(0);
     }
 
     [Fact]
@@ -438,10 +530,6 @@ public sealed class FiscalYearCloseTests
             ReplicationStartDate = type == AccountingBookType.ParallelFull ? f.FiscalYear.StartDate : null,
             ParallelOpeningMode = type == AccountingBookType.ParallelFull ? ParallelBookOpeningMode.ZeroOpening : null };
         f.Db.AccountingBooks.Add(book);
-        FinancePostingAuthorityFixture.SeedExactBookPeriod(f.Db, f.FiscalYear.TenantId, f.Period, code);
-        var authority = f.Db.AccountingBookPeriods.Local.Single(x => x.AccountingBookId == book.Id);
-        authority.PeriodStatus = AccountingBookPeriodStatus.Closed;
-        authority.RequestedByUserId = Guid.NewGuid(); authority.DecidedByUserId = Guid.NewGuid(); authority.DecidedAtUtc = DateTime.UtcNow;
         FinancePostingAuthorityFixture.SeedEnabledBookMappings(f.Db, f.FiscalYear.TenantId, book, f.Cash, f.Revenue, f.Expense, f.RetainedEarnings);
         var journal = new JournalEntry { TenantId = f.FiscalYear.TenantId, AccountingBookId = book.Id, BookClassification = code,
             FiscalPeriodId = f.Period.Id, JournalEntryNumber = code + "-ACTIVITY", Description = "Existing book activity",
@@ -527,7 +615,6 @@ public sealed class FiscalYearCloseTests
             AllowFutureDating = true
         };
         db.FiscalPeriods.Add(period);
-        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, book.Code);
 
         var cash = SeedAccount(db, tenantId, "1000", AccountType.Asset);
         var revenue = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
@@ -554,14 +641,7 @@ public sealed class FiscalYearCloseTests
 
         if (closePeriod)
         {
-            period.IsOpen = false;
-            period.IsClosed = true;
-            period.PeriodStatus = "Closed";
-            var authority = db.AccountingBookPeriods.Local.Single();
-            authority.PeriodStatus = AccountingBookPeriodStatus.Closed;
-            authority.RequestedByUserId = Guid.NewGuid();
-            authority.DecidedByUserId = Guid.NewGuid();
-            authority.DecidedAtUtc = DateTime.UtcNow;
+            SeedGovernedTenantPeriodClose(db, period);
             await db.SaveChangesAsync();
         }
 
@@ -583,6 +663,66 @@ public sealed class FiscalYearCloseTests
             BuildYearEndEngine(engine, mutateClose));
 
         return new Fixture(db, glService, fiscalYear, revenue, expense, retainedEarnings, cash, book, period, engine);
+    }
+
+    private static FinanceCloseCycle SeedGovernedTenantPeriodClose(
+        ApplicationDbContext db,
+        FiscalPeriod period,
+        int cycleNumber = 1)
+    {
+        var preparedBy = Guid.NewGuid();
+        var approvedBy = Guid.NewGuid();
+        var preparedAt = DateTime.UtcNow.AddMinutes(-5);
+        var approvedAt = DateTime.UtcNow;
+        period.IsCloseInitiated = true;
+        period.CloseInitiatedDate = preparedAt.AddMinutes(-5);
+        period.CloseInitiatedByUserId = preparedBy;
+        period.IsOpen = false;
+        period.IsClosed = true;
+        period.IsLocked = false;
+        period.PeriodStatus = "Closed";
+        period.ClosedDate = approvedAt;
+        period.ClosedByUserId = approvedBy;
+        var cycle = new FinanceCloseCycle
+        {
+            Id = Guid.NewGuid(),
+            TenantId = period.TenantId,
+            FiscalPeriodId = period.Id,
+            CycleNumber = cycleNumber,
+            TemplateCode = "TDC-YEAR-END",
+            CloseType = FinanceCloseTemplateTypes.YearEnd,
+            TemplateVersion = 1,
+            Status = FinanceCloseStatuses.Closed,
+            EvaluationCount = 1,
+            StartedAt = period.CloseInitiatedDate.Value,
+            StartedByUserId = preparedBy,
+            StartedByUserName = "period.preparer",
+            PreparedAt = preparedAt,
+            ClosedAt = approvedAt,
+            CreatedBy = "period.preparer",
+            CreatedById = preparedBy
+        };
+        db.FinanceCloseCycles.Add(cycle);
+        db.FinanceCloseCertifications.Add(new FinanceCloseCertification
+        {
+            Id = Guid.NewGuid(),
+            TenantId = period.TenantId,
+            FinanceCloseCycleId = cycle.Id,
+            PreparedByUserId = preparedBy,
+            PreparedByUserName = "period.preparer",
+            PreparedAt = preparedAt,
+            PreparerDeclaration = "All mandatory tenant period controls are complete.",
+            ReviewedByUserId = approvedBy,
+            ReviewedByUserName = "period.approver",
+            ReviewedAt = approvedAt,
+            ReviewerDeclaration = "I independently reviewed and approve this period close.",
+            ApprovedByUserId = approvedBy,
+            ApprovedByUserName = "period.approver",
+            ApprovedAt = approvedAt,
+            CreatedBy = "period.preparer",
+            CreatedById = preparedBy
+        });
+        return cycle;
     }
 
     private static IFinancePostingEngine BuildYearEndEngine(

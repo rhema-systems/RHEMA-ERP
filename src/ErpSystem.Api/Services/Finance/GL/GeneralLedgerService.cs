@@ -2629,17 +2629,22 @@ namespace ErpSystem.Api.Services.Finance.GL
                     && item.FiscalYearId == year.Id && item.AccountingBookId == book.Id && item.Status != "Reopened"))
                     throw new InvalidOperationException("This accounting book is already closed for the fiscal year. Reopen its exact close cycle first.");
 
+                string periodAuthoritySnapshot;
+                try
+                {
+                    periodAuthoritySnapshot = await YearEndTenantPeriodAuthority.CaptureAsync(
+                        _context, TenantId, year.Id);
+                }
+                catch (InvalidOperationException exception)
+                {
+                    return new PeriodCloseResultDto
+                    {
+                        Success = false,
+                        Message = "Cannot close fiscal year - tenant fiscal-period close authority is incomplete.",
+                        Errors = new() { exception.Message }
+                    };
+                }
                 var periodIds = year.FiscalPeriods.Where(item => !item.IsDeleted).Select(item => item.Id).ToArray();
-                var bookPeriods = await _context.AccountingBookPeriods.Where(item => item.TenantId == TenantId
-                    && item.AccountingBookId == book.Id && periodIds.Contains(item.FiscalPeriodId) && !item.IsDeleted).ToListAsync();
-                if (periodIds.Length == 0 || bookPeriods.Count != periodIds.Length
-                    || bookPeriods.Any(item => item.PeriodStatus != AccountingBookPeriodStatus.Closed
-                        || item.PendingStatus != null || item.DecidedByUserId == null || item.RequestedByUserId == null
-                        || item.DecidedByUserId == item.RequestedByUserId || item.DecidedAtUtc == null))
-                    return new PeriodCloseResultDto { Success = false, Message = "Cannot close fiscal year - accounting-book periods require approved closure.",
-                        Errors = new() { "Every period for the selected book must be closed through independent approval, with no pending transition." } };
-                if (year.FiscalPeriods.Any(item => !item.IsDeleted && item.IsLocked))
-                    throw new InvalidOperationException("A fiscal period is locked. Use the governed unlock workflow before year-end processing.");
 
                 var unpostedJournals = await _context.JournalEntries.CountAsync(item => item.TenantId == TenantId
                     && item.AccountingBookId == book.Id && periodIds.Contains(item.FiscalPeriodId)
@@ -2663,9 +2668,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                     AccountingBookId = book.Id, AccountingBookCode = book.Code, FunctionalCurrencyCode = currency,
                     CycleNumber = cycleNumber, IdempotencyKey = key, RetainedEarningsAccountId = request.RetainedEarningsAccountId,
                     Status = "Closing", ClosedByUserId = actor, ClosedAtUtc = DateTime.UtcNow, ClosingNotes = notes,
-                    PeriodAuthoritySnapshotJson = System.Text.Json.JsonSerializer.Serialize(bookPeriods.OrderBy(item => item.FiscalPeriodId)
-                        .Select(item => new { item.Id, item.FiscalPeriodId, item.RequestedByUserId, item.DecidedByUserId,
-                            item.DecidedAtUtc, item.WorkflowInstanceId, item.RowVersion })),
+                    PeriodAuthoritySnapshotJson = periodAuthoritySnapshot,
                     CreatedAt = DateTime.UtcNow, CreatedBy = _currentUserService.UserName
                 };
                 _context.YearEndBookCloseCycles.Add(cycle);

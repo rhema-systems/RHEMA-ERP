@@ -370,6 +370,53 @@ public sealed class AccountingPeriodClosePostingDateTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-PeriodClose")]
     [Trait("Category", "FiscalPeriod")]
+    public async Task RequestPeriodReopen_ShouldRequireBookYearReopenFirst_AndIgnoreWrongTenantCycle()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedTenant(db, otherTenantId, "OTH");
+        var period = SeedPeriod(db, tenantId, isOpen: false, isClosed: true);
+        SeedCertifiedClosedCycle(db, tenantId, period);
+        var tenantBookCycle = BuildYearEndBookCloseCycle(tenantId, period.FiscalYearId, "BASE");
+        var wrongTenantBookCycle = BuildYearEndBookCloseCycle(otherTenantId, period.FiscalYearId, "OTHER");
+        db.YearEndBookCloseCycles.AddRange(tenantBookCycle, wrongTenantBookCycle);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var request = new PeriodReopenRequestDto
+        {
+            FiscalPeriodId = period.Id,
+            Reason = "External audit correction requires a controlled period reopen",
+            AffectedPeriodAssessment = "The correction affects the certified year-end book and shared tenant period."
+        };
+
+        var blocked = () => service.RequestPeriodReopenAsync(request);
+
+        await blocked.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Reopen every active book-year close*BASE cycle 1 (Closed)*");
+        (await db.FinancePeriodReopenRequests.CountAsync()).Should().Be(0);
+
+        var persistedTenantCycle = await db.YearEndBookCloseCycles
+            .SingleAsync(item => item.Id == tenantBookCycle.Id);
+        persistedTenantCycle.Status = "Reopened";
+        persistedTenantCycle.ReopenedByUserId = Guid.NewGuid();
+        persistedTenantCycle.ReopenedAtUtc = DateTime.UtcNow;
+        persistedTenantCycle.ReopenReason = "Book-year reversal completed before the shared calendar was reopened.";
+        await db.SaveChangesAsync();
+
+        var accepted = await CreateService(db, tenantId).RequestPeriodReopenAsync(request);
+
+        accepted.Status.Should().Be(FinancePeriodReopenStatuses.PendingApproval);
+        var retainedRequest = await db.FinancePeriodReopenRequests.SingleAsync(item => item.Id == accepted.Id);
+        retainedRequest.ImpactSnapshotJson.Should().Contain("\"ActiveBookYearCloseCycles\":[]");
+        (await db.YearEndBookCloseCycles.SingleAsync(item => item.Id == wrongTenantBookCycle.Id))
+            .Status.Should().Be("Closed");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-PeriodClose")]
+    [Trait("Category", "FiscalPeriod")]
     public async Task ClosePeriod_ShouldEnforceMakerCheckerAndStartNewCycleAfterReopen()
     {
         var tenantId = Guid.NewGuid();
@@ -1240,5 +1287,30 @@ public sealed class AccountingPeriodClosePostingDateTests
             ApprovedAt = cycle.ClosedAt
         });
         return cycle;
+    }
+
+    private static YearEndBookCloseCycle BuildYearEndBookCloseCycle(
+        Guid tenantId,
+        Guid fiscalYearId,
+        string accountingBookCode)
+    {
+        return new YearEndBookCloseCycle
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalYearId = fiscalYearId,
+            AccountingBookId = Guid.NewGuid(),
+            AccountingBookCode = accountingBookCode,
+            FunctionalCurrencyCode = "GHS",
+            CycleNumber = 1,
+            PeriodAuthoritySnapshotJson = "{}",
+            IdempotencyKey = $"test-{tenantId:N}-{accountingBookCode}",
+            RetainedEarningsAccountId = Guid.NewGuid(),
+            Status = "Closed",
+            ClosedByUserId = Guid.NewGuid(),
+            ClosedAtUtc = DateTime.UtcNow.AddHours(-1),
+            CreatedAt = DateTime.UtcNow.AddHours(-1),
+            CreatedBy = "year.end.test"
+        };
     }
 }
