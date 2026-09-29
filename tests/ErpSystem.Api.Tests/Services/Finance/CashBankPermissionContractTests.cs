@@ -1,0 +1,61 @@
+using ErpSystem.Api.Authorization;
+using ErpSystem.Api.Controllers.Finance;
+using ErpSystem.Shared;
+using FluentAssertions;
+using Microsoft.AspNetCore.Authorization;
+using Xunit;
+
+namespace ErpSystem.Api.Tests.Services.Finance;
+
+public sealed class CashBankPermissionContractTests
+{
+    [Theory]
+    [InlineData("ApproveReturnedCheque")]
+    [InlineData("RejectReturnedCheque")]
+    public void ReturnedChequeReview_ShouldNotRequireBankDepositApproval(string action)
+    {
+        var policies = FinancePermissionPolicyMap.GetRequiredPolicies(
+            "BankingSettlement",
+            action,
+            ["POST"],
+            [$"returned-cheques/{{id:guid}}/{action}"]);
+
+        policies.Should().Equal(FinancePermissions.ManageReturnedCheques);
+        policies.Should().NotContain(FinancePermissions.ApproveBankDeposits);
+    }
+
+    [Fact]
+    public void ManualDepositPosting_ShouldRequirePostAfterApprovalPermission()
+    {
+        var policies = FinancePermissionPolicyMap.GetRequiredPolicies(
+            "BankingSettlement",
+            "PostDeposit",
+            ["POST"],
+            ["deposits/{id:guid}/post"]);
+
+        policies.Should().Equal(FinancePermissions.WorkflowPostAfterApproval);
+        policies.Should().NotContain(FinancePermissions.SubmitBankDeposits);
+    }
+
+    [Theory]
+    [InlineData(nameof(BankingSettlementController.PostDeposit), FinancePermissions.WorkflowPostAfterApproval)]
+    [InlineData(nameof(BankingSettlementController.ApproveReturnedCheque), FinancePermissions.ManageReturnedCheques)]
+    [InlineData(nameof(BankingSettlementController.RejectReturnedCheque), FinancePermissions.ManageReturnedCheques)]
+    public void ExplicitControllerPolicy_ShouldAgreeWithConventionPolicy(string action, string expectedPolicy)
+    {
+        var method = typeof(BankingSettlementController).GetMethod(action);
+
+        method.Should().NotBeNull();
+        method!.GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+            .Cast<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy)
+            .Should().Contain(expectedPolicy);
+
+        FinancePermissionPolicyMap.GetRequiredPolicies(
+                "BankingSettlement",
+                action,
+                ["POST"],
+                [$"contract/{action}"])
+            .Should().Equal(expectedPolicy);
+    }
+}

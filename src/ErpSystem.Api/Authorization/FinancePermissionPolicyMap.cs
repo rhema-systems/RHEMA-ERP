@@ -553,7 +553,11 @@ public static class FinancePermissionPolicyMap
             "ConfirmDeposit" => One(FinancePermissions.ConfirmBankDeposits),
             "CreateReturnedCheque" or "UpdateReturnedChequeDimensions" or "LinkReturnedChequeAttachment" or "SubmitReturnedCheque" =>
                 One(FinancePermissions.ManageReturnedCheques),
-            "ApproveReturnedCheque" or "RejectReturnedCheque" => One(FinancePermissions.ApproveBankDeposits),
+            // Returned-cheque review has its own permission surface. Requiring the unrelated
+            // bank-deposit approval permission here made the convention compose two policies
+            // (ManageReturnedCheques from the controller plus ApproveBankDeposits here), so a
+            // correctly provisioned returned-cheque reviewer was denied at runtime.
+            "ApproveReturnedCheque" or "RejectReturnedCheque" => One(FinancePermissions.ManageReturnedCheques),
             _ => One(FinancePermissions.ViewFinance)
         };
 

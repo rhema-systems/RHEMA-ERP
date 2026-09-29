@@ -22,9 +22,11 @@ import {
 } from '@/lib/finance/source-document-dimensions';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import type { BankDeposit } from '@/types/cash-management';
+import { useAuth } from '@/hooks/use-auth';
 
 export default function BankDepositDetailPage() {
     const params = useParams<{ id: string }>();
+    const { hasPermission } = useAuth();
     const [deposit, setDeposit] = useState<BankDeposit | null>(null);
     const [loading, setLoading] = useState(true);
     const [working, setWorking] = useState(false);
@@ -157,6 +159,11 @@ export default function BankDepositDetailPage() {
 
     const editable = deposit.status === 'Draft' || deposit.status === 'Returned';
     const submitted = deposit.status === 'Submitted';
+    const canCreateDeposit = hasPermission('Finance.Banking.Deposits.Create');
+    const canSubmitDeposit = hasPermission('Finance.Banking.Deposits.Submit');
+    const canApproveDeposit = hasPermission('Finance.Banking.Deposits.Approve');
+    const canPostDeposit = hasPermission('Finance.Workflow.PostAfterApproval');
+    const canConfirmDeposit = hasPermission('Finance.Banking.Deposits.Confirm');
 
     return (
         <div className="space-y-6 p-6">
@@ -166,23 +173,23 @@ export default function BankDepositDetailPage() {
                     <div><div className="flex items-center gap-2"><h1 className="text-3xl font-bold">{deposit.depositNumber}</h1><Badge>{deposit.status}</Badge></div><p className="text-muted-foreground">{deposit.bankAccountName} · {deposit.depositReference}</p></div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    {editable && (
+                    {editable && canCreateDeposit && (
                         <>
                             <Button variant="outline" asChild><label className="cursor-pointer"><FileText className="mr-2 h-4 w-4" />Attach deposit slip<input className="hidden" type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={upload} /></label></Button>
-                            <Button disabled={working || !deposit.attachments.some(item => item.isPrimaryEvidence)} onClick={() => void run(async () => {
+                            {canSubmitDeposit && <Button disabled={working || !deposit.attachments.some(item => item.isPrimaryEvidence)} onClick={() => void run(async () => {
                                 await cashManagementDataService.updateBankDepositDimensions(deposit.id, financeDimensionInput);
                                 return cashManagementDataService.submitBankDeposit(deposit.id);
-                            }, 'Deposit submitted to the Chief Accountant.')}><Send className="mr-2 h-4 w-4" />Submit</Button>
+                            }, 'Deposit submitted to the Chief Accountant.')}><Send className="mr-2 h-4 w-4" />Submit</Button>}
                         </>
                     )}
-                    {submitted && (
+                    {submitted && canApproveDeposit && (
                         <>
                             <Button disabled={working} onClick={() => void run(() => cashManagementDataService.approveBankDeposit(deposit.id), 'Deposit approved and posted.')}><CheckCircle2 className="mr-2 h-4 w-4" />Approve</Button>
                             <Button variant="outline" disabled={working} onClick={() => { const comments = window.prompt('What needs to be corrected?'); if (comments) void run(() => cashManagementDataService.returnBankDeposit(deposit.id, comments), 'Deposit returned for changes.'); }}><RotateCcw className="mr-2 h-4 w-4" />Return</Button>
                             <Button variant="destructive" disabled={working} onClick={() => { const reason = window.prompt('Rejection reason'); if (reason) void run(() => cashManagementDataService.rejectBankDeposit(deposit.id, reason), 'Deposit rejected.'); }}><XCircle className="mr-2 h-4 w-4" />Reject</Button>
                         </>
                     )}
-                    {deposit.status === 'Approved' && (
+                    {deposit.status === 'Approved' && canPostDeposit && (
                         <Button disabled={working} onClick={() => void run(() => cashManagementDataService.postBankDeposit(deposit.id), 'Deposit posted to the bank control account.')}><Landmark className="mr-2 h-4 w-4" />Post deposit</Button>
                     )}
                 </div>
@@ -200,7 +207,7 @@ export default function BankDepositDetailPage() {
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    {editable ? (
+                    {editable && canCreateDeposit ? (
                         <>
                             <SourceDocumentDimensionPanel
                                 context={{
@@ -265,7 +272,7 @@ export default function BankDepositDetailPage() {
                     </CardContent>
                 </Card>
             </div>
-            {deposit.status === 'Posted' && deposit.confirmationStatus === 'Pending' && (
+            {deposit.status === 'Posted' && deposit.confirmationStatus === 'Pending' && canConfirmDeposit && (
                 <Card>
                     <CardHeader><CardTitle>Record bank acknowledgement</CardTitle><CardDescription>Capture the bank-issued reference after the approved deposit has been accepted. This does not create another accounting entry.</CardDescription></CardHeader>
                     <CardContent className="grid gap-4 md:grid-cols-2">

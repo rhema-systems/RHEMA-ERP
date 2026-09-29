@@ -399,20 +399,23 @@ namespace ErpSystem.Api.Services.Finance.AR
             CancellationToken cancellationToken,
             bool executionStrategyScope)
         {
+            if (dto.IsCreditNote)
+            {
+                // Keep this invariant outside the execution-strategy callback. Besides failing
+                // fast before any database work, this prevents alternate IUnitOfWork
+                // implementations (and composed callers) from swallowing the guard by not
+                // invoking a retry delegate. CustomerPayment.IsCreditNote exists for historical
+                // compatibility only; all new credits belong to the governed Sales CreditNote
+                // workflow.
+                throw new InvalidOperationException(
+                    "The legacy AR payment credit-note path is retired. Create the credit through the Sales credit-note workflow.");
+            }
+
             if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
             {
                 return await _unitOfWork.ExecuteInStrategyAsync(
                     () => CreateAsync(dto, producer, cancellationToken, executionStrategyScope: true),
                     cancellationToken);
-            }
-
-            if (dto.IsCreditNote)
-            {
-                // FIN-LIM-0013: CustomerPayment.IsCreditNote is retained only so historical rows
-                // remain readable. New customer credits must use the primary Sales CreditNote
-                // workflow, which owns approval, posting, application, and immutable correction.
-                throw new InvalidOperationException(
-                    "The legacy AR payment credit-note path is retired. Create the credit through the Sales credit-note workflow.");
             }
 
             CustomerPayment? payment = null;

@@ -189,7 +189,7 @@ public sealed class BankingSettlementController : ControllerBase
         => Ok(await _service.CancelDepositAsync(id, dto.Reason ?? "Cancelled by user.", cancellationToken));
 
     [HttpPost("deposits/{id:guid}/post")]
-    [Authorize(Policy = FinancePermissions.SubmitBankDeposits)]
+    [Authorize(Policy = FinancePermissions.WorkflowPostAfterApproval)]
     public async Task<ActionResult<BankDepositDto>> PostDeposit(Guid id, CancellationToken cancellationToken)
         => Ok(await _service.PostDepositAsync(id, cancellationToken));
 

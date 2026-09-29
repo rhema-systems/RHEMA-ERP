@@ -300,6 +300,7 @@
     <Compile Include="Services\Finance\ArCreditNoteProducerRelationalFixtureTests.cs" />
     <Compile Include="Services\Finance\CashBankTransactionPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\CashBankWorkflowApprovalHardeningTests.cs" />
+    <Compile Include="Services\Finance\CashBankPermissionContractTests.cs" />
     <Compile Include="Services\Finance\CashBankOperationalBalanceHardeningTests.cs" />
     <Compile Include="Services\Finance\BankingSettlementReleaseGateTests.cs" />
     <Compile Include="Services\Finance\CashierTillControlTests.cs" />

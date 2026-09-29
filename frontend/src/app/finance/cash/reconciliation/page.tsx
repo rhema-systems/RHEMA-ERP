@@ -53,6 +53,7 @@ import { financeDataService } from '@/services/finance/finance-data.service';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
 import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
+import { useAuth } from '@/hooks/use-auth';
 import {
     BankAccount,
     BankReconciliation,
@@ -105,6 +106,9 @@ function isDirectionCompatible(transaction: UnmatchedTransaction, line: Unmatche
 
 export default function BankReconciliationPage() {
     const router = useRouter();
+    const { hasPermission } = useAuth();
+    const canPerformReconciliation = hasPermission('Finance.BankReconciliation.Perform');
+    const canApproveReconciliation = hasPermission('Finance.BankReconciliation.Approve');
     const searchParams = useSearchParams();
     const { toast } = useToast();
     const queryClient = useQueryClient();
@@ -263,7 +267,7 @@ export default function BankReconciliationPage() {
                 </div>
                 <div className="flex items-center gap-2">
                     {activeReconciliation && <StatusBadge status={activeReconciliation.status} />}
-                    {!activeReconciliation && (
+                    {!activeReconciliation && canPerformReconciliation && (
                         <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
                             <Upload className="mr-2 h-4 w-4" />
                             Import statement
@@ -281,7 +285,12 @@ export default function BankReconciliationPage() {
             {activeReconciliationQuery.isLoading ? (
                 <div className="flex justify-center p-16"><Loader2 className="h-8 w-8 animate-spin" /></div>
             ) : activeReconciliation ? (
-                <ReconciliationWorkspace reconciliation={activeReconciliation} account={selectedAccount} />
+                <ReconciliationWorkspace
+                    reconciliation={activeReconciliation}
+                    account={selectedAccount}
+                    canPerform={canPerformReconciliation}
+                    canApprove={canApproveReconciliation}
+                />
             ) : (
                 <Card className="mx-auto mt-12 max-w-2xl">
                     <CardHeader>
@@ -306,7 +315,7 @@ export default function BankReconciliationPage() {
                             {!statementsQuery.isLoading && statements.length === 0 && (
                                 <p className="text-sm text-amber-700">
                                     No statement has been imported for this account.{' '}
-                                    <button type="button" onClick={() => setImportDialogOpen(true)} className="font-medium underline">
+                                    <button type="button" onClick={() => setImportDialogOpen(true)} className="font-medium underline" disabled={!canPerformReconciliation}>
                                         Import a bank statement
                                     </button>{' '}
                                     first.
@@ -332,15 +341,15 @@ export default function BankReconciliationPage() {
                         </div>
                     </CardContent>
                     <CardFooter>
-                        <Button className="w-full" onClick={handleStart} disabled={startMutation.isPending || !statementId}>
+                        {canPerformReconciliation && <Button className="w-full" onClick={handleStart} disabled={startMutation.isPending || !statementId}>
                             {startMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Start reconciliation
-                        </Button>
+                        </Button>}
                     </CardFooter>
                 </Card>
             )}
             <StatementImportDialog
-                open={importDialogOpen}
+                open={canPerformReconciliation && importDialogOpen}
                 onOpenChange={setImportDialogOpen}
                 bankAccountId={selectedAccountId}
                 bankAccountName={selectedAccount?.accountName ?? 'selected account'}
@@ -473,7 +482,17 @@ function StatusBadge({ status }: { status: ReconciliationStatus }) {
     return <Badge variant={variant} className="px-4 py-1 text-base">{status.replace(/([a-z])([A-Z])/g, '$1 $2')}</Badge>;
 }
 
-function ReconciliationWorkspace({ reconciliation, account }: { reconciliation: BankReconciliation; account?: BankAccount }) {
+function ReconciliationWorkspace({
+    reconciliation,
+    account,
+    canPerform,
+    canApprove,
+}: {
+    reconciliation: BankReconciliation;
+    account?: BankAccount;
+    canPerform: boolean;
+    canApprove: boolean;
+}) {
     const { toast } = useToast();
     const queryClient = useQueryClient();
     const [selectedBookId, setSelectedBookId] = useState('');
@@ -481,7 +500,7 @@ function ReconciliationWorkspace({ reconciliation, account }: { reconciliation: 
     const [adjustmentOpen, setAdjustmentOpen] = useState(false);
     const [cancelOpen, setCancelOpen] = useState(false);
     const currency = account?.currency ?? '';
-    const canEdit = reconciliation.status === ReconciliationStatus.InProgress || reconciliation.status === ReconciliationStatus.Pending;
+    const canEdit = canPerform && (reconciliation.status === ReconciliationStatus.InProgress || reconciliation.status === ReconciliationStatus.Pending);
 
     const summaryQuery = useQuery({
         queryKey: ['reconciliation-summary', reconciliation.id],
@@ -690,7 +709,7 @@ function ReconciliationWorkspace({ reconciliation, account }: { reconciliation: 
                             {finalizeMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Finalize reconciliation
                         </Button>
-                    ) : reconciliation.status === ReconciliationStatus.Completed ? (
+                    ) : canApprove && reconciliation.status === ReconciliationStatus.Completed ? (
                         <Button onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending}>
                             {approveMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Approve reconciliation
@@ -699,20 +718,22 @@ function ReconciliationWorkspace({ reconciliation, account }: { reconciliation: 
                 </CardFooter>
             </Card>
 
-            <AdjustmentDialog
-                open={adjustmentOpen}
-                onOpenChange={setAdjustmentOpen}
-                reconciliation={reconciliation}
-                currency={currency}
-                bankGlAccountId={account?.glAccountId}
-                onPosted={refresh}
-            />
-            <CancelDialog
-                open={cancelOpen}
-                onOpenChange={setCancelOpen}
-                reconciliation={reconciliation}
-                onCancelled={refresh}
-            />
+            {canPerform && <>
+                <AdjustmentDialog
+                    open={adjustmentOpen}
+                    onOpenChange={setAdjustmentOpen}
+                    reconciliation={reconciliation}
+                    currency={currency}
+                    bankGlAccountId={account?.glAccountId}
+                    onPosted={refresh}
+                />
+                <CancelDialog
+                    open={cancelOpen}
+                    onOpenChange={setCancelOpen}
+                    reconciliation={reconciliation}
+                    onCancelled={refresh}
+                />
+            </>}
         </div>
     );
 }
