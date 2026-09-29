@@ -64,6 +64,17 @@ public sealed class FiscalYearCloseTests
         posting.BookClassification.Should().Be("USD_PARALLEL");
         posting.FunctionalCurrencyCode.Should().Be("USD");
         (await f.Db.YearEndBookCloseCycles.CountAsync()).Should().Be(2);
+        var reopened = await f.GlService.ReopenFiscalYearAsync(f.FiscalYear.Id, new FiscalYearReopenRequestDto
+        {
+            AccountingBookId = parallel.Id, BookCloseCycleId = result.BookCloseCycleId!.Value,
+            Reason = "Correct the parallel book's independently closed year."
+        });
+        var reversal = await f.Db.FinancePostingEvents.SingleAsync(x => x.JournalEntryId == reopened.ReversalJournalEntryId);
+        reversal.AccountingBookId.Should().Be(parallel.Id);
+        reversal.BookClassification.Should().Be("USD_PARALLEL");
+        reversal.FunctionalCurrencyCode.Should().Be("USD");
+        (await IncomeAsync(f, parallel.Id)).Should().Be(200m);
+        (await IncomeAsync(f, f.Book.Id)).Should().Be(0m);
     }
 
     [Fact]
@@ -198,6 +209,38 @@ public sealed class FiscalYearCloseTests
             new FinancePostingLineDto { AccountId = f.Cash.Id, DebitAmount = 10m },
             new FinancePostingLineDto { AccountId = f.Revenue.Id, CreditAmount = 10m } });
         await f.Engine.Invoking(x => x.PostAsync(request)).Should().ThrowAsync<InvalidOperationException>().WithMessage("*closed for this fiscal year*");
+    }
+
+    [Theory]
+    [InlineData("tenant")]
+    [InlineData("book")]
+    [InlineData("currency")]
+    [InlineData("source")]
+    [InlineData("reversal")]
+    public async Task YearEndLeaf_RejectsForgedBoundCycleAuthority(string defect)
+    {
+        var f = await FixtureWithPostedActivityAsync();
+        var closed = await f.GlService.CloseFiscalYearAsync(CloseRequest(f));
+        var cycle = await f.Db.YearEndBookCloseCycles.SingleAsync();
+        var request = new FinancePostingRequestV2Dto
+        {
+            SourceModule = "GL", SourceDocumentType = "YearEndCloseReversal",
+            SourceDocumentId = cycle.Id, SourceDocumentTenantId = cycle.TenantId,
+            AccountingBookCode = cycle.AccountingBookCode, FunctionalCurrencyCode = cycle.FunctionalCurrencyCode,
+            ReversalOfJournalEntryId = closed.ClosingJournalEntryId, PostingAction = "Reverse",
+            FiscalPeriodId = f.Period.Id, PostingDate = f.FiscalYear.EndDate,
+            AllowPostingToClosedPeriod = true,
+            IdempotencyKey = $"GL:YearEndCloseReversal:{cycle.TenantId:N}:{cycle.AccountingBookId:N}:{cycle.Id:N}"
+        };
+        if (defect == "tenant") request.SourceDocumentTenantId = Guid.NewGuid();
+        if (defect == "book") request.AccountingBookCode = "IFRS";
+        if (defect == "currency") request.FunctionalCurrencyCode = "USD";
+        if (defect == "source") request.SourceDocumentId = Guid.NewGuid();
+        if (defect == "reversal") request.ReversalOfJournalEntryId = Guid.NewGuid();
+        await f.Engine.Invoking(x => x.PostYearEndAsync(request, cycle.Id))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*does not match its exact book-close cycle*");
+        (await f.Db.FinancePostingEvents.CountAsync(x => x.SourceDocumentType == "YearEndCloseReversal")).Should().Be(0);
+        cycle.Status.Should().Be("Closed");
     }
 
     [Fact]
