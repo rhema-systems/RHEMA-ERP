@@ -2309,6 +2309,7 @@ export function ProcedureCaseWorkspace({
       <Input
         id="new-legal-title"
         value={newCase.title}
+        disabled={module === 'Legal'}
         onChange={(event) =>
           setNewCase({ ...newCase, title: event.target.value })
         }
