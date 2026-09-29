@@ -326,6 +326,7 @@ public sealed class BankingSettlementReleaseGateTests
 
     [Theory]
     [InlineData(RateApprovalStatus.Approved, true)]
+    [InlineData(RateApprovalStatus.AutoApproved, true)]
     [InlineData(RateApprovalStatus.Rejected, false)]
     [Trait("Batch", "FinanceGoLive-BankingSettlement")]
     [Trait("Category", "CashBank-FX")]
@@ -373,6 +374,108 @@ public sealed class BankingSettlementReleaseGateTests
         cash.Amount.Should().Be(2_400m);
         cash.BaseAmount.Should().Be(24_000m);
         cash.ExchangeRateId.Should().Be(rate.Id);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank-FX")]
+    public async Task ForeignCurrencyDeposit_ShouldRejectAmbiguousOrInvalidAccountRatePolicy(
+        bool duplicatePolicy)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        setup.Settings.DirectionalExchangeRatePolicyEnabled = true;
+        var receipt = SeedLiquidityEntry(
+            setup,
+            LiquidityEntryType.CustomerReceipt,
+            LiquidityEntryDirection.Increase,
+            2_400m);
+        ConfigureUsdDepositEvidence(db, setup, receipt, RateApprovalStatus.Approved);
+        var bankPolicy = db.AccountCurrencyLinks.Local.Single(link =>
+            link.AccountId == setup.BankGlAccount.Id && link.LinkedCurrencyCode == "USD");
+        if (duplicatePolicy)
+        {
+            db.AccountCurrencyLinks.Add(new AccountCurrencyLink
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                AccountId = setup.BankGlAccount.Id,
+                LinkedCurrencyCode = "USD",
+                TransactionRateType = "Daily",
+                TransactionQuoteSide = ExchangeRateQuoteSide.Mid,
+                IsActive = true,
+                EffectiveDate = new DateTime(2026, 1, 1),
+                CreatedByUserId = Guid.NewGuid(),
+                CreatedDate = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "seed"
+            });
+        }
+        else
+        {
+            bankPolicy.TransactionRateType = "999";
+        }
+        db.LiquidityAccountEntries.Add(receipt);
+        await db.SaveChangesAsync();
+        var workflow = CreateWorkflow();
+        var maker = CreateBankingService(db, tenantId, Guid.NewGuid(), workflow);
+        var approver = CreateBankingService(db, tenantId, Guid.NewGuid(), workflow);
+        var deposit = await maker.CreateDepositAsync(CreateDepositRequest(setup, receipt));
+        await maker.SubmitDepositAsync(deposit.Id);
+
+        var act = () => approver.ApproveDepositAsync(deposit.Id);
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(duplicatePolicy
+                ? "*multiple active currency policies*"
+                : "*invalid transaction rate type*");
+        (await db.JournalEntries.CountAsync(item =>
+            item.SourceDocumentType == "BankDepositBatch" && item.SourceDocumentId == deposit.Id)).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank-FX")]
+    public async Task ForeignCurrencyDeposit_ShouldRejectUndefinedRateApprovalStatus()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        var receipt = SeedLiquidityEntry(
+            setup,
+            LiquidityEntryType.CustomerReceipt,
+            LiquidityEntryDirection.Increase,
+            2_400m);
+        var sourceRate = ConfigureUsdDepositEvidence(
+            db, setup, receipt, RateApprovalStatus.Approved);
+        sourceRate.IsActive = false;
+        db.ExchangeRates.Add(new ExchangeRate
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 0.1m, InverseRate = 10m,
+            EffectiveDate = new DateTime(2026, 7, 1),
+            RateType = ExchangeRateType.Daily, QuoteSide = ExchangeRateQuoteSide.Mid,
+            IsActive = true, RateSource = "Undefined approval test rate",
+            ApprovalStatus = (RateApprovalStatus)0,
+            CreatedByUserId = Guid.NewGuid(), CreatedDate = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        });
+        db.LiquidityAccountEntries.Add(receipt);
+        await db.SaveChangesAsync();
+        var workflow = CreateWorkflow();
+        var maker = CreateBankingService(db, tenantId, Guid.NewGuid(), workflow);
+        var approver = CreateBankingService(db, tenantId, Guid.NewGuid(), workflow);
+        var deposit = await maker.CreateDepositAsync(CreateDepositRequest(setup, receipt));
+        await maker.SubmitDepositAsync(deposit.Id);
+
+        var act = () => approver.ApproveDepositAsync(deposit.Id);
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*No active approved exchange rate exists*");
+        (await db.JournalEntries.CountAsync(item =>
+            item.SourceDocumentType == "BankDepositBatch" && item.SourceDocumentId == deposit.Id)).Should().Be(0);
     }
 
     [Fact]

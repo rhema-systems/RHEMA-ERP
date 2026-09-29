@@ -3446,22 +3446,33 @@ public sealed class BankingSettlementService : IBankingSettlementService
             var side = ExchangeRateQuoteSide.Mid;
             if (settings.DirectionalExchangeRatePolicyEnabled)
             {
-                var link = await _context.AccountCurrencyLinks.AsNoTracking().FirstOrDefaultAsync(link =>
+                var links = await _context.AccountCurrencyLinks.AsNoTracking().Where(link =>
                     link.TenantId == TenantId && link.AccountId == accountId && !link.IsDeleted && link.IsActive &&
                     link.LinkedCurrencyCode == transactionCurrency && link.EffectiveDate.Date <= postingDate.Date &&
-                    (!link.EffectiveEndDate.HasValue || link.EffectiveEndDate.Value.Date >= postingDate.Date),
-                    cancellationToken);
+                    (!link.EffectiveEndDate.HasValue || link.EffectiveEndDate.Value.Date >= postingDate.Date))
+                    .Take(2).ToListAsync(cancellationToken);
+                if (links.Count > 1)
+                    throw new InvalidOperationException(
+                        $"Account '{accountId}' has multiple active currency policies for {transactionCurrency} on {postingDate:yyyy-MM-dd}.");
+                var link = links.SingleOrDefault();
                 if (link != null)
                 {
                     if (!Enum.TryParse<ExchangeRateType>(
                             link.TransactionRateType?.Replace("-", string.Empty).Replace("_", string.Empty).Replace(" ", string.Empty),
-                            true, out type))
-                        type = ExchangeRateType.Daily;
+                            true, out type) || !Enum.IsDefined(type))
+                        throw new InvalidOperationException(
+                            $"Account '{accountId}' has an invalid transaction rate type for {transactionCurrency}.");
                     side = link.TransactionQuoteSide;
+                    if (!Enum.IsDefined(side))
+                        throw new InvalidOperationException(
+                            $"Account '{accountId}' has an invalid transaction quote side for {transactionCurrency}.");
                 }
                 else
                 {
                     side = settings.DefaultTransactionQuoteSide;
+                    if (!Enum.IsDefined(side))
+                        throw new InvalidOperationException(
+                            "Finance settings contain an invalid default transaction quote side.");
                 }
             }
             policies.Add((type, side));
@@ -3473,9 +3484,11 @@ public sealed class BankingSettlementService : IBankingSettlementService
         var policy = distinctPolicies.Single();
         var rate = await _context.ExchangeRates.AsNoTracking()
             .Where(item => item.TenantId == TenantId && !item.IsDeleted && item.IsActive && item.Rate > 0m &&
+                item.InverseRate > 0m &&
                 item.BaseCurrencyCode == functionalCurrency && item.TargetCurrencyCode == transactionCurrency &&
                 item.RateType == policy.Type && item.QuoteSide == policy.Side &&
-                item.ApprovalStatus != RateApprovalStatus.Pending && item.ApprovalStatus != RateApprovalStatus.Rejected &&
+                (item.ApprovalStatus == RateApprovalStatus.Approved ||
+                 item.ApprovalStatus == RateApprovalStatus.AutoApproved) &&
                 item.EffectiveDate.Date <= postingDate.Date &&
                 (!item.EndDate.HasValue || item.EndDate.Value.Date >= postingDate.Date))
             .OrderByDescending(item => item.EffectiveDate)
