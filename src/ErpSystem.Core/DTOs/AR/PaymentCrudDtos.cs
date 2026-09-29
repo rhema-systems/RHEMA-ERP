@@ -107,6 +107,7 @@ public class InvoiceCreateDto
     public string? CurrencyOverrideReason { get; set; }
     public Guid? PaymentTermId { get; set; }
     public decimal DiscountAmount { get; set; }
+    public string? DiscountReason { get; set; }
     public Guid? TaxGroupId { get; set; }
     public bool IsOpeningBalance { get; set; }
     public List<InvoiceLineItemCreateDto> LineItems { get; set; } = new();
@@ -145,6 +146,7 @@ public class InvoiceUpdateDto
     public string? Reference { get; set; }
     public string? Notes { get; set; }
     public decimal DiscountAmount { get; set; }
+    public string? DiscountReason { get; set; }
     public Guid? TaxGroupId { get; set; }
     public string CurrencyCode { get; set; } = "GHS";
     public decimal ExchangeRate { get; set; } = 1.0m;
@@ -235,5 +237,6 @@ public class OutstandingInvoiceDto
     public decimal? EarlyPaymentDiscountPercentage { get; set; }
     public DateTime? EarlyPaymentDiscountDueDate { get; set; }
     public bool IsDiscountAvailable { get; set; }
+    public bool RequiresTaxAdjustmentForDiscount { get; set; }
     public decimal? DiscountAmount { get; set; }
 }
