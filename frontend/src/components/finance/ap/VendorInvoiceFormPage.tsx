@@ -1677,6 +1677,8 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                 const selectedGlAccount = glAccountsData?.items?.find(
                                     (account: any) => account.id === form.watch(`lineItems.${index}.glAccountId`)
                                 );
+                                const budgetAllocationRequired = selectedGlAccount?.accountType === 'Expense'
+                                    && selectedGlAccount?.budgetTrackingEnabled;
                                 return (
                                     <div key={field.id} className="space-y-3 border-b pb-4">
                                     <div className="grid grid-cols-12 items-end gap-4">
@@ -1906,12 +1908,12 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                         </div>
                                     </div>
                                     {(lineItemType === 'Expense' || lineItemType === 'Service')
-                                        && (budgetCellsLoading[field.id]
+                                        && ((budgetAllocationRequired && budgetCellsLoading[field.id])
                                             || (budgetCellsByLine[field.id]?.length ?? 0) > 0
-                                            || selectedGlAccount?.budgetTrackingEnabled) && (
+                                            || budgetAllocationRequired) && (
                                         <div className={cn(
                                             'rounded-md border p-3',
-                                            selectedGlAccount?.budgetTrackingEnabled
+                                            budgetAllocationRequired
                                                 && !budgetCellsLoading[field.id]
                                                 && (budgetCellsByLine[field.id]?.length ?? 0) === 0
                                                 ? 'border-amber-200 bg-amber-50/60'
@@ -1962,13 +1964,13 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                 </div>
                                                 <p className={cn(
                                                     'text-xs',
-                                                    selectedGlAccount?.budgetTrackingEnabled
+                                                    budgetAllocationRequired
                                                         && !budgetCellsLoading[field.id]
                                                         && (budgetCellsByLine[field.id]?.length ?? 0) === 0
                                                         ? 'text-amber-800'
                                                         : 'text-muted-foreground'
                                                 )}>
-                                                    {selectedGlAccount?.budgetTrackingEnabled
+                                                    {budgetAllocationRequired
                                                         && !budgetCellsLoading[field.id]
                                                         && (budgetCellsByLine[field.id]?.length ?? 0) === 0
                                                         ? 'This account is budget-controlled. Finance must adopt a matching budget allocation for the invoice date before this invoice can be submitted.'
