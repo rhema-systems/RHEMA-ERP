@@ -93,6 +93,7 @@ export interface Invoice {
     currencyCode: string;
     exchangeRate: number;
     exchangeRateId?: string;
+    currencyOverrideReason?: string | null;
     paymentTermsDays: number;
     paymentTermId?: string | null;
     discountAmount: number;
@@ -118,6 +119,7 @@ export interface InvoiceCreateRequest {
     currencyCode: string;
     exchangeRate?: number;
     exchangeRateId?: string;
+    currencyOverrideReason?: string | null;
     paymentTermsDays?: number;
     paymentTermId?: string | null;
     discountAmount?: number;

@@ -32,6 +32,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? Reference { get; set; }
         public bool IsOpeningBalance { get; set; }
         public string CurrencyCode { get; set; } = "USD";
+        public string? CurrencyOverrideReason { get; set; }
         public decimal ExchangeRate { get; set; } = 1.0m;
         public Guid? ExchangeRateId { get; set; }
         public int PaymentTermsDays { get; set; } = 30; // AR-specific
@@ -82,6 +83,9 @@ namespace ErpSystem.Core.DTOs.Finance
         [MaxLength(3)]
         public string CurrencyCode { get; set; } = "USD";
 
+        [MaxLength(500)]
+        public string? CurrencyOverrideReason { get; set; }
+
         public decimal ExchangeRate { get; set; } = 1.0m;
 
         public Guid? TaxGroupId { get; set; }
@@ -102,6 +106,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? Notes { get; set; }
         public string? Reference { get; set; }
         public bool IsOpeningBalance { get; set; }
+        [MaxLength(500)]
+        public string? CurrencyOverrideReason { get; set; }
         public Guid? TaxGroupId { get; set; }
         public List<UpdateInvoiceLineItemDto> LineItems { get; set; } = new();
     }

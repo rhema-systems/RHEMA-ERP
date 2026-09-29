@@ -104,6 +104,7 @@ public class InvoiceCreateDto
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
     public Guid? ExchangeRateId { get; set; }
+    public string? CurrencyOverrideReason { get; set; }
     public Guid? PaymentTermId { get; set; }
     public decimal DiscountAmount { get; set; }
     public Guid? TaxGroupId { get; set; }

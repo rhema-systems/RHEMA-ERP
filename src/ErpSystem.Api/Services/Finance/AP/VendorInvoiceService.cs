@@ -350,6 +350,16 @@ namespace ErpSystem.Api.Services.Finance.AP
             var supplier = apPartner.Partner;
             var acceptedSupply = await ResolveAcceptedSupplyForCreateAsync(
                 dto, supplier, cancellationToken);
+            ValidateSourceDrivenLineTypes(
+                dto.PurchaseOrderId,
+                acceptedSupply?.Kind,
+                dto.LineItems,
+                dto.AutoInvoiceRequestId.HasValue || dto.EstateAcquisitionId.HasValue ||
+                dto.LineItems.Any(line => line.LandedCostItemId.HasValue));
+            var currencyOverrideReason = ResolveCurrencyOverrideReason(
+                dto.CurrencyCode, supplier.Currency, dto.PurchaseOrderId, dto.CurrencyOverrideReason,
+                dto.AutoInvoiceRequestId.HasValue || dto.EstateAcquisitionId.HasValue ||
+                dto.LineItems.Any(line => line.LandedCostItemId.HasValue) || acceptedSupply?.Kind == ProcurementAcceptedSupplyKind.WorksPaymentCertificate);
 
             var capturedPartnerDefaults = await ApplyBusinessPartnerCreateDefaultsAsync(dto, supplier, cancellationToken);
             var withholdingDecisionPending = await ApplySupplierWithholdingCreateDefaultAsync(
@@ -416,6 +426,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ReceivedDate = dto.ReceivedDate ?? now,
                 DueDate = dto.DueDate ?? dto.InvoiceDate.AddDays(paymentTermsDays),
                 CurrencyCode = governedExchangeRate?.TransactionCurrency ?? dto.CurrencyCode,
+                CurrencyOverrideReason = currencyOverrideReason,
                 ExchangeRate = governedExchangeRate?.Rate ?? dto.ExchangeRate,
                 ExchangeRateId = governedExchangeRate?.ExchangeRateId,
                 PaymentTermsDays = paymentTermsDays,
@@ -625,6 +636,17 @@ namespace ErpSystem.Api.Services.Finance.AP
                 : null;
             var acceptedSupply = await ResolveAcceptedSupplyForUpdateAsync(
                 invoice, dto, supplier, cancellationToken);
+            ValidateSourceDrivenLineTypes(
+                dto.PurchaseOrderId,
+                acceptedSupply?.Kind,
+                dto.LineItems,
+                invoice.AutoInvoiceRequestId.HasValue || invoice.EstateAcquisitionId.HasValue ||
+                invoice.LineItems.Any(line => !line.IsDeleted && line.LandedCostItemId.HasValue));
+            var currencyOverrideReason = ResolveCurrencyOverrideReason(
+                dto.CurrencyCode, supplier.Currency, dto.PurchaseOrderId, dto.CurrencyOverrideReason,
+                invoice.AutoInvoiceRequestId.HasValue || invoice.EstateAcquisitionId.HasValue ||
+                invoice.LineItems.Any(line => !line.IsDeleted && line.LandedCostItemId.HasValue) ||
+                acceptedSupply?.Kind == ProcurementAcceptedSupplyKind.WorksPaymentCertificate);
 
             var now = DateTime.UtcNow;
             invoice.SupplierInvoiceNumber = dto.SupplierInvoiceNumber;
@@ -635,6 +657,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.ReceivedDate = dto.ReceivedDate;
             invoice.DueDate = dto.DueDate ?? dto.InvoiceDate.AddDays(paymentTermsDays);
             invoice.CurrencyCode = governedExchangeRate?.TransactionCurrency ?? dto.CurrencyCode;
+            invoice.CurrencyOverrideReason = currencyOverrideReason;
             invoice.ExchangeRate = governedExchangeRate?.Rate ?? dto.ExchangeRate;
             invoice.ExchangeRateId = governedExchangeRate?.ExchangeRateId;
             invoice.PaymentTermsDays = paymentTermsDays;
@@ -4275,6 +4298,78 @@ namespace ErpSystem.Api.Services.Finance.AP
         private static decimal RoundMoney(decimal amount)
             => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
 
+        private static void ValidateSourceDrivenLineTypes(
+            Guid? purchaseOrderId,
+            ProcurementAcceptedSupplyKind? acceptedSupplyKind,
+            IReadOnlyCollection<VendorInvoiceLineItemCreateDto> lines,
+            bool trustedSystemSource)
+        {
+            if (lines.Count == 0)
+                throw new InvalidOperationException("At least one invoice line is required.");
+
+            // Estate, landed-cost and consolidated Procurement producers own their line semantics.
+            if (trustedSystemSource)
+                return;
+
+            static bool Is(VendorInvoiceLineItemCreateDto line, string type) =>
+                string.Equals(line.LineItemType?.Trim(), type, StringComparison.OrdinalIgnoreCase);
+
+            if (acceptedSupplyKind == ProcurementAcceptedSupplyKind.WorksPaymentCertificate)
+            {
+                if (lines.Any(line => !Is(line, "Service")))
+                    throw new InvalidOperationException(
+                        "Works invoices must use service lines supplied by the approved payment certificate.");
+                return;
+            }
+
+            if (!purchaseOrderId.HasValue)
+            {
+                if (lines.Any(line => !Is(line, "Expense")))
+                    throw new InvalidOperationException(
+                        "Manual non-PO invoices may contain only GL Account / Expense lines. Inventory and service lines must originate from their governed source modules.");
+                return;
+            }
+
+            if (acceptedSupplyKind == ProcurementAcceptedSupplyKind.GoodsReceiptInspection)
+            {
+                if (lines.Any(line => !Is(line, "Inventory") || !line.PurchaseOrderItemId.HasValue))
+                    throw new InvalidOperationException(
+                        "Goods invoices must use inventory lines derived from accepted, uninvoiced receipt quantities.");
+                return;
+            }
+
+            if (acceptedSupplyKind == ProcurementAcceptedSupplyKind.ServiceCompletion &&
+                lines.Any(line => !Is(line, "Service") || !line.PurchaseOrderItemId.HasValue))
+            {
+                throw new InvalidOperationException(
+                    "Service invoices must use service lines derived from the approved completion evidence.");
+            }
+        }
+
+        private static string? ResolveCurrencyOverrideReason(
+            string? invoiceCurrency,
+            string? supplierCurrency,
+            Guid? purchaseOrderId,
+            string? suppliedReason,
+            bool governedSource)
+        {
+            var transactionCurrency = invoiceCurrency?.Trim().ToUpperInvariant();
+            var partnerCurrency = supplierCurrency?.Trim().ToUpperInvariant();
+            if (governedSource || purchaseOrderId.HasValue || string.IsNullOrWhiteSpace(partnerCurrency) ||
+                string.Equals(transactionCurrency, partnerCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var reason = suppliedReason?.Trim();
+            if (string.IsNullOrWhiteSpace(reason) || reason.Length < 10)
+                throw new InvalidOperationException(
+                    $"Explain why this invoice uses {transactionCurrency} instead of the supplier default {partnerCurrency} (at least 10 characters).");
+            if (reason.Length > 500)
+                throw new InvalidOperationException("The currency override reason cannot exceed 500 characters.");
+            return reason;
+        }
+
         private async Task<ProcurementAcceptedSupplyResolutionDto?>
             ResolveAcceptedSupplyForCreateAsync(
                 VendorInvoiceCreateDto dto,
@@ -4596,6 +4691,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 PaidAmount = invoice.PaidAmount,
                 BalanceAmount = invoice.BalanceAmount,
                 CurrencyCode = invoice.CurrencyCode,
+                CurrencyOverrideReason = invoice.CurrencyOverrideReason,
                 ExchangeRate = invoice.ExchangeRate,
                 ExchangeRateId = invoice.ExchangeRateId,
                 BaseCurrencyAmount = invoice.BaseCurrencyAmount,
