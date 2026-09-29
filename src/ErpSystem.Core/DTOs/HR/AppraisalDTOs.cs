@@ -256,6 +256,14 @@ public class AppraisalCompetencyDto : BaseDto
     public string? Code { get; set; }
     public string CriteriaName { get; set; } = string.Empty;
     public string? Description { get; set; }
+
+    /// <summary>
+    /// A score on this criterion needs an evidence link before an evaluation can be submitted — the
+    /// employee's, the manager's or a peer's (performance closure B2). The entity had it; no DTO
+    /// carried it, so nothing could set it.
+    /// </summary>
+    public bool RequireEvidence { get; set; }
+
     public bool IsActive { get; set; } = true;
 }
 
@@ -271,6 +279,9 @@ public class CreateAppraisalCompetencyDto : CreateDtoBase
     [MaxLength(1000)]
     public string? Description { get; set; }
 
+    /// <summary>See <see cref="AppraisalCompetencyDto.RequireEvidence"/>.</summary>
+    public bool RequireEvidence { get; set; }
+
     public bool IsActive { get; set; } = true;
 }
 
@@ -285,6 +296,9 @@ public class UpdateAppraisalCompetencyDto : UpdateDtoBase
 
     [MaxLength(1000)]
     public string? Description { get; set; }
+
+    /// <summary>See <see cref="AppraisalCompetencyDto.RequireEvidence"/>.</summary>
+    public bool RequireEvidence { get; set; }
 
     public bool IsActive { get; set; } = true;
 }
@@ -1062,6 +1076,12 @@ public class AppraisalSettingsDto : BaseDto
 {
     public Guid TenantId { get; set; }
     public string SettingsName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The tenant's default profile — at most one (performance closure B6, P-2). Moved only by
+    /// <c>POST …/{id}/make-default</c>; the create and update bodies do not carry it.
+    /// </summary>
+    public bool IsDefault { get; set; }
 
     // Self-evaluation
     public bool RequireSelfEvaluation { get; set; }
@@ -4906,6 +4926,49 @@ public class DeadlineEnforcementResult
     public List<string> Messages { get; set; } = new();
 }
 
+/// <summary>
+/// The transition report (performance closure B8): a cycle's in-flight appraisals whose recorded
+/// state runs ahead of where the gates now hold them — an evaluation submitted before a step the
+/// gates put before it, typically because the gates arrived (lane B) or a profile changed after the
+/// work was done. For HR to waive through the audited advance; nothing is moved automatically.
+/// </summary>
+public class AppraisalTransitionReportDto
+{
+    public Guid CycleId { get; set; }
+    public string? CycleName { get; set; }
+    public DateTime GeneratedAt { get; set; }
+
+    /// <summary>In-flight appraisals examined: not completed, closed, appealed or withdrawn.</summary>
+    public int Examined { get; set; }
+
+    public List<AppraisalTransitionRowDto> Rows { get; set; } = new();
+}
+
+/// <summary>One appraisal whose records run ahead of the gates.</summary>
+public class AppraisalTransitionRowDto
+{
+    public Guid AppraisalId { get; set; }
+    public string? AppraisalNumber { get; set; }
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? EmployeeNumber { get; set; }
+    public AppraisalStatus Status { get; set; }
+
+    /// <summary>Where the gates hold it, and why.</summary>
+    public AppraisalSubStatus SubStatus { get; set; }
+    public string StepLabel { get; set; } = string.Empty;
+    public string? Reason { get; set; }
+
+    /// <summary>What is recorded for steps the gates put after it — "the self-evaluation is submitted", ….</summary>
+    public List<string> RecordedAhead { get; set; } = new();
+
+    /// <summary>
+    /// HR's audited advance can move it past the step (the four before the manager's evaluation).
+    /// Otherwise the step itself has to be completed — the reason says what is missing.
+    /// </summary>
+    public bool CanWaive { get; set; }
+}
+
 public class CreateEmployeeDevelopmentObjectiveDto : CreateDtoBase
 {
     [Required]
@@ -5057,7 +5120,13 @@ public class CreateAppraisalConversationDto : CreateDtoBase
     public Guid? ScheduledById { get; set; }
     public Guid? ConductedById { get; set; }
 
-    public ConversationType Type { get; set; } = ConversationType.KickOff;
+    /// <summary>
+    /// Which conversation this is — required (performance closure B2). It defaulted to KickOff, so
+    /// a body that named no type booked a kick-off, which the goal-setting gate then counted.
+    /// Nullable so that <c>[Required]</c> can see it missing: on a plain enum it is a no-op.
+    /// </summary>
+    [Required]
+    public ConversationType? Type { get; set; }
 
     public DateTime? ScheduledDate { get; set; }
 
@@ -5073,7 +5142,12 @@ public class UpdateAppraisalConversationDto : UpdateDtoBase
     public Guid? ScheduledById { get; set; }
     public Guid? ConductedById { get; set; }
 
-    public ConversationType Type { get; set; }
+    /// <summary>
+    /// Required (performance closure B2): an update that named no type wrote 0, which is no
+    /// conversation type at all — a booked kick-off stopped counting as one.
+    /// </summary>
+    [Required]
+    public ConversationType? Type { get; set; }
 
     public DateTime? ScheduledDate { get; set; }
     public DateTime? HeldDate { get; set; }

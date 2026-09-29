@@ -242,6 +242,14 @@ export default function SelfEvaluationPage() {
         </p>
       )}
 
+      {/* The profile switch is named "allow", but it requires (closure B2): with it on, the
+          submission is refused until every behavioural criterion has a score. */}
+      {!context.isSelfEvaluationSubmitted && context.allowSelfSoftSkillRating && (
+        <p className="text-sm text-muted-foreground">
+          This cycle asks you to score every behavioural criterion before you submit.
+        </p>
+      )}
+
       <EvaluationScoreForm
         sections={sections}
         values={values}

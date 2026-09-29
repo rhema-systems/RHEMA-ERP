@@ -200,6 +200,32 @@ public class AppraisalSettingsController : ControllerBase
     }
 
     /// <summary>
+    /// Make this profile the tenant's default, and no other (performance closure B6, P-2). The
+    /// default was "the newest profile", which any new or test profile won.
+    /// </summary>
+    [HttpPost("{id:guid}/make-default")]
+    [ProducesResponseType(typeof(AppraisalSettingsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
+    public async Task<IActionResult> MakeDefault(Guid id)
+    {
+        try
+        {
+            var response = await _settingsService.MakeDefaultAsync(id, HttpContext.RequestAborted);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error making appraisal settings {SettingsId} the default", id);
+            return StatusCode(500, "An error occurred while making the appraisal settings the default");
+        }
+    }
+
+    /// <summary>
     /// Delete appraisal settings
     /// </summary>
     [HttpDelete("{id:guid}")]

@@ -47,6 +47,17 @@ settings as a policy reference; this document says which of them the code obeys.
 >   evaluation — marked *"Since lane B2"*. **The profile now: 48 enforced, 0 advisory, 0 client-side
 >   only, 0 ghosts — of 48.** (`KpiDefinition.TolerancePercent`, a KPI field rather than a profile
 >   field, moved to migration batch 2 — closure plan D-32.)
+> - **Lane B2, slice B-w** (the write paths, B6, B8) moved no verdict — all 48 were enforced — but
+>   changed what seven do, marked *"Since lane B2 (B-w)"*: `RequireManagerGoalApproval` (off, a
+>   submitted goal lands Approved and needs no manager; a draft holds goal setting either way),
+>   `RequireMidYearConversation` (holds the manager's submission, not the self-evaluation),
+>   `AllowPeerKpiEvaluation` (the draft save refuses a template KPI row too, and the submit drops one a
+>   draft holds), `AllowSelfSoftSkillRating` (the label says what it does), `MinGoalsPerEmployee` and
+>   `MaxGoalsPerEmployee` (the manager's team desk reads the pair) and the deadline-risk bands (a
+>   profile out of order is refused, as is a peer or goal minimum above its maximum). The profile has a
+>   **default** now — a flag HR sets, where it was "the newest profile". `AppraisalCompetency.RequireEvidence`,
+>   a criterion field, is enforced on all three submissions and has a door on the criteria page.
+>   **Every item of "What to fix" is done.**
 >
 > Line numbers below are as of 2026-09-17; lanes A and B1 rewrote much of `PerformanceAppraisalService.cs`,
 > and `AppraisalAdvanceHelpers.cs` is gone — its resolver is `AppraisalGates.cs`.
@@ -252,6 +263,12 @@ goal still waits for the manager's approval"*); **off**, every live goal counts 
 it stands. The goal's own lifecycle still ignores the switch — landing a submitted goal straight on
 Approved when it is off is lane B2's.
 
+*Since lane B2 (B-w):* the goal's lifecycle reads it too. **Off**, a submitted goal lands
+**Approved** on submission (`GoalWorkflowCommandService.SubmitGoalAsync`), and an employee with no line
+manager may submit — the manager is needed only to route an approval. A **draft** holds goal setting
+either way (*"…one goal is still a draft, not yet submitted"*): with the switch off it used to count
+toward the minimum.
+
 #### 7. `RequireKickOffConversation` · 8. `RequireMidYearConversation`
 Single read each — `AppraisalAdvanceHelpers.cs:64` and `:68`. Nothing refuses an evaluation because a
 required conversation was never held.
@@ -260,6 +277,12 @@ required conversation was never held.
 the self-evaluation submit is refused until the required conversation is held, and the refusal names
 it (*"…the kick-off conversation has not been held"*). Lane B2 moves the mid-year one to hold the
 manager's submission instead of the employee's.
+
+*Since lane B2 (B-w):* **the mid-year holds the manager's submission** (`AppraisalGates.EnsureManagerMaySubmit`)
+and nothing before it: the appraisal waits at Manager Evaluation, whose blocker names the mid-year while
+it is missing, and the manager's drafts are not held. A profile that requires only the mid-year has no
+goal-setting step. A conversation must now name its type — the create DTO defaulted to `KickOff`, so a
+body without one booked the conversation this gate counts.
 
 #### 9. `RequireFinalConversation`
 Read at `AppraisalAdvanceHelpers.cs:153` and `:209` (the governance-status helper), plus the dashboard's
@@ -282,6 +305,11 @@ pair is asymmetric.
 *Since lane B1 — enforced.* The self-evaluation submit is refused below the minimum (*"…1 of the 2 goals
 this cycle requires are set"*), counting the employee's live goals in the cycle whether or not they are
 linked to the appraisal. Surfacing `meetsMinGoalCount` in the manager's governance view is lane B2's.
+
+*Since lane B2 (B-w):* the manager's **team desk** reads the pair: its verdict is *Below minimum* or
+*Above maximum* before it looks at the weights (one goal at weight 100 on a three-goal profile read
+*Structurally complete* and offered a *Lock set* the lock refused), and the row carries
+`meetsMinGoalCount`, `withinMaxGoalCount` and the bounds.
 
 *Since lane L-a:* the manager's **lock goal set** reads the pair too — it is refused below the minimum
 and **above the maximum**, and unless the live goals' weights add to 100 (`GoalSetRules.LockBlocker`).
@@ -358,8 +386,8 @@ Grouped by what they actually do, with the strongest evidence line for each.
 | `MinPeerEvaluators` | **Self-eval submit refused** outside the range (`:1449`); phase gate (`:178`); **finalise refused** — *"At least N peer reviews must be completed"* (`:4370`). *Since lane B1:* the nomination step counts **live** nominations — pending ones included, rejected ones not — and the evaluation step submitted ones; the manager's submission waits for the second |
 | `MaxPeerEvaluators` | **Nomination refused** singly (`PeerNominationService.cs:211`) and in batch (`:399`) |
 | `PeerNominationMode` | Who may nominate (`PeerNominationService.cs:100`); who the approval is routed to (`:473`); whether the self-eval submit rule applies (`PerformanceAppraisalService.cs:1446`). *Since lane P:* line 100 was only ever the editing window; the mode now decides **who** — in Manager mode the appraisee is refused both nominate routes (`EnsureMayNominate`) — and every nomination records the login that made it (the batch recorded the appraisee whoever sent it) |
-| `AllowPeerKpiEvaluation` | Which items the peer form renders (`PeerEvaluationService.cs:199`) and **peer submit completeness** (`:321`). *Since lane L-b:* the employee's **goal rows** follow it too — read-only on the form, **a peer's score on one refused when saved**, required at submission only when it is on. A KPI row is still caught only at submission (lane D). *Since lane L-c:* the form takes which rows are read-only from the server's per-row `isScoreable` and sends only the rows the peer may score |
-| `AllowSelfSoftSkillRating` | **Self-eval submit requires every competency scored when ON** (`PerformanceAppraisalService.cs:1461`) — see the caveat below |
+| `AllowPeerKpiEvaluation` | Which items the peer form renders (`PeerEvaluationService.cs:199`) and **peer submit completeness** (`:321`). *Since lane L-b:* the employee's **goal rows** follow it too — read-only on the form, **a peer's score on one refused when saved**, required at submission only when it is on. A KPI row is still caught only at submission (lane D). *Since lane L-c:* the form takes which rows are read-only from the server's per-row `isScoreable` and sends only the rows the peer may score. *Since lane B2 (B-w):* off, **the draft save refuses a template KPI row** as well (it counted in the peer's total, so in the overall), and the submit drops any barred row a draft still holds before it totals |
+| `AllowSelfSoftSkillRating` | **Self-eval submit requires every competency scored when ON** (`PerformanceAppraisalService.cs:1461`) — see the caveat below. *Since lane B2 (B-w):* labelled for what it does |
 
 ### The gates
 | Setting | What it really does |
@@ -392,7 +420,7 @@ Grouped by what they actually do, with the strongest evidence line for each.
 | `AutoLockOnDeadline` | The sweep honours it and reports `AutoLockEnabled` (`AppraisalWorkflowService.cs:699`). *Since lane B1:* each advance is past the step the gates put the appraisal at — a step before the manager's evaluation is **waived** by the advance's own log row. *Since lane L-a:* waiving goal setting **locks the agreed set** — submitted goals approved on the recorded reason, every approved or running goal locked, drafts and rejected goals left out (it used to approve all three and lock nothing). The lock is the goal's flag; its year runs on (D-29) |
 | `ProbationExtensionMonths` | The extension actually applied by the probation handler (`ProbationHandlers.cs:157`) |
 | `ManagerWorkloadThreshold` | The "managers over workload" figure (`AppraisalCycleService.cs:1066`) |
-| `DeadlineRiskHighDays` · `MediumDays` · `LowDays` | The risk banding on the cycle progress dashboard (`AppraisalCycleService.cs:516,1070-1072`) |
+| `DeadlineRiskHighDays` · `MediumDays` · `LowDays` | The risk banding on the cycle progress dashboard (`AppraisalCycleService.cs:516,1070-1072`). *Since lane B2 (B-w):* a profile whose bands are out of order (high ≤ medium ≤ low) or negative is refused, as is a peer or goal minimum above its maximum |
 | `SuccessionPoolName` · `SuccessionDefaultReadiness` | The pool and readiness a succession nomination writes (`SuccessionNominationHandler.cs:90-91`) |
 
 > **Caveat on `AllowSelfSoftSkillRating`.** It is enforced, but it does the **opposite of what its
@@ -403,6 +431,10 @@ Grouped by what they actually do, with the strongest evidence line for each.
 > controls is a **completeness check**: when ON, the submit is refused unless every competency is
 > scored. "May rate" is really "must rate". There is also a dead local at
 > `PerformanceAppraisalService.cs:1533` — assigned from the setting and never used.
+>
+> *Since lane B2 (B-w):* the form reads *"Employees must score every behavioural criterion before
+> submitting"*, the self-evaluation page tells the employee when it is on, and the dead local is gone.
+> The behaviour is unchanged.
 
 ---
 
@@ -414,6 +446,8 @@ Grouped by what they actually do, with the strongest evidence line for each.
 > **Then lane B2, slice B-v (2026-09-29): items 1 and 2 are done** — the last ghost and both
 > visibility controls are enforced in the server's one visibility rule. Item 6 and item 7's
 > governance view are slice B-w's.
+> **Then slice B-w (2026-09-29): items 6 and 7 are done** — the label and the dead local; the
+> minimum and maximum on the manager's team desk. All seven items are closed.
 
 ### 1. Delete or implement the three ghosts *(half a day either way)*
 `ShowPeerScoresToManager`, `AllowAcknowledgmentWithoutConversation`, `RequireDevelopmentPlanUpdate`.

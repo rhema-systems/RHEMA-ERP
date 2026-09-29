@@ -624,6 +624,75 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         return result;
     }
 
+    // ────────────────────────────────────────────────────────────────────────
+    //  GetTransitionReportAsync (performance closure B8)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /// <inheritdoc/>
+    public async Task<AppraisalTransitionReportDto> GetTransitionReportAsync(Guid cycleId, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+
+        // In flight: what the sweep above examines.
+        var appraisals = await _appraisalRepository
+            .GetQueryable(a => a.TenantId == tenantId
+                            && a.AppraisalCycleId == cycleId
+                            && a.Status != AppraisalStatus.Completed
+                            && a.Status != AppraisalStatus.Closed
+                            && a.Status != AppraisalStatus.Appealed
+                            && a.Status != AppraisalStatus.Withdrawn)
+            .AsNoTracking()
+            .Select(a => new
+            {
+                a.Id,
+                a.AppraisalNumber,
+                a.EmployeeId,
+                a.Status,
+                EmployeeName = a.Employee.FirstName + " " + a.Employee.LastName,
+                a.Employee.EmployeeNumber,
+                CycleName = a.AppraisalCycle.CycleName,
+            })
+            .ToListAsync(ct);
+
+        var report = new AppraisalTransitionReportDto
+        {
+            CycleId = cycleId,
+            CycleName = appraisals.FirstOrDefault()?.CycleName,
+            GeneratedAt = DateTime.UtcNow,
+            Examined = appraisals.Count,
+        };
+        if (appraisals.Count == 0)
+            return report;
+
+        var states = await _lifecycle.GetStatesAsync(appraisals.Select(a => a.Id).ToList(), ct);
+        foreach (var appraisal in appraisals.OrderBy(a => a.EmployeeName))
+        {
+            if (!states.TryGetValue(appraisal.Id, out var state))
+                continue;
+
+            var ahead = AppraisalGates.RecordedAhead(state.Facts, state.Settings, state.SubStatus);
+            if (ahead.Count == 0)
+                continue;
+
+            report.Rows.Add(new AppraisalTransitionRowDto
+            {
+                AppraisalId = appraisal.Id,
+                AppraisalNumber = appraisal.AppraisalNumber,
+                EmployeeId = appraisal.EmployeeId,
+                EmployeeName = appraisal.EmployeeName.Trim(),
+                EmployeeNumber = appraisal.EmployeeNumber,
+                Status = appraisal.Status,
+                SubStatus = state.SubStatus,
+                StepLabel = state.StepLabel,
+                Reason = state.Block.Reason,
+                RecordedAhead = ahead.ToList(),
+                CanWaive = AppraisalGates.CanBeWaived(state.SubStatus),
+            });
+        }
+
+        return report;
+    }
+
     /// <summary>Maps a blocking sub-status to the cycle phase deadline that governs it.</summary>
     private static DateOnly? DeadlineForSubStatus(AppraisalCycle cycle, AppraisalSubStatus subStatus) => subStatus switch
     {

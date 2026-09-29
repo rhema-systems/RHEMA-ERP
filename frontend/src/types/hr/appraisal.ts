@@ -172,6 +172,11 @@ export const PERFORMANCE_RATING_OPTIONS = opts<PerformanceRating>([
 export interface AppraisalSettings extends AuditFields {
   tenantId: string;
   settingsName: string;
+  /**
+   * The tenant's default profile — at most one (closure B6). Moved only by `makeDefault`; the
+   * create and update bodies do not carry it.
+   */
+  isDefault: boolean;
 
   requireSelfEvaluation: boolean;
   allowSelfSoftSkillRating: boolean;
@@ -237,7 +242,7 @@ export interface AppraisalSettings extends AuditFields {
   successionDefaultReadiness: ReadinessLevel;
 }
 
-export type CreateAppraisalSettings = Omit<AppraisalSettings, keyof AuditFields | 'tenantId'>;
+export type CreateAppraisalSettings = Omit<AppraisalSettings, keyof AuditFields | 'tenantId' | 'isDefault'>;
 export type UpdateAppraisalSettings = CreateAppraisalSettings & { id: string };
 
 /**
@@ -270,6 +275,8 @@ export interface AppraisalCriterion extends AuditFields {
   code?: string | null;
   criteriaName: string;
   description?: string | null;
+  /** A score on it needs an evidence link before any evaluation can be submitted (closure B2). */
+  requireEvidence: boolean;
   isActive: boolean;
 }
 
@@ -277,6 +284,7 @@ export interface CreateAppraisalCriterion {
   code?: string | null;
   criteriaName: string;
   description?: string | null;
+  requireEvidence: boolean;
   isActive: boolean;
 }
 

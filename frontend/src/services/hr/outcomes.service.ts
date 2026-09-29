@@ -2,6 +2,7 @@ import { apiService } from '../api.service';
 import type {
   AppraisalOutcomeRecommendation,
   CreateAppraisalOutcomeRecommendation,
+  AppraisalTransitionReport,
   DeadlineEnforcementResult,
   EmploymentActionProposal,
   EmploymentActionProposalStatus,
@@ -195,6 +196,14 @@ class DeadlineEnforcementService {
    */
   advance(appraisalId: string, data: ManualAdvanceRequest): Promise<ManualAdvanceResult> {
     return apiService.post<ManualAdvanceResult>(`${this.baseUrl}/advance/${appraisalId}`, data);
+  }
+
+  /**
+   * The cycle's in-flight appraisals whose records run ahead of the gates (closure B8) — HR's list
+   * to waive through `advance`. Read-only.
+   */
+  transitionReport(cycleId: string): Promise<AppraisalTransitionReport> {
+    return apiService.get<AppraisalTransitionReport>(`${this.baseUrl}/transition-report/${cycleId}`);
   }
 }
 

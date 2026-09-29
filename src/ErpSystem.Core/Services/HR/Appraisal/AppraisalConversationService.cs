@@ -165,6 +165,13 @@ public class AppraisalConversationService : IAppraisalConversationService
     {
         var tenantId = GetTenantId();
 
+        // B2: the type is what the gates count — a kick-off holds the self-evaluation, a mid-year the
+        // manager's submission, a final review the acknowledgment — so it is never assumed. It
+        // defaulted to KickOff, and a number the enum does not define was stored as it came.
+        if (createDto.Type is not ConversationType type || !Enum.IsDefined(type))
+            throw new ArgumentException(
+                "Say which conversation this is: KickOff, QuarterlyQ1, MidYear, QuarterlyQ3, QuarterlyQ4 or FinalReview.");
+
         // The appraisal is the conversation's whole context — who it is about, and which cycle it
         // belongs to. An id from another tenant, or none at all, would save happily and then read
         // back as a conversation about nobody.
@@ -209,7 +216,15 @@ public class AppraisalConversationService : IAppraisalConversationService
         if (entity.IsCompleted)
             throw new InvalidOperationException("Cannot update a completed conversation.");
 
+        if (updateDto.Type is not ConversationType type || !Enum.IsDefined(type))
+            throw new InvalidOperationException(
+                "Say which conversation this is: KickOff, QuarterlyQ1, MidYear, QuarterlyQ3, QuarterlyQ4 or FinalReview.");
+
+        // The conversation stays with its appraisal. The body's AppraisalId was copied in, so an edit
+        // — authorised against this conversation's appraisal — could move it to any other (B2).
+        var appraisalId = entity.AppraisalId;
         updateDto.UpdateEntity(entity);
+        entity.AppraisalId = appraisalId;
 
         // The update DTO carries IsCompleted and HeldDate, which would let an edit close a
         // conversation behind CompleteAsync's back — without the held date being stamped and

@@ -143,11 +143,16 @@ public sealed class PerformanceAppraisalDataSeeder
         }
         await _context.SaveChangesAsync(cancellationToken);
 
-        // 4. Appraisal Settings
+        // 4. Appraisal Settings — the tenant's default profile when it has none yet (performance
+        // closure B6/S1): the flag answers GET /default, which read "the newest profile" and so
+        // crowned whatever a test run created last. At most one per tenant (a filtered unique index).
+        var tenantHasDefault = await _context.AppraisalSettings
+            .AnyAsync(s => s.TenantId == tenantId && s.IsDefault, cancellationToken);
         var settings = new AppraisalSettings
         {
             TenantId = tenantId,
             SettingsName = "Standard Annual Appraisal",
+            IsDefault = !tenantHasDefault,
             RequireSelfEvaluation = true,
             SelfEvaluationWeight = 0.1m,
             RequirePeerReviews = true,

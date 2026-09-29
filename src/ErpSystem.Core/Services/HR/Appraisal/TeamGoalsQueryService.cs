@@ -41,6 +41,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
 {
     private readonly IGenericRepository<EmployeeGoal> _goalRepo;
     private readonly IGenericRepository<Employee> _employeeRepo;
+    private readonly IGenericRepository<AppraisalCycle> _cycleRepo;
     private readonly ICurrentUserService _currentUserService;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IDateTimeProvider _clock;
@@ -51,6 +52,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
     public TeamGoalsQueryService(
         IGenericRepository<EmployeeGoal> goalRepo,
         IGenericRepository<Employee> employeeRepo,
+        IGenericRepository<AppraisalCycle> cycleRepo,
         ICurrentUserService currentUserService,
         ICurrentUserProvider currentUserProvider,
         IDateTimeProvider clock,
@@ -60,6 +62,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
     {
         _goalRepo             = goalRepo;
         _employeeRepo         = employeeRepo;
+        _cycleRepo            = cycleRepo;
         _currentUserService   = currentUserService;
         _currentUserProvider  = currentUserProvider;
         _clock                = clock;
@@ -96,6 +99,17 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         _logger.LogDebug(
             "TeamGoalsQueryService.GetTeamOverviewAsync: managerId={ManagerId}, cycleId={CycleId}",
             managerId, appraisalCycleId);
+
+        // The cycle's goal-count bounds (B2): the governance verdict holds a set to them, as the
+        // goal-setting gate and the lock do (GoalSetRules). One goal at weight 100 on a three-goal
+        // profile used to read "structurally complete" and offer a Lock set the lock refused.
+        var bounds = await _cycleRepo.GetQueryable()
+            .AsNoTracking()
+            .Where(c => c.Id == appraisalCycleId && c.TenantId == tenantId)
+            .Select(c => new { c.AppraisalSettings.MinGoalsPerEmployee, c.AppraisalSettings.MaxGoalsPerEmployee })
+            .FirstOrDefaultAsync(cancellationToken);
+        var minGoals = bounds?.MinGoalsPerEmployee is int min && min > 0 ? min : 1;
+        var maxGoals = bounds?.MaxGoalsPerEmployee is int max && max > 0 ? max : (int?)null;
 
         // ── Base queryables ────────────────────────────────────────────────────
         // Both share the same scoped DbContext → they can be composed together.
@@ -160,28 +174,41 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
 
         // ── Post-projection: derive IsWeightBalanced + GovernanceStatus ───────
         // Pure in-memory computations — no additional DB round-trip.
-        return rawRows.Select(r => new TeamMemberOverviewDto
+        return rawRows.Select(r =>
         {
-            EmployeeId            = r.EmployeeId,
-            EmployeeName          = r.EmployeeName.Trim(),
-            TotalGoals            = r.TotalGoals,
-            DraftCount            = r.DraftCount,
-            PendingApprovalCount  = r.PendingApprovalCount,
-            ApprovedWorkflowCount = r.ApprovedWorkflowCount,
-            RejectedCount         = r.RejectedCount,
-            LockedCount           = r.LockedCount,
-            InProgressCount       = r.InProgressCount,
-            AtRiskCount           = r.AtRiskCount,
-            CompletedCount        = r.CompletedCount,
-            OverdueCount          = r.OverdueCount,
-            TotalWeight           = r.TotalWeight,
-            IsWeightBalanced      = r.TotalGoals > 0 && r.TotalWeight == 100,
-            GovernanceStatus      = DeriveGovernanceStatus(
-                                        r.TotalGoals,
-                                        r.DraftCount,
-                                        r.RejectedCount,
-                                        r.PendingApprovalCount,
-                                        r.TotalWeight),
+            // Live goals: every goal but a rejected one (GoalSetRules.IsLive).
+            var live = r.TotalGoals - r.RejectedCount;
+            return new TeamMemberOverviewDto
+            {
+                EmployeeId            = r.EmployeeId,
+                EmployeeName          = r.EmployeeName.Trim(),
+                TotalGoals            = r.TotalGoals,
+                DraftCount            = r.DraftCount,
+                PendingApprovalCount  = r.PendingApprovalCount,
+                ApprovedWorkflowCount = r.ApprovedWorkflowCount,
+                RejectedCount         = r.RejectedCount,
+                LockedCount           = r.LockedCount,
+                InProgressCount       = r.InProgressCount,
+                AtRiskCount           = r.AtRiskCount,
+                CompletedCount        = r.CompletedCount,
+                OverdueCount          = r.OverdueCount,
+                TotalWeight           = r.TotalWeight,
+                IsWeightBalanced      = r.TotalGoals > 0 && r.TotalWeight == 100,
+                LiveGoalCount         = live,
+                MinGoals              = minGoals,
+                MaxGoals              = maxGoals,
+                MeetsMinGoalCount     = live >= minGoals,
+                WithinMaxGoalCount    = maxGoals is not int m || live <= m,
+                GovernanceStatus      = DeriveGovernanceStatus(
+                                            r.TotalGoals,
+                                            r.DraftCount,
+                                            r.RejectedCount,
+                                            r.PendingApprovalCount,
+                                            r.TotalWeight,
+                                            live,
+                                            minGoals,
+                                            maxGoals),
+            };
         }).ToList();
     }
 
@@ -636,8 +663,10 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
     ///   2. InProgress       → DraftCount > 0 OR RejectedCount > 0
     ///                         (structural work still in progress)
     ///   3. AwaitingApproval → PendingApprovalCount > 0
-    ///   4. InvalidWeight    → TotalWeight != 100
-    ///   5. StructurallyComplete (all structural conditions satisfied)
+    ///   4. BelowMinimum     → live goals below the cycle's MinGoalsPerEmployee (B2)
+    ///   5. AboveMaximum     → live goals above the cycle's MaxGoalsPerEmployee (B2)
+    ///   6. InvalidWeight    → TotalWeight != 100
+    ///   7. StructurallyComplete (all structural conditions satisfied — the set the lock accepts)
     ///
     /// Execution states (InProgress, OnTrack, AtRisk, Completed) play NO role
     /// in this derivation by design — they are separated into execution counts.
@@ -647,7 +676,10 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         int draftCount,
         int rejectedCount,
         int pendingApprovalCount,
-        int totalWeight)
+        int totalWeight,
+        int liveGoals,
+        int minGoals,
+        int? maxGoals)
     {
         if (totalGoals == 0)
             return TeamGovernanceStatus.NotStarted;
@@ -659,6 +691,12 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         // All drafts resolved but at least one is pending manager review
         if (pendingApprovalCount > 0)
             return TeamGovernanceStatus.AwaitingApproval;
+
+        // The cycle's goal-count bounds (B2) — what the goal-setting gate and the lock hold a set to.
+        if (liveGoals < minGoals)
+            return TeamGovernanceStatus.BelowMinimum;
+        if (maxGoals is int max && liveGoals > max)
+            return TeamGovernanceStatus.AboveMaximum;
 
         // Approved goals exist but total weight doesn't sum to 100
         if (totalWeight != 100)

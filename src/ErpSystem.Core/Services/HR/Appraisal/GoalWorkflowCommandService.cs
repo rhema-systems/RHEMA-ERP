@@ -50,7 +50,9 @@ namespace ErpSystem.Core.Services.HR.Appraisal;
 //  ┌──────────────┬──────────────────────────┬─────────────────────────────────┐
 //  │ Command      │ Allowed source status(es) │ Target status                   │
 //  ├──────────────┼──────────────────────────┼─────────────────────────────────┤
-//  │ Submit       │ Draft, Rejected           │ PendingApproval                 │
+//  │ Submit       │ Draft, Rejected           │ PendingApproval — or Approved   │
+//  │              │                           │ when the cycle does not require │
+//  │              │                           │ the manager's approval (B2)     │
 //  │ Approve      │ PendingApproval           │ Approved                        │
 //  │ Reject       │ PendingApproval, Approved,│ Rejected (sent back for changes │
 //  │              │ InProgress, OnTrack,      │ when it was approved — D-30)    │
@@ -164,10 +166,21 @@ public sealed class GoalWorkflowCommandService : IGoalWorkflowCommandService
         // ── Invariant checks ─────────────────────────────────────────────
         EnsureNotLocked(goal);
 
+        // The cycle's profile decides whether the manager approves goals at all
+        // (RequireManagerGoalApproval, performance closure B2). When it does not, the submission
+        // is the agreement: the goal lands Approved and needs no manager to route to. It used to
+        // go to PendingApproval whatever the switch said, and wait for an approval nobody was
+        // asked to give. A goal whose cycle cannot be read is treated as needing approval.
+        var tenantId = GetTenantId();
+        var approvalRequired = await _cycleRepo.GetQueryable()
+            .Where(c => c.Id == goal.AppraisalCycleId && c.TenantId == tenantId)
+            .Select(c => (bool?)c.AppraisalSettings.RequireManagerGoalApproval)
+            .FirstOrDefaultAsync(cancellationToken) ?? true;
+
         // Submission target: derived from the employee's manager assignment.
         // Client must NOT provide this — it is read from the HR record to
         // prevent an employee from submitting to an arbitrary manager id.
-        if (!goal.Employee.ManagerId.HasValue)
+        if (approvalRequired && !goal.Employee.ManagerId.HasValue)
             throw new GoalWorkflowException(
                 GoalWorkflowFailureReason.InvalidTransition,
                 "Cannot submit goal: the employee does not have an assigned manager.");
@@ -207,17 +220,33 @@ public sealed class GoalWorkflowCommandService : IGoalWorkflowCommandService
         }
 
         // ── Apply mutation ───────────────────────────────────────────────
-        goal.Status               = GoalStatus.PendingApproval;
+        var now = _clock.UtcNow;
         goal.SubmittedToManagerId = goal.Employee.ManagerId;
-        goal.SubmittedDate        = _clock.UtcNow;
+        goal.SubmittedDate        = now;
+        if (approvalRequired)
+        {
+            goal.Status = GoalStatus.PendingApproval;
+        }
+        else
+        {
+            // Agreed on submission: the cycle does not ask the manager to approve goals.
+            goal.Status       = GoalStatus.Approved;
+            goal.ApprovalDate = now;
+        }
 
         await _goalRepo.UpdateAsync(goal);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation(
-            "Goal {GoalId} submitted for approval by employee {EmployeeId}; " +
-            "routed to manager {ManagerId}",
-            goalId, employeeId, goal.SubmittedToManagerId);
+        if (approvalRequired)
+            _logger.LogInformation(
+                "Goal {GoalId} submitted for approval by employee {EmployeeId}; " +
+                "routed to manager {ManagerId}",
+                goalId, employeeId, goal.SubmittedToManagerId);
+        else
+            _logger.LogInformation(
+                "Goal {GoalId} submitted by employee {EmployeeId} and agreed on submission — " +
+                "the cycle does not require the manager's approval",
+                goalId, employeeId);
     }
 
     // ── Transition 2: Approve ────────────────────────────────────────────────

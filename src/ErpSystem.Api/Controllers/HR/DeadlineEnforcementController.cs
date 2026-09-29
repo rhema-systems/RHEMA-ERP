@@ -67,6 +67,26 @@ public class DeadlineEnforcementController : ControllerBase
     }
 
     /// <summary>
+    /// The transition report (performance closure B8): the cycle's in-flight appraisals whose
+    /// records run ahead of where the gates now hold them — an evaluation submitted before a step the
+    /// gates put first. HR waives each through the advance below; this changes nothing.
+    /// </summary>
+    [HttpGet("transition-report/{cycleId:guid}")]
+    [ProducesResponseType(typeof(AppraisalTransitionReportDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetTransitionReport(Guid cycleId, CancellationToken ct = default)
+    {
+        try
+        {
+            return Ok(await _workflowService.GetTransitionReportAsync(cycleId, ct));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error building the transition report for cycle {CycleId}", cycleId);
+            return StatusCode(500, "An error occurred while building the transition report");
+        }
+    }
+
+    /// <summary>
     /// The acting HR officer, from the token.
     ///
     /// ⚠ This used to read a raw <c>employee_id</c> claim and fall back to <c>Guid.Empty</c>,

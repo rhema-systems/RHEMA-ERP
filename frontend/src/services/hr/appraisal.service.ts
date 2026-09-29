@@ -80,9 +80,14 @@ class AppraisalSettingsService {
     return apiService.get<AppraisalSettings>(`${this.baseUrl}/${id}`);
   }
 
-  /** The most recently created profile. 404 when the tenant has none yet. */
+  /** The profile flagged as the tenant's default (closure B6). 404 when none is. */
   getDefault(): Promise<AppraisalSettings> {
     return apiService.get<AppraisalSettings>(`${this.baseUrl}/default`);
+  }
+
+  /** Makes this profile the default, and no other. */
+  makeDefault(id: string): Promise<AppraisalSettings> {
+    return apiService.post<AppraisalSettings>(`${this.baseUrl}/${id}/make-default`, {});
   }
 
   create(data: CreateAppraisalSettings): Promise<AppraisalSettings> {

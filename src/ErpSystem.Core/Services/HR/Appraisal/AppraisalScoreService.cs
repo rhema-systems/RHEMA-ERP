@@ -76,6 +76,12 @@ public sealed class AppraisalCriterionScoring
         _rowsById.TryGetValue(criterionConfigId, out var row) && row.IsGoalRow() ? row : null;
 
     /// <summary>
+    /// The criterion is measured work — a KPI item or a measured goal row — by the snapshot (or the
+    /// live item already resolved for an older appraisal); false for a key it does not hold.
+    /// </summary>
+    public bool IsMeasured(Guid criterionKey) => Items.TryGetValue(criterionKey, out var info) && info.IsKpi;
+
+    /// <summary>
     /// A score's achievement on its criterion, 0–100, measured as the score is: a rated row against
     /// the top of its own scale, a measured row's restated percentage (D-22) or its actual against
     /// the snapshot's target. Null when the score carries no value or its criterion is not in the

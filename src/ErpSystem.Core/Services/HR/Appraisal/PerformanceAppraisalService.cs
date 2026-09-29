@@ -1092,6 +1092,18 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                     }
                 }
             }
+
+            // B2: a scored criterion whose competency requires evidence needs a link — what is
+            // stored on the evaluation, overlaid with this save's entries. Checked before anything
+            // is written: a new self-evaluation is saved early to get its id.
+            var stored = existingSelfEval == null
+                ? new List<CriterionScore>()
+                : await TenantCriterionScoreQuery()
+                    .Where(cs => cs.EvaluatorEvaluationId == existingSelfEval.Id)
+                    .ToListAsync(cancellationToken);
+            var evidenceError = await EvidenceMissingAsync(appraisal.Id, stored, saveDto.ItemScores, scoring, cancellationToken);
+            if (evidenceError != null)
+                return new SelfEvaluationResultDto { Success = false, Message = evidenceError };
         }
 
         try
@@ -1134,7 +1146,6 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             }
 
             // Save or update scores (KPI and competency items unified under ItemScores)
-            var allowSelfSoftSkillRating = appraisal.AppraisalCycle?.AppraisalSettings?.AllowSelfSoftSkillRating ?? false;
             var scoredThisSave = new List<CriterionScore>();
 
             if (saveDto.ItemScores.Any())
@@ -1165,7 +1176,9 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                             CriterionConfigId = criterion.CriterionConfigId,
                             NumericScore = itemInput.NumericScore,
                             ActualValue  = itemInput.ActualValue,
-                            Notes = itemInput.Notes
+                            Notes = itemInput.Notes,
+                            // B2: the form sent it and no save kept it.
+                            EvidenceLinks = itemInput.EvidenceLinks
                         };
 
                         // Calculate WeightedScore immediately per spec
@@ -1181,6 +1194,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                         existingScore.NumericScore = itemInput.NumericScore;
                         existingScore.ActualValue  = itemInput.ActualValue;
                         existingScore.Notes = itemInput.Notes;
+                        existingScore.EvidenceLinks = itemInput.EvidenceLinks;
 
                         // Recalculate WeightedScore
                         await _scores.ScoreCriterionAsync(existingScore, scoring, cancellationToken);
@@ -1460,6 +1474,37 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     private static decimal CalculateKpiAchievement(decimal actualValue, decimal? targetValue, decimal? minValue, decimal? maxValue)
         => AppraisalScoring.KpiAchievementPercent(actualValue, targetValue, minValue, maxValue);
+
+    /// <summary>
+    /// Why an evaluation cannot be submitted for want of evidence (<c>RequireEvidence</c>, B2), or
+    /// null: the entries are what is stored on the evaluation, overlaid with this save's inputs.
+    /// </summary>
+    private async Task<string?> EvidenceMissingAsync(
+        Guid appraisalId,
+        IEnumerable<CriterionScore> stored,
+        IEnumerable<EvaluationItemInputDto> inputs,
+        AppraisalCriterionScoring scoring,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var required = await AppraisalEvidence
+            .Required(_criterionConfigRepository.GetQueryable().Where(c => c.TenantId == tenantId), appraisalId)
+            .ToListAsync(cancellationToken);
+        if (required.Count == 0) return null;
+
+        var entries = new Dictionary<Guid, EvidenceEntry>();
+        foreach (var score in stored.Where(cs => !cs.IsDeleted))
+            entries[score.CriterionKey()] = new EvidenceEntry(
+                score.NumericScore.HasValue || score.ActualValue.HasValue, score.EvidenceLinks);
+        foreach (var input in inputs)
+        {
+            if (scoring.Resolve(input) is CriterionRef criterion)
+                entries[criterion.Key] = new EvidenceEntry(
+                    input.NumericScore.HasValue || input.ActualValue.HasValue, input.EvidenceLinks);
+        }
+
+        return AppraisalEvidence.Missing(required, entries);
+    }
 
     // ⚠ DetermineNextStatusAsync — the status after a self or manager submission, chosen from the
     // settings alone — was removed in performance closure B1/B5: it never asked where the appraisal
@@ -1842,8 +1887,10 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         // re-evaluation is the appeal's own step and is not held to the pipeline.
         if (!saveDto.IsDraft && !(isRemandedReevaluation && appraisal.CurrentAppealStatus == AppraisalAppealStatus.Remanded))
         {
-            await _lifecycle.EnsureAtAsync(appraisal.Id, "The manager evaluation cannot be submitted yet",
+            var gate = await _lifecycle.EnsureAtAsync(appraisal.Id, "The manager evaluation cannot be submitted yet",
                 [AppraisalSubStatus.ManagerEvaluation], cancellationToken);
+            // B2: the mid-year conversation, when required, holds the manager's submission.
+            AppraisalGates.EnsureManagerMaySubmit(gate.Facts, gate.Settings, "The manager evaluation cannot be submitted yet");
         }
 
         if (isRemandedReevaluation)
@@ -1907,6 +1954,18 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 
         // One query for the whole form, not three or four per item.
         var scoring = await _scores.LoadScoringAsync(appraisal.Id, cancellationToken);
+
+        // B2: a scored criterion whose competency requires evidence needs a link before the manager
+        // submits — what is stored, overlaid with this save. Nothing is written until the save below,
+        // so the refusal leaves no trace.
+        if (!saveDto.IsDraft)
+        {
+            var evidenceError = await EvidenceMissingAsync(
+                appraisal.Id, managerEvaluation.CriterionScores, saveDto.ItemScores, scoring, cancellationToken);
+            if (evidenceError != null)
+                return new ManagerEvaluationResultDto { Success = false, Message = evidenceError };
+        }
+
         var scoredThisSave = new List<CriterionScore>();
 
         // Save criterion scores from ItemScores (covers both KPI and competency items)
@@ -1927,6 +1986,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                 existingScore.NumericScore = itemInput.NumericScore;
                 existingScore.ActualValue  = itemInput.ActualValue;
                 existingScore.Notes = itemInput.Notes;
+                existingScore.EvidenceLinks = itemInput.EvidenceLinks;
                 await _scores.ScoreCriterionAsync(existingScore, scoring, cancellationToken);
                 await _criterionScoreRepository.UpdateAsync(existingScore);
             }
@@ -1941,6 +2001,8 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                     NumericScore = itemInput.NumericScore,
                     ActualValue  = itemInput.ActualValue,
                     Notes = itemInput.Notes,
+                    // B2: the form sent it and no save kept it.
+                    EvidenceLinks = itemInput.EvidenceLinks,
                     TenantId = appraisal.TenantId
                 };
                 // Weight the score *before* handing it to the repository, and do not call

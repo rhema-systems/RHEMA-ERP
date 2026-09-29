@@ -118,6 +118,7 @@ public static class AppraisalMappingExtensions
             Code = entity.Code,
             CriteriaName = entity.CriteriaName,
             Description = entity.Description,
+            RequireEvidence = entity.RequireEvidence,
             IsActive = entity.IsActive,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
@@ -133,6 +134,7 @@ public static class AppraisalMappingExtensions
             Code = dto.Code,
             CriteriaName = dto.CriteriaName,
             Description = dto.Description,
+            RequireEvidence = dto.RequireEvidence,
             IsActive = dto.IsActive
         };
     }
@@ -142,6 +144,7 @@ public static class AppraisalMappingExtensions
         entity.Code = dto.Code;
         entity.CriteriaName = dto.CriteriaName;
         entity.Description = dto.Description;
+        entity.RequireEvidence = dto.RequireEvidence;
         entity.IsActive = dto.IsActive;
     }
 
@@ -703,6 +706,7 @@ public static class AppraisalMappingExtensions
             Id = entity.Id,
             TenantId = entity.TenantId,
             SettingsName = entity.SettingsName,
+            IsDefault = entity.IsDefault,
             RequireSelfEvaluation = entity.RequireSelfEvaluation,
             AllowSelfSoftSkillRating = entity.AllowSelfSoftSkillRating,
             SelfEvaluationWeight = entity.SelfEvaluationWeight,
@@ -2352,7 +2356,8 @@ public static class AppraisalMappingExtensions
             ReviewEventId = dto.ReviewEventId,
             ScheduledById = dto.ScheduledById,
             ConductedById = dto.ConductedById,
-            Type          = dto.Type,
+            // The service refuses a missing or unknown type first (B2); never default one.
+            Type          = dto.Type ?? throw new ArgumentException("A conversation needs its type."),
             ScheduledDate = dto.ScheduledDate,
             Agenda        = dto.Agenda
         };
@@ -2363,7 +2368,8 @@ public static class AppraisalMappingExtensions
         entity.AppraisalId = dto.AppraisalId;
         entity.ScheduledById = dto.ScheduledById;
         entity.ConductedById = dto.ConductedById;
-        entity.Type = dto.Type;
+        // The service refuses a missing or unknown type first (B2); never default one.
+        entity.Type = dto.Type ?? throw new ArgumentException("A conversation needs its type.");
         entity.ScheduledDate = dto.ScheduledDate;
         entity.HeldDate = dto.HeldDate;
         entity.Agenda = dto.Agenda;

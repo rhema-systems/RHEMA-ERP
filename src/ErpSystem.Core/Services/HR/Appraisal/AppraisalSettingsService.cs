@@ -110,6 +110,11 @@ public class AppraisalSettingsService : IAppraisalSettingsService
         if (Math.Abs(totalWeight - 1.0m) > 0.005m)
             throw new InvalidOperationException($"Total evaluation weights must equal 1.0. Current total: {totalWeight:F2}");
 
+        ValidateProfile(
+            createDto.MinPeerEvaluators, createDto.MaxPeerEvaluators,
+            createDto.MinGoalsPerEmployee, createDto.MaxGoalsPerEmployee,
+            createDto.DeadlineRiskHighDays, createDto.DeadlineRiskMediumDays, createDto.DeadlineRiskLowDays);
+
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
 
@@ -144,6 +149,11 @@ public class AppraisalSettingsService : IAppraisalSettingsService
         if (Math.Abs(totalWeight - 1.0m) > 0.005m)
             throw new InvalidOperationException($"Total evaluation weights must equal 1.0. Current total: {totalWeight:F2}");
 
+        ValidateProfile(
+            updateDto.MinPeerEvaluators, updateDto.MaxPeerEvaluators,
+            updateDto.MinGoalsPerEmployee, updateDto.MaxGoalsPerEmployee,
+            updateDto.DeadlineRiskHighDays, updateDto.DeadlineRiskMediumDays, updateDto.DeadlineRiskLowDays);
+
         updateDto.UpdateEntity(entity);
 
         await _settingsRepository.UpdateAsync(entity);
@@ -157,6 +167,11 @@ public class AppraisalSettingsService : IAppraisalSettingsService
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
+
+        // B6: the default stays until another profile takes the flag.
+        if (entity.IsDefault)
+            throw new InvalidOperationException(
+                "This is the default appraisal settings profile. Make another profile the default before deleting it.");
 
         // Check if settings are being used by any cycles in this tenant.
         var cyclesCount = await _settingsRepository.GetQueryable()
@@ -177,17 +192,78 @@ public class AppraisalSettingsService : IAppraisalSettingsService
         return true;
     }
 
+    /// <summary>
+    /// The tenant's default profile — the one HR flagged (B6, P-2) — or null when none is. It was
+    /// the most recently created profile, which a test run or a draft variant could win.
+    /// </summary>
     public async Task<AppraisalSettingsDto?> GetDefaultSettingsAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
 
-        // Return the most recently created settings for this tenant as default.
         var entity = await _settingsRepository.GetQueryable()
-            .Where(s => s.TenantId == tenantId)
-            .OrderByDescending(s => s.CreatedAt)
+            .Where(s => s.TenantId == tenantId && s.IsDefault)
             .FirstOrDefaultAsync(cancellationToken);
 
         return entity?.ToDto();
+    }
+
+    /// <summary>
+    /// Makes this profile the tenant's default, and no other (B6). The previous default is cleared
+    /// and saved first, inside one transaction, so the one-default index never sees two.
+    /// </summary>
+    public async Task<AppraisalSettingsDto> MakeDefaultAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id);
+        if (entity.IsDefault)
+            return entity.ToDto();
+
+        var tenantId = GetTenantId();
+        await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+        {
+            var previous = await _settingsRepository.GetQueryable()
+                .Where(s => s.TenantId == tenantId && s.IsDefault && s.Id != id)
+                .ToListAsync(ct);
+            foreach (var profile in previous)
+            {
+                profile.IsDefault = false;
+                await _settingsRepository.UpdateAsync(profile);
+            }
+            if (previous.Count > 0)
+                await _unitOfWork.SaveChangesAsync(ct);
+
+            entity.IsDefault = true;
+            await _settingsRepository.UpdateAsync(entity);
+        }, cancellationToken);
+
+        _logger.LogInformation("Appraisal settings {SettingsId} is now the tenant's default profile", id);
+        return entity.ToDto();
+    }
+
+    /// <summary>
+    /// What a profile must hold together (B6): the peer and goal minimums at or under their maximums,
+    /// and the deadline-risk bands in order — high inside medium inside low — none negative. The
+    /// weights' sum of 1 is checked beside it.
+    /// </summary>
+    private static void ValidateProfile(
+        int minPeers, int maxPeers, int? minGoals, int? maxGoals, int highDays, int mediumDays, int lowDays)
+    {
+        if (minPeers < 0 || maxPeers < 0)
+            throw new InvalidOperationException("The number of peer evaluators cannot be negative.");
+        if (minPeers > maxPeers)
+            throw new InvalidOperationException(
+                $"The minimum number of peer evaluators ({minPeers}) is above the maximum ({maxPeers}).");
+
+        if (minGoals < 0 || maxGoals < 0)
+            throw new InvalidOperationException("The number of goals per employee cannot be negative.");
+        if (minGoals is int lo && maxGoals is int hi && hi > 0 && lo > hi)
+            throw new InvalidOperationException(
+                $"The minimum number of goals per employee ({lo}) is above the maximum ({hi}).");
+
+        if (highDays < 0 || mediumDays < 0 || lowDays < 0)
+            throw new InvalidOperationException("The deadline-risk bands cannot be negative.");
+        if (highDays > mediumDays || mediumDays > lowDays)
+            throw new InvalidOperationException(
+                $"The deadline-risk bands must run high ≤ medium ≤ low (days before the deadline); they are {highDays}, {mediumDays} and {lowDays}.");
     }
 
     public async Task<bool> ValidateWeightsAsync(Guid id, CancellationToken cancellationToken = default)

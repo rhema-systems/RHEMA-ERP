@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Plus } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -28,8 +29,9 @@ import type { AppraisalSettings } from '@/types/hr/appraisal';
  * read. Most organisations need two or three: a standard annual policy, a lighter probation
  * one, perhaps a senior-management variant.
  *
- * There is no "default" flag on the backend — `GET /default` simply returns the most recently
- * created profile — so the newest is marked below rather than a chosen one.
+ * One profile is the tenant's **default** — a flag HR moves with *Make default*, at most one per
+ * tenant (closure B6). `GET /default` used to return the most recently created profile, so any new
+ * or test profile silently became the default; the page marked the newest for the same reason.
  */
 function weightSummary(s: AppraisalSettings) {
   const parts: string[] = [];
@@ -47,10 +49,24 @@ export default function AppraisalSettingsListPage() {
     queryFn: () => appraisalSettingsService.getAll(),
   });
 
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const makeDefault = useMutation({
+    mutationFn: (id: string) => appraisalSettingsService.makeDefault(id),
+    onSuccess: (profile) => {
+      toast({ title: 'Default profile changed', description: `${profile.settingsName} is now the default.` });
+      queryClient.invalidateQueries({ queryKey: ['hr', 'appraisal-settings'] });
+    },
+    onError: (e: any) =>
+      toast({ title: 'Could not change the default', description: e?.message ?? 'Please try again.', variant: 'destructive' }),
+  });
+
   const rows = data ?? [];
-  // Newest first, and the newest is what `GET /default` hands back to anything asking.
-  const sorted = [...rows].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
-  const defaultId = sorted[0]?.id;
+  // The default first, then newest first.
+  const sorted = [...rows].sort(
+    (a, b) =>
+      Number(b.isDefault) - Number(a.isDefault) || (b.createdAt ?? '').localeCompare(a.createdAt ?? ''),
+  );
 
   return (
     <div className="space-y-6 p-6">
@@ -117,9 +133,9 @@ export default function AppraisalSettingsListPage() {
                           >
                             {s.settingsName}
                           </Link>
-                          {s.id === defaultId && (
+                          {s.isDefault && (
                             <Badge variant="secondary" className="ml-2">
-                              Newest
+                              Default
                             </Badge>
                           )}
                         </TableCell>
@@ -148,7 +164,17 @@ export default function AppraisalSettingsListPage() {
                         <TableCell className="text-muted-foreground">
                           {s.reviewFrequency === 'None' ? 'Year-end only' : s.reviewFrequency}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {!s.isDefault && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={makeDefault.isPending}
+                              onClick={() => makeDefault.mutate(s.id)}
+                            >
+                              Make default
+                            </Button>
+                          )}
                           <Button variant="ghost" size="sm" asChild>
                             <Link href={`/administration/hr/performance/settings/${s.id}`}>
                               Edit

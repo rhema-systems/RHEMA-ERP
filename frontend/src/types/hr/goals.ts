@@ -59,7 +59,11 @@ export type TeamGovernanceStatus =
   | 'InProgress'
   | 'AwaitingApproval'
   | 'InvalidWeight'
-  | 'StructurallyComplete';
+  | 'StructurallyComplete'
+  /** Fewer goals than the cycle requires (closure B2). */
+  | 'BelowMinimum'
+  /** More goals than the cycle allows (closure B2). */
+  | 'AboveMaximum';
 
 const opts = <T extends string>(entries: [T, string][]) =>
   entries.map(([value, label]) => ({ value, label }));
@@ -561,6 +565,12 @@ export interface TeamMemberOverview {
   overdueCount: number;
   totalWeight: number;
   isWeightBalanced: boolean;
+  /** Every goal but a rejected one — what the cycle's bounds count (closure B2). */
+  liveGoalCount: number;
+  minGoals: number;
+  maxGoals?: number | null;
+  meetsMinGoalCount: boolean;
+  withinMaxGoalCount: boolean;
   governanceStatus: TeamGovernanceStatus;
 }
 

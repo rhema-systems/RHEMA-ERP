@@ -275,6 +275,9 @@ public interface IAppraisalSettingsService
     Task<AppraisalSettingsDto> UpdateAsync(UpdateAppraisalSettingsDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
     Task<AppraisalSettingsDto?> GetDefaultSettingsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Makes the profile the tenant's default, and no other (closure B6).</summary>
+    Task<AppraisalSettingsDto> MakeDefaultAsync(Guid id, CancellationToken cancellationToken = default);
     Task<bool> ValidateWeightsAsync(Guid id, CancellationToken cancellationToken = default);
 }
 
@@ -1148,6 +1151,13 @@ public interface IAppraisalWorkflowService
         Guid cycleId,
         Guid advancedByEmployeeId,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// The transition report (performance closure B8): the cycle's in-flight appraisals whose
+    /// records run ahead of where the gates hold them, for HR to waive through the audited advance.
+    /// Read-only — nothing is moved.
+    /// </summary>
+    Task<AppraisalTransitionReportDto> GetTransitionReportAsync(Guid cycleId, CancellationToken ct = default);
 }
 
 #endregion Appraisal Workflow

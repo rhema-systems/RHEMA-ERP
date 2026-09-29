@@ -93,12 +93,9 @@ function appliesTo(phase: AppraisalPhase, settings?: AppraisalSettings | null): 
 
   switch (phase) {
     case 'GoalSetting':
-      // The kick-off and mid-year conversations are held at the goal-setting step.
-      return (
-        settings.requireGoalSetting ||
-        settings.requireKickOffConversation ||
-        settings.requireMidYearConversation
-      );
+      // The kick-off conversation is held at the goal-setting step. The mid-year holds the
+      // manager's submission instead (closure B2), so it does not make a goal-setting step.
+      return settings.requireGoalSetting || settings.requireKickOffConversation;
     case 'PeerNomination':
     case 'PeerEvaluation':
       return settings.requirePeerReviews && settings.minPeerEvaluators > 0;

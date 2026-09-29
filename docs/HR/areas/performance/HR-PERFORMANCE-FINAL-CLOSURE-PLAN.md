@@ -40,8 +40,11 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    (104 history rows; `run-all` 1516/1525). **B2–B8 were source-checked the same night** — § 1d
    (D-32 tolerance to batch 2, D-33 two slices) and lane B's *source check* block. ~~Slice **B-v**
    (visibility)~~ **Done 2026-09-29** (`run-final-settings.mjs` 246/246 twice; lane B's B-v State
-   block — one visibility rule, `AppraisalVisibility`, on every read of an evaluation). **Slice B-w**
-   is next.
+   block — one visibility rule, `AppraisalVisibility`, on every read of an evaluation). ~~Slice
+   **B-w**~~ **Done 2026-09-29** (363/363 twice; regression 1877/1886; lane B's B-w State block —
+   read its refinements and *B7 — where each flip lives*). **Lanes A, P, B and L are complete; lane
+   C (one appeal machine) is next** — source-check it first, as B2–B8 were. It carries P-71, the
+   remand's dead end, and the `AppealReevaluationWindowDays` flip B7 left to it.
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -127,7 +130,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 |---|---|---|---|---|
 | A | Scoring integrity and the settle path | 2.5 days | D-11, D-13, D-22 (A14–A16 only) | ☑ 2026-09-29 — 177/177 twice; staged |
 | P | Privacy and access *(new — the review)* | 2 days | D-26 (P18 only) | ☑ 2026-09-29 — 339/339 twice; staged |
-| B | One gate evaluator (B1 first); settings enforced or removed | 3.5 days (+1, D-33) | D-32, D-33 | ◐ B1 ☑ 2026-09-29 — 256/256 twice; staged. B3–B5 done; B1 enforces nine of the fourteen settings. B2's rest and B6–B8 in two slices (D-33): B-v ☑ 2026-09-29 — 246/246 twice; staged. B-w ☐; the tolerance moves to batch 2 (D-32) |
+| B | One gate evaluator (B1 first); settings enforced or removed | 3.5 days (+1, D-33) | D-32, D-33 | ☑ 2026-09-29. B1 — 256/256 twice; B3–B5 with it; B1 enforces nine of the fourteen settings. B2's rest and B6–B8 in two slices (D-33): B-v — 246/246 twice; B-w — 363/363 twice (the suite holds both), regression 1877/1886; staged. The tolerance moved to batch 2 (D-32); `AppealReevaluationWindowDays`' flip is lane C's |
 | L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ☑ 2026-09-29 — L-a 157/157 twice; L-b 244/244 twice; L-c 261/261 twice (one suite holds L-b and L-c); staged |
 | C | One appeal machine | 2 days | D-22 | ☐ |
 | D | Peer nomination and evaluation integrity | 1 day | — | ☐ |
@@ -683,41 +686,45 @@ Write path → step required (`EnsureAt`), then `SyncLifecycleAsync`:
 
 - [x] B1 `AppraisalGates` + `SyncLifecycleAsync` + the table above. *(2026-09-29 — the B1 State
       block below.)*
-- [ ] B2 Settings, each at its write path *(B1 enforces nine of the fourteen settings — the appeal
+- [x] B2 Settings, each at its write path *(B1 enforces nine of the fourteen settings — the appeal
       pair, the minimum goals, manager goal approval, the three conversation switches, the
-      acknowledgment switch and the peer window; the bullets it closed or started are marked)*:
+      acknowledgment switch and the peer window; the bullets it closed or started are marked.
+      Slices B-v and B-w closed the rest, 2026-09-29 — their State blocks below — except the
+      tolerance, which moved to batch 2 (D-32))*:
   - [x] `EnableAppeals`/`AppealWindowDays` → `SubmitAppealAsync`; window from
         `EmployeeAcknowledgedDate ?? hrEval.SubmittedDate ?? UpdatedAt` (not cycle end);
         `GetMyAppraisalsAsync` :1288-1296 uses the same `CanFileAppeal`; portal reads `canFileAppeal`.
         *(B1, server side. The portal's appeal button still keys off the status — lane I.)*
-  - [ ] `ShowPeerScoresToManager` → `GetManagerPeerEvaluationReviewAsync` (:2653) nulls peer scores
-        until the manager has submitted.
-  - [ ] `ShowSelfScoreToManager` → `GetManagerEvaluationContextAsync` nulls self item scores + self
-        total until the manager has submitted (server-side; the React check stays).
-  - [ ] `ShowScoreBreakdownToEmployee` → every employee-facing DTO strips manager/peer criterion
+  - [x] `ShowPeerScoresToManager` → `GetManagerPeerEvaluationReviewAsync` (:2653) nulls peer scores
+        until the manager has submitted. *(B-v — and on `hr-review`.)*
+  - [x] `ShowSelfScoreToManager` → `GetManagerEvaluationContextAsync` nulls self item scores + self
+        total until the manager has submitted (server-side; the React check stays). *(B-v — on four
+        reads; the manager's form now shows the column once they have submitted.)*
+  - [x] `ShowScoreBreakdownToEmployee` → every employee-facing DTO strips manager/peer criterion
         scores (`GetAppealPageDataAsync`, `GetAppealStatusAsync`, `GetEmployeeAppealOutcomeAsync`, the
         `/me/performance/appraisals/[id]` read); **regardless of the flag, the manager's leg is
         withheld from the appraisee before HR sign-off** (fixes the leak at :4138-4166; the page's
         comment at `me/performance/appraisals/[id]/page.tsx:37-38` claims the server already does).
-  - [ ] `MinGoalsPerEmployee` → first evaluation submit refused below it (symmetric with Max);
+        *(B-v — the appeal reads, the HR review and the goal assessments too.)*
+  - [x] `MinGoalsPerEmployee` → first evaluation submit refused below it (symmetric with Max);
         `meetsMinGoalCount` surfaced in the manager governance view. *(The refusal is B1's GoalSetting
-        gate; the flag on the manager's view is open.)*
-  - [ ] `RequireManagerGoalApproval` → when off, goal submit lands Approved directly.
-  - [ ] `RequireKickOffConversation` / `RequireMidYearConversation` / `RequireFinalConversation` →
+        gate; B-w put the minimum and maximum on the team desk — the verdict and the row.)*
+  - [x] `RequireManagerGoalApproval` → when off, goal submit lands Approved directly. *(B-w.)*
+  - [x] `RequireKickOffConversation` / `RequireMidYearConversation` / `RequireFinalConversation` →
         first-eval submit / manager submit / acknowledge-or-finalise refused without a completed
         conversation of that type; `CreateAppraisalConversationDto.Type` no longer defaults to KickOff.
-        *(B1 holds the kick-off **and the mid-year** at the GoalSetting gate and the final conversation
-        as its own step. Open: move the mid-year to the manager's submission, and the DTO default —
-        still `KickOff`, `AppraisalDTOs.cs:4909`.)*
+        *(B1 holds the kick-off at the GoalSetting gate and the final conversation as its own step;
+        B-w moved the mid-year to the manager's submission and made the type required.)*
   - [x] `AllowAcknowledgmentWithoutConversation` → acknowledge requires a completed FinalReview when off.
         *(B1 — the PendingConversation step.)*
   - [x] `PeerEvaluationOpenMode` → peer draft/submit refused before self-eval submit in `AfterSelfEval`
         (`IsEditableByRole` gains a caller; adds `manager` when remanded). *(B1.)*
-  - [ ] `AllowPeerKpiEvaluation` → enforced on draft save (:244-279) as well as submit.
-  - [ ] `AllowSelfSoftSkillRating` → keep behaviour; form label "Employees must score every
-        behavioural criterion before submitting"; delete dead local PAS ~:1533.
-  - [ ] `AppraisalCompetency.RequireEvidence` → self/manager/peer submit refuse a scored item without
+  - [x] `AllowPeerKpiEvaluation` → enforced on draft save (:244-279) as well as submit. *(B-w.)*
+  - [x] `AllowSelfSoftSkillRating` → keep behaviour; form label "Employees must score every
+        behavioural criterion before submitting"; delete dead local PAS ~:1533. *(B-w.)*
+  - [x] `AppraisalCompetency.RequireEvidence` → self/manager/peer submit refuse a scored item without
         an evidence link (the "required" marker at `EvaluationScoreForm.tsx:255` becomes true).
+        *(B-w — with the door it lacked, and the saves storing the links.)*
   - [ ] `KpiDefinition.TolerancePercent` → used by `KpiAchievementPercent` (within tolerance = 100%).
         The demo KPIs carry 5 (`PerformanceAppraisalDataSeeder.cs:115`), so the demo scores move —
         lane S re-baselines them. **Moved to batch 2 (D-32)**: the snapshot needs the tolerance column
@@ -735,9 +742,14 @@ Write path → step required (`EnsureAt`), then `SyncLifecycleAsync`:
       unconditional today), as do `CanProceedToHRReview` (:4088) and `IsReadyForHRReview` (:4299).
       *(B1: all three read the gate pipeline, which skips a step the profile does not require.)*
 - [x] B5 Delete the dead Peer/HR arms of `DetermineNextStatusAsync` with the method itself. *(B1.)*
-- [ ] B6 Settings profile validation: Min≤Max peers/goals, deadline bands ordered, weights sum 1;
-      `IsDefault` flag replaces "newest row" (P-2) — batch 1 column; backfill rule in S9.
-- [ ] B7 **The gates suite flips every gate setting, not only the 14.** B1 re-implements the code
+- [x] B6 Settings profile validation: Min≤Max peers/goals, deadline bands ordered, weights sum 1;
+      `IsDefault` flag replaces "newest row" (P-2) — batch 1 column; backfill rule in S9. *(B-w.
+      The weights' sum was already checked. The backfill: the seeder flags* Standard Annual
+      Appraisal *on a rebuild, and UAT's was flagged through the new door.)*
+- [x] B7 **The gates suite flips every gate setting, not only the 14.** *(B1's suite and
+      `run-final-settings.mjs` between them, 2026-09-29 — the B-w State block lists where each
+      flip lives. Two stay open: `TolerancePercent` with its batch-2 column (D-32), and
+      `AppealReevaluationWindowDays` in lane C.)* B1 re-implements the code
       behind the 36 already-enforced settings, so all of these are covered both ways:
       - `RequireSelfEvaluation`, `RequireManagerEvaluation`, `RequirePeerReviews`, `Min/MaxPeerEvaluators`;
       - `RequireCalibration`, `RequireHRReview`, `HRReviewTiming`, `RequireEmployeeAcknowledgment`;
@@ -746,7 +758,7 @@ Write path → step required (`EnsureAt`), then `SyncLifecycleAsync`:
       - `PeerEvaluationOpenMode`, `AllowPeerKpiEvaluation`, `AllowSelfSoftSkillRating`;
       - `EnableAppeals`, `AppealWindowDays`, `AppealReevaluationWindowDays`;
       - the three visibility flags, `RequireEvidence`, `TolerancePercent`.
-- [ ] B8 **Transition report.** After B deploys, list the in-flight appraisals whose recorded state
+- [x] B8 **Transition report.** *(B-w — read-only, on the deadline-enforcement page.)* After B deploys, list the in-flight appraisals whose recorded state
       contradicts the new gates (e.g. manager submitted while the self-evaluation was not) for HR to
       waive through the audited advance. Nothing is moved automatically.
 
@@ -930,7 +942,7 @@ offers competencies only, never a goal row (lane C).
         view re-based on the rule), `manager-peer-evaluations`, `hr-review`, `by-appraisal`, the three
         appeal reads (the page answers nothing before release); the screens say what is withheld, and
         the manager's form shows the self column once they have submitted.
-- [ ] **Slice B-w — write paths, B6, B8 (D-33).** Goal submit lands Approved when approval is off
+- [x] **Slice B-w — write paths, B6, B8 (D-33).** *(2026-09-29 — the B-w State block below.)* Goal submit lands Approved when approval is off
       (no line manager needed then) and the gate holds drafts either way; the mid-year from the
       GoalSetting blocker to the manager's submission; `Type` required on a new conversation; peer
       KPI rows refused on the draft save and dropped at submit; the soft-skill label and the dead
@@ -998,6 +1010,107 @@ competencies only, never a goal row (lane C, already noted).
   probe file was caught); ESLint clean.
 - Demo: APC2026's profile shows all three, and its 98 unsubmitted self-evaluations hold no draft
   entries, so no walk changes.
+
+**B-w State (2026-09-29): DONE — built, verified on UAT, staged.** No migration: the two new desk
+verdicts are computed, never stored. What exists now:
+- **Goal approval off** (`GoalWorkflowCommandService.SubmitGoalAsync`): the submit reads the cycle's
+  profile. With `RequireManagerGoalApproval` off the goal lands **Approved** on submission, its
+  approval date stamped, and an employee with no line manager may submit — a manager is needed only
+  to route an approval. A goal whose cycle cannot be read is treated as needing approval.
+- **The GoalSetting gate holds drafts either way** (`AppraisalGates`): with approval off it reads
+  "one goal is still a draft, not yet submitted". A draft used to count toward the minimum.
+- **The mid-year holds the manager's submission** (`AppraisalGates.EnsureManagerMaySubmit`, after
+  `EnsureAtAsync` on the manager's submit): the appraisal waits *at* Manager Evaluation, the blocker
+  names the mid-year while it is missing, and the manager's drafts are never held. A profile that
+  requires only the mid-year has no goal-setting step now; the phase rail agrees.
+- **A conversation names its type** (`AppraisalConversationService`): `Type` is nullable and
+  `[Required]` on the create and update DTOs; a body with no type, or a number the enum does not
+  define, is refused (400), and the mapping throws rather than assume one.
+- **Peer KPI off** (`PeerEvaluationService`): the draft save refuses a template KPI row ("Peers do not
+  score measured work (KPIs) in this cycle.") as L7 refused a goal row; the submit drops any barred
+  row a draft still holds — soft-deleted, with a warning in the log — and totals the rest. The test is
+  `AppraisalCriterionScoring.IsMeasured`.
+- **Every behavioural criterion** (`AllowSelfSoftSkillRating`): the behaviour is unchanged; the
+  settings form's label says what it does, the self-evaluation page tells the employee, and the dead
+  local is gone.
+- **Evidence** (`AppraisalEvidence`, new): the competency DTOs and the mapping carry
+  `RequireEvidence`, and the criteria page sets it (a switch and a column); the self, manager and peer
+  saves store `EvidenceLinks`; the three submits refuse a **scored** criterion that requires evidence
+  and has no link, naming it. An unscored entry needs none; a goal row never does. The form's
+  "required" marker was already wired to the flag, so it now shows.
+- **The team desk** (`TeamGoalsQueryService`): the verdict holds a set to the cycle's minimum and
+  maximum — **Below minimum** and **Above maximum**, after *Awaiting approval* and before *Invalid
+  weight* — over the live goals (all but rejected). The row carries `LiveGoalCount`, `MinGoals`,
+  `MaxGoals`, `MeetsMinGoalCount` and `WithinMaxGoalCount`; the page shows the hint and "(min n)" or
+  "(max n)" beside the count. *Lock set* shows only on a complete set, so a set below the minimum no
+  longer offers the lock that refuses it.
+- **B6** (`AppraisalSettingsService`): create and update refuse a minimum above its maximum (peers,
+  goals) and deadline-risk bands out of order (high ≤ medium ≤ low, none negative), each saying so
+  (400). `IsDefault` is on the DTO; `POST /api/AppraisalSettings/{id}/make-default` (performance write
+  policy) clears the previous default and sets the new one in one transaction, so the one-default
+  index never sees two; `GET /default` answers the flagged profile, or 404; the default cannot be
+  deleted. The list page badges it and offers *Make default*; the seeder flags *Standard Annual
+  Appraisal* when the tenant has no default.
+- **B8** (`AppraisalWorkflowService.GetTransitionReportAsync`, `GET
+  /api/DeadlineEnforcement/transition-report/{cycleId}`): the cycle's in-flight appraisals (not
+  Completed, Closed, Appealed or Withdrawn) whose records run ahead of where the gates hold them —
+  each with the step it waits at and why, what is recorded ahead (`AppraisalGates.RecordedAhead`,
+  the profile's own steps only) and whether HR can waive the step. It changes nothing; the
+  deadline-enforcement page shows it as *Records ahead of the gates*, beside the audited advance HR
+  waives with.
+
+**Where the build refines the rows above** (each deliberate; say if one should go back):
+1. **An edit could move a conversation to another appraisal** — the update copied the body's
+   `AppraisalId` in, after the caller was authorised against the conversation's own appraisal. It is
+   pinned now. Found on the way, not a row.
+2. **A barred peer row is dropped at the submit, not refused** — the form cannot show a KPI row to be
+   removed, so a refusal would strand the peer. The row's note goes with its score.
+3. **The desk mirrors `GoalSetRules`' live count rather than calling it** — its rows are counts from
+   one projection, not goal rows; the rule (live = not rejected) is the same one.
+4. **Each evidence refusal takes its submit's existing shape** — the self and the manager a failed
+   result (400), the peer a 422.
+5. **`GET /default` no longer falls back to the newest profile** — no flag, no default (404). The
+   demo pack's `060` asks for the default and then for *Standard Annual Appraisal* by name; it took
+   the first row the list served, which a harness profile wins on UAT.
+
+**B7 — where each flip lives.** `run-final-settings.mjs`: the three visibility flags (B-v), goal
+approval **off** with goal setting on (W1, with the approval-on pair), the mid-year (W2), peer KPI
+**off** (W3), the soft-skill switch **on** (W3; off on W1), `RequireEvidence` **on** (W3),
+`RequireSelfEvaluation` **off** (W4), and B6. `run-final-gates.mjs` (B1): the sign-off chain and its
+orders — calibration, HR review and `HRReviewTiming`, the final conversation, the acknowledgment and
+`AllowAcknowledgmentWithoutConversation`, the manager step off, both peer windows, appeals off — and
+the kick-off and goal approval on. `run-final-goalset.mjs` (L-a): the goal minimum and maximum at
+the lock. Peer KPI **on** is lane A's `a3` (peers score KPIs), and evidence off is every other
+suite's competency, scored with no link. Open: `TolerancePercent` (batch 2, D-32) and
+`AppealReevaluationWindowDays` (lane C).
+
+**Verified** (Staging API on `ErpSystemDB_UAT`):
+- `run-final-settings.mjs` **363/363, then 363/363** — B-v's 246 and B-w's 117: goal approval off
+  (30 — with the manager-less submit, and its refusal on an approval-on profile), the conversation
+  type and the re-parenting (11), the mid-year (12), peer KPI, the behavioural criteria and evidence
+  on all three submissions (26 — a KPI row planted on a peer's draft is dropped at the submit: the
+  total is 66; counting the planted row would make it 78), no self-evaluation and the transition
+  report before and after HR's waiver (18), B6 (20).
+- Regression (`run-all.mjs`, twelve suites): interim reviews 133/133, attachments 65/65, slice C
+  52/52, slice D 22/22, **slice E 17/26 — the same 9 stale**, gates 32/32, lane B1 256/256, lane L-a
+  157/157, lanes L-b/L-c 261/261, lane B2 363/363. **Lane P 337/337 — three fewer, as expected**: its
+  profile needs no goal approval, so its three goals are agreed on submission and the helper's
+  approve step no longer runs (the diff against B-v's run is exactly those three lines). **Lane A
+  died at `a3`'s manager form on a SQL timeout** (30 s); in the same two minutes a probe login took
+  52 s. Neither is a B-w path — the manager form's read is unchanged since B-v — and lane A alone
+  then passed **182/182**, with a read-only watch on SQL Server's waits that saw no request over a
+  second. The stall is unexplained. **1877/1886** with lane A's rerun.
+- API log: no exception from a B-w path. The errors are UAT's missing SMTP (the notification
+  processor), defect #23's payroll-profile FK (135 — one per fixture employee, each with its
+  fallback), the HR/Identity reconciliation every five minutes ("more than one element" reconciling
+  `property.manager`, TDC/00052, whose manager TDC/00007 holds two logins), and lane A's timeout.
+- Frontend: scoped `tsc` over the 13 touched files and 7 dependents, 0 errors (three errors planted in
+  a probe file were all caught); ESLint clean on the 13.
+- Demo: the phase of every one of APC2026's 107 appraisals, snapshotted before and after the build,
+  is byte-identical; no team desk changes verdict (Kojo Ansah and Efua Seidu hold three goals each, on
+  a 3–6 profile). UAT had **no default profile** — 117 profiles, and batch 1's backfill ran on the
+  empty rebuild — so *Standard Annual Appraisal* was flagged through the new door, as the seeder does
+  on a rebuild.
 
 ### Lane L — Goal-driven KPI scoring
 

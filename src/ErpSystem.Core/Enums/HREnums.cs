@@ -1259,10 +1259,16 @@ public enum TeamGovernanceStatus
     InvalidWeight = 3,
 
     /// <summary>
-    /// No drafts, no pending approvals, total weight == 100.
+    /// No drafts, no pending approvals, the goal count within the cycle's bounds, total weight == 100.
     /// Execution states (InProgress, OnTrack, AtRisk, Completed) do NOT block this status.
     /// </summary>
     StructurallyComplete = 4,
+
+    /// <summary>Fewer goals than the cycle's MinGoalsPerEmployee (performance closure B2).</summary>
+    BelowMinimum = 5,
+
+    /// <summary>More goals than the cycle's MaxGoalsPerEmployee (performance closure B2).</summary>
+    AboveMaximum = 6,
 }
 
 public enum GoalProgressStatus

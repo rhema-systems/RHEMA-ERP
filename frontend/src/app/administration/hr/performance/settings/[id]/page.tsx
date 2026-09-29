@@ -413,11 +413,14 @@ export default function AppraisalSettingsEditorPage() {
               />
               <div />
             </FieldRow>
+            {/* The field is named "allow", but what it does is require: employees can always score
+                the behavioural criteria; with this on, the self-evaluation cannot be submitted until
+                every one is scored (closure B2 relabelled it — it read "may rate"). */}
             <SwitchField
               form={form}
               name="allowSelfSoftSkillRating"
-              label="Employees may rate their own soft skills"
-              description="Off by default — most policies keep behavioural criteria for the manager."
+              label="Employees must score every behavioural criterion before submitting"
+              description="Employees can always score the behavioural criteria. On, the self-evaluation is refused until every one has a score."
             />
           </Section>
 
@@ -607,13 +610,20 @@ export default function AppraisalSettingsEditorPage() {
               form={form}
               name="requireKickOffConversation"
               label="Kick-off conversation"
+              description="Held before the employee can submit the self-evaluation."
             />
             <SwitchField
               form={form}
               name="requireMidYearConversation"
               label="Mid-year conversation"
+              description="Held before the manager can submit their evaluation."
             />
-            <SwitchField form={form} name="requireFinalConversation" label="Final conversation" />
+            <SwitchField
+              form={form}
+              name="requireFinalConversation"
+              label="Final conversation"
+              description="Held before the appraisal completes — and before the acknowledgment, unless that may go first."
+            />
           </Section>
 
           <Section

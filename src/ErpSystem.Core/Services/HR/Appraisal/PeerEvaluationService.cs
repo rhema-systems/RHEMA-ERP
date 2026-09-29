@@ -282,6 +282,10 @@ public class PeerEvaluationService : IPeerEvaluationService
                 ?? throw new InvalidOperationException("An item on this form is not one of this appraisal's criteria.");
             if (!allowPeerKpi && criterion.CriterionConfigId is Guid configId && scoring.GoalRow(configId) != null)
                 throw new InvalidOperationException("Peers do not score the employee's goals in this cycle.");
+            // B2: nor a KPI on the template. The draft took one, and the peer's total — and so the
+            // overall — counted it, though the form never offers it (AllowPeerKpiEvaluation).
+            if (!allowPeerKpi && scoring.IsMeasured(criterion.Key))
+                throw new InvalidOperationException("Peers do not score measured work (KPIs) in this cycle.");
 
             var existingScore = evaluation.CriterionScores
                 .FirstOrDefault(cs => (cs.TemplateItemId.HasValue || cs.CriterionConfigId.HasValue)
@@ -293,6 +297,7 @@ public class PeerEvaluationService : IPeerEvaluationService
                 existingScore.NumericScore = itemInput.NumericScore;
                 existingScore.ActualValue  = itemInput.ActualValue;
                 existingScore.Notes = itemInput.Notes;
+                existingScore.EvidenceLinks = itemInput.EvidenceLinks;
 
                 await _scores.ScoreCriterionAsync(existingScore, scoring, cancellationToken);
                 await _criterionScoreRepository.UpdateAsync(existingScore);
@@ -307,7 +312,9 @@ public class PeerEvaluationService : IPeerEvaluationService
                     CriterionConfigId = criterion.CriterionConfigId,
                     NumericScore = itemInput.NumericScore,
                     ActualValue  = itemInput.ActualValue,
-                    Notes = itemInput.Notes
+                    Notes = itemInput.Notes,
+                    // B2: the form sent it and no save kept it.
+                    EvidenceLinks = itemInput.EvidenceLinks
                 };
 
                 await _scores.ScoreCriterionAsync(newScore, scoring, cancellationToken);
@@ -338,6 +345,7 @@ public class PeerEvaluationService : IPeerEvaluationService
             .Include(e => e.Appraisal)
                 .ThenInclude(a => a.CriterionConfigs)
                     .ThenInclude(cc => cc.TemplateItem)
+                        .ThenInclude(ti => ti!.Competency)
             .Include(e => e.CriterionScores)
             .FirstOrDefaultAsync(e => e.Id == evaluationId && e.EvaluatorId == evaluatorId, cancellationToken);
 
@@ -376,10 +384,47 @@ public class PeerEvaluationService : IPeerEvaluationService
             throw new InvalidOperationException($"Please score all required criteria before submitting. {unscoredCount} criteria remaining.");
         }
 
+        // B2: a scored criterion whose competency requires evidence needs a link. A peer's submit
+        // carries no body — it submits the draft — so the stored entries are the ones read.
+        var evidenceRequired = evaluation.Appraisal.CriterionConfigs
+            .Where(cc => cc.TemplateItemId.HasValue && cc.TemplateItem?.Competency?.RequireEvidence == true)
+            .Select(cc => new RequiredEvidence { Key = cc.TemplateItemId!.Value, Name = cc.TemplateItem!.Competency!.CriteriaName })
+            .ToList();
+        var evidenceError = AppraisalEvidence.Missing(evidenceRequired, evaluation.CriterionScores
+            .Where(cs => !cs.IsDeleted)
+            .GroupBy(cs => cs.CriterionKey())
+            .ToDictionary(g => g.Key, g => new EvidenceEntry(
+                g.Any(cs => cs.NumericScore.HasValue || cs.ActualValue.HasValue),
+                g.Select(cs => cs.EvidenceLinks).FirstOrDefault(l => !string.IsNullOrWhiteSpace(l)))));
+        if (evidenceError != null)
+            throw new InvalidOperationException(evidenceError);
+
         // A weighted mean over the criteria this peer was asked to score, recomputed from the raw
         // inputs by the shared path — the same number the settle will use.
         var scoring = await _scores.LoadScoringAsync(evaluation.AppraisalId, cancellationToken);
-        var totalWeightedScore = await _scores.ScoreEvaluatorAsync(evaluation.CriterionScores, scoring, cancellationToken);
+
+        // B2: a row the cycle does not let a peer score — measured work or the employee's goals,
+        // with AllowPeerKpiEvaluation off — is dropped here rather than counted. A draft saved before
+        // the draft save refused them may hold one, and the form cannot show it to be removed.
+        var scored = evaluation.CriterionScores.ToList();
+        if (!allowPeerKpi)
+        {
+            var barred = scored
+                .Where(cs => scoring.IsMeasured(cs.CriterionKey())
+                          || (cs.CriterionConfigId is Guid rowId && scoring.GoalRow(rowId) != null))
+                .ToList();
+            foreach (var row in barred)
+                await _criterionScoreRepository.DeleteAsync(row);
+            if (barred.Count > 0)
+            {
+                _logger.LogWarning(
+                    "Peer evaluation {EvaluationId}: dropped {Count} score(s) on measured work or goals the cycle does not let peers score",
+                    evaluation.Id, barred.Count);
+                scored = scored.Except(barred).ToList();
+            }
+        }
+
+        var totalWeightedScore = await _scores.ScoreEvaluatorAsync(scored, scoring, cancellationToken);
 
         evaluation.TotalScore = totalWeightedScore;
         evaluation.SubmittedDate = DateTime.UtcNow;

@@ -217,6 +217,36 @@ export interface DeadlineEnforcementResult {
   messages: string[];
 }
 
+/**
+ * The transition report (closure B8): a cycle's in-flight appraisals whose records run ahead of
+ * where the gates hold them. Read-only — HR waives each through the audited advance.
+ */
+export interface AppraisalTransitionReport {
+  cycleId: string;
+  cycleName?: string | null;
+  generatedAt: string;
+  /** In-flight appraisals examined: not completed, closed, appealed or withdrawn. */
+  examined: number;
+  rows: AppraisalTransitionRow[];
+}
+
+export interface AppraisalTransitionRow {
+  appraisalId: string;
+  appraisalNumber?: string | null;
+  employeeId: string;
+  employeeName: string;
+  employeeNumber?: string | null;
+  status: string;
+  /** Where the gates hold it, and why. */
+  subStatus: AppraisalSubStatus;
+  stepLabel: string;
+  reason?: string | null;
+  /** What is recorded for steps after it — "the self-evaluation is submitted", …. */
+  recordedAhead: string[];
+  /** HR's advance can move it past the step; otherwise the step itself must be completed. */
+  canWaive: boolean;
+}
+
 export interface ManualAdvanceRequest {
   /** Omit to advance past whatever step is currently blocking. */
   targetSubStatus?: AppraisalSubStatus | null;

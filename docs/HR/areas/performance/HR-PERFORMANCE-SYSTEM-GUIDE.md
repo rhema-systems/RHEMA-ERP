@@ -198,6 +198,8 @@ you improvise: do not open a second appraisal and press Finalise on it.
 > Kwasi Danquah passes: the profile requires a mid-year conversation before the year-end evaluation,
 > and demo scenario 061 — re-run on this database on 2026-09-29 — holds his mid-year and his final
 > review, so the gates put him at *HR Review*, he is the *Ready* row, and LIVE WRITE 10 goes through.
+> *(Since slice B-w the mid-year holds the manager's submission, not goal setting — and his manager's
+> is in — so the caveat that follows applies only to a database from before this change.)*
 > On a database built before that re-run he sits at *Goal Setting* and the sign-off is refused; the
 > way through there is HR's audited advance past goal setting (chapter 38, with a reason) and
 > chapter 32's final conversation.
@@ -261,7 +263,8 @@ her against it, and the cascade lands end to end. It is **🔴 LIVE WRITE 6**.
   sees her kick-off, her mid-year and her final review), or schedule one live from inside an appraisal —
   chapter 23 does exactly that. *(Fourteen since 2026-09-29: closure lane B1 holds the self-evaluation
   until the kick-off and mid-year are held, so the demo holds a mid-year for all five tracks, and Kwasi's
-  final review ahead of his live sign-off. It was eight.)*
+  final review ahead of his live sign-off. It was eight. Slice B-w moved the mid-year to hold the
+  manager's submission instead; the demo's mid-years stay.)*
 * **`/hr/performance/calibration` → Open is empty.** Both panels are Completed; the **Completed** tab
   has the two you want. Chapter 30 creates a third session live so the room sees the lifecycle from
   Pending.
@@ -465,6 +468,11 @@ appraisal screen drops it rather than greying it out. Calibration and HR review 
 > rail and the refusal both give the reason. Since the demo scenarios' re-run on 29 September Kojo
 > Ansah has three approved goals and both conversations, so he reads *Peer Evaluation*; the opened
 > appraisals with no goals still read *Goal setting*.
+>
+> **Changed 2026-09-29** (performance closure lane B2, slice B-w). **The mid-year left this gate** —
+> it holds the manager's submission (chapter 29) — so goal setting is the goals and the kick-off. A
+> draft goal holds it whether or not the profile needs the manager's approval; on a profile that does
+> not, a goal is approved the moment the employee submits it. No demo appraisal moved.
 
 **`GoalStatus`** — one enum spanning two concerns, which is why the manager workspace splits them:
 `Draft`, `PendingApproval`, `Approved`, `Rejected`, `Locked` are the **approval lifecycle**;
@@ -655,11 +663,20 @@ Forty switches, grouped the way the editor groups them. The values below are the
 > reads no manager score before HR's sign-off (the appeal page and the goal assessments used to show
 > them). Every switch on this profile now does what it says.
 
+> **Changed 2026-09-29** (performance closure lane B2, slice B-w). *Goals need manager approval* off:
+> a submitted goal is agreed on the spot and needs no line manager. On or off, an unsubmitted draft
+> holds goal setting. The **mid-year conversation** holds the manager's submission, not the employee's
+> — the kick-off still holds the self-evaluation, the final one the acknowledgment. *Peers may score
+> KPIs* off: a peer's KPI score is refused when saved, not only at the submit. The soft-skill switch is
+> relabelled for what it does. The profile refuses a minimum above its maximum and risk bands out of
+> order, and one profile is the tenant's **default** (chapter 4). A criterion can require **evidence**
+> (chapter 5).
+
 | Group | Setting | Here |
 |---|---|---|
 | **Self-evaluation** | Require a self-evaluation | **On** |
 | | Weight | **0.10** |
-| | Employees may rate their own soft skills | Off |
+| | Employees must score every behavioural criterion before submitting *(was "may rate their own soft skills")* | Off |
 | **Peer review** | Require peer reviews | **On** |
 | | Weight | **0.20** |
 | | Who nominates | **The employee** |
@@ -1025,19 +1042,21 @@ combine, what has to happen before a result is final, and the thresholds the das
 names exactly one. Most organisations end up with two or three — a standard annual policy, a lighter
 probation one, perhaps a senior-management variant.
 
-There is deliberately no "default" flag: `GET /default` simply hands back the most recently created
-profile, and the list marks the newest rather than a chosen one.
+One profile is the tenant's **default** — a flag HR moves with **Make default**, at most one per
+tenant. *(Since closure B6, 2026-09-29. `GET /default` used to hand back the most recently created
+profile, so any new or test profile silently became the default, and the list marked the newest.)*
 
 ### 👁 On the list page
-Header, a **New profile** button, and a table:
+Header, a **New profile** button, and a table — the default first, then the newest:
 
 | Column | What it shows | On this database |
 |---|---|---|
-| **Profile** | Name, with a *Newest* marker on the most recent | Standard Annual Appraisal |
+| **Profile** | Name, with a *Default* badge on the tenant's default | Standard Annual Appraisal *(Default)* |
 | **Evaluation weights** | The three weights as a summary | Self 10% · Peer 20% · Manager 70% |
 | **Sign-off** | Which of calibration / HR review / acknowledgment are required | all three |
 | **Appeals** | On/off and the window | On, 7 days |
 | **Interim reviews** | Frequency and depth | Mid-year only, light touch |
+| *(actions)* | **Make default** on every other row, then **Edit** | — |
 
 Empty-state copy, if you ever see it: *"A cycle cannot be created without one — start with a profile
 describing your standard annual appraisal."*
@@ -1101,14 +1120,18 @@ block the delete."*
 |---|---|---|
 | The list | `GET api/AppraisalSettings` | `AppraisalSettingsService` → `AppraisalSettings` |
 | The editor | `GET api/AppraisalSettings/{id}` | same |
-| Save | `PUT api/AppraisalSettings/{id}` — **`HR.Performance.Write`** | validates the weight total = 1.0 *after* zeroing disabled evaluators |
-| Delete | `DELETE api/AppraisalSettings/{id}` — **`HR.Performance.Admin`** | 400 while any cycle uses it; **403 for `hr.head`** |
+| Save | `PUT api/AppraisalSettings/{id}` — **`HR.Performance.Write`** | validates the weight total = 1.0 *after* zeroing disabled evaluators; *since B6*, also that no minimum (peers, goals) is above its maximum and the risk bands run high ≤ medium ≤ low — each refusal a 400 that says which |
+| Make default | `POST api/AppraisalSettings/{id}/make-default` — **`HR.Performance.Write`** | clears the previous default and flags this one in one transaction (a filtered unique index allows one per tenant) |
+| The default | `GET api/AppraisalSettings/default` | the flagged profile, or **404** when none is flagged |
+| Delete | `DELETE api/AppraisalSettings/{id}` — **`HR.Performance.Admin`** | 400 while any cycle uses it, **and for the default** (make another the default first); **403 for `hr.head`** |
 | The total badge | client-side `evaluationWeightTotal()` | reproduces the server's rule exactly |
 | Validate weights | `GET api/AppraisalSettings/{id}/validate-weights` | returns `{ isValid, message }` |
 
 ### ⚠ Known gaps
-**P-2.** There is no "default profile" concept. `GET /default` returns the newest row, so creating a
-new profile silently becomes the default for anything that asks for one.
+**P-2.** ~~There is no "default profile" concept. `GET /default` returns the newest row, so creating a
+new profile silently becomes the default for anything that asks for one.~~ **Fixed 2026-09-29**
+(closure B6): a flag HR sets with **Make default**; the seeder flags *Standard Annual Appraisal* on a
+rebuild, and UAT's was flagged through the same door.
 **P-3.** ~~`appealWindowDays` and `appealReevaluationWindowDays` are stored and displayed but **not
 enforced** on the appeal path (Rule 9).~~ **Fixed 2026-09-29** — the re-evaluation window was already
 enforced; the appeal window is since closure lane B1, counted from the acknowledgment.
@@ -1145,12 +1168,15 @@ dashboard and the advance.
 **P-68.** ~~***The manager's score is authoritative* changes only a sort order.** It is copied to
 `EvaluatorEvaluation.IsAuthoritative`, whose sole reader is an `OrderByDescending`.~~ **Removed**
 (closure batch 1).
-**P-69.** ***Employees may rate their own soft skills* is mislabelled.** It does not decide whether the
+**P-69.** ~~***Employees may rate their own soft skills* is mislabelled.** It does not decide whether the
 employee may score behavioural criteria — they always can, and the form always shows them. It decides
-whether the **submit is refused** unless every competency is scored. "May rate" is really "must rate".
+whether the **submit is refused** unless every competency is scored. "May rate" is really "must rate".~~
+**Fixed 2026-09-29** (closure lane B2, slice B-w): the switch reads *Employees must score every
+behavioural criterion before submitting*, and the self-evaluation page says so to the employee.
 **P-70.** ~~***Minimum goals per employee* is not enforced**, while its sibling *Maximum* is.~~ The minimum
 computes a `meetsMinGoalCount` flag the frontend never reads. *Enforced 2026-09-29* (closure lane B1):
 the self-evaluation is refused below the minimum. Showing the flag on the manager's desk is lane B2's.
+**Fixed 2026-09-29** (slice B-w): the team desk reads *Below minimum* or *Above maximum* (chapter 19).
 
 The full audit, with a `file:line` for every claim and a prioritised fix list, is in
 **[`HR-APPRAISAL-SETTINGS-AUDIT.md`](HR-APPRAISAL-SETTINGS-AUDIT.md)**.
@@ -1176,10 +1202,19 @@ A single-table register with inline create/edit dialogs.
 | **Code** | LEADERSHIP · COMMUNICAT · ADAPTABILI · PROBLEMSOL · TEAMWORK |
 | **Criterion** | Leadership · Communication · Adaptability · Problem Solving · Teamwork |
 | **Description** | *"Demonstrates strong … skills"* |
+| **Evidence** | *Required* or — · all — |
 | **Status** | all Active |
 
-The dialog carries **Code**, **Criterion**, **Description** and an **Active** switch whose help text is
-worth reading aloud: *"Inactive criteria stay on existing templates but cannot be added to new items."*
+The dialog carries **Code**, **Criterion**, **Description**, a **Require evidence** switch and an
+**Active** switch whose help text is worth reading aloud: *"Inactive criteria stay on existing templates
+but cannot be added to new items."*
+
+> **Changed 2026-09-29** (performance closure lane B2, slice B-w). *Require evidence* is new on the
+> screen — the flag was always on the criterion, but no screen or API could set it, and no save kept
+> the evidence links the forms sent. On, a **score** on this criterion needs an evidence link before
+> the employee, the manager or a peer can submit; the refusal names the criterion, and the scoring
+> form marks the link *required for this item*. An unscored criterion needs none. No demo criterion
+> requires it.
 
 ### ▶ Walk it
 1. Open it. Five rows.
@@ -1191,7 +1226,8 @@ worth reading aloud: *"Inactive criteria stay on existing templates but cannot b
 
 ### ⚙ Behind the page
 `api/AppraisalCompetency` (singular, and the field is `criteriaName` — the two names are used
-interchangeably in the ported code and both are kept). Writes need `HR.Performance.Write`.
+interchangeably in the ported code and both are kept). Writes need `HR.Performance.Write`. The rule
+behind *Require evidence* is `AppraisalEvidence`, asked by the three submissions.
 
 ### ⚠ Known gaps
 **P-5.** Codes are auto-truncated to 10 characters, which is why *Communication* reads `COMMUNICAT`
@@ -2453,11 +2489,20 @@ Unbalanced weights.
 > on each report whose verdict is **Structurally complete**. It asks first — *"Lock this goal set?"* —
 > and says what the lock means: the goals become fixed for the year (title, measure, target and
 > weight), progress and check-ins still move them, and a goals section on the form is filled from the
-> set. A report whose every live goal is locked reads **Set locked** instead. The verdict does not
+> set. A report whose every live goal is locked reads **Set locked** instead. ~~The verdict does not
 > check the cycle's minimum and maximum goal count; the lock does (chapter 18), and a refusal's toast
-> names what is missing. A rejected goal keeps the verdict at *In progress*, so the button waits until
-> the employee reworks or deletes it — although the lock itself, like HR's advance, leaves a rejected
-> goal out.
+> names what is missing.~~ *(It does since slice B-w, below.)* A rejected goal keeps the verdict at
+> *In progress*, so the button waits until the employee reworks or deletes it — although the lock
+> itself, like HR's advance, leaves a rejected goal out.
+>
+> **Changed 2026-09-29** (performance closure lane B2, slice B-w). **The verdict reads the cycle's
+> minimum and maximum goal count**, as the lock and the goal-setting gate do: a set of approved goals
+> below the minimum reads **Below minimum**, above the maximum **Above maximum**, before the weights
+> are looked at — one goal at weight 100 on a three-goal profile used to read *Structurally complete*
+> and offer a *Lock set* the lock refused. The **Goals** cell adds *(min n)* or *(max n)* when the
+> count is outside the bounds. On a cycle whose profile does not need the manager's approval, a goal
+> is approved the moment the employee submits it, so nothing waits on this desk. No demo desk changes:
+> Kojo Ansah and Efua Seidu hold three goals each, on a profile of three to six.
 
 **The governance verdicts** (`TeamGovernanceStatus`), each with a hint under the badge:
 
@@ -2466,8 +2511,10 @@ Unbalanced weights.
 | **Not started** | no goals in this cycle |
 | **In progress** | one or more goals still Draft or Rejected |
 | **Awaiting approval** | everything submitted, something still pending |
+| **Below minimum** | fewer live goals than the cycle requires *(since B-w)* |
+| **Above maximum** | more live goals than the cycle allows *(since B-w)* |
 | **Invalid weight** | the set does not total 100 |
-| **Structurally complete** | approved, balanced, done |
+| **Structurally complete** | approved, within the bounds, balanced, done |
 
 **Kwasi Danquah's eight direct reports**: Efua Seidu (3 goals), Patrick Appiah, Kwabena Sowah, Kwaku
 Owusu, Yaw Bruce-Quaye, **Kojo Ansah** (3 goals), Mohammed Bruce-Quaye, Prince Nyaho — **six of whom
@@ -2879,7 +2926,8 @@ badges and an **Open** link.
 **On this database:** fourteen conversations, **all completed** — five kick-offs dated 10 February 2026
 and five mid-years dated 14 July (one of each per track), and four final reviews in September (the
 three finished appraisals, and Kwasi's ahead of his live sign-off). *(It was eight — five kick-offs and
-three final reviews — until closure lane B1 made the mid-year a condition of the self-evaluation.)*
+three final reviews — until closure lane B1 made the mid-year a condition of the self-evaluation. Since
+slice B-w it is a condition of the manager's evaluation instead.)*
 
 > ⚠ **On this database, until it is rebuilt, the kick-off notes and the three finished appraisals'
 > final-review notes are empty** — the demo scenario sent field names the endpoint drops, and a held
@@ -2931,8 +2979,8 @@ three final reviews — until closure lane B1 made the mid-year a condition of t
 | My diary | `GET api/AppraisalConversations/my-diary` |
 | About me | `GET api/AppraisalConversations/mine` |
 | By appraisal *(the panel)* | `GET …/by-appraisal/{appraisalId}` |
-| Schedule | `POST api/AppraisalConversations` — `conductedById` left null so the server stamps the scheduler |
-| Amend | `PUT …/{id}` — **422 once completed** |
+| Schedule | `POST api/AppraisalConversations` — `conductedById` left null so the server stamps the scheduler; **the type is required** *(since B-w — a body without one booked a kick-off)* |
+| Amend | `PUT …/{id}` — **422 once completed**; the type is required, and the conversation stays on its own appraisal *(since B-w — the body's appraisal id used to move it)* |
 | Complete | `POST …/{id}/complete` — the **only** way one closes; stamps the held date and notifies |
 
 Anything keyed on an id is **403** unless the caller is HR, the appraisee, the appraisee's manager, or
@@ -2944,6 +2992,12 @@ whoever scheduled or is holding the meeting.
 > acknowledgment, and on a cycle with no acknowledgment, **recording it as held completes the
 > appraisal** and settles its score — it used to leave it in Governance for good. A conversation held
 > on a Draft appraisal does not open it.
+>
+> **Changed 2026-09-29** (performance closure lane B2, slice B-w). **The mid-year holds the manager's
+> submission**, not the self-evaluation: while it is missing the appraisal waits at *Manager
+> Evaluation*, the manager can save drafts, and the submit is refused naming the mid-year. **A
+> conversation must say which it is** — the type decides which gate it opens, and a request without
+> one used to book a kick-off.
 
 ### ⚠ Known gaps
 **P-29.** *My diary* is empty for every persona on this database (Rule 6).
@@ -3381,6 +3435,13 @@ an actual value is present.
 > naming the step and the reason, e.g. *"The self-evaluation cannot be submitted yet: this appraisal is
 > at Goal Setting — the mid-year conversation has not been held."* **Save draft** works at any point.
 > The goals counted are the employee's in the cycle, including any agreed before the appraisal existed.
+>
+> **Changed 2026-09-29** (performance closure lane B2, slice B-w). **The mid-year no longer holds the
+> self-evaluation** — it holds the manager's (chapter 29); the example refusal above now reads *"…at Goal
+> Setting — the kick-off conversation has not been held"*. When the profile asks for every behavioural
+> criterion, the page says so above the form. **A criterion that requires evidence** (chapter 5)
+> refuses the submit while it is scored without a link, naming it; the link is now saved with the
+> score — every save used to drop it.
 
 ### ⚠ Known gaps
 **P-35.** Efua's self-evaluation is already submitted, so this chapter is a **read**. If you want a live
