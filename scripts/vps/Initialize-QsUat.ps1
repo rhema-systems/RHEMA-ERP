@@ -27,11 +27,19 @@ try {
     if($target.InitialCatalog -cne $ExpectedDatabase){throw 'Configured database differs from explicit QS test target.'}
     $secret=[Environment]::GetEnvironmentVariable('UatBootstrap__SharedPassword','Process')
     if([string]::IsNullOrWhiteSpace($secret)){$secret=[string]$values['UatBootstrap__SharedPassword']}
-    if([string]::IsNullOrWhiteSpace($secret)){
+    while([string]::IsNullOrWhiteSpace($secret)){
+        if($secureSecret){$secureSecret.Dispose();$secureSecret=$null}
         $secureSecret=Read-Host 'Shared UAT password for NEW QS contractor, consultant and engineer accounts (existing passwords preserved)' -AsSecureString
-        if(!$secureSecret.Length){throw 'An initial password for missing UAT accounts is required.'}
+        if($null -eq $secureSecret -or !$secureSecret.Length){
+            Write-Warning 'The password cannot be empty. Enter it again, or press Ctrl+C to cancel QS preparation.'
+            continue
+        }
         $pointer=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureSecret)
         try{$secret=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)}finally{[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)}
+        if([string]::IsNullOrWhiteSpace($secret)){
+            $secret=$null
+            Write-Warning 'The password cannot contain only whitespace. Enter it again, or press Ctrl+C to cancel QS preparation.'
+        }
     }
     $stamp=[DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')+'-'+[Guid]::NewGuid().ToString('N').Substring(0,6)
     $work=Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) ('preparation-'+$stamp)

@@ -113,6 +113,7 @@ function Invoke-RhemaFreshApiCli {
  [IO.File]::WriteAllText($harness,@'
 param([string]$Initializer,[string]$OutputDirectory,[string]$ExpectedDatabase,[string]$PasswordSource,[switch]$AutoApproveQsUat)
 $ErrorActionPreference='Stop'
+$global:QsPromptCount=0
 function Get-ItemProperty {
  param([string]$LiteralPath)
  if($LiteralPath -ne 'HKLM:\SYSTEM\CurrentControlSet\Services\RhemaERPAPI\Parameters'){throw 'Unexpected configuration read.'}
@@ -127,12 +128,15 @@ function Test-Path {
 }
 function Read-Host {
  param([string]$Prompt,[switch]$AsSecureString)
- if(!$AsSecureString -or $PasswordSource -ne 'Prompt'){throw 'Unexpected or insecure password prompt.'}
+ if(!$AsSecureString -or $PasswordSource -notin @('Prompt','PromptAfterBlank')){throw 'Unexpected or insecure password prompt.'}
+ $global:QsPromptCount++
+ if($PasswordSource -eq 'PromptAfterBlank' -and $global:QsPromptCount -eq 1){return [Security.SecureString]::new()}
  ConvertTo-SecureString 'fake-qs-secret-!42' -AsPlainText -Force
 }
 & $Initializer -ExpectedDatabase $ExpectedDatabase -OutputDirectory $OutputDirectory -AutoApproveQsUat:$AutoApproveQsUat
+if($PasswordSource -in @('Prompt','PromptAfterBlank')){Write-Output ('PROMPT_COUNT|'+$global:QsPromptCount)}
 '@)
- foreach($source in @('Process','Service','Prompt','Mismatch','Failure','AutoApproval','FalseSuccess')) {
+ foreach($source in @('Process','Service','Prompt','PromptAfterBlank','Mismatch','Failure','AutoApproval','FalseSuccess')) {
   $outputDirectory=Join-Path $testRoot ('init-'+$source);$launch=Join-Path $testRoot ($source+'-launched.txt')
   $environment=@{RHEMA_QS_INIT_LAUNCH=$launch}
   if($source -in @('Process','Failure','AutoApproval','FalseSuccess')){$environment.UatBootstrap__SharedPassword='fake-qs-secret-!42'}
@@ -155,6 +159,8 @@ function Read-Host {
    Assert-QsPreparation ($child.ExitCode -ne 0 -and !$child.Output.Contains('QS_CONFIGURATION|AUTO_APPROVED_TEST_ONLY')) 'Initializer claimed approval despite an unapproved report.'
   }else{
    Assert-QsPreparation ($child.ExitCode -eq 0 -and (Test-Path -LiteralPath $launch)) ('Initializer credential source failed: '+$source)
+   if($source -eq 'Prompt'){Assert-QsPreparation ($child.Output.Contains('PROMPT_COUNT|1')) 'Valid prompted password was requested more than once.'}
+   if($source -eq 'PromptAfterBlank'){Assert-QsPreparation ($child.Output.Contains('PROMPT_COUNT|2') -and $child.Output.Contains('password cannot be empty')) 'Blank prompted password was not rejected and requested again.'}
    if($source -eq 'AutoApproval'){Assert-QsPreparation ($child.Output.Contains('QS_CONFIGURATION|AUTO_APPROVED_TEST_ONLY')) 'Explicit auto-approval was not verified.'}
    foreach($artifact in Get-ChildItem -LiteralPath $outputDirectory -Recurse -File) {
     $text=Get-Content -LiteralPath $artifact.FullName -Raw
@@ -162,7 +168,7 @@ function Read-Host {
    }
   }
  }
- Write-Output 'PASS|Windows PowerShell initializer: secure prompt, process/service secret sources, target rejection before launch, and sanitized artifacts.'
+ Write-Output 'PASS|Windows PowerShell initializer: secure prompt with blank-entry retry, process/service secret sources, target rejection before launch, and sanitized artifacts.'
 
  $wrapper=Join-Path $scripts 'Deploy-QsUatVps.ps1'
  Copy-Item -LiteralPath (Join-Path $repositoryRoot 'scripts\Deploy-QsUatVps.ps1') -Destination $wrapper
