@@ -93,6 +93,8 @@ public sealed class QsUatPreparationSeeder(
         var templates = await PrepareMetadataTemplatesAsync(tenantId, actorId, token);
         var reportTemplates = await PrepareReportTemplatesAsync(tenantId, actorId, token);
         var autoApprove = configuration.GetValue<bool>("QsUat:AutoApprove");
+        var reconcileUnapprovedDrafts = autoApprove &&
+            configuration.GetValue<bool>("QsUat:ReconcileUnapprovedDrafts");
         var profile = await db.QuantitySurveyConfigurationProfiles.AsNoTracking()
             .Where(p => p.TenantId == tenantId && !p.IsDeleted && p.ProfileCode == "TDC-QUANTITY-SURVEY" &&
                 p.LifecycleStatus == QuantitySurveyConfigurationProfileStatus.Draft)
@@ -143,7 +145,8 @@ public sealed class QsUatPreparationSeeder(
                 System.Text.Json.Nodes.JsonNode.Parse(decision.Value.GetRawText()), System.Text.Json.Nodes.JsonNode.Parse(validation.CanonicalJson!)))
             { prepared.Add(decision.DecisionKey); continue; }
             if (!CanPrepareDecision(decision) &&
-                !CanReconcileSeedDecision(decision, bootstrapModifiedDecisionIds.Contains(decision.Id)))
+                !CanReconcileSeedDecision(decision, bootstrapModifiedDecisionIds.Contains(decision.Id)) &&
+                !CanReconcileUnapprovedDraftDecision(decision, reconcileUnapprovedDrafts))
             {
                 unresolved.Add($"{decision.DecisionKey}: existing user preparation or approval preserved; compare the UAT proposal manually.");
                 continue;
@@ -368,6 +371,16 @@ public sealed class QsUatPreparationSeeder(
         decision.ApprovalStatus == QuantitySurveyConfigurationApprovalStatus.Pending &&
         decision.EvidenceStatus == QuantitySurveyConfigurationEvidenceStatus.Missing &&
         decision.Evidence.Count == 0;
+
+    internal static bool CanReconcileUnapprovedDraftDecision(QuantitySurveyDecisionDto decision, bool explicitlyAuthorized) =>
+        explicitlyAuthorized &&
+        decision.Status == QuantitySurveyConfigurationDecisionStatus.Draft &&
+        decision.ApprovalStatus == QuantitySurveyConfigurationApprovalStatus.Pending &&
+        decision.EvidenceStatus == QuantitySurveyConfigurationEvidenceStatus.Missing &&
+        decision.Evidence.Count == 0 &&
+        decision.ApprovedById is null &&
+        decision.ApprovedAt is null &&
+        string.IsNullOrWhiteSpace(decision.ApprovalReference);
 
     internal static CreateWorkflowDefinitionDto CreateWorkflowRecipe(string code, string name, IReadOnlyDictionary<string, Guid> users)
     {

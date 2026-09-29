@@ -6,7 +6,8 @@ param(
     [string]$ExpectedCommit,
     [uri]$PublicBaseUrl='https://63.141.230.56',
     [switch]$PrepareQsUat,
-    [switch]$AutoApproveQsUat
+    [switch]$AutoApproveQsUat,
+    [switch]$ReconcileUnapprovedQsDrafts
 )
 # Run this file on the VPS release checkout after updating master. The existing
 # deployer performs its own preflight, backups, migration and release checks.
@@ -17,6 +18,7 @@ $preparationRunning=$false
 $locationPushed=$false
 try {
     if($AutoApproveQsUat -and !$PrepareQsUat){throw 'AutoApproveQsUat requires PrepareQsUat.'}
+    if($ReconcileUnapprovedQsDrafts -and !$AutoApproveQsUat){throw 'ReconcileUnapprovedQsDrafts requires AutoApproveQsUat.'}
     if($PrepareQsUat -and $ExpectedDatabase -cnotmatch '^RhemaERP_VpsTest_[A-Za-z0-9_]+$') {
         throw 'QS preparation requires an explicitly selected RhemaERP_VpsTest database.'
     }
@@ -42,6 +44,7 @@ try {
         $prepareArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',
             (Join-Path $PSScriptRoot 'vps\Initialize-QsUat.ps1'),'-ExpectedDatabase',$ExpectedDatabase)
         if($AutoApproveQsUat){$prepareArguments+='-AutoApproveQsUat'}
+        if($ReconcileUnapprovedQsDrafts){$prepareArguments+='-ReconcileUnapprovedQsDrafts'}
         & $powershell @prepareArguments
         if($LASTEXITCODE -ne 0){throw 'QS test preparation failed; retain its evidence before retrying.'}
         $preparationRunning=$false

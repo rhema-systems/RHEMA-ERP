@@ -3,11 +3,13 @@ param(
     [Parameter(Mandatory=$true)]
     [ValidatePattern('^RhemaERP_VpsTest_[A-Za-z0-9_]+$')][string]$ExpectedDatabase,
     [string]$OutputDirectory,
-    [switch]$AutoApproveQsUat
+    [switch]$AutoApproveQsUat,
+    [switch]$ReconcileUnapprovedQsDrafts
 )
 # Explicit, additive Test VPS setup. No service restart or production target.
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'FreshDatabaseProvisioning.ps1')
+if($ReconcileUnapprovedQsDrafts -and !$AutoApproveQsUat){throw 'ReconcileUnapprovedQsDrafts requires AutoApproveQsUat.'}
 if([string]::IsNullOrWhiteSpace($OutputDirectory)){$OutputDirectory=Join-Path $PSScriptRoot '..\..\artifacts\qs-uat'}
 $values=@{};$secret=$null;$secureSecret=$null;$connectionString=$null
 try {
@@ -49,10 +51,18 @@ try {
     try {
         $result=Invoke-RhemaFreshApiCli -ApiExecutable 'C:\RhemaERP\api\ErpSystem.Api.exe' -ContentRoot $work `
             -ConnectionString $connectionString -Command 'seed-qs-uat' -ExpectedQsDatabase $ExpectedDatabase `
-            -OperationalUatPassword $secret -TimeoutSeconds 1200 -AutoApproveQsUat:$AutoApproveQsUat
+            -OperationalUatPassword $secret -TimeoutSeconds 1200 -AutoApproveQsUat:$AutoApproveQsUat `
+            -ReconcileUnapprovedQsDrafts:$ReconcileUnapprovedQsDrafts
     } catch {
         $safeEvidence=$_.Exception.Data['SafeCliEvidence']
-        if($safeEvidence){$safeEvidence | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $work 'command-evidence.json') -Encoding UTF8}
+        if($safeEvidence){
+            $safeEvidence | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $work 'command-evidence.json') -Encoding UTF8
+            $summary=[ordered]@{ExitCode=$safeEvidence.ExitCode;GuardCodes=@($safeEvidence.GuardCodes);
+                QsDecisionCodes=@($safeEvidence.QsDecisionCodes);QsStages=@($safeEvidence.QsStages);
+                MissingServices=@($safeEvidence.MissingServices);SqlErrorNumbers=@($safeEvidence.SqlErrorNumbers);
+                ExceptionTypes=@($safeEvidence.ExceptionTypes)}
+            Write-Output ('QS_UAT_FAILURE|'+($summary|ConvertTo-Json -Compress -Depth 5))
+        }
         Write-Output "QS_UAT_PREPARATION_EVIDENCE|$work"
         throw 'QS preparation stopped. Review the sanitized command evidence; raw process output and credentials were not persisted.'
     }
