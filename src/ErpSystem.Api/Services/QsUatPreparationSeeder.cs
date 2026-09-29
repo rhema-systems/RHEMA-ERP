@@ -125,6 +125,13 @@ public sealed class QsUatPreparationSeeder(
         var unresolved = new List<string>();
         var proposals = new List<QsUatDecisionProposal>();
         var current = await configurationOwner.GetProfileAsync(profile.Id, token);
+        // The bootstrap identity has no password and cannot be used through the UI.
+        // This distinguishes a stale value written by an earlier UAT run from a
+        // real user's draft, even when the original profile came from startup seed data.
+        var bootstrapModifiedDecisionIds = (await db.QuantitySurveyConfigurationDecisions.AsNoTracking()
+            .Where(d => d.TenantId == tenantId && d.ProfileId == profile.Id && !d.IsDeleted &&
+                d.SourceLineage == SeedMarker && d.LastModifiedById == actorId)
+            .Select(d => d.Id).ToListAsync(token)).ToHashSet();
         foreach (var decision in current.Decisions.OrderBy(d => d.DecisionKey))
         {
             var resolved = QsUatDecisionRecipes.Resolve(decision.DecisionKey, references);
@@ -135,7 +142,8 @@ public sealed class QsUatPreparationSeeder(
             if (decision.SourceLineage == SeedMarker && System.Text.Json.Nodes.JsonNode.DeepEquals(
                 System.Text.Json.Nodes.JsonNode.Parse(decision.Value.GetRawText()), System.Text.Json.Nodes.JsonNode.Parse(validation.CanonicalJson!)))
             { prepared.Add(decision.DecisionKey); continue; }
-            if (!CanPrepareDecision(decision))
+            if (!CanPrepareDecision(decision) &&
+                !CanReconcileSeedDecision(decision, bootstrapModifiedDecisionIds.Contains(decision.Id)))
             {
                 unresolved.Add($"{decision.DecisionKey}: existing user preparation or approval preserved; compare the UAT proposal manually.");
                 continue;
@@ -152,7 +160,9 @@ public sealed class QsUatPreparationSeeder(
         if (autoApprove)
         {
             if (unresolved.Count > 0)
-                throw new InvalidOperationException("QS_UAT_AUTO_APPROVAL_UNRESOLVED: all 17 decisions must have valid controlled values before auto-approval.");
+                throw new InvalidOperationException(
+                    "QS_UAT_AUTO_APPROVAL_UNRESOLVED: all 17 decisions must have valid controlled values before auto-approval. " +
+                    string.Join(" | ", unresolved));
             await AutoApproveAndPublishAsync(profile.Id, tenantId, actorId, token);
         }
         return new(workflows, profile.Id, prepared, unresolved, proposals, !autoApprove);
@@ -352,6 +362,13 @@ public sealed class QsUatPreparationSeeder(
         (decision.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined ||
          decision.Value.ValueKind == JsonValueKind.Object && !decision.Value.EnumerateObject().Any());
 
+    internal static bool CanReconcileSeedDecision(QuantitySurveyDecisionDto decision, bool bootstrapModified) =>
+        bootstrapModified && decision.SourceLineage == SeedMarker &&
+        decision.Status == QuantitySurveyConfigurationDecisionStatus.Draft &&
+        decision.ApprovalStatus == QuantitySurveyConfigurationApprovalStatus.Pending &&
+        decision.EvidenceStatus == QuantitySurveyConfigurationEvidenceStatus.Missing &&
+        decision.Evidence.Count == 0;
+
     internal static CreateWorkflowDefinitionDto CreateWorkflowRecipe(string code, string name, IReadOnlyDictionary<string, Guid> users)
     {
         ValidateActors(users);
@@ -499,10 +516,13 @@ public sealed class QsUatPreparationSeeder(
         Select("OversightRoleId", "roles", "TDC_INTERNAL_AUDIT");
         Select("ProjectTypeId", "projectTypes", "QS-UAT-CONSTRUCTION");
         Select("LocationId", "locations", "QS-UAT-SITE");
-        Select("ExpenseAccount", "postingExpenseAccounts", "DEFAULT-5000");
-        Select("ApAccount", "accountsPayableAccounts", "DEFAULT-2000");
+        // Finance stores the seeded natural account numbers as 5000/2000. Some
+        // segmented displays add the DEFAULT prefix, so accept either exact
+        // controlled label without falling back across multiple accounts.
+        Select("ExpenseAccount", "postingExpenseAccounts", "DEFAULT-5000", "5000");
+        Select("ApAccount", "accountsPayableAccounts", "DEFAULT-2000", "2000");
         Select("PaymentTerm", "supplierPaymentTerms", "NET30");
-        Select("TaxGroup", "supplierTaxGroups", "GH-PURCH-STD");
+        Select("TaxGroup", "supplierTaxGroups", "VAT-STD-PURCHASES", "GH-PURCH-STD");
         Select("WithholdingTax", "supplierWithholdingTaxes", "WHT-WORKS");
         if (lookups.TryGetValue("reports", out var reports))
         {
@@ -511,13 +531,17 @@ public sealed class QsUatPreparationSeeder(
         }
         return result;
 
-        void Select(string key, string source, string label)
+        void Select(string key, string source, params string[] labels)
         {
             if (!lookups.TryGetValue(source, out var options)) return;
-            var matching = options.Where(o => o.Label.Equals(label, StringComparison.OrdinalIgnoreCase) ||
-                o.Label.StartsWith(label + " - ", StringComparison.OrdinalIgnoreCase)).ToArray();
-            if (matching.Length == 1) result[key] = matching[0].Value;
-            else if (options.Count == 1) result[key] = options[0].Value;
+            foreach (var label in labels)
+            {
+                var matching = options.Where(o => o.Label.Equals(label, StringComparison.OrdinalIgnoreCase) ||
+                    o.Label.StartsWith(label + " - ", StringComparison.OrdinalIgnoreCase)).ToArray();
+                if (matching.Length == 1) { result[key] = matching[0].Value; return; }
+                if (matching.Length > 1) return;
+            }
+            if (options.Count == 1) result[key] = options[0].Value;
         }
     }
 }

@@ -28,6 +28,9 @@ Assert-Test ($package.scripts.'prepare:syncfusion' -eq $package.scripts.postinst
 Assert-Test ($null -eq $package.scripts.PSObject.Properties['prebuild'] -and
     $null -eq $package.scripts.PSObject.Properties['prestart']) `
     'Syncfusion asset copying still runs redundantly during build or start.'
+$tsconfig = Get-Content (Join-Path $repositoryRoot 'frontend\tsconfig.json') -Raw
+Assert-Test $tsconfig.Contains('.next-production/types/**/*.ts') `
+    'The production output type path is missing; Next would mutate tsconfig during a release build.'
 
 $syncfusionTarget = Join-Path $repositoryRoot `
     'frontend\public\syncfusion\ej2-pdfviewer-lib'
