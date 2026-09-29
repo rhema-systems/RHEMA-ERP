@@ -41,7 +41,10 @@ public class EnvironmentProbe {
    if(connection.InitialCatalog != Environment.GetEnvironmentVariable("QsUat__ExpectedDatabase")) return 34;
    if(Environment.GetEnvironmentVariable("UatBootstrap__SharedPassword") != "fake-qs-secret-!42") return 35;
    Console.WriteLine("fake-qs-secret-!42 fake-db-secret-!43");
-   if(connection.InitialCatalog.EndsWith("_Failure")) return 17;
+   if(connection.InitialCatalog.EndsWith("_Failure")) {
+     Console.Error.WriteLine("QS_UAT_AUTO_APPROVAL_UNRESOLVED: QS-DEC-008 and QS-DEC-015 require controlled selections.");
+     return 17;
+   }
   } else {
    if(Environment.GetEnvironmentVariable("QsUat__Enabled") != null || Environment.GetEnvironmentVariable("QsUat__AutoApprove") != null || Environment.GetEnvironmentVariable("QsUat__ExpectedDatabase") != null || Environment.GetEnvironmentVariable("UatBootstrap__SharedPassword") != null) return 36;
    if(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") != "FreshDatabaseProvisioning") return 37;
@@ -68,7 +71,8 @@ public class EnvironmentProbe {
   catch {
    $safe=$_.Exception.Data['SafeCliEvidence']
    $errorEvidence=$_.Exception.Message+($safe | ConvertTo-Json -Depth 6)
-   $failed=$safe.ExitCode -eq 17 -and $safe.OutputSha256.Length -eq 64
+   $failed=$safe.ExitCode -eq 17 -and $safe.OutputSha256.Length -eq 64 -and
+       @($safe.QsDecisionCodes) -join ',' -eq 'QS-DEC-008,QS-DEC-015'
    Assert-QsPreparation (!$errorEvidence.Contains('fake-qs-secret') -and !$errorEvidence.Contains('fake-db-secret')) 'Failed CLI exposed raw child credentials.'
   }
   Assert-QsPreparation $failed 'Failed CLI lost its sanitized child evidence.'

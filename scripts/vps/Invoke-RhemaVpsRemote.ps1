@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Preflight', 'Backup', 'Apply', 'SeedOperational', 'ResumeFrontend', 'Verify', 'RollbackFresh', 'CompleteFresh')]
+    [ValidateSet('Preflight', 'Backup', 'Apply', 'SeedOperational', 'ResumeFrontend', 'Verify', 'RollbackRelease', 'RollbackFresh', 'CompleteFresh')]
     [string]$Action,
 
     [string]$DeploymentId,
@@ -12,6 +12,7 @@ param(
     [string]$FrontendPackageName,
     [string]$ApiSha256,
     [string]$FrontendSha256,
+    [string]$ReleaseId,
     [string]$FreshDatabaseName,
     [string]$ExpectedPublicOrigin = 'https://63.141.230.56',
     [int]$ApiReadyTimeoutSeconds = 1800
@@ -24,6 +25,7 @@ $RhemaRoot = 'C:\RhemaERP'
 $ApiRoot = Join-Path $RhemaRoot 'api'
 $FrontendRoot = Join-Path $RhemaRoot 'frontend'
 $PackagesRoot = Join-Path $RhemaRoot 'packages'
+$ReleasesRoot = Join-Path $RhemaRoot 'releases'
 $BackupsRoot = Join-Path $RhemaRoot 'backups'
 $LogsRoot = Join-Path $RhemaRoot 'logs'
 $ApiServiceXml = Join-Path $RhemaRoot 'services\api\RhemaERPAPI.xml'
@@ -1309,6 +1311,48 @@ function Invoke-Apply {
     Assert-True ((Get-FileHash $frontendZip -Algorithm SHA256).Hash -eq $FrontendSha256) `
         'Uploaded frontend package hash does not match the release manifest.'
 
+    $effectiveReleaseId = if ([string]::IsNullOrWhiteSpace($ReleaseId)) {
+        $DeploymentId
+    } else { $ReleaseId }
+    Assert-True ($effectiveReleaseId -match '^[a-zA-Z0-9-]+$') `
+        'ReleaseId contains unsupported characters.'
+    [void](New-Item -ItemType Directory -Path $ReleasesRoot -Force)
+    $immutableRelease = Join-Path $ReleasesRoot $effectiveReleaseId
+    $immutableMetadata = [ordered]@{
+        releaseId = $effectiveReleaseId
+        deploymentId = $DeploymentId
+        commit = $ExpectedCommit
+        buildId = $ExpectedBuildId
+        cacheVersion = $ExpectedCacheVersion
+        apiSha256 = $ApiSha256
+        frontendSha256 = $FrontendSha256
+        receivedUtc = [DateTime]::UtcNow.ToString('o')
+        status = 'Staged'
+    }
+    if (Test-Path -LiteralPath $immutableRelease) {
+        $existingMetadataPath = Join-Path $immutableRelease 'release.json'
+        Assert-True (Test-Path -LiteralPath $existingMetadataPath) `
+            'Existing immutable release lacks its identity manifest.'
+        $existingMetadata = Get-Content $existingMetadataPath -Raw | ConvertFrom-Json
+        Assert-True ($existingMetadata.commit -eq $ExpectedCommit -and
+            $existingMetadata.buildId -eq $ExpectedBuildId -and
+            $existingMetadata.apiSha256 -eq $ApiSha256 -and
+            $existingMetadata.frontendSha256 -eq $FrontendSha256) `
+            'Existing immutable release identity differs from the requested artifacts.'
+    } else {
+        New-Item -ItemType Directory -Path (Join-Path $immutableRelease 'api'), `
+            (Join-Path $immutableRelease 'frontend') | Out-Null
+        Expand-Archive -LiteralPath $apiZip -DestinationPath `
+            (Join-Path $immutableRelease 'api') -Force
+        Expand-Archive -LiteralPath $frontendZip -DestinationPath `
+            (Join-Path $immutableRelease 'frontend') -Force
+        [IO.File]::WriteAllText((Join-Path $immutableRelease 'release.json'),
+            ($immutableMetadata | ConvertTo-Json -Depth 5),
+            (New-Object Text.UTF8Encoding($false)))
+    }
+
+    # Activate from a disposable copy. The versioned source remains immutable
+    # and available for rollback or inspection.
     $stage = Join-Path $PackagesRoot "stage-$DeploymentId"
     $retired = Join-Path $PackagesRoot "retired-$DeploymentId"
     $failed = Join-Path $PackagesRoot "failed-$DeploymentId"
@@ -1319,9 +1363,14 @@ function Invoke-Apply {
         "Deployment stage already exists: $stage"
     New-Item -ItemType Directory -Path (Join-Path $stage 'api'), `
         (Join-Path $stage 'frontend'), $retired | Out-Null
-    Expand-Archive -LiteralPath $apiZip -DestinationPath (Join-Path $stage 'api') -Force
-    Expand-Archive -LiteralPath $frontendZip `
-        -DestinationPath (Join-Path $stage 'frontend') -Force
+    Invoke-RobocopyChecked @(
+        (Join-Path $immutableRelease 'api'), (Join-Path $stage 'api'),
+        '/E', '/R:2', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
+    )
+    Invoke-RobocopyChecked @(
+        (Join-Path $immutableRelease 'frontend'), (Join-Path $stage 'frontend'),
+        '/E', '/R:2', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
+    )
 
     $stageApi = Join-Path $stage 'api'
     $stageFrontend = Join-Path $stage 'frontend'
@@ -1363,6 +1412,7 @@ function Invoke-Apply {
     }
     else {
     Set-TestServerConfiguration
+    $apiActivationWatch = [Diagnostics.Stopwatch]::StartNew()
     $apiStartedAt = Get-Date
     try {
         Stop-ManagedService RhemaERPAPI
@@ -1401,7 +1451,11 @@ function Invoke-Apply {
         Start-Service RhemaERPAPI -ErrorAction SilentlyContinue
         throw "API apply failed and application files were rolled back: $($_.Exception.Message)"
     }
+    $apiActivationWatch.Stop()
+    Write-Output ("PERFORMANCE|Migrations and API restart|{0}" -f `
+        $apiActivationWatch.Elapsed.TotalSeconds.ToString('0.00', [Globalization.CultureInfo]::InvariantCulture))
 
+    $frontendActivationWatch = [Diagnostics.Stopwatch]::StartNew()
     try {
         Stop-ManagedService RhemaERPFrontend
         if (Test-Path (Join-Path $FrontendRoot '.next')) {
@@ -1449,9 +1503,20 @@ function Invoke-Apply {
         Start-Service RhemaERPFrontend -ErrorAction SilentlyContinue
         throw "Frontend apply failed and was rolled back: $($_.Exception.Message)"
     }
+    $frontendActivationWatch.Stop()
+    Write-Output ("PERFORMANCE|Frontend restart and readiness|{0}" -f `
+        $frontendActivationWatch.Elapsed.TotalSeconds.ToString('0.00', [Globalization.CultureInfo]::InvariantCulture))
 
     }
+    $currentReleasePath = Join-Path $LogsRoot 'current-release.json'
+    $previousReleaseId = $null
+    if (Test-Path -LiteralPath $currentReleasePath) {
+        try { $previousReleaseId = [string](Get-Content $currentReleasePath -Raw | ConvertFrom-Json).releaseId }
+        catch { $previousReleaseId = $null }
+    }
     $release = [ordered]@{
+        releaseId = $effectiveReleaseId
+        previousReleaseId = $previousReleaseId
         deploymentId = $DeploymentId
         commit = $ExpectedCommit
         buildId = $ExpectedBuildId
@@ -1462,10 +1527,123 @@ function Invoke-Apply {
         freshDatabase = $FreshDatabaseName
     }
     [System.IO.File]::WriteAllText(
-        (Join-Path $LogsRoot 'current-release.json'),
+        $currentReleasePath,
         ($release | ConvertTo-Json -Depth 4),
         (New-Object System.Text.UTF8Encoding($false)))
+    $immutableMetadata['status'] = 'Successful'
+    $immutableMetadata['deploymentId'] = $DeploymentId
+    $immutableMetadata['activatedUtc'] = [DateTime]::UtcNow.ToString('o')
+    [IO.File]::WriteAllText((Join-Path $immutableRelease 'release.json'),
+        ($immutableMetadata | ConvertTo-Json -Depth 5),
+        (New-Object Text.UTF8Encoding($false)))
+    $keepIds = @($effectiveReleaseId, $previousReleaseId) | Where-Object { $_ } | Select-Object -Unique
+    $successful = @(Get-ChildItem $ReleasesRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object {
+            $metadataPath = Join-Path $_.FullName 'release.json'
+            if (-not (Test-Path $metadataPath)) { return $false }
+            try { return (Get-Content $metadataPath -Raw | ConvertFrom-Json).status -eq 'Successful' }
+            catch { return $false }
+        } |
+        Sort-Object LastWriteTimeUtc -Descending)
+    $keepIds += @($successful | Select-Object -First 3 -ExpandProperty Name)
+    foreach ($oldRelease in $successful) {
+        if ($oldRelease.Name -notin $keepIds) {
+            Remove-Item -LiteralPath $oldRelease.FullName -Recurse -Force
+        }
+    }
+    Write-Output "VERSIONED_RELEASE|$immutableRelease"
     Write-Output 'APPLY|PASS'
+}
+
+function Restore-ApplicationRelease {
+    Assert-DeploymentId
+    $backup = Join-Path $BackupsRoot "deploy-$DeploymentId"
+    $retired = Join-Path $PackagesRoot "retired-$DeploymentId"
+    $failed = Join-Path $PackagesRoot "failed-rollback-$DeploymentId"
+    Assert-True (Test-Path -LiteralPath (Join-Path $backup 'backup-manifest.json')) `
+        'The verified application backup for this deployment is missing.'
+    Assert-True (Test-Path -LiteralPath $retired) `
+        'The retired frontend for this deployment is missing.'
+    if (Test-Path -LiteralPath $failed) {
+        throw "Rollback failure-retention path already exists: $failed"
+    }
+    New-Item -ItemType Directory -Path $failed | Out-Null
+
+    try {
+        Stop-ManagedService RhemaERPFrontend
+        Stop-ManagedService RhemaERPAPI
+        Invoke-RobocopyChecked @(
+            (Join-Path $backup 'api'), $ApiRoot, '/MIR', '/R:2', '/W:2',
+            '/NFL', '/NDL', '/NJH', '/NJS', '/NP',
+            '/XF', 'appsettings.json', 'appsettings.Production.json',
+            'appsettings.Development.json', 'appsettings.AntiSpam.json', '.env', '.env.production',
+            '/XD', (Join-Path $ApiRoot 'wwwroot\uploads'), (Join-Path $ApiRoot 'logs'),
+            (Join-Path $ApiRoot 'secure-file-storage')
+        )
+        $serviceBackup = Join-Path $backup 'services\api'
+        if ($UsesNssmApiConfiguration) {
+            $configuration = Join-Path $serviceBackup 'RhemaERPAPI.nssm-environment.json'
+            if (Test-Path -LiteralPath $configuration) {
+                Restore-NssmEnvironmentSnapshot `
+                    (Get-Content -LiteralPath $configuration -Raw | ConvertFrom-Json)
+            }
+        } else {
+            $configuration = Join-Path $serviceBackup 'RhemaERPAPI.xml'
+            if (Test-Path -LiteralPath $configuration) {
+                Copy-Item -LiteralPath $configuration -Destination $ApiServiceXml -Force
+            }
+        }
+        foreach ($name in @('.next', 'public', 'node_modules')) {
+            $livePath = Join-Path $FrontendRoot $name
+            if (Test-Path -LiteralPath $livePath) {
+                Move-Item -LiteralPath $livePath -Destination (Join-Path $failed $name)
+            }
+            $retiredPath = Join-Path $retired $name
+            if (Test-Path -LiteralPath $retiredPath) {
+                Move-Item -LiteralPath $retiredPath -Destination $livePath
+            }
+        }
+        foreach ($name in @('package.json', 'package-lock.json', 'next.config.js')) {
+            $livePath = Join-Path $FrontendRoot $name
+            if (Test-Path -LiteralPath $livePath) {
+                Copy-Item -LiteralPath $livePath -Destination (Join-Path $failed $name) -Force
+            }
+            $retiredPath = Join-Path $retired $name
+            if (Test-Path -LiteralPath $retiredPath) {
+                Copy-Item -LiteralPath $retiredPath -Destination $livePath -Force
+            }
+        }
+        $apiStartedAt = Get-Date
+        Start-Service RhemaERPAPI
+        Wait-ApiReady $apiStartedAt
+        Start-Service RhemaERPFrontend
+        Wait-FrontendReady
+        [IO.File]::WriteAllText((Join-Path $LogsRoot "rollback-$DeploymentId.json"),
+            ([ordered]@{
+                deploymentId = $DeploymentId
+                rolledBackUtc = [DateTime]::UtcNow.ToString('o')
+                databaseRestored = $false
+                failedApplication = $failed
+            } | ConvertTo-Json -Depth 4), (New-Object Text.UTF8Encoding($false)))
+        $currentReleasePath = Join-Path $LogsRoot 'current-release.json'
+        if (Test-Path -LiteralPath $currentReleasePath) {
+            $failedRelease = Get-Content $currentReleasePath -Raw | ConvertFrom-Json
+            [IO.File]::WriteAllText($currentReleasePath, ([ordered]@{
+                releaseId = $failedRelease.previousReleaseId
+                previousReleaseId = $null
+                rolledBackFromReleaseId = $failedRelease.releaseId
+                rolledBackDeploymentId = $DeploymentId
+                status = 'RolledBack'
+                deployedUtc = [DateTime]::UtcNow.ToString('o')
+                databaseRestored = $false
+            } | ConvertTo-Json -Depth 4), (New-Object Text.UTF8Encoding($false)))
+        }
+        Write-Output 'APPLICATION_ROLLBACK|PASS|DATABASE_UNCHANGED'
+    } catch {
+        Start-Service RhemaERPAPI -ErrorAction SilentlyContinue
+        Start-Service RhemaERPFrontend -ErrorAction SilentlyContinue
+        throw "Application rollback failed; database was not restored: $($_.Exception.Message)"
+    }
 }
 
 function Invoke-ResumeFrontend {
@@ -1681,6 +1859,7 @@ switch ($Action) {
     'SeedOperational' { Invoke-OperationalSeed }
     'ResumeFrontend' { Invoke-ResumeFrontend }
     'Verify' { Invoke-Verify }
+    'RollbackRelease' { Restore-ApplicationRelease }
     'RollbackFresh' { Restore-FreshDatabaseCutover }
     'CompleteFresh' { Complete-FreshDatabaseCutover }
 }
