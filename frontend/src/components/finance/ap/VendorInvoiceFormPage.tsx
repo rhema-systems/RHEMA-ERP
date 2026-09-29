@@ -1453,36 +1453,37 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                             />
                         </div>
 
-                        <div className="border-t pt-5 md:col-span-2 lg:col-span-3">
-                            <h2 className="text-base font-semibold">VAT and levies</h2>
-                            <p className="text-sm text-muted-foreground">Select the default transactional tax treatment for new invoice lines. WHT is classified separately below.</p>
-                        </div>
-
-                        <div className="space-y-2 md:col-span-2 lg:col-span-1">
-                            <Label>Default Tax Group (For new lines)</Label>
-                            <Controller
-                                control={form.control}
-                                name="taxGroupId"
-                                render={({ field }) => (
-                                    <Select value={watchIsOpeningBalance ? 'none' : (field.value || 'none')} onValueChange={value => { manualSupplierDefaults.current.add('taxGroupId'); field.onChange(value); }} disabled={watchIsOpeningBalance}>
-                                        <SelectTrigger className={cn(watchIsOpeningBalance && 'bg-muted text-muted-foreground')}>
-                                            <SelectValue placeholder="No Tax (Zero/Exempt)" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="none">No Tax (Zero/Exempt)</SelectItem>
-                                            {taxGroupsData?.map((tg: any) => (
-                                                <SelectItem key={tg.id} value={tg.id}>{tg.name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                )}
-                            />
-                            <span className="text-[11px] text-muted-foreground block mt-1">
-                                {watchIsOpeningBalance
-                                    ? 'Disabled for opening balances; opening bills carry no tax reposting.'
-                                    : 'Optional. Pre-populates new lines; can be overridden on each line.'}
-                            </span>
-                        </div>
+                        <section className="space-y-4 rounded-xl border bg-muted/10 p-4 md:col-span-2 lg:col-span-3">
+                            <div>
+                                <h2 className="text-base font-semibold">VAT and levies</h2>
+                                <p className="text-sm text-muted-foreground">Choose the default transactional tax treatment for new invoice lines. WHT is handled separately at payment.</p>
+                            </div>
+                            <div className="max-w-xl space-y-2">
+                                <Label>Default tax group for new lines</Label>
+                                <Controller
+                                    control={form.control}
+                                    name="taxGroupId"
+                                    render={({ field }) => (
+                                        <Select value={watchIsOpeningBalance ? 'none' : (field.value || 'none')} onValueChange={value => { manualSupplierDefaults.current.add('taxGroupId'); field.onChange(value); }} disabled={watchIsOpeningBalance}>
+                                            <SelectTrigger className={cn(watchIsOpeningBalance && 'bg-muted text-muted-foreground')}>
+                                                <SelectValue placeholder="No Tax (Zero/Exempt)" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="none">No Tax (Zero/Exempt)</SelectItem>
+                                                {taxGroupsData?.map((tg: any) => (
+                                                    <SelectItem key={tg.id} value={tg.id}>{tg.name}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    )}
+                                />
+                                <span className="block text-xs text-muted-foreground">
+                                    {watchIsOpeningBalance
+                                        ? 'Disabled for opening balances; opening bills carry no tax reposting.'
+                                        : 'Applied to new lines only. Each line can use a different tax group.'}
+                                </span>
+                            </div>
+                        </section>
 
                         {watchCurrencyCode !== (financeSettings?.baseCurrency || 'GHS') && (
                             <div className="border p-4 rounded-lg bg-muted/20 md:col-span-2 lg:col-span-3 space-y-4">
@@ -1521,12 +1522,11 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                             </div>
                         )}
 
-                        <div className="border-t pt-5 md:col-span-2 lg:col-span-3">
-                            <h2 className="text-base font-semibold">Withholding tax classification</h2>
-                            <p className="text-sm text-muted-foreground">Capture payment-time WHT policy and statutory threshold scope without reducing the invoice liability.</p>
-                        </div>
-
-                        <div className="space-y-2 md:col-span-2 lg:col-span-3">
+                        <section className="space-y-4 rounded-xl border bg-muted/10 p-4 md:col-span-2 lg:col-span-3">
+                            <div>
+                                <h2 className="text-base font-semibold">Withholding tax classification</h2>
+                                <p className="text-sm text-muted-foreground">Record the payment-time WHT policy and statutory threshold scope without reducing the invoice liability now.</p>
+                            </div>
                             <div className="flex flex-wrap items-center gap-3">
                                 <Switch id="invoiceSubjectToWithholding" checked={!watchIsOpeningBalance && withholdingDecision === true} disabled={watchIsOpeningBalance}
                                     onCheckedChange={checked => { if (checked) setWithholdingPromptOpen(true); else declineWithholding(); }} />
@@ -1536,7 +1536,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                             <p className="text-xs text-muted-foreground">
                                 This records the applicable WHT rule and statutory scope. The payable is not reduced now; the final deduction and any configured threshold are evaluated when a payment is posted.
                             </p>
-                            <div className="grid gap-3 sm:grid-cols-[1fr_130px]">
+                            <div className="grid max-w-4xl gap-3 sm:grid-cols-[minmax(280px,640px)_140px]">
                             <div className="space-y-1.5"><Label htmlFor="invoiceWithholdingTaxId">WHT Configuration</Label>
                             <Controller
                                 control={form.control}
@@ -1574,18 +1574,18 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                 {form.formState.errors.withholdingTaxRate && <p className="text-xs text-destructive">Enter a rate from 0 to 100.</p>}
                             </div></div>
                             {withholdingDecision === true && !withholdingAccountId && <p role="status" className="text-xs text-destructive">{supplierWithholding?.message || 'Select a WHT configuration with a payable account.'}</p>}
-                        </div>
+                        </section>
 
                         {!isEditMode && selectedSupplier && (
                             <details className="rounded-lg border md:col-span-2 lg:col-span-3">
                                 <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">
-                                    Posting defaults <span className="ml-2 font-normal text-muted-foreground">AP control and fallback line account</span>
+                                    Posting defaults <span className="ml-2 font-normal text-muted-foreground">Supplier AP control and optional fallback account</span>
                                 </summary>
                                 <div className="space-y-3 border-t p-4">
                                 <div className="flex flex-wrap items-center justify-between gap-3">
                                     <div className="flex items-center gap-2">
                                         <Checkbox id="applySupplierDefaults" checked={applySupplierDefaults} disabled={watchIsOpeningBalance} onCheckedChange={checked => setApplySupplierDefaults(checked === true)} />
-                                        <Label htmlFor="applySupplierDefaults">Use supplier defaults</Label>
+                                        <Label htmlFor="applySupplierDefaults">Use approved supplier defaults</Label>
                                     </div>
                                     {supplierDefaultsLoading && <span className="text-xs text-muted-foreground">Loading defaults...</span>}
                                     {applySupplierDefaults && selectedPurchaseOrderId && supplierDefaults?.paymentTermsDays != null && <span className="text-xs text-muted-foreground">PO payment terms: {supplierDefaults.paymentTermsDays} days</span>}
@@ -1600,6 +1600,11 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                         <p className="text-xs text-muted-foreground">Fallback for a manual GL line. A line-level GL account takes precedence.</p>
                                     </div>
                                 </div>}
+                                <p className="text-xs text-muted-foreground">
+                                    {applySupplierDefaults
+                                        ? 'Finance pre-fills the approved AP account, payment terms, tax and fallback posting account. Any field you change is treated as an explicit invoice override.'
+                                        : 'Supplier defaults will not be applied again. Values already displayed remain available for review and can be replaced manually before recording the invoice.'}
+                                </p>
                                 </div>
                             </details>
                         )}
@@ -1643,42 +1648,6 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                     </CardContent>
                 </Card>
 
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Finance coding dimensions</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <SourceDocumentDimensionPanel
-                            context={{
-                                sourceModule: 'AP',
-                                sourceDocumentType: 'VendorInvoice',
-                                postingAction: 'Post',
-                                sourceRoute: 'finance.ap.vendor-invoices.manual',
-                                contractVersion: '1.0',
-                            }}
-                            effectiveDate={format(watchInvoiceDate || new Date(), 'yyyy-MM-dd')}
-                            lines={watchLineItems.map((item) => ({
-                                id: item.sourceLineId,
-                                ...getSourceLineDimensionAccounts(watchIsOpeningBalance ? undefined : editInvoice?.financeDimensions, item.sourceLineId, !watchIsOpeningBalance
-                                    && !selectedPurchaseOrderId
-                                    && (item.lineItemType === 'Expense' || item.lineItemType === 'Service')
-                                    ? item.glAccountId
-                                    : undefined),
-                                accountLabel: item.description || undefined,
-                            }))}
-                            defaultValues={defaultDimensionValues}
-                            lineValues={lineDimensionValues}
-                            onDefaultValuesChange={(values) => {
-                                setDefaultDimensionValues(values);
-                                setApplyDefaultToAll(false);
-                            }}
-                            onLineValuesChange={setLineDimensionValues}
-                            onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
-                            certificationState={editInvoice?.financeDimensions?.certificationState}
-                        />
-                    </CardContent>
-                </Card>
-
                 {/* Line Items Card */}
                 {goodsCategory && (
                     <div role={goodsEntryError ? 'alert' : 'status'} className={`rounded-lg border p-3 text-sm ${goodsEntryError ? 'border-destructive text-destructive' : 'text-muted-foreground'}`}>
@@ -1688,8 +1657,20 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                     </div>
                 )}
                 <Card>
-                    <CardHeader className="flex flex-row items-center justify-between">
-                        <CardTitle>Line Items</CardTitle>
+                    <CardHeader className="flex flex-row items-start justify-between gap-4">
+                        <div className="space-y-1">
+                            <CardTitle>Invoice lines</CardTitle>
+                            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                                <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
+                                    {selectedPurchaseOrderId ? 'Source-controlled invoice' : 'Manual GL invoice'}
+                                </span>
+                                <span>
+                                    {selectedPurchaseOrderId
+                                        ? 'Line type and posting treatment come from the approved procurement evidence.'
+                                        : 'Each line posts to the expense or asset account you select below.'}
+                                </span>
+                            </div>
+                        </div>
                         {!selectedPurchaseOrderId && <Button type="button" variant="outline" size="sm" onClick={() => append({ sourceLineId: crypto.randomUUID(), lineItemType: 'Expense' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' })}>
                             <Plus className="mr-2 h-4 w-4" /> Add GL line
                         </Button>}
@@ -1703,25 +1684,9 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                 );
                                 return (
                                     <div key={field.id} className="grid grid-cols-12 gap-4 items-end border-b pb-4">
-                                        <div className="col-span-2 space-y-2">
-                                            <Label className={index !== 0 ? 'sr-only' : ''}>Type</Label>
-                                            <div className="flex h-10 items-center rounded-md border bg-muted/40 px-3 text-sm">
-                                                {lineItemType === 'Inventory'
-                                                    ? 'Goods receipt / Inventory'
-                                                    : lineItemType === 'Service'
-                                                        ? 'Approved service completion'
-                                                        : lineItemType === 'Product'
-                                                            ? 'Legacy product line'
-                                                            : 'GL Account / Expense'}
-                                            </div>
-                                            {index === 0 && <p className="text-xs text-muted-foreground">
-                                                {selectedPurchaseOrderId ? 'Line type is governed by the selected source document.' : 'Manual AP invoices post directly to GL expense or asset accounts.'}
-                                            </p>}
-                                        </div>
-
                                         {lineItemType === 'Expense' || lineItemType === 'Service' ? (
                                             <>
-                                                <div className="col-span-2 min-w-0 space-y-2">
+                                                <div className="col-span-3 min-w-0 space-y-2">
                                                     <Label className={index !== 0 ? 'sr-only' : ''}>GL Account</Label>
                                                     <Controller
                                                         control={form.control}
@@ -1823,14 +1788,14 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                         />
                                                     )}
                                                 </div>
-                                                <div className="col-span-2 space-y-2">
+                                                <div className="col-span-3 space-y-2">
                                                     <Label className={index !== 0 ? 'sr-only' : ''}>Description</Label>
                                                     <Input {...form.register(`lineItems.${index}.description` as const)} placeholder="Notes" />
                                                 </div>
                                             </>
                                         ) : lineItemType === 'Inventory' ? (
                                             <>
-                                                <div className="col-span-2 min-w-0 space-y-2">
+                                                <div className="col-span-3 min-w-0 space-y-2">
                                                     <Label className={index !== 0 ? 'sr-only' : ''}>Inventory Item</Label>
                                                     <Controller
                                                         control={form.control}
@@ -1891,7 +1856,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                         )}
                                                     />
                                                 </div>
-                                                <div className="col-span-2 space-y-2">
+                                                <div className="col-span-3 space-y-2">
                                                     <Label className={index !== 0 ? 'sr-only' : ''}>Dest. Whse</Label>
                                                     <Controller
                                                         control={form.control}
@@ -1910,7 +1875,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                 </div>
                                             </>
                                         ) : (
-                                            <div className="col-span-4 space-y-2">
+                                            <div className="col-span-6 space-y-2">
                                                 <Label className={index !== 0 ? 'sr-only' : ''}>Description</Label>
                                                 <Input {...form.register(`lineItems.${index}.description` as const)} placeholder="Item description" />
                                             </div>
@@ -1989,6 +1954,44 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                             })}
                         </div>
 
+                        <section className="mt-6 space-y-4 rounded-xl border bg-muted/10 p-4">
+                            <div>
+                                <h3 className="font-semibold">Line coding</h3>
+                                <p className="text-sm text-muted-foreground">
+                                    Set reusable document defaults, then review or override the coding on each invoice line.
+                                </p>
+                            </div>
+                            <SourceDocumentDimensionPanel
+                                context={{
+                                    sourceModule: 'AP',
+                                    sourceDocumentType: 'VendorInvoice',
+                                    postingAction: 'Post',
+                                    sourceRoute: 'finance.ap.vendor-invoices.manual',
+                                    contractVersion: '1.0',
+                                }}
+                                effectiveDate={format(watchInvoiceDate || new Date(), 'yyyy-MM-dd')}
+                                lines={watchLineItems.map((item) => ({
+                                    id: item.sourceLineId,
+                                    ...getSourceLineDimensionAccounts(watchIsOpeningBalance ? undefined : editInvoice?.financeDimensions, item.sourceLineId, !watchIsOpeningBalance
+                                        && !selectedPurchaseOrderId
+                                        && (item.lineItemType === 'Expense' || item.lineItemType === 'Service')
+                                        ? item.glAccountId
+                                        : undefined),
+                                    accountLabel: item.description || undefined,
+                                    accountResolution: selectedPurchaseOrderId ? 'SourceDocument' as const : 'UserSelection' as const,
+                                }))}
+                                defaultValues={defaultDimensionValues}
+                                lineValues={lineDimensionValues}
+                                onDefaultValuesChange={(values) => {
+                                    setDefaultDimensionValues(values);
+                                    setApplyDefaultToAll(false);
+                                }}
+                                onLineValuesChange={setLineDimensionValues}
+                                onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+                                certificationState={editInvoice?.financeDimensions?.certificationState}
+                            />
+                        </section>
+
                         {/* Dynamic Tax and Payable Breakdown */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-8 border-t mt-8">
                             <div className="space-y-4">
@@ -2023,31 +2026,34 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                     </div>
                                 )}
                             </div>
-                            <div className="flex flex-col items-end space-y-2 text-right">
-                                <div className="flex justify-between w-72 text-sm text-muted-foreground">
-                                    <span>Subtotal (Net):</span>
-                                    <span className="font-medium">{formatAmountWithCurrency(subtotal)}</span>
-                                </div>
-                                <div className="flex justify-between w-72 text-sm text-muted-foreground">
-                                    <span>Est. Standard Taxes:</span>
-                                    <span className="font-medium text-amber-600">+{formatAmountWithCurrency(totalTax)}</span>
-                                </div>
-                                {!watchIsOpeningBalance && withholdingDecision === true && (
-                                    <div className="flex justify-between w-72 text-sm text-muted-foreground">
-                                        <span>Estimated WHT at payment ({watchWithholdingTaxRate}%):</span>
-                                        <span className="font-medium text-red-600">-{formatAmountWithCurrency(taxEstimate.withholdingTaxAmount)}</span>
+                            <div className="rounded-lg border bg-muted/20 p-4">
+                                <div className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Invoice totals</div>
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between gap-6 text-sm">
+                                        <span className="text-muted-foreground">Subtotal (net)</span>
+                                        <span className="font-medium tabular-nums">{formatAmountWithCurrency(subtotal)}</span>
                                     </div>
-                                )}
-                                <div className="flex justify-between w-72 text-xl font-bold border-t pt-2 mt-2">
-                                    <span>Gross Invoice Total:</span>
-                                    <span>{formatAmountWithCurrency(taxEstimate.grandTotal)}</span>
-                                </div>
-                                {taxEstimate.withholdingTaxAmount > 0 && (
-                                    <div className="flex justify-between w-72 text-sm font-semibold text-primary">
-                                        <span>Est. Cash Payable after WHT:</span>
-                                        <span>{formatAmountWithCurrency(taxEstimate.estimatedCashPayable)}</span>
+                                    <div className="flex items-center justify-between gap-6 text-sm">
+                                        <span className="text-muted-foreground">Estimated levies and VAT</span>
+                                        <span className="font-medium tabular-nums text-amber-700">+{formatAmountWithCurrency(totalTax)}</span>
                                     </div>
-                                )}
+                                    <div className="flex items-center justify-between gap-6 rounded-md bg-background px-3 py-3 text-lg font-bold">
+                                        <span>Gross invoice total</span>
+                                        <span className="tabular-nums">{formatAmountWithCurrency(taxEstimate.grandTotal)}</span>
+                                    </div>
+                                    {!watchIsOpeningBalance && withholdingDecision === true && (
+                                        <div className="flex items-center justify-between gap-6 text-sm">
+                                            <span className="text-muted-foreground">Estimated WHT deducted at payment ({watchWithholdingTaxRate}%)</span>
+                                            <span className="font-medium tabular-nums text-red-600">-{formatAmountWithCurrency(taxEstimate.withholdingTaxAmount)}</span>
+                                        </div>
+                                    )}
+                                    {taxEstimate.withholdingTaxAmount > 0 && (
+                                        <div className="flex items-center justify-between gap-6 border-t pt-3 font-semibold text-primary">
+                                            <span>Estimated cash payable after WHT</span>
+                                            <span className="tabular-nums">{formatAmountWithCurrency(taxEstimate.estimatedCashPayable)}</span>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </CardContent>

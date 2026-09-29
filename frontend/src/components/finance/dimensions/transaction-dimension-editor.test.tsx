@@ -229,4 +229,32 @@ describe('multi-account source-line dimension editor', () => {
       'same-source-line': { DEPT: 'OPS' },
     });
   });
+
+  it('explains account selection and optional rollout behavior in business language', () => {
+    render(
+      <SourceDocumentDimensionPanel
+        context={context}
+        effectiveDate="2026-09-29"
+        lines={[
+          {
+            id: 'manual-line',
+            accountResolution: 'UserSelection',
+          },
+        ]}
+        defaultValues={{}}
+        lineValues={{}}
+        onDefaultValuesChange={vi.fn()}
+        onLineValuesChange={vi.fn()}
+        certificationState="CaptureOptional"
+      />
+    );
+
+    expect(screen.getByText('Select account first')).toBeInTheDocument();
+    expect(
+      screen.getByText(/Select this line’s GL account above/)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Dimension validation is in pilot mode')
+    ).toBeInTheDocument();
+  });
 });
