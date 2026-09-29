@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -484,7 +485,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
                 return new CalibrationCriterionDto
                 {
-                    TemplateItemId = c.TemplateItemId,
+                    TemplateItemId = c.TemplateKey(),
                     TemplateItemName = c.TemplateItem?.Competency?.CriteriaName
                                        ?? c.TemplateItem?.KpiDefinition?.KpiName,
                     WeightUsed = c.WeightUsed,
@@ -771,7 +772,7 @@ public class CalibrationSessionService : ICalibrationSessionService
             .Include(cs => cs.EvaluatorEvaluation)
             .Where(cs => cs.EvaluatorEvaluation.AppraisalId == appraisalId
                       && cs.EvaluatorEvaluation.EvaluatorRole == EvaluatorRole.Manager
-                      && templateItemIds.Contains(cs.TemplateItemId))
+                      && templateItemIds.Contains(cs.TemplateItemId!.Value))
             .ToListAsync(cancellationToken);
 
         var applied = 0;

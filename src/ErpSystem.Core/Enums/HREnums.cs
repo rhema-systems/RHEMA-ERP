@@ -1532,6 +1532,36 @@ public enum AppraisalStatus
     /// Appraisal fully closed — terminal state, no further transitions permitted.
     /// </summary>
     Closed = 6,
+
+    /// <summary>
+    /// Taken out of the cycle before it completed — a leaver, a long absence, or an appraisal
+    /// generated in error — with a reason, an actor and a date (performance closure D-10).
+    /// Terminal. A withdrawn appraisal counts in no score, no dashboard denominator and no
+    /// cycle-close check.
+    /// </summary>
+    Withdrawn = 7,
+}
+
+/// <summary>
+/// What caused a change to an appraisal's settled overall score — one row of the rating history
+/// (<c>AppraisalScoreChange</c>, performance closure lane N2).
+/// </summary>
+public enum AppraisalScoreChangeSource
+{
+    /// <summary>A re-settle from the scores themselves (a remand re-evaluation, a late leg).</summary>
+    Settle = 1,
+
+    /// <summary>A committed calibration restated it.</summary>
+    Calibration = 2,
+
+    /// <summary>An appeal was upheld with changes.</summary>
+    Appeal = 3,
+
+    /// <summary>HR's audited advance, or the nightly sweep, moved the appraisal on.</summary>
+    Advance = 4,
+
+    /// <summary>A finalised appraisal was reopened to HR review (D-17).</summary>
+    Reopen = 5,
 }
 
 /// <summary>
@@ -1739,6 +1769,19 @@ public enum KpiTargetSource
 }
 
 /// <summary>
+/// How one row of an appraisal's criterion snapshot is scored (performance closure D-16).
+/// </summary>
+public enum CriterionScoringMethod
+{
+    /// <summary>Actual against target, minimum and maximum — a KPI, or a goal with a numeric target.</summary>
+    Measured = 1,
+
+    /// <summary>A score on grade bands — a competency, or a goal with no numeric target, rated on the
+    /// tenant's overall grade scale.</summary>
+    Rated = 2,
+}
+
+/// <summary>
 /// Approval lifecycle for an appraisal template. Units draft templates and submit them to HR;
 /// only Approved templates can be assigned to a cycle.
 /// </summary>
@@ -1748,6 +1791,20 @@ public enum TemplateApprovalStatus
     PendingApproval = 2,
     Approved = 3,
     Rejected = 4
+}
+
+/// <summary>
+/// What fills an appraisal template section (performance closure D-15, lane L).
+/// </summary>
+public enum AppraisalSectionKind
+{
+    /// <summary>The items on the template: competencies, shared KPIs with one target for everyone
+    /// on the template, and free-text questions.</summary>
+    Fixed = 1,
+
+    /// <summary>No items of its own. Each employee's rows are built from the goal set agreed with
+    /// their manager, when that set is locked.</summary>
+    EmployeeGoals = 2,
 }
 
 public enum PeerNominationMode
@@ -1888,6 +1945,22 @@ public enum PipStatus
     /// <summary>Out for approval on the workflow engine.</summary>
     [Description("Pending Approval")]
     PendingApproval = 7
+}
+
+/// <summary>
+/// Where a PIP review meeting stands — stored, where the screens used to infer it from the date
+/// (P-57, performance closure lane E7).
+/// </summary>
+public enum PipMeetingStatus
+{
+    [Description("Scheduled")]
+    Scheduled = 1,
+
+    [Description("Held")]
+    Held = 2,
+
+    [Description("Cancelled")]
+    Cancelled = 3
 }
 
 public enum PerformanceRating

@@ -531,7 +531,6 @@ export interface ManagerEvaluationContext {
   selfEvaluationWeight: number;
   managerEvaluationWeight: number;
   peerEvaluationWeight: number;
-  isManagerAuthoritative: boolean;
   settings?: AppraisalSettings | null;
   overallComments?: string | null;
   strengthsIdentified?: string | null;

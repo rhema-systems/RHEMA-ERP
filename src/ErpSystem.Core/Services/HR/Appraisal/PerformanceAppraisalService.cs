@@ -639,8 +639,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     {
         var entities = await TenantEvaluationQuery().Where(e => e.AppraisalId == appraisalId)
                                                 .Include(e => e.Evaluator)
-                                                .OrderByDescending(e => e.IsAuthoritative)
-                                                .ThenByDescending(e => e.EvaluatorWeight)
+                                                .OrderByDescending(e => e.EvaluatorWeight)
                                                 .ToListAsync(cancellationToken);
 
         return entities.ToDtoList();
@@ -841,23 +840,24 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     {
         var appraisalId = evaluation.AppraisalId;
         var positionId  = evaluation.Appraisal?.Employee?.PositionId;
+        var templateItemId = criterionScore.TemplateKey();
 
         decimal share, maxScore;
         decimal? kpiTarget, kpiMin, kpiMax;
 
-        if (scoring is not null && scoring.TryGetValue(criterionScore.TemplateItemId, out var info))
+        if (scoring is not null && scoring.TryGetValue(templateItemId, out var info))
         {
             (share, maxScore, kpiTarget, kpiMin, kpiMax) =
                 (info.Share, info.MaxScore, info.KpiTarget, info.KpiMin, info.KpiMax);
         }
         else
         {
-            share = await ResolveCriterionShareAsync(criterionScore.TemplateItemId, appraisalId, positionId, cancellationToken);
+            share = await ResolveCriterionShareAsync(templateItemId, appraisalId, positionId, cancellationToken);
             maxScore = criterionScore.NumericScore.HasValue
-                ? await GetMaxScoreForCriteriaAsync(criterionScore.TemplateItemId, appraisalId, positionId, cancellationToken)
+                ? await GetMaxScoreForCriteriaAsync(templateItemId, appraisalId, positionId, cancellationToken)
                 : 0m;
             (kpiTarget, kpiMin, kpiMax) = criterionScore.ActualValue.HasValue
-                ? await GetKpiTargetsAsync(criterionScore.TemplateItemId, appraisalId, cancellationToken)
+                ? await GetKpiTargetsAsync(templateItemId, appraisalId, cancellationToken)
                 : (null, null, null);
         }
 
@@ -904,7 +904,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             .ToListAsync(cancellationToken);
 
         return configs.ToDictionary(
-            c => c.TemplateItemId,
+            c => c.TemplateKey(),
             c => new CriterionScoringInfo(
                 Share: AppraisalScoring.CriterionShare(c.TemplateItem?.Section?.Weight ?? 0, c.WeightUsed),
                 // Mirrors GetMaxScoreForCriteriaAsync: an un-banded criterion is scored out of 100.
@@ -977,9 +977,10 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         {
             if (!s.NumericScore.HasValue && !s.ActualValue.HasValue) continue;
 
-            var share = scoring.TryGetValue(s.TemplateItemId, out var info)
+            var templateItemId = s.TemplateKey();
+            var share = scoring.TryGetValue(templateItemId, out var info)
                 ? info.Share
-                : await ResolveCriterionShareAsync(s.TemplateItemId, evaluation.AppraisalId, positionId, cancellationToken);
+                : await ResolveCriterionShareAsync(templateItemId, evaluation.AppraisalId, positionId, cancellationToken);
 
             scored.Add((s.WeightedScore, share));
         }
@@ -1506,7 +1507,6 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                     EvaluatorId = saveDto.EmployeeId,
                     EvaluatorRole = EvaluatorRole.Self,
                     EvaluatorWeight = settings.SelfEvaluationWeight,
-                    IsAuthoritative = false,
                     StartedDate = DateTime.UtcNow, // Set on first save (draft or submit)
                     SubmittedDate = saveDto.IsDraft ? null : DateTime.UtcNow
                 };
@@ -2303,7 +2303,6 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             SelfEvaluationWeight = settings?.SelfEvaluationWeight ?? 0,
             ManagerEvaluationWeight = settings?.ManagerEvaluationWeight ?? 0,
             PeerEvaluationWeight = settings?.PeerEvaluationWeight ?? 0,
-            IsManagerAuthoritative = settings?.IsManagerAuthoritative ?? false,
             Settings = settings?.ToDto(),
             // Manager Final Assessment fields from PerformanceAppraisal entity
             OverallComments = appraisal.OverallComments,
@@ -2390,7 +2389,6 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 EvaluatorId = saveDto.ManagerId,
                 EvaluatorRole = EvaluatorRole.Manager,
                 EvaluatorWeight = settings.ManagerEvaluationWeight,
-                IsAuthoritative = settings.IsManagerAuthoritative,
                 StartedDate = DateTime.UtcNow, // Set on first save (draft or submit)
                 TenantId = appraisal.TenantId
             };
@@ -2847,7 +2845,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 // Use 0 as placeholder since weight is in PositionCriteriaMapping
                 appealableCompetencies.Add(new AppealableCompetencyDto
                 {
-                    TemplateItemId = score.TemplateItemId,
+                    TemplateItemId = score.TemplateKey(),
                     ItemName = score.TemplateItem?.Competency?.CriteriaName ?? string.Empty,
                     Description = score.TemplateItem?.Competency?.Description,
                     NumericScore = score.NumericScore,
@@ -3642,7 +3640,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
         foreach (var currentScore in currentManagerEval.CriterionScores)
         {
-            var templateItemId = currentScore.TemplateItemId;
+            var templateItemId = currentScore.TemplateKey();
             var competency = currentScore.TemplateItem?.Competency;
 
             var snapshotScore = snapshot?.CriterionScores
@@ -3861,16 +3859,17 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         foreach (var score in managerEval.CriterionScores)
         {
             var competency = score.TemplateItem?.Competency;
+            var templateItemId = score.TemplateKey();
             result.FinalCriteriaScores.Add(new FinalCriterionScoreDto
             {
-                TemplateItemId = score.TemplateItemId,
+                TemplateItemId = templateItemId,
                 ItemName = competency?.CriteriaName ?? score.TemplateItem?.KpiDefinition?.KpiName ?? string.Empty,
                 ItemDescription = competency?.Description ?? string.Empty,
                 FinalScore = score.NumericScore,
                 FinalWeightedScore = score.WeightedScore,
-                Weight = positionMappings.GetValueOrDefault(score.TemplateItemId, 0),
+                Weight = positionMappings.GetValueOrDefault(templateItemId, 0),
                 ManagerComments = score.Notes ?? "",
-                WasAppealed = appealedTemplateItemIds.Contains(score.TemplateItemId)
+                WasAppealed = appealedTemplateItemIds.Contains(templateItemId)
             });
         }
 
@@ -4566,7 +4565,6 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             EvaluatorId = assignedTo,
             EvaluatorRole = EvaluatorRole.HR,
             EvaluatorWeight = 0m,   // HR governs the score; it does not carry weight in it.
-            IsAuthoritative = false,
             StartedDate = DateTime.UtcNow,
         };
 
@@ -4621,8 +4619,8 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     {
         if (!appraisal.CriterionConfigs.Any()) return new();
 
-        var configsByTemplateItemId = appraisal.CriterionConfigs.ToDictionary(cc => cc.TemplateItemId);
-        var scoresByTemplateItemId   = selfEval?.CriterionScores.ToDictionary(cs => cs.TemplateItemId)
+        var configsByTemplateItemId = appraisal.CriterionConfigs.ToDictionary(cc => cc.TemplateKey());
+        var scoresByTemplateItemId   = selfEval?.CriterionScores.ToDictionary(cs => cs.TemplateKey())
                                   ?? new Dictionary<Guid, CriterionScore>();
         var goalsByKpiDefId     = appraisal.Goals
                                   .Where(g => g.KpiDefinitionId.HasValue)
@@ -4636,7 +4634,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             var fallbackItems = appraisal.CriterionConfigs
                 .Select(cc =>
                 {
-                    scoresByTemplateItemId.TryGetValue(cc.TemplateItemId, out var score);
+                    scoresByTemplateItemId.TryGetValue(cc.TemplateKey(), out var score);
                     var kpiDef = cc.TemplateItem?.KpiDefinition;
                     var goal   = kpiDef != null ? goalsByKpiDefId[kpiDef.Id].FirstOrDefault() : null;
                     return MapSelfItem(cc, cc.TemplateItem?.Competency, kpiDef, goal, score);
@@ -4716,7 +4714,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
         return new SelfEvaluationItemDto
         {
-            TemplateItemId          = config.TemplateItemId,
+            TemplateItemId          = config.TemplateKey(),
             CriterionConfigId       = config.Id,
             ItemName                = competency?.CriteriaName ?? kpiDef?.KpiName ?? string.Empty,
             ItemDescription         = competency?.Description,
@@ -4757,10 +4755,10 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     {
         if (!appraisal.CriterionConfigs.Any()) return new();
 
-        var configsByTemplateItemId       = appraisal.CriterionConfigs.ToDictionary(cc => cc.TemplateItemId);
-        var selfScoresByTemplateItemId    = selfEval?.CriterionScores.ToDictionary(cs => cs.TemplateItemId)
+        var configsByTemplateItemId       = appraisal.CriterionConfigs.ToDictionary(cc => cc.TemplateKey());
+        var selfScoresByTemplateItemId    = selfEval?.CriterionScores.ToDictionary(cs => cs.TemplateKey())
                                            ?? new Dictionary<Guid, CriterionScore>();
-        var managerScoresByTemplateItemId = managerEval?.CriterionScores.ToDictionary(cs => cs.TemplateItemId)
+        var managerScoresByTemplateItemId = managerEval?.CriterionScores.ToDictionary(cs => cs.TemplateKey())
                                            ?? new Dictionary<Guid, CriterionScore>();
         var goalsByKpiDefId               = appraisal.Goals
                                            .Where(g => g.KpiDefinitionId.HasValue)
@@ -4772,11 +4770,11 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             var fallbackItems = appraisal.CriterionConfigs
                 .Select(cc =>
                 {
-                    selfScoresByTemplateItemId.TryGetValue(cc.TemplateItemId, out var selfScore);
-                    managerScoresByTemplateItemId.TryGetValue(cc.TemplateItemId, out var managerScore);
+                    selfScoresByTemplateItemId.TryGetValue(cc.TemplateKey(), out var selfScore);
+                    managerScoresByTemplateItemId.TryGetValue(cc.TemplateKey(), out var managerScore);
                     var kpiDef = cc.TemplateItem?.KpiDefinition;
                     var goal   = kpiDef != null ? goalsByKpiDefId[kpiDef.Id].FirstOrDefault() : null;
-                    return MapManagerItem(cc, cc.TemplateItem?.Competency, kpiDef, goal, selfScore, managerScore, appealedSet.Contains(cc.TemplateItemId));
+                    return MapManagerItem(cc, cc.TemplateItem?.Competency, kpiDef, goal, selfScore, managerScore, appealedSet.Contains(cc.TemplateKey()));
                 })
                 .ToList();
             return new List<ManagerEvaluationSectionDto>
@@ -4828,7 +4826,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         CriterionScore? managerScore,
         bool isAppealed) => new()
     {
-        TemplateItemId           = config.TemplateItemId,
+        TemplateItemId           = config.TemplateKey(),
         CriterionConfigId        = config.Id,
         ItemName                 = competency?.CriteriaName ?? kpiDef?.KpiName ?? string.Empty,
         ItemDescription          = competency?.Description,
@@ -4871,8 +4869,8 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     {
         if (!appraisal.CriterionConfigs.Any()) return new();
 
-        var configsByTemplateItemId = appraisal.CriterionConfigs.ToDictionary(cc => cc.TemplateItemId);
-        var scoresByTemplateItemId   = selfEval.CriterionScores.ToDictionary(cs => cs.TemplateItemId);
+        var configsByTemplateItemId = appraisal.CriterionConfigs.ToDictionary(cc => cc.TemplateKey());
+        var scoresByTemplateItemId   = selfEval.CriterionScores.ToDictionary(cs => cs.TemplateKey());
         var goalsByKpiDefId     = appraisal.Goals
                                   .Where(g => g.KpiDefinitionId.HasValue)
                                   .ToLookup(g => g.KpiDefinitionId!.Value);
@@ -4882,7 +4880,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             var fallbackItems = appraisal.CriterionConfigs
                 .Select(cc =>
                 {
-                    scoresByTemplateItemId.TryGetValue(cc.TemplateItemId, out var score);
+                    scoresByTemplateItemId.TryGetValue(cc.TemplateKey(), out var score);
                     var kpiDef = cc.TemplateItem?.KpiDefinition;
                     var goal   = kpiDef != null ? goalsByKpiDefId[kpiDef.Id].FirstOrDefault() : null;
                     return MapSubmittedItem(cc, cc.TemplateItem?.Competency, kpiDef, goal, score);
@@ -4929,7 +4927,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         EmployeeGoal? goal,
         CriterionScore? score) => new()
     {
-        TemplateItemId      = config.TemplateItemId,
+        TemplateItemId      = config.TemplateKey(),
         ItemName            = competency?.CriteriaName ?? kpiDef?.KpiName ?? string.Empty,
         ItemDescription     = competency?.Description,
         ItemWeight          = config.WeightUsed,

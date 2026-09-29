@@ -19,7 +19,9 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
 **START HERE:**
 1. § 1 is settled. One question stays outside this plan: D-18, the probation admin door, is the
    finish plan's decision (its lane 9). Only F1 waits on it.
-2. Migration batch 1 (§ 6): the user scaffolds, it is rewritten as guarded SQL, the user builds.
+2. ~~Migration batch 1 (§ 6): the user scaffolds, it is rewritten as guarded SQL, the user builds.~~
+   **Done 2026-09-29** and applied to UAT; read § 6's State block before lane A — it lists what the
+   batch decided that later lanes build on.
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -113,7 +115,8 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
   segregation breaks `061`/`070`/`100`. The shape gaps S-1…S-17 are built at the end.
 
 **Size:** about **50 working days, ten weeks** (47 without lane N). **Migrations:** batch 1 sits at
-the start of lane A and batch 2 at the start of lane F; batch 3 is withdrawn (D-21).
+the start of lane A and batch 2 at the start of lane F; batch 3 is withdrawn (D-21). **Batch 1 is
+done and applied to UAT (2026-09-29, § 6 State); lane A is next.**
 
 ---
 
@@ -1353,6 +1356,9 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 - [ ] S9 **`IsDefault` backfill.** Batch 1 picks the profile of the newest cycle that is not a
       fixture (on UAT, "Standard Annual Appraisal"), **never "the newest profile"**, which would crown
       a harness-minted one (`hr-performance/setup.mjs:137-155`, `hr-portal/run-slice5.mjs:42`).
+      *Built in batch 1 as "the most appraisals, then the latest cycle year, then the oldest"*, because
+      nothing defines a fixture (§ 6 State). S1 still sets `IsDefault` in the seeder: on a rebuild
+      the backfill runs against empty tables.
 - [ ] S10 **Two full rebuilds green** (`scripts/New-UatDatabase.ps1`, exit 0: SCENARIOS, REQUIRED,
       COUNTS, RUNBOOK): one after lane B (the gates) and one at the end.
 - [ ] S11 **Runbook Book 3.**
@@ -1522,6 +1528,54 @@ table there. Backfills are for databases that already hold data.
       → InProgress when progress exists, else Approved (E5);
     - manual-advance `IsCalibrated=1` rows with no session → a waiver row in
       `AppraisalManualAdvanceLog` (H3).
+  - **State (2026-09-29): DONE — scaffolded as `20260928231446_PerformanceClosureBatch1`, rewritten
+    as guarded SQL (68 batches up, 67 down), built, and applied to UAT** (backed up first as
+    `Backup\ErpSystemDB_UAT_before_batch1.bak`). On UAT: the history row is present, the 17 tables'
+    columns, indexes, defaults and keys are identical to the tested post-Up schema (668 lines), and
+    the backfill and repair counts match. Tested on
+    a restored copy of UAT, green twice (18 checks): Up, Up again (no row or schema change), Down (the
+    15 tables' columns, indexes, defaults and keys identical to UAT's), Up again (identical to the first
+    Up); a duplicate open appeal stops Up with nothing half-done; Down refuses a goal row and a
+    withdrawn appraisal, and removes only its own waivers. On UAT's data it sets 1 default profile, 1
+    calibrated overall, 408 frozen section weights, 52 score config ids, 2 PIP meeting statuses, moves
+    APC2026 to Open and 10 flagged goals to Locked. Where the SQL refines this list:
+    - **S9 has no definition of "fixture"**, so the default is the profile the tenant has appraised
+      the most people with, then the latest cycle year, then the oldest. A test run's profile carries
+      a handful, and no harness naming lives in a production migration. HR moves the flag (B6).
+    - **The goal repair follows the workflow's own lock**: a flagged goal becomes Locked only from
+      Approved/InProgress/AtRisk/OnTrack/Completed (the lock's source statuses); a flag on a Draft,
+      PendingApproval or Rejected goal is a lock that path refuses, so the flag is cleared instead.
+    - **`IX_AppraisalSettings_TenantId` is dropped**: EF counts the default-profile index as covering
+      the tenant key and removed the unfiltered one from the model.
+    - **The waiver rows** read `PendingCalibration → CalibrationWaived`, no actor, marked
+      `CreatedBy = migration:PerformanceClosureBatch1` (so Down can remove them). None on UAT.
+    - The scaffold's rename (below) happened as predicted and is a drop and an add.
+
+    Choices the model made, that later lanes build on:
+    - **Every new column whose writer arrives in a later lane is nullable, and null means "derive
+      as before"**: `SectionWeightUsed`/`AppraisalTemplateSectionId` (read the live section),
+      `CriterionConfigId` on score, remand snapshot, adjustment and appeal item (key by template
+      item), the goal-row fields `ScoringMethod` (enum `CriterionScoringMethod`, null = the item
+      type decides), `DisplayOrder`, `ItemLabel`, `Unit`, `MeasurementType`. So rows written
+      between batch 1 and their lane are never misread, and every backfill can be re-run
+      (`WHERE … IS NULL`).
+    - **One writer is wired now**, because a default would be a wrong answer: `IsOverall =
+      TemplateItemId IS NULL` in the adjustment mapper, create and update — the backfill's rule,
+      kept true until lane L gives goal rows their own meaning.
+    - `PipReviewMeeting.Status` (`PipMeetingStatus` Scheduled/Held/Cancelled) and
+      `AppraisalTemplateSection.Kind` (`AppraisalSectionKind`) carry model defaults (1) so the
+      scaffold emits them. Meeting writers stay with E7: a meeting held before E7 lands stays
+      Scheduled.
+    - The code still keyed by template item reads the now-nullable id through
+      `CriterionTemplateKey.TemplateKey()` (29 call sites in PAS, PES and CSS), which throws, naming
+      the row, if a goal row ever reaches it. **Lane L3's worklist is `grep TemplateKey(`.**
+    - `CriterionScore.NumericScore` stays `int` (A13's round-explicitly option).
+    - D-14 stays split as § 1b assigns it: batch 1 migrates the data; E2 removes the enum member,
+      its readers and the seeder's `InProgress`. `IsDefault` is not set by the seeder until S1.
+    - The rating history's table is **`AppraisalScoreChanges`** (plural): the name S6 lists.
+    - ⚠ **The scaffold emitted `RenameColumn(RequireDevelopmentPlanUpdate → IsDefault)`**: two `bit`
+      columns left and one arrived. Applied, it would have crowned every profile the default. The
+      SQL drops the old column and adds the new one.
 - **Batch 2 (before lane F):**
   - `SalaryReviewProposal` / `EmploymentActionProposal`: `SubmittedById` + `SubmittedDate` (F3),
     `ActionedById` (Employee FK, null) + `ActionedDate` (F5);

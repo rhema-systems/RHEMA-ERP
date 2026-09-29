@@ -471,7 +471,7 @@ public class PeerEvaluationService : IPeerEvaluationService
             .Include(c => c.TemplateItem)
                 .ThenInclude(i => i.Section)
             .AsNoTracking()
-            .ToDictionaryAsync(c => c.TemplateItemId, cancellationToken);
+            .ToDictionaryAsync(c => c.TemplateKey(), cancellationToken);
     }
 
     /// <summary>
@@ -488,7 +488,7 @@ public class PeerEvaluationService : IPeerEvaluationService
             .Where(cs => cs.NumericScore.HasValue || cs.ActualValue.HasValue)
             .Select(cs => (
                 cs.WeightedScore,
-                snapshot.TryGetValue(cs.TemplateItemId, out var c)
+                snapshot.TryGetValue(cs.TemplateKey(), out var c)
                     ? AppraisalScoring.CriterionShare(c.TemplateItem?.Section?.Weight ?? 0, c.WeightUsed)
                     : 0m));
 
@@ -504,8 +504,8 @@ public class PeerEvaluationService : IPeerEvaluationService
     {
         if (!appraisal.CriterionConfigs.Any()) return new();
 
-        var configsByTemplateItemId = appraisal.CriterionConfigs.ToDictionary(cc => cc.TemplateItemId);
-        var scoresByTemplateItemId  = peerEval.CriterionScores.ToDictionary(cs => cs.TemplateItemId);
+        var configsByTemplateItemId = appraisal.CriterionConfigs.ToDictionary(cc => cc.TemplateKey());
+        var scoresByTemplateItemId  = peerEval.CriterionScores.ToDictionary(cs => cs.TemplateKey());
         var goalsByKpiDefId         = appraisal.Goals
                                       .Where(g => g.KpiDefinitionId.HasValue)
                                       .ToLookup(g => g.KpiDefinitionId!.Value);
@@ -515,7 +515,7 @@ public class PeerEvaluationService : IPeerEvaluationService
             var fallbackItems = appraisal.CriterionConfigs
                 .Select(cc =>
                 {
-                    scoresByTemplateItemId.TryGetValue(cc.TemplateItemId, out var score);
+                    scoresByTemplateItemId.TryGetValue(cc.TemplateKey(), out var score);
                     var kpiDef    = cc.TemplateItem?.KpiDefinition;
                     var goal      = kpiDef != null ? goalsByKpiDefId[kpiDef.Id].FirstOrDefault() : null;
                     bool isKpi    = cc.TemplateItem?.KpiDefinitionId.HasValue == true;
@@ -572,7 +572,7 @@ public class PeerEvaluationService : IPeerEvaluationService
         CriterionScore? existingScore,
         bool isScoreable) => new()
     {
-        TemplateItemId          = config.TemplateItemId,
+        TemplateItemId          = config.TemplateKey(),
         CriterionConfigId       = config.Id,
         ItemName                = competency?.CriteriaName ?? kpiDef?.KpiName ?? string.Empty,
         ItemDescription         = competency?.Description,

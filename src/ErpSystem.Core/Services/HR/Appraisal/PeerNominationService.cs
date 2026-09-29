@@ -534,8 +534,7 @@ public class PeerNominationService : IPeerNominationService
                 AppraisalId = appraisal.Id,
                 EvaluatorId = nomination.PeerEmployeeId,
                 EvaluatorRole = EvaluatorRole.Peer,
-                EvaluatorWeight = settings.PeerEvaluationWeight,
-                IsAuthoritative = false
+                EvaluatorWeight = settings.PeerEvaluationWeight
             };
 
             await _evaluatorEvaluationRepository.AddAsync(evaluatorEvaluation);

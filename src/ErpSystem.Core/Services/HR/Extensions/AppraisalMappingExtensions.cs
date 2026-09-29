@@ -294,11 +294,10 @@ public static class AppraisalMappingExtensions
     /// caller sending the record back unchanged must not be rejected for including them. Ignoring
     /// them is the behaviour; the DTO shape is unchanged.</para>
     ///
-    /// <para>⚠ Not changed here, and recorded rather than assumed: this mapper also assigns
-    /// <c>OverallScore</c>, while <c>UpdateAppraisalHRReviewDto</c> carries an
-    /// <c>AdjustedOverallScore</c> WITH an <c>AdjustmentReason</c> — which looks like the intended
-    /// path for changing a computed score. That was not probed, so it is left alone; see the closure
-    /// ledger.</para>
+    /// <para>⚠ This mapper still assigns <c>OverallScore</c> from the body. The performance closure
+    /// removes that line (lane A6): the settle path becomes the only writer of the score, and HR
+    /// restates a score only through calibration or an appeal (D-11, which dropped the HR review's
+    /// never-applied <c>AdjustedOverallScore</c>).</para>
     /// </remarks>
     public static void UpdateEntity(this UpdatePerformanceAppraisalDto dto, PerformanceAppraisal entity)
     {
@@ -346,7 +345,6 @@ public static class AppraisalMappingExtensions
             EvaluatorName = entity.Evaluator.FullName,
             EvaluatorRole = entity.EvaluatorRole,
             EvaluatorWeight = entity.EvaluatorWeight,
-            IsAuthoritative = entity.IsAuthoritative,
             StartedDate = entity.StartedDate,
             SubmittedDate = entity.SubmittedDate,
             TotalScore = entity.TotalScore,
@@ -367,7 +365,6 @@ public static class AppraisalMappingExtensions
             EvaluatorId = dto.EvaluatorId,
             EvaluatorRole = dto.EvaluatorRole,
             EvaluatorWeight = dto.EvaluatorWeight,
-            IsAuthoritative = dto.IsAuthoritative,
             StartedDate = DateTime.UtcNow,
             OverallNotes = dto.OverallNotes,
             Recommendation = dto.Recommendation
@@ -380,7 +377,6 @@ public static class AppraisalMappingExtensions
         entity.EvaluatorId = dto.EvaluatorId;
         entity.EvaluatorRole = dto.EvaluatorRole;
         entity.EvaluatorWeight = dto.EvaluatorWeight;
-        entity.IsAuthoritative = dto.IsAuthoritative;
         entity.OverallNotes = dto.OverallNotes;
         entity.Recommendation = dto.Recommendation;
     }
@@ -713,7 +709,6 @@ public static class AppraisalMappingExtensions
             PeerEvaluationOpenMode = entity.PeerEvaluationOpenMode,
             RequireManagerEvaluation = entity.RequireManagerEvaluation,
             ManagerEvaluationWeight = entity.ManagerEvaluationWeight,
-            IsManagerAuthoritative = entity.IsManagerAuthoritative,
             ShowSelfScoreToManager = entity.ShowSelfScoreToManager,
             ShowPeerScoresToManager = entity.ShowPeerScoresToManager,
             ShowScoreBreakdownToEmployee = entity.ShowScoreBreakdownToEmployee,
@@ -740,7 +735,6 @@ public static class AppraisalMappingExtensions
             InterimReviewDepth = entity.InterimReviewDepth,
             RequireMidYearSelfAssessment = entity.RequireMidYearSelfAssessment,
             RequireGoalProgressUpdateAtReview = entity.RequireGoalProgressUpdateAtReview,
-            RequireDevelopmentPlanUpdate = entity.RequireDevelopmentPlanUpdate,
             AutoLockOnDeadline = entity.AutoLockOnDeadline,
             DefaultHRReviewerId = entity.DefaultHRReviewerId,
             ProbationExtensionMonths = entity.ProbationExtensionMonths,
@@ -775,7 +769,6 @@ public static class AppraisalMappingExtensions
             PeerEvaluationOpenMode = dto.PeerEvaluationOpenMode,
             RequireManagerEvaluation = dto.RequireManagerEvaluation,
             ManagerEvaluationWeight = dto.ManagerEvaluationWeight,
-            IsManagerAuthoritative = dto.IsManagerAuthoritative,
             ShowSelfScoreToManager = dto.ShowSelfScoreToManager,
             ShowPeerScoresToManager = dto.ShowPeerScoresToManager,
             ShowScoreBreakdownToEmployee = dto.ShowScoreBreakdownToEmployee,
@@ -802,7 +795,6 @@ public static class AppraisalMappingExtensions
             InterimReviewDepth = dto.InterimReviewDepth,
             RequireMidYearSelfAssessment = dto.RequireMidYearSelfAssessment,
             RequireGoalProgressUpdateAtReview = dto.RequireGoalProgressUpdateAtReview,
-            RequireDevelopmentPlanUpdate = dto.RequireDevelopmentPlanUpdate,
             AutoLockOnDeadline = dto.AutoLockOnDeadline,
             DefaultHRReviewerId = dto.DefaultHRReviewerId,
             ProbationExtensionMonths = dto.ProbationExtensionMonths,
@@ -831,7 +823,6 @@ public static class AppraisalMappingExtensions
         entity.PeerEvaluationOpenMode = dto.PeerEvaluationOpenMode;
         entity.RequireManagerEvaluation = dto.RequireManagerEvaluation;
         entity.ManagerEvaluationWeight = dto.ManagerEvaluationWeight;
-        entity.IsManagerAuthoritative = dto.IsManagerAuthoritative;
         entity.ShowSelfScoreToManager = dto.ShowSelfScoreToManager;
         entity.ShowPeerScoresToManager = dto.ShowPeerScoresToManager;
         entity.ShowScoreBreakdownToEmployee = dto.ShowScoreBreakdownToEmployee;
@@ -858,7 +849,6 @@ public static class AppraisalMappingExtensions
         entity.InterimReviewDepth = dto.InterimReviewDepth;
         entity.RequireMidYearSelfAssessment = dto.RequireMidYearSelfAssessment;
         entity.RequireGoalProgressUpdateAtReview = dto.RequireGoalProgressUpdateAtReview;
-        entity.RequireDevelopmentPlanUpdate = dto.RequireDevelopmentPlanUpdate;
         entity.AutoLockOnDeadline = dto.AutoLockOnDeadline;
         entity.DefaultHRReviewerId = dto.DefaultHRReviewerId;
         entity.ProbationExtensionMonths = dto.ProbationExtensionMonths;
@@ -2380,8 +2370,6 @@ public static class AppraisalMappingExtensions
             ReviewCompletedDate = entity.ReviewCompletedDate,
             IsApproved = entity.IsApproved,
             HRNotes = entity.HRNotes,
-            AdjustedOverallScore = entity.AdjustedOverallScore,
-            AdjustmentReason = entity.AdjustmentReason,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -2407,8 +2395,6 @@ public static class AppraisalMappingExtensions
         entity.ReviewCompletedDate = dto.ReviewCompletedDate;
         entity.IsApproved = dto.IsApproved;
         entity.HRNotes = dto.HRNotes;
-        entity.AdjustedOverallScore = dto.AdjustedOverallScore;
-        entity.AdjustmentReason = dto.AdjustmentReason;
     }
 
     public static List<AppraisalHRReviewDto> ToDtoList(this IEnumerable<AppraisalHRReview> entities)
@@ -2572,6 +2558,9 @@ public static class AppraisalMappingExtensions
         {
             PerformanceAppraisalId = dto.PerformanceAppraisalId,
             TemplateItemId = dto.TemplateItemId,
+            // Until goal rows exist (lane L), no item still means the overall — the rule the
+            // batch-1 backfill wrote, kept true for every adjustment written after it.
+            IsOverall = !dto.TemplateItemId.HasValue,
             OriginalScore = dto.OriginalScore,
             AdjustedScore = dto.AdjustedScore,
             AdjustmentDate = DateTime.UtcNow,
@@ -2583,6 +2572,7 @@ public static class AppraisalMappingExtensions
     {
         entity.PerformanceAppraisalId = dto.PerformanceAppraisalId;
         entity.TemplateItemId = dto.TemplateItemId;
+        entity.IsOverall = !dto.TemplateItemId.HasValue;
         entity.OriginalScore = dto.OriginalScore;
         entity.AdjustedScore = dto.AdjustedScore;
         entity.Rationale = dto.Rationale;

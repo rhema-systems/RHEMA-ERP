@@ -482,7 +482,6 @@ public class AppraisalAppealItemDto : BaseDto
     public string? ResolutionNotes { get; set; }
     public bool? ScoreAdjusted { get; set; }
     public decimal? OriginalScore { get; set; }
-    public decimal? RevisedScore { get; set; }
 }
 
 public class CreateAppraisalAppealItemDto : CreateDtoBase
@@ -572,8 +571,6 @@ public class UpdateAppraisalAppealItemDto : UpdateDtoBase
     public string? ResolutionNotes { get; set; }
 
     public bool? ScoreAdjusted { get; set; }
-
-    public decimal? RevisedScore { get; set; }
 }
 
 public class ResolveAppraisalAppealDto
@@ -619,7 +616,6 @@ public class EvaluatorEvaluationDto : BaseDto
     public string EvaluatorName { get; set; } = string.Empty;
     public EvaluatorRole EvaluatorRole { get; set; }
     public decimal EvaluatorWeight { get; set; }
-    public bool IsAuthoritative { get; set; }
     public DateTime? StartedDate { get; set; }
     public DateTime? SubmittedDate { get; set; }
     public decimal? TotalScore { get; set; }
@@ -641,8 +637,6 @@ public class CreateEvaluatorEvaluationDto : CreateDtoBase
     [Required]
     [Range(0, 1)]
     public decimal EvaluatorWeight { get; set; }
-
-    public bool IsAuthoritative { get; set; }
 
     [MaxLength(2000)]
     public string? OverallNotes { get; set; }
@@ -666,8 +660,6 @@ public class UpdateEvaluatorEvaluationDto : UpdateDtoBase
     [Range(0, 1)]
     public decimal EvaluatorWeight { get; set; }
 
-    public bool IsAuthoritative { get; set; }
-
     [MaxLength(2000)]
     public string? OverallNotes { get; set; }
 
@@ -679,7 +671,7 @@ public class CriterionScoreDto : BaseDto
 {
     public Guid TenantId { get; set; }
     public Guid EvaluatorEvaluationId { get; set; }
-    public Guid TemplateItemId { get; set; }
+    public Guid? TemplateItemId { get; set; }
     public string TemplateItemName { get; set; } = string.Empty;
     public Guid? GradeDefinitionId { get; set; }
     public string? GradeName { get; set; }
@@ -1070,7 +1062,6 @@ public class AppraisalSettingsDto : BaseDto
     // Manager evaluation
     public bool RequireManagerEvaluation { get; set; }
     public decimal ManagerEvaluationWeight { get; set; }
-    public bool IsManagerAuthoritative { get; set; }
 
     // Scoring visibility
     public bool ShowSelfScoreToManager { get; set; }
@@ -1115,9 +1106,6 @@ public class AppraisalSettingsDto : BaseDto
     public InterimReviewDepth InterimReviewDepth { get; set; }
     public bool RequireMidYearSelfAssessment { get; set; }
     public bool RequireGoalProgressUpdateAtReview { get; set; }
-
-    // Development plan
-    public bool RequireDevelopmentPlanUpdate { get; set; }
 
     // Deadline enforcement
     public bool AutoLockOnDeadline { get; set; }
@@ -1168,8 +1156,6 @@ public class CreateAppraisalSettingsDto : CreateDtoBase
     [Range(0, 1)]
     public decimal ManagerEvaluationWeight { get; set; } = 0.7m;
     
-    public bool IsManagerAuthoritative { get; set; } = true;
-    
     public bool RequireHRReview { get; set; } = true;
     
     public bool HRCanModifyScores { get; set; } = false;
@@ -1210,7 +1196,6 @@ public class CreateAppraisalSettingsDto : CreateDtoBase
     public InterimReviewDepth InterimReviewDepth { get; set; } = InterimReviewDepth.LightTouch;
     public bool RequireMidYearSelfAssessment { get; set; } = false;
     public bool RequireGoalProgressUpdateAtReview { get; set; } = true;
-    public bool RequireDevelopmentPlanUpdate { get; set; } = true;
     public bool AutoLockOnDeadline { get; set; } = false;
 
     // Operational policy defaults (production-readiness Phase D)
@@ -1259,8 +1244,6 @@ public class UpdateAppraisalSettingsDto : UpdateDtoBase
     [Range(0, 1)]
     public decimal ManagerEvaluationWeight { get; set; }
     
-    public bool IsManagerAuthoritative { get; set; }
-    
     public bool RequireHRReview { get; set; }
     
     public bool HRCanModifyScores { get; set; }
@@ -1301,7 +1284,6 @@ public class UpdateAppraisalSettingsDto : UpdateDtoBase
     public InterimReviewDepth InterimReviewDepth { get; set; }
     public bool RequireMidYearSelfAssessment { get; set; }
     public bool RequireGoalProgressUpdateAtReview { get; set; }
-    public bool RequireDevelopmentPlanUpdate { get; set; }
     public bool AutoLockOnDeadline { get; set; }
 
     // Operational policy defaults (production-readiness Phase D)
@@ -2277,7 +2259,6 @@ public class ManagerEvaluationContextDto
     public decimal SelfEvaluationWeight { get; set; }
     public decimal ManagerEvaluationWeight { get; set; }
     public decimal PeerEvaluationWeight { get; set; }
-    public bool IsManagerAuthoritative { get; set; }
     
     /// <summary>
     /// Appraisal settings for peer nomination configuration
@@ -4920,8 +4901,6 @@ public class AppraisalHRReviewDto : BaseDto
     public DateTime? ReviewCompletedDate { get; set; }
     public bool IsApproved { get; set; }
     public string? HRNotes { get; set; }
-    public decimal? AdjustedOverallScore { get; set; }
-    public string? AdjustmentReason { get; set; }
 }
 
 public class CreateAppraisalHRReviewDto : CreateDtoBase
@@ -4949,12 +4928,6 @@ public class UpdateAppraisalHRReviewDto : UpdateDtoBase
 
     [MaxLength(2000)]
     public string? HRNotes { get; set; }
-
-    [Range(0, 100)]
-    public decimal? AdjustedOverallScore { get; set; }
-
-    [MaxLength(1000)]
-    public string? AdjustmentReason { get; set; }
 }
 
 // ============================================================
@@ -5292,7 +5265,7 @@ public class AppraisalCriterionScoreSnapshotDto : BaseDto
 {
     public Guid TenantId { get; set; }
     public Guid AppraisalEvaluationSnapshotId { get; set; }
-    public Guid TemplateItemId { get; set; }
+    public Guid? TemplateItemId { get; set; }
     public string? ItemName { get; set; }
     public int? NumericScore { get; set; }
     public decimal WeightedScore { get; set; }

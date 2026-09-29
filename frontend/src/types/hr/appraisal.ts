@@ -188,7 +188,6 @@ export interface AppraisalSettings extends AuditFields {
 
   requireManagerEvaluation: boolean;
   managerEvaluationWeight: number;
-  isManagerAuthoritative: boolean;
 
   showSelfScoreToManager: boolean;
   showPeerScoresToManager: boolean;
@@ -224,8 +223,6 @@ export interface AppraisalSettings extends AuditFields {
   interimReviewDepth: InterimReviewDepth;
   requireMidYearSelfAssessment: boolean;
   requireGoalProgressUpdateAtReview: boolean;
-
-  requireDevelopmentPlanUpdate: boolean;
 
   /** When on, HR's "advance overdue appraisals" action will move stalled steps along. */
   autoLockOnDeadline: boolean;

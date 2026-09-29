@@ -726,12 +726,12 @@ public class AppraisalCycleService : IAppraisalCycleService
                     var employee = batch.First(r => r.emp.Id == appraisal.EmployeeId).emp;
 
                     if (settings.RequireSelfEvaluation)
-                        evaluationsToAdd.Add(CreateEvaluation(appraisal, employee.Id, EvaluatorRole.Self, settings.SelfEvaluationWeight, false, cycle, generatedById));
+                        evaluationsToAdd.Add(CreateEvaluation(appraisal, employee.Id, EvaluatorRole.Self, settings.SelfEvaluationWeight, cycle, generatedById));
 
                     if (settings.RequireManagerEvaluation)
                     {
                         if (employee.ManagerId.HasValue)
-                            evaluationsToAdd.Add(CreateEvaluation(appraisal, employee.ManagerId.Value, EvaluatorRole.Manager, settings.ManagerEvaluationWeight, settings.IsManagerAuthoritative, cycle, generatedById));
+                            evaluationsToAdd.Add(CreateEvaluation(appraisal, employee.ManagerId.Value, EvaluatorRole.Manager, settings.ManagerEvaluationWeight, cycle, generatedById));
                         else
                             _logger.LogWarning("Employee {EmployeeId} has no manager assigned; skipping manager evaluation for cycle {CycleId}", employee.Id, cycleId);
                     }
@@ -950,7 +950,7 @@ public class AppraisalCycleService : IAppraisalCycleService
     // ── Evaluation factory ───────────────────────────────────────────────────
     private static EvaluatorEvaluation CreateEvaluation(
         PerformanceAppraisal appraisal, Guid evaluatorId, EvaluatorRole role,
-        decimal weight, bool isAuthoritative, AppraisalCycle cycle, Guid createdById)
+        decimal weight, AppraisalCycle cycle, Guid createdById)
     {
         return new EvaluatorEvaluation
         {
@@ -959,7 +959,6 @@ public class AppraisalCycleService : IAppraisalCycleService
             EvaluatorId = evaluatorId,
             EvaluatorRole = role,
             EvaluatorWeight = weight,
-            IsAuthoritative = isAuthoritative,
             TenantId = cycle.TenantId,
             CreatedBy = createdById.ToString(),
             CreatedById = createdById,
@@ -1398,7 +1397,6 @@ public class AppraisalCycleService : IAppraisalCycleService
                         EvaluatorId = employee.Id,
                         EvaluatorRole = EvaluatorRole.Self,
                         EvaluatorWeight = settings.SelfEvaluationWeight,
-                        IsAuthoritative = false,
                         TenantId = cycle.TenantId,
                         CreatedBy = cycle.OpenedById?.ToString(),
                         CreatedById = cycle.OpenedById,
@@ -1416,7 +1414,6 @@ public class AppraisalCycleService : IAppraisalCycleService
                         EvaluatorId = employee.ManagerId.Value,
                         EvaluatorRole = EvaluatorRole.Manager,
                         EvaluatorWeight = settings.ManagerEvaluationWeight,
-                        IsAuthoritative = settings.IsManagerAuthoritative,
                         TenantId = cycle.TenantId,
                         CreatedBy = cycle.OpenedById?.ToString(),
                         CreatedById = cycle.OpenedById,
