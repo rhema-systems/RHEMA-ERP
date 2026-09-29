@@ -63,7 +63,10 @@ import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
 import { useTenant } from '@/contexts/TenantContext';
 import type { ApBudgetCell } from '@/types/ap';
 import { receiptBasedInvoiceLines } from '@/lib/finance/ap-goods-invoice-entry';
-import { planApSupplierDefaults } from '@/lib/finance/ap-supplier-defaults';
+import {
+    planApSupplierDefaults,
+    taxGroupForNewApInvoiceLine,
+} from '@/lib/finance/ap-supplier-defaults';
 import { PostingAccountPicker } from '@/components/finance/PostingAccountPicker';
 import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
 import {
@@ -795,7 +798,8 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         if (!value) {
             form.setValue('lineItems', [{
                 sourceLineId: crypto.randomUUID(), lineItemType: 'Expense', description: '',
-                quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none',
+                quantity: 1, unitPrice: 0, discountPercentage: 0,
+                taxGroupId: taxGroupForNewApInvoiceLine(form.getValues('taxGroupId'), watchIsOpeningBalance),
             }]);
         }
     };
@@ -837,7 +841,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             quantity: item.invoiceQuantity,
             unitPrice: item.unitPrice,
             discountPercentage: 0,
-            taxGroupId: 'none',
+            taxGroupId: taxGroupForNewApInvoiceLine(form.getValues('taxGroupId'), watchIsOpeningBalance),
             unit: item.unitOfMeasure,
         })));
         hydratedPurchaseOrderIdRef.current = selectedPurchaseOrder.id;
@@ -1666,7 +1670,15 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                 </span>
                             </div>
                         </div>
-                        {!selectedPurchaseOrderId && <Button type="button" variant="outline" size="sm" onClick={() => append({ sourceLineId: crypto.randomUUID(), lineItemType: 'Expense' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' })}>
+                        {!selectedPurchaseOrderId && <Button type="button" variant="outline" size="sm" onClick={() => append({
+                            sourceLineId: crypto.randomUUID(),
+                            lineItemType: 'Expense' as const,
+                            description: '',
+                            quantity: 1,
+                            unitPrice: 0,
+                            discountPercentage: 0,
+                            taxGroupId: taxGroupForNewApInvoiceLine(watchTaxGroupId, watchIsOpeningBalance),
+                        })}>
                             <Plus className="mr-2 h-4 w-4" /> Add GL line
                         </Button>}
                     </CardHeader>
