@@ -51,9 +51,13 @@ Assert-Test (($build | Select-String -Pattern "'ci', '--include=dev'" -AllMatche
     'Release construction must perform exactly one npm ci.'
 foreach ($contract in @('CleanBuild', '.next-production', "'cache'", 'npm.cmd', "'prune'",
         'release-manifest.json', 'nextPublicApiUrl', 'availablePhysicalMemoryBytes',
-        'totalBuildSeconds', 'api.zip', 'frontend.zip')) {
+        'totalBuildSeconds', 'api.zip', 'frontend.zip', 'ReuseFrontendBuildFromCommit',
+        'git diff --quiet', 'frontendBuildCommit')) {
     Assert-Test $build.Contains($contract) "Release builder is missing contract: $contract"
 }
+Assert-Test $build.Contains(
+    "Select-String -Pattern 'localhost:5000|localhost:53484|localhost:7095'") `
+    'Compiled URL validation leaves -Pattern without its argument in Windows PowerShell.'
 
 $deploy = Get-Content $deployPath -Raw
 foreach ($contract in @('DeployOnly', 'ArtifactDirectory',
