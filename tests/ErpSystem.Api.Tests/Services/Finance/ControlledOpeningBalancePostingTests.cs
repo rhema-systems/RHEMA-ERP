@@ -3047,10 +3047,10 @@ public sealed class ControlledOpeningBalancePostingTests
     {
         var accumulatedDepreciationAccount = SeedAccount(db, tenantId, $"19{Guid.NewGuid():N}"[..4], AccountType.Asset);
         var depreciationExpenseAccount = SeedAccount(db, tenantId, $"61{Guid.NewGuid():N}"[..4], AccountType.Expense);
-        var book = new AccountingBook
-        {
-            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS", IsDefault = true, AllowsPosting = true
-        };
+        var book = db.AccountingBooks.Local.FirstOrDefault(item =>
+                item.TenantId == tenantId && item.Code == "IFRS" && !item.IsDeleted)
+            ?? db.AccountingBooks.Single(item =>
+                item.TenantId == tenantId && item.Code == "IFRS" && !item.IsDeleted);
         var category = new FixedAssetCategory
         {
             Id = Guid.NewGuid(), TenantId = tenantId, Code = $"FA-{Guid.NewGuid():N}"[..8], Name = "Opening assets",
@@ -3075,7 +3075,6 @@ public sealed class ControlledOpeningBalancePostingTests
             OpeningAsOfDate = new DateTime(2026, 1, 1), OpeningSource = "OpeningImport"
         };
         asset.BookValues.Add(bookValue);
-        db.AccountingBooks.Add(book);
         db.FixedAssetCategories.Add(category);
         db.FixedAssets.Add(asset);
         var actorId = Guid.NewGuid();
@@ -3107,6 +3106,16 @@ public sealed class ControlledOpeningBalancePostingTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "IFRS",
+            Name = "IFRS Primary",
+            IsDefault = true,
+            IsActive = true,
+            AllowsPosting = true
+        });
     }
 
     private static FiscalPeriod SeedPeriod(ApplicationDbContext db, Guid tenantId, bool isOpen, bool isClosed)
@@ -3129,6 +3138,22 @@ public sealed class ControlledOpeningBalancePostingTests
             IsLocked = false
         };
         db.FiscalPeriods.Add(period);
+        foreach (var book in db.AccountingBooks.Local
+                     .Where(item => item.TenantId == tenantId && !item.IsDeleted)
+                     .ToList())
+        {
+            db.AccountingBookPeriods.Add(new AccountingBookPeriod
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                AccountingBookId = book.Id,
+                FiscalPeriodId = period.Id,
+                PeriodStatus = period.IsLocked ? AccountingBookPeriodStatus.Locked
+                    : period.IsClosed ? AccountingBookPeriodStatus.Closed
+                    : period.IsOpen ? AccountingBookPeriodStatus.Open
+                    : AccountingBookPeriodStatus.Future
+            });
+        }
         return period;
     }
 
@@ -3152,6 +3177,20 @@ public sealed class ControlledOpeningBalancePostingTests
             AllowDirectPosting = true
         };
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.FirstOrDefault(item =>
+                item.TenantId == tenantId && item.Code == "IFRS" && !item.IsDeleted)
+            ?? db.AccountingBooks.Single(item =>
+                item.TenantId == tenantId && item.Code == "IFRS" && !item.IsDeleted);
+        db.AccountAccountingBooks.Add(new AccountAccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AccountId = account.Id,
+            AccountingBookId = book.Id,
+            IsEnabled = true,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "opening-balance-test"
+        });
         return account;
     }
 
@@ -3170,6 +3209,10 @@ public sealed class ControlledOpeningBalancePostingTests
         string bookClassification = "IFRS")
     {
         var entryDate = (transactionDate ?? new DateTime(2026, 1, 5)).Date;
+        var book = db.AccountingBooks.Local.FirstOrDefault(item =>
+                item.TenantId == tenantId && item.Code == bookClassification && !item.IsDeleted)
+            ?? db.AccountingBooks.Single(item =>
+                item.TenantId == tenantId && item.Code == bookClassification && !item.IsDeleted);
         var journal = new JournalEntry
         {
             Id = Guid.NewGuid(),
@@ -3180,6 +3223,7 @@ public sealed class ControlledOpeningBalancePostingTests
             Description = reference,
             FiscalPeriodId = fiscalPeriodId,
             PostingStatus = "Posted",
+            AccountingBookId = book.Id,
             BookClassification = bookClassification,
             SourceModule = sourceModule,
             SourceDocumentType = sourceDocumentType,
@@ -3201,6 +3245,7 @@ public sealed class ControlledOpeningBalancePostingTests
             DebitAmount = amount,
             CreditAmount = 0m,
             PostingStatus = "Posted",
+            AccountingBookId = book.Id,
             BookClassification = bookClassification,
             LineNumber = 1,
             FunctionalCurrencyCode = "GHS",
@@ -3221,6 +3266,7 @@ public sealed class ControlledOpeningBalancePostingTests
             DebitAmount = 0m,
             CreditAmount = amount,
             PostingStatus = "Posted",
+            AccountingBookId = book.Id,
             BookClassification = bookClassification,
             LineNumber = 2,
             FunctionalCurrencyCode = "GHS",
@@ -3247,6 +3293,7 @@ public sealed class ControlledOpeningBalancePostingTests
             FunctionalCurrencyCode = "GHS",
             TotalDebitAmount = amount,
             TotalCreditAmount = amount,
+            AccountingBookId = book.Id,
             BookClassification = bookClassification
         };
         db.FinancePostingEvents.Add(postingEvent);
