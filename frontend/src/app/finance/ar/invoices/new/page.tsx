@@ -93,6 +93,7 @@ const invoiceSchema = z.object({
     currencyOverrideReason: z.string().max(500, 'Override reason cannot exceed 500 characters').optional().default(''),
     paymentTermId: z.string().optional(),
     discountAmount: z.coerce.number().min(0).optional().default(0),
+    discountReason: z.string().max(500, 'Discount reason cannot exceed 500 characters').optional().default(''),
     isOpeningBalance: z.boolean().default(false),
     notes: z.string().optional(),
     taxGroupId: z.string().optional(),
@@ -106,7 +107,16 @@ const invoiceSchema = z.object({
         context.addIssue({
             code: z.ZodIssueCode.custom,
             path: ['discountAmount'],
-            message: 'Document trade discount cannot exceed the net line amount',
+            message: 'Document discount cannot exceed the net line amount',
+        });
+    }
+    const hasDiscount = (invoice.discountAmount || 0) > 0 ||
+        invoice.lineItems.some(line => (line.discountPercentage || 0) > 0);
+    if (hasDiscount && (invoice.discountReason || '').trim().length < 10) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['discountReason'],
+            message: 'Explain the commercial reason for the discount in at least 10 characters',
         });
     }
     if (!invoice.isOpeningBalance) {
@@ -231,6 +241,7 @@ export default function NewInvoicePage() {
             currencyOverrideReason: '',
             paymentTermId: 'none',
             discountAmount: 0,
+            discountReason: '',
             isOpeningBalance: defaultOpeningBalance,
             notes: '',
             lineItems: [
@@ -289,6 +300,7 @@ export default function NewInvoicePage() {
 
     const watchTaxGroupId = form.watch('taxGroupId');
     const watchCurrencyCode = form.watch('currencyCode') || 'GHS';
+    const selectedPaymentTerm = paymentTerms.find(term => term.id === watchPaymentTermId);
     const customerCurrency = selectedCustomer?.currencyCode?.trim().toUpperCase() || '';
     const currencyOverridesCustomer = Boolean(selectedCustomer && customerCurrency && watchCurrencyCode !== customerCurrency);
     const currencyOptions = activeCurrencies.map((currency: any) => ({
@@ -302,6 +314,8 @@ export default function NewInvoicePage() {
         }
     }
     const documentDiscount = Number(form.watch('discountAmount')) || 0;
+    const hasInvoiceDiscount = documentDiscount > 0 ||
+        watchLineItems.some(line => (Number(line.discountPercentage) || 0) > 0);
 
     const applyInvoiceExchangeRate = async (currencyCode: string) => {
         const requestId = ++exchangeRateRequestId.current;
@@ -533,6 +547,7 @@ export default function NewInvoicePage() {
                 currencyOverrideReason: currencyOverridesCustomer ? data.currencyOverrideReason?.trim() : null,
                 paymentTermId: data.paymentTermId === 'none' ? null : (data.paymentTermId || null),
                 discountAmount: Number(data.discountAmount) || 0,
+                discountReason: hasInvoiceDiscount ? data.discountReason?.trim() : null,
                 isOpeningBalance,
                 lineItems: data.lineItems.map(item => ({
                     id: item.sourceLineId,
@@ -874,24 +889,6 @@ export default function NewInvoicePage() {
                             </span>
                         </div>
 
-                        <div className="space-y-2">
-                            <Label htmlFor="discountAmount">Document Trade Discount</Label>
-                            <Input
-                                id="discountAmount"
-                                type="number"
-                                min="0"
-                                max={documentDiscountBasis}
-                                step="0.01"
-                                {...form.register('discountAmount')}
-                            />
-                            {form.formState.errors.discountAmount && (
-                                <p className="text-sm text-red-500">{form.formState.errors.discountAmount.message}</p>
-                            )}
-                            <span className="text-[11px] text-muted-foreground block mt-1">
-                                Fixed currency amount allocated across invoice lines. It reduces revenue and the taxable base.
-                            </span>
-                        </div>
-
                         {watchCurrencyCode !== (financeSettings?.baseCurrency || 'GHS') && (
                             <div className="border p-4 rounded-lg bg-muted/20 md:col-span-2 space-y-4">
                                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Advanced FX Details</div>
@@ -937,6 +934,66 @@ export default function NewInvoicePage() {
                                 placeholder="Reference number, payment instructions, etc."
                                 {...form.register('notes')}
                             />
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Discounts and settlement terms</CardTitle>
+                        <CardDescription>
+                            Record invoice-time price reductions separately from any early-payment discount in the customer&apos;s payment term.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                        <div className="space-y-2">
+                            <Label htmlFor="discountAmount">Document discount amount ({watchCurrencyCode})</Label>
+                            <Input
+                                id="discountAmount"
+                                type="number"
+                                min="0"
+                                max={documentDiscountBasis}
+                                step="0.01"
+                                {...form.register('discountAmount')}
+                            />
+                            {form.formState.errors.discountAmount && (
+                                <p className="text-sm text-red-500">{form.formState.errors.discountAmount.message}</p>
+                            )}
+                            <p className="text-xs text-muted-foreground">
+                                Use this only for a discount shared across the invoice. Finance allocates it proportionately after line discounts, reducing revenue and the taxable base. Put a discount specific to one service on that line instead.
+                            </p>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="discountReason">
+                                Discount reason {hasInvoiceDiscount && <span className="text-destructive">*</span>}
+                            </Label>
+                            <Textarea
+                                id="discountReason"
+                                rows={3}
+                                placeholder="Commercial approval, contract clause, promotion, pricing correction, etc."
+                                {...form.register('discountReason')}
+                            />
+                            {form.formState.errors.discountReason && (
+                                <p className="text-sm text-red-500">{form.formState.errors.discountReason.message}</p>
+                            )}
+                            <p className="text-xs text-muted-foreground">
+                                Required whenever a line or document discount is used. A discounted manual invoice must pass the configured Invoice approval workflow before posting.
+                            </p>
+                        </div>
+                        <div className="rounded-lg border bg-muted/20 p-4 lg:col-span-2">
+                            <div className="text-sm font-semibold">Payment-term discount</div>
+                            {selectedPaymentTerm && (selectedPaymentTerm.discountPercent || 0) > 0 ? (
+                                <div className="mt-1 space-y-1 text-sm text-muted-foreground">
+                                    <p>
+                                        {selectedPaymentTerm.discountPercent}% if settled within {selectedPaymentTerm.discountDays} day(s). This is evaluated when payment is allocated; it is not deducted from this invoice now.
+                                    </p>
+                                    <p>
+                                        For invoices carrying VAT or levies, any later reduction in taxable consideration must use the approved sales credit/adjustment-note process. Direct receipt discounts are blocked.
+                                    </p>
+                                </div>
+                            ) : (
+                                <p className="mt-1 text-sm text-muted-foreground">The selected payment term does not grant an early-payment discount.</p>
+                            )}
                         </div>
                     </CardContent>
                 </Card>
@@ -1198,6 +1255,9 @@ export default function NewInvoicePage() {
                                         </li>
                                         <li className={watchLineItems.every(line => line.description && Number(line.quantity) > 0 && Number(line.unitPrice) >= 0 && (watchIsOpeningBalance || line.glAccountId)) ? 'text-emerald-700' : 'text-amber-700'}>
                                             {watchLineItems.every(line => line.description && Number(line.quantity) > 0 && Number(line.unitPrice) >= 0 && (watchIsOpeningBalance || line.glAccountId)) ? '✓' : '○'} Complete, governed invoice lines
+                                        </li>
+                                        <li className={!hasInvoiceDiscount || (form.watch('discountReason') || '').trim().length >= 10 ? 'text-emerald-700' : 'text-amber-700'}>
+                                            {!hasInvoiceDiscount || (form.watch('discountReason') || '').trim().length >= 10 ? '✓' : '○'} Discount reason and approval evidence
                                         </li>
                                     </ul>
                                 </div>

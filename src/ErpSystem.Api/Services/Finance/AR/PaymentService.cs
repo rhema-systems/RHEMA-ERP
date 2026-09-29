@@ -1589,6 +1589,11 @@ namespace ErpSystem.Api.Services.Finance.AR
 
                 if (requestedDiscountAmount > 0m)
                 {
+                    ArDiscountGovernancePolicy.RequireTaxAdjustmentForEarlyPaymentDiscount(
+                        invoice.TaxAmount,
+                        requestedDiscountAmount,
+                        invoice.InvoiceNumber);
+
                     if (invoice.EarlyPaymentDiscountPercentage <= 0m ||
                         !invoice.EarlyPaymentDiscountDueDate.HasValue ||
                         payment.PaymentDate.Date > invoice.EarlyPaymentDiscountDueDate.Value.Date)
@@ -2664,9 +2669,11 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             return invoices.Select(i =>
             {
-                var discountAvailable = i.EarlyPaymentDiscountPercentage > 0
+                var discountWithinTerms = i.EarlyPaymentDiscountPercentage > 0
                     && i.EarlyPaymentDiscountDueDate.HasValue
                     && i.EarlyPaymentDiscountDueDate.Value.Date >= now.Date;
+                var requiresTaxAdjustment = discountWithinTerms && i.TaxAmount > 0m;
+                var discountAvailable = discountWithinTerms && !requiresTaxAdjustment;
                 var discountAmount = discountAvailable
                     ? Math.Round(i.BalanceAmount * (i.EarlyPaymentDiscountPercentage / 100m), 2, MidpointRounding.AwayFromZero)
                     : 0m;
@@ -2687,6 +2694,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     EarlyPaymentDiscountPercentage = i.EarlyPaymentDiscountPercentage,
                     EarlyPaymentDiscountDueDate = i.EarlyPaymentDiscountDueDate,
                     IsDiscountAvailable = discountAvailable,
+                    RequiresTaxAdjustmentForDiscount = requiresTaxAdjustment,
                     DiscountAmount = discountAmount
                 };
             }).ToList();
@@ -2887,6 +2895,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                 if (allocation.AllocatedAmount < 0m || allocation.DiscountAmount < 0m ||
                     allocation.WithholdingTaxAmount < 0m || allocation.VatWithholdingAmount < 0m)
                     throw new InvalidOperationException("AR receipt allocation amounts cannot be negative.");
+
+                ArDiscountGovernancePolicy.RequireTaxAdjustmentForEarlyPaymentDiscount(
+                    allocation.Invoice.TaxAmount,
+                    allocation.DiscountAmount,
+                    allocation.Invoice.InvoiceNumber);
 
                 if (!allocation.Invoice.JournalEntryId.HasValue)
                     throw new InvalidOperationException($"AR receipt cannot settle unposted invoice '{allocation.Invoice.InvoiceNumber}'.");
@@ -3129,6 +3142,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 var originalAccounts = await CustomerPostingAccountHistory.LoadAsync(
                     _unitOfWork, tenantId, payment.JournalEntryId, "CustomerPayment", payment.Id, cancellationToken);
                 var discountAccountId = originalAccounts?.Account("AR-Discount")
+                    ?? customer.CustomerTermsDiscountsTakenAccountId
                     ?? settings.DiscountAllowedAccountId
                     ?? throw new InvalidOperationException("Sales discounts allowed account is not configured for this tenant.");
                 await ResolveReceiptPostingAccountAsync(discountAccountId, "sales discount allowed account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);

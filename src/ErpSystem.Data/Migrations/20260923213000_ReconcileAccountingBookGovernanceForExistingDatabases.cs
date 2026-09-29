@@ -55,19 +55,23 @@ public sealed class ReconcileAccountingBookGovernanceForExistingDatabases : Migr
 
         IF OBJECT_ID(N'dbo.AccountingBooks', N'U') IS NOT NULL
         BEGIN
-            EXEC(N'
-                UPDATE b
-                   SET BookType = CASE WHEN b.IsDefault = 1 THEN 1 ELSE 2 END,
-                       LifecycleStatus = CASE WHEN b.IsActive = 1 AND b.AllowsPosting = 1 THEN 4 ELSE 2 END,
-                       IsActive = CASE WHEN b.IsActive = 1 AND b.AllowsPosting = 1 THEN 1 ELSE 0 END,
-                       AllowsPosting = CASE WHEN b.IsActive = 1 AND b.AllowsPosting = 1 THEN 1 ELSE 0 END,
-                       FunctionalCurrencyCode = COALESCE(
-                           CASE WHEN LEN(LTRIM(RTRIM(t.BaseCurrency))) = 3
-                                THEN UPPER(LTRIM(RTRIM(t.BaseCurrency))) END,
-                           N''GHS'')
-                  FROM dbo.AccountingBooks b
-                  JOIN dbo.Tenants t ON t.Id = b.TenantId
-                 WHERE b.IsDeleted = 0;');
+            -- A database that already has the governed base-shape constraint contains classified
+            -- books. Re-running the legacy conversion would incorrectly turn every non-default
+            -- governed book into a parallel book without its required replication/opening fields.
+            IF OBJECT_ID(N'dbo.CK_AccountingBooks_BaseShape', N'C') IS NULL
+                EXEC(N'
+                    UPDATE b
+                       SET BookType = CASE WHEN b.IsDefault = 1 THEN 1 ELSE 2 END,
+                           LifecycleStatus = CASE WHEN b.IsActive = 1 AND b.AllowsPosting = 1 THEN 4 ELSE 2 END,
+                           IsActive = CASE WHEN b.IsActive = 1 AND b.AllowsPosting = 1 THEN 1 ELSE 0 END,
+                           AllowsPosting = CASE WHEN b.IsActive = 1 AND b.AllowsPosting = 1 THEN 1 ELSE 0 END,
+                           FunctionalCurrencyCode = COALESCE(
+                               CASE WHEN LEN(LTRIM(RTRIM(t.BaseCurrency))) = 3
+                                    THEN UPPER(LTRIM(RTRIM(t.BaseCurrency))) END,
+                               N''GHS'')
+                      FROM dbo.AccountingBooks b
+                      JOIN dbo.Tenants t ON t.Id = b.TenantId
+                     WHERE b.IsDeleted = 0;');
 
             IF NOT EXISTS (SELECT 1 FROM sys.key_constraints
                 WHERE parent_object_id = OBJECT_ID(N'dbo.AccountingBooks')

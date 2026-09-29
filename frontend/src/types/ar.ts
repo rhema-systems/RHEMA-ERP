@@ -97,6 +97,7 @@ export interface Invoice {
     paymentTermsDays: number;
     paymentTermId?: string | null;
     discountAmount: number;
+    discountReason?: string | null;
     reference?: string;
     isOpeningBalance: boolean;
     earlyPaymentDiscountPercentage?: number;
@@ -123,6 +124,7 @@ export interface InvoiceCreateRequest {
     paymentTermsDays?: number;
     paymentTermId?: string | null;
     discountAmount?: number;
+    discountReason?: string | null;
     taxGroupId?: string | null;
     isOpeningBalance?: boolean;
     notes?: string;

@@ -244,13 +244,13 @@ export default function InvoiceDetailsPage() {
                             </div>
                             {lineDiscounts > 0 && (
                                 <div className="flex justify-between text-sm">
-                                    <span className="text-muted-foreground">Line Trade Discounts</span>
+                                    <span className="text-muted-foreground">Line discounts</span>
                                     <span>-{formatCurrency(lineDiscounts, invoice.currencyCode)}</span>
                                 </div>
                             )}
                             {documentDiscount > 0 && (
                                 <div className="flex justify-between text-sm">
-                                    <span className="text-muted-foreground">Document Trade Discount</span>
+                                    <span className="text-muted-foreground">Document discount</span>
                                     <span>-{formatCurrency(documentDiscount, invoice.currencyCode)}</span>
                                 </div>
                             )}
@@ -269,6 +269,13 @@ export default function InvoiceDetailsPage() {
                             </div>
                         </div>
                     </div>
+
+                    {(lineDiscounts > 0 || documentDiscount > 0) && invoice.discountReason && (
+                        <div className="rounded-lg border bg-muted/20 p-4 text-sm">
+                            <div className="font-medium">Discount reason</div>
+                            <p className="mt-1 text-muted-foreground">{invoice.discountReason}</p>
+                        </div>
+                    )}
 
                     {/* Notes */}
                     {invoice.notes && (
