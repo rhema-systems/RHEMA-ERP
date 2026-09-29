@@ -121,6 +121,15 @@ const ESTATE_LINKED_ASSET_FIELD_KEYS = new Set([
   'adjoiningPlotNumber',
 ]);
 
+const FACILITIES_LINKED_ASSET_ENTITY_TYPES = new Set([
+  'EstateFacilityMaintenance',
+  'EstateFacilityComplaint',
+]);
+
+const FACILITIES_SYSTEM_FIELD_KEYS = new Set([
+  'referenceNumber',
+]);
+
 const HIDDEN_LINK_FIELD_KEYS = new Set([
   'estateManagedAssetId',
   'customerBusinessPartnerId',
@@ -663,6 +672,8 @@ export function ProcedureCaseWorkspace({
   const linkedLegalAssetId = selectedCase?.fields.find(
     (field) => field.key === 'estateManagedAssetId'
   )?.value;
+  const isFacilitiesMaintenanceOrComplaint =
+    module === 'Facilities' && FACILITIES_LINKED_ASSET_ENTITY_TYPES.has(entityType);
   const isLinkedLegalMatter =
     module === 'Legal' && Boolean(originatingPropertyCaseId);
   const selectedNewCaseDepartment = departmentOptions.find(
@@ -1250,7 +1261,11 @@ export function ProcedureCaseWorkspace({
   }, [isCreateDialogOpen, legalAssetSearch, module]);
 
   React.useEffect(() => {
-    if (module !== 'Estate' || (!isCreateDialogOpen && !selectedCase)) return;
+    if (
+      module !== 'Estate' &&
+      (module !== 'Facilities' || !FACILITIES_LINKED_ASSET_ENTITY_TYPES.has(entityType))
+    ) return;
+    if (!isCreateDialogOpen && !selectedCase) return;
     let active = true;
     const timer = window.setTimeout(() => {
       void estateLandManagementService.getManagedAssets({
@@ -1266,7 +1281,7 @@ export function ProcedureCaseWorkspace({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [estateAssetSearch, isCreateDialogOpen, module, selectedCase]);
+  }, [entityType, estateAssetSearch, isCreateDialogOpen, module, selectedCase]);
 
   React.useEffect(() => {
     if (module !== 'Legal' || !isCreateDialogOpen) return;
@@ -1468,6 +1483,10 @@ export function ProcedureCaseWorkspace({
         } else {
           setSelectedEstateAsset(null);
         }
+      } else if (module === 'Facilities' && FACILITIES_LINKED_ASSET_ENTITY_TYPES.has(entityType)) {
+        const reference = detail.fields.find((field) => field.key === 'propertyUnit')?.value;
+        setEstateAssetSearch(reference || '');
+        setSelectedEstateAsset(null);
       }
     } catch (err) {
       setError(
@@ -1637,6 +1656,24 @@ export function ProcedureCaseWorkspace({
           });
         }
       });
+      return { ...current, fields };
+    });
+  };
+
+  const applyFacilitiesAssetToSelectedCase = (asset: EstateManagedAsset) => {
+    const values: Record<string, string> = {
+      propertyUnit: estateAssetReference(asset),
+      location: asset.location || asset.town || '',
+    };
+    setSelectedEstateAsset(asset);
+    setEstateAssetSearch(estateAssetReference(asset));
+    setSelectedCase((current) => {
+      if (!current) return current;
+      const fields = current.fields.map((field) =>
+        Object.prototype.hasOwnProperty.call(values, field.key)
+          ? { ...field, value: values[field.key] }
+          : field
+      );
       return { ...current, fields };
     });
   };
@@ -2336,6 +2373,9 @@ export function ProcedureCaseWorkspace({
     if (module === 'Estate' && HIDDEN_LINK_FIELD_KEYS.has(field.key)) {
       return null;
     }
+    if (module === 'Facilities' && FACILITIES_SYSTEM_FIELD_KEYS.has(field.key)) {
+      return null;
+    }
     const isCalculated = CALCULATED_PROCEDURE_FIELD_KEYS.has(field.key);
     const isLinkedLegalReadonly =
       isLinkedLegalMatter && !linkedLegalEditableFields.has(field.key);
@@ -2444,6 +2484,44 @@ export function ProcedureCaseWorkspace({
       );
     }
 
+    if (isFacilitiesMaintenanceOrComplaint && field.key === 'propertyUnit') {
+      return (
+        <div key={field.id} className="space-y-1.5">
+          {label}
+          <Input
+            id={`${fieldId}-search`}
+            placeholder="Search property, plot, unit, file reference, or location"
+            value={estateAssetSearch}
+            disabled={isDisabled}
+            onChange={(event) => setEstateAssetSearch(event.target.value)}
+          />
+          <Select
+            value={selectedEstateAsset?.id || undefined}
+            disabled={isDisabled}
+            onValueChange={(value) => {
+              const asset = estateAssetOptions.find((item) => item.id === value);
+              if (!asset) return;
+              applyFacilitiesAssetToSelectedCase(asset);
+            }}
+          >
+            <SelectTrigger id={fieldId}>
+              <SelectValue placeholder={field.value || 'Select from Estate register'} />
+            </SelectTrigger>
+            <SelectContent>
+              {estateAssetOptions.map((asset) => (
+                <SelectItem key={asset.id} value={asset.id}>
+                  {estateAssetLabel(asset)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {field.value ? (
+            <p className="text-xs text-muted-foreground">Selected reference: {field.value}</p>
+          ) : null}
+        </div>
+      );
+    }
+
     if (fieldType === 'select' && field.options?.length) {
       return (
         <div key={field.id} className="space-y-1.5">
@@ -2513,11 +2591,15 @@ export function ProcedureCaseWorkspace({
 
   const renderCreateCaseForm = () => (
     <div className="space-y-3">
-      {module === 'Legal' ? <label className="text-xs font-medium" htmlFor="new-legal-title">Matter title</label> : null}
+      {module === 'Legal' || isFacilitiesMaintenanceOrComplaint ? (
+        <label className="text-xs font-medium" htmlFor="new-procedure-title">
+          {module === 'Legal' ? 'Matter title' : 'Case title'}
+        </label>
+      ) : null}
       <Input
-        id="new-legal-title"
+        id="new-procedure-title"
         value={newCase.title}
-        disabled={module === 'Legal'}
+        disabled={module === 'Legal' || isFacilitiesMaintenanceOrComplaint}
         onChange={(event) =>
           setNewCase({ ...newCase, title: event.target.value })
         }
