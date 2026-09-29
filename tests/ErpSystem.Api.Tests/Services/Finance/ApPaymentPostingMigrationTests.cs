@@ -981,6 +981,92 @@ public sealed partial class ApPaymentPostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
     [Trait("Category", "AccountsPayable")]
+    public async Task LeaseInvoiceSettlementAndReversal_ShouldReuseExactNonIfrsBookAuthority()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId, accountingBookCode: "LEASE_PRIMARY");
+        var book = await db.AccountingBooks.SingleAsync(item => item.TenantId == tenantId);
+        fixture.Invoice.LeaseScheduleLineId = Guid.NewGuid();
+        fixture.Invoice.LeaseAccountingBookId = book.Id;
+        fixture.Invoice.LeaseAccountingBookCode = book.Code;
+        fixture.Invoice.LeaseFunctionalCurrencyCode = "GHS";
+        var invoiceJournal = await db.JournalEntries.SingleAsync(item => item.Id == fixture.Invoice.JournalEntryId);
+        invoiceJournal.BookClassification = book.Code;
+        var invoiceEvent = await db.FinancePostingEvents.SingleAsync(item =>
+            item.SourceDocumentType == "VendorInvoice" && item.SourceDocumentId == fixture.Invoice.Id);
+        invoiceEvent.BookClassification = book.Code;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var posted = await service.PostAsync(fixture.Payment.Id);
+        var reversed = await service.ReversePaymentAsync(fixture.Payment.Id, new ReverseVendorPaymentDto
+        {
+            Reason = "Lease instalment settlement correction.",
+            ReversalDate = DateTime.UtcNow.Date
+        });
+
+        posted.AccountingBookId.Should().Be(book.Id);
+        posted.AccountingBookCode.Should().Be("LEASE_PRIMARY");
+        posted.FunctionalCurrencyCode.Should().Be("GHS");
+        (await db.JournalEntries.SingleAsync(item => item.Id == posted.JournalEntryId))
+            .BookClassification.Should().Be("LEASE_PRIMARY");
+        (await db.JournalEntries.SingleAsync(item => item.Id == reversed.ReversalJournalEntryId))
+            .BookClassification.Should().Be("LEASE_PRIMARY");
+        (await db.VendorInvoices.SingleAsync(item => item.Id == fixture.Invoice.Id)).Status
+            .Should().Be(VendorInvoiceStatus.Approved);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task PaymentAcrossDifferentInvoiceBooks_ShouldFailBeforeAnyPaymentJournal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId);
+        var periodId = await db.FiscalPeriods.Where(item => item.TenantId == tenantId)
+            .Select(item => item.Id).FirstAsync();
+        var secondBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "LOCAL", Name = "Local Full",
+            Purpose = "Statutory", BookType = AccountingBookType.ParallelFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsActive = true, AllowsPosting = true, BaseAccountingBookId =
+                (await db.AccountingBooks.SingleAsync(item => item.TenantId == tenantId)).Id,
+            ReplicationStartDate = new DateTime(2026, 1, 1)
+        };
+        db.AccountingBooks.Add(secondBook);
+        var secondInvoice = SeedPostedInvoice(db, tenantId, fixture.Supplier, fixture.ApAccount,
+            "VI-2026-LOCAL", fixture.Payment.PaymentDate, 100m, periodId);
+        var secondJournal = db.JournalEntries.Local.Single(item => item.Id == secondInvoice.JournalEntryId);
+        secondJournal.AccountingBookId = secondBook.Id;
+        secondJournal.BookClassification = secondBook.Code;
+        var secondEvent = db.FinancePostingEvents.Local.Single(item => item.SourceDocumentId == secondInvoice.Id);
+        secondEvent.AccountingBookId = secondBook.Id;
+        secondEvent.BookClassification = secondBook.Code;
+        fixture.Payment.TotalAmount = 200m;
+        fixture.Payment.AllocatedAmount = 200m;
+        db.Set<VendorPaymentAllocation>().Add(new VendorPaymentAllocation
+        {
+            TenantId = tenantId, VendorPaymentId = fixture.Payment.Id, VendorInvoiceId = secondInvoice.Id,
+            AllocatedAmount = 100m, AllocationDate = fixture.Payment.PaymentDate, CreatedBy = "seed"
+        });
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var post = () => service.PostAsync(fixture.Payment.Id);
+
+        await post.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AP_PAYMENT_MIXED_BOOKS:*");
+        (await db.FinancePostingEvents.CountAsync(item =>
+            item.SourceDocumentType == "VendorPayment" && item.SourceDocumentId == fixture.Payment.Id))
+            .Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
     public async Task PostedApPayment_ShouldReverseThroughPostingEngineAndRestoreInvoiceSettlement()
     {
         var tenantId = Guid.NewGuid();
@@ -1334,11 +1420,12 @@ public sealed partial class ApPaymentPostingMigrationTests
         decimal allocationAmount = 100m,
         bool seedInvoicePostingEvent = true,
         bool periodIsOpen = true,
-        bool periodIsClosed = false)
+        bool periodIsClosed = false,
+        string accountingBookCode = "IFRS")
     {
-        SeedTenant(db, tenantId);
-        var period = SeedOpenPeriod(db, tenantId, periodIsOpen, periodIsClosed);
-        SeedCurrentOperationalPeriodWhenNeeded(db, tenantId, period);
+        SeedTenant(db, tenantId, accountingBookCode: accountingBookCode);
+        var period = SeedOpenPeriod(db, tenantId, periodIsOpen, periodIsClosed, accountingBookCode);
+        SeedCurrentOperationalPeriodWhenNeeded(db, tenantId, period, accountingBookCode);
         var apAccount = SeedAccount(db, tenantId, "2000", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
         var bankGlAccount = SeedAccount(db, tenantId, "1100", AccountType.Asset);
         var expenseAccount = SeedAccount(db, tenantId, "6000", AccountType.Expense);
@@ -1416,7 +1503,11 @@ public sealed partial class ApPaymentPostingMigrationTests
         return new ApPaymentFixture(payment, allocation, invoice, supplier, apAccount, bankGlAccount, bankAccount);
     }
 
-    private static void SeedTenant(ApplicationDbContext db, Guid tenantId, string code = "TEN")
+    private static void SeedTenant(
+        ApplicationDbContext db,
+        Guid tenantId,
+        string code = "TEN",
+        string accountingBookCode = "IFRS")
     {
         db.Tenants.Add(new Tenant
         {
@@ -1428,7 +1519,7 @@ public sealed partial class ApPaymentPostingMigrationTests
         });
         db.AccountingBooks.Add(new AccountingBook
         {
-            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = accountingBookCode, Name = $"{accountingBookCode} Primary",
             Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
             LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
             IsDefault = true, IsActive = true, AllowsPosting = true
@@ -1439,7 +1530,8 @@ public sealed partial class ApPaymentPostingMigrationTests
         ApplicationDbContext db,
         Guid tenantId,
         bool isOpen = true,
-        bool isClosed = false)
+        bool isClosed = false,
+        string accountingBookCode = "IFRS")
     {
         var period = new FiscalPeriod
         {
@@ -1460,14 +1552,15 @@ public sealed partial class ApPaymentPostingMigrationTests
         };
 
         db.FiscalPeriods.Add(period);
-        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, accountingBookCode);
         return period;
     }
 
     private static void SeedCurrentOperationalPeriodWhenNeeded(
         ApplicationDbContext db,
         Guid tenantId,
-        FiscalPeriod seededPeriod)
+        FiscalPeriod seededPeriod,
+        string accountingBookCode = "IFRS")
     {
         var today = DateTime.UtcNow.Date;
         if (today >= seededPeriod.StartDate.Date && today <= seededPeriod.EndDate.Date)
@@ -1493,7 +1586,7 @@ public sealed partial class ApPaymentPostingMigrationTests
             IsLocked = seededPeriod.IsLocked
         };
         db.FiscalPeriods.Add(currentPeriod);
-        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, currentPeriod);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, currentPeriod, accountingBookCode);
     }
 
     private static Account SeedAccount(
@@ -1520,7 +1613,7 @@ public sealed partial class ApPaymentPostingMigrationTests
         };
 
         db.Accounts.Add(account);
-        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.IsDefault);
         FinancePostingAuthorityFixture.SeedEnabledBookMappings(db, tenantId, book, account);
         return account;
     }
@@ -1623,7 +1716,7 @@ public sealed partial class ApPaymentPostingMigrationTests
         Guid? fiscalPeriodId = null,
         bool seedPostingEvent = true)
     {
-        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.IsDefault);
         var role = db.Set<BusinessPartnerRole>().Local.FirstOrDefault(item =>
             item.TenantId == tenantId && item.BusinessPartnerId == supplier.Id &&
             item.RoleType == BusinessPartnerRoleType.Supplier);
@@ -1676,7 +1769,7 @@ public sealed partial class ApPaymentPostingMigrationTests
             PostingStatus = "Posted",
             ApprovalStatus = "Approved",
             PostingDate = invoiceDate,
-            BookClassification = "IFRS",
+            BookClassification = book.Code,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
         };
@@ -1706,7 +1799,7 @@ public sealed partial class ApPaymentPostingMigrationTests
                 TotalDebitAmount = amount,
                 TotalCreditAmount = amount,
                 FunctionalCurrencyCode = "GHS",
-                BookClassification = "IFRS",
+                BookClassification = book.Code,
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = "seed"
             });

@@ -2263,6 +2263,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<LeaseContract>(entity =>
         {
+            entity.HasOne<WorkflowInstance>().WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.ActivationWorkflowInstanceId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(item => new { item.TenantId, item.ActivationWorkflowInstanceId });
             entity.HasOne(item => item.AccountingBook).WithMany()
                 .HasForeignKey(item => new { item.TenantId, item.AccountingBookId })
                 .HasPrincipalKey(book => new { book.TenantId, book.Id }).OnDelete(DeleteBehavior.Restrict);
@@ -2913,6 +2918,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.WithholdingTaxAccountId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<AccountingBook>()
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.AccountingBookId })
+                .HasPrincipalKey(book => new { book.TenantId, book.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.TenantId, e.AccountingBookId });
             // Posted AP payments are never edited out of the ledger. These explicit links make
             // the compensating posting first-class and allow source-to-ledger tracing without
             // depending on a convention-based lookup through posting event text fields.

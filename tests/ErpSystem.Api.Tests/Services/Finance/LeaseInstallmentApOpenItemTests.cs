@@ -578,6 +578,47 @@ public sealed class LeaseInstallmentApOpenItemTests
     }
 
     [Fact]
+    public async Task Frozen_recognition_authority_rejects_wrong_entry_date_even_when_posting_date_matches()
+    {
+        await using var fixture = new Fixture();
+        var lease = await fixture.AddLeaseAsync();
+        var journal = await fixture.Context.JournalEntries.SingleAsync(item =>
+            item.Id == lease.RecognitionJournalEntryId);
+        journal.EntryDate = lease.StartDate.AddDays(1);
+        journal.PostingDate = lease.StartDate;
+        await fixture.Context.SaveChangesAsync();
+
+        var prepare = () => fixture.Service.CreateLeaseInstallmentDraftAsync(
+            lease.Id, lease.ScheduleLines.Single().Id);
+
+        await prepare.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("LEASE_AUTHORITY_REMEDIATION_REQUIRED:*");
+        (await fixture.Context.VendorInvoices.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Legacy_period_interest_authority_rejects_wrong_entry_date_and_rolls_back_freeze()
+    {
+        await using var fixture = new Fixture();
+        var lease = await fixture.AddLeaseAsync(twoPeriods: true, freezeAuthority: false);
+        var first = lease.ScheduleLines.Single(item => item.PeriodNumber == 1);
+        var second = lease.ScheduleLines.Single(item => item.PeriodNumber == 2);
+        first.IsPosted = true;
+        await fixture.Context.SaveChangesAsync();
+        await fixture.SeedLegacyRecognitionAsync(lease);
+        await fixture.SeedLegacyPeriodInterestAsync(lease, first, reversed: false, entryDateOffsetDays: 1);
+
+        var prepare = () => fixture.Service.CreateLeaseInstallmentDraftAsync(lease.Id, second.Id);
+
+        await prepare.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("LEASE_AUTHORITY_REMEDIATION_REQUIRED:*immutable posted interest-account evidence*");
+        (await fixture.Context.VendorInvoices.CountAsync()).Should().Be(0);
+        var unchanged = await fixture.Context.LeaseContracts.AsNoTracking().SingleAsync(item => item.Id == lease.Id);
+        unchanged.RecognitionPostingEventId.Should().BeNull();
+        unchanged.InterestExpenseAccountId.Should().BeNull();
+    }
+
+    [Fact]
     public async Task Deleting_unposted_draft_releases_source_for_truthful_recreation()
     {
         await using var fixture = new Fixture();
@@ -888,7 +929,8 @@ public sealed class LeaseInstallmentApOpenItemTests
         public async Task SeedLegacyPeriodInterestAsync(
             LeaseContract lease,
             LeaseScheduleLine schedule,
-            bool reversed)
+            bool reversed,
+            int entryDateOffsetDays = 0)
         {
             var periodId = await Context.FiscalPeriods.Where(item => item.TenantId == lease.TenantId)
                 .Select(item => item.Id).SingleAsync();
@@ -896,7 +938,7 @@ public sealed class LeaseInstallmentApOpenItemTests
             {
                 Id = Guid.NewGuid(), TenantId = lease.TenantId,
                 JournalEntryNumber = $"JE-LEGACY-PERIOD-{Guid.NewGuid():N}", JournalType = "System Generated",
-                EntryDate = schedule.PeriodDate, PostingDate = schedule.PeriodDate,
+                EntryDate = schedule.PeriodDate.AddDays(entryDateOffsetDays), PostingDate = schedule.PeriodDate,
                 Description = $"Legacy period {schedule.PeriodNumber}", SourceModule = "FixedAssets",
                 SourceDocumentType = "LeasePeriodPosting", SourceDocumentId = schedule.Id,
                 TotalDebitAmount = schedule.PaymentAmount, TotalCreditAmount = schedule.PaymentAmount,

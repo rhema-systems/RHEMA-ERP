@@ -81,6 +81,13 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public Guid? LeaseLiabilityAccountId { get; set; }
         public Guid? InterestExpenseAccountId { get; set; }
 
+        // ── Governed activation maker/checker evidence ──
+        public Guid? ActivationWorkflowInstanceId { get; set; }
+        public Guid? ActivationSubmittedByUserId { get; set; }
+        public DateTime? ActivationSubmittedAtUtc { get; set; }
+        public Guid? ActivationApprovedByUserId { get; set; }
+        public DateTime? ActivationApprovedAtUtc { get; set; }
+
         // ── Concurrency ──
         [Timestamp]
         public byte[] RowVersion { get; set; } = null!;

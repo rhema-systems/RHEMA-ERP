@@ -20,6 +20,7 @@ export default function LeaseDetailPage() {
   const { hasPermission } = useAuth();
   const id = params.id as string;
   const canCreateApInvoice = hasPermission('Finance.AP.Invoices.Create');
+  const canManageFixedAssets = hasPermission('Finance.FixedAssets.Manage');
 
   const [lease, setLease] = useState<LeaseContractDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,7 +48,7 @@ export default function LeaseDetailPage() {
   };
 
   const handleActivate = async () => {
-    if (!confirm('Activate this lease? This will create the ROU fixed asset and post recognition GL journal.')) return;
+    if (!confirm('Submit this lease recognition proposal for independent approval? No asset or journal is created until final approval.')) return;
     try {
       await leaseAccountingService.activate(id, {
         defaultDimensions: toFinancePostingDimensionValues(recognitionDefaults),
@@ -56,7 +57,7 @@ export default function LeaseDetailPage() {
       });
       await refresh();
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'The lease was not activated. Review its commencement data and Finance mappings, then retry.');
+      toast.error(error instanceof Error ? error.message : 'The lease activation proposal was not submitted. Review its commencement data and Finance mappings, then retry.');
     }
   };
 
@@ -76,6 +77,7 @@ export default function LeaseDetailPage() {
   const getStatusBadge = (status: LeaseStatus) => {
     const variants: Record<LeaseStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
       Draft: 'outline', Active: 'default', Terminated: 'destructive', Completed: 'secondary',
+      PendingApproval: 'secondary', Rejected: 'destructive',
     };
     return <Badge variant={variants[status] || 'default'}>{status}</Badge>;
   };
@@ -105,13 +107,19 @@ export default function LeaseDetailPage() {
             <p className="text-muted-foreground">{lease.description}</p>
           </div>
         </div>
-        {lease.status === 'Draft' && (
+        {(lease.status === 'Draft' || lease.status === 'Rejected') && canManageFixedAssets && (
           <Button onClick={handleActivate} size="lg">
             <Play className="mr-2 h-4 w-4" />
-            Activate Lease
+            Submit activation
           </Button>
         )}
       </div>
+
+      {lease.status === 'PendingApproval' && (
+        <p className="text-sm text-muted-foreground">
+          Activation is pending independent approval in the Finance approval queue. No recognition journal or ROU asset has been created.
+        </p>
+      )}
 
       <Breadcrumb>
         <BreadcrumbList>

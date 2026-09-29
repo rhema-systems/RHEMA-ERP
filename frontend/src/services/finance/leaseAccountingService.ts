@@ -7,7 +7,7 @@ import type { FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInpu
 
 // ── Types ──────────────────────────────────────────────────────────
 
-export type LeaseStatus = 'Draft' | 'Active' | 'Terminated' | 'Completed';
+export type LeaseStatus = 'Draft' | 'Active' | 'Terminated' | 'Completed' | 'PendingApproval' | 'Rejected';
 export type PaymentFrequency = 'Monthly' | 'Quarterly' | 'SemiAnnually' | 'Annually';
 export type VendorInvoiceStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'PartiallyPaid' | 'Paid' | 'Overdue' | 'Voided' | 'Rejected' | 'OnHold';
 
@@ -53,6 +53,11 @@ export interface LeaseContractDetail extends LeaseContractList {
   createdBy?: string;
   updatedAt?: string;
   updatedBy?: string;
+  activationWorkflowInstanceId?: string;
+  activationSubmittedByUserId?: string;
+  activationSubmittedAtUtc?: string;
+  activationApprovedByUserId?: string;
+  activationApprovedAtUtc?: string;
   scheduleLines: LeaseScheduleLine[];
   recognitionFinanceDimensions?: FinanceSourceDocumentDimension;
 }

@@ -21,6 +21,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         private readonly IFinancePostingEngine _postingEngine;
         private readonly IFixedAssetDimensionService _fixedAssetDimensions;
         private readonly IVendorInvoiceService _vendorInvoices;
+        private readonly IWorkflowService _workflowService;
+        private const string LeaseWorkflowEntityType = "LeaseContract";
         private static readonly FinancePostingProducerContext RecognitionProducer =
             new(FinanceDimensionRouteId.FinanceLeaseRecognition);
         private static readonly FinancePostingProducerContext HistoricalPeriodProducer =
@@ -32,7 +34,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             IDocumentNumberingService documentNumberingService,
             IFinancePostingEngine postingEngine,
             IFixedAssetDimensionService fixedAssetDimensions,
-            IVendorInvoiceService vendorInvoices)
+            IVendorInvoiceService vendorInvoices,
+            IWorkflowService workflowService)
         {
             _context = context;
             _currentUser = currentUser;
@@ -41,10 +44,14 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             _postingEngine = postingEngine;
             _fixedAssetDimensions = fixedAssetDimensions;
             _vendorInvoices = vendorInvoices;
+            _workflowService = workflowService;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
         private string UserName => _currentUser.UserName ?? "system";
+        private Guid CurrentUserId => Guid.TryParse(_currentUser.UserId, out var userId) && userId != Guid.Empty
+            ? userId
+            : throw new UnauthorizedAccessException("An authenticated Finance user is required.");
 
         // ── Queries ──────────────────────────────────────────────────────
 
@@ -115,6 +122,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 var exactEvents = events.Where(item => item.SourceDocumentId == schedule.Id).ToArray();
                 if (exactEvents.Length != 1) continue;
                 var postingEvent = exactEvents[0];
+                if (postingEvent.JournalEntry?.EntryDate.Date != schedule.PeriodDate.Date) continue;
                 var historicalLines = await _context.AccountTransactions.AsNoTracking()
                     .Where(item => item.TenantId == TenantId && !item.IsDeleted &&
                         item.JournalEntryId == postingEvent.JournalEntryId &&
@@ -228,13 +236,14 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 ?? throw new InvalidOperationException("Failed to create lease.");
         }
 
-        // ── Activate (with ROU asset creation — EzFMC gap fix) ───────────
+        // ── Submit / complete governed activation ───────────────────────
 
         public async Task<LeaseContractDetailDto> ActivateLeaseAsync(
             Guid leaseId,
             ActivateLeaseDto? dto = null,
             CancellationToken cancellationToken = default)
         {
+            var makerId = CurrentUserId;
             var lease = await _context.LeaseContracts
                 .Include(l => l.Lessor)
                 .FirstOrDefaultAsync(l => l.TenantId == TenantId && l.Id == leaseId && !l.IsDeleted, cancellationToken)
@@ -243,10 +252,17 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             if (lease.Status is LeaseStatus.Active or LeaseStatus.Completed)
                 return await GetLeaseByIdAsync(leaseId)
                     ?? throw new InvalidOperationException("Failed to retrieve activated lease.");
-            if (lease.Status != LeaseStatus.Draft)
-                throw new InvalidOperationException($"Cannot activate a lease in '{lease.Status}' status.");
+            if (lease.Status == LeaseStatus.PendingApproval)
+            {
+                if (lease.ActivationWorkflowInstanceId.HasValue &&
+                    await _workflowService.HasActiveApprovalInstanceAsync(LeaseWorkflowEntityType, lease.Id))
+                    return await GetLeaseByIdAsync(leaseId)
+                        ?? throw new InvalidOperationException("Failed to retrieve submitted lease.");
+                throw new InvalidOperationException("The lease has pending status without one active approval instance. Finance remediation is required.");
+            }
+            if (lease.Status is not (LeaseStatus.Draft or LeaseStatus.Rejected))
+                throw new InvalidOperationException($"Cannot submit a lease in '{lease.Status}' status for activation.");
 
-            // Load finance settings for GL account defaults
             var settings = await _context.FinanceSettings
                 .FirstOrDefaultAsync(s => s.TenantId == TenantId && !s.IsDeleted, cancellationToken);
 
@@ -254,6 +270,12 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 settings.LeaseInterestExpenseAccountId == null)
                 throw new InvalidOperationException(
                     "Lease GL accounts not configured. Set ROU Asset, Lease Liability and Interest Expense accounts in Finance Settings.");
+            if (!await _workflowService.HasActiveApprovalWorkflowAsync(LeaseWorkflowEntityType))
+                throw new InvalidOperationException("A published LeaseContract approval workflow is required before activation can be submitted.");
+
+            var (rouCategory, primaryBook, currency) = await ResolveRecognitionProposalAsync(
+                lease.StartDate, settings, cancellationToken);
+            var proposalLines = BuildRecognitionLines(lease, settings);
 
             var strategy = _context.Database.CreateExecutionStrategy();
             await strategy.ExecuteAsync(async () =>
@@ -261,90 +283,37 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
                 try
                 {
-                // ── Gap Fix: Actually create the ROU Fixed Asset ──
-                // EzFMC's original code only posted the GL journal but never created the FixedAsset record.
-
-                // ROU category is explicit source authority; never capitalize into an arbitrary
-                // first category merely because configuration is incomplete.
-                var rouCategory = await _context.FixedAssetCategories
-                    .SingleOrDefaultAsync(c => c.TenantId == TenantId && !c.IsDeleted && c.Code == "ROU", cancellationToken)
-                    ?? throw new InvalidOperationException(
-                        "An active fixed asset category with exact code 'ROU' is required before lease activation.");
-                var categoryId = rouCategory.Id;
-                if (rouCategory.AssetAccountId != settings.LeaseRouAssetAccountId)
-                    throw new InvalidOperationException(
-                        "The ROU category asset account must match the configured lease ROU recognition account.");
-
-                var books = await _context.AccountingBooks.AsNoTracking().Where(book =>
-                        book.TenantId == TenantId && !book.IsDeleted && book.IsDefault && book.IsActive &&
-                        book.AllowsPosting && book.BookType == AccountingBookType.PrimaryFull &&
-                        book.LifecycleStatus == AccountingBookLifecycleStatus.Active)
-                    .Take(2).ToListAsync(cancellationToken);
-                if (books.Count != 1)
-                    throw new InvalidOperationException(
-                        "PRIMARY_BOOK_AUTHORITY_AMBIGUOUS: Exactly one active default PrimaryFull posting book is required.");
-                var book = books[0];
-                if (string.IsNullOrWhiteSpace(book.Code) ||
-                    !string.Equals(book.Code, book.Code.Trim().ToUpperInvariant(), StringComparison.Ordinal))
-                    throw new InvalidOperationException("The primary accounting book code is unavailable or noncanonical.");
-                var currency = book.FunctionalCurrencyCode?.Trim().ToUpperInvariant();
-                if (currency?.Length != 3 || !string.Equals(currency, settings.BaseCurrency?.Trim().ToUpperInvariant(), StringComparison.Ordinal) ||
-                    !string.Equals(book.FunctionalCurrencyCode, currency, StringComparison.Ordinal))
-                    throw new InvalidOperationException("The primary accounting book and tenant functional-currency authority do not agree.");
-                var periodReady = await _context.FiscalPeriods.AsNoTracking().AnyAsync(item =>
-                    item.TenantId == TenantId && !item.IsDeleted &&
-                    item.StartDate <= lease.StartDate.Date && item.EndDate >= lease.StartDate.Date &&
-                    item.PeriodStatus == "Open" && item.IsOpen && !item.IsLocked, cancellationToken);
-                if (!periodReady)
-                    throw new InvalidOperationException("The lease commencement date has no governed open tenant fiscal period.");
-
-                var assetCode = await _fixedAssetService.GenerateAssetCodeAsync(categoryId);
-                var rouAsset = await _fixedAssetService.CreateAsync(new CreateFixedAssetDto
-                {
-                    AssetCode = assetCode,
-                    Name = $"ROU Asset — {lease.ContractNumber}",
-                    Description = $"Right-of-Use asset for lease {lease.ContractNumber} ({lease.Lessor?.PartnerName ?? "N/A"})",
-                    FixedAssetCategoryId = categoryId,
-                    PurchaseDate = lease.StartDate,
-                    PlacedInServiceDate = lease.StartDate,
-                    PurchasePrice = lease.PresentValue,
-                    AcquisitionCost = lease.PresentValue,
-                    DepreciationMethod = DepreciationMethod.StraightLine,
-                    UsefulLifeMonths = (int)((lease.EndDate - lease.StartDate).TotalDays / 30.44),
-                    ResidualValue = 0
-                });
-
-                lease.RouAssetId = rouAsset.Id;
-                lease.Status = LeaseStatus.Active;
-                lease.AccountingBookId = book.Id;
-                lease.AccountingBookCode = book.Code;
+                lease.RouAssetId = null;
+                lease.RecognitionPostingEventId = null;
+                lease.RecognitionJournalEntryId = null;
+                lease.Status = LeaseStatus.PendingApproval;
+                lease.AccountingBookId = primaryBook.Id;
+                lease.AccountingBookCode = primaryBook.Code;
                 lease.FunctionalCurrencyCode = currency;
                 lease.RouAssetAccountId = settings.LeaseRouAssetAccountId;
                 lease.LeaseLiabilityAccountId = settings.LeaseLiabilityAccountId;
                 lease.InterestExpenseAccountId = settings.LeaseInterestExpenseAccountId;
+                lease.ActivationWorkflowInstanceId = null;
+                lease.ActivationSubmittedByUserId = makerId;
+                lease.ActivationSubmittedAtUtc = DateTime.UtcNow;
+                lease.ActivationApprovedByUserId = null;
+                lease.ActivationApprovedAtUtc = null;
                 lease.UpdatedAt = DateTime.UtcNow;
                 lease.UpdatedBy = UserName;
 
-                var postingLines = BuildRecognitionLines(lease, settings);
                 await _fixedAssetDimensions.SynchronizeAsync(
-                    RecognitionProducer, lease.Id, lease.StartDate, postingLines,
+                    RecognitionProducer, lease.Id, lease.StartDate, proposalLines,
                     dto?.FinanceDimensions, inheritedAssetJournalBySourceLine: null,
-                    "Lease recognition dimensions synchronized.", cancellationToken);
+                    "Lease recognition proposal submitted for approval.", cancellationToken);
                 await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
-                    RecognitionProducer, lease.Id, lease.StartDate, postingLines, cancellationToken);
-                var recognition = await _postingEngine.PostAsync(BuildLeasePostingRequest(
-                    RecognitionProducer,
-                    lease.Id,
-                    lease.ContractNumber,
-                    lease.StartDate,
-                    $"Lease activation — ROU asset recognition: {lease.Description}",
-                    $"LEASE-RECOGNITION:{TenantId:D}:{lease.Id:D}",
-                    book.Code,
-                    currency,
-                    postingLines), RecognitionProducer, cancellationToken);
-                lease.RecognitionPostingEventId = recognition.PostingEventId;
-                lease.RecognitionJournalEntryId = recognition.JournalEntryId;
-
+                    RecognitionProducer, lease.Id, lease.StartDate, proposalLines, cancellationToken);
+                await _context.SaveChangesAsync(cancellationToken);
+                var workflow = await _workflowService.StartApprovalWorkflowAsync(LeaseWorkflowEntityType, lease.Id);
+                if (!workflow.Success || !workflow.WorkflowInstanceId.HasValue ||
+                    workflow.Status == WorkflowInstanceStatus.Completed)
+                    throw new InvalidOperationException(workflow.Message ??
+                        "Lease activation approval workflow could not be started as a pending independent review.");
+                lease.ActivationWorkflowInstanceId = workflow.WorkflowInstanceId;
                 await _context.SaveChangesAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
                 }
@@ -362,7 +331,355 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             });
 
             return await GetLeaseByIdAsync(leaseId)
-                ?? throw new InvalidOperationException("Failed to activate lease.");
+                ?? throw new InvalidOperationException("Failed to retrieve the submitted lease.");
+        }
+
+        public async Task<LeaseContractDetailDto> CompleteApprovedActivationAsync(
+            Guid leaseId,
+            Guid approvedByUserId,
+            CancellationToken cancellationToken = default)
+        {
+            if (approvedByUserId == Guid.Empty || approvedByUserId != CurrentUserId)
+                throw new UnauthorizedAccessException("The authenticated approver identity is required.");
+
+            if (_context.Database.CurrentTransaction != null)
+            {
+                await CompleteApprovedActivationCoreAsync(leaseId, approvedByUserId, cancellationToken);
+                return await GetLeaseByIdAsync(leaseId)
+                    ?? throw new InvalidOperationException("Failed to retrieve the approved lease activation.");
+            }
+
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
+            {
+                await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+                try
+                {
+                    await CompleteApprovedActivationCoreAsync(leaseId, approvedByUserId, cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                }
+                catch
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            });
+
+            return await GetLeaseByIdAsync(leaseId)
+                ?? throw new InvalidOperationException("Failed to retrieve the approved lease activation.");
+        }
+
+        private async Task CompleteApprovedActivationCoreAsync(
+            Guid leaseId,
+            Guid approvedByUserId,
+            CancellationToken cancellationToken)
+        {
+            var lease = await _context.LeaseContracts
+                .Include(item => item.Lessor)
+                .SingleOrDefaultAsync(item => item.TenantId == TenantId && item.Id == leaseId && !item.IsDeleted,
+                    cancellationToken)
+                ?? throw new KeyNotFoundException("Lease contract not found.");
+            if (lease.Status == LeaseStatus.Active && lease.RouAssetId.HasValue &&
+                lease.ActivationApprovedByUserId == approvedByUserId)
+                return;
+            if (lease.Status != LeaseStatus.PendingApproval || !lease.ActivationWorkflowInstanceId.HasValue ||
+                !lease.ActivationSubmittedByUserId.HasValue || !lease.ActivationSubmittedAtUtc.HasValue)
+                throw new InvalidOperationException("The lease has no complete pending activation proposal evidence.");
+            if (lease.ActivationSubmittedByUserId == approvedByUserId)
+                throw new InvalidOperationException("LEASE_ACTIVATION_SOD: The lease maker cannot approve activation.");
+
+            var workflow = await _context.WorkflowInstances
+                .Include(item => item.EntityType)
+                .Include(item => item.StepInstances)
+                    .ThenInclude(item => item.Approvals)
+                .SingleOrDefaultAsync(item => item.TenantId == TenantId && !item.IsDeleted &&
+                    item.Id == lease.ActivationWorkflowInstanceId && item.EntityId == lease.Id,
+                    cancellationToken)
+                ?? throw new InvalidOperationException("The bound lease approval workflow evidence is unavailable.");
+            if (!string.Equals(workflow.EntityType.Code, LeaseWorkflowEntityType, StringComparison.Ordinal) ||
+                workflow.InitiatedById != lease.ActivationSubmittedByUserId ||
+                workflow.Status != WorkflowInstanceStatus.Completed || !workflow.CompletedDate.HasValue ||
+                !workflow.StepInstances.SelectMany(item => item.Approvals).Any(item =>
+                    !item.IsDeleted && item.Status == WorkflowApprovalStatus.Approved &&
+                    item.ProcessedById == approvedByUserId && item.ProcessedDate.HasValue))
+                throw new InvalidOperationException("The lease activation workflow does not prove an independent completed approval.");
+
+            var (rouCategory, primaryBook, representationBooks) = await ValidateFrozenRecognitionAuthorityAsync(
+                lease, cancellationToken);
+            var postingLines = BuildRecognitionEvidenceLines(lease);
+            await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                RecognitionProducer, lease.Id, lease.StartDate, postingLines, cancellationToken);
+            var recognition = await _postingEngine.PostAsync(BuildLeasePostingRequest(
+                RecognitionProducer,
+                lease.Id,
+                lease.ContractNumber,
+                lease.StartDate,
+                $"Lease activation — ROU asset recognition: {lease.Description}",
+                $"LEASE-RECOGNITION:{TenantId:D}:{lease.Id:D}",
+                primaryBook.Code,
+                lease.FunctionalCurrencyCode!,
+                postingLines), RecognitionProducer, cancellationToken);
+
+            var postingEvent = await _context.Set<FinancePostingEvent>().AsNoTracking()
+                .SingleOrDefaultAsync(item => item.TenantId == TenantId && !item.IsDeleted &&
+                    item.Id == recognition.PostingEventId && item.JournalEntryId == recognition.JournalEntryId &&
+                    item.SourceDocumentType == RecognitionProducer.Definition.DocumentType &&
+                    item.SourceDocumentId == lease.Id && item.PostingAction == "Post" &&
+                    item.PostingStatus == "Posted" && item.AccountingBookId == primaryBook.Id,
+                    cancellationToken)
+                ?? throw new InvalidOperationException("The lease recognition posting event evidence is inconsistent.");
+            var journals = await _context.JournalEntries.AsNoTracking()
+                .Where(item => item.TenantId == TenantId && !item.IsDeleted &&
+                    (item.Id == recognition.JournalEntryId || item.ReplicatedFromJournalEntryId == recognition.JournalEntryId))
+                .ToListAsync(cancellationToken);
+            if (journals.Count != representationBooks.Count)
+                throw new InvalidOperationException("Lease recognition did not create exactly one representation in every governed full book.");
+
+            var journalByBook = journals.GroupBy(item => item.AccountingBookId).ToDictionary(item => item.Key, item => item.ToArray());
+            if (representationBooks.Any(book => !journalByBook.TryGetValue(book.Id, out var values) || values.Length != 1) ||
+                journalByBook.Keys.Except(representationBooks.Select(item => item.Id)).Any())
+                throw new InvalidOperationException("Lease recognition book representations are missing, duplicated, or unexpected.");
+
+            var rouSourceLineId = FinanceSourceLineIdentity.Create(lease.Id, "ROU-ASSET", lease.Id);
+            var liabilitySourceLineId = FinanceSourceLineIdentity.Create(lease.Id, "LEASE-LIABILITY", lease.Id);
+            var representationCosts = new Dictionary<Guid, decimal>();
+            foreach (var book in representationBooks)
+            {
+                var journal = journalByBook[book.Id].Single();
+                var isPrimary = book.Id == primaryBook.Id;
+                if (journal.EntryDate.Date != lease.StartDate.Date || journal.PostingStatus != "Posted" ||
+                    journal.IsReversed || journal.ReversalJournalEntryId.HasValue ||
+                    journal.SourceDocumentType != RecognitionProducer.Definition.DocumentType ||
+                    journal.SourceDocumentId != lease.Id || journal.BookClassification != book.Code ||
+                    (isPrimary ? journal.ReplicatedFromJournalEntryId.HasValue || journal.Id != recognition.JournalEntryId
+                               : journal.ReplicatedFromJournalEntryId != recognition.JournalEntryId))
+                    throw new InvalidOperationException("A lease recognition journal representation is inconsistent or not authoritative.");
+
+                var lines = await _context.AccountTransactions.AsNoTracking()
+                    .Where(item => item.TenantId == TenantId && !item.IsDeleted && item.JournalEntryId == journal.Id &&
+                        item.SourceDocumentType == RecognitionProducer.Definition.DocumentType && item.SourceDocumentId == lease.Id &&
+                        item.PostingStatus == "Posted" &&
+                        (item.SourceDocumentLineId == rouSourceLineId || item.SourceDocumentLineId == liabilitySourceLineId))
+                    .ToListAsync(cancellationToken);
+                var rou = lines.Where(item => item.SourceDocumentLineId == rouSourceLineId &&
+                    item.DebitAmount > 0m && item.CreditAmount == 0m).ToArray();
+                var liability = lines.Where(item => item.SourceDocumentLineId == liabilitySourceLineId &&
+                    item.CreditAmount > 0m && item.DebitAmount == 0m).ToArray();
+                var bookCurrency = book.FunctionalCurrencyCode?.Trim().ToUpperInvariant();
+                if (lines.Count != 2 || rou.Length != 1 || liability.Length != 1 ||
+                    Math.Abs(rou[0].DebitAmount - liability[0].CreditAmount) > 0.01m ||
+                    lines.Any(item => item.FunctionalCurrencyCode != bookCurrency) ||
+                    (isPrimary && (rou[0].AccountId != lease.RouAssetAccountId ||
+                        liability[0].AccountId != lease.LeaseLiabilityAccountId ||
+                        Math.Abs(rou[0].DebitAmount - lease.PresentValue) > 0.01m)))
+                    throw new InvalidOperationException("A lease recognition book representation has inconsistent source lines or amounts.");
+                representationCosts[book.Id] = rou[0].DebitAmount;
+            }
+
+            var usefulLifeMonths = Math.Max(1, (int)Math.Ceiling((lease.EndDate.Date - lease.StartDate.Date).TotalDays / 30.44d));
+            var asset = new FixedAsset
+            {
+                TenantId = TenantId,
+                AssetCode = await _fixedAssetService.GenerateAssetCodeAsync(rouCategory.Id),
+                Name = $"ROU Asset — {lease.ContractNumber}",
+                Description = $"Right-of-Use asset for lease {lease.ContractNumber} ({lease.Lessor?.PartnerName ?? "N/A"})",
+                FixedAssetCategoryId = rouCategory.Id,
+                PurchaseDate = lease.StartDate,
+                PlacedInServiceDate = lease.StartDate,
+                CapitalizationDate = lease.StartDate,
+                PurchasePrice = lease.PresentValue,
+                AcquisitionCost = lease.PresentValue,
+                NetBookValue = lease.PresentValue,
+                DepreciationMethod = DepreciationMethod.StraightLine,
+                DepreciationConvention = DepreciationConvention.FullMonth,
+                UsefulLifeMonths = usefulLifeMonths,
+                ResidualValue = 0m,
+                Status = FixedAssetStatus.Active,
+                FunctionalCurrencyCode = lease.FunctionalCurrencyCode!,
+                SourceDocumentType = RecognitionProducer.Definition.DocumentType,
+                SourceDocumentId = lease.Id,
+                SourceDocumentLineId = rouSourceLineId,
+                JournalEntryId = recognition.JournalEntryId,
+                PostingEventId = recognition.PostingEventId,
+                CapitalizedAt = postingEvent.PostedAt ?? DateTime.UtcNow,
+                CapitalizationApprovalWorkflowInstanceId = lease.ActivationWorkflowInstanceId,
+                CapitalizationApprovalSubmittedByUserId = lease.ActivationSubmittedByUserId,
+                CapitalizationApprovalSubmittedAt = lease.ActivationSubmittedAtUtc,
+                CapitalizationApprovalApprovedByUserId = approvedByUserId,
+                CapitalizationApprovalApprovedAt = workflow.CompletedDate,
+                CreatedBy = UserName
+            };
+            foreach (var book in representationBooks)
+            {
+                var journal = journalByBook[book.Id].Single();
+                var cost = representationCosts[book.Id];
+                asset.BookValues.Add(new FixedAssetBookValue
+                {
+                    TenantId = TenantId,
+                    AccountingBookId = book.Id,
+                    BookClassification = book.Code,
+                    AcquisitionCost = cost,
+                    AccumulatedDepreciation = 0m,
+                    NetBookValue = cost,
+                    ResidualValue = 0m,
+                    UsefulLifeMonths = usefulLifeMonths,
+                    RemainingUsefulLifeMonths = usefulLifeMonths,
+                    DepreciationMethod = DepreciationMethod.StraightLine,
+                    DepreciationConvention = DepreciationConvention.FullMonth,
+                    PlacedInServiceDate = lease.StartDate,
+                    CapitalizationDate = lease.StartDate,
+                    CapitalizationJournalEntryId = journal.Id,
+                    CapitalizationPostingEventId = recognition.PostingEventId,
+                    OpeningSource = "LeaseRecognition",
+                    SourceDocumentType = RecognitionProducer.Definition.DocumentType,
+                    SourceDocumentId = lease.Id,
+                    SourceDocumentLineId = rouSourceLineId,
+                    CreatedBy = UserName
+                });
+                asset.Transactions.Add(new AssetTransaction
+                {
+                    TenantId = TenantId,
+                    AccountingBookId = book.Id,
+                    BookClassification = book.Code,
+                    TransactionDate = lease.StartDate,
+                    TransactionType = "LeaseRecognition",
+                    Description = $"Approved ROU recognition for lease {lease.ContractNumber}",
+                    Amount = cost,
+                    ResultingBookValue = cost,
+                    RelatedEntityId = journal.Id,
+                    PerformedByUserId = approvedByUserId,
+                    CreatedBy = UserName
+                });
+            }
+
+            _context.FixedAssets.Add(asset);
+            lease.RouAssetId = asset.Id;
+            lease.RecognitionPostingEventId = recognition.PostingEventId;
+            lease.RecognitionJournalEntryId = recognition.JournalEntryId;
+            lease.ActivationApprovedByUserId = approvedByUserId;
+            lease.ActivationApprovedAtUtc = workflow.CompletedDate;
+            lease.Status = LeaseStatus.Active;
+            lease.UpdatedAt = DateTime.UtcNow;
+            lease.UpdatedBy = UserName;
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        private async Task<(FixedAssetCategory Category, AccountingBook PrimaryBook, string Currency)>
+            ResolveRecognitionProposalAsync(
+                DateTime commencementDate,
+                FinanceSettings settings,
+                CancellationToken cancellationToken)
+        {
+            var category = await _context.FixedAssetCategories.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.TenantId == TenantId && !item.IsDeleted && item.Code == "ROU",
+                    cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "An active fixed asset category with exact code 'ROU' is required before lease activation.");
+            if (category.AssetAccountId != settings.LeaseRouAssetAccountId)
+                throw new InvalidOperationException(
+                    "The ROU category asset account must match the configured lease ROU recognition account.");
+
+            var books = await _context.AccountingBooks.AsNoTracking().Where(book =>
+                    book.TenantId == TenantId && !book.IsDeleted && book.IsDefault && book.IsActive &&
+                    book.AllowsPosting && book.BookType == AccountingBookType.PrimaryFull &&
+                    book.LifecycleStatus == AccountingBookLifecycleStatus.Active)
+                .Take(2).ToListAsync(cancellationToken);
+            if (books.Count != 1)
+                throw new InvalidOperationException(
+                    "PRIMARY_BOOK_AUTHORITY_AMBIGUOUS: Exactly one active default PrimaryFull posting book is required.");
+            var book = books[0];
+            var currency = CanonicalBookCurrency(book);
+            if (!string.Equals(currency, settings.BaseCurrency?.Trim().ToUpperInvariant(), StringComparison.Ordinal))
+                throw new InvalidOperationException("The primary accounting book and tenant functional-currency authority do not agree.");
+            await ValidateRecognitionAccountsAsync(
+                settings.LeaseRouAssetAccountId!.Value,
+                settings.LeaseLiabilityAccountId!.Value,
+                settings.LeaseInterestExpenseAccountId!.Value,
+                cancellationToken);
+            await ValidateOpenTenantPeriodAsync(commencementDate, cancellationToken);
+            return (category, book, currency);
+        }
+
+        private async Task<(FixedAssetCategory Category, AccountingBook PrimaryBook, List<AccountingBook> RepresentationBooks)>
+            ValidateFrozenRecognitionAuthorityAsync(LeaseContract lease, CancellationToken cancellationToken)
+        {
+            if (!lease.AccountingBookId.HasValue || string.IsNullOrWhiteSpace(lease.AccountingBookCode) ||
+                string.IsNullOrWhiteSpace(lease.FunctionalCurrencyCode) || !lease.RouAssetAccountId.HasValue ||
+                !lease.LeaseLiabilityAccountId.HasValue || !lease.InterestExpenseAccountId.HasValue)
+                throw new InvalidOperationException("The approved lease recognition proposal is incomplete.");
+
+            var primary = await _context.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(book =>
+                book.TenantId == TenantId && !book.IsDeleted && book.Id == lease.AccountingBookId &&
+                book.IsDefault && book.IsActive && book.AllowsPosting &&
+                book.BookType == AccountingBookType.PrimaryFull &&
+                book.LifecycleStatus == AccountingBookLifecycleStatus.Active,
+                cancellationToken)
+                ?? throw new InvalidOperationException("The approved primary-book authority is no longer eligible for posting.");
+            var primaryCurrency = CanonicalBookCurrency(primary);
+            if (primary.Code != lease.AccountingBookCode || primaryCurrency != lease.FunctionalCurrencyCode)
+                throw new InvalidOperationException("The approved lease book code or currency no longer matches its authority.");
+
+            var category = await _context.FixedAssetCategories.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.TenantId == TenantId && !item.IsDeleted && item.Code == "ROU",
+                    cancellationToken)
+                ?? throw new InvalidOperationException("The governed ROU asset category is unavailable.");
+            if (category.AssetAccountId != lease.RouAssetAccountId)
+                throw new InvalidOperationException("The governed ROU category no longer matches the approved recognition account.");
+            await ValidateRecognitionAccountsAsync(
+                lease.RouAssetAccountId.Value,
+                lease.LeaseLiabilityAccountId.Value,
+                lease.InterestExpenseAccountId.Value,
+                cancellationToken);
+            await ValidateOpenTenantPeriodAsync(lease.StartDate, cancellationToken);
+
+            var parallelBooks = await _context.AccountingBooks.AsNoTracking().Where(book =>
+                    book.TenantId == TenantId && !book.IsDeleted && book.IsActive && book.AllowsPosting &&
+                    book.LifecycleStatus == AccountingBookLifecycleStatus.Active &&
+                    book.BookType == AccountingBookType.ParallelFull && book.BaseAccountingBookId == primary.Id &&
+                    book.ReplicationStartDate.HasValue && book.ReplicationStartDate.Value.Date <= lease.StartDate.Date)
+                .OrderBy(book => book.Code)
+                .ToListAsync(cancellationToken);
+            foreach (var book in parallelBooks)
+                _ = CanonicalBookCurrency(book);
+            var representationBooks = new List<AccountingBook> { primary };
+            representationBooks.AddRange(parallelBooks);
+            return (category, primary, representationBooks);
+        }
+
+        private async Task ValidateRecognitionAccountsAsync(
+            Guid rouAccountId,
+            Guid liabilityAccountId,
+            Guid interestAccountId,
+            CancellationToken cancellationToken)
+        {
+            var ids = new[] { rouAccountId, liabilityAccountId, interestAccountId };
+            var count = await _context.Accounts.AsNoTracking().CountAsync(item =>
+                item.TenantId == TenantId && !item.IsDeleted && ids.Contains(item.Id), cancellationToken);
+            if (count != ids.Distinct().Count())
+                throw new InvalidOperationException("Every approved lease recognition account must be an active tenant account.");
+        }
+
+        private async Task ValidateOpenTenantPeriodAsync(DateTime date, CancellationToken cancellationToken)
+        {
+            var dateOnly = date.Date;
+            var periodCount = await _context.FiscalPeriods.AsNoTracking().CountAsync(item =>
+                item.TenantId == TenantId && !item.IsDeleted &&
+                item.StartDate <= dateOnly && item.EndDate >= dateOnly &&
+                item.PeriodStatus == "Open" && item.IsOpen && !item.IsLocked,
+                cancellationToken);
+            if (periodCount != 1)
+                throw new InvalidOperationException("The lease commencement date must have exactly one governed open tenant fiscal period.");
+        }
+
+        private static string CanonicalBookCurrency(AccountingBook book)
+        {
+            if (string.IsNullOrWhiteSpace(book.Code) ||
+                !string.Equals(book.Code, book.Code.Trim().ToUpperInvariant(), StringComparison.Ordinal))
+                throw new InvalidOperationException("An accounting-book code is unavailable or noncanonical.");
+            var currency = book.FunctionalCurrencyCode?.Trim().ToUpperInvariant();
+            if (currency?.Length != 3 || !string.Equals(book.FunctionalCurrencyCode, currency, StringComparison.Ordinal))
+                throw new InvalidOperationException($"Accounting book '{book.Code}' has no canonical functional currency.");
+            return currency;
         }
 
         // ── Prepare canonical AP payable ─────────────────────────────────
@@ -561,6 +878,11 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             PresentValue = l.PresentValue,
             Status = l.Status,
             RouAssetId = l.RouAssetId,
+            ActivationWorkflowInstanceId = l.ActivationWorkflowInstanceId,
+            ActivationSubmittedByUserId = l.ActivationSubmittedByUserId,
+            ActivationSubmittedAtUtc = l.ActivationSubmittedAtUtc,
+            ActivationApprovedByUserId = l.ActivationApprovedByUserId,
+            ActivationApprovedAtUtc = l.ActivationApprovedAtUtc,
             CreatedAt = l.CreatedAt,
             CreatedBy = l.CreatedBy,
             UpdatedAt = l.UpdatedAt,

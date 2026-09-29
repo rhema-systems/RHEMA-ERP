@@ -512,6 +512,7 @@ public static class FinancePermissionPolicyMap
         => action switch
         {
             "PreparePeriodPayable" => One(FinancePermissions.CreateApInvoices),
+            "Activate" => One(FinancePermissions.ManageFixedAssets),
             _ => IsRead(action, methods) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.ManageFixedAssets)
         };
 

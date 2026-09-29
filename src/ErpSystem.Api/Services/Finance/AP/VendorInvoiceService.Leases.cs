@@ -400,7 +400,8 @@ public partial class VendorInvoiceService
             recognition.JournalEntry.SourceDocumentType != "LeaseRecognition" ||
             recognition.JournalEntry.SourceDocumentId != lease.Id ||
             recognition.JournalEntry.AccountingBookId != lease.AccountingBookId ||
-            recognition.JournalEntry.BookClassification != lease.AccountingBookCode)
+            recognition.JournalEntry.BookClassification != lease.AccountingBookCode ||
+            recognition.JournalEntry.EntryDate.Date != lease.StartDate.Date)
             throw new InvalidOperationException(
                 "LEASE_AUTHORITY_REMEDIATION_REQUIRED: the original posted recognition journal is unavailable, reversed or inconsistent.");
         var rouSource = FinanceSourceLineIdentity.Create(lease.Id, "ROU-ASSET", lease.Id);
@@ -463,6 +464,7 @@ public partial class VendorInvoiceService
                 item.JournalEntry.SourceDocumentType == "LeaseRecognition" &&
                 item.JournalEntry.SourceDocumentId == lease.Id &&
                 item.JournalEntry.PostingStatus == "Posted" &&
+                item.JournalEntry.EntryDate.Date == lease.StartDate.Date &&
                 item.JournalEntry.ReplicatedFromJournalEntryId == null &&
                 !item.JournalEntry.IsReversed && !item.JournalEntry.ReversalJournalEntryId.HasValue)
             .Include(item => item.JournalEntry).Take(2).ToListAsync(ct);
@@ -530,6 +532,12 @@ public partial class VendorInvoiceService
                     foreach (var period in postedPeriods)
                     {
                         var postingEvent = periodEvents.Single(item => item.SourceDocumentId == period.Id);
+                        if (postingEvent.JournalEntry == null ||
+                            postingEvent.JournalEntry.EntryDate.Date != period.PeriodDate.Date)
+                        {
+                            exact = false;
+                            break;
+                        }
                         var sourceId = FinanceSourceLineIdentity.Create(period.Id, "INTEREST", lease.Id, period.Id);
                         var matches = transactions.Where(item =>
                             item.JournalEntryId == postingEvent.JournalEntryId &&

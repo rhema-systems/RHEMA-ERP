@@ -102,6 +102,7 @@ public class FinanceApprovalsController : ControllerBase
     private readonly IProcurementInvoicePaymentSodService? _invoicePaymentSod;
     private readonly IVendorPaymentService? _vendorPaymentService;
     private readonly IFinanceBudgetControlService? _budgetControl;
+    private readonly ILeaseAccountingService? _leaseAccountingService;
 
     public FinanceApprovalsController(
         ApplicationDbContext db,
@@ -118,7 +119,8 @@ public class FinanceApprovalsController : ControllerBase
         IFinanceAuditService? financeAuditService = null,
         IProcurementInvoicePaymentSodService? invoicePaymentSod = null,
         IVendorPaymentService? vendorPaymentService = null,
-        IFinanceBudgetControlService? budgetControl = null)
+        IFinanceBudgetControlService? budgetControl = null,
+        ILeaseAccountingService? leaseAccountingService = null)
     {
         _db = db;
         _currentUserService = currentUserService;
@@ -135,6 +137,7 @@ public class FinanceApprovalsController : ControllerBase
         _invoicePaymentSod = invoicePaymentSod;
         _vendorPaymentService = vendorPaymentService;
         _budgetControl = budgetControl;
+        _leaseAccountingService = leaseAccountingService;
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -2121,7 +2124,11 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("LeaseContract"))
         {
-            await UpdateIfFoundAsync(_db.LeaseContracts, tenantId, entityId, item => item.Status = LeaseStatus.Active, cancellationToken);
+            if (_leaseAccountingService == null)
+                throw new InvalidOperationException(
+                    "Lease activation completion service is not configured; approval cannot mutate the ledger.");
+            await _leaseAccountingService.CompleteApprovedActivationAsync(
+                entityId, userId, cancellationToken);
         }
     }
 

@@ -60,6 +60,7 @@ public class LeaseAccountingController : ControllerBase
     }
 
     [HttpPost("{id}/activate")]
+    [Authorize(Policy = FinancePermissions.ManageFixedAssets)]
     public async Task<ActionResult<LeaseContractDetailDto>> Activate(
         Guid id,
         [FromBody] ActivateLeaseDto? dto = null,

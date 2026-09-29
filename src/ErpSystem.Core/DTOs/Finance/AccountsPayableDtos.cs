@@ -663,6 +663,9 @@ public class VendorPaymentDto
     public Guid? PaymentBatchId { get; set; }
     public string? PaymentBatchNumber { get; set; }
     public Guid? JournalEntryId { get; set; }
+    public Guid? AccountingBookId { get; set; }
+    public string? AccountingBookCode { get; set; }
+    public string? FunctionalCurrencyCode { get; set; }
     public Guid? ReversalJournalEntryId { get; set; }
     public Guid? ReversalPostingEventId { get; set; }
     public DateTime? ReversalDate { get; set; }

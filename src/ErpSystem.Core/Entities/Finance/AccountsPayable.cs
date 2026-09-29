@@ -618,6 +618,14 @@ public class VendorPayment : TenantEntity
     /// </summary>
     public Guid? ExchangeRateId { get; set; }
 
+    /// <summary>
+    /// Exact accounting-book authority inherited from the posted invoices settled by this
+    /// payment. It is frozen before the first payment journal and reused by FX and reversals.
+    /// </summary>
+    public Guid? AccountingBookId { get; set; }
+    [MaxLength(20)] public string? AccountingBookCode { get; set; }
+    [MaxLength(3)] public string? FunctionalCurrencyCode { get; set; }
+
     // ── Bank Details ────────────────────────────────────────────────────
 
     public Guid? BankAccountId { get; set; }

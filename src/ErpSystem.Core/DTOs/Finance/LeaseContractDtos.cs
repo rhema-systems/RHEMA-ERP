@@ -41,6 +41,11 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? CreatedBy { get; set; }
         public DateTime? UpdatedAt { get; set; }
         public string? UpdatedBy { get; set; }
+        public Guid? ActivationWorkflowInstanceId { get; set; }
+        public Guid? ActivationSubmittedByUserId { get; set; }
+        public DateTime? ActivationSubmittedAtUtc { get; set; }
+        public Guid? ActivationApprovedByUserId { get; set; }
+        public DateTime? ActivationApprovedAtUtc { get; set; }
         public List<LeaseScheduleLineDto> ScheduleLines { get; set; } = new();
         public FinanceSourceDocumentDimensionDto? RecognitionFinanceDimensions { get; set; }
     }

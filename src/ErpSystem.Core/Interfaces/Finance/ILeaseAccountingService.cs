@@ -18,12 +18,21 @@ public interface ILeaseAccountingService
     Task<LeaseContractDetailDto> CreateLeaseAsync(CreateLeaseContractDto dto);
 
     /// <summary>
-    /// Activate the lease: create the ROU FixedAsset + post recognition GL journal
-    /// (DR ROU Asset, CR Lease Liability)
+    /// Submit the immutable lease-recognition proposal to the shared Finance workflow.
+    /// No GL or asset mutation occurs until an independent final approval.
     /// </summary>
     Task<LeaseContractDetailDto> ActivateLeaseAsync(
         Guid leaseId,
         ActivateLeaseDto? dto = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Completes an independently approved activation inside the shared approval transaction.
+    /// This is not a public maker action.
+    /// </summary>
+    Task<LeaseContractDetailDto> CompleteApprovedActivationAsync(
+        Guid leaseId,
+        Guid approvedByUserId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
