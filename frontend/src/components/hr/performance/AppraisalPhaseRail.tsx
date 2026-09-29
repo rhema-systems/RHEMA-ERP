@@ -17,8 +17,9 @@ import type { AppraisalSettings } from '@/types/hr/appraisal';
  *
  * Steps a cycle does not require are dropped rather than shown greyed: a cycle with no peer
  * reviews never reports `PeerEvaluation`, so leaving it on the rail would imply the appraisal
- * is stuck at a step it will never reach. Pass `settings` to prune; without it every step is
- * shown, which is the honest fallback when the settings have not loaded.
+ * is stuck at a step it will never reach. Pass `settings` to prune — and to put HR review ahead
+ * of calibration when the cycle runs it first; without them every step is shown in the default
+ * order, which is the honest fallback when the settings have not loaded.
  */
 export function AppraisalPhaseRail({
   phase,
@@ -29,7 +30,7 @@ export function AppraisalPhaseRail({
   settings?: AppraisalSettings | null;
   className?: string;
 }) {
-  const steps = APPRAISAL_PHASE_ORDER.filter((p) => appliesTo(p, settings));
+  const steps = orderFor(settings).filter((p) => appliesTo(p, settings));
   const currentIndex = phase ? steps.indexOf(phase) : -1;
 
   return (
@@ -75,20 +76,34 @@ export function AppraisalPhaseRail({
   );
 }
 
+/** The display order, with HR review ahead of calibration when the cycle runs it first. */
+function orderFor(settings?: AppraisalSettings | null): AppraisalPhase[] {
+  if (settings?.hrReviewTiming !== 'BeforeCalibration') return APPRAISAL_PHASE_ORDER;
+  return APPRAISAL_PHASE_ORDER.map((p) =>
+    p === 'Calibration' ? 'HRReview' : p === 'HRReview' ? 'Calibration' : p,
+  );
+}
+
 /**
- * Mirrors the server's own gate conditions in `AppraisalWorkflowService.GetCurrentPhase`. Kept
- * in step with it: a phase the server can never report should not be on the rail.
+ * Mirrors the server's pipeline (`AppraisalGates.Pipeline`). Kept in step with it: a phase the
+ * server can never report should not be on the rail.
  */
 function appliesTo(phase: AppraisalPhase, settings?: AppraisalSettings | null): boolean {
   if (!settings) return true;
 
   switch (phase) {
     case 'GoalSetting':
-      return settings.requireGoalSetting;
-    case 'SelfEvaluation':
-      return settings.requireSelfEvaluation;
+      // The kick-off and mid-year conversations are held at the goal-setting step.
+      return (
+        settings.requireGoalSetting ||
+        settings.requireKickOffConversation ||
+        settings.requireMidYearConversation
+      );
+    case 'PeerNomination':
     case 'PeerEvaluation':
       return settings.requirePeerReviews && settings.minPeerEvaluators > 0;
+    case 'SelfEvaluation':
+      return settings.requireSelfEvaluation;
     case 'ManagerEvaluation':
       return settings.requireManagerEvaluation;
     case 'Calibration':
@@ -96,7 +111,13 @@ function appliesTo(phase: AppraisalPhase, settings?: AppraisalSettings | null): 
     case 'HRReview':
       return settings.requireHRReview;
     case 'EmployeeReview':
-      return settings.requireEmployeeAcknowledgment;
+      // The final conversation and the acknowledgment. The conversation is a step unless the
+      // acknowledgment may go ahead without it.
+      return (
+        settings.requireEmployeeAcknowledgment ||
+        (settings.requireFinalConversation &&
+          !(settings.requireEmployeeAcknowledgment && settings.allowAcknowledgmentWithoutConversation))
+      );
     case 'Closed':
       return true;
     default:

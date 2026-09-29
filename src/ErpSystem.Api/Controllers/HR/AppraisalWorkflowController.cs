@@ -57,8 +57,9 @@ public class AppraisalWorkflowController : ControllerBase
     }
 
     /// <summary>
-    /// Get the current fine-grained lifecycle phase for an appraisal.
-    /// The phase is computed from live entity state and is NOT persisted.
+    /// Where an appraisal is: the coarse phase for the progress rail, and the step within it — the
+    /// same step (and name) the HR dashboard shows and a refused write names. Computed from live
+    /// state by the gates; NOT persisted.
     /// </summary>
     [HttpGet("{appraisalId:guid}/phase")]
     [ProducesResponseType(typeof(AppraisalPhaseResponse), StatusCodes.Status200OK)]
@@ -70,8 +71,8 @@ public class AppraisalWorkflowController : ControllerBase
 
         try
         {
-            var phase = await _workflowService.GetCurrentPhaseAsync(appraisalId, cancellationToken);
-            return Ok(new AppraisalPhaseResponse(appraisalId, phase));
+            var step = await _workflowService.GetCurrentStepAsync(appraisalId, cancellationToken);
+            return Ok(new AppraisalPhaseResponse(appraisalId, step.Phase, step.SubStatus, step.StepLabel, step.Block.Reason));
         }
         catch (ArgumentException ex)
         {
@@ -145,8 +146,12 @@ public class AppraisalWorkflowController : ControllerBase
     }
 }
 
-/// <summary>Response for the current appraisal phase query</summary>
-public record AppraisalPhaseResponse(Guid AppraisalId, AppraisalPhase Phase);
+/// <summary>
+/// Response for the current appraisal phase query: the rail's phase, the step within it, the
+/// step's display name, and why the appraisal has not passed it (null once it is complete).
+/// </summary>
+public record AppraisalPhaseResponse(
+    Guid AppraisalId, AppraisalPhase Phase, AppraisalSubStatus SubStatus, string StepLabel, string? Reason);
 
 /// <summary>Response for the role-based editability query</summary>
 public record AppraisalEditableResponse(Guid AppraisalId, string Role, bool IsEditable);

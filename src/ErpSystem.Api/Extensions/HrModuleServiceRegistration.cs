@@ -485,6 +485,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ITalentRatingSyncService, TalentRatingSyncService>();
         // The appraisal's score in one place — the only writer of OverallScore (performance closure lane A).
         services.AddScoped<IAppraisalScoreService, AppraisalScoreService>();
+        // The appraisal pipeline's one gate evaluator, and the status it implies (performance closure lane B1).
+        services.AddScoped<IAppraisalLifecycleService, AppraisalLifecycleService>();
         services.AddScoped<IAppraisalOutcomeService, AppraisalOutcomeService>();
         services.AddScoped<IOutcomeRecommendationHandler, SuccessionNominationHandler>();
         services.AddScoped<IOutcomeRecommendationHandler, TrainingRequestHandler>();

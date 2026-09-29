@@ -1566,9 +1566,10 @@ public enum AppraisalScoreChangeSource
 
 /// <summary>
 /// Fine-grained sub-status of an appraisal within its lifecycle, derived from entity state and
-/// settings flags by <see cref="AppraisalSubStatusResolver"/>.
+/// settings flags by <c>AppraisalGates.Resolve</c> (performance closure B1).
 /// Used as the "current stuck step" identifier when HR manually advances a stalled pipeline.
-/// NOT persisted — always derived on demand.
+/// NOT persisted — always derived on demand. The advance log stores the name as text, so members
+/// are only ever appended.
 /// </summary>
 public enum AppraisalSubStatus
 {
@@ -1599,11 +1600,15 @@ public enum AppraisalSubStatus
     // ── Terminal ───────────────────────────────────
     Completed = 14,
     Closed = 15,
+
+    /// <summary>The appraisal was withdrawn from the cycle (D-10) — it is not being appraised.</summary>
+    Withdrawn = 16,
 }
 
 /// <summary>
-/// Fine-grained workflow phase computed dynamically from appraisal data.
-/// NOT persisted to the database — derive on demand via <c>IAppraisalWorkflowService.GetCurrentPhase</c>.
+/// Coarse workflow phase computed dynamically from appraisal data — the progress rail's steps.
+/// NOT persisted to the database — derived from the gates' sub-status (<c>AppraisalGates.ToPhase</c>).
+/// Members are appended, never renumbered: the order they run in is the rail's to decide.
 /// </summary>
 public enum AppraisalPhase
 {
@@ -1630,6 +1635,9 @@ public enum AppraisalPhase
 
     /// <summary>All steps complete — appraisal is in a terminal phase.</summary>
     Closed = 8,
+
+    /// <summary>Awaiting the peer nominations the cycle requires. Runs after goal setting, before the self-evaluation.</summary>
+    PeerNomination = 9,
 }
 
 public enum DevelopmentPlanStatus

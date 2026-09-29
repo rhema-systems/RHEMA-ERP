@@ -25,6 +25,7 @@ public class CalibrationSessionService : ICalibrationSessionService
     private readonly IGenericRepository<AppraisalGradeDefinition> _gradeDefinitionRepository;
     private readonly IGenericRepository<PerformanceAppraisalCriterionConfig> _criterionConfigRepository;
     private readonly IAppraisalScoreService _scores;
+    private readonly IAppraisalLifecycleService _lifecycle;
     private readonly IAppraisalNotificationService _notifications;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
@@ -42,6 +43,7 @@ public class CalibrationSessionService : ICalibrationSessionService
         IGenericRepository<AppraisalGradeDefinition> gradeDefinitionRepository,
         IGenericRepository<PerformanceAppraisalCriterionConfig> criterionConfigRepository,
         IAppraisalScoreService scores,
+        IAppraisalLifecycleService lifecycle,
         IAppraisalNotificationService notifications,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
@@ -58,6 +60,7 @@ public class CalibrationSessionService : ICalibrationSessionService
         _gradeDefinitionRepository = gradeDefinitionRepository;
         _criterionConfigRepository = criterionConfigRepository;
         _scores = scores;
+        _lifecycle = lifecycle;
         _notifications = notifications;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
@@ -801,6 +804,9 @@ public class CalibrationSessionService : ICalibrationSessionService
 
         var result = new CalibrationApplyResultDto();
 
+        // Where each appraisal is, by the same gates every other write is held to (B1).
+        var gateStates = await _lifecycle.GetStatesAsync(scopedIds, cancellationToken);
+
         foreach (var appraisal in scoped)
         {
             byAppraisal.TryGetValue(appraisal.Id, out var forThis);
@@ -814,9 +820,17 @@ public class CalibrationSessionService : ICalibrationSessionService
             var overallAdjustment = forThis.FirstOrDefault(a => a.IsOverall && a.AdjustedScore.HasValue);
             var adjustedHere = itemAdjustments.Count > 0 || overallAdjustment != null;
 
-            var skip = CalibrationSkipReason(appraisal, adjustedHere);
+            gateStates.TryGetValue(appraisal.Id, out var gateState);
+            var skip = CalibrationSkipReason(appraisal, gateState, adjustedHere);
             if (skip != null)
             {
+                // Opening the session linked every appraisal in its scope to it; one it does not
+                // calibrate leaves with the commit. The link is what reads as "in a calibration
+                // session", and it pinned a skipped appraisal to a panel that had already sat — the
+                // next session's opening never took it, since it was linked already.
+                if (appraisal.CalibrationSessionId == sessionId && !appraisal.IsCalibrated)
+                    appraisal.CalibrationSessionId = null;
+
                 result.Skipped.Add(new CalibrationSkippedAppraisalDto
                 {
                     AppraisalId = appraisal.Id,
@@ -857,7 +871,16 @@ public class CalibrationSessionService : ICalibrationSessionService
             // rating to the talent pools (A7).
             var settled = await _scores.SettleAsync(appraisal.Id, AppraisalScoreChangeSource.Calibration, publish: true, cancellationToken);
             if (settled.ScoreBefore != settled.ScoreAfter) result.ScoresChanged++;
+
+            // The commit can be the step that completes the appraisal — calibration last, with no HR
+            // review or acknowledgment after it — which left it in Governance for good: nothing but
+            // HR's advance ever moved it on. The gates decide now, and completion settles again in the
+            // same save and publishes (B1).
+            await _lifecycle.SyncAsync(appraisal.Id, AppraisalScoreChangeSource.Calibration, publish: true, cancellationToken);
         }
+
+        // The skipped appraisals' released links, when no settle after them saved them.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
             "Calibration session {SessionId} committed by {AppliedById}: {Adjustments} adjustment(s), {Changed} score(s) changed, {Calibrated} appraisal(s) calibrated, {Skipped} skipped",
@@ -867,22 +890,44 @@ public class CalibrationSessionService : ICalibrationSessionService
     }
 
     /// <summary>
-    /// Why the commit leaves an appraisal in the session's scope alone, or null when it is at the
-    /// calibration step: in governance (its manager has submitted), or final with an adjustment
-    /// from this session.
+    /// Why the commit leaves an appraisal in the session's scope alone, or null when it calibrates
+    /// it: at the calibration step by the gates (B1); already calibrated and adjusted again by this
+    /// session before it is final — a later panel restating it (lane A); or final with an adjustment
+    /// from this session (A7).
+    ///
+    /// <para>It calibrated any appraisal in Governance. With HR's review before calibration that
+    /// took appraisals HR had not reviewed yet, and on a cycle with no calibration step it stamped
+    /// appraisals calibrated that no gate would ever ask about.</para>
     /// </summary>
-    private static string? CalibrationSkipReason(PerformanceAppraisal appraisal, bool adjustedHere) => appraisal.Status switch
+    private static string? CalibrationSkipReason(PerformanceAppraisal appraisal, AppraisalGateState? state, bool adjustedHere)
     {
-        AppraisalStatus.Governance => null,
-        AppraisalStatus.Completed or AppraisalStatus.Closed => adjustedHere
-            ? null
-            : "Already final, and this session made no adjustment to it.",
-        AppraisalStatus.Draft or AppraisalStatus.Active =>
-            "Not at the calibration step: the manager has not submitted the evaluation.",
-        AppraisalStatus.Appealed => "Under appeal: the appeal decides its score.",
-        AppraisalStatus.Withdrawn => "Withdrawn: it is not being appraised.",
-        _ => $"Not at the calibration step ({appraisal.Status}).",
-    };
+        switch (appraisal.Status)
+        {
+            case AppraisalStatus.Completed or AppraisalStatus.Closed:
+                return adjustedHere ? null : "Already final, and this session made no adjustment to it.";
+            case AppraisalStatus.Appealed:
+                return "Under appeal: the appeal decides its score.";
+            case AppraisalStatus.Withdrawn:
+                return "Withdrawn: it is not being appraised.";
+        }
+
+        if (state == null)
+            return "Its cycle's appraisal settings could not be read.";
+
+        if (AppraisalGates.Check(state.Block, AppraisalSubStatus.PendingCalibration))
+            return null;
+
+        if (appraisal.IsCalibrated && adjustedHere
+            && AppraisalGates.ExpectedMajorStatus(state.SubStatus) == AppraisalStatus.Governance)
+            return null;
+
+        if (!state.Settings.RequireCalibration)
+            return $"This cycle does not require calibration (it is at {state.StepLabel}).";
+
+        return state.Block.Reason is { Length: > 0 } reason
+            ? $"Not at the calibration step: it is at {state.StepLabel} — {reason}."
+            : $"Not at the calibration step: it is at {state.StepLabel}.";
+    }
 
     /// <summary>
     /// Writes item-level panel decisions onto the manager's criterion scores. A criterion the

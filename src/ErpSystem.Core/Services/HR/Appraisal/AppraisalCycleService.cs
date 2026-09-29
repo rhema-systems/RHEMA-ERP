@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -29,6 +30,7 @@ public class AppraisalCycleService : IAppraisalCycleService
     private readonly IGenericRepository<CheckIn> _checkInRepository;
     private readonly IEffectiveAppraisalConfigurationService _effectiveConfigService;
     private readonly IAppraisalNotificationService _notificationService;
+    private readonly IAppraisalLifecycleService _lifecycle;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<AppraisalCycleService> _logger;
@@ -48,6 +50,7 @@ public class AppraisalCycleService : IAppraisalCycleService
         IGenericRepository<CheckIn> checkInRepository,
         IEffectiveAppraisalConfigurationService effectiveConfigService,
         IAppraisalNotificationService notificationService,
+        IAppraisalLifecycleService lifecycle,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<AppraisalCycleService> logger)
@@ -66,6 +69,7 @@ public class AppraisalCycleService : IAppraisalCycleService
         _checkInRepository = checkInRepository;
         _effectiveConfigService = effectiveConfigService;
         _notificationService = notificationService;
+        _lifecycle = lifecycle;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -1045,7 +1049,7 @@ public class AppraisalCycleService : IAppraisalCycleService
             EmployeeAcknowledgeDeadline = cycle.EmployeeAcknowledgeDeadline,
 
             // Calculate current phase
-            CurrentPhase = DetermineCurrentPhase(cycle),
+            CurrentPhase = await DetermineCurrentPhaseAsync(appraisals, cancellationToken),
 
             // Progress metrics
             SelfEvaluationProgress = CalculateEvaluationProgress(evaluations, EvaluatorRole.Self, totalAppraisals, settings?.RequireSelfEvaluation ?? true),
@@ -1076,26 +1080,27 @@ public class AppraisalCycleService : IAppraisalCycleService
         return progress;
     }
 
-    private string DetermineCurrentPhase(AppraisalCycle cycle)
+    /// <summary>
+    /// Where most of the cycle's appraisals are: the step the gates put the largest number at, the
+    /// earlier step on a tie (B1). It was read off the calendar — the first deadline not yet passed —
+    /// so a cycle whose staff were all still setting goals read "Self Evaluation", and a cycle with
+    /// no deadlines set read "Completed" from the day it opened.
+    /// </summary>
+    private async Task<string> DetermineCurrentPhaseAsync(
+        IReadOnlyCollection<PerformanceAppraisal> appraisals, CancellationToken cancellationToken)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var inPlay = appraisals.Where(a => a.Status != AppraisalStatus.Withdrawn).Select(a => a.Id).ToList();
+        var states = await _lifecycle.GetStatesAsync(inPlay, cancellationToken);
+        if (states.Count == 0) return "Not started";
 
-        if (cycle.SelfEvaluationDeadline.HasValue && today <= cycle.SelfEvaluationDeadline.Value)
-            return "Self Evaluation";
+        var modal = states.Values
+            .GroupBy(s => AppraisalGates.StepOf(s.SubStatus))
+            .OrderByDescending(g => g.Count())
+            .ThenBy(g => (int)g.Key)
+            .First()
+            .Key;
 
-        if (cycle.PeerEvaluationDeadline.HasValue && today <= cycle.PeerEvaluationDeadline.Value)
-            return "Peer Evaluation";
-
-        if (cycle.ManagerEvaluationDeadline.HasValue && today <= cycle.ManagerEvaluationDeadline.Value)
-            return "Manager Evaluation";
-
-        if (cycle.HRReviewDeadline.HasValue && today <= cycle.HRReviewDeadline.Value)
-            return "HR Review";
-
-        if (cycle.EmployeeAcknowledgeDeadline.HasValue && today <= cycle.EmployeeAcknowledgeDeadline.Value)
-            return "Employee Acknowledgment";
-
-        return "Completed";
+        return AppraisalGates.Label(modal);
     }
 
     private ProgressMetricDto CalculateEvaluationProgress(List<EvaluatorEvaluation> evaluations, EvaluatorRole role, int totalAppraisals, bool isRequired)

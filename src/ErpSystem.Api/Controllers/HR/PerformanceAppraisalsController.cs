@@ -815,7 +815,7 @@ public class PerformanceAppraisalsController : ControllerBase
             saveDto.EmployeeId = employeeId;
 
             var response = await _appraisalService.SaveSelfEvaluationAsync(saveDto);
-            
+
             if (!response.Success)
             {
                 _logger.LogWarning("SaveSelfEvaluation returning 400 for appraisal {AppraisalId}: {Message}", appraisalId, response.Message);
@@ -823,6 +823,12 @@ public class PerformanceAppraisalsController : ControllerBase
             }
 
             return Ok(response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A submission refused by the pipeline — the appraisal is not at the self-evaluation
+            // step (performance closure B1). It used to fall to the catch-all below as a 500.
+            return BusinessRuleRejected(ex, "submitting the self-evaluation");
         }
         catch (Exception ex)
         {
@@ -1494,16 +1500,17 @@ public class PerformanceAppraisalsController : ControllerBase
     [ProducesResponseType(typeof(AppraisalAppealDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> SubmitAppeal(Guid id, [FromBody] SubmitAppealDto dto)
     {
         try
         {
             if (id != dto.AppraisalId)
                 return BadRequest(new { message = "Appraisal ID mismatch" });
-            
+
             var employeeId = _currentUserService.EmployeeId
                 ?? throw new UnauthorizedAccessException("Employee record not linked to current user");
-            
+
             var appeal = await _appraisalService.SubmitAppealAsync(dto, employeeId);
             return Ok(appeal);
         }
@@ -1517,7 +1524,9 @@ public class PerformanceAppraisalsController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { message = ex.Message });
+            // Appeals disabled, the window closed, not completed, already appealed — rules, answered
+            // 422 like every gated appraisal write (performance closure B1).
+            return BusinessRuleRejected(ex, "submitting an appeal");
         }
         catch (Exception ex)
         {

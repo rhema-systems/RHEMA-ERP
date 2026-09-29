@@ -29,6 +29,7 @@ import type {
   AppraisalSettings,
   PeerNominationMode,
 } from './appraisal';
+import type { AppraisalSubStatus } from './outcomes';
 
 // ── Enums ────────────────────────────────────────────────────────────────────────
 
@@ -52,10 +53,12 @@ export type AppraisalStatus =
 
 /**
  * The computed step. Derived from what has actually been submitted plus the cycle's settings
- * flags, so a cycle that does not require peer reviews never reports `PeerEvaluation`.
+ * flags, so a cycle that does not require peer reviews never reports `PeerEvaluation`. The server
+ * maps its fine-grained step (`AppraisalSubStatus`) onto these — the phase endpoint carries both.
  */
 export type AppraisalPhase =
   | 'GoalSetting'
+  | 'PeerNomination'
   | 'SelfEvaluation'
   | 'PeerEvaluation'
   | 'ManagerEvaluation'
@@ -114,6 +117,7 @@ export const GOAL_PROGRESS_STATUS_OPTIONS = opts<GoalProgressStatus>([
 /** Human labels for the computed phase, for headers and progress rails. */
 export const APPRAISAL_PHASE_LABELS: Record<AppraisalPhase, string> = {
   GoalSetting: 'Goal setting',
+  PeerNomination: 'Peer nomination',
   SelfEvaluation: 'Self-evaluation',
   PeerEvaluation: 'Peer evaluation',
   ManagerEvaluation: 'Manager evaluation',
@@ -124,12 +128,13 @@ export const APPRAISAL_PHASE_LABELS: Record<AppraisalPhase, string> = {
 };
 
 /**
- * Phases in the order they run, for a progress rail. Calibration and HR review can swap
- * (`hrReviewTiming`), and any of them can be switched off in settings — this is the display
- * order, not a claim about which ones apply.
+ * Phases in the order they run, for a progress rail. Calibration and HR review swap when the
+ * cycle's `hrReviewTiming` is `BeforeCalibration` (the rail reorders them), and any of them can be
+ * switched off in settings — this is the display order, not a claim about which ones apply.
  */
 export const APPRAISAL_PHASE_ORDER: AppraisalPhase[] = [
   'GoalSetting',
+  'PeerNomination',
   'SelfEvaluation',
   'PeerEvaluation',
   'ManagerEvaluation',
@@ -235,6 +240,12 @@ export interface MyAppraisal {
 export interface AppraisalPhaseResponse {
   appraisalId: string;
   phase: AppraisalPhase;
+  /** The step within the phase — the one the HR dashboard shows and a refused write names. */
+  subStatus: AppraisalSubStatus;
+  /** The step's display name, e.g. "Self-Evaluation". */
+  stepLabel: string;
+  /** Why the appraisal has not passed the step; null once it is complete. */
+  reason?: string | null;
 }
 
 export interface AppraisalEditableResponse {

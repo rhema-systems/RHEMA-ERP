@@ -20,8 +20,17 @@ settings as a policy reference; this document says which of them the code obeys.
 >   `RequireCalibration` and `RequireHRReview` (now also decide when the outcome is released to the
 >   employee); `ShowSelfScoreToManager` is honoured on one more read, but its verdict stands — the
 >   manager's own form, the path this audit describes, is lane B2's. No verdict moved.
+> - **Lane B1** (one gate evaluator) **moved nine verdicts**. The two pipeline resolvers of
+>   Group 1 are one (`AppraisalGates`), and every write path — self, peer and manager submissions,
+>   the calibration commit, HR's sign-off, the acknowledgment, the appeal and HR's advance — is held
+>   to the step it puts the appraisal at. So the eight Group 1–3 settings below (#6–#13) and ghost 2
+>   (`AllowAcknowledgmentWithoutConversation`) now **refuse something**: all nine are *enforced*.
+>   Marked *"Since lane B1"*, and the section A rows whose mechanism changed are too. **The profile
+>   now: 45 enforced, 0 advisory, 2 client-side only, 1 ghost** (`ShowPeerScoresToManager`) — of 48.
+>   The client-side pair and the ghost are lane B2's.
 >
-> Line numbers below are as of 2026-09-17; lane A rewrote much of `PerformanceAppraisalService.cs`.
+> Line numbers below are as of 2026-09-17; lanes A and B1 rewrote much of `PerformanceAppraisalService.cs`,
+> and `AppraisalAdvanceHelpers.cs` is gone — its resolver is `AppraisalGates.cs`.
 
 ---
 
@@ -95,6 +104,13 @@ There is even a stranded XML comment referring to it on a different property
 (`PerformanceEntities.cs:574`), which is a documentation promise the code never kept.
 
 **Effect of switching it off: none.** The employee can always acknowledge.
+
+*Since lane B1 — enforced.* The final conversation is a step in the pipeline (`AppraisalGates`), and
+this switch decides whether it stands before the acknowledgment: **off**, the acknowledgment is refused
+(422, *"…is at Final Conversation — the final review conversation has not been held"*) until a
+FinalReview conversation is held; **on**, the employee may acknowledge first. With no acknowledgment
+step the switch has nothing to relax, so a required final conversation holds completion either way
+(`run-final-gates.mjs`, e1 and e2 both ways, e3).
 
 ### 3. `RequireDevelopmentPlanUpdate`
 
@@ -177,6 +193,11 @@ The module has **two** pipeline resolvers, with **different rule sets**:
 So the four conversation- and goal-governance settings below take effect **only** on the analytics
 dashboard and the manual-advance path — neither of which refuses anybody anything.
 
+> *Since lane B1:* **one resolver.** `AppraisalGates.Resolve` (`AppraisalGates.cs`) carries every gate
+> of the right-hand column, and the phase endpoint, the dashboard, the lists and every write path read
+> it through `AppraisalLifecycleService`. It counts goals by **employee and cycle** — the left column's
+> source, `appraisal.Goals`, missed any goal agreed before its appraisal was generated.
+
 #### 6. `RequireManagerGoalApproval`
 Single read: `AppraisalAdvanceHelpers.cs:50`. Neither `EmployeeGoalService` nor
 `GoalWorkflowCommandService` reads it (verified: zero occurrences in both files). A goal's lifecycle is
@@ -184,14 +205,31 @@ identical whether this is on or off — and `GetCurrentPhase:149` already treats
 Rejected goals as not-ready **regardless**, so turning it *off* does not let unapproved goals through
 the goal-setting phase either.
 
+*Since lane B1 — enforced.* **On**, the self-evaluation submit is refused while any of the employee's
+goals in the cycle is still a draft or waits for the manager's approval (*"…is at Goal Setting — one
+goal still waits for the manager's approval"*); **off**, every live goal counts towards the minimum as
+it stands. The goal's own lifecycle still ignores the switch — landing a submitted goal straight on
+Approved when it is off is lane B2's.
+
 #### 7. `RequireKickOffConversation` · 8. `RequireMidYearConversation`
 Single read each — `AppraisalAdvanceHelpers.cs:64` and `:68`. Nothing refuses an evaluation because a
 required conversation was never held.
+
+*Since lane B1 — enforced.* Both belong to the goal-setting step, where the old resolver kept them:
+the self-evaluation submit is refused until the required conversation is held, and the refusal names
+it (*"…the kick-off conversation has not been held"*). Lane B2 moves the mid-year one to hold the
+manager's submission instead of the employee's.
 
 #### 9. `RequireFinalConversation`
 Read at `AppraisalAdvanceHelpers.cs:153` and `:209` (the governance-status helper), plus the dashboard's
 deadline row (`HRCycleDashboardQueryService.cs:502`). **Acknowledgment does not check it** — which is
 also why its intended companion, `AllowAcknowledgmentWithoutConversation`, has nothing to switch.
+
+*Since lane B1 — enforced.* A step between HR's sign-off and the acknowledgment: the acknowledgment is
+refused until the FinalReview conversation is held (unless ghost 2 lets it go first), and on a cycle
+with no acknowledgment the appraisal waits in Governance until the conversation is held — holding it
+completes the appraisal and settles its score. HR's sign-off used to complete such an appraisal on the
+spot, conversation or not.
 
 #### 10. `MinGoalsPerEmployee`
 Reads: `AppraisalAdvanceHelpers.cs:45`, and `EmployeeGoalService.cs:550` where it computes
@@ -199,6 +237,10 @@ Reads: `AppraisalAdvanceHelpers.cs:45`, and `EmployeeGoalService.cs:550` where i
 references). Nothing refuses a self-evaluation submit, or a goal-set submission, for having too few
 goals. Its sibling `MaxGoalsPerEmployee` **is** hard-enforced (`EmployeeGoalService.cs:205-216`), so the
 pair is asymmetric.
+
+*Since lane B1 — enforced.* The self-evaluation submit is refused below the minimum (*"…1 of the 2 goals
+this cycle requires are set"*), counting the employee's live goals in the cycle whether or not they are
+linked to the appraisal. Surfacing `meetsMinGoalCount` in the manager's governance view is lane B2's.
 
 ### Group 2 — appeals
 
@@ -219,6 +261,11 @@ Also worth noting: the window is computed from **`cycle.EndDate + AppealWindowDa
 entity's own documentation says *"days after employee acknowledgment"*. Even the advisory figure is
 anchored to the wrong date.
 
+*Since lane B1 — both enforced.* One rule, `AppraisalGates.CanFileAppeal`, for the submit, the appeal
+page and the list row: Completed, no appeal yet, appeals on, and inside the window, which now runs
+from the **acknowledgment** (else HR's sign-off, else the last submission). `SubmitAppealAsync` refuses
+with a 422 that says which. The portal's button still keys off the status alone — lane I.
+
 ### Group 3 — read, but only into wording or sort order
 
 #### 13. `PeerEvaluationOpenMode`
@@ -234,6 +281,11 @@ Genuinely does two things, neither of which is a gate:
   consult the phase or this setting.
 
 **So in `AfterSelfEval` mode a peer is told to wait, and is not actually prevented from submitting.**
+
+*Since lane B1 — enforced.* The peer's draft and submission are held to the peer window
+(`AppraisalGates.PeerWindow`): from the self-evaluation step in `WithSelfEval`, from the peer step in
+`AfterSelfEval`, until the manager submits. A peer writing early in `AfterSelfEval` is refused with a
+422 naming the step; `IsEditableByRole` answers from the same window.
 
 #### 14. `IsManagerAuthoritative`
 Copied onto the manager's `EvaluatorEvaluation.IsAuthoritative` at generation
@@ -254,10 +306,10 @@ Grouped by what they actually do, with the strongest evidence line for each.
 | Setting | What it really does |
 |---|---|
 | `SelfEvaluationWeight` · `PeerEvaluationWeight` · `ManagerEvaluationWeight` | Written onto each `EvaluatorEvaluation.EvaluatorWeight` at generation (`AppraisalCycleService.cs:729,734`) and used as the role weights in the overall weighted mean |
-| `RequireSelfEvaluation` | Phase gate (`AppraisalWorkflowService.cs:163`); whether generation creates the self evaluator record (`AppraisalCycleService.cs:728`); **finalise refuses without it** (`PerformanceAppraisalService.cs:4363`) |
-| `RequireManagerEvaluation` | Phase gate (`:183`); generation (`AppraisalCycleService.cs:731`); **finalise refuses** (`:4366`); blocks progress-to-HR (`:3924`) |
-| `RequirePeerReviews` | Phase gate (`:173`); nomination ceiling check (`PeerNominationService.cs:211`); **self-eval submit rule** (`PerformanceAppraisalService.cs:1446`) |
-| `MinPeerEvaluators` | **Self-eval submit refused** outside the range (`:1449`); phase gate (`:178`); **finalise refused** — *"At least N peer reviews must be completed"* (`:4370`) |
+| `RequireSelfEvaluation` | Phase gate (`AppraisalWorkflowService.cs:163`); whether generation creates the self evaluator record (`AppraisalCycleService.cs:728`); **finalise refuses without it** (`PerformanceAppraisalService.cs:4363`). *Since lane B1:* a pipeline step the **manager's submission waits for** (decision 5 — HR's audited advance can waive it, leaving the employee's draft a draft); sign-off demands it only when this is on (it demanded it regardless) |
+| `RequireManagerEvaluation` | Phase gate (`:183`); generation (`AppraisalCycleService.cs:731`); **finalise refuses** (`:4366`); blocks progress-to-HR (`:3924`). *Since lane B1:* off, nothing waits for a manager — the submission that completes the last step before governance moves the appraisal on, a peer's included |
+| `RequirePeerReviews` | Phase gate (`:173`); nomination ceiling check (`PeerNominationService.cs:211`); **self-eval submit rule** (`PerformanceAppraisalService.cs:1446`). *Since lane B1:* two pipeline steps, **nominations** before the self-evaluation and **evaluations** before the manager's submission; sign-off demands the minimum only when this is on |
+| `MinPeerEvaluators` | **Self-eval submit refused** outside the range (`:1449`); phase gate (`:178`); **finalise refused** — *"At least N peer reviews must be completed"* (`:4370`). *Since lane B1:* the nomination step counts **live** nominations — pending ones included, rejected ones not — and the evaluation step submitted ones; the manager's submission waits for the second |
 | `MaxPeerEvaluators` | **Nomination refused** singly (`PeerNominationService.cs:211`) and in batch (`:399`) |
 | `PeerNominationMode` | Who may nominate (`PeerNominationService.cs:100`); who the approval is routed to (`:473`); whether the self-eval submit rule applies (`PerformanceAppraisalService.cs:1446`). *Since lane P:* line 100 was only ever the editing window; the mode now decides **who** — in Manager mode the appraisee is refused both nominate routes (`EnsureMayNominate`) — and every nomination records the login that made it (the batch recorded the appraisee whoever sent it) |
 | `AllowPeerKpiEvaluation` | Which items the peer form renders (`PeerEvaluationService.cs:199`) and **peer submit completeness** (`:321`) |
@@ -266,11 +318,11 @@ Grouped by what they actually do, with the strongest evidence line for each.
 ### The gates
 | Setting | What it really does |
 |---|---|
-| `RequireCalibration` | Phase gate (`AppraisalWorkflowService.cs:206`) **and the finalise refusal** (`PerformanceAppraisalService.cs:4378`). *Since lane A:* a commit lifts the gate only on appraisals at the calibration step (manager submitted); it used to stamp everyone in the session's scope, so an appraisal could pass the gate before any panel saw its score. *Since lane P:* also one of the two conditions of the employee's **outcome release** (see `RequireHRReview`) |
-| `RequireHRReview` | Phase gate; assigns the HR reviewer on manager submit (`:2604`); **refuses acknowledgment before sign-off** (`:2753`); short-circuits progress-to-HR (`:3907`). *Since lane P:* with `RequireCalibration`, decides when an outcome is **released to the employee** (`AppraisalRelease.IsReleased`) — until then their own copy of the appraisal, lists, trend and HR review carries no score, grade, recommendations or narrative |
-| `HRReviewTiming` | Swaps the calibration / HR-review order in **both** resolvers (`AppraisalWorkflowService.cs:196`, `AppraisalAdvanceHelpers.cs:113`) |
-| `RequireEmployeeAcknowledgment` | **Decides the status finalisation lands on** — `Governance` vs `Completed` (`PerformanceAppraisalService.cs:4388`); phase gate (`:224`). *Since lane A:* the acknowledgment settles the score and publishes it; with calibration and HR review off, the manager's submission settles it first so the employee acknowledges a score, not a blank (it used to finish with none) |
-| `RequireGoalSetting` | Phase gate (`AppraisalWorkflowService.cs:150`) |
+| `RequireCalibration` | Phase gate (`AppraisalWorkflowService.cs:206`) **and the finalise refusal** (`PerformanceAppraisalService.cs:4378`). *Since lane A:* a commit lifts the gate only on appraisals at the calibration step (manager submitted); it used to stamp everyone in the session's scope, so an appraisal could pass the gate before any panel saw its score. *Since lane P:* also one of the two conditions of the employee's **outcome release** (see `RequireHRReview`). *Since lane B1:* the calibration step — the commit calibrates an appraisal **at** it (or one it already calibrated and this session restates, or a final one it adjusts) and skips the rest naming the step each is at, releasing them from the session; a commit that is the last step **completes** the appraisal with its score (it stayed in Governance for good); a cycle with this off has no calibration step, and a commit skips its appraisals |
+| `RequireHRReview` | Phase gate; assigns the HR reviewer on manager submit (`:2604`); **refuses acknowledgment before sign-off** (`:2753`); short-circuits progress-to-HR (`:3907`). *Since lane P:* with `RequireCalibration`, decides when an outcome is **released to the employee** (`AppraisalRelease.IsReleased`) — until then their own copy of the appraisal, lists, trend and HR review carries no score, grade, recommendations or narrative. *Since lane B1:* the sign-off is refused unless the appraisal is **at** the HR-review step, and the acknowledgment reads the sign-off record (`AppraisalHRReview`), which HR's advance writes too |
+| `HRReviewTiming` | Swaps the calibration / HR-review order in **both** resolvers (`AppraisalWorkflowService.cs:196`, `AppraisalAdvanceHelpers.cs:113`). *Since lane B1:* real on the **write** paths. With `BeforeCalibration`, HR signs off first (the sign-off used to demand calibration whatever the timing, so such a cycle could never be finalised), a panel before the sign-off skips the appraisal, and nothing is published to the talent pools until the panel has committed |
+| `RequireEmployeeAcknowledgment` | **Decides the status finalisation lands on** — `Governance` vs `Completed` (`PerformanceAppraisalService.cs:4388`); phase gate (`:224`). *Since lane A:* the acknowledgment settles the score and publishes it; with calibration and HR review off, the manager's submission settles it first so the employee acknowledges a score, not a blank (it used to finish with none). *Since lane B1:* the last step of the pipeline; where a write leaves the appraisal follows the gates, not this switch alone (a required final conversation used to be skipped when this was off) |
+| `RequireGoalSetting` | Phase gate (`AppraisalWorkflowService.cs:150`). *Since lane B1:* **refuses the self-evaluation submit** until the goals are set — the minimum, the manager's approval and, with a goals section on the template, the goal set's lock — counting the employee's goals in the cycle, linked to the appraisal or not |
 | `HRCanModifyScores` | **Refuses score modifications on appeal resolution** (`PerformanceAppraisalService.cs:3368`). *Since lane A:* the modifications it allows **reach the score** (checked against the item's own scale; a KPI's is a restated achievement %). Before, they were written and the overall re-summed stale weighted scores, so an upheld appeal never moved the result |
 | `DefaultHRReviewerId` | Chosen as reviewer when it points at an active employee, else least-loaded fallback (`:3984`) |
 | `AllowEmployeeResponse` | **Refuses the employee's written response** when off (`:1003`) |
@@ -291,7 +343,7 @@ Grouped by what they actually do, with the strongest evidence line for each.
 ### Operations
 | Setting | What it really does |
 |---|---|
-| `AutoLockOnDeadline` | The sweep honours it and reports `AutoLockEnabled` (`AppraisalWorkflowService.cs:699`) |
+| `AutoLockOnDeadline` | The sweep honours it and reports `AutoLockEnabled` (`AppraisalWorkflowService.cs:699`). *Since lane B1:* each advance is past the step the gates put the appraisal at — a step before the manager's evaluation is **waived** by the advance's own log row |
 | `ProbationExtensionMonths` | The extension actually applied by the probation handler (`ProbationHandlers.cs:157`) |
 | `ManagerWorkloadThreshold` | The "managers over workload" figure (`AppraisalCycleService.cs:1066`) |
 | `DeadlineRiskHighDays` · `MediumDays` · `LowDays` | The risk banding on the cycle progress dashboard (`AppraisalCycleService.cs:516,1070-1072`) |
@@ -309,6 +361,10 @@ Grouped by what they actually do, with the strongest evidence line for each.
 ---
 
 ## What to fix, in priority order
+
+> **Status 2026-09-29 (closure lane B1).** Items **3, 4 and 5 are done**; item 1 is down to
+> `ShowPeerScoresToManager` (ghost 2 is enforced, ghost 3 removed in batch 1); item 7's refusal is
+> done and its governance-view half is lane B2's; items 2 and 6 are lane B2's.
 
 ### 1. Delete or implement the three ghosts *(half a day either way)*
 `ShowPeerScoresToManager`, `AllowAcknowledgmentWithoutConversation`, `RequireDevelopmentPlanUpdate`.

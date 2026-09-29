@@ -46,6 +46,7 @@ public class PeerEvaluationService : IPeerEvaluationService
     private readonly IGenericRepository<AppraisalCompetency> _appraisalCompetencyRepository;
     private readonly IGenericRepository<PerformanceAppraisalCriterionConfig> _criterionConfigRepository;
     private readonly IAppraisalScoreService _scores;
+    private readonly IAppraisalLifecycleService _lifecycle;
     private readonly IAppraisalNotificationService _notifications;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
@@ -60,6 +61,7 @@ public class PeerEvaluationService : IPeerEvaluationService
         IGenericRepository<AppraisalCompetency> appraisalCompetencyRepository,
         IGenericRepository<PerformanceAppraisalCriterionConfig> criterionConfigRepository,
         IAppraisalScoreService scores,
+        IAppraisalLifecycleService lifecycle,
         IAppraisalNotificationService notifications,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
@@ -73,6 +75,7 @@ public class PeerEvaluationService : IPeerEvaluationService
         _appraisalCompetencyRepository = appraisalCompetencyRepository;
         _criterionConfigRepository = criterionConfigRepository;
         _scores = scores;
+        _lifecycle = lifecycle;
         _notifications = notifications;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
@@ -94,6 +97,19 @@ public class PeerEvaluationService : IPeerEvaluationService
     {
         var tenantId = GetTenantId();
         return _evaluatorEvaluationRepository.GetQueryable().Where(e => e.TenantId == tenantId);
+    }
+
+    /// <summary>
+    /// A peer writes — draft or submission — inside the cycle's peer window (performance closure
+    /// B1): alongside the self-evaluation, or only once it is in when the cycle says
+    /// <see cref="PeerEvaluationOpenMode.AfterSelfEval"/>, and until the manager has submitted.
+    /// No write enforced <c>PeerEvaluationOpenMode</c> before. Refused with a 422 naming the step the
+    /// appraisal is at.
+    /// </summary>
+    private async Task EnsureInPeerWindowAsync(Guid appraisalId, string action, CancellationToken cancellationToken)
+    {
+        var state = await _lifecycle.GetStateAsync(appraisalId, cancellationToken);
+        AppraisalGates.EnsureAt(state.Facts, state.Settings, action, AppraisalGates.PeerWindow(state.Settings));
     }
 
     public async Task<IEnumerable<PeerEvaluationAssignmentDto>> GetPeerEvaluationAssignmentsAsync(
@@ -229,6 +245,8 @@ public class PeerEvaluationService : IPeerEvaluationService
             throw new InvalidOperationException("Cannot modify submitted evaluation.");
         }
 
+        await EnsureInPeerWindowAsync(evaluation.AppraisalId, "Peer feedback cannot be saved yet", cancellationToken);
+
         // Every score on its item's own scale — the same check as the self and manager forms (A11).
         var scaleError = await _scores.ValidateItemScoresAsync(evaluation.AppraisalId, saveDto.ItemScores, cancellationToken);
         if (scaleError != null)
@@ -319,6 +337,8 @@ public class PeerEvaluationService : IPeerEvaluationService
             throw new InvalidOperationException("Evaluation already submitted.");
         }
 
+        await EnsureInPeerWindowAsync(evaluation.AppraisalId, "Peer feedback cannot be submitted yet", cancellationToken);
+
         // Validate all required criteria are scored (using the CriterionConfig snapshot), mirroring
         // the peer scoring form's IsScoreable rule: competencies are always required; KPI items are
         // required only when AllowPeerKpiEvaluation is enabled. A KPI item counts as scored when it
@@ -347,12 +367,17 @@ public class PeerEvaluationService : IPeerEvaluationService
 
         evaluation.TotalScore = totalWeightedScore;
         evaluation.SubmittedDate = DateTime.UtcNow;
-        
+
         await _evaluatorEvaluationRepository.UpdateAsync(evaluation);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Peer evaluation submitted for evaluation {evaluationId} by evaluator {evaluatorId} with total score {score}",
             evaluation.Id, evaluatorId, totalWeightedScore);
+
+        // A peer's submission can be the step that completes the appraisal — a cycle with no manager
+        // evaluation and nothing after the peers — which nothing handled: the arm of the old status
+        // helper written for it had no caller. The gates decide now, and completion settles (B1, B5).
+        await _lifecycle.SyncAsync(evaluation.AppraisalId, cancellationToken: cancellationToken);
 
         await NotifyPeerSubmissionAsync(evaluation, cancellationToken);
 

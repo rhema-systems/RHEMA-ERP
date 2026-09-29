@@ -284,16 +284,22 @@ public class AppraisalScoreService : IAppraisalScoreService
     // ── Settle ───────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Final means the score has left governance: Completed or Closed, or HR has signed it off
-    /// and only the employee's acknowledgment is outstanding. A remanded appraisal back in
+    /// Final means the score has left governance: Completed or Closed, or HR has signed it off —
+    /// and the panel has committed it, when the cycle requires calibration — so only the final
+    /// conversation or the employee's acknowledgment is outstanding. A remanded appraisal back in
     /// governance still carries the sign-off from before its appeal, and is not final until HR's
     /// post-remand decision.
+    ///
+    /// <para>⚠ The calibration condition came with B1, which made <c>HRReviewTiming</c> real: with
+    /// HR's review before calibration, a sign-off is not the last word, and the sign-off published
+    /// the pre-calibration score to the talent pools.</para>
     /// </summary>
     private static bool IsFinal(PerformanceAppraisal appraisal)
         => appraisal.Status is AppraisalStatus.Completed or AppraisalStatus.Closed
            || (appraisal.Status == AppraisalStatus.Governance
                && appraisal.AppealRemandedDate == null
-               && appraisal.HRReviews.Any(r => r.ReviewCompletedDate != null && r.IsApproved));
+               && appraisal.HRReviews.Any(r => r.ReviewCompletedDate != null && r.IsApproved)
+               && (appraisal.IsCalibrated || appraisal.AppraisalCycle?.AppraisalSettings?.RequireCalibration != true));
 
     private async Task<PerformanceAppraisal> LoadForSettleAsync(Guid appraisalId, bool tracked, CancellationToken cancellationToken)
     {
@@ -303,6 +309,8 @@ public class AppraisalScoreService : IAppraisalScoreService
             .Include(a => a.EvaluatorEvaluations)
                 .ThenInclude(e => e.CriterionScores)
             .Include(a => a.HRReviews)
+            .Include(a => a.AppraisalCycle)
+                .ThenInclude(c => c.AppraisalSettings)
             .AsSplitQuery();
 
         var appraisal = await (tracked ? query : query.AsNoTracking()).FirstOrDefaultAsync(cancellationToken);

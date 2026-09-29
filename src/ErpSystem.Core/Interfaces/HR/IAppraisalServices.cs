@@ -547,6 +547,40 @@ public interface IAppraisalScoreService
 
 #endregion
 
+#region Appraisal lifecycle (performance closure lane B1)
+
+/// <summary>
+/// The appraisal pipeline's one gate evaluator, over what is saved: where an appraisal is, whether
+/// a write is open to it, and — after a write — the status the gates put it in. The decisions are
+/// <see cref="AppraisalGates"/>'s; this loads the facts they read and applies the result.
+/// </summary>
+public interface IAppraisalLifecycleService
+{
+    /// <summary>One appraisal's gate state. Throws <see cref="ArgumentException"/> when it is not in the tenant.</summary>
+    Task<AppraisalGateState> GetStateAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+
+    /// <summary>Many appraisals' gate states in a fixed number of queries, for the dashboards and lists. Unknown ids are left out.</summary>
+    Task<IReadOnlyDictionary<Guid, AppraisalGateState>> GetStatesAsync(IReadOnlyCollection<Guid> appraisalIds, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Refuses <paramref name="action"/> with <see cref="AppraisalGateException"/> (a 422 naming the
+    /// step) unless the appraisal is at one of <paramref name="steps"/>. Returns the state it read.
+    /// </summary>
+    Task<AppraisalGateState> EnsureAtAsync(Guid appraisalId, string action, AppraisalSubStatus[] steps, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// After a pipeline write, reads what is saved and moves the major status forward to where the
+    /// gates put it — never back, never out of Draft (the first save or HR opens an appraisal), and
+    /// never for an appeal, a withdrawn or a closed appraisal. When that completes the appraisal, or
+    /// brings it to the employee's end (the final conversation or the acknowledgment), the score is
+    /// settled in the same save — published when <paramref name="publish"/> and the appraisal is final.
+    /// A caller inside a transaction passes <c>publish: false</c>.
+    /// </summary>
+    Task<AppraisalSyncResult> SyncAsync(Guid appraisalId, AppraisalScoreChangeSource source = AppraisalScoreChangeSource.Settle, bool publish = true, CancellationToken cancellationToken = default);
+}
+
+#endregion
+
 #region Salary Review Proposals (Theme 11)
 
 public interface ISalaryReviewProposalService
@@ -1057,18 +1091,12 @@ public interface ICalibrationSessionService
 #region Appraisal Workflow
 
 /// <summary>
-/// Provides appraisal lifecycle helpers that are decoupled from data-persistence operations:
-/// fine-grained phase computation, lifecycle transition enforcement, and role-based edit guards.
+/// The appraisal pipeline's read and override endpoints: where an appraisal is, who may edit it now,
+/// the raw status transition, and HR's audited advance. The gates themselves are
+/// <see cref="AppraisalGates"/>, loaded by <see cref="IAppraisalLifecycleService"/>.
 /// </summary>
 public interface IAppraisalWorkflowService
 {
-    /// <summary>
-    /// Computes the current fine-grained <see cref="AppraisalPhase"/> from appraisal data.
-    /// The result is NOT persisted — it is always derived from live entity state.
-    /// <para>The <paramref name="appraisal"/> must have <c>AppraisalCycle.AppraisalSettings</c> loaded.</para>
-    /// </summary>
-    AppraisalPhase GetCurrentPhase(PerformanceAppraisal appraisal);
-
     /// <summary>
     /// Enforces the lifecycle transition table and persists the new <see cref="AppraisalStatus"/>
     /// on the specified appraisal.
@@ -1077,34 +1105,26 @@ public interface IAppraisalWorkflowService
     Task TransitionAsync(Guid appraisalId, AppraisalStatus newStatus, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Returns <c>true</c> when the given role-holder is permitted to submit edits to the appraisal
-    /// in its current lifecycle state and phase.
+    /// Where the appraisal is: its step (sub-status), the reason it has not passed it, and the coarse
+    /// phase for the progress rail — the same answer every write path and the HR dashboard give.
     /// </summary>
-    /// <param name="appraisal">The appraisal (must have <c>AppraisalCycle.AppraisalSettings</c> loaded).</param>
-    /// <param name="role">One of: <c>Employee</c>, <c>Manager</c>, <c>Peer</c>, <c>HR</c>.</param>
-    bool IsEditableByRole(PerformanceAppraisal appraisal, string role);
+    Task<AppraisalGateState> GetCurrentStepAsync(Guid appraisalId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Loads the appraisal with required navigations and returns the current
-    /// <see cref="AppraisalPhase"/>. Controller-friendly async wrapper.
-    /// </summary>
-    Task<AppraisalPhase> GetCurrentPhaseAsync(Guid appraisalId, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Loads the appraisal with required navigations and returns whether the
-    /// specified role may currently submit edits. Controller-friendly async wrapper.
+    /// Whether the specified role may currently submit edits, per the step the appraisal is at.
+    /// Role values: <c>Employee</c>, <c>Manager</c>, <c>Peer</c>, <c>HR</c>.
     /// </summary>
     Task<bool> IsEditableByRoleAsync(Guid appraisalId, string role, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// HR-initiated manual advance: completes a single stalled pipeline sub-step, performs the
-    /// appropriate auto-completion data actions, automatically triggers any required major-status
-    /// transition (Active→Governance, Governance→Completed), and writes an audit log record.
+    /// HR-initiated manual advance past the step the appraisal is at: performs that step's
+    /// auto-completion data actions, writes the audit log row — which is also the waiver for a step
+    /// before the manager's evaluation — and moves the major status to where the gates then put it.
     /// </summary>
     /// <param name="appraisalId">Target appraisal.</param>
     /// <param name="targetSubStatus">
-    /// The sub-step to advance past. When <c>null</c> (or omitted), advances past the current
-    /// blocking sub-step as resolved from live entity state.
+    /// The step to advance past. It must be the step the appraisal is at (a 422 otherwise); omit it
+    /// to advance past whatever is blocking.
     /// </param>
     /// <param name="reason">HR-provided justification stored verbatim in the audit log.</param>
     /// <param name="advancedByEmployeeId">Employee ID of the HR officer performing the action.</param>
