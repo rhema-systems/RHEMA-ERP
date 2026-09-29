@@ -44,6 +44,7 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { formatDate, formatDateTime, humanizeEnum } from '@/lib/hr/attendance-format';
 import {
   developmentPlanFeedbackService,
@@ -66,12 +67,17 @@ import {
  * **Draft is a real state.** A draft plan is invisible to the employee in the sense that matters —
  * nothing has told them about it. Activating raises the notification, which is why the banner
  * pushes for it rather than leaving the status picker to do the job quietly.
+ *
+ * **Who closes it (performance closure P10).** A plan the employee's manager or HR set for them
+ * is theirs to work, not to complete or cancel — the server refuses it, so the picker does not
+ * offer it. A plan they wrote themselves is theirs throughout.
  */
 export default function DevelopmentPlanDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const [objectiveOpen, setObjectiveOpen] = useState(false);
   const [editing, setEditing] = useState<DevelopmentObjective | null>(null);
@@ -272,6 +278,18 @@ export default function DevelopmentPlanDetailPage() {
   const rows = objectives.data ?? [];
   const isClosed = data.planStatus === 'Completed' || data.planStatus === 'Cancelled';
 
+  // P10: the employee closes only a plan they wrote. A plan older than the author stamp has no
+  // author and counts as set for them.
+  const setForMe =
+    !!user?.employeeId &&
+    user.employeeId === data.employeeId &&
+    (!data.authorUserId || data.authorUserId !== user.id);
+  const statusOptions = setForMe
+    ? DEVELOPMENT_PLAN_STATUS_OPTIONS.filter(
+        (o) => o.value === data.planStatus || (o.value !== 'Completed' && o.value !== 'Cancelled'),
+      )
+    : DEVELOPMENT_PLAN_STATUS_OPTIONS;
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -288,7 +306,7 @@ export default function DevelopmentPlanDetailPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {DEVELOPMENT_PLAN_STATUS_OPTIONS.map((o) => (
+                {statusOptions.map((o) => (
                   <SelectItem key={o.value} value={o.value}>
                     {o.label}
                   </SelectItem>

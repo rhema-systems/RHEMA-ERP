@@ -115,6 +115,21 @@ public class PeerNominationService : IPeerNominationService
         }
     }
 
+    /// <summary>
+    /// Who may nominate (performance closure P14 — the access half of D4): in Manager mode the
+    /// manager chooses the peers, so the appraisee is refused; in Employee mode the appraisee
+    /// nominates, and their manager or HR may add to the list for approval. Neither create path
+    /// asked — the mode only timed the editing window — and the batch recorded every nomination as
+    /// the appraisee's, whoever made it.
+    /// </summary>
+    private static void EnsureMayNominate(PerformanceAppraisal appraisal, AppraisalSettings settings, Guid nominatorId)
+    {
+        if (nominatorId == Guid.Empty)
+            throw new ArgumentException("A nomination has to be made by an employee.");
+        if (settings.PeerNominationMode == PeerNominationMode.Manager && nominatorId == appraisal.EmployeeId)
+            throw new InvalidOperationException("In this cycle your manager chooses your peer evaluators.");
+    }
+
     public async Task<PeerNominationDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await TenantNominationQuery()
@@ -193,6 +208,8 @@ public class PeerNominationService : IPeerNominationService
 
         var settings = appraisal.AppraisalCycle.AppraisalSettings;
         EnsureNominationsEditable(appraisal, settings);
+        // The controller sets NominatedById from the token (P14).
+        EnsureMayNominate(appraisal, settings, createDto.NominatedById);
 
         // Validate peer employee exists and is not the same as appraisee
         var peerEmployee = await _employeeRepository.GetByIdAsync(createDto.PeerEmployeeId);
@@ -379,7 +396,7 @@ public class PeerNominationService : IPeerNominationService
         };
     }
 
-    public async Task<IEnumerable<PeerNominationDto>> BatchCreateAsync(BatchCreatePeerNominationsDto batchDto, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<PeerNominationDto>> BatchCreateAsync(BatchCreatePeerNominationsDto batchDto, Guid nominatedById, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var appraisal = await _appraisalRepository.GetQueryable()
@@ -393,6 +410,7 @@ public class PeerNominationService : IPeerNominationService
 
         var settings = appraisal.AppraisalCycle.AppraisalSettings;
         EnsureNominationsEditable(appraisal, settings);
+        EnsureMayNominate(appraisal, settings, nominatedById);
 
         // Validate count
         var totalAfterAdd = appraisal.PeerNominations.Count + batchDto.PeerEmployeeIds.Count;
@@ -425,11 +443,8 @@ public class PeerNominationService : IPeerNominationService
             throw new InvalidOperationException($"The following peers are already nominated: {string.Join(", ", employees)}");
         }
 
-        // Create nominations
+        // Create nominations — recorded as whoever made them (P14), from the caller's token.
         var createdNominations = new List<PeerNomination>();
-        var nominatorId = appraisal.EmployeeId; // Default to employee
-
-        // If manager-driven mode, we'd pass the manager ID differently (would need to be in DTO)
         foreach (var peerId in batchDto.PeerEmployeeIds)
         {
             var nomination = new PeerNomination
@@ -437,7 +452,7 @@ public class PeerNominationService : IPeerNominationService
                 TenantId = tenantId,
                 AppraisalId = batchDto.AppraisalId,
                 PeerEmployeeId = peerId,
-                NominatedById = nominatorId,
+                NominatedById = nominatedById,
                 NominationDate = DateTime.UtcNow,
                 DueDate = batchDto.DueDate,
                 InstructionsToPeer = batchDto.InstructionsToPeer,

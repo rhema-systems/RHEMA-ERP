@@ -153,6 +153,9 @@ public class DevelopmentPlanService : IDevelopmentPlanService
         // went live the moment it was saved. It defaults to Active; a caller asking for Draft
         // gets Draft.
         entity.PlanStatus = createDto.PlanStatus;
+        // Who wrote it (P10): the author is what decides whether the employee may close it.
+        // Nothing stamped the author columns, so no plan could say who set it.
+        Extensions.AuditStampExtensions.StampCreated(entity, _currentUserProvider);
 
         await _planRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -176,9 +179,29 @@ public class DevelopmentPlanService : IDevelopmentPlanService
         return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
-    public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Performance closure P10: a plan the employee's manager or HR set for them is not the
+    /// employee's to delete, complete or cancel — they work it, their manager closes it. A plan
+    /// they wrote themselves is theirs. The author is the login that created it
+    /// (<c>CreatedById</c>); a plan older than the stamp has none, and is treated
+    /// as set by someone else. An HR officer on their own plan is its employee here.
+    /// </summary>
+    private void EnsureSubjectMayEnd(EmployeeDevelopmentPlan entity, Guid? actorEmployeeId, string action)
+    {
+        if (actorEmployeeId is not Guid me || me != entity.EmployeeId) return;
+
+        var authoredByCaller = entity.CreatedById is Guid author
+                               && author != Guid.Empty
+                               && author == _currentUserProvider.UserId;
+        if (!authoredByCaller)
+            throw new UnauthorizedAccessException(
+                $"This plan was set for you, so {action} is for your manager or HR to do.");
+    }
+
+    public async Task<bool> DeleteAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPlanAsync(id);
+        EnsureSubjectMayEnd(entity, actorEmployeeId, "deleting it");
 
         await _planRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -186,12 +209,15 @@ public class DevelopmentPlanService : IDevelopmentPlanService
         return true;
     }
 
-    public async Task<bool> UpdateStatusAsync(Guid id, DevelopmentPlanStatus status, CancellationToken cancellationToken = default)
+    public async Task<bool> UpdateStatusAsync(Guid id, DevelopmentPlanStatus status, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPlanAsync(id);
 
         if (entity.PlanStatus == status)
             return true;
+        if (status is DevelopmentPlanStatus.Completed or DevelopmentPlanStatus.Cancelled)
+            EnsureSubjectMayEnd(entity, actorEmployeeId,
+                status == DevelopmentPlanStatus.Completed ? "completing it" : "cancelling it");
         if (entity.PlanStatus == DevelopmentPlanStatus.Completed && status != DevelopmentPlanStatus.Active)
             throw new InvalidOperationException("A completed plan can only be reopened by making it active again.");
         if (status == DevelopmentPlanStatus.Draft && entity.PlanStatus != DevelopmentPlanStatus.Draft)

@@ -14,6 +14,12 @@ settings as a policy reference; this document says which of them the code obeys.
 > - **Lane A** (scoring and the settle path) changed what three *enforced* settings do — marked
 >   *"Since lane A"* in section A: `HRCanModifyScores`, `RequireCalibration`,
 >   `RequireEmployeeAcknowledgment`. No verdict moved between A/B/C/D.
+> - **Lane P** (privacy and access) changed what four *enforced* settings do and touched one
+>   presentation setting — marked *"Since lane P"*: `PeerNominationMode` (now decides who may
+>   nominate), `PeerReviewsAnonymous` (holds for an HR officer who is the appraisee),
+>   `RequireCalibration` and `RequireHRReview` (now also decide when the outcome is released to the
+>   employee); `ShowSelfScoreToManager` is honoured on one more read, but its verdict stands — the
+>   manager's own form, the path this audit describes, is lane B2's. No verdict moved.
 >
 > Line numbers below are as of 2026-09-17; lane A rewrote much of `PerformanceAppraisalService.cs`.
 
@@ -121,6 +127,12 @@ render something the API has already sent. Anyone with the browser's network tab
 
 **Effect of switching it off:** the manager's screen stops *showing* the self-score. The payload still
 contains it. If anchoring bias is the reason for the setting, it is not prevented — it is hidden.
+
+*Since lane P (P12):* the employee's own form (`GET …/{id}/self-evaluation-context`), which the
+manager and HR could also read, now withholds the entries from everyone but the employee until the
+self-evaluation is submitted, and from the manager afterwards when this setting is off. That is a
+second path, not the manager's form: `MapManagerEvaluationItem` still sends the self scores
+unconditionally, so the verdict above stands until lane B2.
 
 ### 5. `ShowScoreBreakdownToEmployee`
 
@@ -247,15 +259,15 @@ Grouped by what they actually do, with the strongest evidence line for each.
 | `RequirePeerReviews` | Phase gate (`:173`); nomination ceiling check (`PeerNominationService.cs:211`); **self-eval submit rule** (`PerformanceAppraisalService.cs:1446`) |
 | `MinPeerEvaluators` | **Self-eval submit refused** outside the range (`:1449`); phase gate (`:178`); **finalise refused** — *"At least N peer reviews must be completed"* (`:4370`) |
 | `MaxPeerEvaluators` | **Nomination refused** singly (`PeerNominationService.cs:211`) and in batch (`:399`) |
-| `PeerNominationMode` | Who may nominate (`PeerNominationService.cs:100`); who the approval is routed to (`:473`); whether the self-eval submit rule applies (`PerformanceAppraisalService.cs:1446`) |
+| `PeerNominationMode` | Who may nominate (`PeerNominationService.cs:100`); who the approval is routed to (`:473`); whether the self-eval submit rule applies (`PerformanceAppraisalService.cs:1446`). *Since lane P:* line 100 was only ever the editing window; the mode now decides **who** — in Manager mode the appraisee is refused both nominate routes (`EnsureMayNominate`) — and every nomination records the login that made it (the batch recorded the appraisee whoever sent it) |
 | `AllowPeerKpiEvaluation` | Which items the peer form renders (`PeerEvaluationService.cs:199`) and **peer submit completeness** (`:321`) |
 | `AllowSelfSoftSkillRating` | **Self-eval submit requires every competency scored when ON** (`PerformanceAppraisalService.cs:1461`) — see the caveat below |
 
 ### The gates
 | Setting | What it really does |
 |---|---|
-| `RequireCalibration` | Phase gate (`AppraisalWorkflowService.cs:206`) **and the finalise refusal** (`PerformanceAppraisalService.cs:4378`). *Since lane A:* a commit lifts the gate only on appraisals at the calibration step (manager submitted); it used to stamp everyone in the session's scope, so an appraisal could pass the gate before any panel saw its score |
-| `RequireHRReview` | Phase gate; assigns the HR reviewer on manager submit (`:2604`); **refuses acknowledgment before sign-off** (`:2753`); short-circuits progress-to-HR (`:3907`) |
+| `RequireCalibration` | Phase gate (`AppraisalWorkflowService.cs:206`) **and the finalise refusal** (`PerformanceAppraisalService.cs:4378`). *Since lane A:* a commit lifts the gate only on appraisals at the calibration step (manager submitted); it used to stamp everyone in the session's scope, so an appraisal could pass the gate before any panel saw its score. *Since lane P:* also one of the two conditions of the employee's **outcome release** (see `RequireHRReview`) |
+| `RequireHRReview` | Phase gate; assigns the HR reviewer on manager submit (`:2604`); **refuses acknowledgment before sign-off** (`:2753`); short-circuits progress-to-HR (`:3907`). *Since lane P:* with `RequireCalibration`, decides when an outcome is **released to the employee** (`AppraisalRelease.IsReleased`) — until then their own copy of the appraisal, lists, trend and HR review carries no score, grade, recommendations or narrative |
 | `HRReviewTiming` | Swaps the calibration / HR-review order in **both** resolvers (`AppraisalWorkflowService.cs:196`, `AppraisalAdvanceHelpers.cs:113`) |
 | `RequireEmployeeAcknowledgment` | **Decides the status finalisation lands on** — `Governance` vs `Completed` (`PerformanceAppraisalService.cs:4388`); phase gate (`:224`). *Since lane A:* the acknowledgment settles the score and publishes it; with calibration and HR review off, the manager's submission settles it first so the employee acknowledges a score, not a blank (it used to finish with none) |
 | `RequireGoalSetting` | Phase gate (`AppraisalWorkflowService.cs:150`) |
@@ -266,7 +278,7 @@ Grouped by what they actually do, with the strongest evidence line for each.
 | `MaxGoalsPerEmployee` | **Refuses goal creation** past the ceiling (`EmployeeGoalService.cs:205`) |
 | `EnableCheckIns` | **Refuses check-in creation** (`CheckInService.cs:145`) |
 | `EnablePrivateJournal` | **Refuses a private journal entry** (`PerformanceJournalService.cs:159`) |
-| `PeerReviewsAnonymous` | **Server-side redaction** of peer identity from the appraisee (`PerformanceAppraisalService.cs:4066`) |
+| `PeerReviewsAnonymous` | **Server-side redaction** of peer identity from the appraisee (`PerformanceAppraisalService.cs:4066`). *Since lane P:* an HR officer who is the appraisee is the appraisee — the manager's peer detail, which names each peer, used to open to them through the desk exemption; lane P's suite asserts no peer name in seven of the appraisee's payloads |
 
 ### Interim reviews
 | Setting | What it really does |

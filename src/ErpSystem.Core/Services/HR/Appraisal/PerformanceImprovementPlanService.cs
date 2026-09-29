@@ -297,6 +297,15 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         if (createDto.EndDate.Date <= createDto.StartDate.Date)
             throw new InvalidOperationException("The plan's end date has to be after its start date.");
 
+        // P4: the plan is about an employee of this tenant — it was never checked, so a bad id died
+        // on the foreign key — and the employee is neither its supervisor nor its HR owner.
+        var employeeExists = await _employeeRepository.ExistsAsync(
+            e => e.TenantId == tenantId && e.Id == createDto.EmployeeId);
+        if (!employeeExists)
+            throw new ArgumentException("Employee not found.");
+        if (createDto.SupervisorId == createDto.EmployeeId || createDto.HROwnerId == createDto.EmployeeId)
+            throw new InvalidOperationException("The employee on the plan cannot also be its supervisor or its HR owner.");
+
         var supervisorExists = await _employeeRepository.ExistsAsync(
             e => e.TenantId == tenantId && e.Id == createDto.SupervisorId);
         if (!supervisorExists)
@@ -484,28 +493,22 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     {
         var entity = await GetOwnedPipAsync(updateDto.Id, cancellationToken);
 
+        // P5: a draft only. What was approved is what is in force, so a live plan's terms are not
+        // rewritten after the approval (lane E7 decides whether that becomes a re-approval); it
+        // changes through its goals, review meetings and outcome.
         if (entity.Status == PipStatus.PendingApproval)
             throw new InvalidOperationException(
                 "This plan is out for approval. Recall it before making changes.");
-        if (entity.Status is PipStatus.Completed or PipStatus.Unsuccessful or PipStatus.Cancelled)
-            throw new InvalidOperationException($"A {entity.Status} plan can no longer be edited.");
+        if (entity.Status != PipStatus.Draft)
+            throw new InvalidOperationException(
+                $"A {entity.Status} plan's terms can no longer be edited — only a draft can.");
 
         if (updateDto.EndDate.Date <= updateDto.StartDate.Date)
             throw new InvalidOperationException("The plan's end date has to be after its start date.");
 
-        // The status is the workflow's and the outcome path's to set. Letting the edit form carry
-        // them would hand any editor a way round both the approval and the closure rules.
-        var status = entity.Status;
-        var outcome = entity.Outcome;
-        var outcomeNotes = entity.OutcomeNotes;
-        var completionDate = entity.CompletionDate;
-
+        // The mapper carries the plan's content only: never its employee, appraisal, supervisor,
+        // HR owner, status or outcome (P5).
         updateDto.UpdateEntity(entity);
-
-        entity.Status = status;
-        entity.Outcome = outcome;
-        entity.OutcomeNotes = outcomeNotes;
-        entity.CompletionDate = completionDate;
 
         await _improvementPlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -732,15 +735,43 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         if (entity == null)
             throw new ArgumentException("Review meeting not found");
 
+        // The mapper carries the supervisor's record only — never the plan, the conductor or the
+        // employee's reply (P13) — and the meeting was found under this plan, so it stays there.
         updateDto.UpdateEntity(entity);
-        // The mapper copies PipId from the body; the meeting belongs to the plan it was found
-        // under, and an edit is not a way to move it to a different one.
-        entity.PipId = pipId;
         await _reviewMeetingRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Review meeting updated successfully: {Id}", entity.Id);
 
+        return entity.ToDto();
+    }
+
+    /// <summary>
+    /// The employee's right of reply on a review meeting (performance closure P13) — their own
+    /// write and nobody else's. It went through the supervisor's update, so anyone on the plan
+    /// (or any performance-Read holder) could write it, and every supervisor save could overwrite
+    /// it with whatever the form sent back.
+    /// </summary>
+    public async Task<PipReviewMeetingDto> SetEmployeeCommentsAsync(
+        Guid pipId, Guid meetingId, Guid actorEmployeeId, string? comments, CancellationToken cancellationToken = default)
+    {
+        var pip = await GetOwnedPipAsync(pipId, cancellationToken);
+        if (pip.EmployeeId != actorEmployeeId)
+            throw new UnauthorizedAccessException("Only the employee on the plan can write their reply.");
+
+        var tenantId = GetTenantId();
+        var entity = await _reviewMeetingRepository.GetQueryable()
+            .Include(m => m.ConductedBy)
+            .FirstOrDefaultAsync(m => m.Id == meetingId && m.PipId == pipId && m.TenantId == tenantId, cancellationToken);
+
+        if (entity == null)
+            throw new ArgumentException("Review meeting not found");
+
+        entity.EmployeeComments = string.IsNullOrWhiteSpace(comments) ? null : comments.Trim();
+        await _reviewMeetingRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Employee reply recorded on review meeting {Id}", entity.Id);
         return entity.ToDto();
     }
 

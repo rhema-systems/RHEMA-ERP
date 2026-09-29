@@ -305,6 +305,12 @@ public class PerformanceAppraisalDto : BaseDto
     public DateOnly EndDate { get; set; }
     public AppraisalStatus Status { get; set; }
     public int PeerEvaluatorsCount { get; set; }
+    /// <summary>
+    /// The outcome is released to the appraisee (performance closure P2): completed, or in
+    /// governance with only the acknowledgment outstanding. On the appraisee's own unreleased
+    /// appraisal the scores, grade, ranks, recommendations and the manager's narrative are withheld.
+    /// </summary>
+    public bool OutcomeReleased { get; set; }
     public decimal? OverallScore { get; set; }
     /// <summary>Score after a successful appeal resolution. Null until an appeal is adjudicated with a score change.</summary>
     public decimal? AdjustedScore { get; set; }
@@ -1767,10 +1773,14 @@ public class MyAppraisalDto
     public DateOnly? DueDate { get; set; }
     
     /// <summary>
-    /// Overall score if available
+    /// Overall score if available — and only once it is released to the employee (performance
+    /// closure P2: completed, or in governance with only the acknowledgment outstanding).
     /// </summary>
     public decimal? OverallScore { get; set; }
-    
+
+    /// <summary>The outcome is released to the employee; until it is, <see cref="OverallScore"/> is withheld from them.</summary>
+    public bool OutcomeReleased { get; set; }
+
     /// <summary>
     /// Has the employee acknowledged the final appraisal?
     /// </summary>
@@ -2515,7 +2525,14 @@ public class HRReviewDto
     public string OrganizationUnit { get; set; } = string.Empty;
     public string AppraisalCycleName { get; set; } = string.Empty;
     public AppraisalStatus Status { get; set; }
-    
+
+    /// <summary>
+    /// The outcome is released to the appraisee (performance closure P2). While false, the
+    /// appraisee's own copy carries no manager evaluation, peer summary, manager/peer/final
+    /// score, grade or HR remarks; HR and the manager see them throughout.
+    /// </summary>
+    public bool OutcomeReleased { get; set; }
+
     // Precondition Flags
     public bool IsSelfEvaluationComplete { get; set; }
     public bool IsManagerEvaluationComplete { get; set; }
@@ -3396,6 +3413,11 @@ public class PerformanceTrendPointDto
     public decimal? OverallScore { get; set; }
     public PerformanceRating? Rating { get; set; }
     public string? Status { get; set; }
+    /// <summary>
+    /// The outcome is released to the employee (performance closure P2). Their own trend carries no
+    /// score or rating for an appraisal still in progress.
+    /// </summary>
+    public bool OutcomeReleased { get; set; }
 }
 
 /// <summary>An employee's appraisal scores across cycles/years (Theme 14).</summary>
@@ -4111,6 +4133,12 @@ public class UnitGoalCascadeStatsDto
 {
     public Guid GoalId { get; set; }
     public int EmployeeGoalsCount { get; set; }
+
+    /// <summary>
+    /// Mean progress across the aligned employee goals; null when there are none. The figure
+    /// everyone sees — the per-employee rows are the desk's and the unit line's (P11).
+    /// </summary>
+    public decimal? AverageProgressPercent { get; set; }
 }
 
 // ============================================================
@@ -4619,6 +4647,13 @@ public class EmployeeDevelopmentPlanDto : BaseDto
     public DateOnly? EndDate { get; set; }
     public DevelopmentPlanStatus PlanStatus { get; set; }
     public string? OverallNotes { get; set; }
+
+    /// <summary>
+    /// The login that wrote the plan (performance closure P10); null for a plan older than the
+    /// stamp. The employee may complete, cancel or delete only a plan they wrote themselves, so
+    /// the screen compares this with the signed-in user's id.
+    /// </summary>
+    public Guid? AuthorUserId { get; set; }
 
     // ── Objective rollup ──────────────────────────────────────────────────────
     // A plan on its own says nothing about how it is going. The reads already load the

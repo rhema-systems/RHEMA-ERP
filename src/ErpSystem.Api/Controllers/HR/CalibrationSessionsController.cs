@@ -17,10 +17,14 @@ namespace ErpSystem.Api.Controllers.HR;
 /// Calibration sessions — the panel that reconciles managers' ratings across a unit before HR
 /// signs the appraisals off.
 ///
-/// <para><b>Reads</b> are open to any authenticated user, because the managers sitting on a panel
-/// need the grid. <b>Writes</b> are HR/SuperAdmin: running a session, moving someone's rating and
-/// committing the result are all HR actions, and committing lifts the calibration gate on every
-/// appraisal in scope.</para>
+/// <para><b>Reads</b> are the performance desk's, and a panellist's for the sessions they sit on —
+/// a participant, or the facilitator (performance closure P3). They were open to any authenticated
+/// user, so any colleague could list every session and read any panel's grid: names, the
+/// managers' proposals, the restated scores and the rationales. A panellist's own appraisal is
+/// left out of every read, desk or not: it is their outcome before it is released to them.
+/// <b>Writes</b> are HR/SuperAdmin: running a session, moving someone's rating and committing the
+/// result are all HR actions, and committing lifts the calibration gate on every appraisal in
+/// scope.</para>
 ///
 /// <para>The actor is always taken from the token. The ported routes carried it as a path segment
 /// (<c>…/open/{facilitatedById}</c>), which let any caller record the session as run by someone
@@ -83,14 +87,56 @@ public class CalibrationSessionsController : ControllerBase
         return UnprocessableEntity(new { message = ex.Message });
     }
 
+    private bool? _isDesk;
+
+    /// <summary>The performance desk: whoever holds the performance Read policy.</summary>
+    private async Task<bool> IsDeskAsync()
+    {
+        if (_isDesk is bool known) return known;
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        _isDesk = (await authorization.AuthorizeAsync(User, HrPermissions.PerformanceReadPolicy)).Succeeded;
+        return _isDesk.Value;
+    }
+
+    /// <summary>
+    /// Who may read a session (performance closure P3): the desk, or a panellist of that session —
+    /// a participant, or its facilitator. An unknown id falls to the desk, so the desk is told it
+    /// is missing (404) and anyone else is refused.
+    /// </summary>
+    private async Task<bool> CanReadSessionAsync(Guid sessionId, CancellationToken ct)
+    {
+        if (await IsDeskAsync()) return true;
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<CalibrationSession>()
+            .AsNoTracking()
+            .AnyAsync(s => s.Id == sessionId
+                        && s.TenantId == tenantId
+                        && (s.FacilitatedById == me || s.Participants.Any(p => p.EmployeeId == me && !p.IsDeleted)), ct);
+    }
+
+    /// <summary>
+    /// The list reads' scope (P3): everything for the desk, the caller's own sessions for anyone
+    /// else linked to an employee, nothing for an unlinked non-desk account.
+    /// </summary>
+    private async Task<(bool Allowed, Guid? Panellist)> ListScopeAsync()
+    {
+        if (await IsDeskAsync()) return (true, null);
+        return _currentUserService.EmployeeId is Guid me && me != Guid.Empty ? (true, me) : (false, null);
+    }
+
     /// <summary>Get calibration sessions with pagination</summary>
     [HttpGet("paged")]
     [ProducesResponseType(typeof(PagedResult<CalibrationSessionDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetPaged([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20, CancellationToken cancellationToken = default)
     {
+        var (allowed, panellist) = await ListScopeAsync();
+        if (!allowed) return Forbid();
+
         try
         {
-            var result = await _calibrationService.GetPagedAsync(pageNumber, pageSize, cancellationToken);
+            var result = await _calibrationService.GetPagedAsync(pageNumber, pageSize, panellist, cancellationToken);
             return Ok(result);
         }
         catch (Exception ex)
@@ -106,6 +152,8 @@ public class CalibrationSessionsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken = default)
     {
+        if (!await CanReadSessionAsync(id, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _calibrationService.GetByIdAsync(id, cancellationToken);
@@ -127,9 +175,12 @@ public class CalibrationSessionsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<CalibrationSessionDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetByCycle(Guid cycleId, CancellationToken cancellationToken = default)
     {
+        var (allowed, panellist) = await ListScopeAsync();
+        if (!allowed) return Forbid();
+
         try
         {
-            var result = await _calibrationService.GetByCycleIdAsync(cycleId, cancellationToken);
+            var result = await _calibrationService.GetByCycleIdAsync(cycleId, panellist, cancellationToken);
             return Ok(result);
         }
         catch (Exception ex)
@@ -350,6 +401,8 @@ public class CalibrationSessionsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<CalibrationParticipantDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetParticipants(Guid sessionId, CancellationToken cancellationToken = default)
     {
+        if (!await CanReadSessionAsync(sessionId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _calibrationService.GetParticipantsAsync(sessionId, cancellationToken);
@@ -454,9 +507,11 @@ public class CalibrationSessionsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<CalibrationRatingAdjustmentDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetRatingAdjustments(Guid sessionId, CancellationToken cancellationToken = default)
     {
+        if (!await CanReadSessionAsync(sessionId, cancellationToken)) return Forbid();
+
         try
         {
-            var result = await _calibrationService.GetRatingAdjustmentsAsync(sessionId, cancellationToken);
+            var result = await _calibrationService.GetRatingAdjustmentsAsync(sessionId, _currentUserService.EmployeeId, cancellationToken);
             return Ok(result);
         }
         catch (ArgumentException ex)
@@ -475,9 +530,11 @@ public class CalibrationSessionsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<CalibrationRatingAdjustmentDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAdjustmentsByAppraisal(Guid sessionId, Guid appraisalId, CancellationToken cancellationToken = default)
     {
+        if (!await CanReadSessionAsync(sessionId, cancellationToken)) return Forbid();
+
         try
         {
-            var result = await _calibrationService.GetAdjustmentsByAppraisalAsync(sessionId, appraisalId, cancellationToken);
+            var result = await _calibrationService.GetAdjustmentsByAppraisalAsync(sessionId, appraisalId, _currentUserService.EmployeeId, cancellationToken);
             return Ok(result);
         }
         catch (ArgumentException ex)
@@ -591,9 +648,11 @@ public class CalibrationSessionsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetCalibrationMatrix(Guid sessionId, CancellationToken cancellationToken = default)
     {
+        if (!await CanReadSessionAsync(sessionId, cancellationToken)) return Forbid();
+
         try
         {
-            var result = await _calibrationService.GetCalibrationMatrixAsync(sessionId, cancellationToken);
+            var result = await _calibrationService.GetCalibrationMatrixAsync(sessionId, _currentUserService.EmployeeId, cancellationToken);
             return Ok(result);
         }
         catch (ArgumentException ex)
@@ -635,14 +694,17 @@ public class CalibrationSessionsController : ControllerBase
             cancellationToken);
 
     /// <summary>
-    /// Streams a calibration attachment. Reads stay open to any authenticated user, matching the
-    /// rest of this controller — the managers on a panel need the papers that go with the grid.
+    /// Streams a calibration attachment — to the desk and the session's panellists, like every
+    /// other read here (P3); the managers on a panel need the papers that go with the grid.
     /// </summary>
     [HttpGet("{sessionId:guid}/attachments/{attachmentId:guid}/download")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DownloadAttachment(Guid sessionId, Guid attachmentId, CancellationToken cancellationToken = default)
     {
+        if (!await CanReadSessionAsync(sessionId, cancellationToken)) return Forbid();
+
         if (_currentUserService.TenantId is not Guid tenantId)
             return Unauthorized("Tenant context could not be resolved");
 
@@ -668,19 +730,23 @@ public class CalibrationSessionsController : ControllerBase
     /// whatever this session has already adjusted.
     /// </summary>
     /// <remarks>
-    /// A read, so it follows this controller's rule that panellists can see the grid. Without it
-    /// the calibration dialog could only move an appraisal's overall score — the API accepted
-    /// per-criterion adjustments but nothing could enumerate the criteria to offer them, because
-    /// the snapshot only came back inside a manager's or HR's own evaluation context.
+    /// A read, so the desk and the session's panellists (P3) — for an appraisal in the session's
+    /// scope only, and never the reader's own (the service holds both). Without it the calibration
+    /// dialog could only move an appraisal's overall score — the API accepted per-criterion
+    /// adjustments but nothing could enumerate the criteria to offer them, because the snapshot
+    /// only came back inside a manager's or HR's own evaluation context.
     /// </remarks>
     [HttpGet("{sessionId:guid}/appraisals/{appraisalId:guid}/criteria")]
     [ProducesResponseType(typeof(IEnumerable<CalibrationCriterionDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetAppraisalCriteria(Guid sessionId, Guid appraisalId, CancellationToken cancellationToken = default)
     {
+        if (!await CanReadSessionAsync(sessionId, cancellationToken)) return Forbid();
+
         try
         {
-            return Ok(await _calibrationService.GetAppraisalCriteriaAsync(sessionId, appraisalId, cancellationToken));
+            return Ok(await _calibrationService.GetAppraisalCriteriaAsync(sessionId, appraisalId, _currentUserService.EmployeeId, cancellationToken));
         }
         catch (ArgumentException ex)
         {
@@ -698,6 +764,8 @@ public class CalibrationSessionsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<AppraisalAttachmentDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAttachments(Guid sessionId, CancellationToken cancellationToken = default)
     {
+        if (!await CanReadSessionAsync(sessionId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _calibrationService.GetAttachmentsAsync(sessionId, cancellationToken);

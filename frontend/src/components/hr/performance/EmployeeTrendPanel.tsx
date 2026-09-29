@@ -140,7 +140,12 @@ export function EmployeeTrendPanel({
                       </TableCell>
                       <TableCell>
                         {p.rating ? humanizeEnum(p.rating) : (
-                          <span className="text-muted-foreground">not rated</span>
+                          <span className="text-muted-foreground">
+                            {/* P2: on the employee's own trend an unreleased outcome is withheld. */}
+                            {p.outcomeReleased === false && p.overallScore == null
+                              ? 'not yet released'
+                              : 'not rated'}
+                          </span>
                         )}
                       </TableCell>
                       <TableCell>

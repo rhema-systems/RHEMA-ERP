@@ -345,9 +345,15 @@ export interface UnitGoalDashboardMetrics {
   totalEmployeeGoalsCascaded: number;
 }
 
+/**
+ * The cascade in numbers — open to everyone who can read the unit goal. The per-employee rows
+ * (`…/employee-goals`) are the HR desk's and the unit line's only (performance closure P11).
+ */
 export interface UnitGoalCascadeStats {
   goalId: string;
   employeeGoalsCount: number;
+  /** Mean progress across the aligned employee goals; null when there are none. */
+  averageProgressPercent?: number | null;
 }
 
 export interface UnitGoalEmployeeGoalSummary {

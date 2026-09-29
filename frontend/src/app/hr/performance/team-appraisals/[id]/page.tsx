@@ -39,7 +39,9 @@ import { PeerFeedbackPanel } from '@/components/hr/performance/PeerFeedbackPanel
 import { ConversationsPanel } from '@/components/hr/performance/ConversationsPanel';
 import { PeerNominationPanel } from '@/components/hr/performance/PeerNominationPanel';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { PerformanceAttachmentsPanel } from '@/components/hr/performance/PerformanceAttachmentsPanel';
+import { hasAnyPermissionAccess } from '@/lib/permissions';
 import { formatDate, humanizeEnum } from '@/lib/hr/attendance-format';
 import {
   appraisalWorkflowService,
@@ -69,6 +71,7 @@ export default function ManagerEvaluationPage() {
   const appraisalId = params.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const [values, setValues] = useState<ScoreValues>({});
   const [narrative, setNarrative] = useState({
@@ -330,10 +333,18 @@ export default function ManagerEvaluationPage() {
         {/* ⚠ The upload behind this tab was purpose-built for the controlled gate and had never
             been called by anything: an appraisal's evidence could not be attached at all. */}
         <TabsContent value="evidence" className="mt-4">
+          {/* P9: a file is removed by whoever attached it, or HR, and only until the appraisal is
+              complete — after that it is part of the record. The server refuses the rest. */}
           <PerformanceAttachmentsPanel
             basePath="/PerformanceAppraisals"
             ownerId={appraisalId}
             canUpload={!readOnly}
+            canDelete={!['Appealed', 'Completed', 'Closed', 'Withdrawn'].includes(context.status)}
+            canDeleteItem={(a) =>
+              (!!user?.employeeId && a.uploadedById === user.employeeId) ||
+              (hasAnyPermissionAccess(user, ['HR.Performance.Write', 'HR.Performance.Admin']) &&
+                user?.employeeId !== context.employeeId)
+            }
             helpText="Evidence behind the ratings — reports, certificates, correspondence. Scanned on upload; max 10 MB."
           />
         </TabsContent>

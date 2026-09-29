@@ -157,6 +157,12 @@ export interface PerformanceAppraisal extends AuditFields {
   endDate: string;
   status: AppraisalStatus;
   peerEvaluatorsCount: number;
+  /**
+   * The outcome is released to the appraisee (performance closure P2). While false, the
+   * appraisee's own copy comes back with the score, grade, ranks, recommendations and the
+   * manager's narrative blanked by the server; HR and the manager see them throughout.
+   */
+  outcomeReleased?: boolean;
   overallScore?: number | null;
   /** Set only once an appeal is adjudicated with a score change. */
   adjustedScore?: number | null;
@@ -213,7 +219,10 @@ export interface MyAppraisal {
   actionRequired: boolean;
   actionText?: string | null;
   dueDate?: string | null;
+  /** Null for the appraisee until {@link outcomeReleased} (P2). */
   overallScore?: number | null;
+  /** The outcome is released to the appraisee (P2). */
+  outcomeReleased?: boolean;
   isAcknowledged: boolean;
   appealFiled: boolean;
   appealStatus?: string | null;
@@ -795,6 +804,11 @@ export interface HRReview {
   organizationUnit: string;
   appraisalCycleName: string;
   status: AppraisalStatus;
+  /**
+   * The outcome is released to the appraisee (P2). While false, the appraisee's own copy has no
+   * manager evaluation, peer summary, manager/peer/final score, grade or HR remarks.
+   */
+  outcomeReleased?: boolean;
   isSelfEvaluationComplete: boolean;
   isManagerEvaluationComplete: boolean;
   requiresPeerReviews: boolean;

@@ -150,9 +150,14 @@ export default function MyAppraisalsPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {row.overallScore !== null && row.overallScore !== undefined
-                        ? Number(row.overallScore).toFixed(1)
-                        : '—'}
+                      {row.overallScore !== null && row.overallScore !== undefined ? (
+                        Number(row.overallScore).toFixed(1)
+                      ) : row.outcomeReleased === false ? (
+                        // P2: the score exists, but is not the appraisee's to see yet.
+                        <span className="text-xs text-muted-foreground">Not yet released</span>
+                      ) : (
+                        '—'
+                      )}
                       {row.appealFiled && (
                         <Badge variant="secondary" className="ml-2">
                           Appealed

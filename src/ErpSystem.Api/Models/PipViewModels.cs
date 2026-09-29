@@ -153,6 +153,11 @@ public class PipMeetingFormResponse
     public Guid? MeetingId { get; set; }
     public Guid PipId { get; set; }
     public string PipNumber { get; set; } = string.Empty;
+    /// <summary>
+    /// The employee the plan is about — the one person who writes <see cref="EmployeeComments"/>
+    /// (performance closure P13), so the screen offers the reply to them alone.
+    /// </summary>
+    public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
     public string EmployeePosition { get; set; } = string.Empty;
     public string? EmployeePhotoUrl { get; set; }

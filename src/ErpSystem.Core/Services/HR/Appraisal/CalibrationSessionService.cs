@@ -112,18 +112,42 @@ public class CalibrationSessionService : ICalibrationSessionService
         return entity.ToDto();
     }
 
-    public async Task<IEnumerable<CalibrationSessionDto>> GetByCycleIdAsync(Guid cycleId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// The sessions a panellist sits on (performance closure P3): those they are a participant of,
+    /// or facilitate. The desk passes no panellist and sees every session in the tenant — before
+    /// this, so did any authenticated user.
+    /// </summary>
+    private static IQueryable<CalibrationSession> ForPanellist(IQueryable<CalibrationSession> query, Guid? panellistEmployeeId)
+        => panellistEmployeeId is Guid me
+            ? query.Where(s => s.FacilitatedById == me || s.Participants.Any(p => p.EmployeeId == me && !p.IsDeleted))
+            : query;
+
+    /// <summary>
+    /// The viewer's own appraisals, which no calibration read shows them (P3, the two-actor rule):
+    /// a panellist — or an HR officer — whose own appraisal is in scope would otherwise read their
+    /// manager's proposal and the panel's restatement before the outcome is released to them.
+    /// </summary>
+    /// <remarks>A list, not a set: it is used inside an EF query, where a list's Contains translates.</remarks>
+    private async Task<List<Guid>> OwnAppraisalIdsAsync(Guid tenantId, Guid? viewerEmployeeId, CancellationToken cancellationToken)
+        => viewerEmployeeId is Guid me
+            ? await _appraisalRepository.GetQueryable()
+                .Where(a => a.TenantId == tenantId && a.EmployeeId == me)
+                .Select(a => a.Id)
+                .ToListAsync(cancellationToken)
+            : new List<Guid>();
+
+    public async Task<IEnumerable<CalibrationSessionDto>> GetByCycleIdAsync(Guid cycleId, Guid? panellistEmployeeId, CancellationToken cancellationToken = default)
     {
-        var entities = await BaseQuery
+        var entities = await ForPanellist(BaseQuery, panellistEmployeeId)
             .Where(s => s.AppraisalCycleId == cycleId)
             .OrderByDescending(s => s.ScheduledDate)
             .ToListAsync(cancellationToken);
         return entities.ToDtoList();
     }
 
-    public async Task<PagedResult<CalibrationSessionDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
+    public async Task<PagedResult<CalibrationSessionDto>> GetPagedAsync(int pageNumber, int pageSize, Guid? panellistEmployeeId, CancellationToken cancellationToken = default)
     {
-        var query = BaseQuery.OrderByDescending(s => s.ScheduledDate);
+        var query = ForPanellist(BaseQuery, panellistEmployeeId).OrderByDescending(s => s.ScheduledDate);
         var totalCount = await query.CountAsync(cancellationToken);
         var items = await query.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken);
         return new PagedResult<CalibrationSessionDto>
@@ -447,10 +471,12 @@ public class CalibrationSessionService : ICalibrationSessionService
                 $"This criterion is scored from {AppraisalScoring.MinScore:0} to {top:0}; {score:0} is outside its scale.");
     }
 
-    public async Task<IEnumerable<CalibrationRatingAdjustmentDto>> GetRatingAdjustmentsAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<CalibrationRatingAdjustmentDto>> GetRatingAdjustmentsAsync(Guid sessionId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default)
     {
-        await GetOwnedSessionAsync(sessionId);
+        var session = await GetOwnedSessionAsync(sessionId);
+        var own = await OwnAppraisalIdsAsync(session.TenantId, viewerEmployeeId, cancellationToken);
         var entities = await _adjustmentRepository.GetQueryable(a => a.CalibrationSessionId == sessionId)
+            .Where(a => !own.Contains(a.PerformanceAppraisalId))
             .Include(a => a.PerformanceAppraisal)
                 .ThenInclude(ap => ap.Employee)
             .Include(a => a.AdjustedBy)
@@ -459,9 +485,11 @@ public class CalibrationSessionService : ICalibrationSessionService
         return entities.ToDtoList();
     }
 
-    public async Task<IEnumerable<CalibrationRatingAdjustmentDto>> GetAdjustmentsByAppraisalAsync(Guid sessionId, Guid appraisalId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<CalibrationRatingAdjustmentDto>> GetAdjustmentsByAppraisalAsync(Guid sessionId, Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default)
     {
-        await GetOwnedSessionAsync(sessionId);
+        var session = await GetOwnedSessionAsync(sessionId);
+        if ((await OwnAppraisalIdsAsync(session.TenantId, viewerEmployeeId, cancellationToken)).Contains(appraisalId))
+            throw new ArgumentException("That appraisal is not in this calibration session.");
         var entities = await _adjustmentRepository.GetQueryable(
                 a => a.CalibrationSessionId == sessionId && a.PerformanceAppraisalId == appraisalId)
             .Include(a => a.PerformanceAppraisal)
@@ -483,10 +511,17 @@ public class CalibrationSessionService : ICalibrationSessionService
     /// enumerate the criteria to offer them.
     /// </remarks>
     public async Task<IEnumerable<CalibrationCriterionDto>> GetAppraisalCriteriaAsync(
-        Guid sessionId, Guid appraisalId, CancellationToken cancellationToken = default)
+        Guid sessionId, Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default)
     {
         var session = await GetOwnedSessionAsync(sessionId);
         var tenantId = session.TenantId;
+
+        // P3: an appraisal this session covers, and not the viewer's own. Any session id opened
+        // every appraisal's criteria and the manager's item scores in the tenant — the id in the
+        // route was never checked against the session's scope.
+        var inScope = (await GetScopedAppraisalsAsync(session, cancellationToken)).Any(a => a.Id == appraisalId);
+        if (!inScope || (await OwnAppraisalIdsAsync(tenantId, viewerEmployeeId, cancellationToken)).Contains(appraisalId))
+            throw new ArgumentException("That appraisal is not in this calibration session.");
 
         var configs = await _criterionConfigRepository
             .GetQueryable(c => c.PerformanceAppraisalId == appraisalId && c.TenantId == tenantId)
@@ -893,13 +928,18 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     // ─── Calibration Matrix ───────────────────────────────────────────────────
 
-    public async Task<CalibrationMatrixDto> GetCalibrationMatrixAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    public async Task<CalibrationMatrixDto> GetCalibrationMatrixAsync(Guid sessionId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default)
     {
         var session = await BaseQuery.FirstOrDefaultAsync(s => s.Id == sessionId, cancellationToken);
         if (session == null)
             throw new ArgumentException("Calibration session not found.");
 
-        var appraisals = await GetScopedAppraisalsAsync(session, cancellationToken);
+        // The viewer's own row goes before the counts and the average are taken (P3): leaving it
+        // in the average would let them work their own score out from everyone else's.
+        var own = await OwnAppraisalIdsAsync(session.TenantId, viewerEmployeeId, cancellationToken);
+        var appraisals = (await GetScopedAppraisalsAsync(session, cancellationToken))
+            .Where(a => !own.Contains(a.Id))
+            .ToList();
 
         var adjustments = await _adjustmentRepository
             .GetQueryable(a => a.CalibrationSessionId == sessionId)

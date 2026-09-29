@@ -23,7 +23,8 @@
  * irreversible.
  *
  * The actor is never sent: the facilitator, the adjuster and the committer all come from the
- * token. Reads are open to any authenticated user (managers sit on the panel); writes are HR.
+ * token. Reads are HR's and the session's panellists' (P3 — managers sit on the panel); writes
+ * are HR.
  *
  * Enums serialize as strings.
  */

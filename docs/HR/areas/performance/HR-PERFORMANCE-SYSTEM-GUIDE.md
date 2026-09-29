@@ -3,7 +3,7 @@
 **Module:** Human Resources → Talent & Performance → **Performance**
 **Coverage:** 19 sidebar leaves · 46 desk routes · 12 Administration setup routes · 15 self-service portal routes — **62 screens**
 **Written:** 2026-09-17 · **Verified against** `ErpSystemDB_UAT` as it stands today, and against the source of every screen and service behind it.
-**Updated 2026-09-29** for the performance closure's lane A (scoring and the settle path): Rule 2, § 1.5, P-6/P-39/P-40, chapter 30's commit and chapter 31's finalise wording, Appendix C. The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
+**Updated 2026-09-29** for the performance closure's lane A (scoring and the settle path): Rule 2, § 1.5, P-6/P-39/P-40, chapter 30's commit and chapter 31's finalise wording, Appendix C. **And for lane P** (privacy and access): chapter 16's cascade rows and P-19, chapter 21's private notes, check-in rules and P-27, chapter 25's plan authorship, chapter 26's outcome release, chapter 28's nominations, chapter 29's Evidence tab, chapter 30's panel reads, chapter 36's PIP rules and the review meeting's right of reply. The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
 **Seventh in the series**, after Recruitment, Employees, Leave, Attendance & Time, Company Schedule and Staff Travel.
 
 ---
@@ -1938,6 +1938,12 @@ Description · Success criteria · Target value · Unit · Due date.
 **Supporting evidence** attachment panel, and **"Employee goals cascaded from this goal"** — Employee ·
 Goal · Priority · Status · Progress · Due.
 
+> **Changed 2026-09-29** (performance closure lane P, P11). The per-employee rows are shown to HR,
+> the manager who raised the goal, and the head of the goal's unit or of any unit above it. Everyone
+> else — the page is open to the whole tenant — sees the cascade in numbers instead: *"N employee
+> goals aligned to this goal"* and the cascade progress, naming nobody. Before, any member of staff
+> could read which colleague was behind on which goal.
+
 ### ▶ Walk it
 
 1. Open **Unit Goals**. Three rows, all linked.
@@ -1974,7 +1980,8 @@ Goal · Priority · Status · Progress · Due.
 
 > ⚠ **The attachment entitlement here is weaker than anywhere else in the module**: a unit goal's
 > attachments are readable by **anyone authenticated in the tenant**, because a departmental target is
-> not personal data. Do not attach anything sensitive to a unit goal.
+> not personal data. Do not attach anything sensitive to a unit goal. This is deliberate (closure
+> decision D-26), and the upload card says so beside the Attach button.
 
 > **A quirk worth knowing if you ever script against it:** `UnitGoals/dashboard/paged` binds
 > `priority` as an **integer** while every other endpoint takes the enum name. The client converts it;
@@ -1982,7 +1989,9 @@ Goal · Priority · Status · Progress · Due.
 
 ### ⚠ Known gaps
 **P-18.** Employee-goal cascade counts read 0 on every unit goal (Rule 5).
-**P-19.** Unit-goal attachments are tenant-readable rather than entitlement-scoped.
+**P-19.** Unit-goal attachments are tenant-readable rather than entitlement-scoped. *Kept by decision
+(D-26, closure P18): a departmental target is not personal data, and the upload card has said so since
+2026-08-09.*
 
 ---
 
@@ -2461,12 +2470,19 @@ On this database `head.dev` has **one** check-in: *Q3 one-to-one — Community 2
 | **Three fields** | Scheduled · Cycle · Follow-up |
 | **Objectives this was about** | Which of the cycle's company goals the conversation served. **Replace-set** — each save sends the whole list. Read-only once held |
 | **Agenda** | Free text, set when the check-in was scheduled |
-| **Shared notes** / **Action items** / **Private notes** / **Employee comments** | Four cards, shown once held. **Private notes are shown only to whoever conducted the check-in** |
+| **Shared notes** / **Action items** / **Private notes** / **Employee comments** | Four cards, shown once held. **Private notes reach only whoever conducted the check-in, and HR** — the server leaves them out of every other reader's copy, and always out of the subject's, even when the subject is an HR officer (closure lane P, 2026-09-29) |
 | **Goal updates** | Goal · Progress · Status, with an **Update a goal** button — and the standing line *"Recording an update here moves the goal itself, so it shows up in progress and at-risk reporting."* |
 
 **The "Record as held" dialog** carries **Shared notes** *("What you both agreed. The employee can see
-this.")*, **Action items**, **Private notes** *("Your own record.")* — and warns: *"These three fields
-are replaced wholesale each time, not merged — paste back anything you want to keep."*
+this.")*, **Action items**, **Private notes** *("Your own record.")* — and warns: *"These fields are
+replaced wholesale each time, not merged — paste back anything you want to keep."*
+
+> **Changed 2026-09-29** (closure lane P, P6). **Record as held** is offered to the conductor and to
+> HR, never to the check-in's subject (the subject sees *Not yet held*), and the **Private notes**
+> field to the conductor alone — the server writes private notes only from the conductor, so HR
+> closing a meeting it did not hold cannot overwrite them. Who the check-in is about and who holds it
+> are fixed once it exists, and it can be opened only about yourself, a direct report, or — for HR —
+> anyone in the tenant.
 
 **The "Update a goal" dialog**: Goal *(the employee's own, for this cycle)* · Progress % · Status ·
 Note · and a **"This changes the goal"** confirmation line.
@@ -2486,9 +2502,9 @@ Note · and a **"This changes the goal"** confirmation line.
 5. Read the **Agenda**, then the **Shared notes** and **Action items**.
 6. Point at **Private notes**.
 
-   💬 *"And that box is his. It comes back on every read of this check-in — including the employee's —
-   so the screen shows it only to the person who ran the meeting. That is a rule in the code, not a
-   convention."*
+   💬 *"And that box is his. When Efua opens this check-in, the server does not send it to her at
+   all — not hidden on her screen, absent from what her browser receives. That is a rule in the code,
+   not a convention."*
 
 7. Scroll to **Goal updates**. Three rows: the layout at 70% *On track*, the turnaround at 55%
    *At risk*, the certification at 40% *In progress*.
@@ -2517,6 +2533,8 @@ Note · and a **"This changes the goal"** confirmation line.
 | Record as held | `POST api/CheckIns/{id}/complete` | stamps it held, **now**; the three note fields are replaced wholesale |
 | Goal updates | `GET/POST/PUT/DELETE api/CheckIns/{id}/goal-updates[/{id}]` | writes `CheckInGoalUpdates` **and applies the figures to `EmployeeGoals`** |
 | Objectives | `PUT api/PerformanceLinks/check-ins/{id}/objectives` | **replace-set**; `[]` clears it |
+| Attachments | `GET/POST/DELETE api/CheckIns/{id}/attachments[/{id}]` | a file is removed by whoever attached it, or HR — never as the check-in's subject — and only until the check-in is held (closure P9) |
+| Goal updates, ownership | `POST …/goal-updates` | **only a goal of the check-in's subject** (404 otherwise); an edit never moves an update to another check-in or goal (closure P7 — anyone could open a check-in about themselves and move a colleague's goal through it) |
 
 > **Deleting a goal update does not undo what it did.** The toast says so: *"The goal keeps the figures
 > this update put on it."* That is honest rather than convenient — the goal has moved on, and rolling it
@@ -2525,8 +2543,10 @@ Note · and a **"This changes the goal"** confirmation line.
 ### ⚠ Known gaps
 **P-26.** There is exactly **one** check-in on this database, so the "I run" tab has one row and the
 "About me" tab is empty for everyone except Efua.
-**P-27.** `privateNotes` come back on **every** read of a check-in, including the employee's. The client
-hides them; the API does not.
+**P-27.** ~~`privateNotes` come back on **every** read of a check-in, including the employee's. The client
+hides them; the API does not.~~ **Fixed on every path** — by id, the employee's and the conductor's
+lists, by employee, by conductor, upcoming, and HR's paged list, which was never redacted (closure lane
+P, P15; `run-final-privacy.mjs`).
 
 ---
 
@@ -2849,6 +2869,13 @@ employee has not been told"* banner where applicable, and three tabs:
 The objective dialog: Title · **What good looks like** · **Actions agreed** *("Training, mentoring,
 stretch work — whatever was agreed")* · Target date · Status.
 
+> **Changed 2026-09-29** (closure lane P, P10). A plan records **who wrote it**. The employee may
+> complete, cancel or delete only a plan they wrote themselves; on one their manager or HR set for
+> them, the status picker offers neither Completed nor Cancelled and the server answers 403 — they work
+> it, the manager closes it. A plan written before that date has no author and counts as set for the
+> employee (the three on this database). The plan's edit route no longer moves a plan to another
+> employee or changes its status; status moves only through the picker's own route.
+
 Alongside it, on the employee's own plan, sits **Development skill suggestions** — competencies this
 person's *goals* say they need, each listed with the goals that asked for it. Not generic
 recommendations: somebody ticked "development needed" on a real goal.
@@ -2967,6 +2994,15 @@ Steps the cycle does not require are **dropped** from the rail rather than greye
 | **My evaluation** | The submitted self-evaluation, read-only, with scores **as stored** — grade and achievement resolved by the server against the frozen snapshot, not recomputed here |
 | **My peer nominations** | Only when the cycle nominates in *Employee* mode. Nominate, see who was approved |
 | **Outcome** | Empty until HR finalises. Then: **Final score · Finalised · Acknowledged**, **How the score was made up** (Self / Peers / Manager), **HR remarks**, and **Your response** |
+
+> **Changed 2026-09-29** (closure lane P, P2). **The outcome is released to the employee, not merely
+> hidden from them.** Until it is released — Completed or Closed, or in governance with every required
+> calibration committed and HR's sign-off given — the server sends the employee's own copy of their
+> appraisal, their lists, their trend and the HR review **without** the overall and calibrated scores,
+> the grade, the ranks, the manager's recommendations and narrative, the manager's and peers' scores
+> and HR's remarks; each carries `outcomeReleased: false`, and *My Appraisals* shows *"Not yet
+> released"*. Their own self-evaluation score is theirs throughout. HR and the manager see everything
+> as before. With anonymous peer reviews on, no payload of the employee's names a peer.
 
 ### ▶ Walk it
 
@@ -3174,6 +3210,12 @@ first.
 creates each peer's evaluation record and notifies them. A nomination can be removed until the
 invitation has been sent — which approval does.
 
+> **Changed 2026-09-29** (closure lane P, P14). **The nominated peer can read their nomination but
+> never change or delete it** — they could mark it approved or withdraw one they did not want. A
+> nomination records **who actually made it**, from the login (the batch recorded every one as the
+> appraisee's, whoever sent it). In a cycle that nominates in **Manager** mode the appraisee is
+> refused both nominate routes (*"In this cycle your manager chooses your peer evaluators."*).
+
 ### ⚠ Known gaps
 **P-36.** Every peer evaluation on this database is already submitted, so the forms open read-only.
 
@@ -3228,7 +3270,7 @@ it needs changing.*
 | **Nominations** | Only when the cycle nominates in *Manager* mode |
 | **History** | The employee's score across previous cycles |
 | **Conversations** | The panel that schedules and completes appraisal conversations |
-| **Evidence** | Attachments — *"Evidence behind the ratings — reports, certificates, correspondence. Scanned on upload; max 10 MB."* |
+| **Evidence** | Attachments — *"Evidence behind the ratings — reports, certificates, correspondence. Scanned on upload; max 10 MB."* **Remove** is offered on a file to whoever attached it, or to HR, and on nothing once the appraisal is complete — the server refuses the rest (closure P9, 2026-09-29; it removed anyone's file, at any stage) |
 
 Below the tabs, when the cycle nominates in *Employee* mode, a separate card: **Peer nominations
 awaiting your approval** — because the employee nominates, but approving is still the manager's call.
@@ -3475,13 +3517,19 @@ Leave one blank to leave it alone."*
 | Close | `POST …/{id}/complete` — adjustments refused afterwards; the panel is notified |
 | **Commit** | `POST …/{id}/apply-adjustments` — **only from Completed, and irreversible** |
 | Grid | `GET …/{id}/matrix` — **every appraisal the session covers, not only the adjusted ones** |
-| Per-criterion detail | `GET …/{id}/appraisals/{appraisalId}/criteria` — a *read*, so panellists get it, not just HR |
+| Per-criterion detail | `GET …/{id}/appraisals/{appraisalId}/criteria` — a *read*, so panellists get it, not just HR; **404 for an appraisal outside the session's scope** (any session id used to open any appraisal's criteria) |
 | Adjustments | `GET/POST/PUT/DELETE …/{id}/adjustments[/{id}]` — **422 while the session is Pending, Completed or Cancelled**, and 422 if the appraisal is outside scope |
 | Panel | `…/{id}/participants[/{id}]`, `PATCH …/attendance` |
 | Attachments | `…/{id}/attachments` — HR only, through the scan gate |
 
-**Reads work for any authenticated user; every write needs an HR role.** Deleting a session needs
-`HR.Performance.Admin` — 403 for `hr.head`.
+**Reads are HR's and the panel's; every write needs an HR role.** *(Changed 2026-09-29, closure lane
+P, P3 — reads were open to any authenticated user.)* A session is readable by the performance desk and
+by its panellists — the participants and the facilitator — and the lists (by cycle, paged) give
+everyone else only the sessions they sit on. The per-criterion read answers only for an appraisal in
+the session's scope. **A panellist's own appraisal is left out of every read** — their matrix row,
+its adjustments and criteria, and the grid's counts and average, which would otherwise let them work
+their own score out. Panellists reach the detail page from the *"session complete"* notification.
+Deleting a session needs `HR.Performance.Admin` — 403 for `hr.head`.
 
 **Scope resolution:** every appraisal in the cycle whose employee sits in the named unit **or any unit
 beneath it**; or, when a level is named instead, everyone at that level. Anything already linked to the
@@ -4235,6 +4283,13 @@ Support provided · Measurement criteria · Review schedule)* — each with a pl
 
 The page header says it: *"Saved as a draft. It binds nobody until it has been approved."*
 
+> **Changed 2026-09-29** (closure lane P, P4). A manager opens a plan — and `prepare`, which carries the
+> source appraisal's score — **only for a direct report**; HR for anyone except themselves. The
+> supervisor is the employee's line manager unless HR names someone else, and the **HR owner must be
+> an HR officer with an active login** (422 otherwise): the supervisor and HR owner can read and manage
+> the plan, so naming them used to hand anyone the plan. **The employee does not see a draft**, or one
+> out for approval, in their list or by id — the Draft status's own contract — until it is in force.
+
 ### 👁 The detail page
 
 Header with **Open the appraisal**, the status badge, and the workflow actions. Banners:
@@ -4272,6 +4327,13 @@ here is written onto the goals themselves when the form is saved**. That is why 
 a meeting rather than on the goals tab: what changed and the conversation that agreed it stay together.
 **The employee's comments**: their right of reply — *"Replaces whatever is above — this field holds one
 comment, not a thread."*
+
+> **Changed 2026-09-29** (closure lane P, P13). The reply is **the employee's own write**: the
+> comment box is shown to the plan's employee only, and the server refuses anyone else — the
+> supervisor, the HR owner and HR included (it said *"anyone on the plan can enter it here on their
+> behalf"*). The supervisor's save carries the whole form back, but the server takes neither the reply
+> nor the conductor from it: **whoever books a review holds it**, whatever the body names. The
+> employee sees the record read-only — no Save or Record meeting.
 
 > ⚠ A meeting has **no stored status**. "Completed" is derived from its date being in the past, so the
 > **Complete** button saves the notes and stamps nothing extra. It is a save with a fuller name.
@@ -4323,7 +4385,7 @@ comment, not a thread."*
 | Detail | `GET api/Pip/{id}/detail` — plan, goals, attachments and meetings in one call |
 | Prepare | `GET api/Pip/prepare?employeeId=&appraisalId=` |
 | Create | `POST api/Pip` — returns the new id; created as a **Draft** |
-| Amend | `PUT api/Pip/{id}` — **422 while out for approval or once closed** |
+| Amend | `PUT api/Pip/{id}` — **a draft only** (422 otherwise), and the plan's content only: its employee, source appraisal, supervisor, HR owner, status and outcome are never taken from the body (closure P5, 2026-09-29) |
 | Submit / Approve / Reject / Recall | **workflow engine**, `PERFORMANCE_IMPROVEMENT_PLAN`, published; approvers **HR, Manager, TenantAdmin** |
 | Running states | `PATCH api/Pip/{id}/status` — Draft / PendingApproval / Active are refused; this moves a **live** plan between its running states |
 | Outcome | `POST api/Pip/{id}/outcome` — `Extended` needs `newEndDate` |
@@ -4331,8 +4393,10 @@ comment, not a thread."*
 | Meetings | `api/PipMeeting` — `prepare`, `schedule`, create, update, `complete`, `schedule/{pipId}`, `{id}/comment` |
 | Attachments | `api/Pip/attachments/{id}/download` — streamed, entitlement checked per request |
 
-**Who can see one:** HR, the employee it is about, the named supervisor and the named HR owner. Anything
-keyed on a plan id is 403 for anybody else.
+**Who can see one:** HR, the employee it is about (once it is in force), the named supervisor and the
+named HR owner. Anything keyed on a plan id is 403 for anybody else. **The employee is the employee
+whatever else they hold**: an HR officer on a plan reads it and never manages it (closure P4, the
+two-actor rule — the desk exemption used to come first).
 
 **Only a draft can be deleted.** A plan that has been in force is **cancelled**, not erased.
 

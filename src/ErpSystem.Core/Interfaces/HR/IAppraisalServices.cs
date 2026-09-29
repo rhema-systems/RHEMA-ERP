@@ -68,17 +68,8 @@ public interface IPerformanceAppraisalService
     Task<bool> CalculateOverallScoreAsync(Guid appraisalId, CancellationToken cancellationToken = default);
     Task<bool> ProgressToHRReviewAsync(Guid appraisalId, CancellationToken cancellationToken = default);
 
-    // EvaluatorEvaluation operations
-    Task<EvaluatorEvaluationDto> AddEvaluatorEvaluationAsync(Guid appraisalId, CreateEvaluatorEvaluationDto createDto, CancellationToken cancellationToken = default);
-    Task<IEnumerable<EvaluatorEvaluationDto>> GetEvaluatorEvaluationsAsync(Guid appraisalId, CancellationToken cancellationToken = default);
-    Task<EvaluatorEvaluationDto> UpdateEvaluatorEvaluationAsync(Guid appraisalId, UpdateEvaluatorEvaluationDto updateDto, CancellationToken cancellationToken = default);
-    Task<bool> DeleteEvaluatorEvaluationAsync(Guid appraisalId, Guid evaluationId, CancellationToken cancellationToken = default);
-
-    // CriterionScore operations
-    Task<CriterionScoreDto> AddCriterionScoreAsync(Guid evaluationId, CreateCriterionScoreDto createDto, CancellationToken cancellationToken = default);
-    Task<IEnumerable<CriterionScoreDto>> GetCriterionScoresAsync(Guid evaluationId, CancellationToken cancellationToken = default);
-    Task<CriterionScoreDto> UpdateCriterionScoreAsync(Guid evaluationId, UpdateCriterionScoreDto updateDto, CancellationToken cancellationToken = default);
-    Task<bool> DeleteCriterionScoreAsync(Guid evaluationId, Guid scoreId, CancellationToken cancellationToken = default);
+    // The raw EvaluatorEvaluation / CriterionScore CRUD was removed in performance closure lane P1:
+    // no screen called it, and its read exposed every evaluator row to the appraisee.
 
     // AppraisalEmployeeResponse operations
     /// <summary>HR transcribing a response. ⚠ Deliberately unwired — see AddOwnEmployeeResponseAsync.</summary>
@@ -96,7 +87,8 @@ public interface IPerformanceAppraisalService
         Guid? fileUploadRecordId = null, Guid? documentRecordId = null, Guid? documentVersionId = null);
     Task<IEnumerable<AppraisalAttachmentDto>> GetAttachmentsAsync(Guid appraisalId, CancellationToken cancellationToken = default);
     Task<AppraisalAttachmentDto?> GetAttachmentAsync(Guid appraisalId, Guid attachmentId, CancellationToken cancellationToken = default);
-    Task<bool> DeleteAttachmentAsync(Guid appraisalId, Guid attachmentId, CancellationToken cancellationToken = default);
+    // P9: the uploader, or the HR desk (actorIsDesk) when it is not the appraisee; before completion.
+    Task<bool> DeleteAttachmentAsync(Guid appraisalId, Guid attachmentId, bool actorIsDesk, CancellationToken cancellationToken = default);
     
     // Employee-centric operations
     Task<IEnumerable<MyAppraisalDto>> GetMyAppraisalsAsync(Guid employeeId, string? cycleFilter = null, CancellationToken cancellationToken = default);
@@ -176,6 +168,8 @@ public interface IPerformanceImprovementPlanService
     Task<IEnumerable<PipReviewMeetingDto>> GetReviewMeetingsAsync(Guid pipId, CancellationToken cancellationToken = default);
     Task<PipReviewMeetingDto?> GetReviewMeetingByIdAsync(Guid meetingId, CancellationToken cancellationToken = default);
     Task<PipReviewMeetingDto> UpdateReviewMeetingAsync(Guid pipId, UpdatePipReviewMeetingDto updateDto, CancellationToken cancellationToken = default);
+    // P13: the plan's subject only (actorEmployeeId from the token); UnauthorizedAccessException otherwise.
+    Task<PipReviewMeetingDto> SetEmployeeCommentsAsync(Guid pipId, Guid meetingId, Guid actorEmployeeId, string? comments, CancellationToken cancellationToken = default);
     Task<bool> DeleteReviewMeetingAsync(Guid pipId, Guid meetingId, CancellationToken cancellationToken = default);
     Task<PipReviewMeetingDto> GetLatestReviewMeetingAsync(Guid pipId, CancellationToken cancellationToken = default);
 
@@ -359,7 +353,8 @@ public interface IPeerNominationService
     
     // Batch operations
     Task<PeerNominationSummaryDto> GetNominationSummaryAsync(Guid appraisalId, CancellationToken cancellationToken = default);
-    Task<IEnumerable<PeerNominationDto>> BatchCreateAsync(BatchCreatePeerNominationsDto batchDto, CancellationToken cancellationToken = default);
+    // P14: nominatedById is the caller (from the token); Manager mode refuses the appraisee.
+    Task<IEnumerable<PeerNominationDto>> BatchCreateAsync(BatchCreatePeerNominationsDto batchDto, Guid nominatedById, CancellationToken cancellationToken = default);
     Task<IEnumerable<PeerNominationDto>> ApproveNominationsAsync(ApprovePeerNominationsDto approveDto, CancellationToken cancellationToken = default);
     Task<IEnumerable<PeerNominationDto>> RejectNominationsAsync(RejectPeerNominationsDto rejectDto, CancellationToken cancellationToken = default);
 }
@@ -812,8 +807,9 @@ public interface IEmployeeGoalService
     /// <summary>recordedById comes from the caller's token — never from the payload.</summary>
     Task<GoalProgressEntryDto> AddProgressEntryAsync(Guid goalId, CreateGoalProgressEntryDto dto, Guid recordedById, CancellationToken cancellationToken = default);
     Task<IEnumerable<GoalProgressEntryDto>> GetProgressEntriesAsync(Guid goalId, CancellationToken cancellationToken = default);
-    Task<GoalProgressEntryDto> UpdateProgressEntryAsync(Guid goalId, UpdateGoalProgressEntryDto dto, CancellationToken cancellationToken = default);
-    Task<bool> DeleteProgressEntryAsync(Guid goalId, Guid entryId, CancellationToken cancellationToken = default);
+    // P8: the recorder (actorEmployeeId, from the token), or the HR desk when it is not the goal's owner.
+    Task<GoalProgressEntryDto> UpdateProgressEntryAsync(Guid goalId, UpdateGoalProgressEntryDto dto, Guid? actorEmployeeId, bool actorIsDesk, CancellationToken cancellationToken = default);
+    Task<bool> DeleteProgressEntryAsync(Guid goalId, Guid entryId, Guid? actorEmployeeId, bool actorIsDesk, CancellationToken cancellationToken = default);
 
     // Lock management (goals locked at start of evaluation phase)
     Task<bool> LockGoalAsync(Guid goalId, CancellationToken cancellationToken = default);
@@ -855,7 +851,8 @@ public interface ICheckInService
         Guid? fileUploadRecordId = null, Guid? documentRecordId = null, Guid? documentVersionId = null);
     Task<IEnumerable<AppraisalAttachmentDto>> GetAttachmentsAsync(Guid checkInId, CancellationToken cancellationToken = default);
     Task<AppraisalAttachmentDto?> GetAttachmentAsync(Guid checkInId, Guid attachmentId, CancellationToken cancellationToken = default);
-    Task<bool> DeleteAttachmentAsync(Guid checkInId, Guid attachmentId, CancellationToken cancellationToken = default);
+    // P9: the uploader, or the HR desk (actorIsDesk) when it is not the subject; before completion.
+    Task<bool> DeleteAttachmentAsync(Guid checkInId, Guid attachmentId, bool actorIsDesk, CancellationToken cancellationToken = default);
 }
 
 #endregion Check-In
@@ -906,8 +903,10 @@ public interface IDevelopmentPlanService
     Task<PagedResult<EmployeeDevelopmentPlanDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default);
     Task<EmployeeDevelopmentPlanDto> CreateAsync(CreateEmployeeDevelopmentPlanDto createDto, CancellationToken cancellationToken = default);
     Task<EmployeeDevelopmentPlanDto> UpdateAsync(UpdateEmployeeDevelopmentPlanDto updateDto, CancellationToken cancellationToken = default);
-    Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<bool> UpdateStatusAsync(Guid id, DevelopmentPlanStatus status, CancellationToken cancellationToken = default);
+    // P10: actorEmployeeId (from the token) — the plan's subject cannot delete, complete or cancel
+    // a plan they did not write; UnauthorizedAccessException when they try.
+    Task<bool> DeleteAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<bool> UpdateStatusAsync(Guid id, DevelopmentPlanStatus status, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 
     // Manager operations
     Task<IEnumerable<EmployeeDevelopmentPlanDto>> GetByManagerIdAsync(Guid managerId, CancellationToken cancellationToken = default);
@@ -998,8 +997,10 @@ public interface IAppraisalConversationService
 public interface ICalibrationSessionService
 {
     Task<CalibrationSessionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<IEnumerable<CalibrationSessionDto>> GetByCycleIdAsync(Guid cycleId, CancellationToken cancellationToken = default);
-    Task<PagedResult<CalibrationSessionDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default);
+    // P3: panellistEmployeeId narrows the list to the sessions that employee sits on (participant
+    // or facilitator); null is the desk's whole list.
+    Task<IEnumerable<CalibrationSessionDto>> GetByCycleIdAsync(Guid cycleId, Guid? panellistEmployeeId, CancellationToken cancellationToken = default);
+    Task<PagedResult<CalibrationSessionDto>> GetPagedAsync(int pageNumber, int pageSize, Guid? panellistEmployeeId, CancellationToken cancellationToken = default);
     Task<CalibrationSessionDto> CreateAsync(CreateCalibrationSessionDto createDto, CancellationToken cancellationToken = default);
     Task<CalibrationSessionDto> UpdateAsync(UpdateCalibrationSessionDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
@@ -1017,8 +1018,10 @@ public interface ICalibrationSessionService
 
     // Rating adjustment management
     Task<CalibrationRatingAdjustmentDto> AddRatingAdjustmentAsync(Guid sessionId, CreateCalibrationRatingAdjustmentDto dto, Guid adjustedById, CancellationToken cancellationToken = default);
-    Task<IEnumerable<CalibrationRatingAdjustmentDto>> GetRatingAdjustmentsAsync(Guid sessionId, CancellationToken cancellationToken = default);
-    Task<IEnumerable<CalibrationRatingAdjustmentDto>> GetAdjustmentsByAppraisalAsync(Guid sessionId, Guid appraisalId, CancellationToken cancellationToken = default);
+    // P3: viewerEmployeeId's own appraisals are left out of every calibration read (the two-actor
+    // rule — a panellist's own row is their outcome before it is released).
+    Task<IEnumerable<CalibrationRatingAdjustmentDto>> GetRatingAdjustmentsAsync(Guid sessionId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<CalibrationRatingAdjustmentDto>> GetAdjustmentsByAppraisalAsync(Guid sessionId, Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default);
     Task<CalibrationRatingAdjustmentDto> UpdateRatingAdjustmentAsync(Guid sessionId, UpdateCalibrationRatingAdjustmentDto dto, Guid adjustedById, CancellationToken cancellationToken = default);
     Task<bool> DeleteRatingAdjustmentAsync(Guid sessionId, Guid adjustmentId, CancellationToken cancellationToken = default);
 
@@ -1032,7 +1035,7 @@ public interface ICalibrationSessionService
     Task<IReadOnlyCollection<Guid>> GetScopedAppraisalIdsAsync(Guid sessionId, CancellationToken cancellationToken = default);
 
     // Calibration matrix view
-    Task<CalibrationMatrixDto> GetCalibrationMatrixAsync(Guid sessionId, CancellationToken cancellationToken = default);
+    Task<CalibrationMatrixDto> GetCalibrationMatrixAsync(Guid sessionId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default);
 
     // Attachment operations
     // See the note on ICheckInService's attachment methods — the file goes through the gate in the
@@ -1045,7 +1048,8 @@ public interface ICalibrationSessionService
     Task<AppraisalAttachmentDto?> GetAttachmentAsync(Guid sessionId, Guid attachmentId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAttachmentAsync(Guid sessionId, Guid attachmentId, CancellationToken cancellationToken = default);
     /// <summary>An appraisal's frozen criteria, weights, manager scores and existing adjustments.</summary>
-    Task<IEnumerable<CalibrationCriterionDto>> GetAppraisalCriteriaAsync(Guid sessionId, Guid appraisalId, CancellationToken cancellationToken = default);
+    // P3: only an appraisal in the session's scope, and never the viewer's own.
+    Task<IEnumerable<CalibrationCriterionDto>> GetAppraisalCriteriaAsync(Guid sessionId, Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default);
 }
 
 #endregion Calibration

@@ -391,6 +391,10 @@ class UnitGoalService {
     return apiService.get<UnitGoalCascadeStats>(`${this.baseUrl}/${id}/cascade-stats`);
   }
 
+  /**
+   * The per-employee cascade — HR and the managers in the unit's line only (performance closure
+   * P11); anyone else gets 403 and reads {@link getCascadeStats} instead.
+   */
   getEmployeeGoalSummaries(id: string): Promise<UnitGoalEmployeeGoalSummary[]> {
     return apiService.get<UnitGoalEmployeeGoalSummary[]>(`${this.baseUrl}/${id}/employee-goals`);
   }

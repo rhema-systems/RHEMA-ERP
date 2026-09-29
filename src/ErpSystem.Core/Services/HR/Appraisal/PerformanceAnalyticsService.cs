@@ -21,6 +21,7 @@ public class PerformanceAnalyticsService : IPerformanceAnalyticsService
     private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly IPerformanceRatingResolver _ratingResolver;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ICurrentUserService _currentUser;
     private readonly ILogger<PerformanceAnalyticsService> _logger;
 
     public PerformanceAnalyticsService(
@@ -29,6 +30,7 @@ public class PerformanceAnalyticsService : IPerformanceAnalyticsService
         IGenericRepository<Employee> employeeRepository,
         IPerformanceRatingResolver ratingResolver,
         ICurrentUserProvider currentUserProvider,
+        ICurrentUserService currentUser,
         ILogger<PerformanceAnalyticsService> logger)
     {
         _appraisalRepository = appraisalRepository;
@@ -36,6 +38,7 @@ public class PerformanceAnalyticsService : IPerformanceAnalyticsService
         _employeeRepository = employeeRepository;
         _ratingResolver = ratingResolver;
         _currentUserProvider = currentUserProvider;
+        _currentUser = currentUser;
         _logger = logger;
     }
 
@@ -114,20 +117,40 @@ public class PerformanceAnalyticsService : IPerformanceAnalyticsService
         var appraisals = await _appraisalRepository.GetQueryable()
             .Where(a => a.EmployeeId == employeeId && a.TenantId == tenantId)
             .Include(a => a.AppraisalCycle)
+                .ThenInclude(c => c.AppraisalSettings)
+            .Include(a => a.HRReviews)
             .ToListAsync(cancellationToken);
 
         var mapRating = await _ratingResolver.GetMapperAsync(cancellationToken);
 
+        // P2: the employee's own trend carries a score only once the outcome is released to them;
+        // HR or their manager reading it sees every point as before.
+        var viewerIsSubject = _currentUser.EmployeeId is Guid viewer && viewer == employeeId;
+
         var points = appraisals
             .OrderBy(a => a.AppraisalCycle != null ? a.AppraisalCycle.Year : 0)
-            .Select(a => new PerformanceTrendPointDto
+            .Select(a =>
             {
-                Year = a.AppraisalCycle?.Year ?? 0,
-                AppraisalId = a.Id,
-                CycleName = a.AppraisalCycle?.CycleName,
-                OverallScore = a.OverallScore,
-                Rating = mapRating(a.OverallScore),
-                Status = a.Status.ToString()
+                var settings = a.AppraisalCycle?.AppraisalSettings;
+                var released = AppraisalRelease.IsReleased(
+                    a.Status,
+                    a.IsCalibrated,
+                    a.HRReviews.Any(r => r.ReviewCompletedDate != null && r.IsApproved),
+                    a.AppealRemandedDate != null,
+                    settings?.RequireCalibration ?? false,
+                    settings?.RequireHRReview ?? false);
+                var score = released || !viewerIsSubject ? a.OverallScore : null;
+
+                return new PerformanceTrendPointDto
+                {
+                    Year = a.AppraisalCycle?.Year ?? 0,
+                    AppraisalId = a.Id,
+                    CycleName = a.AppraisalCycle?.CycleName,
+                    OverallScore = score,
+                    Rating = mapRating(score),
+                    Status = a.Status.ToString(),
+                    OutcomeReleased = released,
+                };
             })
             .ToList();
 

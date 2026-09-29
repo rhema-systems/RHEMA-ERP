@@ -1,7 +1,11 @@
+using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
@@ -12,12 +16,44 @@ namespace ErpSystem.Api.Controllers.HR;
 public class AppraisalWorkflowController : ControllerBase
 {
     private readonly IAppraisalWorkflowService _workflowService;
+    private readonly ICurrentUserService _currentUserService;
+    private readonly ApplicationDbContext _db;
     private readonly ILogger<AppraisalWorkflowController> _logger;
 
-    public AppraisalWorkflowController(IAppraisalWorkflowService workflowService, ILogger<AppraisalWorkflowController> logger)
+    public AppraisalWorkflowController(
+        IAppraisalWorkflowService workflowService,
+        ICurrentUserService currentUserService,
+        ApplicationDbContext db,
+        ILogger<AppraisalWorkflowController> logger)
     {
         _workflowService = workflowService;
+        _currentUserService = currentUserService;
+        _db = db;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// A party to the appraisal — the appraisee, their line manager, or a peer whose nomination
+    /// was approved — or the performance desk (performance closure P17). The two reads were open
+    /// to any authenticated user, and answered 404 or 200 for any id in the tenant. An unknown id
+    /// falls to the desk, so the desk is told it is missing and anyone else is refused.
+    /// </summary>
+    private async Task<bool> CanReadAppraisalAsync(Guid appraisalId, CancellationToken ct)
+    {
+        if (_currentUserService.TenantId is Guid tenantId
+            && _currentUserService.EmployeeId is Guid me && me != Guid.Empty
+            && await _db.Set<PerformanceAppraisal>()
+                .AsNoTracking()
+                .Where(a => a.Id == appraisalId && a.TenantId == tenantId)
+                .AnyAsync(a => a.EmployeeId == me
+                            || a.Employee.ManagerId == me
+                            || a.PeerNominations.Any(n => n.PeerEmployeeId == me
+                                                       && n.NominationStatus == PeerNominationStatus.Approved
+                                                       && !n.IsDeleted), ct))
+            return true;
+
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, HrPermissions.PerformanceReadPolicy)).Succeeded;
     }
 
     /// <summary>
@@ -26,9 +62,12 @@ public class AppraisalWorkflowController : ControllerBase
     /// </summary>
     [HttpGet("{appraisalId:guid}/phase")]
     [ProducesResponseType(typeof(AppraisalPhaseResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetCurrentPhase(Guid appraisalId, CancellationToken cancellationToken = default)
     {
+        if (!await CanReadAppraisalAsync(appraisalId, cancellationToken)) return Forbid();
+
         try
         {
             var phase = await _workflowService.GetCurrentPhaseAsync(appraisalId, cancellationToken);
@@ -83,9 +122,12 @@ public class AppraisalWorkflowController : ControllerBase
     /// </summary>
     [HttpGet("{appraisalId:guid}/editable/{role}")]
     [ProducesResponseType(typeof(AppraisalEditableResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> IsEditableByRole(Guid appraisalId, string role, CancellationToken cancellationToken = default)
     {
+        if (!await CanReadAppraisalAsync(appraisalId, cancellationToken)) return Forbid();
+
         try
         {
             var editable = await _workflowService.IsEditableByRoleAsync(appraisalId, role, cancellationToken);

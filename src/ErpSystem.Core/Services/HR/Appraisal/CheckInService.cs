@@ -19,6 +19,7 @@ public class CheckInService : ICheckInService
     private readonly IGenericRepository<EmployeeGoal> _goalRepository;
     private readonly IGenericRepository<AppraisalCycle> _cycleRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ICurrentUserService _currentUser;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CheckInService> _logger;
 
@@ -29,6 +30,7 @@ public class CheckInService : ICheckInService
         IGenericRepository<EmployeeGoal> goalRepository,
         IGenericRepository<AppraisalCycle> cycleRepository,
         ICurrentUserProvider currentUserProvider,
+        ICurrentUserService currentUser,
         IUnitOfWork unitOfWork,
         ILogger<CheckInService> logger)
     {
@@ -38,9 +40,18 @@ public class CheckInService : ICheckInService
         _goalRepository = goalRepository;
         _cycleRepository = cycleRepository;
         _currentUserProvider = currentUserProvider;
+        _currentUser = currentUser;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
+
+    /// <summary>
+    /// Whether the caller holds this check-in (performance closure P6): the private notes are the
+    /// conductor's own record, so they are written by the conductor and nobody else — the desk and
+    /// the subject edit the shared record, and their redacted copy never wipes the notes.
+    /// </summary>
+    private bool CallerConducts(CheckIn entity) =>
+        _currentUser.EmployeeId is Guid me && me == entity.ConductedById;
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
     // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
@@ -157,6 +168,8 @@ public class CheckInService : ICheckInService
     {
         var entity = await GetOwnedCheckInAsync(updateDto.Id, cancellationToken);
         updateDto.UpdateEntity(entity);
+        if (CallerConducts(entity))
+            entity.PrivateNotes = updateDto.PrivateNotes;
         await _checkInRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Check-in updated: {Id}", entity.Id);
@@ -180,7 +193,8 @@ public class CheckInService : ICheckInService
 
         entity.ConductedDate = DateTime.UtcNow;
         entity.SharedNotes = sharedNotes;
-        entity.PrivateNotes = privateNotes;
+        if (CallerConducts(entity))
+            entity.PrivateNotes = privateNotes;
         entity.ActionItems = actionItems;
 
         await _checkInRepository.UpdateAsync(entity);
@@ -248,11 +262,14 @@ public class CheckInService : ICheckInService
 
     public async Task<CheckInGoalUpdateDto> AddGoalUpdateAsync(Guid checkInId, CreateCheckInGoalUpdateDto dto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedCheckInAsync(checkInId, cancellationToken);
+        var checkIn = await GetOwnedCheckInAsync(checkInId, cancellationToken);
         var tenantId = GetTenantId();
 
+        // Only a goal of the person the check-in is about (performance closure P7, E10's add-time
+        // check brought forward). Anyone could open a check-in about themselves and, through it,
+        // move any colleague's goal progress and status — the goal was checked for tenant only.
         var goal = await _goalRepository.GetByIdAsync(dto.EmployeeGoalId);
-        if (goal == null || goal.TenantId != tenantId)
+        if (goal == null || goal.TenantId != tenantId || goal.EmployeeId != checkIn.EmployeeId)
             throw new ArgumentException("Employee goal not found.");
 
         var entity = dto.ToEntity();
@@ -397,14 +414,29 @@ public class CheckInService : ICheckInService
         return entities.ToDtoList();
     }
 
-    public async Task<bool> DeleteAttachmentAsync(Guid checkInId, Guid attachmentId, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// Performance closure P9: only the person who attached the file, or the HR desk when it is not
+    /// the check-in's subject, removes it — and only until the check-in is completed (its
+    /// <c>ConductedDate</c> is set), after which the file is part of the meeting's record.
+    /// </remarks>
+    public async Task<bool> DeleteAttachmentAsync(Guid checkInId, Guid attachmentId, bool actorIsDesk, CancellationToken cancellationToken = default)
     {
-        await GetOwnedCheckInAsync(checkInId, cancellationToken);
+        var checkIn = await GetOwnedCheckInAsync(checkInId, cancellationToken);
         var tenantId = GetTenantId();
         var entity = await _attachmentRepository.GetQueryable()
             .FirstOrDefaultAsync(a => a.Id == attachmentId && a.CheckInId == checkInId && a.TenantId == tenantId, cancellationToken);
         if (entity == null)
             throw new ArgumentException("Attachment not found.");
+
+        if (checkIn.ConductedDate != null)
+            throw new InvalidOperationException(
+                "This check-in has been completed, so its attachments are part of the record and cannot be removed.");
+
+        var me = _currentUser.EmployeeId;
+        var isUploader = me is Guid uploader && uploader == entity.UploadedById;
+        var deskActs = actorIsDesk && !(me is Guid subject && subject == checkIn.EmployeeId);
+        if (!isUploader && !deskActs)
+            throw new UnauthorizedAccessException("Only the person who attached this file, or HR, can remove it.");
         await _attachmentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;

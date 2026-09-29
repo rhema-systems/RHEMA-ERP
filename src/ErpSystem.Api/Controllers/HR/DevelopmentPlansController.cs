@@ -314,13 +314,18 @@ public class DevelopmentPlansController : ControllerBase
 
         try
         {
-            var result = await _developmentPlanService.DeleteAsync(id, cancellationToken);
+            // P10: the service refuses the employee a plan somebody else set for them.
+            var result = await _developmentPlanService.DeleteAsync(id, _currentUserService.EmployeeId, cancellationToken);
             if (!result) return NotFound(new { message = "Development plan not found" });
             return NoContent();
         }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
@@ -345,13 +350,18 @@ public class DevelopmentPlansController : ControllerBase
 
         try
         {
-            var result = await _developmentPlanService.UpdateStatusAsync(id, request.Status, cancellationToken);
+            // P10: the service refuses the employee completing or cancelling a plan set for them.
+            var result = await _developmentPlanService.UpdateStatusAsync(id, request.Status, _currentUserService.EmployeeId, cancellationToken);
             if (!result) return NotFound(new { message = "Development plan not found" });
             return NoContent();
         }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {

@@ -23,7 +23,9 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    **Done 2026-09-29** and applied to UAT; read § 6's State block before lane A — it lists what the
    batch decided that later lanes build on.
    ~~Lane A~~ **Done 2026-09-29** (`run-final-scoring.mjs` 177/177 twice; § 4 lane A's State
-   block). **Lane P is next.**
+   block). ~~Lane P~~ **Done 2026-09-29** (`run-final-privacy.mjs` 339/339 twice; § 4 lane P's
+   State block — read its "refines or extends" list: it built a few rows beyond the plan's wording
+   and brought two E10 bullets forward). **Lane B1 is next**, then L.
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -93,7 +95,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | Lane | Title | Size | Carries (§ 1b, all settled) | State |
 |---|---|---|---|---|
 | A | Scoring integrity and the settle path | 2.5 days | D-11, D-13, D-22 (A14–A16 only) | ☑ 2026-09-29 — 177/177 twice; staged |
-| P | Privacy and access *(new — the review)* | 2 days | D-26 (P18 only) | ☐ |
+| P | Privacy and access *(new — the review)* | 2 days | D-26 (P18 only) | ☑ 2026-09-29 — 339/339 twice; staged |
 | B | One gate evaluator (B1 first); settings enforced or removed | 3.5 days | — | ☐ |
 | L | Goal-driven KPI scoring | 5 days | D-15, D-16 | ☐ |
 | C | One appeal machine | 2 days | D-22 | ☐ |
@@ -463,63 +465,63 @@ Rule 2 carries this.
 P1–P6 were re-verified in source on 2026-09-28. P7–P17 come from the authorization sweep with file:line
 — **verify each before building.**
 
-- [ ] P1 **The evaluator/criterion CRUD block** (PAC :433-664, eight routes). Delete it now rather
+- [x] P1 **The evaluator/criterion CRUD block** (PAC :433-664, eight routes). Delete it now rather
       than in E1: none has a screen caller, and `GET …/{appraisalId}/evaluations` (:466) hands the
       appraisee every evaluator row — `EvaluatorName`, `TotalScore`, `OverallNotes` and
       `Recommendation` (MAP :338-360) — because `CanAccessAppraisalAsync` (:743-753) admits the
       appraisee.
-- [ ] P2 **An appraisee-facing projection.** Before sign-off (Completed/Closed, or Governance with HR
+- [x] P2 **An appraisee-facing projection.** Before sign-off (Completed/Closed, or Governance with HR
       signed) it withholds `Recommend*`, `RecommendationNotes`, `RankIn*`, `PreCalibrationScore`,
       `AdjustedScore`, `OverallScore` and the grade. It applies to `GET …/{id}` and
       `/employee/{employeeId}` (PAC :127-170, MAP :224-262), `my-appraisals` (PAS :1312) and
       `me/trend` (`PerformanceAnalyticsService.cs:104-121`). Lane I's "hide overallScore on the list"
       becomes the server's job.
-- [ ] P3 **Calibration reads** — paged, {id}, by-cycle, participants, adjustments,
+- [x] P3 **Calibration reads** — paged, {id}, by-cycle, participants, adjustments,
       adjustments/appraisal/{id}, matrix, appraisals/{id}/criteria, and attachments with download
       (`CalibrationSessionsController.cs:87-140, :349-367, :453-492, :589-608, :641-715`). Each needs
       the Read policy **or** panel participation, and a participant sees only the appraisals in the
       session's scope. The "reads stay open to any authenticated user" remark (:638-639) is
       rewritten.
-- [ ] P4 **PIP create** (`PerformanceImprovementPlansController.cs:41` — `AuthorRoles` includes
+- [x] P4 **PIP create** (`PerformanceImprovementPlansController.cs:41` — `AuthorRoles` includes
       Manager; `PerformanceImprovementPlanService.cs:278-317` checks only that the supervisor exists).
       A manager opens a PIP only for a direct report. `SupervisorId` defaults to the employee's
       manager and only HR changes it; `HROwnerId` must hold HR.
-- [ ] P5 **PIP update** (MAP :609-623): `EmployeeId`, `AppraisalId`, `SupervisorId`, `HROwnerId`,
+- [x] P5 **PIP update** (MAP :609-623): `EmployeeId`, `AppraisalId`, `SupervisorId`, `HROwnerId`,
       `Status` and `Outcome` are never copied from the body; Draft edits only (Active per E7).
-- [ ] P6 **Check-in create** (`CheckInsController.cs:285-304` checks only the conductor): the subject
+- [x] P6 **Check-in create** (`CheckInsController.cs:285-304` checks only the conductor): the subject
       must be the caller's direct report, or the caller for a self-requested check-in, or the caller
       must hold HR. Check-in update (:327-352; MAP :1963-1977) cannot change `EmployeeId` or
       `ConductedById`, because `Redact` (:168-176) trusts `ConductedById`.
-- [ ] P7 Goal-update PUT (MAP :2024-2025; `CheckInService.cs:286-310`): `CheckInId` and
+- [x] P7 Goal-update PUT (MAP :2024-2025; `CheckInService.cs:286-310`): `CheckInId` and
       `EmployeeGoalId` are never taken from the body (E10 adds the ownership check on add).
-- [ ] P8 Goal progress PUT/DELETE (`EmployeeGoalsController.cs:621-667`; EGS :448-495; MAP
+- [x] P8 Goal progress PUT/DELETE (`EmployeeGoalsController.cs:621-667`; EGS :448-495; MAP
       :1900-1902): `EmployeeGoalId` is never taken from the body, and only the recorder (or HR) edits
       or deletes an entry.
-- [ ] P9 Attachment delete — appraisal (PAC :856-879 → PAS :1163-1177) and check-in
+- [x] P9 Attachment delete — appraisal (PAC :856-879 → PAS :1163-1177) and check-in
       (`CheckInsController.cs:624-647` → `CheckInService.cs:400-411`): only the uploader or HR, and
       only before completion.
-- [ ] P10 Development plans (`DevelopmentPlansController.cs:73-83, :307-365`;
+- [x] P10 Development plans (`DevelopmentPlansController.cs:73-83, :307-365`;
       `DevelopmentPlanService.cs:179-225`): the subject cannot delete or complete a plan authored by
       their manager or HR.
-- [ ] P11 `GET /UnitGoals/{id}/employee-goals` (`UnitGoalsController.cs:421-435`;
+- [x] P11 `GET /UnitGoals/{id}/employee-goals` (`UnitGoalsController.cs:421-435`;
       `UnitGoalService.cs:243-264`): per-employee rows only for HR and the managers in that unit's
       line; counts for everyone else.
-- [ ] P12 `self-evaluation-context` (PAC :951-972; PAS :1341, :1368-1396): the manager sees self
+- [x] P12 `self-evaluation-context` (PAC :951-972; PAS :1341, :1368-1396): the manager sees self
       scores only once they are submitted, and then per `ShowSelfScoreToManager` (B2).
-- [ ] P13 PIP meeting comment and forms (`PipMeetingController.cs:362-393, :188-208, :235-252`;
+- [x] P13 PIP meeting comment and forms (`PipMeetingController.cs:362-393, :188-208, :235-252`;
       `PerformanceImprovementPlansController.cs:1199-1202`; MAP :683-684): the right of reply is the
       employee's own write, and supervisor forms cannot set `EmployeeComments` or `ConductedById`.
-- [ ] P14 Peer nomination writes (`PeerNominationController.cs:49-61, :227, :266, :298`): the
+- [x] P14 Peer nomination writes (`PeerNominationController.cs:49-61, :227, :266, :298`): the
       nominated peer cannot edit or delete the nomination. Batch nominate (PAC :1324-1338; PNS
       :98-116, :430-441) honours `PeerNominationMode` and records the real nominator (D1/D4).
-- [ ] P15 `GET /CheckIns/paged` (:179-194) is redacted like every other read, and `IsHr`
+- [x] P15 `GET /CheckIns/paged` (:179-194) is redacted like every other read, and `IsHr`
       (:120-121) becomes the Read-policy check. Today TenantAdmin, Admin and "HR User" see private
       notes there and are refused elsewhere. P-27 is then fixed on every path.
-- [ ] P16 `GET /AppraisalCycleTarget/{id}/exclusions` (`AppraisalCycleTargetController.cs:206-221`):
+- [x] P16 `GET /AppraisalCycleTarget/{id}/exclusions` (`AppraisalCycleTargetController.cs:206-221`):
       HR read only, because it carries the reasons.
-- [ ] P17 `GET /AppraisalWorkflow/{id}/phase` and `/editable/{role}`
+- [x] P17 `GET /AppraisalWorkflow/{id}/phase` and `/editable/{role}`
       (`AppraisalWorkflowController.cs:27-46, :84-103`): a party to the appraisal, or HR.
-- [ ] P18 P-19 per D-26: keep the tenant-wide read and say so on the upload control.
+- [x] P18 P-19 per D-26: keep the tenant-wide read and say so on the upload control.
 
 The fallback-path self-approval found by the same sweep is lane F3.
 
@@ -527,6 +529,88 @@ The fallback-path self-approval found by the same sweep is lane F3.
 member, manager of another unit, and HR — expected status, **and the field absent from the body**, not
 only hidden. No peer name appears in any appraisee payload while `PeerReviewsAnonymous` is on.
 `privateNotes` are absent on every check-in path for everyone but the conductor and HR.
+
+**State (2026-09-29): DONE — built, verified on UAT, staged.** No migration: the one new fact — who
+wrote a development plan — uses `BaseEntity.CreatedById`, which every row already has. What exists now:
+- **The release rule** (`Services/HR/Appraisal/AppraisalRelease.cs`): an outcome is released when the
+  appraisal is Completed, Closed or Appealed, or in Governance with every required calibration
+  committed, HR's sign-off given and no pending remand. Until then **the employee's own copy** — the
+  appraisal by id, by employee, by status/year/paged, `my-appraisals`, `me/trend` and the HR review —
+  carries no overall, adjusted, pre-calibration or calibrated score, grade, ranks, `Recommend*`,
+  recommendation notes or manager narrative, and the HR review no manager evaluation, manager/peer/final
+  score or HR remarks. `OutcomeReleased` rides on the four DTOs; the screens say *"Not yet released"*.
+- **P3** — calibration reads are the desk's or a panellist's (participant or facilitator); the lists
+  answer everyone else with only their own sessions; the criteria read is scope-checked for everyone
+  (any session id opened any appraisal's criteria); a reader's **own** appraisal is out of every read,
+  the grid's counts and average included.
+- **P4/P5** — `CanOpenPlanForAsync` (line manager, or the Write desk; never yourself) gates create and
+  `prepare`; the supervisor defaults to the line manager and only the desk names another; the HR owner
+  must hold the performance Write tier by role or seeded permission (`PipAccess.EmployeeHoldsDeskAsync`);
+  the edit carries content only and a draft only.
+- **P6–P8** — check-ins open about yourself, a direct report, or anyone for the desk; subject, conductor
+  and cycle fixed; private notes written only by the conductor; goal updates and progress entries never
+  re-parented; a progress entry amended by its recorder or the desk.
+- **P9** — attachment delete on appraisals and check-ins: the uploader, or the Write desk when it is not
+  the subject; refused once the appraisal is Completed/Closed/Withdrawn/Appealed or the check-in held.
+- **P10–P17** — development-plan authorship (`AuthorUserId`); unit-goal cascade rows for the desk and
+  the unit line, `cascade-stats.averageProgressPercent` for everyone; the self-evaluation read
+  (`SelfEvaluationView`); the PIP reply as `SetEmployeeCommentsAsync`; the peer-excluding nomination
+  write gate and `EnsureMayNominate`; paged check-ins redacted, the desk by policy; exclusions HR-only;
+  workflow reads for parties (appraisee, line manager, approved peer) or the desk.
+
+**Where the build refines or extends the rows above** (each deliberate; say if one should go back):
+1. **The HR review is withheld too.** P2 listed four routes; the employee's own appraisal page reads
+   a fifth, `GET …/{id}/hr-review`, which carried the manager's evaluation, the final score and grade
+   and HR's remarks (a draft included).
+2. **The two-actor rule wherever lane P touched a gate**: an HR officer who is the subject is the
+   subject — check-in notes and management, PIP access and management, the recommendations read, the
+   manager's side of an appraisal (peer names under anonymity; nomination approve/reject), their own
+   calibration row, a nomination naming them. The desk test used to come first on each.
+3. **E10's goal-ownership check (X1) and its development-plan PUT bullet came forward** — the first
+   let anyone move a colleague's goal through a check-in about themselves; the second would have let
+   P10 be walked round.
+4. **PIP drafts are hidden from the employee** (the `Draft` status's own contract), and create now
+   checks the employee exists, the source appraisal is theirs, and neither supervisor nor HR owner is
+   the employee.
+5. **P5 is draft-only**, so E7 only decides whether a live plan's edit becomes a re-approval.
+6. **P10's author** is the creating login; the three UAT plans predate the stamp and count as set for
+   the employee. "Complete" includes **cancel**.
+7. **P11's unit line** is the goal's raiser plus the head of its unit or any unit above
+   (`UnitAncestryAsync`). Direct line managers of aligned employees are not included.
+8. **P13's conductor** is whoever books the meeting — the body cannot name another (a check-in lets
+   the desk name one; a PIP meeting does not).
+9. **P14** refuses the peer's update, send-invitation and delete; D1's status and field narrowing
+   and D4's no-approval-step and wording stay in lane D.
+10. **P16** also answers 404 for an unknown target (it was a 500).
+11. **P18 needed no code** — the note has been on the upload card since 0ef42c223.
+
+**Not probed, or carried forward:**
+- P15's TenantAdmin / "HR User" case is covered by the switch to the policy in code, not by a live
+  login: the suite would have to mint a TenantAdmin login on the demo database.
+- P12's second leg (`ShowSelfScoreToManager` off) — no fixture profile switches it off; B2 adds one.
+- A check-in's `EmployeeComments` has no door for the employee and stays writable by the conductor —
+  the P13 principle applies; lane E or I.
+- An HR officer can still propose an outcome recommendation or record a calibration adjustment on
+  their own appraisal — segregation of duties, F3.
+- The PIP detail page still shows the subject workflow, goal and document controls the server refuses
+  (cosmetic; lane I). A PIP's supervisor or HR owner cannot be changed after create (no door).
+- Seen in the API log, not lane P: the HR/Identity reconciliation job fails every sweep for TDC/00052
+  (`property.manager`) — `SingleOrDefault` over more than one match; pre-existing demo data.
+
+**Verified** (Staging API on `ErpSystemDB_UAT`):
+- `run-final-privacy.mjs` **333/333, then 339/339** — six HR-side pairs added after the first run so
+  every withheld field has a reader who does see it (pre-calibration score, grade, trend score and
+  rating, HR review final score and manager evaluation) — and **339/339 again** inside `run-all`.
+- Regression (`run-all.mjs`, eight suites): interim reviews 128/128, attachments 65/65 (+1: P3 seats
+  the manager on the panel before the reader reads), slice C 51/51, slice D 22/22 (+2: the seating and
+  a non-panellist's 403), **slice E 17/26 — the same 9 stale**, gates 32/32, lane A 180/180 (+3: P1 moved
+  its evaluator totals onto `step`-checked HR-review and peer-review reads), lane P 339/339. **834/843.**
+- Frontend: scoped `tsc` over the 19 changed files, 0 errors (a planted error was caught).
+- API log: the 84 save errors are all `FK_PayrollEmployeeProfiles_PayrollPaymentMethods_DefaultPaymentMethodId`
+  (defect #23, one per employee created); every notification error is UAT's missing SMTP settings.
+- The demo scenarios that touch these doors (060 check-ins and the PIP, 061 nominations and the panel,
+  130 the single nomination) read correctly against the new rules. The W3 permissions suite (slice 10)
+  was not run: its fixture resolves real TDC staff.
 
 ### Lane B — One gate evaluator; settings enforced or removed
 
@@ -780,7 +864,8 @@ B7 is covered.
 
 ### Lane D — Peer nomination and evaluation integrity
 
-- [ ] D1 `ToEntity` forces Pending + nominator from the token (PNS validates appraisee or manager);
+- [ ] D1 *(The nominator from the token is done — both create routes, lane P14. The rest stands.)*
+      `ToEntity` forces Pending + nominator from the token (PNS validates appraisee or manager);
       `UpdateEntity` copies only `DueDate`/`InstructionsToPeer`; update refused unless Pending;
       a posted non-Pending status → 422; `PeerEmployeeId` ≠ appraisee and ≠ manager, **on the batch
       route too** (`hr-portal/run-slice5.mjs:122` nominates the manager today — lane S8). Approval
@@ -791,10 +876,12 @@ B7 is covered.
       its client method (`appraisal-run.service.ts:403-405`, no screen caller) goes with it.
 - [ ] D4 `PeerNominationMode.Manager`: manager nominates, nominator recorded as manager, no
       approval step; wording per mode (PNS :430 records the appraisee today); the appraisee is not
-      admitted to batch nominate in Manager mode (PAC :1324-1338).
+      admitted to batch nominate in Manager mode (PAC :1324-1338). *(The access half is done in lane
+      P14: the nominator is recorded from the login on both routes, and Manager mode refuses the
+      appraisee on both — `EnsureMayNominate`. Left for D4: no approval step, wording per mode.)*
 - [ ] D5 Peer submit checks appraisal + cycle status; peer `DueDate` (PNS :525) shown on the assignment
       instead of the cycle deadline (`PeerEvaluationService.cs:128`); dead decrement at PNS :299-305 removed.
-- [ ] D6 The nominated peer cannot write the nomination (P14).
+- [x] D6 The nominated peer cannot write the nomination (P14). *Done in lane P, 2026-09-29.*
 
 **Assertion** (`run-final-nominations.mjs`):
 - A raw POST with `nominationStatus: Approved` → 422, and no peer evaluation exists.
@@ -886,7 +973,8 @@ B7 is covered.
 - [ ] E7 **PIP:**
       - Goals, meetings and progress (:778-872) are refused on closed plans.
       - `UpdateAsync` (:483-516) on an Active plan is refused or re-approved; body re-parenting goes
-        in P5.
+        in P5. *(Lane P5 made it a draft-only edit and stopped the re-parenting: an Active plan is
+        refused today. E7 only decides whether that refusal becomes a re-approval.)*
       - Handler numbering is aligned to `PIP-yyyy-NNNN`.
       - Meetings get a stored status (P-57, batch 1 column; backfill rule in § 6).
       - `UpdatePipGoalProgress` honours status and percent at create (P-55: status is forced to
@@ -903,10 +991,12 @@ B7 is covered.
       (:153) / unit (:286) goals, cycle targets (:210), template assignments (:171) refuse delete
       while referenced.
 - [ ] E10 **Other:**
-      - `CheckInService.AddGoalUpdateAsync` (:249-273) checks the goal belongs to the check-in's
-        employee.
-      - `DevelopmentPlansController PUT` cannot change `EmployeeId`/`PlanStatus` (MAP :2152-2161);
-        status changes only through `UpdateStatusAsync`.
+      - ~~`CheckInService.AddGoalUpdateAsync` (:249-273) checks the goal belongs to the check-in's
+        employee.~~ *Done in lane P (with P7): any user could open a check-in about themselves and move
+        a colleague's goal through it.*
+      - ~~`DevelopmentPlansController PUT` cannot change `EmployeeId`/`PlanStatus` (MAP :2152-2161);
+        status changes only through `UpdateStatusAsync`.~~ *Done in lane P (with P10), which it
+        would otherwise have bypassed.*
       - `AppraisalOutcomeService.CloseAsync` (:214) stamps the rejecter fields, not `ApprovedById`.
       - `SaveSelfEvaluationAsync`'s blanket catch (:1723) logs and rethrows non-business errors.
       - Journal `entryDate` is honoured (`PerformanceJournalService.cs:169`, P-28).
@@ -1748,11 +1838,17 @@ officer on probation can be the HR reviewer). It changes none of these.
   enforced (PAS :2361, :3454). P-5 — only the seeder truncates (S1). P-33 — the Active/Draft split
   is intended, and the screen has said so since 2afab21de; the guide's text is out of date.
 - **FIXED (1):** P-27 (0ef42c223, before the guide), except `GET /CheckIns/paged` for
-  TenantAdmin/Admin/"HR User" (P15).
+  TenantAdmin/Admin/"HR User" (P15) — *closed by lane P, below.*
 - **FIXED by lane A (2026-09-29, 3 of the LIVE list above):** P-6 (A2 — overlapping bands refused
   at save), P-39 (A3 — a calibrated overall survives sign-off), P-40 (A4 — item adjustments, KPI
   included, reach the score). Finalised appraisals scored before the fix keep their stored numbers
   (D-13); lane A's State block lists the two on UAT that a settle would move.
+- **FIXED by lane P (2026-09-29):** P-27 on every path — HR's paged list was never redacted, and the
+  check-in's subject no longer reads the notes even as HR (P15). P-34's server half *before release* —
+  the appraisee's HR review no longer carries the manager's evaluation and scores, the final score,
+  the grade or HR's remarks until the outcome is released (P2); the breakdown after release, per
+  `ShowScoreBreakdownToEmployee`, stays B2. P-19 is **kept** by decision D-26 (P18) — the upload
+  card has said so since 0ef42c223.
 - **BY-DESIGN (9):** P-15, P-16, P-21, P-23, P-30, P-34 (its server half — the manager's scores sent
   to the appraisee — is B2/P2), P-37, P-45, P-60 (lane I adds a picker anyway, because decision 5
   makes the form HR's main tool).

@@ -445,7 +445,20 @@ public class EmployeeGoalService : IEmployeeGoalService
         return entities.ToDtoList();
     }
 
-    public async Task<GoalProgressEntryDto> UpdateProgressEntryAsync(Guid goalId, UpdateGoalProgressEntryDto dto, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Performance closure P8: a progress entry is a claim about what someone did, so it is
+    /// corrected or withdrawn by the person who recorded it — or by the HR desk when the desk is not
+    /// the goal's owner (the two-actor rule). Either party to the goal could rewrite or delete the
+    /// other's entries.
+    /// </summary>
+    private static void EnsureMayAmendProgressEntry(GoalProgressEntry entry, EmployeeGoal goal, Guid? actorEmployeeId, bool actorIsDesk)
+    {
+        if (actorEmployeeId is Guid me && me == entry.RecordedById) return;
+        if (actorIsDesk && !(actorEmployeeId is Guid owner && owner == goal.EmployeeId)) return;
+        throw new UnauthorizedAccessException("Only the person who recorded this progress entry, or HR, can change it.");
+    }
+
+    public async Task<GoalProgressEntryDto> UpdateProgressEntryAsync(Guid goalId, UpdateGoalProgressEntryDto dto, Guid? actorEmployeeId, bool actorIsDesk, CancellationToken cancellationToken = default)
     {
         var goal = await GetOwnedGoalAsync(goalId, cancellationToken);
         var tenantId = GetTenantId();
@@ -456,6 +469,7 @@ public class EmployeeGoalService : IEmployeeGoalService
         if (entity == null)
             throw new ArgumentException("Progress entry not found.");
 
+        EnsureMayAmendProgressEntry(entity, goal, actorEmployeeId, actorIsDesk);
         dto.UpdateEntity(entity);
         await _progressRepository.UpdateAsync(entity);
 
@@ -477,15 +491,17 @@ public class EmployeeGoalService : IEmployeeGoalService
         return entity.ToDto();
     }
 
-    public async Task<bool> DeleteProgressEntryAsync(Guid goalId, Guid entryId, CancellationToken cancellationToken = default)
+    public async Task<bool> DeleteProgressEntryAsync(Guid goalId, Guid entryId, Guid? actorEmployeeId, bool actorIsDesk, CancellationToken cancellationToken = default)
     {
-        await GetOwnedGoalAsync(goalId, cancellationToken);
+        var goal = await GetOwnedGoalAsync(goalId, cancellationToken);
         var tenantId = GetTenantId();
         var entity = await _progressRepository.GetQueryable()
             .FirstOrDefaultAsync(p => p.Id == entryId && p.EmployeeGoalId == goalId && p.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException("Progress entry not found.");
+
+        EnsureMayAmendProgressEntry(entity, goal, actorEmployeeId, actorIsDesk);
 
         await _progressRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

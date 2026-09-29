@@ -623,16 +623,27 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UpdateProgressEntry(Guid goalId, Guid entryId, [FromBody] UpdateGoalProgressEntryDto dto, CancellationToken cancellationToken = default)
     {
+        // The service keys off the body's Id, so without this a mismatch silently edits another entry.
+        if (entryId != dto.Id)
+            return BadRequest(new { message = "ID mismatch" });
+
         if (!await CanAccessGoalAsync(goalId, HrPermissions.PerformanceWritePolicy)) return Forbid();
 
         try
         {
-            var result = await _employeeGoalService.UpdateProgressEntryAsync(goalId, dto, cancellationToken);
+            // P8: the recorder or the desk — the service decides, with the goal and the entry in hand.
+            var isDesk = await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy);
+            var result = await _employeeGoalService.UpdateProgressEntryAsync(
+                goalId, dto, _currentUserService.EmployeeId, isDesk, cancellationToken);
             return Ok(result);
         }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
         }
         catch (Exception ex)
         {
@@ -651,13 +662,20 @@ public class EmployeeGoalsController : ControllerBase
 
         try
         {
-            var result = await _employeeGoalService.DeleteProgressEntryAsync(goalId, entryId, cancellationToken);
+            // P8: the recorder or the desk — the service decides, with the goal and the entry in hand.
+            var isDesk = await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy);
+            var result = await _employeeGoalService.DeleteProgressEntryAsync(
+                goalId, entryId, _currentUserService.EmployeeId, isDesk, cancellationToken);
             if (!result) return NotFound(new { message = "Progress entry not found" });
             return NoContent();
         }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
         }
         catch (Exception ex)
         {

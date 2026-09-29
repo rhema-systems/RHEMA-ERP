@@ -28,6 +28,10 @@ import type { GoalPriority } from '@/types/hr/goals';
  *
  * The employee list is a projection built for exactly this view — it carries each goal's
  * status and progress but not its full body, so nothing here needs a per-row fetch.
+ *
+ * The goal itself is the tenant's to read; the per-employee rows are the HR desk's and the
+ * unit line's only (performance closure P11). Everyone else is refused the rows and sees the
+ * cascade in numbers, which names nobody.
  */
 const PRIORITY_VARIANT: Record<GoalPriority, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   Critical: 'destructive',
@@ -46,11 +50,24 @@ export default function UnitGoalDetailPage() {
     enabled: !!id,
   });
 
-  const { data: employeeGoals, isLoading: cascadeLoading } = useQuery({
+  const {
+    data: employeeGoals,
+    isLoading: cascadeLoading,
+    error: cascadeError,
+  } = useQuery({
     queryKey: ['hr', 'unit-goals', id, 'employee-goals'],
     queryFn: () => unitGoalService.getEmployeeGoalSummaries(id),
     enabled: !!id,
   });
+
+  // The counts everyone may see (P11) — what the page shows when the rows are refused.
+  const { data: cascadeStats } = useQuery({
+    queryKey: ['hr', 'unit-goals', id, 'cascade-stats'],
+    queryFn: () => unitGoalService.getCascadeStats(id),
+    enabled: !!id,
+  });
+
+  const rowsRefused = (cascadeError as { status?: number } | null)?.status === 403;
 
   if (isLoading) {
     return (
@@ -73,10 +90,13 @@ export default function UnitGoalDetailPage() {
   }
 
   const rows = employeeGoals ?? [];
+  const alignedCount = cascadeStats?.employeeGoalsCount ?? rows.length;
   const averageProgress =
-    rows.length === 0
-      ? null
-      : rows.reduce((sum, r) => sum + Number(r.progressPercent ?? 0), 0) / rows.length;
+    cascadeStats?.averageProgressPercent != null
+      ? Number(cascadeStats.averageProgressPercent)
+      : rows.length === 0
+        ? null
+        : rows.reduce((sum, r) => sum + Number(r.progressPercent ?? 0), 0) / rows.length;
 
   return (
     <div className="space-y-6 p-6">
@@ -161,7 +181,8 @@ export default function UnitGoalDetailPage() {
                 </div>
                 <Progress value={averageProgress} />
                 <p className="text-xs text-muted-foreground">
-                  Mean across the {rows.length} employee goal{rows.length === 1 ? '' : 's'} below.
+                  Mean across the {alignedCount} employee goal{alignedCount === 1 ? '' : 's'}{' '}
+                  aligned to it.
                 </p>
               </div>
             )}
@@ -189,6 +210,16 @@ export default function UnitGoalDetailPage() {
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
+          ) : rowsRefused ? (
+            <EmptyState
+              icon={Users}
+              title={
+                alignedCount === 0
+                  ? 'No employee goals yet'
+                  : `${alignedCount} employee goal${alignedCount === 1 ? '' : 's'} aligned to this goal`
+              }
+              description="Who they belong to, and how each is going, is visible to HR and to the managers in this unit's line."
+            />
           ) : rows.length === 0 ? (
             <EmptyState
               icon={Users}

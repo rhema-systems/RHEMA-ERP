@@ -36,6 +36,8 @@ import {
   FieldRow,
 } from '@/components/hr/employee/tabs/fields';
 import { employeeGoalService } from '@/services/hr/goals.service';
+import { useAuth } from '@/hooks/use-auth';
+import { hasAnyPermissionAccess } from '@/lib/permissions';
 import { formatDate, formatDateTime, formatPercent, humanizeEnum } from '@/lib/hr/attendance-format';
 import { GOAL_PROGRESS_STATUS_OPTIONS } from '@/types/hr/goals';
 import type { GoalProgressEntry, GoalProgressStatus } from '@/types/hr/goals';
@@ -78,6 +80,7 @@ export default function EmployeeGoalDetailPage() {
   const id = params.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const [decision, setDecision] = useState<'approve' | 'reject' | null>(null);
   const [feedback, setFeedback] = useState('');
@@ -155,6 +158,13 @@ export default function EmployeeGoalDetailPage() {
   };
 
   const progressAllowed = PROGRESS_OPEN.has(goal.status) && !goal.isLocked;
+
+  // P8: an entry is corrected or withdrawn by whoever recorded it, or HR when HR is not the
+  // goal's owner — the server refuses everyone else, so they are not offered Edit or Remove.
+  const me = user?.employeeId ?? null;
+  const isDeskWriter = hasAnyPermissionAccess(user, ['HR.Performance.Write', 'HR.Performance.Admin']);
+  const mayAmendEntry = (entry: GoalProgressEntry) =>
+    (!!me && entry.recordedById === me) || (isDeskWriter && me !== goal.employeeId);
 
   return (
     <div className="space-y-6 p-6">
@@ -378,6 +388,8 @@ export default function EmployeeGoalDetailPage() {
           queryKey={['hr', 'employee-goals', id, 'progress']}
           invalidateKeys={[[...goalKey], ['hr', 'employee-goals']]}
           readOnly={!progressAllowed}
+          canEditItem={mayAmendEntry}
+          canRemoveItem={mayAmendEntry}
           dialogHint="The percentage and status recorded here become the goal's — marking an entry At risk is what puts the goal on the at-risk reports. 100% completes it."
           emptyDescription="Nothing recorded yet. Entries are what move the goal's progress."
           list={(goalId) => employeeGoalService.getProgressEntries(goalId)}
@@ -395,6 +407,8 @@ export default function EmployeeGoalDetailPage() {
           }}
           update={(goalId, entryId, values) => {
             const v = progressSchema.parse(values);
+            // The server keeps the entry's own goal and review event on an edit (P8); the two
+            // fields below are required by the type, not honoured.
             return employeeGoalService.updateProgressEntry(goalId, entryId, {
               id: entryId,
               employeeGoalId: goalId,

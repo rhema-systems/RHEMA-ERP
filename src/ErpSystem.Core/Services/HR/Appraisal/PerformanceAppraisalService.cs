@@ -38,6 +38,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     private readonly IAppraisalScoreService _scores;
     private readonly IAppraisalNotificationService _notifications;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ICurrentUserService _currentUser;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<PerformanceAppraisal> _logger;
 
@@ -65,7 +66,8 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         IGenericRepository<AppraisalGradeDefinition> gradeDefinitionRepository,
         IAppraisalScoreService scores,
         IAppraisalNotificationService notifications,
-        ICurrentUserProvider currentUserProvider)
+        ICurrentUserProvider currentUserProvider,
+        ICurrentUserService currentUser)
     {
         _appraisalRepository = appraisalRepository;
         _unitOfWork = unitOfWork;
@@ -91,6 +93,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         _scores = scores;
         _notifications = notifications;
         _currentUserProvider = currentUserProvider;
+        _currentUser = currentUser;
     }
 
     /// <summary>
@@ -194,6 +197,49 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             .Where(i => i.Section.AppraisalTemplateId == appraisal.AppraisalTemplateId)
             .ToDictionaryAsync(i => i.Id, i => i.Weight, cancellationToken);
     }
+
+    /// <summary>
+    /// Every appraisal read passes through here (performance closure P2): it marks each row with
+    /// whether its outcome is released to the appraisee, and withholds the outcome from the
+    /// caller's OWN unreleased appraisals — whatever route or policy brought them there, so an
+    /// HR officer reading the desk list sees their own appraisal as the appraisee does.
+    /// </summary>
+    private async Task<List<PerformanceAppraisalDto>> ForViewerAsync(
+        List<PerformanceAppraisalDto> rows, CancellationToken cancellationToken)
+    {
+        if (rows.Count == 0) return rows;
+
+        var tenantId = GetTenantId();
+        var ids = rows.Select(r => r.Id).Distinct().ToList();
+        var facts = await _appraisalRepository.GetQueryable()
+            .Where(a => a.TenantId == tenantId && ids.Contains(a.Id))
+            .Select(a => new
+            {
+                a.Id,
+                a.Status,
+                a.IsCalibrated,
+                Remanded = a.AppealRemandedDate != null,
+                a.AppraisalCycle.AppraisalSettings.RequireCalibration,
+                a.AppraisalCycle.AppraisalSettings.RequireHRReview,
+                HrApproved = a.HRReviews.Any(r => !r.IsDeleted && r.ReviewCompletedDate != null && r.IsApproved),
+            })
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        var viewer = _currentUser.EmployeeId;
+        foreach (var row in rows)
+        {
+            row.OutcomeReleased = facts.TryGetValue(row.Id, out var f)
+                && AppraisalRelease.IsReleased(f.Status, f.IsCalibrated, f.HrApproved, f.Remanded, f.RequireCalibration, f.RequireHRReview);
+
+            if (!row.OutcomeReleased && viewer is Guid me && me == row.EmployeeId)
+                AppraisalRelease.WithholdOutcome(row);
+        }
+
+        return rows;
+    }
+
+    private async Task<PerformanceAppraisalDto> ForViewerAsync(PerformanceAppraisalDto row, CancellationToken cancellationToken)
+        => (await ForViewerAsync(new List<PerformanceAppraisalDto> { row }, cancellationToken))[0];
 
     /// <summary>Grade name for an appraisal's stored grade id, or null when it is ungraded.</summary>
     private async Task<string?> GradeNameAsync(Guid? gradeDefinitionId, CancellationToken cancellationToken)
@@ -306,7 +352,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             .OrderByDescending(p => p.CreatedAt)
             .ToListAsync(cancellationToken);
 
-        return entities.ToDtoList();
+        return await ForViewerAsync(entities.ToDtoList(), cancellationToken);
     }
 
     public async Task<IEnumerable<PerformanceAppraisalDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
@@ -320,7 +366,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                                                 .OrderByDescending(p => p.Year)
                                                 .ToListAsync(cancellationToken);
 
-        return entities.ToDtoList();
+        return await ForViewerAsync(entities.ToDtoList(), cancellationToken);
     }
 
     public async Task<PerformanceAppraisalDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -335,7 +381,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         if (entity == null)
             throw new ArgumentException($"Performance appraisal with ID '{id}' not found.");
 
-        return entity.ToDto();
+        return await ForViewerAsync(entity.ToDto(), cancellationToken);
     }
 
     public async Task<IEnumerable<PerformanceAppraisalDto>> GetByStatusAsync(AppraisalStatus status, CancellationToken cancellationToken = default)
@@ -347,7 +393,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                                                     .ThenInclude(e => e.Position)
                                                 .ToListAsync(cancellationToken);
 
-        return entities.ToDtoList();
+        return await ForViewerAsync(entities.ToDtoList(), cancellationToken);
     }
 
     public async Task<IEnumerable<PerformanceAppraisalDto>> GetByYearAsync(int year, CancellationToken cancellationToken = default)
@@ -359,7 +405,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                                                     .ThenInclude(e => e.Position)
                                                 .ToListAsync(cancellationToken);
 
-        return entities.ToDtoList();
+        return await ForViewerAsync(entities.ToDtoList(), cancellationToken);
     }
 
     public async Task<PagedResult<PerformanceAppraisalDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
@@ -380,7 +426,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                                 .ThenInclude(e => e.Position)
                             .ToListAsync(cancellationToken);
 
-        var appraisalDtos = items.ToDtoList();
+        var appraisalDtos = await ForViewerAsync(items.ToDtoList(), cancellationToken);
 
         return new PagedResult<PerformanceAppraisalDto>
         {
@@ -461,7 +507,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
         _logger.LogInformation("Performance appraisal updated successfully: {Id}", updateDto.Id);
 
-        return entity.ToDto();
+        return await ForViewerAsync(entity.ToDto(), cancellationToken);
     }
 
     public async Task<bool> UpdateStatusAsync(UpdateAppraisalStatusDto statusDto, CancellationToken cancellationToken = default)
@@ -514,261 +560,11 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         return $"APR-{year}-{(count + 1):D5}";
     }
 
-    #region EvaluatorEvaluation Operations
-
-    public async Task<EvaluatorEvaluationDto> AddEvaluatorEvaluationAsync(Guid appraisalId, CreateEvaluatorEvaluationDto createDto, CancellationToken cancellationToken = default)
-    {
-        // Validate appraisal exists
-        var appraisal = await TenantAppraisalQuery()
-            .Include(a => a.EvaluatorEvaluations)
-            .FirstOrDefaultAsync(a => a.Id == appraisalId, cancellationToken);
-
-        if (appraisal == null)
-            throw new ArgumentException("Performance appraisal not found");
-
-        // Validate evaluator exists
-        var evaluatorExists = await _employeeRepository.ExistsAsync(e => e.TenantId == GetTenantId() && e.Id == createDto.EvaluatorId);
-        if (!evaluatorExists)
-            throw new ArgumentException("Evaluator not found");
-
-        // Check if evaluator already evaluated this appraisal
-        var duplicateExists = appraisal.EvaluatorEvaluations
-            .Any(e => e.EvaluatorId == createDto.EvaluatorId && e.EvaluatorRole == createDto.EvaluatorRole);
-
-        if (duplicateExists)
-        {
-            throw new InvalidOperationException("This evaluator has already submitted an evaluation for this appraisal with the same role");
-        }
-
-        // Validate that the weights across evaluator *roles* do not exceed 1.0.
-        //
-        // ⚠ This used to sum EvaluatorWeight over every record, which is wrong: the weight is the
-        // role's, copied onto each of that role's records. Three peers each carrying the 0.2 peer
-        // weight summed to 0.6 rather than the 0.2 peers actually contribute, so on any cycle with
-        // peer reviews the total blew past 1.0 and every addition was refused — which is one of
-        // the reasons HR review could never be reached. The settle (AppraisalScoreService) agrees with
-        // this reading: it accumulates one weight per *contributing evaluator role*.
-        var weightByRole = appraisal.EvaluatorEvaluations
-            .GroupBy(e => e.EvaluatorRole)
-            .ToDictionary(g => g.Key, g => g.Max(e => e.EvaluatorWeight));
-
-        weightByRole[createDto.EvaluatorRole] = Math.Max(
-            weightByRole.TryGetValue(createDto.EvaluatorRole, out var existing) ? existing : 0m,
-            createDto.EvaluatorWeight);
-
-        var totalWeight = weightByRole.Values.Sum();
-        if (totalWeight > 1.0m)
-        {
-            throw new InvalidOperationException(
-                $"Evaluator weights across roles cannot exceed 1.0. Adding a {createDto.EvaluatorRole} evaluator "
-                + $"at weight {createDto.EvaluatorWeight} would take the total to {totalWeight}.");
-        }
-
-        var entity = createDto.ToEntity();
-        entity.TenantId = appraisal.TenantId;
-        entity.AppraisalId = appraisalId;
-
-        await _evaluatorEvaluationRepository.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        // Reload with includes
-        entity = await TenantEvaluationQuery()
-            .Include(e => e.Evaluator)
-            .FirstOrDefaultAsync(e => e.Id == entity.Id, cancellationToken);
-
-        _logger.LogInformation("Evaluator evaluation added successfully: {Id}", entity!.Id);
-
-        return entity!.ToDto();
-    }
-
-    public async Task<IEnumerable<EvaluatorEvaluationDto>> GetEvaluatorEvaluationsAsync(Guid appraisalId, CancellationToken cancellationToken = default)
-    {
-        var entities = await TenantEvaluationQuery().Where(e => e.AppraisalId == appraisalId)
-                                                .Include(e => e.Evaluator)
-                                                .OrderByDescending(e => e.EvaluatorWeight)
-                                                .ToListAsync(cancellationToken);
-
-        return entities.ToDtoList();
-    }
-
-    public async Task<EvaluatorEvaluationDto> UpdateEvaluatorEvaluationAsync(Guid appraisalId, UpdateEvaluatorEvaluationDto updateDto, CancellationToken cancellationToken = default)
-    {
-        var entity = await TenantEvaluationQuery()
-            .Include(e => e.Evaluator)
-            .Include(e => e.Appraisal)
-                .ThenInclude(a => a.EvaluatorEvaluations)
-            .FirstOrDefaultAsync(e => e.Id == updateDto.Id && e.AppraisalId == appraisalId, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException("Evaluator evaluation not found");
-
-        // Validate weights across evaluator roles, not across records — see the note in
-        // AddEvaluatorEvaluationAsync for why summing per record is wrong.
-        var weightByRole = entity.Appraisal.EvaluatorEvaluations
-            .Where(e => e.Id != updateDto.Id)
-            .GroupBy(e => e.EvaluatorRole)
-            .ToDictionary(g => g.Key, g => g.Max(e => e.EvaluatorWeight));
-
-        weightByRole[entity.EvaluatorRole] = Math.Max(
-            weightByRole.TryGetValue(entity.EvaluatorRole, out var existing) ? existing : 0m,
-            updateDto.EvaluatorWeight);
-
-        var totalWeight = weightByRole.Values.Sum();
-        if (totalWeight > 1.0m)
-        {
-            throw new InvalidOperationException(
-                $"Evaluator weights across roles cannot exceed 1.0. This change would take the total to {totalWeight}.");
-        }
-
-        updateDto.UpdateEntity(entity);
-        await _evaluatorEvaluationRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Evaluator evaluation updated successfully: {Id}", entity.Id);
-
-        return entity.ToDto();
-    }
-
-    public async Task<bool> DeleteEvaluatorEvaluationAsync(Guid appraisalId, Guid evaluationId, CancellationToken cancellationToken = default)
-    {
-        var entity = await TenantEvaluationQuery()
-                                                        .FirstOrDefaultAsync(e => e.Id == evaluationId && e.AppraisalId == appraisalId, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException("Evaluator evaluation not found");
-
-        await _evaluatorEvaluationRepository.DeleteAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Evaluator evaluation deleted successfully");
-
-        return true;
-    }
-
-    #endregion
-
-    #region CriterionScore Operations
-
-    public async Task<CriterionScoreDto> AddCriterionScoreAsync(Guid evaluationId, CreateCriterionScoreDto createDto, CancellationToken cancellationToken = default)
-    {
-        // Validate evaluation exists and get criteria mapping info
-        var evaluation = await TenantEvaluationQuery()
-            .Include(e => e.Appraisal)
-                .ThenInclude(a => a.Employee)
-                    .ThenInclude(emp => emp.Position)
-            .Include(e => e.CriterionScores)
-            .FirstOrDefaultAsync(e => e.Id == evaluationId, cancellationToken);
-
-        if (evaluation == null)
-            throw new ArgumentException("Evaluator evaluation not found");
-
-        // Validate template item is configured for this appraisal
-        var templateItemConfigExists = await _criterionConfigRepository.ExistsAsync(
-            c => c.TenantId == GetTenantId() && c.PerformanceAppraisalId == evaluation.AppraisalId && c.TemplateItemId == createDto.TemplateItemId);
-        if (!templateItemConfigExists)
-            throw new ArgumentException("Appraisal template item not found or not configured for this appraisal");
-
-        // Check if this template item has already been scored by this evaluator
-        var duplicateExists = evaluation.CriterionScores.Any(cs => cs.TemplateItemId == createDto.TemplateItemId);
-        if (duplicateExists)
-        {
-            throw new InvalidOperationException("This criteria has already been scored in this evaluation");
-        }
-
-        var entity = createDto.ToEntity();
-        entity.TenantId = evaluation.TenantId;
-        entity.EvaluatorEvaluationId = evaluationId;
-
-        await EnsureOnItemScaleAsync(evaluation.AppraisalId, entity, cancellationToken);
-        await _scores.ScoreCriterionAsync(entity, await _scores.LoadScoringAsync(evaluation.AppraisalId, cancellationToken), cancellationToken);
-
-        await _criterionScoreRepository.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        // Reload with includes
-        entity = await TenantCriterionScoreQuery()
-                                                .Include(cs => cs.TemplateItem)
-                                                .FirstOrDefaultAsync(cs => cs.Id == entity.Id, cancellationToken);
-
-        _logger.LogInformation("Criterion score added successfully: {Id}", entity!.Id);
-
-        return entity!.ToDto();
-    }
-
-    public async Task<IEnumerable<CriterionScoreDto>> GetCriterionScoresAsync(Guid evaluationId, CancellationToken cancellationToken = default)
-    {
-        var entities = await TenantCriterionScoreQuery().Where(cs => cs.EvaluatorEvaluationId == evaluationId)
-                                            .Include(cs => cs.TemplateItem)
-                                            .OrderBy(cs => cs.TemplateItemId)
-                                            .ToListAsync(cancellationToken);
-
-        return entities.ToDtoList();
-    }
-
-    public async Task<CriterionScoreDto> UpdateCriterionScoreAsync(Guid evaluationId, UpdateCriterionScoreDto updateDto, CancellationToken cancellationToken = default)
-    {
-        var entity = await TenantCriterionScoreQuery()
-            .Include(cs => cs.TemplateItem)
-            .Include(cs => cs.EvaluatorEvaluation)
-                .ThenInclude(e => e.Appraisal)
-                    .ThenInclude(a => a.Employee)
-            .FirstOrDefaultAsync(cs => cs.Id == updateDto.Id && cs.EvaluatorEvaluationId == evaluationId, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException("Criterion score not found");
-
-        updateDto.UpdateEntity(entity);
-
-        var appraisalId = entity.EvaluatorEvaluation.AppraisalId;
-        await EnsureOnItemScaleAsync(appraisalId, entity, cancellationToken);
-        await _scores.ScoreCriterionAsync(entity, await _scores.LoadScoringAsync(appraisalId, cancellationToken), cancellationToken);
-
-        await _criterionScoreRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Criterion score updated successfully: {Id}", entity.Id);
-
-        return entity.ToDto();
-    }
-
-    public async Task<bool> DeleteCriterionScoreAsync(Guid evaluationId, Guid scoreId, CancellationToken cancellationToken = default)
-    {
-        var entity = await TenantCriterionScoreQuery()
-            .FirstOrDefaultAsync(cs => cs.Id == scoreId && cs.EvaluatorEvaluationId == evaluationId, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException("Criterion score not found");
-
-        await _criterionScoreRepository.DeleteAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Criterion score deleted successfully");
-
-        return true;
-    }
-
-    /// <summary>
-    /// Refuses a score outside the item's own scale (performance closure A11). Bands may top out
-    /// below 100, and achievement is score ÷ top band, so a 95 on an item banded to 80 used to
-    /// count as 119 %.
-    /// </summary>
-    private async Task EnsureOnItemScaleAsync(Guid appraisalId, CriterionScore score, CancellationToken cancellationToken)
-    {
-        var error = await _scores.ValidateItemScoresAsync(appraisalId, new[]
-        {
-            new EvaluationItemInputDto
-            {
-                TemplateItemId = score.TemplateKey(),
-                NumericScore = score.NumericScore,
-                ActualValue = score.ActualValue,
-            },
-        }, cancellationToken);
-
-        if (error != null)
-            throw new InvalidOperationException(error);
-    }
-
-    #endregion
+    // ⚠ The raw evaluator-evaluation and criterion-score CRUD (add/read/update/delete, eight routes)
+    // was removed in performance closure lane P1 (2026-09-29). No screen called it; its read handed
+    // the appraisee every evaluator row — peer names, scores, the manager's notes and recommendation —
+    // and its writes could re-parent an evaluation or score it outside the settle path. Evaluations
+    // are written by the self, manager and peer forms, and read through their contexts and the HR review.
 
     #region AppraisalEmployeeResponse Operations
 
@@ -941,16 +737,34 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         return entities.ToDtoList();
     }
 
-    public async Task<bool> DeleteAttachmentAsync(Guid appraisalId, Guid attachmentId, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// Performance closure P9: an attachment is evidence on the record, so only the person who put
+    /// it there, or the HR desk, removes it — and nobody once the appraisal is complete. It was open
+    /// to the appraisee, the line manager and any Write holder whoever had uploaded it, and after
+    /// completion. An HR officer who is the appraisee is the appraisee here (the two-actor rule).
+    /// </remarks>
+    public async Task<bool> DeleteAttachmentAsync(Guid appraisalId, Guid attachmentId, bool actorIsDesk, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var entity = await _appraisalAttachmentRepository.GetQueryable()
+            .Include(a => a.PerformanceAppraisal)
             .FirstOrDefaultAsync(
                 a => a.Id == attachmentId && a.PerformanceAppraisalId == appraisalId && a.TenantId == tenantId,
                 cancellationToken);
 
-        if (entity == null)
+        if (entity?.PerformanceAppraisal == null)
             throw new ArgumentException("Attachment not found.");
+
+        if (entity.PerformanceAppraisal.Status is AppraisalStatus.Completed or AppraisalStatus.Closed
+            or AppraisalStatus.Withdrawn or AppraisalStatus.Appealed)
+            throw new InvalidOperationException(
+                "This appraisal is complete, so its attachments are part of the record and cannot be removed.");
+
+        var me = _currentUser.EmployeeId;
+        var isUploader = me is Guid uploader && uploader == entity.UploadedById;
+        var deskActs = actorIsDesk && !(me is Guid subject && subject == entity.PerformanceAppraisal.EmployeeId);
+        if (!isUploader && !deskActs)
+            throw new UnauthorizedAccessException("Only the person who attached this file, or HR, can remove it.");
 
         await _appraisalAttachmentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -971,7 +785,12 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             .Include(a => a.Employee)
                 .ThenInclude(e => e.OrganizationUnit)
             .Include(a => a.EvaluatorEvaluations)
+            .Include(a => a.HRReviews)
             .Where(a => a.EmployeeId == employeeId);
+
+        // P2: the score is the employee's to see only once released; HR or the manager reading this
+        // list for someone else sees it as before.
+        var viewerIsSubject = _currentUser.EmployeeId is Guid viewer && viewer == employeeId;
 
         // Apply cycle filter if provided
         if (!string.IsNullOrEmpty(cycleFilter))
@@ -1076,6 +895,14 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 }
             }
 
+            var released = AppraisalRelease.IsReleased(
+                appraisal.Status,
+                appraisal.IsCalibrated,
+                appraisal.HRReviews.Any(r => r.ReviewCompletedDate != null && r.IsApproved),
+                appraisal.AppealRemandedDate != null,
+                settings?.RequireCalibration ?? false,
+                settings?.RequireHRReview ?? false);
+
             result.Add(new MyAppraisalDto
             {
                 AppraisalId = appraisal.Id,
@@ -1090,7 +917,8 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 ActionRequired = actionRequired,
                 ActionText = actionText,
                 DueDate = dueDate,
-                OverallScore = appraisal.OverallScore,
+                OverallScore = released || !viewerIsSubject ? appraisal.OverallScore : null,
+                OutcomeReleased = released,
                 IsAcknowledged = appraisal.EmployeeAcknowledgedDate.HasValue,
                 AppealFiled = appraisal.HasAppeal,
                 AppealStatus = appraisal.CurrentAppealStatus,
@@ -3713,15 +3541,13 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             }
         }
 
-        // Create the HR evaluation directly rather than through AddEvaluatorEvaluationAsync.
-        //
-        // ⚠ That method rejects an addition whose EvaluatorWeight would take the *sum over
-        // records* past 1.0 — but EvaluatorWeight is the role's weight copied onto every record,
-        // so N peers each carrying the peer weight already blow the total on any cycle with peer
-        // reviews. Combined with this method having had no caller at all, HR review could not be
-        // reached. The weight-sum rule is left alone here (it still guards manual evaluator
-        // additions) because HR governs the score without carrying weight in it: the record is
-        // created at weight 0.
+        // Create the HR evaluation directly. The evaluator CRUD this once went through
+        // (AddEvaluatorEvaluationAsync, removed with the rest of that block in performance
+        // closure P1) rejected an addition whose EvaluatorWeight took the *sum over records* past
+        // 1.0 — but EvaluatorWeight is the role's weight copied onto every record, so N peers each
+        // carrying the peer weight already blew the total on any cycle with peer reviews, and HR
+        // review could not be reached. HR governs the score without carrying weight in it: the
+        // record is created at weight 0.
         var hrEval = await EnsureHRReviewEvaluationAsync(appraisal, reviewerId: null, cancellationToken);
         hrEval.OverallNotes ??= "HR Review - Automatically assigned";
         await _evaluatorEvaluationRepository.UpdateAsync(hrEval);
@@ -3843,6 +3669,8 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 .ThenInclude(e => e.Evaluator)
             // The snapshot is what was scored: targets, weights (A12).
             .Include(a => a.CriterionConfigs)
+            // The HR sign-off record, for the release rule (P2).
+            .Include(a => a.HRReviews)
             .AsSplitQuery()
             .FirstOrDefaultAsync(a => a.Id == appraisalId, cancellationToken);
 
@@ -3852,6 +3680,14 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         var settings = appraisal.AppraisalCycle?.AppraisalSettings;
         if (settings == null)
             throw new InvalidOperationException("Appraisal cycle settings not found.");
+
+        var outcomeReleased = AppraisalRelease.IsReleased(
+            appraisal.Status,
+            appraisal.IsCalibrated,
+            appraisal.HRReviews.Any(r => !r.IsDeleted && r.ReviewCompletedDate != null && r.IsApproved),
+            appraisal.AppealRemandedDate != null,
+            settings.RequireCalibration,
+            settings.RequireHRReview);
 
         var configsByTemplateItemId = appraisal.CriterionConfigs
             .Where(c => c.TemplateItemId.HasValue)
@@ -3929,8 +3765,15 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
         var totalWeight = settings.SelfEvaluationWeight + settings.ManagerEvaluationWeight + settings.PeerEvaluationWeight;
 
+        // P2: the appraisee's own copy carries the outcome only once it is released to them. The
+        // employee's page reads this record, not the appraisal, so withholding the score on the
+        // appraisal alone left the manager's evaluation, the peer average, the final score and
+        // grade — and HR's remarks, a draft included — in the body the page merely declined to show.
+        var withholdOutcome = isAppraiseeViewing && !outcomeReleased;
+
         return new HRReviewDto
         {
+            OutcomeReleased = outcomeReleased,
             AppraisalId = appraisal.Id,
             AppraisalNumber = appraisal.AppraisalNumber,
             EmployeeId = appraisal.EmployeeId,
@@ -3950,20 +3793,21 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             TotalWeight = totalWeight,
             IsCycleActive = appraisal.AppraisalCycle.Status == AppraisalCycleStatus.Open,
             SelfEvaluation = selfSummary,
-            ManagerEvaluation = managerSummary,
-            PeerEvaluationSummary = peerSummary,
+            ManagerEvaluation = withholdOutcome ? null : managerSummary,
+            PeerEvaluationSummary = withholdOutcome ? null : peerSummary,
             SelfWeight = settings.SelfEvaluationWeight,
             ManagerWeight = settings.ManagerEvaluationWeight,
             PeerWeight = settings.PeerEvaluationWeight,
             SelfScore = selfEvaluation?.TotalScore,
-            ManagerScore = managerEvaluation?.TotalScore,
-            PeerScore = peerEvaluations.Any() ? peerEvaluations.Where(e => e.SubmittedDate.HasValue).Average(e => e.TotalScore) : null,
-            FinalScore = appraisal.OverallScore,
-            FinalGrade = await GradeNameAsync(appraisal.OverallGradeDefinitionId, cancellationToken),
+            ManagerScore = withholdOutcome ? null : managerEvaluation?.TotalScore,
+            PeerScore = withholdOutcome ? null
+                : peerEvaluations.Any() ? peerEvaluations.Where(e => e.SubmittedDate.HasValue).Average(e => e.TotalScore) : null,
+            FinalScore = withholdOutcome ? null : appraisal.OverallScore,
+            FinalGrade = withholdOutcome ? null : await GradeNameAsync(appraisal.OverallGradeDefinitionId, cancellationToken),
             // The HR sign-off, not the appraisal's status: an appraisal whose cycle requires an
             // employee acknowledgment stays in Governance after HR has finalised it.
             IsFinalized = hrEvaluation?.SubmittedDate.HasValue == true || appraisal.Status == AppraisalStatus.Completed,
-            HRRemarks = hrEvaluation?.OverallNotes,
+            HRRemarks = withholdOutcome ? null : hrEvaluation?.OverallNotes,
             FinalizedDate = hrEvaluation?.SubmittedDate,
             FinalizedByName = hrEvaluation?.SubmittedDate.HasValue == true ? hrEvaluation.Evaluator?.FullName : null,
             EmployeeAcknowledgedDate = appraisal.EmployeeAcknowledgedDate,

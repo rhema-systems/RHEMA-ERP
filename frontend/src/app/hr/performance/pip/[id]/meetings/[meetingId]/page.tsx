@@ -22,6 +22,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { formatDate } from '@/lib/hr/attendance-format';
 import { pipMeetingService } from '@/services/hr/pip.service';
 import { GOAL_PROGRESS_STATUS_OPTIONS, type GoalProgressStatus } from '@/types/hr/goals';
@@ -38,6 +39,10 @@ import type { PipMeetingForm } from '@/types/hr/pip';
  *
  * ⚠ A meeting has no stored status. "Completed" is derived from its date being in the past, so
  * the Complete button saves the notes and stamps nothing extra — it is a save with a fuller name.
+ *
+ * Two authors, two parts (performance closure P13): the supervisor's record — what was discussed,
+ * goal progress — and the employee's reply, which is theirs alone. The save posts the whole form
+ * back, but the server takes neither the reply nor the conductor from it.
  */
 export default function PipMeetingPage() {
   const params = useParams<{ id: string; meetingId: string }>();
@@ -45,6 +50,7 @@ export default function PipMeetingPage() {
   const meetingId = params.meetingId;
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const [form, setForm] = useState<PipMeetingForm | null>(null);
   const [comment, setComment] = useState('');
@@ -140,6 +146,10 @@ export default function PipMeetingPage() {
     );
   }
 
+  // The plan's subject reads the record and writes the reply; everyone else here is the other way
+  // round (P13) — the server refuses each the other's write.
+  const isSubject = !!user?.employeeId && user.employeeId === form.employeeId;
+
   return (
     <div className="space-y-6 p-6">
       <PageHeader
@@ -147,6 +157,7 @@ export default function PipMeetingPage() {
         description={`${form.pipNumber} — ${form.employeeName} · ${formatDate(form.meetingDate)}`}
         backHref={`/hr/performance/pip/${pipId}`}
         actions={
+          isSubject ? undefined : (
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={() => save.mutate(false)} disabled={save.isPending}>
               <Save className="mr-2 h-4 w-4" />
@@ -157,6 +168,7 @@ export default function PipMeetingPage() {
               {save.isPending ? 'Saving…' : 'Record meeting'}
             </Button>
           </div>
+          )
         }
       />
 
@@ -295,31 +307,34 @@ export default function PipMeetingPage() {
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Nothing recorded yet. The employee&apos;s right of reply is theirs to use — anyone on
-              the plan can enter it here on their behalf if the meeting was verbal.
+              {isSubject
+                ? 'Nothing recorded yet. This is your right of reply — only you can write it.'
+                : `Nothing recorded yet. This is ${form.employeeName}'s right of reply — only they can write it.`}
             </p>
           )}
 
-          <div className="space-y-2">
-            <Label htmlFor="pm-comment">Add a comment</Label>
-            <Textarea
-              id="pm-comment"
-              rows={3}
-              maxLength={2000}
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              placeholder="Replaces whatever is above — this field holds one comment, not a thread."
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => addComment.mutate()}
-              disabled={!comment.trim() || addComment.isPending}
-            >
-              <MessageSquarePlus className="mr-2 h-4 w-4" />
-              {addComment.isPending ? 'Saving…' : 'Save comment'}
-            </Button>
-          </div>
+          {isSubject && (
+            <div className="space-y-2">
+              <Label htmlFor="pm-comment">Your comment</Label>
+              <Textarea
+                id="pm-comment"
+                rows={3}
+                maxLength={2000}
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder="Replaces whatever is above — this field holds one comment, not a thread."
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => addComment.mutate()}
+                disabled={!comment.trim() || addComment.isPending}
+              >
+                <MessageSquarePlus className="mr-2 h-4 w-4" />
+                {addComment.isPending ? 'Saving…' : 'Save comment'}
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
