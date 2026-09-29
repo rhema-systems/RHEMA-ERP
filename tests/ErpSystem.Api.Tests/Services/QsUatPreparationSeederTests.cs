@@ -184,6 +184,38 @@ public sealed class QsUatPreparationSeederTests
         }, true).Should().BeFalse();
     }
 
+    [Fact]
+    public void ExplicitDraftReconciliation_OnlyAllowsUnapprovedEvidenceFreeDraft()
+    {
+        static JsonElement Json(string text) => JsonDocument.Parse(text).RootElement.Clone();
+        var draft = new QuantitySurveyDecisionDto
+        {
+            SourceLineage = "Manual preparation", Status = QuantitySurveyConfigurationDecisionStatus.Draft,
+            ApprovalStatus = QuantitySurveyConfigurationApprovalStatus.Pending,
+            EvidenceStatus = QuantitySurveyConfigurationEvidenceStatus.Missing,
+            Value = Json("{\"requireContractorSignature\":false}")
+        };
+
+        QsUatPreparationSeeder.CanReconcileUnapprovedDraftDecision(draft, true).Should().BeTrue();
+        QsUatPreparationSeeder.CanReconcileUnapprovedDraftDecision(draft, false).Should().BeFalse();
+        QsUatPreparationSeeder.CanReconcileUnapprovedDraftDecision(new QuantitySurveyDecisionDto
+        {
+            Status = QuantitySurveyConfigurationDecisionStatus.Approved,
+            ApprovalStatus = QuantitySurveyConfigurationApprovalStatus.Approved,
+            EvidenceStatus = QuantitySurveyConfigurationEvidenceStatus.Verified,
+            ApprovedById = Guid.NewGuid(), ApprovedAt = DateTime.UtcNow, ApprovalReference = "reviewed",
+            Value = draft.Value
+        }, true).Should().BeFalse();
+        QsUatPreparationSeeder.CanReconcileUnapprovedDraftDecision(new QuantitySurveyDecisionDto
+        {
+            Status = QuantitySurveyConfigurationDecisionStatus.Draft,
+            ApprovalStatus = QuantitySurveyConfigurationApprovalStatus.Pending,
+            EvidenceStatus = QuantitySurveyConfigurationEvidenceStatus.Attached,
+            Evidence = [new QuantitySurveyEvidenceDto { Id = Guid.NewGuid() }],
+            Value = draft.Value
+        }, true).Should().BeFalse();
+    }
+
     [Theory]
     [InlineData("valid")]
     [InlineData("missing")]

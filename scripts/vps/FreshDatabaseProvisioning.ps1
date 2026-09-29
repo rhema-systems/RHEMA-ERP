@@ -70,7 +70,11 @@ function Invoke-RhemaFreshApiCli {
           [int]$TimeoutSeconds = 3600,
           [string]$OperationalUatPassword,
           [string]$ExpectedQsDatabase,
-          [switch]$AutoApproveQsUat)
+          [switch]$AutoApproveQsUat,
+          [switch]$ReconcileUnapprovedQsDrafts)
+    if ($ReconcileUnapprovedQsDrafts -and -not $AutoApproveQsUat) {
+        throw 'ReconcileUnapprovedQsDrafts requires AutoApproveQsUat.'
+    }
     if ($Command -eq 'seed-qs-uat') {
         $qsTarget = New-Object System.Data.SqlClient.SqlConnectionStringBuilder $ConnectionString
         if ($ExpectedQsDatabase -cnotmatch '^RhemaERP_(VpsTest|QsUatVerify)_[A-Za-z0-9_]+$' -or
@@ -112,6 +116,7 @@ function Invoke-RhemaFreshApiCli {
         $start.EnvironmentVariables['QsUat__Enabled']='true'
         $start.EnvironmentVariables['QsUat__ExpectedDatabase']=$ExpectedQsDatabase
         $start.EnvironmentVariables['QsUat__AutoApprove']= if($AutoApproveQsUat) { 'true' } else { 'false' }
+        $start.EnvironmentVariables['QsUat__ReconcileUnapprovedDrafts']= if($ReconcileUnapprovedQsDrafts) { 'true' } else { 'false' }
         $start.EnvironmentVariables['DOTNET_GCHeapHardLimit']='0x200000000'
     }
     if (-not [string]::IsNullOrWhiteSpace($OperationalUatPassword)) {
