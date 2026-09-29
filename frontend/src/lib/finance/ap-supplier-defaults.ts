@@ -19,6 +19,14 @@ export function isApExpenseLineType(type: string): boolean {
   return (apExpenseLineTypes as readonly string[]).includes(type);
 }
 
+/** Snapshots the header default onto a newly created line. Existing lines remain unchanged. */
+export function taxGroupForNewApInvoiceLine(
+  headerTaxGroupId: string | null | undefined,
+  isOpeningBalance: boolean
+): string {
+  return isOpeningBalance ? 'none' : (headerTaxGroupId || 'none');
+}
+
 /** Visible form assignments only. Explicit edits, including selecting No Tax, always win. */
 export function planApSupplierDefaults(values: ApSupplierDefaultValues, defaults: PurchaseOrderSupplierDefaultsDto,
   edited: ReadonlySet<string>, availableTaxIds: ReadonlySet<string>) {

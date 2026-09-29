@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { planApSupplierDefaults, type ApSupplierDefaultValues } from './ap-supplier-defaults';
+import {
+  planApSupplierDefaults,
+  taxGroupForNewApInvoiceLine,
+  type ApSupplierDefaultValues,
+} from './ap-supplier-defaults';
 import type { PurchaseOrderSupplierDefaultsDto } from '@/services/purchasingService';
 
 const defaults: PurchaseOrderSupplierDefaultsDto = { businessPartnerId: 'bp', paymentTermId: 'net30', postingDefaults: {
@@ -13,6 +17,13 @@ const values = (): ApSupplierDefaultValues => ({ paymentTermId: '', expenseAccou
 const taxes = new Set(['vat']);
 
 describe('visible AP supplier-default assignments', () => {
+  it('snapshots the selected header tax group onto new lines only', () => {
+    expect(taxGroupForNewApInvoiceLine('vat-standard', false)).toBe('vat-standard');
+    expect(taxGroupForNewApInvoiceLine('none', false)).toBe('none');
+    expect(taxGroupForNewApInvoiceLine(undefined, false)).toBe('none');
+    expect(taxGroupForNewApInvoiceLine('vat-standard', true)).toBe('none');
+  });
+
   it('routes typed supplier charges while preserving explicit line accounts', () => {
     const current = values();
     current.lineItems = [
