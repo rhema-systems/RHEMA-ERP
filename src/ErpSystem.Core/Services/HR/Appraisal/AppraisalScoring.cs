@@ -128,9 +128,13 @@ public static class AppraisalScoring
     ///
     /// Dividing by the contributing weight rather than by 1.0 means a missing or unweighted
     /// evaluator re-proportions the rest instead of silently dragging the score toward zero.
+    ///
+    /// Null when no role with a weight scored anything (performance closure A1): nothing was
+    /// scored, which is not a score of zero — a zero used to be graded at the bottom band and
+    /// pushed to the talent pools as the lowest rating.
     /// </summary>
     /// <param name="roles">(roleScore, roleWeight) — one entry per role, peers already averaged.</param>
-    public static decimal OverallScore(IEnumerable<(decimal Score, decimal Weight)> roles)
+    public static decimal? OverallScore(IEnumerable<(decimal Score, decimal Weight)> roles)
     {
         decimal weighted = 0, totalWeight = 0;
         foreach (var (score, weight) in roles)
@@ -140,6 +144,6 @@ public static class AppraisalScoring
             totalWeight += weight;
         }
 
-        return totalWeight > 0 ? Clamp(weighted / totalWeight) : 0m;
+        return totalWeight > 0 ? Clamp(weighted / totalWeight) : null;
     }
 }

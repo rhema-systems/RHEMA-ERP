@@ -175,6 +175,9 @@ public class EffectiveAppraisalCriterionDto
     /// <summary>Display name — competency name or KPI name, depending on item type.</summary>
     public string ItemName { get; set; } = string.Empty;
     public int Weight { get; set; }
+    /// <summary>The item's section, and that section's weight in the template (0–100).</summary>
+    public Guid AppraisalTemplateSectionId { get; set; }
+    public int SectionWeight { get; set; }
     public decimal? KpiTargetValue { get; set; }
     public decimal? KpiMinValue { get; set; }
     public decimal? KpiMaxValue { get; set; }
@@ -323,6 +326,8 @@ public class PerformanceAppraisalDto : BaseDto
     public bool IsCalibrated { get; set; }
     public Guid? CalibrationSessionId { get; set; }
     public decimal? PreCalibrationScore { get; set; }
+    /// <summary>The overall a committed calibration restated; the settled score reads it ahead of the computed one.</summary>
+    public decimal? CalibratedOverallScore { get; set; }
     public Guid? OverallGradeDefinitionId { get; set; }
     public Guid? AppraisalTemplateId { get; set; }
     public Guid? DevelopmentPlanId { get; set; }
@@ -1906,6 +1911,11 @@ public class ManagerEvaluationItemDto : EvaluationItemDto
     public string? ManagerNotes { get; set; }
     public string? ManagerEvidenceLinks { get; set; }
     public decimal? ManagerAchievementPercent { get; set; }
+    /// <summary>
+    /// A KPI whose achievement calibration or an appeal restated (D-22): the percentage above is
+    /// the restatement, not the actual against the target (A14).
+    /// </summary>
+    public bool ManagerAchievementOverridden { get; set; }
     public string? ManagerAchievedGrade { get; set; }
 
     /// <summary>True when this item is flagged in an active appeal remand (highlights the row).</summary>
@@ -2587,6 +2597,11 @@ public class KpiScoreSummaryDto
     public decimal? TargetValue { get; set; }
     public decimal? ActualValue { get; set; }
     public decimal? AchievementPercentage { get; set; }
+    /// <summary>
+    /// The achievement was restated by calibration or an appeal (D-22): it is not the actual
+    /// against the target, and the screen says so.
+    /// </summary>
+    public bool AchievementOverridden { get; set; }
     public string? Unit { get; set; }
     public string? Notes { get; set; }
 }
@@ -3126,6 +3141,8 @@ public class EmployeeAppealOutcomeDto
     
     // Final Scores
     public decimal FinalOverallScore { get; set; }
+    /// <summary>The overall score the appeal was filed against; null on appeals filed before it was kept.</summary>
+    public decimal? OriginalOverallScore { get; set; }
     public List<FinalCriterionScoreDto> FinalCriteriaScores { get; set; } = new();
     public List<FinalKpiScoreDto> FinalKpiScores { get; set; } = new();
     
@@ -3143,6 +3160,8 @@ public class FinalCriterionScoreDto
     public int Weight { get; set; }
     public string ManagerComments { get; set; } = "";
     public bool WasAppealed { get; set; }
+    /// <summary>A KPI whose achievement calibration or an appeal restated to <see cref="FinalScore"/> percent (D-22, A14).</summary>
+    public bool AchievementOverridden { get; set; }
 }
 
 // ============================================================
@@ -5017,15 +5036,65 @@ public class RecordCalibrationAttendanceDto
 }
 
 /// <summary>
-/// What committing a session actually did. <c>AppraisalsCalibrated</c> counts everyone in the
-/// session's scope — an employee the panel discussed and left alone is still calibrated, and
-/// would otherwise sit blocked behind the calibration gate forever.
+/// What committing a session actually did. <c>AppraisalsCalibrated</c> counts every appraisal at
+/// the calibration step — an employee the panel discussed and left alone is still calibrated, and
+/// would otherwise sit blocked behind the calibration gate forever. An appraisal the session
+/// covers that is not at that step (its manager has not submitted, it is under appeal, or it is
+/// already final with nothing adjusted) is left untouched and listed in <c>Skipped</c> with the
+/// reason (performance closure A4).
 /// </summary>
 public class CalibrationApplyResultDto
 {
     public int AdjustmentsApplied { get; set; }
     public int ScoresChanged { get; set; }
     public int AppraisalsCalibrated { get; set; }
+    public int AppraisalsSkipped => Skipped.Count;
+    public List<CalibrationSkippedAppraisalDto> Skipped { get; set; } = new();
+}
+
+/// <summary>An appraisal in the session's scope that the commit did not calibrate, and why.</summary>
+public class CalibrationSkippedAppraisalDto
+{
+    public Guid AppraisalId { get; set; }
+    public string? EmployeeName { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Performance closure A15 (D-13): what the settle path would store for each finalised appraisal,
+/// beside what is stored now. Read-only; finalised scores stay as they are unless HR restates one
+/// through the audited reopen.
+/// </summary>
+public class AppraisalSettleDryRunReportDto
+{
+    public DateTime GeneratedAt { get; set; }
+    public Guid? CycleId { get; set; }
+    public int Examined { get; set; }
+    public int Changed { get; set; }
+    public List<AppraisalSettleDryRunRowDto> Rows { get; set; } = new();
+}
+
+public class AppraisalSettleDryRunRowDto
+{
+    public Guid AppraisalId { get; set; }
+    public string AppraisalNumber { get; set; } = string.Empty;
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string CycleName { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public decimal? StoredScore { get; set; }
+    public decimal? SettledScore { get; set; }
+    /// <summary>The score from the submitted legs alone, before any calibrated overall is applied.</summary>
+    public decimal? ComputedScore { get; set; }
+    public decimal? CalibratedOverallScore { get; set; }
+    public string? StoredGrade { get; set; }
+    public string? SettledGrade { get; set; }
+    public string? StoredRating { get; set; }
+    public string? SettledRating { get; set; }
+    /// <summary>The employee's talent-pool rating today; null when they are in no pool.</summary>
+    public string? TalentPoolRatingNow { get; set; }
+    public bool Changed { get; set; }
 }
 
 // ============================================================
@@ -5117,9 +5186,23 @@ public class CalibrationCriterionDto
     public string? TemplateItemName { get; set; }
     public int WeightUsed { get; set; }
 
+    /// <summary>
+    /// A KPI: an adjustment restates its achievement percentage (D-22) rather than giving it a
+    /// rated score.
+    /// </summary>
+    public bool IsKpi { get; set; }
+
+    /// <summary>The highest adjustment this row accepts: the item's top grade band, or 100 for a KPI (A11).</summary>
+    public decimal ScaleTop { get; set; }
+
+    public decimal? KpiTargetValue { get; set; }
+
     /// <summary>The manager's score for this criterion — what the panel is moving away from.</summary>
     public decimal? ManagerScore { get; set; }
     public decimal? ManagerActualValue { get; set; }
+
+    /// <summary>For a KPI, the achievement the manager's actual produced — what the score used.</summary>
+    public decimal? ManagerAchievementPercent { get; set; }
 
     /// <summary>Set when this panel has already adjusted this criterion.</summary>
     public Guid? AdjustmentId { get; set; }

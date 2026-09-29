@@ -6,6 +6,17 @@ settings as a policy reference; this document says which of them the code obeys.
 
 **Audited:** 2026-09-17 against the working tree. Every claim carries a `file:line`.
 
+> **Closure status (2026-09-29) — read before the body.** The performance closure
+> (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) is working through this audit; its decision 1 implements
+> twelve of the fourteen non-enforced settings and removes two. So far:
+> - **Migration batch 1** removed `IsManagerAuthoritative` (#14) and `RequireDevelopmentPlanUpdate`
+>   (ghost 3) from the entity, the DTOs and the form — the profile now carries **48** fields.
+> - **Lane A** (scoring and the settle path) changed what three *enforced* settings do — marked
+>   *"Since lane A"* in section A: `HRCanModifyScores`, `RequireCalibration`,
+>   `RequireEmployeeAcknowledgment`. No verdict moved between A/B/C/D.
+>
+> Line numbers below are as of 2026-09-17; lane A rewrote much of `PerformanceAppraisalService.cs`.
+
 ---
 
 
@@ -243,12 +254,12 @@ Grouped by what they actually do, with the strongest evidence line for each.
 ### The gates
 | Setting | What it really does |
 |---|---|
-| `RequireCalibration` | Phase gate (`AppraisalWorkflowService.cs:206`) **and the finalise refusal** (`PerformanceAppraisalService.cs:4378`) |
+| `RequireCalibration` | Phase gate (`AppraisalWorkflowService.cs:206`) **and the finalise refusal** (`PerformanceAppraisalService.cs:4378`). *Since lane A:* a commit lifts the gate only on appraisals at the calibration step (manager submitted); it used to stamp everyone in the session's scope, so an appraisal could pass the gate before any panel saw its score |
 | `RequireHRReview` | Phase gate; assigns the HR reviewer on manager submit (`:2604`); **refuses acknowledgment before sign-off** (`:2753`); short-circuits progress-to-HR (`:3907`) |
 | `HRReviewTiming` | Swaps the calibration / HR-review order in **both** resolvers (`AppraisalWorkflowService.cs:196`, `AppraisalAdvanceHelpers.cs:113`) |
-| `RequireEmployeeAcknowledgment` | **Decides the status finalisation lands on** — `Governance` vs `Completed` (`PerformanceAppraisalService.cs:4388`); phase gate (`:224`) |
+| `RequireEmployeeAcknowledgment` | **Decides the status finalisation lands on** — `Governance` vs `Completed` (`PerformanceAppraisalService.cs:4388`); phase gate (`:224`). *Since lane A:* the acknowledgment settles the score and publishes it; with calibration and HR review off, the manager's submission settles it first so the employee acknowledges a score, not a blank (it used to finish with none) |
 | `RequireGoalSetting` | Phase gate (`AppraisalWorkflowService.cs:150`) |
-| `HRCanModifyScores` | **Refuses score modifications on appeal resolution** (`PerformanceAppraisalService.cs:3368`) |
+| `HRCanModifyScores` | **Refuses score modifications on appeal resolution** (`PerformanceAppraisalService.cs:3368`). *Since lane A:* the modifications it allows **reach the score** (checked against the item's own scale; a KPI's is a restated achievement %). Before, they were written and the overall re-summed stale weighted scores, so an upheld appeal never moved the result |
 | `DefaultHRReviewerId` | Chosen as reviewer when it points at an active employee, else least-loaded fallback (`:3984`) |
 | `AllowEmployeeResponse` | **Refuses the employee's written response** when off (`:1003`) |
 | `AppealReevaluationWindowDays` | Sets `AppealRemandDeadline` (`:3454`) — and **the post-remand re-evaluation is refused after it** (`:2361`) |

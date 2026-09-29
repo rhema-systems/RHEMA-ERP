@@ -329,6 +329,8 @@ export interface FinalCriterionScore {
   weight: number;
   managerComments: string;
   wasAppealed: boolean;
+  /** A KPI whose achievement calibration or an appeal restated to `finalScore` percent. */
+  achievementOverridden?: boolean;
 }
 
 export interface FinalKpiScore {
@@ -367,6 +369,8 @@ export interface EmployeeAppealOutcome {
   outcomeMessage: string;
 
   finalOverallScore: number;
+  /** The overall the appeal was filed against; null on appeals filed before it was kept. */
+  originalOverallScore?: number | null;
   finalCriteriaScores: FinalCriterionScore[];
   finalKpiScores: FinalKpiScore[];
 

@@ -92,6 +92,9 @@ export default function AppealOutcomePage() {
       <MetricTiles
         tiles={[
           { label: 'Final overall score', value: data.finalOverallScore.toFixed(1) },
+          ...(data.originalOverallScore != null
+            ? [{ label: 'Score when you appealed', value: Number(data.originalOverallScore).toFixed(1) }]
+            : []),
           {
             label: 'Scores changed',
             value: data.scoresChangedAfterAppeal ? 'Yes' : 'No',
@@ -168,6 +171,11 @@ export default function AppealOutcomePage() {
                     <TableCell className="text-right tabular-nums">{c.weight}</TableCell>
                     <TableCell className="text-right tabular-nums font-medium">
                       {c.finalScore ?? '—'}
+                      {c.achievementOverridden && (
+                        <div className="text-xs font-normal text-amber-700 dark:text-amber-400">
+                          Achievement %, overridden by calibration/appeal
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {c.finalWeightedScore.toFixed(1)}

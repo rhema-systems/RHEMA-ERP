@@ -166,6 +166,10 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
                 PerformanceAppraisalId = performanceAppraisalId,
                 TemplateItemId = criterion.TemplateItemId,
                 WeightUsed = criterion.Weight,
+                // Frozen with the item weight (performance closure A0): a section weight edited
+                // after generation must not re-score an appraisal already under way.
+                AppraisalTemplateSectionId = criterion.AppraisalTemplateSectionId,
+                SectionWeightUsed = criterion.SectionWeight,
                 KpiTargetValue = criterion.KpiTargetValue,
                 KpiMinValue = criterion.KpiMinValue,
                 KpiMaxValue = criterion.KpiMaxValue,
@@ -283,12 +287,12 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
         IReadOnlyList<EmployeeGoal> lockedGoals)
     {
         var allItems = template.Sections
-            .SelectMany(s => s.TemplateItems)
+            .SelectMany(s => s.TemplateItems.Select(item => (Section: s, Item: item)))
             .ToList();
 
         var criteria = new List<EffectiveAppraisalCriterionDto>();
 
-        foreach (var item in allItems)
+        foreach (var (section, item) in allItems)
         {
             // Skip items with no source (e.g. pure custom questions with no competency or KPI)
             if (item.CompetencyId == null && item.KpiDefinitionId == null) continue;
@@ -337,6 +341,8 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
                 KpiDefinitionId = item.KpiDefinitionId,
                 ItemName = item.Competency?.CriteriaName ?? item.KpiDefinition?.KpiName ?? string.Empty,
                 Weight = item.Weight,
+                AppraisalTemplateSectionId = section.Id,
+                SectionWeight = section.Weight,
                 KpiTargetValue = kpiTargetValue,
                 KpiMinValue = kpiMinValue,
                 KpiMaxValue = kpiMaxValue,

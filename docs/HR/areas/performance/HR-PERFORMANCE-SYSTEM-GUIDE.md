@@ -3,6 +3,7 @@
 **Module:** Human Resources → Talent & Performance → **Performance**
 **Coverage:** 19 sidebar leaves · 46 desk routes · 12 Administration setup routes · 15 self-service portal routes — **62 screens**
 **Written:** 2026-09-17 · **Verified against** `ErpSystemDB_UAT` as it stands today, and against the source of every screen and service behind it.
+**Updated 2026-09-29** for the performance closure's lane A (scoring and the settle path): Rule 2, § 1.5, P-6/P-39/P-40, chapter 30's commit and chapter 31's finalise wording, Appendix C. The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
 **Seventh in the series**, after Recruitment, Employees, Leave, Attendance & Time, Company Schedule and Staff Travel.
 
 ---
@@ -117,42 +118,53 @@ the policy and you change the year, not the software."*
 
 ---
 
-### Rule 2 — Calibration is a **gate**, and the panel's number does **not** survive HR sign-off
+### Rule 2 — Calibration is a **gate**, and the panel's number **survives** HR sign-off — except on the two appraisals signed off before that was fixed
+
+> **Changed 2026-09-29** (performance closure lane A). Until then the panel's number did *not*
+> survive sign-off; this rule said so, and the two cases below are the evidence that was left behind.
 
 This is the single most important thing to understand before you demonstrate calibration.
 
-Calibration does two separate jobs, and only one of them behaves the way an audience will assume.
+**1. The gate — the real feature.** Because the settings profile has *Require a calibration session*
+switched on, an appraisal **cannot be finalised by HR** until a calibration session covering it has
+been **committed**. Committing now calibrates the appraisals **at the calibration step** — the ones
+whose manager has submitted — including the people the panel discussed and left exactly as they
+were. The rest of the session's scope is left alone and **listed with the reason** in the commit's
+result ("the manager has not submitted", "under appeal", "already final, and this session made no
+adjustment to it"). On this database two panels were committed *before* that change (Operations
+Directorate, and Finance & Administration), when a commit stamped everyone in scope, so **76 of the
+107 appraisals carry the stamp and 31 do not** — including some whose manager had not yet submitted.
 
-**1. The gate — this works, and it is the real feature.** Because the settings profile has *Require a
-calibration session* switched on, an appraisal **cannot be finalised by HR** until a calibration
-session covering it has been **committed**. Committing marks everyone in the session's scope as
-calibrated — including the people the panel discussed and left exactly as they were. On this database
-two panels have been committed (Operations Directorate, and Finance & Administration), so **76 of the
-107 appraisals are through the gate and 31 are not.**
+**2. The number — it now survives.** A committed **overall** restatement is kept on the appraisal as
+its *calibrated overall*, and HR sign-off keeps it: the final score, the grade and the talent-pool
+rating all come from the panel's figure. A **per-criterion** restatement goes into the score through
+the item — a **KPI** included, where the panel restates the *achievement percentage* and every screen
+labels the row **"overridden by calibration/appeal"**.
 
-**2. The number — this does not survive.** When HR finalises an appraisal it **recalculates the
-weighted final score from the three evaluation legs**, overwriting whatever the panel wrote. The
-evidence is on this database: the Finance & Administration panel restated Cynthia Sarpong's overall
-score to **87.0**, and her finalised appraisal reads **88.74** — the recomputed figure. The calibration
-grid still shows 87.0, because the grid reads the *adjustment record*, not the appraisal.
+**3. What this database still shows — two appraisals signed off before the fix.** Finalised scores
+are **not** restated automatically (decision D-13): changing a signed-off score is a deliberate,
+audited act — HR's *reopen*, which lane E of the closure builds. So:
+- **Cynthia Sarpong** — the Finance & Administration panel restated her overall to **87.0**; her
+  appraisal still reads **88.74**, the figure it was signed off at. A settle today would give **87.00**.
+  The calibration grid shows 87.0.
+- **Efua Seidu** — the Operations panel moved *Project Delivery Timeliness* from 92 to 88 (the row
+  carries `NumericScore 88` beside `ActualValue 92`); her appraisal still reads **89.40**. A settle
+  today would give **88.56**, the panel's 88 counting.
 
-A **per-criterion** adjustment fares a little better, but not much. It writes the panel's figure onto
-the manager's criterion score, and that survives the recompute **for a competency item**. On a **KPI
-item it changes nothing**, because a KPI is scored from its *actual value* and the adjustment only
-writes the *numeric score*. Efua Seidu's appraisal proves it: the Operations panel moved *Project
-Delivery Timeliness* from 92 to 88; the row now carries `NumericScore 88` beside `ActualValue 92`; and
-her weighted contribution (27.6) and final score (89.40) are unchanged.
+Neither would change grade (both stay *Exceeds*), and neither is in a talent pool. The read-only
+report that found them is `GET /api/PerformanceAppraisals/settle-dry-run` (closure A15).
 
-**What to do on stage.** Demonstrate calibration as **governance** — the panel that reconciles ratings
-across a directorate, records its reasoning, and releases the appraisals to HR. Do **not** put the
-calibration grid and the HR review score side by side and invite the room to compare them.
+**What to do on stage.** Calibration now demonstrates end to end — restate an overall in a panel,
+commit, sign off in HR review, and the number that reaches the employee and the talent pool is the
+panel's. **Do not use Cynthia or Efua as the example of it**: their records predate the fix, and the
+grid and the HR review will disagree on them.
 
-If someone asks directly, the honest answer is short and good:
+If someone asks why those two disagree, the honest answer is short and good:
 
-💬 *"Calibration in this release is the control gate and the audit trail — nothing reaches HR sign-off
-until a panel has released it, and every restatement is recorded with its reasoning against the
-panellist who made it. Writing the panel's number back over the computed score is the next increment;
-today HR signs off the arithmetic, and the panel's decision sits beside it on the record."*
+💬 *"The panel's decision is the final number: restate the overall and that is what HR signs off and
+what reaches the talent pools; restate a criterion and the score moves with it. These two appraisals
+were signed off before that change, and they keep the numbers they were signed off with — changing a
+signed-off score is a deliberate, audited step, never a side effect."*
 
 ---
 
@@ -506,8 +518,16 @@ Ansah gave 84 / 84 → **84.00**. Cynthia Sarpong gave 80 / 80 → **80.00**. Co
 ```
 
 **89.40 is what her appraisal reads.** You can put that arithmetic on the screen and it will match.
+It is the figure she was **signed off** at. Since 2026-09-29 the Operations panel's restatement of
+*Project Delivery Timeliness* (92 → 88, Rule 2) counts: her manager's line becomes 88% × 30 = 26.4,
+his score 89.60, and a settle today would give **88.56** — still *Exceeds*. Her record keeps 89.40
+because finalised scores are not restated automatically.
 
-Three more facts worth carrying:
+Four more facts worth carrying:
+
+* **Only submitted evaluations count.** A self-evaluation or peer review saved as a draft is never a
+  leg of the overall; nothing scored at all gives *no* score, not zero. (Before 2026-09-29 a saved
+  draft moved the final score.)
 
 * **Hitting target is full marks.** A KPI actual of 110 against a target of 100 scores 100%, not 110%.
   There is no extra credit, and an actual beyond the item's ceiling counts as attaining the ceiling.
@@ -1116,8 +1136,11 @@ A grade with no band shows *"Item-level only"* in the band column. The dialog ca
 the per-item bands live on `TemplateItemGradeRanges`, edited from the template editor.
 
 ### ⚠ Known gaps
-**P-6.** The overall bands are **not validated against each other**. Two overlapping bands resolve to
-whichever is found first. Keep them tidy by hand.
+**P-6.** ~~The overall bands are **not validated against each other**. Two overlapping bands resolve
+to whichever is found first. Keep them tidy by hand.~~ **Fixed 2026-09-29** (closure A2): saving a
+band refuses an overlap with another active band, a half band, a band outside 0–100 or inverted,
+and a band with no mapped rating. One resolver grades everywhere; a score between two published
+ranges (90.5 between 76–90 and 91–100) takes the lower band.
 
 ---
 
@@ -3327,7 +3350,8 @@ otherwise.
   Convened    stamps that the panel actually met
   Close       no further adjustments; the panel is notified the ratings are ready
   COMMIT      irreversible. Writes the agreed ratings onto the appraisals AND lifts the
-              calibration gate on everyone in scope — including the people left alone
+              calibration gate on everyone at the calibration step (manager submitted) —
+              including the people left alone. The rest are listed as skipped, with why.
 ```
 
 ### 👁 On the list
@@ -3433,8 +3457,10 @@ Leave one blank to leave it alone."*
 
 10. Press **Commit ratings**, read the confirmation out loud, and confirm.
 
-    > *"This writes the agreed scores onto the appraisals and marks everyone in scope as calibrated —
-    > including the N the panel left as they are. It cannot be undone."*
+    > *"This writes the agreed scores onto the N appraisal(s) whose manager has submitted and marks
+    > them calibrated — including the M the panel left as they are. The other K are not at the
+    > calibration step yet and are left alone; the result lists them. It cannot be undone."*
+    > *(Wording since 2026-09-29; before that a commit stamped everyone in scope.)*
 
     💬 *"Committed. Those appraisals are now through the gate, and HR can sign them off."*
 
@@ -3462,10 +3488,15 @@ beneath it**; or, when a level is named instead, everyone at that level. Anythin
 session, or carrying one of its adjustments, is pulled in even if the scope has since changed.
 
 ### ⚠ Known gaps
-**P-39.** **The overall calibrated score does not survive HR sign-off** (Rule 2). HR's finalise
-recalculates from the evaluation legs.
-**P-40.** **A per-criterion adjustment on a KPI item does nothing to the score.** It writes
-`NumericScore`; a KPI is scored from `ActualValue`. Competency items are fine.
+**P-39.** ~~**The overall calibrated score does not survive HR sign-off** (Rule 2). HR's finalise
+recalculates from the evaluation legs.~~ **Fixed 2026-09-29** (closure A3): the calibrated overall
+is kept and sign-off settles *from* it. Cynthia Sarpong's record predates the fix (Rule 2).
+**P-40.** ~~**A per-criterion adjustment on a KPI item does nothing to the score.** It writes
+`NumericScore`; a KPI is scored from `ActualValue`. Competency items are fine.~~ **Fixed 2026-09-29**
+(closure A4) — and it was wider than written: *no* item adjustment reached the overall, because the
+overall re-summed the stored weighted scores. The settle recomputes every item from its raw inputs,
+and a KPI restatement is an achievement percentage, labelled on every screen. Efua Seidu's record
+predates the fix (Rule 2).
 **P-41.** The grid's **Calibrated** column reads the *adjustment record*, not the appraisal — so it can
 legitimately disagree with the score on the HR review screen. Do not put them side by side.
 **P-42.** **Only 76 of 107 appraisals are calibrated.** The two panels cover two directorates; anyone
@@ -3489,9 +3520,11 @@ is visible from the queue rather than only after opening a record.
 
 **Two outcomes, and they are not symmetrical:**
 
-* **Finalise** recalculates the weighted score from all three legs, records the sign-off, and **pushes
-  the score onto the employee's talent records**. Where it lands depends on the cycle: `Governance` when
-  an acknowledgment is required — the employee closes it out — or `Completed` when one is not.
+* **Finalise** settles the score — **the panel's restated overall where a calibration committed one**,
+  otherwise the weighted mean of the submitted evaluations (since 2026-09-29; before, it recalculated
+  over the panel's figure, Rule 2) — records the sign-off, and **pushes the rating onto the employee's
+  talent records**. Where it lands depends on the cycle: `Governance` when an acknowledgment is
+  required — the employee closes it out — or `Completed` when one is not.
 * **Return to manager** reopens the manager's evaluation and puts the appraisal back to `Active`.
   **Remarks are mandatory**: they are the whole message the manager gets.
 
@@ -3534,8 +3567,9 @@ actions:
 
 * *Not ready to finalise* — **"Finalising is blocked because the employee has not submitted a
   self-evaluation, and only 1 of 2 peer evaluations are in."**
-* *Ready to finalise* — **"All required evaluations are in. Finalising recalculates the weighted score
-  and hands the appraisal on for acknowledgment."**
+* *Ready to finalise* — **"All required evaluations are in. Finalising settles the score — the
+  calibration panel's overall where it restated one, otherwise the weighted evaluations — and hands
+  the appraisal on for acknowledgment."**
 * *Finalised <date> by <name>* — with the acknowledgment state and HR's remarks
 
 Plus, where the weights are wrong: *"Evaluator weights do not total 100% — they come to N%. The final
@@ -3625,7 +3659,7 @@ you type something.
 | Queue | `GET api/PerformanceAppraisals/hr-review-list?cycleId=&status=` |
 | Detail | `GET …/{id}/hr-review` |
 | Phase | `GET api/AppraisalWorkflow/{id}/phase` |
-| **Finalise** | `POST …/{id}/approve` — recalculates the score, writes the HR review record **and** the HR evaluator record, sets the status, and best-effort syncs the talent rating |
+| **Finalise** | `POST …/{id}/approve` — writes the HR review record **and** the HR evaluator record, sets the status and settles the score in one transaction (calibrated overall first, else the submitted legs), then syncs the talent rating after the commit |
 | **Return** | `POST …/{id}/return-to-manager` — remarks required |
 | Assign HR reviewer | `POST …/{id}/progress-to-hr-review` — a repair route, offered only when no reviewer was resolved at submission time |
 | Correct dates | `PUT api/PerformanceAppraisals/{id}` |
@@ -4709,7 +4743,7 @@ mislabelled soft-skill switch (P-69) and an unenforced goal minimum (P-70). The 
 
 | # | Gap | Where |
 |---|---|---|
-| **P-39 / P-41** | The panel's **overall** calibrated score is overwritten by HR sign-off, and the calibration grid still shows the panel's figure — so the two screens legitimately disagree | ch. 30, Rule 2 |
+| **P-39 / P-41** | ~~The panel's **overall** calibrated score is overwritten by HR sign-off~~ — **fixed 2026-09-29**; the grid and the HR review now agree, *except* on the two appraisals signed off before the fix (Cynthia Sarpong, Efua Seidu), which keep their signed-off figures | ch. 30, Rule 2 |
 | **P-43** | **Finalise is not disabled by the calibration gate**; on an uncalibrated appraisal it 422s | ch. 31, Rule 3 |
 | **P-8 / Rule 8** | Five appraisals have **no criterion snapshot** and open every evaluation screen empty | ch. 8, Rule 8 |
 | **P-18 / Rule 5** | No TDC employee goal is aligned to anything, so every unit goal's cascade table is empty | ch. 16, Rule 5 |
@@ -4720,12 +4754,12 @@ mislabelled soft-skill switch (P-69) and an unenforced goal minimum (P-70). The 
 
 | # | Gap |
 |---|---|
-| **P-40** | A per-criterion calibration adjustment on a **KPI item** writes `NumericScore`, which a KPI is not scored from — so it changes nothing |
+| ~~**P-40**~~ | ~~A per-criterion calibration adjustment on a **KPI item** writes `NumericScore`, which a KPI is not scored from — so it changes nothing~~ — **fixed 2026-09-29** (every item adjustment now reaches the score) |
 | **P-47** | **KPI items are not appealable** — `appealableKpis` is always empty |
 | **P-48** | The **appeal window is not enforced**; eligibility is "Completed and unappealed" |
 | **P-28** | **Journal entry dates are ignored** on create; the server stamps the creation date |
 | **P-55** | PIP goal **status and progress supplied at creation are not honoured** |
-| **P-6** | Overall grade bands are **not validated against each other**; overlaps resolve to whichever is found first |
+| ~~**P-6**~~ | ~~Overall grade bands are **not validated against each other**; overlaps resolve to whichever is found first~~ — **fixed 2026-09-29** (refused at save) |
 | **P-49** | The appeal review's Weight column falls back to **0** where a snapshot row is missing |
 | **P-13** | Generation **skips** anyone who already has an appraisal, and cannot repair a bad one |
 

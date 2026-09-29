@@ -57,8 +57,18 @@ public class PerformanceAnalyticsService : IPerformanceAnalyticsService
         if (cycle == null || cycle.TenantId != tenantId)
             throw new ArgumentException($"Appraisal cycle with ID '{cycleId}' not found.");
 
+        // Finalised by status, not by having a score (performance closure A9): calibration and the
+        // settle before an acknowledgment write a score while the appraisal is still in
+        // governance, and those provisional numbers were counted as final ratings. Final is
+        // Completed, Closed, under appeal after that, or signed off by HR and waiting only on the
+        // employee's acknowledgment.
         var scores = await _appraisalRepository.GetQueryable()
-            .Where(a => a.AppraisalCycleId == cycleId && a.TenantId == tenantId && a.OverallScore != null)
+            .Where(a => a.AppraisalCycleId == cycleId && a.TenantId == tenantId && a.OverallScore != null
+                     && (a.Status == AppraisalStatus.Completed
+                         || a.Status == AppraisalStatus.Closed
+                         || a.Status == AppraisalStatus.Appealed
+                         || (a.Status == AppraisalStatus.Governance
+                             && a.HRReviews.Any(r => !r.IsDeleted && r.ReviewCompletedDate != null && r.IsApproved))))
             .Select(a => a.OverallScore!.Value)
             .ToListAsync(cancellationToken);
 

@@ -166,13 +166,24 @@ export interface CalibrationMatrix {
 }
 
 /**
- * What committing did. `appraisalsCalibrated` counts everyone in scope, not only the adjusted —
- * an employee the panel discussed and left alone is still calibrated.
+ * What committing did. `appraisalsCalibrated` counts every appraisal at the calibration step, not
+ * only the adjusted — an employee the panel discussed and left alone is still calibrated. One not
+ * at that step (its manager has not submitted, it is under appeal, or it is already final with
+ * nothing adjusted) is left alone and listed in `skipped` with the reason.
  */
 export interface CalibrationApplyResult {
   adjustmentsApplied: number;
   scoresChanged: number;
   appraisalsCalibrated: number;
+  appraisalsSkipped: number;
+  skipped: CalibrationSkippedAppraisal[];
+}
+
+export interface CalibrationSkippedAppraisal {
+  appraisalId: string;
+  employeeName?: string | null;
+  status: string;
+  reason: string;
 }
 
 /**
@@ -186,9 +197,16 @@ export interface CalibrationCriterion {
   templateItemId: string;
   templateItemName?: string | null;
   weightUsed: number;
+  /** A KPI: an adjustment restates its achievement percentage rather than giving it a score. */
+  isKpi: boolean;
+  /** The highest adjustment the row accepts — its top grade band, or 100 for a KPI. */
+  scaleTop: number;
+  kpiTargetValue?: number | null;
   /** What the manager scored — the figure the panel is moving away from. */
   managerScore?: number | null;
   managerActualValue?: number | null;
+  /** For a KPI, the achievement the manager's actual produced — what the score used. */
+  managerAchievementPercent?: number | null;
   /** Present when this session has already adjusted this criterion. */
   adjustmentId?: string | null;
   adjustedScore?: number | null;

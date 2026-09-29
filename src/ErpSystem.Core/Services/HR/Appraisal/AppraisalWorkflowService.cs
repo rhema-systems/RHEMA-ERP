@@ -76,6 +76,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     private readonly IGenericRepository<AppraisalConversation> _conversationRepository;
     private readonly IGenericRepository<EmployeeGoal> _goalRepository;
     private readonly IGenericRepository<AppraisalManualAdvanceLog> _advanceLogRepository;
+    private readonly IAppraisalScoreService _scores;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<AppraisalWorkflowService> _logger;
@@ -88,6 +89,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         IGenericRepository<AppraisalConversation> conversationRepository,
         IGenericRepository<EmployeeGoal> goalRepository,
         IGenericRepository<AppraisalManualAdvanceLog> advanceLogRepository,
+        IAppraisalScoreService scores,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ILogger<AppraisalWorkflowService> logger)
@@ -99,6 +101,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         _conversationRepository = conversationRepository;
         _goalRepository       = goalRepository;
         _advanceLogRepository = advanceLogRepository;
+        _scores               = scores;
         _unitOfWork           = unitOfWork;
         _currentUserProvider  = currentUserProvider;
         _logger               = logger;
@@ -256,7 +259,12 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         appraisal.Status = newStatus;
 
         await _appraisalRepository.UpdateAsync(appraisal);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Completed by any route settles and publishes in the same save (performance closure A7).
+        if (newStatus == AppraisalStatus.Completed)
+            await _scores.SettleAsync(appraisalId, AppraisalScoreChangeSource.Settle, publish: true, cancellationToken);
+        else
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
             "Appraisal {AppraisalId} transitioned from {From} → {To}.",
@@ -636,6 +644,17 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
             _logger.LogInformation(
                 "ManualAdvance: Appraisal {Id} major status auto-transitioned {From} → {To}.",
                 appraisalId, previousMajorStatus, newMajorStatus);
+        }
+
+        // An advance that completes the appraisal settles its score and publishes it, like every
+        // other way to Completed (performance closure A7) — it used to finish with whatever score
+        // was stored, often none.
+        if (newMajorStatus == AppraisalStatus.Completed && previousMajorStatus != AppraisalStatus.Completed)
+        {
+            var settled = await _scores.SettleAsync(appraisalId, AppraisalScoreChangeSource.Advance, publish: true, ct);
+            actions.Add(settled.ScoreAfter is decimal score
+                ? $"Settled the overall score at {score:0.##}."
+                : "Settled the overall score: no submitted evaluation scored anything, so it has none.");
         }
 
         // ── Write audit log ──────────────────────────────────────────────────

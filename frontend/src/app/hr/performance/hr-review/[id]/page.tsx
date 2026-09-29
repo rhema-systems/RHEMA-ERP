@@ -42,8 +42,9 @@ import type { EvaluationSummary } from '@/types/hr/appraisal-run';
  * HR's sign-off on one appraisal.
  *
  * Two outcomes, and they are not symmetrical:
- *   • **Finalise** recalculates the weighted score from all three legs, records the sign-off,
- *     and pushes the score onto the employee's talent records. Where it lands depends on the
+ *   • **Finalise** settles the score — the panel's restated overall where a calibration committed
+ *     one, otherwise the weighted mean of the submitted evaluations — records the sign-off, and
+ *     pushes the rating onto the employee's talent records. Where it lands depends on the
  *     cycle: `Governance` when an acknowledgment is required (the employee closes it out), or
  *     `Completed` when one is not.
  *   • **Return to manager** reopens the manager's evaluation and puts the appraisal back to
@@ -325,7 +326,8 @@ export default function HRReviewDetailPage() {
           <CheckCircle2 className="h-4 w-4" />
           <AlertTitle>Ready to finalise</AlertTitle>
           <AlertDescription>
-            All required evaluations are in. Finalising recalculates the weighted score and
+            All required evaluations are in. Finalising settles the score — the calibration
+            panel&apos;s overall where it restated one, otherwise the weighted evaluations — and
             {data.status === 'Governance'
               ? ' closes HR’s part of this appraisal.'
               : ' hands the appraisal on for acknowledgment.'}
@@ -676,6 +678,11 @@ function SummaryTables({
                       {k.achievementPercentage != null
                         ? `${Number(k.achievementPercentage).toFixed(1)}%`
                         : '—'}
+                      {k.achievementOverridden && (
+                        <div className="text-xs font-normal text-amber-700 dark:text-amber-400">
+                          Overridden by calibration/appeal
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

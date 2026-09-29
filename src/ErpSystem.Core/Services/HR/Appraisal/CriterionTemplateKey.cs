@@ -27,4 +27,18 @@ internal static class CriterionTemplateKey
     private static InvalidOperationException NoTemplateItem(string row, Guid id) =>
         new($"The {row} {id} has no template item. Goal rows are keyed by criterion config, " +
             "which this path does not read yet (performance closure lane L3).");
+
+    /// <summary>
+    /// The weight a section was scored at: frozen on its snapshot rows when the appraisal was
+    /// generated (performance closure A0), and the live section only for rows written before the
+    /// freeze. The forms showed the live weight, so a section re-weighted after generation read
+    /// one number on screen while the score used another.
+    /// </summary>
+    public static int ScoredWeight(
+        this AppraisalTemplateSection section,
+        IReadOnlyDictionary<Guid, PerformanceAppraisalCriterionConfig> configsByTemplateItemId)
+        => section.TemplateItems
+               .Select(item => configsByTemplateItemId.TryGetValue(item.Id, out var config) ? config.SectionWeightUsed : null)
+               .FirstOrDefault(weight => weight.HasValue)
+           ?? section.Weight;
 }

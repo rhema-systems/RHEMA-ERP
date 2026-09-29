@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Services.HR.Appraisal;
 
 namespace ErpSystem.Core.Interfaces.HR;
 
@@ -487,7 +488,66 @@ public interface IAppraisalCycleTemplateService
 /// succession/talent-pool records so the 9-box and dashboards stay current.</summary>
 public interface ITalentRatingSyncService
 {
-    Task SyncFromAppraisalAsync(Guid employeeId, decimal? overallScore, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Publishes the appraisal's settled score. Does nothing — and says why in the log — when the
+    /// score is null or a newer appraisal of the same employee has already published a rating.
+    /// True when a rating was written.
+    /// </summary>
+    Task<bool> SyncFromAppraisalAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+}
+
+#endregion
+
+#region Appraisal score (performance closure lane A)
+
+/// <summary>
+/// The appraisal's score in one place: the only arithmetic path from an evaluator's raw inputs to a
+/// stored number, and the only writer of <c>PerformanceAppraisal.OverallScore</c>.
+/// </summary>
+public interface IAppraisalScoreService
+{
+    /// <summary>The appraisal's scoring inputs, from its criterion snapshot, loaded once.</summary>
+    Task<AppraisalCriterionScoring> LoadScoringAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+
+    /// <summary>Sets <c>WeightedScore</c> on one row from its raw inputs.</summary>
+    Task ScoreCriterionAsync(CriterionScore score, AppraisalCriterionScoring scoring, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Re-weights every row from its raw inputs and returns the evaluator's 0–100 total over the
+    /// items they scored; null when they scored nothing that carries weight.
+    /// </summary>
+    Task<decimal?> ScoreEvaluatorAsync(IEnumerable<CriterionScore> scores, AppraisalCriterionScoring scoring, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The top of an item's own scale: its highest grade band, or 100 when it has none. A KPI's
+    /// score is an achievement percentage, so its top is always 100.
+    /// </summary>
+    Task<decimal> GetScaleTopAsync(AppraisalCriterionScoring scoring, Guid templateItemId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Checks each input against its item's own scale (A11). Returns the message to show, or null
+    /// when every input is in range.
+    /// </summary>
+    Task<string?> ValidateItemScoresAsync(Guid appraisalId, IEnumerable<EvaluationItemInputDto> items, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Settles the appraisal's overall score: recomputes every weighted score and evaluator total
+    /// from raw inputs, takes the SUBMITTED legs by role, and stores
+    /// <c>CalibratedOverallScore ?? computed</c> (null when nothing was scored) with its grade. When
+    /// <paramref name="publish"/> is true and the appraisal is final, the rating goes to the talent
+    /// pools. Saves. A caller inside a transaction passes <c>publish: false</c> and calls
+    /// <see cref="PublishAsync"/> after the commit.
+    /// </summary>
+    Task<AppraisalSettleResult> SettleAsync(Guid appraisalId, AppraisalScoreChangeSource source, bool publish = true, CancellationToken cancellationToken = default);
+
+    /// <summary>Publishes a final appraisal's settled rating to the talent pools; false when it is not final or nothing was written.</summary>
+    Task<bool> PublishAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// A15 (D-13): what a settle would store for every Completed/Closed appraisal, beside what is
+    /// stored. Read-only — nothing is written.
+    /// </summary>
+    Task<AppraisalSettleDryRunReportDto> DryRunAsync(Guid? cycleId, CancellationToken cancellationToken = default);
 }
 
 #endregion
@@ -546,8 +606,9 @@ public interface IEmploymentActionProposalService
 }
 
 /// <summary>
-/// Resolves a 0–100 overall appraisal score to a 5-point <see cref="Enums.PerformanceRating"/> using the
-/// tenant's configurable <c>AppraisalGradeDefinition</c> overall bands, falling back to the fixed
+/// The one resolver of an overall appraisal score (0–100): the grade band it falls in and the 5-point
+/// <see cref="Enums.PerformanceRating"/> that band maps to, from the tenant's configurable
+/// <c>AppraisalGradeDefinition</c> overall bands, falling back to the fixed
 /// <c>AppraisalScoring.MapScoreToRating</c> bands when none are configured. Bands are cached per instance
 /// (scoped/per-request) so repeated mapping in analytics doesn't re-query.
 /// </summary>
@@ -558,6 +619,9 @@ public interface IPerformanceRatingResolver
 
     /// <summary>Returns a synchronous mapper (bands captured) for mapping many scores in a loop/LINQ.</summary>
     Task<Func<decimal?, Enums.PerformanceRating?>> GetMapperAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>The grade definition whose band the score reaches; null when no band covers it.</summary>
+    Task<Guid?> ResolveGradeDefinitionIdAsync(decimal? score, CancellationToken cancellationToken = default);
 }
 
 #endregion

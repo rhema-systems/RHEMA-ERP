@@ -483,6 +483,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IEmploymentActionProposalService, EmploymentActionProposalService>();
         services.AddScoped<IPerformanceRatingResolver, PerformanceRatingResolver>();
         services.AddScoped<ITalentRatingSyncService, TalentRatingSyncService>();
+        // The appraisal's score in one place — the only writer of OverallScore (performance closure lane A).
+        services.AddScoped<IAppraisalScoreService, AppraisalScoreService>();
         services.AddScoped<IAppraisalOutcomeService, AppraisalOutcomeService>();
         services.AddScoped<IOutcomeRecommendationHandler, SuccessionNominationHandler>();
         services.AddScoped<IOutcomeRecommendationHandler, TrainingRequestHandler>();

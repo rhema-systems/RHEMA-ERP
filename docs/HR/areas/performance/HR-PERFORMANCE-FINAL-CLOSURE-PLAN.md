@@ -22,6 +22,8 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
 2. ~~Migration batch 1 (§ 6): the user scaffolds, it is rewritten as guarded SQL, the user builds.~~
    **Done 2026-09-29** and applied to UAT; read § 6's State block before lane A — it lists what the
    batch decided that later lanes build on.
+   ~~Lane A~~ **Done 2026-09-29** (`run-final-scoring.mjs` 177/177 twice; § 4 lane A's State
+   block). **Lane P is next.**
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -90,7 +92,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 
 | Lane | Title | Size | Carries (§ 1b, all settled) | State |
 |---|---|---|---|---|
-| A | Scoring integrity and the settle path | 2.5 days | D-11, D-13, D-22 (A14–A16 only) | ☐ |
+| A | Scoring integrity and the settle path | 2.5 days | D-11, D-13, D-22 (A14–A16 only) | ☑ 2026-09-29 — 177/177 twice; staged |
 | P | Privacy and access *(new — the review)* | 2 days | D-26 (P18 only) | ☐ |
 | B | One gate evaluator (B1 first); settings enforced or removed | 3.5 days | — | ☐ |
 | L | Goal-driven KPI scoring | 5 days | D-15, D-16 | ☐ |
@@ -116,7 +118,8 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 
 **Size:** about **50 working days, ten weeks** (47 without lane N). **Migrations:** batch 1 sits at
 the start of lane A and batch 2 at the start of lane F; batch 3 is withdrawn (D-21). **Batch 1 is
-done and applied to UAT (2026-09-29, § 6 State); lane A is next.**
+done and applied to UAT (2026-09-29, § 6 State); lane A is done (2026-09-29, § 4 lane A State);
+lane P is next.**
 
 ---
 
@@ -261,7 +264,7 @@ gates and settle: after any pipeline write → `Resolve` → `ExpectedMajorStatu
 `AppraisalLifecycle.EnsureTransition` → if Completed → settle + publish. `DetermineNextStatusAsync`
 (PAS :1945-2009) and the AWS Governance→Completed block (:622-639) are deleted in its favour.
 
-- [ ] A0 **Freeze the section weight into the snapshot** (moved here from E4 by the review).
+- [x] A0 **Freeze the section weight into the snapshot** (moved here from E4 by the review).
       `PerformanceAppraisalCriterionConfig` gains `AppraisalTemplateSectionId` + `SectionWeightUsed`
       (batch 1), backfilled from the live template for existing snapshots. Every share is computed
       from them:
@@ -270,16 +273,16 @@ gates and settle: after any pipeline write → `Resolve` → `ExpectedMajorStatu
       - PES :437, :471-472, :492.
 
       It must land before A3, because settle recomputes every weighted score from raw inputs.
-- [ ] A1 `AppraisalScoring.OverallScore` returns `decimal?`; nothing grades or syncs a null.
-- [ ] A2 `IPerformanceRatingResolver.ResolveGradeDefinitionIdAsync`; bands loaded once, ordered by
+- [x] A1 `AppraisalScoring.OverallScore` returns `decimal?`; nothing grades or syncs a null.
+- [x] A2 `IPerformanceRatingResolver.ResolveGradeDefinitionIdAsync`; bands loaded once, ordered by
       min desc; delete `PAS.ResolveGradeAsync` (:242-255) and `CSS.ResolveGradeAsync` (:805-818);
       overlapping bands refused at definition save (P-6). The resolver requires `MappedRating`
       (`PerformanceRatingResolver.cs:75`) — a grade definition without one must be refused at save,
       not silently ungraded.
-- [ ] A3 `SettleScoreAsync` as above; `ApproveAndFinalizeAsync` settles inside its transaction with
+- [x] A3 `SettleScoreAsync` as above; `ApproveAndFinalizeAsync` settles inside its transaction with
       `publish:false` and publishes after commit (a swallowed EF failure inside a retrying
       transaction poisons tracked entities); delete the :4433-4442 block.
-- [ ] A4 Calibration commit (CSS :719-740):
+- [x] A4 Calibration commit (CSS :719-740):
       - Item adjustments write `NumericScore` for **both** item types (D-22). A KPI item with
         `NumericScore` set is scored as an achievement-percent override by the `NumericScore`-first
         branch at PAS :864.
@@ -290,11 +293,11 @@ gates and settle: after any pipeline write → `Resolve` → `ExpectedMajorStatu
       - One settle per scoped appraisal **at the calibration step**; the others are reported as
         skipped, not stamped `IsCalibrated`.
       - The per-item `SaveChangesAsync` at :798 is removed.
-- [ ] A5 `AdjustedScore` = post-resolution overall only when it changed, else null;
+- [x] A5 `AdjustedScore` = post-resolution overall only when it changed, else null;
       `AppraisalAppeal.OriginalOverallScore` captured at submit-appeal; `GetAppealStatusAsync`
       (:3167) and `GetEmployeeAppealOutcomeAsync` report it.
-- [ ] A6 MAP :312 stops assigning `OverallScore`; `ToDto` (:224) exposes `CalibratedOverallScore`.
-- [ ] A7 Every settle call site is wired:
+- [x] A6 MAP :312 stops assigning `OverallScore`; `ToDto` (:224) exposes `CalibratedOverallScore`.
+- [x] A7 Every settle call site is wired:
       - HR finalise;
       - completion without HR review (:1986);
       - acknowledge → Completed;
@@ -305,15 +308,15 @@ gates and settle: after any pipeline write → `Resolve` → `ExpectedMajorStatu
 
       `SuccessionNominationHandler.cs:128` reads the settled score. Today calibration (CSS :736) and
       appeal resolution (PAS :3403, :3408, :3736) change the score without syncing.
-- [ ] A8 `TalentRatingSyncService` recency check (an older cycle's finalisation must not overwrite a
+- [x] A8 `TalentRatingSyncService` recency check (an older cycle's finalisation must not overwrite a
       newer rating); null score leaves the rating untouched and logs.
-- [ ] A9 Analytics "finalised scores" filter by status, not `OverallScore != null`
+- [x] A9 Analytics "finalised scores" filter by status, not `OverallScore != null`
       (`PerformanceAnalyticsService.cs:61`).
-- [ ] A10 **One arithmetic path.** PES's own copy is replaced by the settle path's helpers:
+- [x] A10 **One arithmetic path.** PES's own copy is replaced by the settle path's helpers:
       `CalculateAndSetWeightedScore` (:428-461), `RecomputePeerTotal` (:484-496) and
       `LoadCriterionSnapshotAsync` (:464-475). `AppraisalScoring.cs` stays the single arithmetic
       home.
-- [ ] A11 **Scores validated on the item's own scale.** Bands may top out below 100 —
+- [x] A11 **Scores validated on the item's own scale.** Bands may top out below 100 —
       `AppraisalTemplateService.cs:797-817` checks only 0 ≤ low ≤ high ≤ 100 and no overlap. Inputs
       are validated 0..100 (PAS :1433, :2352; PES :230; DTO :1997; `EvaluationScoreForm.tsx:219-225`),
       and achievement is score ÷ top band (PAS :866-868), so an item can exceed 100 %. These are all
@@ -321,20 +324,20 @@ gates and settle: after any pipeline write → `Resolve` → `ExpectedMajorStatu
       - self, manager and peer inputs;
       - calibration item adjustments;
       - appeal modifications (appeal `NewScore`, DTO :2956, has no range check today).
-- [ ] A12 **The target shown is the target scored.**
+- [x] A12 **The target shown is the target scored.**
       - Manager and peer section builders read the snapshot's target/min/max, as the self form
         already does (:4713). Today they read the live goal: PAS :4840-4842, :4941; PES :584-586;
         HR review PAS :4121.
       - The frontend preview `kpiAchievementPercent` (`types/hr/appraisal-run.ts:965-972`) mirrors
         `AppraisalScoring.KpiAchievementPercent` (min→target segment, max cap, clamp).
-- [ ] A13 `CriterionScore.NumericScore` is `int?` while adjustments are `decimal?`: round
+- [x] A13 `CriterionScore.NumericScore` is `int?` while adjustments are `decimal?`: round
       explicitly (or widen in batch 1), never truncate silently.
-- [ ] A14 KPI adjustments per D-22: the `NumericScore` override is flagged on the row, so the forms,
+- [x] A14 KPI adjustments per D-22: the `NumericScore` override is flagged on the row, so the forms,
       HR review, appeal page and PDF say "overridden by calibration/appeal".
-- [ ] A15 Historical scores per D-13: a read-only dry run of the settle over every Completed/Closed
+- [x] A15 Historical scores per D-13: a read-only dry run of the settle over every Completed/Closed
       appraisal (stored vs settled overall, grade and talent rating) written to a report. Nothing is
       restated without a decision.
-- [ ] A16 D-11: drop `AppraisalHRReview.AdjustedOverallScore`/`AdjustmentReason` and
+- [x] A16 D-11: drop `AppraisalHRReview.AdjustedOverallScore`/`AdjustmentReason` and
       `AppraisalAppealItem.RevisedScore` (batch 1), with their DTO members and MAP :2383, :2410.
 
 **Risks** (carried from the original design package):
@@ -364,6 +367,96 @@ The fixture's appraisals are generated through an `Employee` target (J), never t
 - The "lite" profile settles a non-null score, grade and talent rating at acknowledgment — one
   assertion per settle path in A7.
 - A score above the item's top band is refused.
+
+**State (2026-09-29): DONE — built, verified on UAT, staged.** No migration: batch 1 carried every
+column. What exists now:
+- **`AppraisalScoreService`** (`Services/HR/Appraisal/AppraisalScoreService.cs`, `IAppraisalScoreService`)
+  is the one arithmetic path and the only writer of `OverallScore`: `SettleAsync` (steps 1–6 above),
+  `PublishAsync`, `ScoreCriterionAsync`/`ScoreEvaluatorAsync`, `ValidateItemScoresAsync`/`GetScaleTopAsync`
+  (A11) and `DryRunAsync` (A15, `GET PerformanceAppraisals/settle-dry-run`). PAS, PES, CSS and AWS
+  use it; `CalculateOverallScoreAsync` is a delegate; the PAS and PES copies of the arithmetic, the
+  PAS and CSS grade resolvers and PAS's direct talent sync are deleted.
+- **Every route to Completed settles in the same save**: HR sign-off (inside its transaction,
+  published after the commit), manager submit with nothing after it, acknowledgment, appeal
+  upheld/rejected, post-remand finalise, HR's manual/auto advance, calibration of a Completed
+  appraisal — and the two raw status routes (`PATCH PerformanceAppraisals/{id}/status`,
+  `POST AppraisalWorkflow/{id}/transition`), which A7 did not list (lane E guards both).
+- A0: generation writes `AppraisalTemplateSectionId`/`SectionWeightUsed`; scoring reads the frozen
+  weight, and the four section builders show it (`ScoredWeight`).
+- A2: one resolver (`ResolveGradeDefinitionIdAsync`); grade definitions refuse a half band, a band
+  outside 0–100 or inverted, a band with no mapped rating, and an overlap with another active band.
+- A12/A14: the manager, peer, submitted-view and HR-review builders read the snapshot's
+  target/min/max and show the score's own achievement; a restated KPI is flagged on the manager
+  form, HR review, appeal outcome and calibration dialog; the frontend preview mirrors the server.
+
+**Where the build refines the rows above** (each deliberate; say if one should go back):
+1. **The settle lives in its own service**, not in PAS: PES, CSS and AWS call it without taking a
+   dependency on the 24-dependency appraisal service. B's `SyncLifecycleAsync` calls the same
+   `SettleAsync`.
+2. **A4's "null clears an earlier session's override" is narrowed**: a calibrated overall stands
+   until a later session *restates that appraisal*. A session that adjusts its items clears it (the
+   overall follows the items it just changed); a session that adjusts nothing for it leaves it (the
+   panel accepted the score as it stood — clearing it would have dropped an agreed 80 back to 72).
+3. **Settles A7 did not list**: the manager's submission settles *without publishing* when only the
+   acknowledgment remains, so the employee acknowledges a settled score, not a blank; a remanded
+   re-evaluation clears the calibrated overall, or the redo could never move the score.
+4. **A2 threshold matching**: a band's minimum is its threshold, so a score between two published
+   ranges (90.5 between 76–90 and 91–100) takes the lower band; the rating comes from the same band.
+5. **"Final" for publishing** is Completed/Closed, or Governance with an approved HR review *and no
+   pending remand* — a remanded appraisal still carries the sign-off from before its appeal.
+6. **A13**: a calibration item adjustment must be a whole number (refused, not rounded); the commit's
+   rounding stays only for rows recorded before the check.
+7. **The commit saves per appraisal**, not in one outer transaction: a retrying strategy that re-ran
+   the lambda after a partial save would see accepted changes and under-write. Each appraisal's
+   adjustments, stamp and score commit together, and a re-run is idempotent.
+8. **The snapshot is read with the query filters off** (its own soft delete applied): a template item
+   or section deleted after generation used to read as a competency with section weight 0.
+9. Evaluator totals are recomputed for **submitted** evaluations only; per-item achievement is clamped
+   to 0–1, so one item past its scale cannot make up another's shortfall.
+10. A14's flag is **derived** (a KPI row carrying `NumericScore`), with no column; the label is
+    "overridden by calibration/appeal".
+11. The HR review's peer summaries count **submitted** peers only.
+
+**Verified** (Staging API on `ErpSystemDB_UAT`):
+- `run-final-scoring.mjs` **177/177, twice** — the plan's assertions with numbers that separate the
+  fix from the defect (a calibrated 80 against a computed 72, not 70 against 72, which are both
+  "Meets"), plus A2, A5, A6, A8, A9, A11 on all five input paths, A13, A14, A15.
+- Regression (`run-all.mjs`): interim reviews 128/128, attachments 64/64, slice C 51/51, slice D
+  20/20, gates 32/32, **slice E 17/26 — 9 stale**, verified in SQL: UAT's four seeded definitions are
+  active but none sets `preventInitiatorApproval` (so "the submitter cannot approve" fails — F3's
+  finding), and slice E looks them up by an `entityType` name the endpoint does not return.
+  489/498 across the seven suites.
+- API log: no error from the settle or the talent sync; the 85 save errors are defect #23 (payroll
+  profile FK, one per employee created).
+- Frontend: scoped `tsc` 0 errors over 72 files; eslint clean on the touched files.
+- **The harness fixture change (part of S8)**: `buildFixture()` took the first real position with a
+  unit — slice E generated appraisals for every real holder of that post (264 in one call, per the
+  harness README) and the unit goals were raised in a real unit. It now mints its unit and position
+  as `buildClosureFixture()` does; slices D and E close the cycle they open. Slice D's "an Open cycle
+  stays Open" was vacuous until now: on UAT the open had always been refused.
+- The fixture's appraisals come from generation through a **Position target per settings profile**:
+  J's `Employee` target needs an `AppraisalCycleTarget.EmployeeId` column, which is in neither
+  migration batch (recorded under J).
+
+**A15's report — UAT, 2026-09-29** (18 Completed/Closed examined, 15 of them E2E). The three in
+APC2026: Kojo Fiadzo 89.28 = 89.28; **Efua Seidu stored 89.40 → settled 88.56** (the panel's KPI
+92 → 88 now counts); **Cynthia Sarpong stored 88.74 → settled 87.00** (the panel's overall 87.0 now
+stands). No grade or rating would change, and none of the three is in a talent pool. Per D-13 nothing
+is restated; HR restates one through the audited reopen (D-17) if it chooses. The system guide's
+Rule 2 carries this.
+
+**Found on the way, routed:**
+- The HR review's **Correct dates** (`appraisal-run.service.ts updateHeader`) sends no score, so the
+  mapper set the final score to **null** on every date correction — fixed by A6. The same call still
+  **blanks `OverallComments`, strengths, areas, training needs, aspirations, every `Recommend*` flag
+  and `RecommendationNotes`**, which the body does not carry either → **E1**.
+- `[Range(0, 100)]` on a **decimal** DTO field has int bounds and rounds before comparing: 100.5
+  passes (calibration `AdjustedScore`). The service rules hold; the attributes mislead → **J**.
+- `TalentPoolMember.LatestPerformanceRating` is documented as a cache of the latest confirmed
+  `TalentReviewRating` ("never write in isolation"), and the appraisal sync (Theme 9) writes it
+  directly: two writers, two rules → **K** (succession's owner decides).
+- HR's advance auto-submits a manager **draft**, which carries no total, so `PreCalibrationScore`
+  stays null for it (the settle computes the total later) → **H3**.
 
 ### Lane P — Privacy and access *(new, from the review)*
 
@@ -719,7 +812,10 @@ B7 is covered.
       - **Narrow `PUT /{id}`** to the correction the HR review's Correct dates button sends
         (`hr-review/[id]/page.tsx:103, :262`; `appraisal-run.service.ts:293-296`): dates and peer
         count only, with A6's `OverallScore` line gone. It is **not** deleted — the review found its
-        caller.
+        caller. ⚠ *Live until then (found in lane A):* that caller sends only id, cycle, employee,
+        status, dates and peer count, so every correction **blanks the manager's comments, strengths,
+        areas, training needs, aspirations, every `Recommend*` flag and `RecommendationNotes`** (A6
+        stopped it nulling the score).
       - **Raw `POST /PerformanceAppraisals`** is deleted per D-20. It needs J's `Employee` target case
         and S8's fixtures in the same slice.
       - **`PATCH /{id}/status`** and `POST appraisal-workflow/{id}/transition` allow **Draft→Active
@@ -1172,6 +1268,10 @@ files, and the persona walk in § 7.
       `AppraisalTargetType.Employee = 4` exists (`HREnums.cs:1477`), but only Position,
       OrganizationUnit and OrganizationLevel resolve. D-20 and S8 need it, so harness fixtures can
       generate one appraisal.
+      ⚠ *Found building lane A (2026-09-29):* it also needs a **column** — `AppraisalCycleTarget` has
+      no `EmployeeId` (the service calls it "deprecated in entity redesign", `AppraisalCycleService.cs`
+      ~:1543), and neither migration batch adds one. Either batch 2 adds it (before lane F), or the
+      enum member goes and fixtures keep one Position per case, as `buildClosureFixture()` does.
 - [ ] Unused injected fields: PAS `_kpiEvaluationSnapshotRepository` (so `KpiSnapshots` at :3574 is
       always empty — decide with C6), `PeerEvaluationService` `_gradeRepository` /
       `_appraisalCompetencyRepository`, `AppraisalCycleService` `_positionRepository`,
@@ -1427,9 +1527,9 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | Settings profile validation (Min≤Max, bands ordered) | `AppraisalSettingsService` | B6 |
 | Calibration `FacilitatedById` from body; session `UpdateEntity` ignores Status | MAP :2481 | E6 |
 | Pre-remand snapshot copies no `ActualValue`; KPI snapshots never written | PAS :2085-2093 | C5 |
-| `AppraisalScoring.OverallScore` 0 vs null | `AppraisalScoring.cs:143` | A1 |
-| Analytics includes pre-final scores | `PerformanceAnalyticsService.cs:61` | A9 |
-| Talent sync no recency check | `TalentRatingSyncService.cs:51-82` | A8 |
+| ~~`AppraisalScoring.OverallScore` 0 vs null~~ | `AppraisalScoring.cs:143` | A1 — done 2026-09-29 |
+| ~~Analytics includes pre-final scores~~ | `PerformanceAnalyticsService.cs:61` | A9 — done 2026-09-29 |
+| ~~Talent sync no recency check~~ | `TalentRatingSyncService.cs:51-82` | A8 — done 2026-09-29 |
 | Manager resolution inlined ~57 times, snapshot vs live, no head-of-unit fallback (an employee with no manager cannot submit goals, `GoalWorkflowCommandService.cs:148`) | module-wide | M2 (evaluator record) + D-28 (no HR fallback — decision 6) |
 | `GetEmployeesInScopeAsync` tenant-wide auto-discovery | `AppraisalCycleService.cs:1467-1514` | E2 |
 | Interim finalise writes goal `ProgressPercent` | `AppraisalReviewEventService.cs:263-285` | E10 |
@@ -1456,8 +1556,8 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | P-54 no effective date on proposals | entities :1287-1345 | D-19 / F5 |
 | Finish plan 9.3 raw create takes no snapshot | PAS :269-297 | D-20 / E1 |
 | Finish plan 9.26 `Employee` target case missing | `AppraisalCycleService` resolver | J |
-| Manager and peer forms show the live target; frontend preview formula differs | PAS :4840, PES :584; `appraisal-run.ts:965-972` | A12 |
-| Scores accepted above an item's top band; appeal `NewScore` unchecked | `AppraisalTemplateService.cs:797-817`; DTO :2956 | A11 |
+| ~~Manager and peer forms show the live target; frontend preview formula differs~~ | PAS :4840, PES :584; `appraisal-run.ts:965-972` | A12 — done 2026-09-29 |
+| ~~Scores accepted above an item's top band; appeal `NewScore` unchecked~~ | `AppraisalTemplateService.cs:797-817`; DTO :2956 | A11 — done 2026-09-29 |
 | Goals set before generation invisible to the appraisal | EGS :221-229 | L2 |
 | The only goal-weight guard is never called | EGS :278-279, :306-307, :643-659 | L5 |
 | HR's advance approves goals but never locks them | AWS :404-421 | H3 / L2 |
@@ -1468,8 +1568,13 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | Seeded definitions route by role; conditional routing does not route | cross-module #3; `DatabaseSeedingService.cs:505-545` | F3 |
 | Check-in ↔ company objective link unconfirmed | ledger :2178 | D-27 |
 | Round 3 walks owed (T3 tab; proposal → salary tab) | round 3 plan :170, :242 | K |
-| Harness fixtures and `run-sliceE` would resolve to real UAT staff | `setup.mjs:26-27, :178`; README :77-79 | S8 |
+| Harness fixtures and `run-sliceE` would resolve to real UAT staff | `setup.mjs:26-27, :178`; README :77-79 | S8 — *the real-position half done in lane A (the fixture mints its unit and position); the raw create remains, D-20* |
 | The medium privacy items P7–P17 | lane P | P |
+| *Added by lane A (2026-09-29):* | | |
+| `[Range(0, 100)]` on decimal DTO fields has int bounds and rounds first — 100.5 passes | e.g. `CreateCalibrationRatingAdjustmentDto.AdjustedScore` | J (the service rules hold) |
+| Two writers of the talent-pool rating cache: the appraisal sync, and the documented "latest confirmed `TalentReviewRating`" rule | `SuccessionPlanningEntities.cs:680-692` | K (succession's owner) |
+| `PreCalibrationScore` null when HR's advance auto-submits a manager draft | AWS ManagerEvaluation arm | H3 |
+| Slice E's 9 definition assertions stale on UAT (seeded names; no `preventInitiatorApproval`) | `run-sliceE.mjs:18-31, :84-88` | F3 / S |
 
 ---
 
@@ -1644,6 +1749,10 @@ officer on probation can be the HR reviewer). It changes none of these.
   is intended, and the screen has said so since 2afab21de; the guide's text is out of date.
 - **FIXED (1):** P-27 (0ef42c223, before the guide), except `GET /CheckIns/paged` for
   TenantAdmin/Admin/"HR User" (P15).
+- **FIXED by lane A (2026-09-29, 3 of the LIVE list above):** P-6 (A2 — overlapping bands refused
+  at save), P-39 (A3 — a calibrated overall survives sign-off), P-40 (A4 — item adjustments, KPI
+  included, reach the score). Finalised appraisals scored before the fix keep their stored numbers
+  (D-13); lane A's State block lists the two on UAT that a settle would move.
 - **BY-DESIGN (9):** P-15, P-16, P-21, P-23, P-30, P-34 (its server half — the manager's scores sent
   to the appraisee — is B2/P2), P-37, P-45, P-60 (lane I adds a picker anyway, because decision 5
   makes the form HR's main tool).

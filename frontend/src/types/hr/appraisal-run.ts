@@ -46,7 +46,9 @@ export type AppraisalStatus =
   | 'Governance'
   | 'Appealed'
   | 'Completed'
-  | 'Closed';
+  | 'Closed'
+  /** Not appraised — a leaver, or someone generated in error (D-10). Excluded from scores. */
+  | 'Withdrawn';
 
 /**
  * The computed step. Derived from what has actually been submitted plus the cycle's settings
@@ -294,6 +296,8 @@ export interface ManagerEvaluationItem extends EvaluationItem {
   managerNotes?: string | null;
   managerEvidenceLinks?: string | null;
   managerAchievementPercent?: number | null;
+  /** A KPI whose achievement calibration or an appeal restated — `managerAchievementPercent` is the restatement. */
+  managerAchievementOverridden?: boolean;
   managerAchievedGrade?: string | null;
   /** True when the item is under an active appeal remand — the row is highlighted. */
   isAppealed: boolean;
@@ -742,6 +746,8 @@ export interface KpiScoreSummary {
   targetValue?: number | null;
   actualValue?: number | null;
   achievementPercentage?: number | null;
+  /** The achievement was restated by calibration or an appeal — it is not actual ÷ target. */
+  achievementOverridden?: boolean;
   unit?: string | null;
   notes?: string | null;
 }
@@ -957,17 +963,43 @@ export function resolveGrade(
 }
 
 /**
- * KPI achievement as a percentage of target, mirroring the server's `CalculateKpiAchievement`
- * closely enough for a live preview. The stored value is always the server's — this only
- * saves a round trip while the user types.
+ * KPI achievement as a percentage of target — the same rule as the server's
+ * `AppraisalScoring.KpiAchievementPercent`, so the preview shows what will be scored: an actual
+ * above the ceiling counts as the ceiling; with a floor, achievement runs from the floor (0 %)
+ * to the target (100 %); and the result is clamped to 0–100, because hitting target is full
+ * marks. The stored value is always the server's — this only saves a round trip while the user
+ * types. It used to divide actual by target and nothing else, so it showed 150 % for a score
+ * the server caps at 100 % and ignored the floor altogether (performance closure A12).
  */
 export function kpiAchievementPercent(
   actual: number | null | undefined,
   target: number | null | undefined,
+  min?: number | null,
+  max?: number | null,
 ): number | null {
   if (actual === null || actual === undefined) return null;
   if (!target) return null;
-  return Math.round((actual / target) * 1000) / 10;
+
+  let value = actual;
+  if (max !== null && max !== undefined && value > max) value = max;
+
+  let percent: number;
+  if (min !== null && min !== undefined && target !== min) {
+    if (value <= min) return 0;
+    percent = ((value - min) / (target - min)) * 100;
+  } else {
+    percent = (value / target) * 100;
+  }
+
+  return Math.round(Math.min(100, Math.max(0, percent)) * 10) / 10;
+}
+
+/**
+ * The top of a rated item's own scale: its highest grade band, or 100 when it has none. Scores
+ * above it are refused by the server (A11) — bands may stop below 100.
+ */
+export function scaleTop(ranges: EvaluationGradeRange[]): number {
+  return ranges.length > 0 ? Math.max(...ranges.map((r) => r.highScore)) : 100;
 }
 
 /**

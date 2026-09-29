@@ -329,6 +329,29 @@ public class PerformanceAppraisalsController : ControllerBase
     }
 
     /// <summary>
+    /// Performance closure A15 (D-13): what the settle path would store for every Completed or
+    /// Closed appraisal — overall, grade and rating — beside what is stored now, with the
+    /// employee's current talent-pool rating. Read-only: nothing is written, and a finalised score
+    /// is restated only through the audited reopen.
+    /// </summary>
+    [HttpGet("settle-dry-run")]
+    [ProducesResponseType(typeof(AppraisalSettleDryRunReportDto), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
+    public async Task<IActionResult> SettleDryRun(
+        [FromQuery] Guid? cycleId, [FromServices] IAppraisalScoreService scores, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await scores.DryRunAsync(cycleId, cancellationToken));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error running the settle dry run (cycle {CycleId})", cycleId);
+            return StatusCode(500, "An error occurred while running the settle dry run");
+        }
+    }
+
+    /// <summary>
     /// File an appeal for an appraisal
     /// </summary>
     [HttpPost("{id:guid}/appeal")]

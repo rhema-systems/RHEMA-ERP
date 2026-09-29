@@ -243,6 +243,7 @@ public static class AppraisalMappingExtensions
             IsCalibrated = entity.IsCalibrated,
             CalibrationSessionId = entity.CalibrationSessionId,
             PreCalibrationScore = entity.PreCalibrationScore,
+            CalibratedOverallScore = entity.CalibratedOverallScore,
             OverallGradeDefinitionId = entity.OverallGradeDefinitionId,
             EmployeeAcknowledged = entity.EmployeeAcknowledged,
             EmployeeAcknowledgedDate = entity.EmployeeAcknowledgedDate,
@@ -294,10 +295,12 @@ public static class AppraisalMappingExtensions
     /// caller sending the record back unchanged must not be rejected for including them. Ignoring
     /// them is the behaviour; the DTO shape is unchanged.</para>
     ///
-    /// <para>⚠ This mapper still assigns <c>OverallScore</c> from the body. The performance closure
-    /// removes that line (lane A6): the settle path becomes the only writer of the score, and HR
-    /// restates a score only through calibration or an appeal (D-11, which dropped the HR review's
-    /// never-applied <c>AdjustedOverallScore</c>).</para>
+    /// <para><c>OverallScore</c> is ignored the same way (performance closure A6): the settle path
+    /// (<c>AppraisalScoreService</c>) is its only writer, and HR restates a score only through
+    /// calibration or an appeal (D-11). This mapper used to copy it from the body — and the HR
+    /// review's "Correct dates" (<c>appraisal-run.service.ts updateHeader</c>) sends no score at
+    /// all, so correcting an appraisal's dates set its final score to null, with no grade change,
+    /// no talent sync and no trace.</para>
     /// </remarks>
     public static void UpdateEntity(this UpdatePerformanceAppraisalDto dto, PerformanceAppraisal entity)
     {
@@ -308,7 +311,7 @@ public static class AppraisalMappingExtensions
         entity.StartDate = dto.StartDate;
         entity.EndDate = dto.EndDate;
         entity.PeerEvaluatorsCount = dto.PeerEvaluatorsCount;
-        entity.OverallScore = dto.OverallScore;
+        // entity.OverallScore     — NOT assigned. See the remarks above.
         entity.RankInPosition = dto.RankInPosition;
         entity.RankInUnit = dto.RankInUnit;
         entity.OverallComments = dto.OverallComments;

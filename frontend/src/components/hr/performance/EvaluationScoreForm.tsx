@@ -14,6 +14,7 @@ import {
   isKpiItem,
   kpiAchievementPercent,
   resolveGrade,
+  scaleTop,
   type EvaluationGradeRange,
   type EvaluationItem,
 } from '@/types/hr/appraisal-run';
@@ -170,7 +171,10 @@ function ScoreRow({
 }) {
   const kpi = isKpiItem(item);
   const grade = kpi ? null : resolveGrade(value.numericScore, item.gradeRanges);
-  const achievement = kpi ? kpiAchievementPercent(value.actualValue, item.kpiTargetValue) : null;
+  const achievement = kpi
+    ? kpiAchievementPercent(value.actualValue, item.kpiTargetValue, item.kpiMinValue, item.kpiMaxValue)
+    : null;
+  const top = scaleTop(item.gradeRanges);
 
   return (
     <div className={cn('space-y-3 rounded-md', highlighted && 'bg-amber-50 p-3 dark:bg-amber-950/30')}>
@@ -216,12 +220,12 @@ function ScoreRow({
             </div>
           ) : (
             <div className="space-y-1.5">
-              <Label htmlFor={`s-${item.templateItemId}`}>Score (0–100)</Label>
+              <Label htmlFor={`s-${item.templateItemId}`}>Score (0–{top})</Label>
               <Input
                 id={`s-${item.templateItemId}`}
                 type="number"
                 min={0}
-                max={100}
+                max={top}
                 step={1}
                 inputMode="numeric"
                 disabled={disabled}

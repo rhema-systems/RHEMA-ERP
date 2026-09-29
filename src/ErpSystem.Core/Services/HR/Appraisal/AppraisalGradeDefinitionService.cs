@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -53,10 +54,52 @@ public class AppraisalGradeDefinitionService : IAppraisalGradeDefinitionService
         return entity;
     }
 
+    /// <summary>
+    /// Refuses an overall band the one grade resolver could not use (performance closure A2).
+    /// A band needs both bounds inside 0–100, a rating for the talent feed, and no overlap with
+    /// another active band — two bands claiming one score made the grade depend on row order
+    /// (P-6). A definition with no bounds is an item-only grade and is not checked.
+    /// </summary>
+    private async Task ValidateOverallBandAsync(AppraisalGradeDefinition candidate, CancellationToken cancellationToken)
+    {
+        var min = candidate.OverallMinScore;
+        var max = candidate.OverallMaxScore;
+        if (min is null && max is null) return;
+
+        if (min is null || max is null)
+            throw new ArgumentException("An overall band needs both a minimum and a maximum score.");
+        if (min < AppraisalScoring.MinScore || max > AppraisalScoring.MaxScore || min > max)
+            throw new ArgumentException(
+                $"An overall band must lie within {AppraisalScoring.MinScore:0}–{AppraisalScoring.MaxScore:0} with its minimum no higher than its maximum.");
+        if (candidate.MappedRating is null)
+            throw new ArgumentException(
+                "An overall band needs a mapped rating — it is what the talent pools and the rating reports read.");
+
+        if (!candidate.IsActive) return;
+
+        var tenantId = GetTenantId();
+        var clash = await _gradeDefinitionRepository.GetQueryable()
+            .Where(g => g.TenantId == tenantId
+                     && g.Id != candidate.Id
+                     && g.IsActive
+                     && g.OverallMinScore != null
+                     && g.OverallMaxScore != null
+                     && g.OverallMinScore <= max
+                     && min <= g.OverallMaxScore)
+            .Select(g => new { g.GradeName, g.OverallMinScore, g.OverallMaxScore })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (clash != null)
+            throw new ArgumentException(
+                $"The band {min:0.##}–{max:0.##} overlaps \"{clash.GradeName}\" ({clash.OverallMinScore:0.##}–{clash.OverallMaxScore:0.##}). Each score must fall in one band only.");
+    }
+
     public async Task<AppraisalGradeDefinitionDto> CreateAsync(CreateAppraisalGradeDefinitionDto createDto, CancellationToken cancellationToken = default)
     {
         var gradeDefinition = createDto.ToEntity();
         gradeDefinition.TenantId = GetTenantId();
+
+        await ValidateOverallBandAsync(gradeDefinition, cancellationToken);
 
         await _gradeDefinitionRepository.AddAsync(gradeDefinition);
         await _unitOfWork.SaveChangesAsync();
@@ -127,6 +170,8 @@ public class AppraisalGradeDefinitionService : IAppraisalGradeDefinitionService
         var entity = await GetOwnedAsync(updateDto.Id);
 
         updateDto.UpdateEntity(entity);
+
+        await ValidateOverallBandAsync(entity, cancellationToken);
 
         await _gradeDefinitionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

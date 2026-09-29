@@ -109,7 +109,10 @@ export default function ManagerEvaluationPage() {
     for (const section of context.sections) {
       for (const item of section.items) {
         seeded[item.templateItemId] = {
-          numericScore: item.managerNumericScore ?? null,
+          // A KPI is entered as an actual. A number in its NumericScore is a calibration or
+          // appeal restatement (D-22), which the form must not send back as the manager's own:
+          // a re-evaluation replaces it.
+          numericScore: isKpiItem(item) ? null : item.managerNumericScore ?? null,
           actualValue: item.managerActualValue ?? null,
           notes: item.managerNotes ?? null,
           evidenceLinks: item.managerEvidenceLinks ?? null,
@@ -346,45 +349,57 @@ export default function ManagerEvaluationPage() {
             onChange={(id, patch) =>
               setValues((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }))
             }
-            renderItemAside={
-              showSelfScores
-                ? (item: EvaluationItem) => {
-                    const full = itemsById.get(item.templateItemId);
-                    if (!full) return null;
-                    const hasSelf =
-                      full.employeeSelfNumericScore != null || full.employeeSelfActualValue != null;
-                    if (!hasSelf) {
-                      return (
-                        <p className="text-muted-foreground">
-                          {context.employeeName.split(' ')[0]} has not scored this yet.
-                        </p>
-                      );
-                    }
-                    return (
-                      <div className="space-y-1">
-                        <p className="text-xs font-medium uppercase text-muted-foreground">
-                          Their self-assessment
-                        </p>
-                        <p className="text-lg font-semibold tabular-nums">
-                          {isKpiItem(item)
-                            ? `${full.employeeSelfActualValue ?? '—'}${item.kpiUnit ? ` ${item.kpiUnit}` : ''}`
-                            : (full.employeeSelfNumericScore ?? '—')}
-                          {full.employeeSelfAchievedGrade && (
-                            <span className="ml-2 text-sm font-normal text-muted-foreground">
-                              {full.employeeSelfAchievedGrade}
-                            </span>
-                          )}
-                        </p>
-                        {full.employeeSelfNotes && (
-                          <p className="whitespace-pre-wrap text-muted-foreground">
-                            {full.employeeSelfNotes}
-                          </p>
-                        )}
-                      </div>
-                    );
-                  }
-                : undefined
-            }
+            renderItemAside={(item: EvaluationItem) => {
+              const full = itemsById.get(item.templateItemId);
+              if (!full) return null;
+
+              // A KPI restated by calibration or an appeal is scored on the restated achievement,
+              // not on the actual in the input (D-22) — say so on the row.
+              const override = full.managerAchievementOverridden ? (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Overridden by calibration/appeal: scored at {full.managerAchievementPercent ?? '—'}%
+                  achievement, not on the actual above.
+                </p>
+              ) : null;
+
+              if (!showSelfScores) return override;
+
+              const hasSelf =
+                full.employeeSelfNumericScore != null || full.employeeSelfActualValue != null;
+              if (!hasSelf) {
+                return (
+                  <div className="space-y-1">
+                    <p className="text-muted-foreground">
+                      {context.employeeName.split(' ')[0]} has not scored this yet.
+                    </p>
+                    {override}
+                  </div>
+                );
+              }
+              return (
+                <div className="space-y-1">
+                  <p className="text-xs font-medium uppercase text-muted-foreground">
+                    Their self-assessment
+                  </p>
+                  <p className="text-lg font-semibold tabular-nums">
+                    {isKpiItem(item)
+                      ? `${full.employeeSelfActualValue ?? '—'}${item.kpiUnit ? ` ${item.kpiUnit}` : ''}`
+                      : (full.employeeSelfNumericScore ?? '—')}
+                    {full.employeeSelfAchievedGrade && (
+                      <span className="ml-2 text-sm font-normal text-muted-foreground">
+                        {full.employeeSelfAchievedGrade}
+                      </span>
+                    )}
+                  </p>
+                  {full.employeeSelfNotes && (
+                    <p className="whitespace-pre-wrap text-muted-foreground">
+                      {full.employeeSelfNotes}
+                    </p>
+                  )}
+                  {override}
+                </div>
+              );
+            }}
           />
         </TabsContent>
 

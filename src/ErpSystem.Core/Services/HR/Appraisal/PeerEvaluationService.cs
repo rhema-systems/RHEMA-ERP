@@ -45,6 +45,7 @@ public class PeerEvaluationService : IPeerEvaluationService
     private readonly IGenericRepository<AppraisalGradeDefinition> _gradeRepository;
     private readonly IGenericRepository<AppraisalCompetency> _appraisalCompetencyRepository;
     private readonly IGenericRepository<PerformanceAppraisalCriterionConfig> _criterionConfigRepository;
+    private readonly IAppraisalScoreService _scores;
     private readonly IAppraisalNotificationService _notifications;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
@@ -58,6 +59,7 @@ public class PeerEvaluationService : IPeerEvaluationService
         IGenericRepository<AppraisalGradeDefinition> gradeRepository,
         IGenericRepository<AppraisalCompetency> appraisalCompetencyRepository,
         IGenericRepository<PerformanceAppraisalCriterionConfig> criterionConfigRepository,
+        IAppraisalScoreService scores,
         IAppraisalNotificationService notifications,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
@@ -70,6 +72,7 @@ public class PeerEvaluationService : IPeerEvaluationService
         _gradeRepository = gradeRepository;
         _appraisalCompetencyRepository = appraisalCompetencyRepository;
         _criterionConfigRepository = criterionConfigRepository;
+        _scores = scores;
         _notifications = notifications;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
@@ -226,9 +229,10 @@ public class PeerEvaluationService : IPeerEvaluationService
             throw new InvalidOperationException("Cannot modify submitted evaluation.");
         }
 
-        // Enforce the 0–100 score invariant.
-        if (saveDto.ItemScores.Any(e => e.NumericScore.HasValue && !AppraisalScoring.IsValidScore(e.NumericScore.Value)))
-            throw new InvalidOperationException($"Scores must be between {AppraisalScoring.MinScore:0} and {AppraisalScoring.MaxScore:0}.");
+        // Every score on its item's own scale — the same check as the self and manager forms (A11).
+        var scaleError = await _scores.ValidateItemScoresAsync(evaluation.AppraisalId, saveDto.ItemScores, cancellationToken);
+        if (scaleError != null)
+            throw new InvalidOperationException(scaleError);
 
         // Mark as started if not already
         if (!evaluation.StartedDate.HasValue)
@@ -237,8 +241,10 @@ public class PeerEvaluationService : IPeerEvaluationService
             await _evaluatorEvaluationRepository.UpdateAsync(evaluation);
         }
 
-        // One query for the whole form, not one per item.
-        var snapshot = await LoadCriterionSnapshotAsync(evaluation.AppraisalId, cancellationToken);
+        // One query for the whole form, not one per item. The arithmetic is the shared one
+        // (AppraisalScoreService): this service used to keep its own copy, which read the live
+        // section weight and scored a KPI restatement against the band top (A10).
+        var scoring = await _scores.LoadScoringAsync(evaluation.AppraisalId, cancellationToken);
 
         // Update criterion scores from ItemScores (keyed by CriteriaId)
         foreach (var itemInput in saveDto.ItemScores)
@@ -247,7 +253,6 @@ public class PeerEvaluationService : IPeerEvaluationService
                 continue;
 
             var templateItemId = itemInput.TemplateItemId;
-            snapshot.TryGetValue(templateItemId, out var config);
 
             var existingScore = evaluation.CriterionScores
                 .FirstOrDefault(cs => cs.TemplateItemId == templateItemId);
@@ -258,7 +263,7 @@ public class PeerEvaluationService : IPeerEvaluationService
                 existingScore.ActualValue  = itemInput.ActualValue;
                 existingScore.Notes = itemInput.Notes;
 
-                CalculateAndSetWeightedScore(existingScore, config);
+                await _scores.ScoreCriterionAsync(existingScore, scoring, cancellationToken);
                 await _criterionScoreRepository.UpdateAsync(existingScore);
             }
             else
@@ -273,7 +278,7 @@ public class PeerEvaluationService : IPeerEvaluationService
                     Notes = itemInput.Notes
                 };
 
-                CalculateAndSetWeightedScore(newScore, config);
+                await _scores.ScoreCriterionAsync(newScore, scoring, cancellationToken);
                 await _criterionScoreRepository.AddAsync(newScore);
             }
         }
@@ -335,9 +340,10 @@ public class PeerEvaluationService : IPeerEvaluationService
             throw new InvalidOperationException($"Please score all required criteria before submitting. {unscoredCount} criteria remaining.");
         }
 
-        // A weighted mean over the criteria this peer was asked to score, not a bare sum.
-        var submitSnapshot = await LoadCriterionSnapshotAsync(evaluation.AppraisalId, cancellationToken);
-        var totalWeightedScore = RecomputePeerTotal(evaluation, submitSnapshot);
+        // A weighted mean over the criteria this peer was asked to score, recomputed from the raw
+        // inputs by the shared path — the same number the settle will use.
+        var scoring = await _scores.LoadScoringAsync(evaluation.AppraisalId, cancellationToken);
+        var totalWeightedScore = await _scores.ScoreEvaluatorAsync(evaluation.CriterionScores, scoring, cancellationToken);
 
         evaluation.TotalScore = totalWeightedScore;
         evaluation.SubmittedDate = DateTime.UtcNow;
@@ -409,92 +415,6 @@ public class PeerEvaluationService : IPeerEvaluationService
         }
     }
 
-    /// <summary>
-    /// Sets a peer CriterionScore's contribution to that peer's score:
-    /// <c>WeightedScore = achievement(0–1) × CriterionShare</c>, from the immutable
-    /// <see cref="PerformanceAppraisalCriterionConfig"/> snapshot.
-    ///
-    /// ⚠ The peer's evaluator weight is deliberately NOT applied here — it belongs once, at
-    /// aggregation, and applying it in both places made every role contribute w². Kept in step
-    /// with the self/manager formula in <c>PerformanceAppraisalService</c>; the two scoring the
-    /// same snapshot differently is exactly the drift <see cref="AppraisalScoring"/> exists to
-    /// prevent.
-    /// </summary>
-    /// <param name="snapshot">
-    /// This criterion's row from <see cref="LoadCriterionSnapshotAsync"/>. Resolved once for the
-    /// whole form and passed in, rather than queried per item — a peer scoring a thirty-item
-    /// form would otherwise issue thirty round trips for one draft save.
-    /// </param>
-    private static void CalculateAndSetWeightedScore(
-        CriterionScore criterionScore, PerformanceAppraisalCriterionConfig? snapshot)
-    {
-        if (snapshot == null)
-        {
-            criterionScore.WeightedScore = 0;
-            return;
-        }
-
-        var share = AppraisalScoring.CriterionShare(snapshot.TemplateItem?.Section?.Weight ?? 0, snapshot.WeightUsed);
-
-        if (criterionScore.NumericScore.HasValue)
-        {
-            var maxScore = snapshot.GradeRanges.Any()
-                ? snapshot.GradeRanges.Max(r => r.HighScore)
-                : 100m;
-
-            criterionScore.WeightedScore = maxScore > 0
-                ? (criterionScore.NumericScore.Value / maxScore) * share
-                : 0;
-        }
-        else if (criterionScore.ActualValue.HasValue)
-        {
-            // Only reachable when the cycle lets peers score KPI items.
-            var achievement = AppraisalScoring.KpiAchievementPercent(
-                criterionScore.ActualValue.Value, snapshot.KpiTargetValue, snapshot.KpiMinValue, snapshot.KpiMaxValue);
-
-            criterionScore.WeightedScore = achievement / 100m * share;
-        }
-        else
-        {
-            criterionScore.WeightedScore = 0;
-        }
-    }
-
-    /// <summary>The appraisal's criterion snapshot in one query, keyed by template item.</summary>
-    private async Task<Dictionary<Guid, PerformanceAppraisalCriterionConfig>> LoadCriterionSnapshotAsync(
-        Guid appraisalId, CancellationToken cancellationToken)
-    {
-        var tenantId = GetTenantId();
-        return await _criterionConfigRepository.GetQueryable()
-            .Where(c => c.TenantId == tenantId && c.PerformanceAppraisalId == appraisalId)
-            .Include(c => c.GradeRanges)
-            .Include(c => c.TemplateItem)
-                .ThenInclude(i => i.Section)
-            .AsNoTracking()
-            .ToDictionaryAsync(c => c.TemplateKey(), cancellationToken);
-    }
-
-    /// <summary>
-    /// The peer's 0–100 score: a weighted mean over the criteria they were asked to score.
-    ///
-    /// The denominator is the shares of the scored criteria, not of the whole template — peers
-    /// are excluded from KPI items unless the cycle opts in, and marking them out of the full
-    /// form would cap a perfect peer review at the competency share.
-    /// </summary>
-    private static decimal RecomputePeerTotal(
-        EvaluatorEvaluation evaluation, IReadOnlyDictionary<Guid, PerformanceAppraisalCriterionConfig> snapshot)
-    {
-        var scored = evaluation.CriterionScores
-            .Where(cs => cs.NumericScore.HasValue || cs.ActualValue.HasValue)
-            .Select(cs => (
-                cs.WeightedScore,
-                snapshot.TryGetValue(cs.TemplateKey(), out var c)
-                    ? AppraisalScoring.CriterionShare(c.TemplateItem?.Section?.Weight ?? 0, c.WeightUsed)
-                    : 0m));
-
-        return AppraisalScoring.EvaluatorScore(scored);
-    }
-
     #region Section Building Helpers
 
     private List<PeerEvaluationSectionDto> BuildPeerEvaluationSections(
@@ -556,7 +476,7 @@ public class PeerEvaluationService : IPeerEvaluationService
                     SectionName        = section.SectionName,
                     SectionDescription = section.Description,
                     DisplayOrder       = section.DisplayOrder,
-                    SectionWeight      = section.Weight,
+                    SectionWeight      = section.ScoredWeight(configsByTemplateItemId),
                     Items              = items
                 };
             })
@@ -581,9 +501,11 @@ public class PeerEvaluationService : IPeerEvaluationService
         KpiDefinitionId         = kpiDef?.Id,
         KpiUnit                 = kpiDef?.Unit ?? goal?.Unit,
         MeasurementType         = kpiDef?.MeasurementType,
-        KpiTargetValue          = goal?.TargetValue,
-        KpiMinValue             = goal?.MinValue,
-        KpiMaxValue             = goal?.MaxValue,
+        // The snapshot's target, floor and ceiling — the ones the score uses. This read the live
+        // goal, so a peer saw a target the score never used (A12).
+        KpiTargetValue          = config.KpiTargetValue,
+        KpiMinValue             = config.KpiMinValue,
+        KpiMaxValue             = config.KpiMaxValue,
         GradeRanges             = config.GradeRanges.Select(gr => new EvaluationGradeRangeDto
         {
             GradeDefinitionId = gr.GradeDefinitionId,
