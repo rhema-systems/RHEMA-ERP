@@ -93,7 +93,12 @@ public sealed class JournalBatchService : IJournalBatchService
                 Description = batch.Description,
                 FiscalPeriodId = batch.FiscalPeriodId,
                 FiscalPeriodName = batch.FiscalPeriod == null ? null : batch.FiscalPeriod.PeriodName,
+                FiscalPeriodStartDate = batch.FiscalPeriod == null ? null : batch.FiscalPeriod.StartDate,
+                FiscalPeriodEndDate = batch.FiscalPeriod == null ? null : batch.FiscalPeriod.EndDate,
+                AccountingBookId = batch.AccountingBookId,
                 BookClassification = batch.BookClassification,
+                AccountingBookName = batch.AccountingBook == null ? batch.BookClassification : batch.AccountingBook.Name,
+                AccountingBookType = batch.AccountingBook == null ? AccountingBookType.PrimaryFull : batch.AccountingBook.BookType,
                 ControlCurrencyCode = batch.ControlCurrencyCode,
                 BatchType = batch.BatchType,
                 ApprovalStatus = batch.ApprovalStatus,
@@ -137,6 +142,30 @@ public sealed class JournalBatchService : IJournalBatchService
         return batch == null ? null : MapDetail(batch);
     }
 
+    public async Task<IReadOnlyList<EligibleJournalBatchBookDto>> GetEligibleBooksAsync(
+        Guid fiscalPeriodId,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        await EnsureOpenPeriodAsync(fiscalPeriodId, tenantId, cancellationToken);
+
+        return await EligibleBookQuery(tenantId, fiscalPeriodId)
+            .OrderByDescending(book => book.IsDefault)
+            .ThenBy(book => book.SortOrder)
+            .ThenBy(book => book.Code)
+            .Select(book => new EligibleJournalBatchBookDto
+            {
+                Id = book.Id,
+                Code = book.Code,
+                Name = book.Name,
+                Purpose = book.Purpose,
+                BookType = book.BookType,
+                FunctionalCurrencyCode = book.FunctionalCurrencyCode,
+                IsDefault = book.IsDefault
+            })
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<JournalBatchDetailDto> CreateAsync(
         CreateJournalBatchDto dto,
         CancellationToken cancellationToken = default)
@@ -144,6 +173,11 @@ public sealed class JournalBatchService : IJournalBatchService
         var tenantId = TenantId;
         await EnsureOpenPeriodAsync(dto.FiscalPeriodId, tenantId, cancellationToken);
         await EnsureControlCurrencyAsync(dto.ControlCurrencyCode, tenantId, cancellationToken);
+        var accountingBook = await RequireEligibleBookAsync(
+            dto.AccountingBookId,
+            dto.FiscalPeriodId,
+            tenantId,
+            cancellationToken);
 
         var now = DateTime.UtcNow;
         var batch = new JournalBatch
@@ -158,7 +192,8 @@ public sealed class JournalBatchService : IJournalBatchService
                 cancellationToken: cancellationToken),
             Description = dto.Description.Trim(),
             FiscalPeriodId = dto.FiscalPeriodId,
-            BookClassification = dto.BookClassification.Trim().ToUpperInvariant(),
+            AccountingBookId = accountingBook.Id,
+            BookClassification = accountingBook.Code,
             ControlCurrencyCode = dto.ControlCurrencyCode.Trim().ToUpperInvariant(),
             ExpectedDebitTotal = decimal.Round(dto.ExpectedDebitTotal, 2),
             ExpectedJournalCount = dto.ExpectedJournalCount,
@@ -275,8 +310,6 @@ public sealed class JournalBatchService : IJournalBatchService
             .Where(item => item.TenantId == TenantId && !item.IsDeleted)
             .Select(item => item.JournalEntryId);
 
-        var normalizedBook = batch.BookClassification.ToUpper();
-
         var query = _context.JournalEntries
             .AsNoTracking()
             .Where(journal =>
@@ -284,7 +317,19 @@ public sealed class JournalBatchService : IJournalBatchService
                 !journal.IsDeleted &&
                 journal.PostingStatus == "Draft" &&
                 journal.FiscalPeriodId == batch.FiscalPeriodId &&
-                journal.BookClassification.ToUpper() == normalizedBook &&
+                journal.AccountingBookId == batch.AccountingBookId &&
+                !journal.Transactions.Any(transaction => !transaction.IsDeleted &&
+                    !_context.AccountAccountingBooks.Any(mapping =>
+                        mapping.TenantId == TenantId &&
+                        !mapping.IsDeleted &&
+                        mapping.AccountingBookId == batch.AccountingBookId &&
+                        mapping.AccountId == transaction.AccountId &&
+                        mapping.IsEnabled &&
+                        (mapping.AccountClassification == null ||
+                         (!mapping.AccountClassification.IsDeleted &&
+                          mapping.AccountClassification.Status == AccountClassificationStatus.Active &&
+                          mapping.AccountClassification.IsPostingClassification &&
+                          mapping.AccountClassification.CoreAccountType == transaction.Account.AccountType)))) &&
                 !attachedJournalIds.Contains(journal.Id) &&
                 !activeWorkflowJournalIds.Contains(journal.Id));
 
@@ -351,6 +396,13 @@ public sealed class JournalBatchService : IJournalBatchService
     {
         var batch = await RequireBatchAsync(id, cancellationToken);
         EnsureDraft(batch);
+        await RequireEligibleBookAsync(batch.AccountingBookId, batch.FiscalPeriodId, TenantId, cancellationToken);
+        var mappingIssue = await GetAccountBookMappingIssueAsync(
+            batch.AccountingBookId,
+            dto.Transactions.Select(line => line.AccountId),
+            cancellationToken);
+        if (mappingIssue != null)
+            throw new InvalidOperationException(mappingIssue);
         dto.FiscalPeriodId = batch.FiscalPeriodId;
         dto.BookClassification = batch.BookClassification;
         dto.SourceModule = "GL";
@@ -367,8 +419,38 @@ public sealed class JournalBatchService : IJournalBatchService
     {
         var batch = await RequireBatchAsync(id, cancellationToken);
         EnsureDraft(batch);
+        await RequireEligibleBookAsync(batch.AccountingBookId, batch.FiscalPeriodId, TenantId, cancellationToken);
         await RequireBatchItemAsync(id, journalEntryId, cancellationToken);
+        if (dto.TransactionDate.HasValue)
+        {
+            var targetDate = dto.TransactionDate.Value.Date;
+            var insideBatchPeriod = await _context.FiscalPeriods.AsNoTracking().AnyAsync(
+                period => period.TenantId == TenantId &&
+                          period.Id == batch.FiscalPeriodId &&
+                          !period.IsDeleted &&
+                          period.StartDate <= targetDate &&
+                          period.EndDate >= targetDate,
+                cancellationToken);
+            if (!insideBatchPeriod)
+                throw new InvalidOperationException("The journal date must fall inside the batch fiscal period.");
+        }
+        dto.BookClassification = batch.BookClassification;
+        if (dto.Transactions is { Count: > 0 })
+        {
+            var mappingIssue = await GetAccountBookMappingIssueAsync(
+                batch.AccountingBookId,
+                dto.Transactions.Select(line => line.AccountId),
+                cancellationToken);
+            if (mappingIssue != null)
+                throw new InvalidOperationException(mappingIssue);
+        }
         await _journalEntries.UpdateJournalEntryAsync(journalEntryId, dto, cancellationToken);
+        var updatedJournal = await _context.JournalEntries
+            .AsNoTracking()
+            .Include(journal => journal.Transactions)
+            .SingleAsync(journal => journal.TenantId == TenantId && journal.Id == journalEntryId && !journal.IsDeleted, cancellationToken);
+        if (updatedJournal.FiscalPeriodId != batch.FiscalPeriodId || updatedJournal.AccountingBookId != batch.AccountingBookId)
+            throw new InvalidOperationException("The updated journal no longer belongs to the batch fiscal period and accounting book.");
         await AuditAsync("JournalBatchEntryUpdated", batch, cancellationToken, new { journalEntryId });
         return await RequireDetailAsync(id, cancellationToken);
     }
@@ -416,6 +498,14 @@ public sealed class JournalBatchService : IJournalBatchService
         if (period == null || !period.IsOpen || period.IsClosed || period.IsLocked)
             issues.Add(Issue("PERIOD_NOT_OPEN", "The batch fiscal period is not open and unlocked."));
 
+        if (!await EligibleBookQuery(TenantId, batch.FiscalPeriodId)
+                .AnyAsync(book => book.Id == batch.AccountingBookId, cancellationToken))
+        {
+            issues.Add(Issue(
+                "BOOK_NOT_ELIGIBLE",
+                "The accounting book is unavailable for direct manual posting or its exact-book period is not open."));
+        }
+
         var eligibleReversalSourceIds = new HashSet<Guid>();
         if (batch.BatchType == JournalBatchType.Reversal && batch.ReversalOfJournalBatchId.HasValue)
         {
@@ -450,8 +540,13 @@ public sealed class JournalBatchService : IJournalBatchService
 
             if (journal.FiscalPeriodId != batch.FiscalPeriodId)
                 issues.Add(Issue("PERIOD_MISMATCH", $"{journal.JournalEntryNumber} belongs to another fiscal period.", item));
-            if (!string.Equals(journal.BookClassification, batch.BookClassification, StringComparison.OrdinalIgnoreCase))
+            if (journal.AccountingBookId != batch.AccountingBookId ||
+                !string.Equals(journal.BookClassification, batch.BookClassification, StringComparison.OrdinalIgnoreCase))
                 issues.Add(Issue("BOOK_MISMATCH", $"{journal.JournalEntryNumber} belongs to another accounting book.", item));
+
+            var mappingIssue = await GetAccountBookMappingIssueAsync(batch.AccountingBookId, journal, cancellationToken);
+            if (mappingIssue != null)
+                issues.Add(Issue("ACCOUNT_BOOK_MAPPING_INVALID", $"{journal.JournalEntryNumber}: {mappingIssue}", item));
 
             try
             {
@@ -792,6 +887,8 @@ public sealed class JournalBatchService : IJournalBatchService
                         : JournalBatchApprovalStatus.Approved;
                     batch.PostingStatus = JournalBatchPostingStatus.Ready;
                     batch.ReviewCompletedAt = now;
+                    batch.ApprovedByUserId = UserId;
+                    batch.ApprovedAt = now;
                 }
 
                 StampModified(batch);
@@ -821,6 +918,7 @@ public sealed class JournalBatchService : IJournalBatchService
         var batch = await LoadBatchAsync(id, asTracking: true, cancellationToken)
             ?? throw new ArgumentException("Journal batch was not found for this tenant.");
         EnsurePostingEligibility(batch);
+        await RequireEligibleBookAsync(batch.AccountingBookId, batch.FiscalPeriodId, TenantId, cancellationToken);
 
         var requestedIds = dto.JournalBatchItemIds.Distinct().ToList();
         if (requestedIds.Count == 0)
@@ -1010,6 +1108,13 @@ public sealed class JournalBatchService : IJournalBatchService
         bool rejectedOnly,
         CancellationToken cancellationToken = default)
     {
+        var strategy = _context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+        _context.ChangeTracker.Clear();
+        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
         var source = await LoadBatchAsync(id, asTracking: false, cancellationToken)
             ?? throw new ArgumentException("Journal batch was not found for this tenant.");
         var selected = ActiveItems(source)
@@ -1020,13 +1125,15 @@ public sealed class JournalBatchService : IJournalBatchService
             throw new InvalidOperationException(rejectedOnly ? "The batch has no rejected entries to copy." : "The batch has no entries to copy.");
 
         var fiscalPeriodId = dto.FiscalPeriodId ?? source.FiscalPeriodId;
+        if (fiscalPeriodId != source.FiscalPeriodId && !dto.EntryDate.HasValue)
+            throw new InvalidOperationException("A journal date is required when copying a batch to a different fiscal period.");
         await EnsureOpenPeriodAsync(fiscalPeriodId, TenantId, cancellationToken);
         var expectedTotal = Money(selected.Sum(x => x.JournalEntry.TotalDebitAmount));
         var created = await CreateAsync(new CreateJournalBatchDto
         {
             Description = rejectedOnly ? $"Correction of rejected entries from {source.BatchNumber}" : $"Copy of {source.BatchNumber}",
             FiscalPeriodId = fiscalPeriodId,
-            BookClassification = source.BookClassification,
+            AccountingBookId = source.AccountingBookId,
             ControlCurrencyCode = source.ControlCurrencyCode,
             ExpectedDebitTotal = expectedTotal,
             ExpectedJournalCount = selected.Count,
@@ -1058,7 +1165,9 @@ public sealed class JournalBatchService : IJournalBatchService
                         Reference = x.SourceReferenceNumber ?? original.ReferenceNumber ?? string.Empty,
                         CurrencyCode = x.TransactionCurrency,
                         ForeignAmount = x.ForeignCurrencyAmount,
+                        ExchangeRateId = x.ExchangeRateId,
                         ExchangeRate = x.ExchangeRate,
+                        Dimensions = PostingDimensions(x),
                         LineNumber = x.LineNumber
                     })
                     .ToList()
@@ -1081,7 +1190,16 @@ public sealed class JournalBatchService : IJournalBatchService
             copiedBatch,
             cancellationToken,
             new { sourceBatchId = source.Id, source.BatchNumber });
-        return await RequireDetailAsync(created.Id, cancellationToken);
+        var result = await RequireDetailAsync(created.Id, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+        });
     }
 
     public async Task<JournalBatchDetailDto> CreateReversalBatchAsync(
@@ -1119,7 +1237,7 @@ public sealed class JournalBatchService : IJournalBatchService
                 {
                     Description = $"Full reversal of {source.BatchNumber}",
                     FiscalPeriodId = reversalPeriod.Id,
-                    BookClassification = source.BookClassification,
+                    AccountingBookId = source.AccountingBookId,
                     ControlCurrencyCode = source.ControlCurrencyCode,
                     ExpectedDebitTotal = Money(sourceItems.Sum(x => x.JournalEntry.TotalDebitAmount)),
                     ExpectedJournalCount = sourceItems.Count,
@@ -1159,7 +1277,9 @@ public sealed class JournalBatchService : IJournalBatchService
                                 Reference = original.JournalEntryNumber,
                                 CurrencyCode = x.TransactionCurrency,
                                 ForeignAmount = x.ForeignCurrencyAmount,
+                                ExchangeRateId = x.ExchangeRateId,
                                 ExchangeRate = x.ExchangeRate,
+                                Dimensions = PostingDimensions(x),
                                 LineNumber = x.LineNumber
                             })
                             .ToList()
@@ -1222,6 +1342,11 @@ public sealed class JournalBatchService : IJournalBatchService
             CreatedById = UserId
         });
         await _context.SaveChangesAsync(cancellationToken);
+        await AuditAsync(
+            "JournalBatchAttachmentLinked",
+            batch,
+            cancellationToken,
+            new { FileUploadRecordId = fileUploadRecordId });
     }
 
     public async Task UnlinkAttachmentAsync(Guid id, Guid fileUploadRecordId, CancellationToken cancellationToken = default)
@@ -1240,6 +1365,11 @@ public sealed class JournalBatchService : IJournalBatchService
         link.DeletedAt = DateTime.UtcNow;
         link.DeletedBy = _currentUser.UserName;
         await _context.SaveChangesAsync(cancellationToken);
+        await AuditAsync(
+            "JournalBatchAttachmentUnlinked",
+            batch,
+            cancellationToken,
+            new { FileUploadRecordId = fileUploadRecordId });
     }
 
     private async Task<List<JournalBatchItem>> ClaimPostingItemsAsync(
@@ -1364,15 +1494,19 @@ public sealed class JournalBatchService : IJournalBatchService
         var query = _context.JournalBatches
             .Where(x => x.TenantId == TenantId && x.Id == id && !x.IsDeleted)
             .Include(x => x.FiscalPeriod)
+            .Include(x => x.AccountingBook)
             .Include(x => x.ReversalAttempts)
             .Include(x => x.Items.Where(item => !item.IsDeleted))
                 .ThenInclude(item => item.JournalEntry)
                     .ThenInclude(journal => journal.Transactions)
+                        .ThenInclude(transaction => transaction.FinanceDimensionSet)
+                            .ThenInclude(set => set!.Items)
             .Include(x => x.Items.Where(item => !item.IsDeleted))
                 .ThenInclude(item => item.Reviews.Where(review => !review.IsDeleted))
             .Include(x => x.PostingRuns.Where(run => !run.IsDeleted))
                 .ThenInclude(run => run.Items.Where(item => !item.IsDeleted))
             .Include(x => x.Attachments.Where(attachment => !attachment.IsDeleted))
+                .ThenInclude(attachment => attachment.FileUploadRecord)
             .AsSplitQuery();
         if (!asTracking)
             query = query.AsNoTracking();
@@ -1384,6 +1518,17 @@ public sealed class JournalBatchService : IJournalBatchService
                x => x.TenantId == TenantId && x.Id == id && !x.IsDeleted,
                cancellationToken)
            ?? throw new ArgumentException("Journal batch was not found for this tenant.");
+
+    private static IReadOnlyList<FinancePostingDimensionValueDto> PostingDimensions(AccountTransaction transaction)
+        => transaction.FinanceDimensionSet?.Items
+            .Where(item => !item.IsDeleted)
+            .OrderBy(item => item.DimensionCodeSnapshot)
+            .Select(item => new FinancePostingDimensionValueDto
+            {
+                DimensionCode = item.DimensionCodeSnapshot,
+                ValueCode = item.DimensionValueCodeSnapshot
+            })
+            .ToList() ?? [];
 
     private async Task<JournalBatchDetailDto> RequireDetailAsync(Guid id, CancellationToken cancellationToken)
         => await GetByIdAsync(id, cancellationToken)
@@ -1429,8 +1574,12 @@ public sealed class JournalBatchService : IJournalBatchService
         }
         if (journal.FiscalPeriodId != batch.FiscalPeriodId)
             throw new InvalidOperationException("Journal entry and batch must use the same fiscal period.");
-        if (!string.Equals(journal.BookClassification, batch.BookClassification, StringComparison.OrdinalIgnoreCase))
+        if (journal.AccountingBookId != batch.AccountingBookId ||
+            !string.Equals(journal.BookClassification, batch.BookClassification, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Journal entry and batch must use the same accounting book.");
+        var mappingIssue = await GetAccountBookMappingIssueAsync(batch.AccountingBookId, journal, cancellationToken);
+        if (mappingIssue != null)
+            throw new InvalidOperationException(mappingIssue);
         if (await _context.JournalBatchItems.AnyAsync(
                 x => x.TenantId == TenantId && x.JournalEntryId == journal.Id && !x.IsDeleted,
                 cancellationToken))
@@ -1488,6 +1637,89 @@ public sealed class JournalBatchService : IJournalBatchService
             ?? throw new InvalidOperationException("Fiscal period was not found for this tenant.");
         if (!period.IsOpen || period.IsClosed || period.IsLocked)
             throw new InvalidOperationException($"Fiscal period '{period.PeriodName}' is not open and unlocked.");
+    }
+
+    private IQueryable<AccountingBook> EligibleBookQuery(Guid tenantId, Guid fiscalPeriodId)
+        => _context.AccountingBooks.AsNoTracking().Where(book =>
+            book.TenantId == tenantId &&
+            !book.IsDeleted &&
+            book.IsActive &&
+            book.AllowsPosting &&
+            book.LifecycleStatus == AccountingBookLifecycleStatus.Active &&
+            (book.BookType == AccountingBookType.PrimaryFull || book.BookType == AccountingBookType.Delta) &&
+            _context.AccountingBookPeriods.Any(period =>
+                period.TenantId == tenantId &&
+                !period.IsDeleted &&
+                period.AccountingBookId == book.Id &&
+                period.FiscalPeriodId == fiscalPeriodId &&
+                period.PeriodStatus == AccountingBookPeriodStatus.Open &&
+                period.PendingStatus != AccountingBookPeriodStatus.Closed &&
+                period.PendingStatus != AccountingBookPeriodStatus.Locked));
+
+    private async Task<AccountingBook> RequireEligibleBookAsync(
+        Guid accountingBookId,
+        Guid fiscalPeriodId,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        if (accountingBookId == Guid.Empty)
+            throw new InvalidOperationException("Select an eligible accounting book.");
+
+        return await EligibleBookQuery(tenantId, fiscalPeriodId)
+                   .SingleOrDefaultAsync(book => book.Id == accountingBookId, cancellationToken)
+               ?? throw new InvalidOperationException(
+                   "The accounting book is unavailable for direct manual posting or its exact-book period is not open.");
+    }
+
+    private async Task<string?> GetAccountBookMappingIssueAsync(
+        Guid accountingBookId,
+        JournalEntry journal,
+        CancellationToken cancellationToken)
+        => await GetAccountBookMappingIssueAsync(
+            accountingBookId,
+            journal.Transactions.Where(line => !line.IsDeleted).Select(line => line.AccountId),
+            cancellationToken);
+
+    private async Task<string?> GetAccountBookMappingIssueAsync(
+        Guid accountingBookId,
+        IEnumerable<Guid> requestedAccountIds,
+        CancellationToken cancellationToken)
+    {
+        var accountIds = requestedAccountIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (accountIds.Count == 0)
+            return null;
+
+        var accounts = await _context.Accounts.AsNoTracking()
+            .Where(account => account.TenantId == TenantId && accountIds.Contains(account.Id) && !account.IsDeleted)
+            .ToDictionaryAsync(account => account.Id, cancellationToken);
+        var mappings = await _context.AccountAccountingBooks.AsNoTracking()
+            .Include(mapping => mapping.AccountClassification)
+            .Where(mapping =>
+                mapping.TenantId == TenantId &&
+                mapping.AccountingBookId == accountingBookId &&
+                accountIds.Contains(mapping.AccountId) &&
+                !mapping.IsDeleted)
+            .ToListAsync(cancellationToken);
+
+        if (accounts.Count != accountIds.Count || mappings.Select(mapping => mapping.AccountId).Distinct().Count() != accountIds.Count)
+            return "One or more posting accounts are not enabled for the selected accounting book.";
+
+        foreach (var mapping in mappings)
+        {
+            var classification = mapping.AccountClassification;
+            if (!mapping.IsEnabled || (classification != null &&
+                (classification.TenantId != TenantId ||
+                 classification.AccountingBookId != accountingBookId ||
+                 classification.IsDeleted ||
+                 classification.Status != AccountClassificationStatus.Active ||
+                 !classification.IsPostingClassification ||
+                 classification.CoreAccountType != accounts[mapping.AccountId].AccountType)))
+            {
+                return "One or more posting accounts lack an enabled, compatible accounting-book classification.";
+            }
+        }
+
+        return null;
     }
 
     private async Task EnsureControlCurrencyAsync(string currencyCode, Guid tenantId, CancellationToken cancellationToken)
@@ -1707,7 +1939,12 @@ public sealed class JournalBatchService : IJournalBatchService
             Description = batch.Description,
             FiscalPeriodId = batch.FiscalPeriodId,
             FiscalPeriodName = batch.FiscalPeriod?.PeriodName,
+            FiscalPeriodStartDate = batch.FiscalPeriod?.StartDate,
+            FiscalPeriodEndDate = batch.FiscalPeriod?.EndDate,
+            AccountingBookId = batch.AccountingBookId,
             BookClassification = batch.BookClassification,
+            AccountingBookName = batch.AccountingBook?.Name ?? batch.BookClassification,
+            AccountingBookType = batch.AccountingBook?.BookType ?? AccountingBookType.PrimaryFull,
             ControlCurrencyCode = batch.ControlCurrencyCode,
             BatchType = batch.BatchType,
             ApprovalStatus = batch.ApprovalStatus,
@@ -1741,7 +1978,12 @@ public sealed class JournalBatchService : IJournalBatchService
             Description = batch.Description,
             FiscalPeriodId = batch.FiscalPeriodId,
             FiscalPeriodName = batch.FiscalPeriodName,
+            FiscalPeriodStartDate = batch.FiscalPeriodStartDate,
+            FiscalPeriodEndDate = batch.FiscalPeriodEndDate,
+            AccountingBookId = batch.AccountingBookId,
             BookClassification = batch.BookClassification,
+            AccountingBookName = batch.AccountingBookName,
+            AccountingBookType = batch.AccountingBookType,
             ControlCurrencyCode = batch.ControlCurrencyCode,
             BatchType = batch.BatchType,
             ApprovalStatus = batch.ApprovalStatus,
@@ -1783,7 +2025,12 @@ public sealed class JournalBatchService : IJournalBatchService
             Description = list.Description,
             FiscalPeriodId = list.FiscalPeriodId,
             FiscalPeriodName = list.FiscalPeriodName,
+            FiscalPeriodStartDate = list.FiscalPeriodStartDate,
+            FiscalPeriodEndDate = list.FiscalPeriodEndDate,
+            AccountingBookId = list.AccountingBookId,
             BookClassification = list.BookClassification,
+            AccountingBookName = list.AccountingBookName,
+            AccountingBookType = list.AccountingBookType,
             ControlCurrencyCode = list.ControlCurrencyCode,
             BatchType = list.BatchType,
             ApprovalStatus = list.ApprovalStatus,
@@ -1844,7 +2091,20 @@ public sealed class JournalBatchService : IJournalBatchService
                                   .All(x => !x.JournalEntry.IsReversed && !x.JournalEntry.ReversalJournalEntryId.HasValue),
             Items = items.Select(MapItem).ToList(),
             PostingRuns = batch.PostingRuns.Where(x => !x.IsDeleted).OrderBy(x => x.RunNumber).Select(MapPostingRun).ToList(),
-            AttachmentIds = batch.Attachments.Where(x => !x.IsDeleted).Select(x => x.FileUploadRecordId).ToList()
+            AttachmentIds = batch.Attachments.Where(x => !x.IsDeleted).Select(x => x.FileUploadRecordId).ToList(),
+            Attachments = batch.Attachments
+                .Where(x => !x.IsDeleted && !x.FileUploadRecord.IsDeleted)
+                .Select(x => new JournalBatchAttachmentDto
+                {
+                    FileUploadRecordId = x.FileUploadRecordId,
+                    FileName = x.FileUploadRecord.OriginalFileName,
+                    FileUrl = x.FileUploadRecord.FilePath,
+                    ContentType = x.FileUploadRecord.ContentType,
+                    FileSize = x.FileUploadRecord.FileSize,
+                    UploadedAt = x.FileUploadRecord.CreatedAt
+                })
+                .OrderBy(x => x.UploadedAt)
+                .ToList()
         };
     }
 
@@ -1938,7 +2198,12 @@ public sealed class JournalBatchService : IJournalBatchService
         public string Description { get; init; } = string.Empty;
         public Guid FiscalPeriodId { get; init; }
         public string? FiscalPeriodName { get; init; }
+        public DateTime? FiscalPeriodStartDate { get; init; }
+        public DateTime? FiscalPeriodEndDate { get; init; }
+        public Guid AccountingBookId { get; init; }
         public string BookClassification { get; init; } = string.Empty;
+        public string AccountingBookName { get; init; } = string.Empty;
+        public AccountingBookType AccountingBookType { get; init; }
         public string ControlCurrencyCode { get; init; } = string.Empty;
         public JournalBatchType BatchType { get; init; }
         public JournalBatchApprovalStatus ApprovalStatus { get; init; }
@@ -1982,6 +2247,8 @@ public sealed class JournalBatchService : IJournalBatchService
             AfterValues = new
             {
                 batch.BatchNumber,
+                batch.AccountingBookId,
+                batch.BookClassification,
                 batch.ApprovalStatus,
                 batch.PostingStatus,
                 batch.ReversalStatus,

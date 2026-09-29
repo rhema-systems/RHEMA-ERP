@@ -248,6 +248,51 @@ public sealed class JournalBatchServiceTests
 
     [Fact]
     [Trait("Batch", "GeneralLedger")]
+    [Trait("Category", "BookGovernance")]
+    public async Task EligibleBooks_ShouldUseExactPeriodAuthorityAndExcludeParallelBooks()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var period = SeedPeriod(db, tenantId);
+        var deltaBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "IFRS_ADJUSTMENTS",
+            Name = "IFRS Adjustments",
+            Purpose = "IFRS reporting adjustments",
+            BookType = AccountingBookType.Delta,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            IsActive = true,
+            AllowsPosting = true,
+            SortOrder = 10
+        };
+        db.AccountingBooks.Add(deltaBook);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, deltaBook.Code);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, "TAX");
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var result = await service.GetEligibleBooksAsync(period.Id);
+
+        result.Select(book => book.Code).Should().Equal("IFRS", "IFRS_ADJUSTMENTS");
+        result.Should().NotContain(book => book.BookType == AccountingBookType.ParallelFull);
+
+        var parallelBookId = db.AccountingBooks.Single(book => book.TenantId == tenantId && book.Code == "TAX").Id;
+        var createParallel = () => service.CreateAsync(new CreateJournalBatchDto
+        {
+            Description = "Parallel book must remain replication governed",
+            FiscalPeriodId = period.Id,
+            AccountingBookId = parallelBookId,
+            ControlCurrencyCode = "GHS",
+            ExpectedDebitTotal = 100m
+        });
+        await createParallel.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*unavailable for direct manual posting*");
+    }
+
+    [Fact]
+    [Trait("Batch", "GeneralLedger")]
     [Trait("Category", "Controls")]
     public async Task GetEligibleDraftJournalsAsync_ShouldReturnOnlyAttachableDraftsForBatch()
     {
@@ -288,7 +333,7 @@ public sealed class JournalBatchServiceTests
         {
             Description = "Eligible draft selector",
             FiscalPeriodId = period.Id,
-            BookClassification = "IFRS",
+            AccountingBookId = BookId(db, tenantId),
             ControlCurrencyCode = "GHS",
             ExpectedDebitTotal = 100m
         });
@@ -323,7 +368,7 @@ public sealed class JournalBatchServiceTests
         {
             Description = "Month-end manual journals",
             FiscalPeriodId = period.Id,
-            BookClassification = "IFRS",
+            AccountingBookId = BookId(db, tenantId),
             ControlCurrencyCode = "GHS",
             ExpectedDebitTotal = 300m,
             ExpectedJournalCount = 2
@@ -373,7 +418,7 @@ public sealed class JournalBatchServiceTests
         {
             Description = "Selective approval batch",
             FiscalPeriodId = period.Id,
-            BookClassification = "IFRS",
+            AccountingBookId = BookId(db, tenantId),
             ControlCurrencyCode = "GHS",
             ExpectedDebitTotal = 300m,
             ExpectedJournalCount = 2
@@ -452,7 +497,7 @@ public sealed class JournalBatchServiceTests
         {
             Description = "Two-run posting batch",
             FiscalPeriodId = period.Id,
-            BookClassification = "IFRS",
+            AccountingBookId = BookId(db, tenantId),
             ControlCurrencyCode = "GHS",
             ExpectedDebitTotal = 300m,
             ExpectedJournalCount = 2
@@ -655,7 +700,7 @@ public sealed class JournalBatchServiceTests
             BatchNumber = "JB-OTHER-00001",
             Description = "Must remain isolated",
             FiscalPeriodId = period.Id,
-            BookClassification = "IFRS",
+            AccountingBookId = BookId(db, tenantId),
             ControlCurrencyCode = "GHS",
             ExpectedDebitTotal = 100m
         };
@@ -695,7 +740,7 @@ public sealed class JournalBatchServiceTests
             BatchNumber = "JB-PERF-00001",
             Description = "One-thousand-entry release gate",
             FiscalPeriodId = period.Id,
-            BookClassification = "IFRS",
+            AccountingBookId = BookId(db, tenantId),
             ControlCurrencyCode = "GHS",
             ExpectedDebitTotal = entryCount,
             ExpectedJournalCount = entryCount
@@ -793,7 +838,7 @@ public sealed class JournalBatchServiceTests
         {
             Description = "Posted source batch",
             FiscalPeriodId = period.Id,
-            BookClassification = "IFRS",
+            AccountingBookId = BookId(db, tenantId),
             ControlCurrencyCode = "GHS",
             ExpectedDebitTotal = 300m,
             ExpectedJournalCount = 2
@@ -1078,7 +1123,7 @@ public sealed class JournalBatchServiceTests
         {
             Description = "Approved posting test batch",
             FiscalPeriodId = fiscalPeriodId,
-            BookClassification = "IFRS",
+            AccountingBookId = journals.First().AccountingBookId,
             ControlCurrencyCode = "GHS",
             ExpectedDebitTotal = journals.Sum(item => item.TotalDebitAmount),
             ExpectedJournalCount = journals.Count
@@ -1172,10 +1217,36 @@ public sealed class JournalBatchServiceTests
         return period;
     }
 
+    private static Guid BookId(ApplicationDbContext db, Guid tenantId) =>
+        db.AccountingBooks.Local.Single(item =>
+            item.TenantId == tenantId && item.Code == "IFRS" && !item.IsDeleted).Id;
+
     private static List<JournalEntry> SeedJournals(ApplicationDbContext db, Guid tenantId, Guid periodId)
     {
         var book = db.AccountingBooks.Local.Single(item =>
             item.TenantId == tenantId && item.Code == "IFRS" && !item.IsDeleted);
+        var debitAccount = new Account
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountCode = "1000", AccountNumber = "1000",
+            AccountName = "Cash", AccountType = AccountType.Asset, CurrencyCode = "GHS",
+            Status = AccountStatus.Active, AllowDirectPosting = true
+        };
+        var creditAccount = new Account
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountCode = "2000", AccountNumber = "2000",
+            AccountName = "Accrual", AccountType = AccountType.Liability, CurrencyCode = "GHS",
+            Status = AccountStatus.Active, AllowDirectPosting = true
+        };
+        db.Accounts.AddRange(debitAccount, creditAccount);
+        db.AccountAccountingBooks.AddRange(
+            new AccountAccountingBook
+            {
+                TenantId = tenantId, AccountId = debitAccount.Id, AccountingBookId = book.Id, IsEnabled = true
+            },
+            new AccountAccountingBook
+            {
+                TenantId = tenantId, AccountId = creditAccount.Id, AccountingBookId = book.Id, IsEnabled = true
+            });
         var amounts = new[] { 100m, 200m };
         var journals = amounts.Select((amount, index) =>
         {
@@ -1208,7 +1279,7 @@ public sealed class JournalBatchServiceTests
                         JournalEntryId = journalId,
                         AccountingBookId = book.Id,
                         BookClassification = book.Code,
-                        AccountId = Guid.NewGuid(),
+                        AccountId = debitAccount.Id,
                         TransactionDate = new DateTime(2026, 7, 15),
                         DebitAmount = amount,
                         CreditAmount = 0,
@@ -1222,7 +1293,7 @@ public sealed class JournalBatchServiceTests
                         JournalEntryId = journalId,
                         AccountingBookId = book.Id,
                         BookClassification = book.Code,
-                        AccountId = Guid.NewGuid(),
+                        AccountId = creditAccount.Id,
                         TransactionDate = new DateTime(2026, 7, 15),
                         DebitAmount = 0,
                         CreditAmount = amount,

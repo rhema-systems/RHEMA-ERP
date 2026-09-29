@@ -564,7 +564,7 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> JournalBatchPolicy(string action)
         => action switch
         {
-            "CreateBatch" or "CreateJournal" or "AddExistingJournal" or "LinkAttachment"
+            "CreateBatch" or "CreateJournal" or "AddExistingJournal" or "LinkAttachment" or "GetEligibleBooks"
                 => One(FinancePermissions.CreateJournalBatches),
             "UpdateBatch" or "UpdateJournal" or "RemoveJournal" or "UnlinkAttachment"
                 => One(FinancePermissions.EditJournalBatches),

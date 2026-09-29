@@ -41,6 +41,12 @@ public sealed class JournalBatchController : ControllerBase
         return batch == null ? NotFound() : Ok(batch);
     }
 
+    [HttpGet("eligible-books")]
+    public Task<IReadOnlyList<EligibleJournalBatchBookDto>> GetEligibleBooks(
+        [FromQuery] Guid fiscalPeriodId,
+        CancellationToken cancellationToken)
+        => _batches.GetEligibleBooksAsync(fiscalPeriodId, cancellationToken);
+
     [HttpPost]
     public async Task<ActionResult<JournalBatchDetailDto>> CreateBatch(
         [FromBody] CreateJournalBatchDto dto,

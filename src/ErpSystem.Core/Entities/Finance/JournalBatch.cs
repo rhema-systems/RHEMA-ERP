@@ -91,8 +91,14 @@ public sealed class JournalBatch : TenantEntity
 
     public Guid FiscalPeriodId { get; set; }
 
+    /// <summary>
+    /// Stable relational identity of the governed accounting book. BookClassification is retained
+    /// as the immutable code snapshot used by journal/posting audit history.
+    /// </summary>
+    public Guid AccountingBookId { get; set; }
+
     [Required, MaxLength(20)]
-    public string BookClassification { get; set; } = "IFRS";
+    public string BookClassification { get; set; } = string.Empty;
 
     [Required, MaxLength(3)]
     public string ControlCurrencyCode { get; set; } = "GHS";
@@ -148,6 +154,9 @@ public sealed class JournalBatch : TenantEntity
 
     [ForeignKey(nameof(FiscalPeriodId))]
     public FiscalPeriod FiscalPeriod { get; set; } = null!;
+
+    [ForeignKey(nameof(AccountingBookId))]
+    public AccountingBook AccountingBook { get; set; } = null!;
 
     [ForeignKey(nameof(ReversalOfJournalBatchId))]
     public JournalBatch? ReversalOfJournalBatch { get; set; }
@@ -281,7 +290,7 @@ public sealed class JournalBatchImportSession : TenantEntity
     public string NormalizedPayloadHash { get; set; } = string.Empty;
 
     [Required, MaxLength(20)]
-    public string TemplateVersion { get; set; } = "1";
+    public string TemplateVersion { get; set; } = "2";
 
     [Required, MaxLength(260)]
     public string OriginalFileName { get; set; } = string.Empty;

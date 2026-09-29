@@ -2,6 +2,7 @@ import { apiService } from '@/services/api.service';
 import type {
     CreateJournalBatch,
     CreateJournalBatchEntry,
+    EligibleJournalBatchBook,
     EligibleJournalBatchDraft,
     JournalBatchDetail,
     JournalBatchImportPreview,
@@ -20,17 +21,36 @@ function download(blob: Blob, fileName: string) {
     URL.revokeObjectURL(url);
 }
 
+function resolveBackendFileUrl(url?: string): string {
+    if (!url) return '';
+    if (/^https?:\/\//i.test(url)) return url;
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || '/api';
+    const backendBase = apiBase.replace(/\/api\/?$/, '');
+    return `${backendBase}${url.startsWith('/') ? url : `/${url}`}`;
+}
+
 class JournalBatchDataService {
     getBatches(query?: Record<string, unknown>) {
         return apiService.get<JournalBatchListResult>('/finance/journal-batches', query);
     }
 
-    getBatch(id: string) {
-        return apiService.get<JournalBatchDetail>(`/finance/journal-batches/${id}`);
+    async getBatch(id: string) {
+        const batch = await apiService.get<JournalBatchDetail>(`/finance/journal-batches/${id}`);
+        return {
+            ...batch,
+            attachments: (batch.attachments || []).map((attachment) => ({
+                ...attachment,
+                fileUrl: resolveBackendFileUrl(attachment.fileUrl),
+            })),
+        };
     }
 
     createBatch(dto: CreateJournalBatch) {
         return apiService.post<JournalBatchDetail>('/finance/journal-batches', dto);
+    }
+
+    getEligibleBooks(fiscalPeriodId: string) {
+        return apiService.get<EligibleJournalBatchBook[]>('/finance/journal-batches/eligible-books', { fiscalPeriodId });
     }
 
     updateBatch(id: string, dto: {
@@ -74,6 +94,14 @@ class JournalBatchDataService {
 
     removeJournal(id: string, journalEntryId: string) {
         return apiService.delete<JournalBatchDetail>(`/finance/journal-batches/${id}/entries/${journalEntryId}`);
+    }
+
+    linkAttachment(id: string, fileUploadRecordId: string) {
+        return apiService.post<void>(`/finance/journal-batches/${id}/attachments/${fileUploadRecordId}`, {});
+    }
+
+    unlinkAttachment(id: string, fileUploadRecordId: string) {
+        return apiService.delete<void>(`/finance/journal-batches/${id}/attachments/${fileUploadRecordId}`);
     }
 
     validate(id: string) {
