@@ -862,6 +862,8 @@ public sealed class GhanaStatutoryTaxEngineTests
             ApprovedById = Guid.NewGuid(),
             ApprovedDate = DateTime.UtcNow,
             ApAccountId = apAccount.Id,
+            WithholdingContractReference = "CONTRACT-WHT-001",
+            WithholdingSupplyCategory = WhtSupplyCategory.Services,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
         };
@@ -1350,6 +1352,8 @@ public sealed class GhanaStatutoryTaxEngineTests
             ApprovedById = Guid.NewGuid(),
             ApprovedDate = DateTime.UtcNow,
             ApAccountId = apAccount.Id,
+            WithholdingContractReference = "CONTRACT-WHT-001",
+            WithholdingSupplyCategory = WhtSupplyCategory.Services,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
         };

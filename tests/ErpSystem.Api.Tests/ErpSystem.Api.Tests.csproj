@@ -319,6 +319,7 @@
     <Compile Include="Services\Finance\FinanceCloseTemplateBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\CoreFinancialReportingFoundationTests.cs" />
     <Compile Include="Services\Finance\GhanaStatutoryTaxEngineTests.cs" />
+    <Compile Include="Services\Finance\TaxRuleGovernanceTests.cs" />
     <Compile Include="Services\Finance\WhtComplianceLifecycleTests.cs" />
     <Compile Include="Services\Finance\FxFunctionalCurrencyGovernanceTests.cs" />
     <Compile Include="Services\Finance\FxRealizedUnrealizedRevaluationTests.cs" />

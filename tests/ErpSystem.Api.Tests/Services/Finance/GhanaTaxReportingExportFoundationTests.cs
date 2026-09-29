@@ -584,6 +584,8 @@ public sealed class GhanaTaxReportingExportFoundationTests
     {
         var lineList = lines.ToList();
         var journalId = Guid.NewGuid();
+        var book = db.AccountingBooks.Local.Single(item =>
+            item.TenantId == tenantId && item.Code == "IFRS" && !item.IsDeleted);
         var totalDebit = lineList.Sum(l => l.Debit);
         var totalCredit = lineList.Sum(l => l.Credit);
 
@@ -603,6 +605,8 @@ public sealed class GhanaTaxReportingExportFoundationTests
             TotalCreditAmount = totalCredit,
             IsBalanced = totalDebit == totalCredit,
             FiscalPeriodId = fiscalPeriodId,
+            AccountingBookId = book.Id,
+            BookClassification = book.Code,
             PostingStatus = "Posted",
             ApprovalStatus = "Approved",
             PostingDate = date,
@@ -631,6 +635,8 @@ public sealed class GhanaTaxReportingExportFoundationTests
                 SourceDocumentId = sourceDocumentId,
                 SourceReferenceNumber = reference,
                 FiscalPeriodId = fiscalPeriodId,
+                AccountingBookId = book.Id,
+                BookClassification = book.Code,
                 PostingStatus = "Posted",
                 PostedDate = date,
                 LineNumber = lineNo++,
@@ -655,7 +661,8 @@ public sealed class GhanaTaxReportingExportFoundationTests
             TotalDebitAmount = totalDebit,
             TotalCreditAmount = totalCredit,
             FunctionalCurrencyCode = "GHS",
-            BookClassification = "IFRS",
+            AccountingBookId = book.Id,
+            BookClassification = book.Code,
             CreatedBy = "test"
         });
 
@@ -672,6 +679,20 @@ public sealed class GhanaTaxReportingExportFoundationTests
             Id = tenantId,
             Code = code,
             Name = $"{code} Tenant",
+            CreatedBy = "test"
+        });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "IFRS",
+            Name = "IFRS Primary",
+            BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
+            IsDefault = true,
+            IsActive = true,
+            AllowsPosting = true,
             CreatedBy = "test"
         });
     }
