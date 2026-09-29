@@ -1149,6 +1149,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<EstateFacilityDutyRoster> EstateFacilityDutyRosters { get; set; }
     public DbSet<EstateFacilityDutyAttendance> EstateFacilityDutyAttendances { get; set; }
     public DbSet<EstateFacilityProviderRate> EstateFacilityProviderRates { get; set; }
+    public DbSet<EstateFacilityProviderAssignment> EstateFacilityProviderAssignments { get; set; }
     public DbSet<EstateGisConfiguration> EstateGisConfigurations { get; set; }
     public DbSet<LandAcquisitionNote> LandAcquisitionNotes { get; set; }
     public DbSet<LandAcquisitionChecklistResponse> LandAcquisitionChecklistResponses { get; set; }
@@ -10543,6 +10544,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("EstateFacilityProviderRates");
             entity.Property(item => item.Rate).HasPrecision(18, 4);
             entity.HasIndex(item => new { item.TenantId, item.BusinessPartnerId, item.IsActive });
+            entity.HasIndex(item => new { item.TenantId, item.ContractId });
+        });
+
+        builder.Entity<EstateFacilityProviderAssignment>(entity =>
+        {
+            entity.ToTable("EstateFacilityProviderAssignments");
+            entity.HasIndex(item => new { item.TenantId, item.BusinessPartnerId, item.AssignmentStatus });
+            entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId, item.AssignmentStatus });
             entity.HasIndex(item => new { item.TenantId, item.ContractId });
         });
 

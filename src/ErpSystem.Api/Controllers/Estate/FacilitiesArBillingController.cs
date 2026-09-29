@@ -53,7 +53,7 @@ public sealed class FacilitiesArBillingController : ControllerBase
                 && asset.AssetCode == request.PropertyUnit.Trim(), cancellationToken);
         if (property is null || !property.CustomerBusinessPartnerId.HasValue)
             return BadRequest("The selected Estate property has no customer account.");
-        if (property.CustomerBusinessPartnerId.Value != request.Invoice.CustomerId)
+        if (property.CustomerBusinessPartnerId.Value != request.Invoice.BusinessPartnerId)
             return BadRequest("The invoice customer does not match the selected Estate property.");
 
         var reference = request.Invoice.Reference?.Trim() ?? string.Empty;
@@ -153,7 +153,7 @@ public sealed class FacilitiesArBillingController : ControllerBase
         if (property is null) return NotFound("The Estate property or customer account was not found.");
         var invoice = await _invoiceService.GetByIdAsync(id, cancellationToken);
         if (invoice is null) return NotFound();
-        if (invoice.CustomerId != property.CustomerBusinessPartnerId
+        if (invoice.BusinessPartnerId != property.CustomerBusinessPartnerId
             || invoice.Reference?.Contains(property.AssetCode, StringComparison.OrdinalIgnoreCase) != true
             || invoice.Notes?.Contains(SourceLabel, StringComparison.OrdinalIgnoreCase) != true)
             return BadRequest("The invoice is not a Facilities charge for this property.");
@@ -177,7 +177,7 @@ public sealed class FacilitiesArBillingController : ControllerBase
                 ["sourceLabel"] = SourceLabel,
                 ["sourceModule"] = "Estate / Facilities",
                 ["financeArReference"] = invoice.InvoiceNumber,
-                ["customerId"] = invoice.CustomerId,
+                ["businessPartnerId"] = invoice.BusinessPartnerId,
                 ["amount"] = invoice.TotalAmount,
                 ["currencyCode"] = invoice.CurrencyCode,
                 ["propertyUnit"] = property.AssetCode

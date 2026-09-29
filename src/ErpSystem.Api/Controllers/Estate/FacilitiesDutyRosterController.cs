@@ -202,6 +202,95 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         return Ok(new { success = true, data = roster });
     }
 
+    [HttpGet("mine")]
+    public async Task<IActionResult> GetMyRoster(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? status,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var employeeId = _currentUserService.EmployeeId;
+        if (employeeId is null || employeeId == Guid.Empty)
+        {
+            return Unauthorized(new { success = false, message = "Your account is not linked to an employee record." });
+        }
+
+        var employee = await _db.Employees.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.Id == employeeId.Value)
+            .Select(item => new { item.Id, item.EmployeeNumber })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (employee is null)
+        {
+            return NotFound(new { success = false, message = "Your employee record was not found." });
+        }
+
+        var profileIds = await _db.PayrollEmployeeProfiles.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.EmployeeId == employee.Id)
+            .Select(item => item.Id)
+            .ToListAsync(cancellationToken);
+        var fromDate = (from ?? DateTime.UtcNow.Date.AddDays(-7)).Date;
+        var toDate = (to ?? DateTime.UtcNow.Date.AddDays(30)).Date;
+        if (toDate < fromDate)
+        {
+            return BadRequest(new { success = false, message = "End date cannot be before start date." });
+        }
+
+        var query = _db.EstateFacilityDutyRosters
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                && (item.EmployeeNumber == employee.EmployeeNumber
+                    || (item.EmployeeProfileId.HasValue && profileIds.Contains(item.EmployeeProfileId.Value)))
+                && (item.EndDate == null || item.EndDate >= fromDate)
+                && item.StartDate <= toDate);
+
+        var items = await query
+            .OrderBy(item => item.StartDate)
+            .ThenBy(item => item.ShiftStart)
+            .ThenBy(item => item.ServiceAreaName)
+            .ToListAsync(cancellationToken);
+
+        var rosterIds = items.Select(item => item.Id).ToList();
+        var attendances = new List<EstateFacilityDutyAttendance>();
+        if (rosterIds.Count > 0)
+        {
+            attendances = await _db.EstateFacilityDutyAttendances.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                    && rosterIds.Contains(item.DutyRosterId)
+                    && item.DutyDate >= fromDate
+                    && item.DutyDate <= toDate)
+                .ToListAsync(cancellationToken);
+        }
+        var attendanceByKey = attendances.ToDictionary(
+            item => (item.DutyRosterId, item.DutyDate.Date),
+            item => item);
+
+        var roster = new List<EstateFacilityDutyRosterDto>();
+        foreach (var item in items)
+        {
+            for (var date = fromDate; date <= toDate; date = date.AddDays(1))
+            {
+                if (!IsScheduledOn(item, date))
+                {
+                    continue;
+                }
+
+                var dto = ToDto(item, date, attendanceByKey.GetValueOrDefault((item.Id, date)));
+                if (!string.IsNullOrWhiteSpace(status)
+                    && !string.Equals(status, "all", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(dto.CompletionStatus, status, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(dto.AttendanceStatus, status, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                roster.Add(dto);
+            }
+        }
+
+        return Ok(new { success = true, data = roster });
+    }
+
     [HttpPost]
     [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Facilities Officer,Facilities Manager")]
     public async Task<IActionResult> CreateRosterItem(
@@ -552,6 +641,7 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         return new(
             item.Id,
             item.RosterReference,
+            date,
             item.EmployeeProfileId,
             item.EmployeeNumber,
             item.StaffName,

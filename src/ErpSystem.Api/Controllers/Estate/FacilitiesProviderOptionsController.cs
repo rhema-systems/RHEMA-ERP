@@ -79,14 +79,9 @@ public sealed class FacilitiesProviderOptionsController(
         if (!providerExists)
             return NotFound();
 
-        var supplierIds = await db.ApSupplierIdentityLinks.AsNoTracking()
-            .Where(link => link.TenantId == tenantId && !link.IsDeleted
-                && link.BusinessPartnerId == id && link.Supplier.TenantId == tenantId)
-            .Select(link => link.SupplierId)
-            .ToListAsync(cancellationToken);
         var invoices = await db.VendorInvoices.AsNoTracking()
             .Where(invoice => invoice.TenantId == tenantId && !invoice.IsDeleted
-                && supplierIds.Contains(invoice.SupplierId))
+                && invoice.BusinessPartnerId == id)
             .OrderByDescending(invoice => invoice.InvoiceDate)
             .ThenByDescending(invoice => invoice.CreatedAt)
             .Select(invoice => new
@@ -129,6 +124,65 @@ public sealed class FacilitiesProviderOptionsController(
                 ? number : null)).ToList() });
     }
 
+    [HttpGet("{id:guid}/assignments")]
+    public async Task<IActionResult> GetAssignments(Guid id, CancellationToken cancellationToken)
+    {
+        var tenantId = TenantId();
+        if (!await db.BusinessPartners.AsNoTracking().AnyAsync(item =>
+            item.TenantId == tenantId && item.Id == id && !item.IsDeleted, cancellationToken))
+            return NotFound();
+
+        var assignments = await db.EstateFacilityProviderAssignments.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && item.BusinessPartnerId == id && !item.IsDeleted)
+            .OrderBy(item => item.AssignmentStatus == "Active" ? 0 : 1)
+            .ThenBy(item => item.EffectiveFrom)
+            .ToListAsync(cancellationToken);
+        return Ok(new { success = true, data = await AssignmentViews(assignments, cancellationToken) });
+    }
+
+    [HttpPost("{id:guid}/assignments")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Manager,Facilities Manager")]
+    public async Task<IActionResult> CreateAssignment(Guid id, [FromBody] ProviderAssignmentRequest request,
+        CancellationToken cancellationToken)
+    {
+        var validation = await ValidateAssignment(id, request, cancellationToken);
+        if (validation is not null) return validation;
+
+        var now = DateTime.UtcNow;
+        var assignment = new EstateFacilityProviderAssignment
+        {
+            TenantId = TenantId(),
+            BusinessPartnerId = id,
+            CreatedAt = now,
+            CreatedBy = currentUser.UserName ?? "System",
+            CreatedById = CurrentUserId()
+        };
+        Apply(assignment, request);
+        db.EstateFacilityProviderAssignments.Add(assignment);
+        await db.SaveChangesAsync(cancellationToken);
+        return Ok(new { success = true, data = (await AssignmentViews([assignment], cancellationToken)).Single() });
+    }
+
+    [HttpPut("{id:guid}/assignments/{assignmentId:guid}")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Manager,Facilities Manager")]
+    public async Task<IActionResult> UpdateAssignment(Guid id, Guid assignmentId, [FromBody] ProviderAssignmentRequest request,
+        CancellationToken cancellationToken)
+    {
+        var assignment = await db.EstateFacilityProviderAssignments.FirstOrDefaultAsync(item =>
+            item.TenantId == TenantId() && item.BusinessPartnerId == id
+            && item.Id == assignmentId && !item.IsDeleted, cancellationToken);
+        if (assignment is null) return NotFound();
+        var validation = await ValidateAssignment(id, request, cancellationToken);
+        if (validation is not null) return validation;
+
+        Apply(assignment, request);
+        assignment.UpdatedAt = DateTime.UtcNow;
+        assignment.UpdatedBy = currentUser.UserName ?? "System";
+        assignment.LastModifiedById = CurrentUserId();
+        await db.SaveChangesAsync(cancellationToken);
+        return Ok(new { success = true, data = (await AssignmentViews([assignment], cancellationToken)).Single() });
+    }
+
     [HttpPost("{id:guid}/rates")]
     [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Manager,Facilities Manager")]
     public async Task<IActionResult> CreateRate(Guid id, [FromBody] ProviderRateRequest request,
@@ -164,6 +218,9 @@ public sealed class FacilitiesProviderOptionsController(
 
     private Guid TenantId() => currentUser.TenantId is { } tenant && tenant != Guid.Empty
         ? tenant : throw new UnauthorizedAccessException("Tenant context is required.");
+
+    private Guid? CurrentUserId()
+        => Guid.TryParse(currentUser.UserId, out var userId) ? userId : null;
 
     private async Task<IActionResult?> ValidateRate(Guid providerId, Guid? rateId,
         ProviderRateRequest request, CancellationToken cancellationToken)
@@ -212,6 +269,48 @@ public sealed class FacilitiesProviderOptionsController(
         return null;
     }
 
+    private async Task<IActionResult?> ValidateAssignment(Guid providerId,
+        ProviderAssignmentRequest request, CancellationToken cancellationToken)
+    {
+        var tenantId = TenantId();
+        var provider = await db.BusinessPartners.AsNoTracking().FirstOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.Id == providerId && !item.IsDeleted, cancellationToken);
+        if (provider is null) return NotFound("Provider not found.");
+        if (provider.PartnerType is not ("Supplier" or "Contractor" or "Both")
+            || !BusinessPartnerLifecyclePolicy.IsOperationallyApproved(provider)
+            || provider.ComplianceValidUntilUtc is { } expiry && expiry < DateTime.UtcNow)
+            return BadRequest("Provider must be approved and compliant.");
+
+        var asset = await db.EstateManagedAssets.AsNoTracking().FirstOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.Id == request.EstateManagedAssetId && !item.IsDeleted,
+            cancellationToken);
+        if (asset is null) return BadRequest("Select a valid facility, property, site, or unit.");
+
+        if (request.ContractId is { } contractId)
+        {
+            var contract = await db.Contracts.AsNoTracking().FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId && item.Id == contractId && !item.IsDeleted
+                && item.BusinessPartnerId == providerId, cancellationToken);
+            if (contract is null) return BadRequest("Contract does not belong to this provider.");
+            if (request.AssignmentStatus == "Active" && (contract.Status != "Active"
+                || contract.StartDate is { } start && request.EffectiveFrom.Date < start.Date
+                || contract.EndDate is { } contractEnd &&
+                    (request.EffectiveTo?.Date ?? DateTime.MaxValue.Date) > contractEnd.Date))
+                return BadRequest("Active assignment dates must fall within the active provider contract.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ServiceScope) || request.ServiceScope.Trim().Length > 160)
+            return BadRequest("Enter a service scope.");
+        if (request.EffectiveFrom == default)
+            return BadRequest("Enter an effective start date.");
+        if (request.EffectiveTo is { } end && end.Date < request.EffectiveFrom.Date)
+            return BadRequest("End date cannot be before start date.");
+        if (request.AssignmentStatus is not ("Active" or "Suspended" or "Ended"))
+            return BadRequest("Assignment status must be Active, Suspended, or Ended.");
+
+        return null;
+    }
+
     private static void Apply(EstateFacilityProviderRate rate, ProviderRateRequest request)
     {
         rate.ContractId = request.ContractId;
@@ -224,14 +323,92 @@ public sealed class FacilitiesProviderOptionsController(
         rate.IsActive = request.IsActive;
     }
 
+    private static void Apply(EstateFacilityProviderAssignment assignment, ProviderAssignmentRequest request)
+    {
+        assignment.EstateManagedAssetId = request.EstateManagedAssetId;
+        assignment.ContractId = request.ContractId;
+        assignment.ServiceScope = request.ServiceScope.Trim();
+        assignment.ServiceArea = TrimToNull(request.ServiceArea);
+        assignment.AssignmentStatus = request.AssignmentStatus.Trim();
+        assignment.EffectiveFrom = request.EffectiveFrom.Date;
+        assignment.EffectiveTo = request.EffectiveTo?.Date;
+        assignment.SchedulePattern = TrimToNull(request.SchedulePattern);
+        assignment.SupervisorName = TrimToNull(request.SupervisorName);
+        assignment.SlaReference = TrimToNull(request.SlaReference);
+        assignment.Notes = TrimToNull(request.Notes);
+    }
+
     private static object RateView(EstateFacilityProviderRate rate, string? contractNumber = null) => new
     {
         rate.Id, rate.BusinessPartnerId, rate.ContractId, ContractNumber = contractNumber, rate.ServiceName,
         rate.UnitOfMeasure, rate.Rate, rate.Currency, rate.EffectiveFrom,
         rate.EffectiveTo, rate.IsActive
     };
+
+    private async Task<List<object>> AssignmentViews(
+        IReadOnlyCollection<EstateFacilityProviderAssignment> assignments,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = TenantId();
+        var assetIds = assignments.Select(item => item.EstateManagedAssetId).Distinct().ToList();
+        var contractIds = assignments.Where(item => item.ContractId.HasValue)
+            .Select(item => item.ContractId!.Value).Distinct().ToList();
+        var assets = await db.EstateManagedAssets.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && assetIds.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
+        var contracts = await db.Contracts.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && contractIds.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
+
+        return assignments.Select(item =>
+        {
+            assets.TryGetValue(item.EstateManagedAssetId, out var asset);
+            var contract = item.ContractId is { } contractId && contracts.TryGetValue(contractId, out var found)
+                ? found : null;
+            return (object)new
+            {
+                item.Id,
+                item.BusinessPartnerId,
+                item.EstateManagedAssetId,
+                AssetCode = asset?.AssetCode,
+                AssetName = asset?.Name,
+                AssetLocation = asset?.Location,
+                AssetType = asset?.AssetType.ToString(),
+                item.ContractId,
+                ContractNumber = contract?.ContractNumber,
+                ContractTitle = contract?.ContractTitle,
+                item.ServiceScope,
+                item.ServiceArea,
+                item.AssignmentStatus,
+                item.EffectiveFrom,
+                item.EffectiveTo,
+                item.SchedulePattern,
+                item.SupervisorName,
+                item.SlaReference,
+                item.Notes,
+                item.CreatedAt,
+                item.UpdatedAt
+            };
+        }).ToList();
+    }
+
+    private static string? TrimToNull(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
 
 public sealed record ProviderRateRequest(Guid? ContractId, string ServiceName,
     string UnitOfMeasure, decimal Rate, string Currency, DateTime EffectiveFrom,
     DateTime? EffectiveTo, bool IsActive);
+
+public sealed record ProviderAssignmentRequest(
+    Guid EstateManagedAssetId,
+    Guid? ContractId,
+    string ServiceScope,
+    string? ServiceArea,
+    string AssignmentStatus,
+    DateTime EffectiveFrom,
+    DateTime? EffectiveTo,
+    string? SchedulePattern,
+    string? SupervisorName,
+    string? SlaReference,
+    string? Notes);

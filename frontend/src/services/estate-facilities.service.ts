@@ -95,6 +95,44 @@ export interface FacilitiesProviderRate {
 
 export type FacilitiesProviderRateRequest = Omit<FacilitiesProviderRate, 'id' | 'businessPartnerId' | 'contractNumber'>;
 
+export interface FacilitiesProviderAssignment {
+  id: string;
+  businessPartnerId: string;
+  estateManagedAssetId: string;
+  assetCode?: string | null;
+  assetName?: string | null;
+  assetLocation?: string | null;
+  assetType?: string | null;
+  contractId?: string | null;
+  contractNumber?: string | null;
+  contractTitle?: string | null;
+  serviceScope: string;
+  serviceArea?: string | null;
+  assignmentStatus: string;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  schedulePattern?: string | null;
+  supervisorName?: string | null;
+  slaReference?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface FacilitiesProviderAssignmentRequest {
+  estateManagedAssetId: string;
+  contractId?: string | null;
+  serviceScope: string;
+  serviceArea?: string | null;
+  assignmentStatus: string;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  schedulePattern?: string | null;
+  supervisorName?: string | null;
+  slaReference?: string | null;
+  notes?: string | null;
+}
+
 export interface FacilitiesBudgetYear {
   id: string;
   fiscalYearName: string;
@@ -243,6 +281,7 @@ export interface FacilitiesArResultNotificationRequest {
 export interface EstateFacilityDutyRosterItem {
   id: string;
   rosterReference: string;
+  dutyDate?: string | null;
   employeeProfileId?: string | null;
   employeeNumber?: string | null;
   staffName: string;
@@ -459,6 +498,27 @@ class EstateFacilitiesService {
     return response.data || [];
   }
 
+  async getProviderAssignments(providerId: string): Promise<FacilitiesProviderAssignment[]> {
+    const response = await apiService.get<ApiResponse<FacilitiesProviderAssignment[]>>(
+      `/estate/facilities/providers/${encodeURIComponent(providerId)}/assignments`
+    );
+    return response.data || [];
+  }
+
+  async createProviderAssignment(providerId: string, request: FacilitiesProviderAssignmentRequest): Promise<FacilitiesProviderAssignment> {
+    const response = await apiService.post<ApiResponse<FacilitiesProviderAssignment>>(
+      `/estate/facilities/providers/${encodeURIComponent(providerId)}/assignments`, request
+    );
+    return response.data;
+  }
+
+  async updateProviderAssignment(providerId: string, assignmentId: string, request: FacilitiesProviderAssignmentRequest): Promise<FacilitiesProviderAssignment> {
+    const response = await apiService.put<ApiResponse<FacilitiesProviderAssignment>>(
+      `/estate/facilities/providers/${encodeURIComponent(providerId)}/assignments/${encodeURIComponent(assignmentId)}`, request
+    );
+    return response.data;
+  }
+
   async createProviderRate(providerId: string, request: FacilitiesProviderRateRequest): Promise<FacilitiesProviderRate> {
     const response = await apiService.post<ApiResponse<FacilitiesProviderRate>>(
       `/estate/facilities/providers/${encodeURIComponent(providerId)}/rates`, request
@@ -540,6 +600,16 @@ class EstateFacilitiesService {
   async getDutyRoster(date?: string): Promise<EstateFacilityDutyRosterItem[]> {
     const response = await apiService.get<ApiResponse<EstateFacilityDutyRosterItem[]>>(
       `/estate/facilities/duty-roster${date ? `?from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}` : ''}`
+    );
+    return response.data || [];
+  }
+
+  async getMyDutyRoster(from?: string, to?: string): Promise<EstateFacilityDutyRosterItem[]> {
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const response = await apiService.get<ApiResponse<EstateFacilityDutyRosterItem[]>>(
+      `/estate/facilities/duty-roster/mine${params.size ? `?${params.toString()}` : ''}`
     );
     return response.data || [];
   }

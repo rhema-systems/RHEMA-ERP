@@ -114,6 +114,18 @@ const LEGAL_NEW_MATTER_FIELD_KEYS = new Set([
   'counselName', 'instructionReference', 'feeEstimate',
 ]);
 
+const ESTATE_LINKED_ASSET_FIELD_KEYS = new Set([
+  'propertyNumber',
+  'housePlotShopNumber',
+  'unitNumber',
+  'adjoiningPlotNumber',
+]);
+
+const HIDDEN_LINK_FIELD_KEYS = new Set([
+  'estateManagedAssetId',
+  'customerBusinessPartnerId',
+]);
+
 const LAND_FEE_ENTITY_TYPES = new Set([
   'EstateLandsPartiallyServiced',
   'EstateTraditionalLands',
@@ -131,6 +143,19 @@ type DepartmentOption = {
   organizationLevelId: string;
   levelName?: string | null;
 };
+
+const estateAssetReference = (asset: EstateManagedAsset) =>
+  asset.projectUnitCode || asset.assetCode;
+
+const estateAssetLabel = (asset: EstateManagedAsset) =>
+  [
+    estateAssetReference(asset),
+    asset.name,
+    asset.location || asset.town,
+    asset.propertyFileReference ? `File ${asset.propertyFileReference}` : null,
+  ]
+    .filter(Boolean)
+    .join(' - ');
 
 const LINKED_LEGAL_STAGE_EDITABLE_FIELDS: Record<string, string[]> = {
   'Legal Intake': ['assignedLegalOfficer'],
@@ -564,12 +589,21 @@ export function ProcedureCaseWorkspace({
   const [isLoadingIntakeDms, setIsLoadingIntakeDms] = React.useState(false);
   const [linkDocumentTargetId, setLinkDocumentTargetId] = React.useState<string | null>(null);
   const [newLegalFields, setNewLegalFields] = React.useState<Record<string, string | null>>(prefilledFieldValues);
+  const [newEstateFields, setNewEstateFields] = React.useState<Record<string, string | null>>(prefilledFieldValues);
   const [legalAssetSearch, setLegalAssetSearch] = React.useState(searchParams.get('field_propertyNumber') || '');
   const [legalAssets, setLegalAssets] = React.useState<EstateManagedAsset[]>([]);
   const [selectedLegalAsset, setSelectedLegalAsset] = React.useState<EstateManagedAsset | null>(null);
   const [legalAssetContext, setLegalAssetContext] = React.useState<EstateManagedAsset | null>(null);
   const [isLegalAssetContextOpen, setIsLegalAssetContextOpen] = React.useState(false);
   const [legalAssetContextError, setLegalAssetContextError] = React.useState<string | null>(null);
+  const [estateAssetSearch, setEstateAssetSearch] = React.useState(
+    searchParams.get('field_propertyNumber') ||
+      searchParams.get('field_housePlotShopNumber') ||
+      searchParams.get('field_unitNumber') ||
+      ''
+  );
+  const [estateAssets, setEstateAssets] = React.useState<EstateManagedAsset[]>([]);
+  const [selectedEstateAsset, setSelectedEstateAsset] = React.useState<EstateManagedAsset | null>(null);
   const [legalCustomers, setLegalCustomers] = React.useState<BusinessPartnerDto[]>([]);
   const [facilitiesProviders, setFacilitiesProviders] = React.useState<FacilitiesProviderOption[]>([]);
   const [isLegalContextOpen, setIsLegalContextOpen] = React.useState(false);
@@ -661,6 +695,9 @@ export function ProcedureCaseWorkspace({
   const legalAssetOptions = selectedLegalAsset && !legalAssets.some((asset) => asset.id === selectedLegalAsset.id)
     ? [selectedLegalAsset, ...legalAssets]
     : legalAssets;
+  const estateAssetOptions = selectedEstateAsset && !estateAssets.some((asset) => asset.id === selectedEstateAsset.id)
+    ? [selectedEstateAsset, ...estateAssets]
+    : estateAssets;
   const selectedCaseDepartmentValue =
     selectedCase?.organizationUnitId ||
     departmentOptions.find(
@@ -1184,6 +1221,7 @@ export function ProcedureCaseWorkspace({
       organizationUnitId: searchParams.get('organizationUnitId') || '',
     }));
     setNewLegalFields((current) => ({ ...current, ...prefilledFieldValues }));
+    setNewEstateFields((current) => ({ ...current, ...prefilledFieldValues }));
   }, [
     prefillSignature,
     prefilledCase,
@@ -1210,6 +1248,25 @@ export function ProcedureCaseWorkspace({
       window.clearTimeout(timer);
     };
   }, [isCreateDialogOpen, legalAssetSearch, module]);
+
+  React.useEffect(() => {
+    if (module !== 'Estate' || (!isCreateDialogOpen && !selectedCase)) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void estateLandManagementService.getManagedAssets({
+        search: estateAssetSearch.trim() || undefined,
+        take: 100,
+      }).then((assets) => {
+        if (active) setEstateAssets(assets);
+      }).catch(() => {
+        if (active) setEstateAssets([]);
+      });
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [estateAssetSearch, isCreateDialogOpen, module, selectedCase]);
 
   React.useEffect(() => {
     if (module !== 'Legal' || !isCreateDialogOpen) return;
@@ -1395,6 +1452,23 @@ export function ProcedureCaseWorkspace({
     try {
       const detail = await procedureCaseService.getCase(id);
       setSelectedCase(detail);
+      if (!detail) {
+        return;
+      }
+      if (module === 'Estate') {
+        const reference = detail.fields.find((field) =>
+          ESTATE_LINKED_ASSET_FIELD_KEYS.has(field.key)
+        )?.value;
+        const linkedAssetId = detail.fields.find((field) => field.key === 'estateManagedAssetId')?.value;
+        setEstateAssetSearch(reference || '');
+        if (linkedAssetId) {
+          void estateLandManagementService.getManagedAsset(linkedAssetId)
+            .then(setSelectedEstateAsset)
+            .catch(() => setSelectedEstateAsset(null));
+        } else {
+          setSelectedEstateAsset(null);
+        }
+      }
     } catch (err) {
       setError(
         err instanceof Error
@@ -1436,6 +1510,8 @@ export function ProcedureCaseWorkspace({
         description: newCase.description,
         fieldValues: module === 'Legal'
           ? { ...prefilledFieldValues, ...newLegalFields, applicantName: newCase.applicantName }
+          : module === 'Estate'
+            ? { ...prefilledFieldValues, ...newEstateFields, applicantName: newCase.applicantName }
           : prefilledFieldValues,
         hasIntakeAttachment: Boolean(intakeAttachmentMode === 'upload' ? intakeAttachmentFile : intakeDmsRecordId),
       });
@@ -1474,6 +1550,10 @@ export function ProcedureCaseWorkspace({
         setNewLegalFields({});
         setSelectedLegalAsset(null);
         toast({ title: 'Legal matter created', variant: 'success' });
+      } else if (module === 'Estate') {
+        setNewEstateFields({});
+        setSelectedEstateAsset(null);
+        toast({ title: 'Estate case created', variant: 'success' });
       } else if (registerOnly || detailOnly) {
         router.push(caseDetailHref(created.id));
       }
@@ -1486,6 +1566,92 @@ export function ProcedureCaseWorkspace({
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const estateFieldValuesForAsset = (asset: EstateManagedAsset) => {
+    const reference = estateAssetReference(asset);
+    const values: Record<string, string | null> = {
+      estateManagedAssetId: asset.id,
+      customerBusinessPartnerId: asset.customerBusinessPartnerId || null,
+      propertyNumber: reference,
+      housePlotShopNumber: reference,
+      unitNumber: reference,
+      fileReference: asset.propertyFileReference || null,
+      propertyFileReference: asset.propertyFileReference || null,
+      location: asset.location || asset.town || null,
+      applicantName: asset.lesseeName || null,
+      oldLesseeName: asset.lesseeName || null,
+      transferorName: asset.lesseeName || null,
+      lesseeName: asset.lesseeName || null,
+      addressOnRecord: asset.lesseeAddress || null,
+      oldAddress: asset.lesseeAddress || null,
+      landUse: asset.purpose || null,
+      existingUse: asset.purpose || null,
+      plotSizeAcres:
+        asset.areaUnit?.toLowerCase().includes('acre') && asset.areaValue != null
+          ? String(asset.areaValue)
+          : null,
+      plotSizeHectares:
+        asset.areaUnit?.toLowerCase().includes('hectare') && asset.areaValue != null
+          ? String(asset.areaValue)
+          : null,
+      groundRentRatePerAcre: asset.groundRentRatePerAcre != null ? String(asset.groundRentRatePerAcre) : null,
+      groundRentComputed: asset.groundRentComputed != null ? String(asset.groundRentComputed) : null,
+      groundRentPayable: asset.groundRentPayable != null ? String(asset.groundRentPayable) : null,
+      existingLayoutReference: asset.mapSheetNumber || asset.surveyPlanNumber || null,
+      originalLeaseReference: asset.propertyFileReference || null,
+    };
+
+    return Object.fromEntries(
+      Object.entries(values).filter(([, value]) => value !== null && value !== '')
+    ) as Record<string, string>;
+  };
+
+  const applyEstateAssetToSelectedCase = (asset: EstateManagedAsset) => {
+    const values = estateFieldValuesForAsset(asset);
+    setSelectedEstateAsset(asset);
+    setEstateAssetSearch(estateAssetReference(asset));
+    setNewCase((current) => ({
+      ...current,
+      applicantName: current.applicantName || asset.lesseeName || '',
+    }));
+    setSelectedCase((current) => {
+      if (!current) return current;
+      const fields = [...current.fields];
+      Object.entries(values).forEach(([key, value]) => {
+        const index = fields.findIndex((field) => field.key === key);
+        if (index >= 0) {
+          fields[index] = { ...fields[index], value };
+        } else {
+          fields.push({
+            id: `local-${key}`,
+            key,
+            label: key === 'estateManagedAssetId'
+              ? 'Linked estate asset ID'
+              : key === 'customerBusinessPartnerId'
+                ? 'Linked customer ID'
+                : key,
+            fieldType: 'text',
+            value,
+            options: null,
+          });
+        }
+      });
+      return { ...current, fields };
+    });
+  };
+
+  const applyEstateAssetToNewCase = (asset: EstateManagedAsset) => {
+    setSelectedEstateAsset(asset);
+    setEstateAssetSearch(estateAssetReference(asset));
+    setNewEstateFields((current) => ({
+      ...current,
+      ...estateFieldValuesForAsset(asset),
+    }));
+    setNewCase((current) => ({
+      ...current,
+      applicantName: current.applicantName || asset.lesseeName || '',
+    }));
   };
 
   const updateFieldValue = (key: string, value: string) => {
@@ -2167,6 +2333,9 @@ export function ProcedureCaseWorkspace({
     if (module === 'Legal' && (field.key === 'estateManagedAssetId' || field.key === 'customerBusinessPartnerId')) {
       return null;
     }
+    if (module === 'Estate' && HIDDEN_LINK_FIELD_KEYS.has(field.key)) {
+      return null;
+    }
     const isCalculated = CALCULATED_PROCEDURE_FIELD_KEYS.has(field.key);
     const isLinkedLegalReadonly =
       isLinkedLegalMatter && !linkedLegalEditableFields.has(field.key);
@@ -2232,6 +2401,45 @@ export function ProcedureCaseWorkspace({
               ))}
             </SelectContent>
           </Select>
+        </div>
+      );
+    }
+
+    if (module === 'Estate' && ESTATE_LINKED_ASSET_FIELD_KEYS.has(field.key)) {
+      const selectedAssetId = selectedCase?.fields.find((item) => item.key === 'estateManagedAssetId')?.value;
+      return (
+        <div key={field.id} className="space-y-1.5">
+          {label}
+          <Input
+            id={`${fieldId}-search`}
+            placeholder="Search property, plot, unit, file reference, or location"
+            value={estateAssetSearch}
+            disabled={isDisabled}
+            onChange={(event) => setEstateAssetSearch(event.target.value)}
+          />
+          <Select
+            value={selectedAssetId || undefined}
+            disabled={isDisabled}
+            onValueChange={(value) => {
+              const asset = estateAssetOptions.find((item) => item.id === value);
+              if (!asset) return;
+              applyEstateAssetToSelectedCase(asset);
+            }}
+          >
+            <SelectTrigger id={fieldId}>
+              <SelectValue placeholder={field.value || `Select ${field.label.toLowerCase()}`} />
+            </SelectTrigger>
+            <SelectContent>
+              {estateAssetOptions.map((asset) => (
+                <SelectItem key={asset.id} value={asset.id}>
+                  {estateAssetLabel(asset)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {field.value ? (
+            <p className="text-xs text-muted-foreground">Selected reference: {field.value}</p>
+          ) : null}
         </div>
       );
     }
@@ -2374,6 +2582,39 @@ export function ProcedureCaseWorkspace({
               ))}
             </SelectContent>
           </Select>
+        </div>
+      ) : null}
+      {module === 'Estate' ? (
+        <div className="space-y-2">
+          <label className="text-xs font-medium" htmlFor="new-estate-asset-search">Property / plot / unit</label>
+          <Input
+            id="new-estate-asset-search"
+            placeholder="Search property, plot, unit, file reference, or location"
+            value={estateAssetSearch}
+            onChange={(event) => setEstateAssetSearch(event.target.value)}
+          />
+          <Select
+            value={newEstateFields.estateManagedAssetId || undefined}
+            onValueChange={(value) => {
+              const asset = estateAssetOptions.find((item) => item.id === value);
+              if (!asset) return;
+              applyEstateAssetToNewCase(asset);
+            }}
+          >
+            <SelectTrigger id="new-estate-asset">
+              <SelectValue placeholder="Select from Estate register" />
+            </SelectTrigger>
+            <SelectContent>
+              {estateAssetOptions.map((asset) => (
+                <SelectItem key={asset.id} value={asset.id}>
+                  {estateAssetLabel(asset)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {newEstateFields.propertyNumber ? (
+            <p className="text-xs text-muted-foreground">Selected reference: {newEstateFields.propertyNumber}</p>
+          ) : null}
         </div>
       ) : null}
       {module === 'Legal' ? <label className="text-xs font-medium" htmlFor="new-legal-applicant">Applicant / party name</label> : null}

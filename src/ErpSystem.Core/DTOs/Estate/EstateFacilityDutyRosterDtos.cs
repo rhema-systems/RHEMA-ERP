@@ -3,6 +3,7 @@ namespace ErpSystem.Core.DTOs.Estate;
 public sealed record EstateFacilityDutyRosterDto(
     Guid Id,
     string RosterReference,
+    DateTime? DutyDate,
     Guid? EmployeeProfileId,
     string? EmployeeNumber,
     string StaffName,

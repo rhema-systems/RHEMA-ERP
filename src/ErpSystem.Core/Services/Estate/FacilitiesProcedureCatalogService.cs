@@ -111,7 +111,7 @@ public sealed class FacilitiesProcedureCatalogService : IFacilitiesProcedureCata
         new("Lease / Occupancy Coordination", "EstateFacilityLease", "FileCheck", 0, "sky", "Operational Queue"),
         new("Maintenance Intake", "EstateFacilityMaintenance", "Wrench", 3, "amber"),
         new("Complaint Management", "EstateFacilityComplaint", "MessageSquare", 3, "rose"),
-        new("Service Provider Management", "EstateFacilityServiceProvider", "Briefcase", 0, "violet"),
+        new("Approved Provider Assignments", "EstateFacilityServiceProvider", "Briefcase", 0, "violet"),
         new("Staff & Cleaner Duty Operations", "EstateFacilityStaffCleaner", "ClipboardCheck", 0, "emerald"),
         new("Facilities Asset Operating View", "EstateFacilityAssetRegister", "Database", 0, "indigo"),
         new("Facilities Billing / Service Charge Operations", "EstateFacilityBillingServiceCharge", "CreditCard", 0, "cyan"),

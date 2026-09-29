@@ -4782,8 +4782,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         return (
             procedure.Title,
-            [],
-            []);
+            BuildEstateFieldSeeds(procedure),
+            BuildEstateDocumentSeeds(procedure));
     }
 
     private (string Title, IReadOnlyList<FieldSeed> Fields, IReadOnlyList<DocumentSeed> Documents) BuildPropertyManagementSeed(string entityType)
@@ -4820,6 +4820,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     {
         var fields = new List<FieldSeed>
         {
+            new("estateManagedAssetId", "Linked estate asset ID", "text", null),
+            new("customerBusinessPartnerId", "Linked customer ID", "text", null),
             new("referenceNumber", "Reference number", "text", null),
             new("procedureType", "Procedure", "text", [procedure.Title]),
             new("applicantName", "Applicant / lessee / client name", "text", null),

@@ -2,18 +2,44 @@
 
 import Link from 'next/link';
 import React from 'react';
-import { Banknote, ExternalLink, FileText, RefreshCw, Search } from 'lucide-react';
+import { Banknote, Building2, ExternalLink, FileText, RefreshCw, Search } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
-import { estateFacilitiesService, type FacilitiesProviderInvoice, type FacilitiesProviderOption } from '@/services/estate-facilities.service';
+import {
+  estateFacilitiesService,
+  type FacilitiesPropertyOption,
+  type FacilitiesProviderAssignment,
+  type FacilitiesProviderAssignmentRequest,
+  type FacilitiesProviderInvoice,
+  type FacilitiesProviderOption,
+} from '@/services/estate-facilities.service';
+import { FacilitiesDutyLookup } from './FacilitiesDutyLookup';
 import { FacilitiesProviderRates } from './FacilitiesProviderRates';
 
 const PAGE_SIZE = 20;
+const todayInputValue = () => new Date().toISOString().slice(0, 10);
+
+const emptyAssignmentForm = (): FacilitiesProviderAssignmentRequest => ({
+  estateManagedAssetId: '',
+  contractId: null,
+  serviceScope: '',
+  serviceArea: '',
+  assignmentStatus: 'Active',
+  effectiveFrom: todayInputValue(),
+  effectiveTo: '',
+  schedulePattern: '',
+  supervisorName: '',
+  slaReference: '',
+  notes: '',
+});
 
 export function expiringProviderContracts(provider: FacilitiesProviderOption, today = new Date()) {
   const current = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
@@ -36,9 +62,16 @@ export function FacilitiesProviderRegister() {
   const [error, setError] = React.useState<string | null>(null);
   const [invoiceProvider, setInvoiceProvider] = React.useState<FacilitiesProviderOption | null>(null);
   const [rateProvider, setRateProvider] = React.useState<FacilitiesProviderOption | null>(null);
+  const [assignmentProvider, setAssignmentProvider] = React.useState<FacilitiesProviderOption | null>(null);
   const [invoices, setInvoices] = React.useState<FacilitiesProviderInvoice[]>([]);
+  const [assignments, setAssignments] = React.useState<FacilitiesProviderAssignment[]>([]);
+  const [assignmentForm, setAssignmentForm] = React.useState<FacilitiesProviderAssignmentRequest>(emptyAssignmentForm);
+  const [assignmentAssetLabel, setAssignmentAssetLabel] = React.useState('');
   const [invoiceLoading, setInvoiceLoading] = React.useState(false);
   const [invoiceError, setInvoiceError] = React.useState<string | null>(null);
+  const [assignmentLoading, setAssignmentLoading] = React.useState(false);
+  const [assignmentSaving, setAssignmentSaving] = React.useState(false);
+  const [assignmentError, setAssignmentError] = React.useState<string | null>(null);
 
   const openInvoices = async (provider: FacilitiesProviderOption) => {
     setInvoiceProvider(provider);
@@ -51,6 +84,48 @@ export function FacilitiesProviderRegister() {
       setInvoiceError('Unable to load provider invoices.');
     } finally {
       setInvoiceLoading(false);
+    }
+  };
+
+  const openAssignments = async (provider: FacilitiesProviderOption) => {
+    setAssignmentProvider(provider);
+    setAssignments([]);
+    setAssignmentForm({
+      ...emptyAssignmentForm(),
+      contractId: provider.contracts[0]?.id ?? null,
+    });
+    setAssignmentAssetLabel('');
+    setAssignmentError(null);
+    setAssignmentLoading(true);
+    try {
+      setAssignments(await estateFacilitiesService.getProviderAssignments(provider.id));
+    } catch {
+      setAssignmentError('Unable to load provider assignments.');
+    } finally {
+      setAssignmentLoading(false);
+    }
+  };
+
+  const saveAssignment = async () => {
+    if (!assignmentProvider) return;
+    setAssignmentSaving(true);
+    setAssignmentError(null);
+    try {
+      await estateFacilitiesService.createProviderAssignment(assignmentProvider.id, {
+        ...assignmentForm,
+        contractId: assignmentForm.contractId || null,
+        effectiveTo: assignmentForm.effectiveTo || null,
+      });
+      setAssignments(await estateFacilitiesService.getProviderAssignments(assignmentProvider.id));
+      setAssignmentForm({
+        ...emptyAssignmentForm(),
+        contractId: assignmentProvider.contracts[0]?.id ?? null,
+      });
+      setAssignmentAssetLabel('');
+    } catch (error) {
+      setAssignmentError(error instanceof Error ? error.message : 'Unable to save provider assignment.');
+    } finally {
+      setAssignmentSaving(false);
     }
   };
 
@@ -139,6 +214,10 @@ export function FacilitiesProviderRegister() {
                     aria-label={`View rates for ${provider.partnerName}`} onClick={() => setRateProvider(provider)}>
                     <Banknote className="h-4 w-4" />
                   </Button>
+                  <Button size="icon" variant="ghost" title={`Assign ${provider.partnerName} to a facility`}
+                    aria-label={`Assign ${provider.partnerName} to a facility`} onClick={() => void openAssignments(provider)}>
+                    <Building2 className="h-4 w-4" />
+                  </Button>
                   <Button size="icon" variant="ghost" title={`View invoices for ${provider.partnerName}`}
                     aria-label={`View invoices for ${provider.partnerName}`} onClick={() => void openInvoices(provider)}>
                     <FileText className="h-4 w-4" />
@@ -187,6 +266,122 @@ export function FacilitiesProviderRegister() {
                     ))}
               </TableBody>
             </Table>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={assignmentProvider !== null} onOpenChange={(open) => { if (!open) setAssignmentProvider(null); }}>
+        <DialogContent className="max-w-5xl" aria-describedby={undefined}>
+          <DialogHeader><DialogTitle>Assign {assignmentProvider?.partnerName} to facility</DialogTitle></DialogHeader>
+          {assignmentError ? <p role="alert" className="text-sm text-destructive">{assignmentError}</p> : null}
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+            <div className="space-y-3 rounded-md border p-4">
+              <div className="grid gap-2">
+                <Label>Facility / property / site</Label>
+                <FacilitiesDutyLookup<FacilitiesPropertyOption>
+                  label="facility"
+                  selectedLabel={assignmentAssetLabel}
+                  search={(query) => estateFacilitiesService.searchDutyProperties(query)}
+                  describe={(option) => ({
+                    title: `${option.assetCode} - ${option.name}`,
+                    detail: [option.location, option.projectCode, option.projectTitle].filter(Boolean).join(' | '),
+                  })}
+                  onSelect={(option) => {
+                    setAssignmentForm((current) => ({ ...current, estateManagedAssetId: option.id }));
+                    setAssignmentAssetLabel(`${option.assetCode} - ${option.name}`);
+                  }}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="provider-assignment-contract">Contract</Label>
+                <Select value={assignmentForm.contractId || 'none'} onValueChange={(value) => setAssignmentForm((current) => ({ ...current, contractId: value === 'none' ? null : value }))}>
+                  <SelectTrigger id="provider-assignment-contract"><SelectValue placeholder="Select contract" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No contract selected</SelectItem>
+                    {(assignmentProvider?.contracts ?? []).map((contract) => (
+                      <SelectItem key={contract.id} value={contract.id}>{contract.contractNumber} - {contract.contractTitle}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="provider-assignment-scope">Service scope</Label>
+                <Input id="provider-assignment-scope" value={assignmentForm.serviceScope}
+                  onChange={(event) => setAssignmentForm((current) => ({ ...current, serviceScope: event.target.value }))}
+                  placeholder="Cleaning, security, landscaping, lift servicing..." />
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="provider-assignment-area">Service area</Label>
+                  <Input id="provider-assignment-area" value={assignmentForm.serviceArea || ''}
+                    onChange={(event) => setAssignmentForm((current) => ({ ...current, serviceArea: event.target.value }))}
+                    placeholder="Block A, compound, car park..." />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="provider-assignment-status">Status</Label>
+                  <Select value={assignmentForm.assignmentStatus} onValueChange={(value) => setAssignmentForm((current) => ({ ...current, assignmentStatus: value }))}>
+                    <SelectTrigger id="provider-assignment-status"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Active">Active</SelectItem>
+                      <SelectItem value="Suspended">Suspended</SelectItem>
+                      <SelectItem value="Ended">Ended</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="provider-assignment-from">Effective from</Label>
+                  <Input id="provider-assignment-from" type="date" value={assignmentForm.effectiveFrom}
+                    onChange={(event) => setAssignmentForm((current) => ({ ...current, effectiveFrom: event.target.value }))} />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="provider-assignment-to">Effective to</Label>
+                  <Input id="provider-assignment-to" type="date" value={assignmentForm.effectiveTo || ''}
+                    onChange={(event) => setAssignmentForm((current) => ({ ...current, effectiveTo: event.target.value }))} />
+                </div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="provider-assignment-schedule">Schedule</Label>
+                  <Input id="provider-assignment-schedule" value={assignmentForm.schedulePattern || ''}
+                    onChange={(event) => setAssignmentForm((current) => ({ ...current, schedulePattern: event.target.value }))}
+                    placeholder="Mon-Fri 07:00-17:00" />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="provider-assignment-supervisor">Supervisor</Label>
+                  <Input id="provider-assignment-supervisor" value={assignmentForm.supervisorName || ''}
+                    onChange={(event) => setAssignmentForm((current) => ({ ...current, supervisorName: event.target.value }))} />
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="provider-assignment-notes">Notes</Label>
+                <Textarea id="provider-assignment-notes" value={assignmentForm.notes || ''}
+                  onChange={(event) => setAssignmentForm((current) => ({ ...current, notes: event.target.value }))} />
+              </div>
+              <Button onClick={() => void saveAssignment()} disabled={assignmentSaving || !assignmentForm.estateManagedAssetId || !assignmentForm.serviceScope.trim()}>
+                {assignmentSaving ? 'Saving...' : 'Assign provider'}
+              </Button>
+            </div>
+            <div className="max-h-[70vh] overflow-auto rounded-md border">
+              <Table>
+                <TableHeader><TableRow>
+                  <TableHead>Facility</TableHead><TableHead>Scope</TableHead><TableHead>Contract</TableHead><TableHead>Status</TableHead><TableHead>Dates</TableHead>
+                </TableRow></TableHeader>
+                <TableBody>
+                  {assignmentLoading ? <TableRow><TableCell colSpan={5}>Loading assignments...</TableCell></TableRow>
+                    : assignments.length === 0 ? <TableRow><TableCell colSpan={5}>No facility assignments yet.</TableCell></TableRow>
+                      : assignments.map((assignment) => (
+                        <TableRow key={assignment.id}>
+                          <TableCell><div className="font-medium">{assignment.assetCode || '-'}</div><div className="text-xs text-muted-foreground">{assignment.assetName || assignment.assetLocation || '-'}</div></TableCell>
+                          <TableCell><div>{assignment.serviceScope}</div>{assignment.serviceArea ? <div className="text-xs text-muted-foreground">{assignment.serviceArea}</div> : null}</TableCell>
+                          <TableCell>{assignment.contractNumber || '-'}</TableCell>
+                          <TableCell><Badge variant={assignment.assignmentStatus === 'Active' ? 'default' : 'secondary'}>{assignment.assignmentStatus}</Badge></TableCell>
+                          <TableCell><span className="text-xs">{new Date(assignment.effectiveFrom).toLocaleDateString()} {assignment.effectiveTo ? `- ${new Date(assignment.effectiveTo).toLocaleDateString()}` : 'onward'}</span></TableCell>
+                        </TableRow>
+                      ))}
+                </TableBody>
+              </Table>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
