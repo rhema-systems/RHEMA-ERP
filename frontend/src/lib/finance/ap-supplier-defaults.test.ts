@@ -6,7 +6,7 @@ const defaults: PurchaseOrderSupplierDefaultsDto = { businessPartnerId: 'bp', pa
   cashAccountSource: 'Chequebook', subjectToWithholdingDeduction: true, withholdingTaxRate: 7.5,
   defaultApAccountId: 'ap-control', defaultExpenseAccountId: 'purchases', defaultTaxGroupId: 'vat',
 } };
-const values = (): ApSupplierDefaultValues => ({ paymentTermId: '', apAccountId: '', expenseAccountId: '', taxGroupId: 'none', lineItems: [
+const values = (): ApSupplierDefaultValues => ({ paymentTermId: '', expenseAccountId: '', taxGroupId: 'none', lineItems: [
   { sourceLineId: 'expense', lineItemType: 'Expense', glAccountId: '', taxGroupId: 'none' },
   { sourceLineId: 'stock', lineItemType: 'Inventory', glAccountId: '', taxGroupId: 'none' },
 ] });
@@ -32,10 +32,10 @@ describe('visible AP supplier-default assignments', () => {
       .toContainEqual({ field: 'lineItems.0.glAccountId', value: 'purchases' });
   });
 
-  it('fills visible header accounts/payment/tax and applicable lines, but never invents a WHT tax ID', () => {
+  it('fills visible payment, tax and line-account defaults, but never exposes an AP control override or invents a WHT tax ID', () => {
     const plan = planApSupplierDefaults(values(), defaults, new Set(), taxes);
     expect(plan.assignments).toContainEqual({ field: 'paymentTermId', value: 'net30' });
-    expect(plan.assignments).toContainEqual({ field: 'apAccountId', value: 'ap-control' });
+    expect(plan.assignments).not.toContainEqual(expect.objectContaining({ field: 'apAccountId' }));
     expect(plan.assignments).toContainEqual({ field: 'expenseAccountId', value: 'purchases' });
     expect(plan.assignments).toContainEqual({ field: 'lineItems.0.glAccountId', value: 'purchases' });
     expect(plan.assignments).not.toContainEqual(expect.objectContaining({ field: 'lineItems.1.glAccountId' }));
@@ -64,10 +64,10 @@ describe('visible AP supplier-default assignments', () => {
     expect(plan.allowServerDefaults).toBe(false);
   });
 
-  it('keeps explicit payment terms and GL overrides, including an explicitly cleared AP account', () => {
-    const edited = new Set(['paymentTermId', 'apAccountId', 'expense:glAccountId']);
+  it('keeps explicit payment terms and GL overrides', () => {
+    const edited = new Set(['paymentTermId', 'expense:glAccountId']);
     const plan = planApSupplierDefaults(values(), defaults, edited, taxes);
-    expect(plan.assignments.some(item => ['paymentTermId', 'apAccountId', 'lineItems.0.glAccountId'].includes(item.field))).toBe(false);
+    expect(plan.assignments.some(item => ['paymentTermId', 'lineItems.0.glAccountId'].includes(item.field))).toBe(false);
     expect(plan.allowServerDefaults).toBe(false);
   });
 
@@ -82,9 +82,7 @@ describe('visible AP supplier-default assignments', () => {
   it('keeps nonstandard tax treatments and already applied values unchanged', () => {
     const current = values();
     current.lineItems[0].taxTreatment = 3;
-    current.apAccountId = 'ap-control';
     const plan = planApSupplierDefaults(current, defaults, new Set(), taxes);
     expect(plan.assignments).not.toContainEqual(expect.objectContaining({ field: 'lineItems.0.taxGroupId' }));
-    expect(plan.assignments).not.toContainEqual(expect.objectContaining({ field: 'apAccountId' }));
   });
 });

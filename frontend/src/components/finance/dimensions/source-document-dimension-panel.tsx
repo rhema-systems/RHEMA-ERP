@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, LockKeyhole } from 'lucide-react';
+import { LockKeyhole } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import {
@@ -190,18 +190,6 @@ export function SourceDocumentDimensionPanel({
           </div>
         ))}
       </div>
-      {certificationState === 'CaptureOptional' && (
-        <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/60 p-3 text-xs text-amber-800">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <div>
-            <p className="font-medium">Dimension validation is in pilot mode</p>
-            <p className="mt-0.5">
-              Missing required coding is currently reported as a warning and will not block this invoice.
-              Any coding entered must still comply with Finance’s fixed and prohibited-value rules.
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

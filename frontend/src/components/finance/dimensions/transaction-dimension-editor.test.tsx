@@ -230,7 +230,7 @@ describe('multi-account source-line dimension editor', () => {
     });
   });
 
-  it('explains account selection and optional rollout behavior in business language', () => {
+  it('explains the actionable account-selection requirement without exposing rollout terminology', () => {
     render(
       <SourceDocumentDimensionPanel
         context={context}
@@ -253,8 +253,6 @@ describe('multi-account source-line dimension editor', () => {
     expect(
       screen.getByText(/Select this line’s GL account above/)
     ).toBeInTheDocument();
-    expect(
-      screen.getByText('Dimension validation is in pilot mode')
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/pilot mode/i)).not.toBeInTheDocument();
   });
 });

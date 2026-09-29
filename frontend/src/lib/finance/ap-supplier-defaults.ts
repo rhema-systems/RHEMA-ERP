@@ -9,7 +9,6 @@ export interface ApSupplierDefaultLine {
 }
 export interface ApSupplierDefaultValues {
   paymentTermId?: string;
-  apAccountId?: string;
   expenseAccountId?: string;
   taxGroupId?: string;
   lineItems: ApSupplierDefaultLine[];
@@ -31,7 +30,6 @@ export function planApSupplierDefaults(values: ApSupplierDefaultValues, defaults
     if (!edited.has(field) && (current || '') !== next) assignments.push({ field, value: next });
   };
   if (defaults.paymentTermId) assign('paymentTermId', values.paymentTermId, defaults.paymentTermId);
-  assign('apAccountId', values.apAccountId, posting.defaultApAccountId);
   assign('expenseAccountId', values.expenseAccountId, posting.defaultExpenseAccountId);
   if (!taxUnavailable) assign('taxGroupId', values.taxGroupId, posting.defaultTaxGroupId || 'none');
   values.lineItems.forEach((line, index) => {
