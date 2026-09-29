@@ -517,7 +517,7 @@ public interface IAppraisalScoreService
     /// The top of an item's own scale: its highest grade band, or 100 when it has none. A KPI's
     /// score is an achievement percentage, so its top is always 100.
     /// </summary>
-    Task<decimal> GetScaleTopAsync(AppraisalCriterionScoring scoring, Guid templateItemId, CancellationToken cancellationToken = default);
+    Task<decimal> GetScaleTopAsync(AppraisalCriterionScoring scoring, Guid criterionKey, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Checks each input against its item's own scale (A11). Returns the message to show, or null

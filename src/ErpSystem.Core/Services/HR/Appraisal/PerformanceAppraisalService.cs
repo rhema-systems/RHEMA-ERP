@@ -14,7 +14,7 @@ namespace ErpSystem.Core.Services.HR;
 
 #region Performance Appraisal
 
-public class PerformanceAppraisalService : IPerformanceAppraisalService
+public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 {
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly IGenericRepository<Employee> _employeeRepository;
@@ -33,6 +33,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     private readonly IGenericRepository<AppraisalKpiEvaluationSnapshot> _kpiEvaluationSnapshotRepository;
     private readonly IGenericRepository<PerformanceAppraisalCriterionConfig> _criterionConfigRepository;
     private readonly IGenericRepository<EmployeeGoalAppraisalAssessment> _goalAssessmentRepository;
+    private readonly IGenericRepository<EmployeeGoal> _goalRepository;
     private readonly IGenericRepository<AppraisalHRReview> _hrReviewRepository;
     private readonly IGenericRepository<AppraisalGradeDefinition> _gradeDefinitionRepository;
     private readonly IAppraisalScoreService _scores;
@@ -63,6 +64,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         IGenericRepository<AppraisalKpiEvaluationSnapshot> kpiEvaluationSnapshotRepository,
         IGenericRepository<PerformanceAppraisalCriterionConfig> criterionConfigRepository,
         IGenericRepository<EmployeeGoalAppraisalAssessment> goalAssessmentRepository,
+        IGenericRepository<EmployeeGoal> goalRepository,
         IGenericRepository<AppraisalHRReview> hrReviewRepository,
         IGenericRepository<AppraisalGradeDefinition> gradeDefinitionRepository,
         IAppraisalScoreService scores,
@@ -90,6 +92,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         _kpiEvaluationSnapshotRepository = kpiEvaluationSnapshotRepository;
         _criterionConfigRepository = criterionConfigRepository;
         _goalAssessmentRepository = goalAssessmentRepository;
+        _goalRepository = goalRepository;
         _hrReviewRepository = hrReviewRepository;
         _gradeDefinitionRepository = gradeDefinitionRepository;
         _scores = scores;
@@ -182,19 +185,19 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     }
 
     /// <summary>
-    /// Each criterion's weight in its section as the appraisal was scored: the snapshot's
-    /// <c>WeightUsed</c>, not today's template (A12). An appraisal generated before the snapshot
-    /// existed reads its template, as its scoring does.
+    /// Each criterion's weight in its section as the appraisal was scored, by criterion key: the
+    /// snapshot's <c>WeightUsed</c>, not today's template (A12), goal rows included (lane L3). An
+    /// appraisal generated before the snapshot existed reads its template, as its scoring does.
     /// </summary>
     private async Task<Dictionary<Guid, int>> ItemWeightsAsync(PerformanceAppraisal appraisal, CancellationToken cancellationToken)
     {
         var snapshot = await _criterionConfigRepository.GetQueryable()
-            .Where(c => c.TenantId == appraisal.TenantId && c.PerformanceAppraisalId == appraisal.Id && c.TemplateItemId != null)
-            .Select(c => new { TemplateItemId = c.TemplateItemId!.Value, c.WeightUsed })
+            .Where(c => c.TenantId == appraisal.TenantId && c.PerformanceAppraisalId == appraisal.Id)
+            .Select(c => new { Key = c.TemplateItemId ?? c.Id, c.WeightUsed })
             .ToListAsync(cancellationToken);
 
         if (snapshot.Count > 0)
-            return snapshot.GroupBy(c => c.TemplateItemId).ToDictionary(g => g.Key, g => g.First().WeightUsed);
+            return snapshot.GroupBy(c => c.Key).ToDictionary(g => g.Key, g => g.First().WeightUsed);
 
         return await _templateItemRepository.GetQueryable()
             .Where(i => i.Section.AppraisalTemplateId == appraisal.AppraisalTemplateId)
@@ -1018,6 +1021,10 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         if (scaleError != null)
             return new SelfEvaluationResultDto { Success = false, Message = scaleError };
 
+        // One query for the whole form, not three or four per item; each input resolves against it
+        // to the criterion it names (lane L3).
+        var scoring = await _scores.LoadScoringAsync(appraisal.Id, cancellationToken);
+
         // Validate all KPIs are evaluated if submitting (not draft)
         if (!saveDto.IsDraft)
         {
@@ -1062,7 +1069,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 {
                     var submittedCompetencyIds = saveDto.ItemScores
                         .Where(r => r.NumericScore.HasValue)
-                        .Select(r => r.TemplateItemId)
+                        .Select(r => scoring.Resolve(r)?.Key)
                         .ToHashSet();
 
                     var missing = requiredCompetencyIds
@@ -1121,10 +1128,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
             // Save or update scores (KPI and competency items unified under ItemScores)
             var allowSelfSoftSkillRating = appraisal.AppraisalCycle?.AppraisalSettings?.AllowSelfSoftSkillRating ?? false;
-
-            // One query for the whole form, not three or four per item. Declared out here because
-            // the submit branch below reuses it to recompute the total.
-            var scoring = await _scores.LoadScoringAsync(appraisal.Id, cancellationToken);
+            var scoredThisSave = new List<CriterionScore>();
 
             if (saveDto.ItemScores.Any())
             {
@@ -1136,11 +1140,12 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
                 foreach (var itemInput in saveDto.ItemScores)
                 {
+                    // The criterion the input names — a template item, or a goal row's snapshot id.
+                    var criterion = scoring.Resolve(itemInput)
+                        ?? throw new InvalidOperationException("An item on this form is not one of this appraisal's criteria.");
+
                     // Check if criterion score already exists
-                    var existingScore = await TenantCriterionScoreQuery()
-                        .FirstOrDefaultAsync(cs => cs.EvaluatorEvaluationId == evaluatorEvaluation.Id
-                                                 && cs.TemplateItemId == itemInput.TemplateItemId,
-                                           cancellationToken);
+                    var existingScore = await FindScoreAsync(evaluatorEvaluation.Id, criterion, cancellationToken);
 
                     if (existingScore == null)
                     {
@@ -1149,7 +1154,8 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                         {
                             TenantId = appraisal.TenantId,
                             EvaluatorEvaluationId = evaluatorEvaluation.Id,
-                            TemplateItemId = itemInput.TemplateItemId,
+                            TemplateItemId = criterion.TemplateItemId,
+                            CriterionConfigId = criterion.CriterionConfigId,
                             NumericScore = itemInput.NumericScore,
                             ActualValue  = itemInput.ActualValue,
                             Notes = itemInput.Notes
@@ -1159,10 +1165,12 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                         await _scores.ScoreCriterionAsync(newScore, scoring, cancellationToken);
 
                         await _criterionScoreRepository.AddAsync(newScore);
+                        scoredThisSave.Add(newScore);
                     }
                     else
                     {
                         // Update existing score
+                        existingScore.CriterionConfigId ??= criterion.CriterionConfigId;
                         existingScore.NumericScore = itemInput.NumericScore;
                         existingScore.ActualValue  = itemInput.ActualValue;
                         existingScore.Notes = itemInput.Notes;
@@ -1171,6 +1179,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                         await _scores.ScoreCriterionAsync(existingScore, scoring, cancellationToken);
 
                         await _criterionScoreRepository.UpdateAsync(existingScore);
+                        scoredThisSave.Add(existingScore);
                     }
                 }
             }
@@ -1241,56 +1250,12 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 }
             }
 
-            // Upsert goal appraisal assessments (self-assessment fields)
-            if (saveDto.GoalAssessments != null && saveDto.GoalAssessments.Count > 0)
-            {
-                var goalLookup = appraisal.Goals?.ToDictionary(g => g.Id) ?? new Dictionary<Guid, EmployeeGoal>();
-
-                foreach (var ga in saveDto.GoalAssessments)
-                {
-                    // Derive FinalProgressPercent server-side for KPI goals so the stored
-                    // value always reflects the goal's measurement semantics rather than
-                    // whatever the client slider happened to be set to.
-                    decimal? computedProgress = ga.FinalProgressPercent;
-                    if (goalLookup.TryGetValue(ga.GoalId, out var goal)
-                        && goal.KpiDefinitionId.HasValue
-                        && goal.MeasurementType != MeasurementType.Boolean
-                        && ga.FinalActualValue.HasValue)
-                    {
-                        computedProgress = CalculateKpiAchievement(
-                            ga.FinalActualValue.Value, goal.TargetValue, goal.MinValue, goal.MaxValue);
-                    }
-
-                    var existing = await _goalAssessmentRepository.GetQueryable()
-                        .FirstOrDefaultAsync(a => a.EmployeeGoalId == ga.GoalId
-                                               && a.PerformanceAppraisalId == appraisal.Id,
-                                           cancellationToken);
-
-                    if (existing == null)
-                    {
-                        await _goalAssessmentRepository.AddAsync(new EmployeeGoalAppraisalAssessment
-                        {
-                            EmployeeGoalId          = ga.GoalId,
-                            PerformanceAppraisalId  = appraisal.Id,
-                            TenantId                = appraisal.TenantId,
-                            SelfFinalProgressPercent = computedProgress,
-                            SelfFinalStatus         = ga.FinalStatus,
-                            SelfFinalActualValue    = ga.FinalActualValue,
-                            SelfAssessmentNotes     = ga.AssessmentNotes,
-                            SelfEvidenceLinks       = ga.EvidenceLinks
-                        });
-                    }
-                    else
-                    {
-                        existing.SelfFinalProgressPercent = computedProgress;
-                        existing.SelfFinalStatus         = ga.FinalStatus;
-                        existing.SelfFinalActualValue    = ga.FinalActualValue;
-                        existing.SelfAssessmentNotes     = ga.AssessmentNotes;
-                        existing.SelfEvidenceLinks       = ga.EvidenceLinks;
-                        await _goalAssessmentRepository.UpdateAsync(existing);
-                    }
-                }
-            }
+            // The employee's side of the year-end goal assessments, and the goal rows scored here
+            // mirrored into them (lane L3).
+            var assessmentError = await SaveGoalAssessmentsAsync(
+                appraisal, managerSide: false, saveDto.GoalAssessments, scoredThisSave, scoring, cancellationToken);
+            if (assessmentError != null)
+                return new SelfEvaluationResultDto { Success = false, Message = assessmentError };
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -1550,6 +1515,9 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             {
                 AppraisalEvaluationSnapshotId = evaluationSnapshot.Id,
                 TemplateItemId = criterionScore.TemplateItemId,
+                // A goal row has only its snapshot id, and a measured row only its actual (lane L3).
+                CriterionConfigId = criterionScore.CriterionConfigId,
+                ActualValue = criterionScore.ActualValue,
                 NumericScore = criterionScore.NumericScore,
                 WeightedScore = criterionScore.WeightedScore,
                 Notes = criterionScore.Notes,
@@ -1729,9 +1697,10 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 .FirstOrDefault();
             if (latestAppeal?.Items != null)
             {
+                // By criterion key, so an appealed goal row is marked too (lane L3).
                 appealedCriteriaIds = latestAppeal.Items
-                    .Where(item => item.TemplateItemId.HasValue)
-                    .Select(item => item.TemplateItemId!.Value)
+                    .Where(item => item.TemplateItemId.HasValue || item.CriterionConfigId.HasValue)
+                    .Select(item => item.CriterionKey())
                     .ToList();
             }
         }
@@ -1890,6 +1859,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
         // One query for the whole form, not three or four per item.
         var scoring = await _scores.LoadScoringAsync(appraisal.Id, cancellationToken);
+        var scoredThisSave = new List<CriterionScore>();
 
         // Save criterion scores from ItemScores (covers both KPI and competency items)
         foreach (var itemInput in saveDto.ItemScores)
@@ -1897,13 +1867,15 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             if (!itemInput.NumericScore.HasValue && !itemInput.ActualValue.HasValue)
                 continue;
 
-            var existingScore = await TenantCriterionScoreQuery()
-                .FirstOrDefaultAsync(cs => cs.EvaluatorEvaluationId == managerEvaluation.Id
-                                        && cs.TemplateItemId == itemInput.TemplateItemId,
-                                      cancellationToken);
+            // The criterion the input names — a template item, or a goal row's snapshot id (L3).
+            var criterion = scoring.Resolve(itemInput)
+                ?? throw new InvalidOperationException("An item on this form is not one of this appraisal's criteria.");
+
+            var existingScore = await FindScoreAsync(managerEvaluation.Id, criterion, cancellationToken);
 
             if (existingScore != null)
             {
+                existingScore.CriterionConfigId ??= criterion.CriterionConfigId;
                 existingScore.NumericScore = itemInput.NumericScore;
                 existingScore.ActualValue  = itemInput.ActualValue;
                 existingScore.Notes = itemInput.Notes;
@@ -1916,7 +1888,8 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 {
                     Id = Guid.NewGuid(),
                     EvaluatorEvaluationId = managerEvaluation.Id,
-                    TemplateItemId = itemInput.TemplateItemId,
+                    TemplateItemId = criterion.TemplateItemId,
+                    CriterionConfigId = criterion.CriterionConfigId,
                     NumericScore = itemInput.NumericScore,
                     ActualValue  = itemInput.ActualValue,
                     Notes = itemInput.Notes,
@@ -1934,6 +1907,8 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 await _scores.ScoreCriterionAsync(existingScore, scoring, cancellationToken);
                 await _criterionScoreRepository.AddAsync(existingScore);
             }
+
+            scoredThisSave.Add(existingScore);
         }
 
         // Update overall notes and recommendation
@@ -2013,54 +1988,12 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         if (!managerEvaluationIsNew)
             await _evaluatorEvaluationRepository.UpdateAsync(managerEvaluation);
 
-        // Upsert goal appraisal assessments (manager-side fields)
-        if (saveDto.GoalAssessments != null && saveDto.GoalAssessments.Count > 0)
-        {
-            var goalLookup = appraisal.Goals?.ToDictionary(g => g.Id) ?? new Dictionary<Guid, EmployeeGoal>();
-
-            foreach (var ga in saveDto.GoalAssessments)
-            {
-                // Derive FinalProgressPercent server-side for KPI goals
-                decimal? computedProgress = ga.FinalProgressPercent;
-                if (goalLookup.TryGetValue(ga.GoalId, out var goal)
-                    && goal.KpiDefinitionId.HasValue
-                    && goal.MeasurementType != MeasurementType.Boolean
-                    && ga.FinalActualValue.HasValue)
-                {
-                    computedProgress = CalculateKpiAchievement(
-                        ga.FinalActualValue.Value, goal.TargetValue, goal.MinValue, goal.MaxValue);
-                }
-
-                var existing = await _goalAssessmentRepository.GetQueryable()
-                    .FirstOrDefaultAsync(a => a.EmployeeGoalId == ga.GoalId
-                                           && a.PerformanceAppraisalId == appraisal.Id,
-                                       cancellationToken);
-
-                if (existing == null)
-                {
-                    await _goalAssessmentRepository.AddAsync(new EmployeeGoalAppraisalAssessment
-                    {
-                        EmployeeGoalId             = ga.GoalId,
-                        PerformanceAppraisalId     = appraisal.Id,
-                        TenantId                   = appraisal.TenantId,
-                        ManagerFinalProgressPercent = computedProgress,
-                        ManagerFinalStatus         = ga.FinalStatus,
-                        ManagerFinalActualValue    = ga.FinalActualValue,
-                        ManagerAssessmentNotes     = ga.AssessmentNotes,
-                        ManagerEvidenceLinks       = ga.EvidenceLinks
-                    });
-                }
-                else
-                {
-                    existing.ManagerFinalProgressPercent = computedProgress;
-                    existing.ManagerFinalStatus         = ga.FinalStatus;
-                    existing.ManagerFinalActualValue    = ga.FinalActualValue;
-                    existing.ManagerAssessmentNotes     = ga.AssessmentNotes;
-                    existing.ManagerEvidenceLinks       = ga.EvidenceLinks;
-                    await _goalAssessmentRepository.UpdateAsync(existing);
-                }
-            }
-        }
+        // The manager's side of the year-end goal assessments, and the goal rows scored here
+        // mirrored into them (lane L3).
+        var assessmentError = await SaveGoalAssessmentsAsync(
+            appraisal, managerSide: true, saveDto.GoalAssessments, scoredThisSave, scoring, cancellationToken);
+        if (assessmentError != null)
+            return new ManagerEvaluationResultDto { Success = false, Message = assessmentError };
 
         // Saved first: the gates read what is saved.
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2361,6 +2294,28 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
         if (submitDto.AppealedItems == null || !submitDto.AppealedItems.Any())
             throw new ArgumentException("At least one item must be appealed.");
+
+        // A goal row is named by its snapshot row, which must be this appraisal's; a template row
+        // named that way takes its template item from the row (lane L3). Whether a template item
+        // named directly belongs to the appraisal is lane C8's check.
+        var appealedConfigIds = submitDto.AppealedItems
+            .Where(i => i.CriterionConfigId.HasValue)
+            .Select(i => i.CriterionConfigId!.Value)
+            .Distinct()
+            .ToList();
+        var appealedTemplateItemIds = submitDto.AppealedItems
+            .Where(i => i.TemplateItemId.HasValue)
+            .Select(i => i.TemplateItemId!.Value)
+            .Distinct()
+            .ToList();
+        var appealedRows = await _criterionConfigRepository.GetQueryable()
+            .Where(c => c.TenantId == appraisal.TenantId && c.PerformanceAppraisalId == appraisal.Id
+                     && (appealedConfigIds.Contains(c.Id)
+                         || (c.TemplateItemId != null && appealedTemplateItemIds.Contains(c.TemplateItemId.Value))))
+            .Select(c => new { c.Id, c.TemplateItemId })
+            .ToListAsync(cancellationToken);
+        if (appealedConfigIds.Any(id => appealedRows.All(r => r.Id != id)))
+            throw new ArgumentException("An appealed item is not one of this appraisal's criteria.");
         
         // Create appeal
         var appeal = new AppraisalAppeal
@@ -2383,12 +2338,16 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         var appealItems = new List<AppraisalAppealItem>();
         foreach (var item in submitDto.AppealedItems)
         {
+            var row = item.CriterionConfigId is Guid configId
+                ? appealedRows.First(r => r.Id == configId)
+                : appealedRows.FirstOrDefault(r => item.TemplateItemId.HasValue && r.TemplateItemId == item.TemplateItemId);
             appealItems.Add(new AppraisalAppealItem
             {
                 Id = Guid.NewGuid(),
                 TenantId = appraisal.TenantId,
                 AppraisalAppealId = appeal.Id,
-                TemplateItemId = item.TemplateItemId,
+                TemplateItemId = row != null ? row.TemplateItemId : item.TemplateItemId,
+                CriterionConfigId = row?.Id,
                 Reason = item.Reason,
                 CreatedBy = employeeId.ToString(),
                 CreatedAt = DateTime.UtcNow
@@ -2428,6 +2387,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 TenantId = ai.TenantId,
                 AppraisalAppealId = ai.AppraisalAppealId,
                 TemplateItemId = ai.TemplateItemId,
+                CriterionConfigId = ai.CriterionConfigId,
                 Reason = ai.Reason
             }).ToList()
         };
@@ -2584,6 +2544,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         // Load the appeal with related data
         var appeal = await TenantAppealQuery()
             .Include(a => a.Items)
+                .ThenInclude(i => i.CriterionConfig)
             .Include(a => a.Reviewer)
             .FirstOrDefaultAsync(a => a.PerformanceAppraisalId == appraisalId, cancellationToken);
         
@@ -2622,6 +2583,27 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                     OriginalScore = score?.NumericScore,
                     TargetValue = null,
                     ActualValue = null
+                });
+            }
+            else if (item.CriterionConfigId is Guid configId)
+            {
+                // A goal row (lane L3): named by the snapshot, scored by the manager's row on it.
+                var score = await TenantCriterionScoreQuery()
+                    .FirstOrDefaultAsync(cs =>
+                        cs.CriterionConfigId == configId &&
+                        cs.EvaluatorEvaluation.AppraisalId == appraisalId &&
+                        cs.EvaluatorEvaluation.EvaluatorRole == EvaluatorRole.Manager,
+                        cancellationToken);
+
+                appealedItemsView.Add(new AppealedItemViewDto
+                {
+                    ItemId = item.Id,
+                    ItemType = "Goal",
+                    ItemName = item.CriterionConfig?.ItemLabel ?? "Goal",
+                    Reason = item.Reason,
+                    OriginalScore = score?.NumericScore,
+                    TargetValue = item.CriterionConfig?.KpiTargetValue,
+                    ActualValue = score?.ActualValue
                 });
             }
         }
@@ -2711,9 +2693,10 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         if (!appraisal.HasAppeal)
             throw new InvalidOperationException("No appeal exists for this appraisal");
 
-        // Load the appeal
+        // Load the appeal — with each item's snapshot row, which names a goal row (lane L3)
         var appeal = await TenantAppealQuery()
             .Include(a => a.Items)
+                .ThenInclude(i => i.CriterionConfig)
             .FirstOrDefaultAsync(a => a.PerformanceAppraisalId == appraisalId, cancellationToken);
 
         if (appeal == null)
@@ -2774,16 +2757,19 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             AppraisalSettingsName = settings.SettingsName
         };
 
-        // Load appealed items details
+        // Load appealed items details — a goal row by its snapshot row (lane L3).
         foreach (var item in appeal.Items)
         {
-            if (item.TemplateItemId.HasValue)
+            if (item.TemplateItemId.HasValue || item.CriterionConfigId.HasValue)
             {
                 // Load criteria details
-                var scores = await TenantCriterionScoreQuery()
+                var scoresQuery = TenantCriterionScoreQuery()
                     .Include(cs => cs.EvaluatorEvaluation)
-                    .Where(cs => cs.TemplateItemId == item.TemplateItemId.Value && cs.EvaluatorEvaluation.AppraisalId == appraisalId)
-                    .ToListAsync(cancellationToken);
+                    .Where(cs => cs.EvaluatorEvaluation.AppraisalId == appraisalId);
+                scoresQuery = item.TemplateItemId is Guid appealedTemplateItemId
+                    ? scoresQuery.Where(cs => cs.TemplateItemId == appealedTemplateItemId)
+                    : scoresQuery.Where(cs => cs.CriterionConfigId == item.CriterionConfigId);
+                var scores = await scoresQuery.ToListAsync(cancellationToken);
 
                 var managerScore = scores.FirstOrDefault(s => s.EvaluatorEvaluation.EvaluatorRole == EvaluatorRole.Manager);
                 var selfScore = scores.FirstOrDefault(s => s.EvaluatorEvaluation.EvaluatorRole == EvaluatorRole.Self);
@@ -2791,8 +2777,11 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 var criterionDto = new AppealedCriterionReviewDto
                 {
                     AppealItemId = item.Id,
-                    TemplateItemId = item.TemplateItemId.Value,
-                    ItemName = item.TemplateItem?.Competency?.CriteriaName ?? item.TemplateItem?.KpiDefinition?.KpiName ?? string.Empty,
+                    TemplateItemId = item.TemplateItemId,
+                    CriterionConfigId = item.CriterionConfigId,
+                    CriterionKey = item.CriterionKey(),
+                    ItemName = item.TemplateItem?.Competency?.CriteriaName ?? item.TemplateItem?.KpiDefinition?.KpiName
+                               ?? item.CriterionConfig?.ItemLabel ?? string.Empty,
                     ItemDescription = item.TemplateItem?.Competency?.Description ?? string.Empty,
                     Weight = 0, // Weight already reflected in WeightedScore
                     AppealReason = item.Reason,
@@ -2853,6 +2842,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 resolveDto.CriteriaModifications.Select(m => new EvaluationItemInputDto
                 {
                     TemplateItemId = m.TemplateItemId,
+                    CriterionConfigId = m.CriterionConfigId,
                     NumericScore = m.NewScore,
                 }),
                 cancellationToken);
@@ -2866,14 +2856,20 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         {
             if (resolveDto.CriteriaModifications != null)
             {
+                // A modification names its criterion as a form input does: a template item, or a
+                // goal row's snapshot id (lane L3).
+                var modScoring = await _scores.LoadScoringAsync(appraisalId, cancellationToken);
+                var managerEval = await TenantEvaluationQuery()
+                    .FirstOrDefaultAsync(e => e.AppraisalId == appraisalId && e.EvaluatorRole == EvaluatorRole.Manager, cancellationToken);
                 foreach (var mod in resolveDto.CriteriaModifications)
                 {
-                    var scores = await TenantCriterionScoreQuery()
-                        .Include(cs => cs.EvaluatorEvaluation)
-                        .Where(cs => cs.TemplateItemId == mod.TemplateItemId && 
-                                   cs.EvaluatorEvaluation.AppraisalId == appraisalId &&
-                                   cs.EvaluatorEvaluation.EvaluatorRole == EvaluatorRole.Manager)
-                        .FirstOrDefaultAsync(cancellationToken);
+                    // Validated above, so the modification names one of this appraisal's criteria.
+                    var criterion = modScoring.Resolve(new EvaluationItemInputDto
+                    {
+                        TemplateItemId = mod.TemplateItemId,
+                        CriterionConfigId = mod.CriterionConfigId,
+                    })!;
+                    var scores = managerEval == null ? null : await FindScoreAsync(managerEval.Id, criterion, cancellationToken);
 
                     if (scores != null)
                     {
@@ -3035,6 +3031,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 TenantId = ai.TenantId,
                 AppraisalAppealId = ai.AppraisalAppealId,
                 TemplateItemId = ai.TemplateItemId,
+                CriterionConfigId = ai.CriterionConfigId,
                 Reason = ai.Reason
             }).ToList()
         };
@@ -3087,7 +3084,10 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             .Include(e => e.CriterionScores)
                 .ThenInclude(cs => cs.TemplateItem)
                     .ThenInclude(ti => ti.KpiDefinition)
+            .Include(e => e.CriterionScores)
+                .ThenInclude(cs => cs.CriterionConfig)
             .Where(e => e.AppraisalId == appraisalId && e.EvaluatorRole == EvaluatorRole.Manager)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(cancellationToken);
 
         if (currentManagerEval == null || !currentManagerEval.SubmittedDate.HasValue)
@@ -3130,30 +3130,33 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             HRCanModifyScores = settings?.HRCanModifyScores ?? false
         };
 
-        // Build criterion comparisons
-        var appealedTemplateItemIds = latestAppeal.Items
-            .Where(i => i.TemplateItemId.HasValue)
-            .Select(i => i.TemplateItemId!.Value)
+        // Build criterion comparisons, paired by criterion key — a goal row has no template item
+        // (lane L3).
+        var appealedKeys = latestAppeal.Items
+            .Where(i => i.TemplateItemId.HasValue || i.CriterionConfigId.HasValue)
+            .Select(i => i.CriterionKey())
             .ToHashSet();
 
         foreach (var currentScore in currentManagerEval.CriterionScores)
         {
-            var templateItemId = currentScore.TemplateKey();
+            var key = currentScore.CriterionKey();
             var competency = currentScore.TemplateItem?.Competency;
 
             var snapshotScore = snapshot?.CriterionScores
-                .FirstOrDefault(s => s.TemplateItemId == templateItemId);
+                .FirstOrDefault(s => (s.TemplateItemId.HasValue || s.CriterionConfigId.HasValue) && s.CriterionKey() == key);
 
             var appealItem = latestAppeal.Items
-                .FirstOrDefault(i => i.TemplateItemId == templateItemId);
+                .FirstOrDefault(i => (i.TemplateItemId.HasValue || i.CriterionConfigId.HasValue) && i.CriterionKey() == key);
 
             result.CriteriaComparisons.Add(new CriterionScoreComparisonDto
             {
-                TemplateItemId = templateItemId,
-                ItemName = competency?.CriteriaName ?? currentScore.TemplateItem?.KpiDefinition?.KpiName ?? string.Empty,
+                TemplateItemId = currentScore.TemplateItemId,
+                CriterionConfigId = currentScore.CriterionConfigId,
+                CriterionKey = key,
+                ItemName = currentScore.CriterionName(),
                 ItemDescription = competency?.Description ?? string.Empty,
-                Weight = positionMappings.GetValueOrDefault(templateItemId, 0),
-                WasAppealed = appealedTemplateItemIds.Contains(templateItemId),
+                Weight = positionMappings.GetValueOrDefault(key, 0),
+                WasAppealed = appealedKeys.Contains(key),
                 AppealReason = appealItem?.Reason,
                 
                 PreRemandScore = snapshotScore?.NumericScore,
@@ -3268,6 +3271,10 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 .ThenInclude(ap => ap.Items)
                     .ThenInclude(i => i.TemplateItem)
                         .ThenInclude(ti => ti.KpiDefinition)
+            .Include(a => a.Appeals)
+                .ThenInclude(ap => ap.Items)
+                    .ThenInclude(i => i.CriterionConfig)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(a => a.Id == appraisalId, cancellationToken);
 
         if (appraisal == null)
@@ -3304,7 +3311,10 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             .Include(e => e.CriterionScores)
                 .ThenInclude(cs => cs.TemplateItem)
                     .ThenInclude(ti => ti.KpiDefinition)
+            .Include(e => e.CriterionScores)
+                .ThenInclude(cs => cs.CriterionConfig)
             .Where(e => e.AppraisalId == appraisalId && e.EvaluatorRole == EvaluatorRole.Manager)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(cancellationToken);
 
         if (managerEval == null)
@@ -3350,34 +3360,41 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         {
             if (item.TemplateItemId.HasValue)
             {
-                var itemName = item.TemplateItem?.Competency?.CriteriaName 
-                    ?? item.TemplateItem?.KpiDefinition?.KpiName 
+                var itemName = item.TemplateItem?.Competency?.CriteriaName
+                    ?? item.TemplateItem?.KpiDefinition?.KpiName
                     ?? "Unknown";
                 result.AppealedItems.Add($"Criterion: {itemName}");
             }
+            else if (item.CriterionConfigId.HasValue)
+            {
+                result.AppealedItems.Add($"Goal: {item.CriterionConfig?.ItemLabel ?? "Unknown"}");
+            }
         }
 
-        // Build final criterion scores
-        var appealedTemplateItemIds = latestAppeal.Items
-            .Where(i => i.TemplateItemId.HasValue)
-            .Select(i => i.TemplateItemId!.Value)
+        // Build final criterion scores, by criterion key (lane L3)
+        var appealedKeys = latestAppeal.Items
+            .Where(i => i.TemplateItemId.HasValue || i.CriterionConfigId.HasValue)
+            .Select(i => i.CriterionKey())
             .ToHashSet();
 
         foreach (var score in managerEval.CriterionScores)
         {
             var competency = score.TemplateItem?.Competency;
-            var templateItemId = score.TemplateKey();
+            var key = score.CriterionKey();
             result.FinalCriteriaScores.Add(new FinalCriterionScoreDto
             {
-                TemplateItemId = templateItemId,
-                ItemName = competency?.CriteriaName ?? score.TemplateItem?.KpiDefinition?.KpiName ?? string.Empty,
+                TemplateItemId = score.TemplateItemId,
+                CriterionConfigId = score.CriterionConfigId,
+                CriterionKey = key,
+                ItemName = score.CriterionName(),
                 ItemDescription = competency?.Description ?? string.Empty,
                 FinalScore = score.NumericScore,
                 FinalWeightedScore = score.WeightedScore,
-                Weight = positionMappings.GetValueOrDefault(templateItemId, 0),
+                Weight = positionMappings.GetValueOrDefault(key, 0),
                 ManagerComments = score.Notes ?? "",
-                WasAppealed = appealedTemplateItemIds.Contains(templateItemId),
-                AchievementOverridden = score.NumericScore.HasValue && score.TemplateItem?.KpiDefinitionId != null
+                WasAppealed = appealedKeys.Contains(key),
+                AchievementOverridden = score.NumericScore.HasValue
+                    && (score.TemplateItem?.KpiDefinitionId != null || score.CriterionConfig?.ScoringMethod == CriterionScoringMethod.Measured)
             });
         }
 
@@ -3565,7 +3582,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             // Needed for "finalised by" — without it the name could only be a placeholder.
             .Include(a => a.EvaluatorEvaluations)
                 .ThenInclude(e => e.Evaluator)
-            // The snapshot is what was scored: targets, weights (A12).
+            // The snapshot is what was scored: targets, weights (A12) — and a goal row's label.
             .Include(a => a.CriterionConfigs)
             // The HR sign-off record, for the release rule (P2).
             .Include(a => a.HRReviews)
@@ -3587,9 +3604,9 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             settings.RequireCalibration,
             settings.RequireHRReview);
 
-        var configsByTemplateItemId = appraisal.CriterionConfigs
-            .Where(c => c.TemplateItemId.HasValue)
-            .GroupBy(c => c.TemplateItemId!.Value)
+        // By criterion key, so goal rows are found too (lane L3).
+        var configsByKey = appraisal.CriterionConfigs
+            .GroupBy(c => c.CriterionKey())
             .ToDictionary(g => g.Key, g => g.First());
 
         // Check if the requester is the appraisee and peer reviews are anonymous
@@ -3615,8 +3632,8 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         var canProceed = AppraisalGates.Check(gateState.Block, AppraisalSubStatus.PendingHRReview);
 
         // Build evaluation summaries
-        var selfSummary = selfEvaluation != null ? BuildEvaluationSummary(selfEvaluation, configsByTemplateItemId) : null;
-        var managerSummary = managerEvaluation != null ? BuildEvaluationSummary(managerEvaluation, configsByTemplateItemId) : null;
+        var selfSummary = selfEvaluation != null ? BuildEvaluationSummary(selfEvaluation, configsByKey) : null;
+        var managerSummary = managerEvaluation != null ? BuildEvaluationSummary(managerEvaluation, configsByKey) : null;
 
         // Build peer evaluation summary - HIDE details if anonymous and appraisee is viewing.
         // Submitted peers only: a draft is not a peer's view yet, and it is not in the score.
@@ -3624,13 +3641,18 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         var submittedPeers = peerEvaluations.Where(e => e.SubmittedDate.HasValue).ToList();
         if (submittedPeers.Any() && !shouldHidePeerDetails)
         {
+            // A goal row goes with the rated or the measured rows by its own flag (lane L3).
+            PerformanceAppraisalCriterionConfig? GoalRowOf(CriterionScore cs)
+                => configsByKey.TryGetValue(cs.CriterionKey(), out var row) && row.IsGoalRow() ? row : null;
+
             var peerCompetencyScores = submittedPeers
                 .SelectMany(e => e.CriterionScores)
-                .Where(cs => cs.TemplateItem?.CompetencyId != null)
-                .GroupBy(cs => cs.TemplateItemId)
+                .Where(cs => cs.TemplateItem?.CompetencyId != null || GoalRowOf(cs) is { } row && !row.IsMeasured())
+                .GroupBy(cs => cs.CriterionKey())
                 .Select(g => new PeerCompetencyScoreSummaryDto
                 {
-                    CriteriaName = g.First().TemplateItem?.Competency?.CriteriaName ?? "Unknown",
+                    CriteriaName = g.First().TemplateItem?.Competency?.CriteriaName ?? GoalRowOf(g.First())?.ItemLabel ?? "Unknown",
+                    IsGoal = GoalRowOf(g.First()) != null,
                     AverageScore = (decimal?)g.Average(cs => cs.NumericScore),
                     ResponseCount = g.Count()
                 })
@@ -3639,16 +3661,17 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             // KPI items scored by peers (only present when AllowPeerKpiEvaluation) → aggregated KPI rows.
             var peerKpiScores = submittedPeers
                 .SelectMany(e => e.CriterionScores)
-                .Where(cs => cs.TemplateItem?.KpiDefinitionId != null)
-                .GroupBy(cs => cs.TemplateItemId)
+                .Where(cs => cs.TemplateItem?.KpiDefinitionId != null || GoalRowOf(cs) is { } row && row.IsMeasured())
+                .GroupBy(cs => cs.CriterionKey())
                 .Select(g => new PeerKpiScoreSummaryDto
                 {
-                    KpiName = g.First().TemplateItem?.KpiDefinition?.KpiName ?? "Unknown",
+                    KpiName = g.First().TemplateItem?.KpiDefinition?.KpiName ?? GoalRowOf(g.First())?.ItemLabel ?? "Unknown",
+                    IsGoal = GoalRowOf(g.First()) != null,
                     AverageActual = g.Any(cs => cs.ActualValue.HasValue)
                         ? g.Where(cs => cs.ActualValue.HasValue).Average(cs => cs.ActualValue!.Value)
                         : (decimal?)null,
                     // The snapshot's target — the one scored — not today's template (A12).
-                    AverageTarget = g.Key is Guid itemId && configsByTemplateItemId.TryGetValue(itemId, out var config)
+                    AverageTarget = configsByKey.TryGetValue(g.Key, out var config)
                         ? config.KpiTargetValue
                         : null,
                     ResponseCount = g.Count()
@@ -3727,17 +3750,21 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// come from the appraisal's criterion snapshot — what was scored (A12).
     /// </summary>
     private static EvaluationSummaryDto BuildEvaluationSummary(
-        EvaluatorEvaluation evaluation, IReadOnlyDictionary<Guid, PerformanceAppraisalCriterionConfig> configsByTemplateItemId)
+        EvaluatorEvaluation evaluation, IReadOnlyDictionary<Guid, PerformanceAppraisalCriterionConfig> configsByKey)
     {
         PerformanceAppraisalCriterionConfig? ConfigFor(CriterionScore cs)
-            => cs.TemplateItemId is Guid id && configsByTemplateItemId.TryGetValue(id, out var c) ? c : null;
+            => configsByKey.TryGetValue(cs.CriterionKey(), out var c) ? c : null;
 
-        // Competency criteria (non-KPI items) → competency score rows.
+        // A goal row (lane L3) is listed with the rated or the measured rows by its own flag.
+        bool IsGoal(CriterionScore cs) => ConfigFor(cs)?.IsGoalRow() == true;
+
+        // Competency criteria (non-KPI items), and rated goals → competency score rows.
         var competencyScores = evaluation.CriterionScores
-            .Where(cs => cs.TemplateItem?.CompetencyId != null)
+            .Where(cs => cs.TemplateItem?.CompetencyId != null || IsGoal(cs) && !ConfigFor(cs)!.IsMeasured())
             .Select(cs => new CompetencyScoreSummaryDto
             {
-                CriteriaName = cs.TemplateItem?.Competency?.CriteriaName ?? "Unknown",
+                CriteriaName = cs.TemplateItem?.Competency?.CriteriaName ?? ConfigFor(cs)?.ItemLabel ?? "Unknown",
+                IsGoal = IsGoal(cs),
                 Description = cs.TemplateItem?.Competency?.Description,
                 NumericScore = cs.NumericScore,
                 // Was hard-coded 0 ("would need to look this up"): the item's weight in its section.
@@ -3752,13 +3779,14 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         // against the snapshot's target, floor and ceiling. It used to be NumericScore alone —
         // empty for every KPI scored the normal way, by its actual.
         var kpiScores = evaluation.CriterionScores
-            .Where(cs => cs.TemplateItem?.KpiDefinitionId != null)
+            .Where(cs => cs.TemplateItem?.KpiDefinitionId != null || IsGoal(cs) && ConfigFor(cs)!.IsMeasured())
             .Select(cs =>
             {
                 var config = ConfigFor(cs);
                 return new KpiScoreSummaryDto
                 {
-                    KpiName = cs.TemplateItem?.KpiDefinition?.KpiName ?? "Unknown",
+                    KpiName = cs.TemplateItem?.KpiDefinition?.KpiName ?? config?.ItemLabel ?? "Unknown",
+                    IsGoal = IsGoal(cs),
                     Description = cs.TemplateItem?.KpiDefinition?.Description,
                     TargetValue = config?.KpiTargetValue,
                     ActualValue = cs.ActualValue,
@@ -3768,7 +3796,7 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                             ? AppraisalScoring.KpiAchievementPercent(cs.ActualValue.Value, config?.KpiTargetValue, config?.KpiMinValue, config?.KpiMaxValue)
                             : null,
                     AchievementOverridden = cs.NumericScore.HasValue,
-                    Unit = cs.TemplateItem?.KpiDefinition?.Unit,
+                    Unit = cs.TemplateItem?.KpiDefinition?.Unit ?? config?.Unit,
                     Notes = cs.Notes
                 };
             })
@@ -4165,7 +4193,8 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// <summary>
     /// Builds the section/item tree for a self-evaluation context from the appraisal's
     /// CriterionConfig snapshot and (optionally) the linked AppraisalTemplate sections.
-    /// Falls back to a single synthetic section when no template is attached.
+    /// Falls back to a single synthetic section when no template is attached. Rows are keyed by
+    /// criterion, so a goals section shows the employee's goal rows (lane L3).
     /// </summary>
     private List<SelfEvaluationSectionDto> BuildSelfEvaluationSections(
         PerformanceAppraisal appraisal,
@@ -4174,27 +4203,33 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     {
         if (!appraisal.CriterionConfigs.Any()) return new();
 
-        var configsByTemplateItemId = appraisal.CriterionConfigs.ToDictionary(cc => cc.TemplateKey());
-        var scoresByTemplateItemId   = selfEval?.CriterionScores.ToDictionary(cs => cs.TemplateKey())
-                                  ?? new Dictionary<Guid, CriterionScore>();
+        var configsByKey = appraisal.CriterionConfigs.ToDictionary(cc => cc.CriterionKey());
+        var scoresByKey  = selfEval?.CriterionScores.ToDictionary(cs => cs.CriterionKey())
+                           ?? new Dictionary<Guid, CriterionScore>();
         var goalsByKpiDefId     = appraisal.Goals
                                   .Where(g => g.KpiDefinitionId.HasValue)
                                   .ToLookup(g => g.KpiDefinitionId!.Value);
         var responsesByTemplateItemId = (customResponses ?? Enumerable.Empty<AppraisalCustomQuestionResponse>())
                                          .ToDictionary(r => r.TemplateItemId);
 
+        SelfEvaluationItemDto Item(PerformanceAppraisalCriterionConfig config, AppraisalTemplateItem? templateItem)
+        {
+            scoresByKey.TryGetValue(config.CriterionKey(), out var score);
+            var kpiDef = config.TemplateItem?.KpiDefinition;
+            var goal   = kpiDef != null ? goalsByKpiDefId[kpiDef.Id].FirstOrDefault() : null;
+            var item   = MapSelfItem(config, config.TemplateItem?.Competency, kpiDef, goal, score);
+            if (templateItem != null)
+            {
+                item.DisplayOrder   = templateItem.DisplayOrder;
+                item.CustomQuestion = templateItem.CustomQuestion;
+            }
+            return item;
+        }
+
         if (appraisal.Template?.Sections == null || !appraisal.Template.Sections.Any())
         {
             // Fallback: single section from all configured criteria
-            var fallbackItems = appraisal.CriterionConfigs
-                .Select(cc =>
-                {
-                    scoresByTemplateItemId.TryGetValue(cc.TemplateKey(), out var score);
-                    var kpiDef = cc.TemplateItem?.KpiDefinition;
-                    var goal   = kpiDef != null ? goalsByKpiDefId[kpiDef.Id].FirstOrDefault() : null;
-                    return MapSelfItem(cc, cc.TemplateItem?.Competency, kpiDef, goal, score);
-                })
-                .ToList();
+            var fallbackItems = appraisal.CriterionConfigs.Select(cc => Item(cc, null)).ToList();
             return new List<SelfEvaluationSectionDto>
             {
                 new() { SectionName = "Evaluation Criteria", SectionWeight = 100, Items = fallbackItems }
@@ -4205,20 +4240,8 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             .OrderBy(s => s.DisplayOrder)
             .Select(section =>
             {
-                var items = section.TemplateItems
-                    .OrderBy(ti => ti.DisplayOrder)
-                    .Where(ti => configsByTemplateItemId.ContainsKey(ti.Id))
-                    .Select(ti =>
-                    {
-                        var config = configsByTemplateItemId[ti.Id];
-                        scoresByTemplateItemId.TryGetValue(ti.Id, out var score);
-                        var kpiDef = config.TemplateItem?.KpiDefinition;
-                        var goal   = kpiDef != null ? goalsByKpiDefId[kpiDef.Id].FirstOrDefault() : null;
-                        var item   = MapSelfItem(config, config.TemplateItem?.Competency, kpiDef, goal, score);
-                        item.DisplayOrder   = ti.DisplayOrder;
-                        item.CustomQuestion = ti.CustomQuestion;
-                        return item;
-                    })
+                var items = section.FormRows(configsByKey)
+                    .Select(row => Item(row.Config, row.Item))
                     .ToList();
 
                 var customQuestions = section.TemplateItems
@@ -4243,9 +4266,10 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
                 {
                     SectionId          = section.Id,
                     SectionName        = section.SectionName,
+                    Kind               = section.Kind,
                     SectionDescription = section.Description,
                     DisplayOrder       = section.DisplayOrder,
-                    SectionWeight      = section.ScoredWeight(configsByTemplateItemId),
+                    SectionWeight      = section.ScoredWeight(configsByKey),
                     Items              = items,
                     CustomQuestions    = customQuestions
                 };
@@ -4269,15 +4293,19 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
         return new SelfEvaluationItemDto
         {
-            TemplateItemId          = config.TemplateKey(),
+            TemplateItemId          = config.TemplateItemId,
             CriterionConfigId       = config.Id,
-            ItemName                = competency?.CriteriaName ?? kpiDef?.KpiName ?? string.Empty,
+            CriterionKey            = config.CriterionKey(),
+            ScoringMethod           = config.EffectiveScoringMethod(),
+            EmployeeGoalId          = config.EmployeeGoalId,
+            ItemName                = competency?.CriteriaName ?? kpiDef?.KpiName ?? config.ItemLabel ?? string.Empty,
             ItemDescription         = competency?.Description,
             ItemWeight              = config.WeightUsed,
+            DisplayOrder            = config.DisplayOrder ?? 0,
             RequireEvidence         = competency?.RequireEvidence ?? false,
             KpiDefinitionId         = kpiDef?.Id,
-            KpiUnit                 = kpiDef?.Unit ?? goal?.Unit,
-            MeasurementType         = kpiDef?.MeasurementType,
+            KpiUnit                 = config.Unit ?? kpiDef?.Unit ?? goal?.Unit,
+            MeasurementType         = config.MeasurementType ?? kpiDef?.MeasurementType,
             KpiTargetValue          = effectiveTarget,
             KpiMinValue             = effectiveMin,
             KpiMaxValue             = effectiveMax,
@@ -4299,15 +4327,16 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     }
 
     /// <summary>
-    /// The achievement a KPI row shows: the restated percentage when calibration or an appeal set
-    /// one (D-22), otherwise the actual measured the way the score measures it — against the
+    /// The achievement a measured row shows: the restated percentage when calibration or an appeal
+    /// set one (D-22), otherwise the actual measured the way the score measures it — against the
     /// snapshot's floor, target and ceiling, clamped (A12). A bare actual ÷ target showed 150 %
-    /// for an actual the score caps at 100 %, and ignored the floor altogether.
+    /// for an actual the score caps at 100 %, and ignored the floor altogether. A goal row reads
+    /// its own measured flag (lane L3).
     /// </summary>
     private static decimal? KpiAchievementShown(CriterionScore? score, PerformanceAppraisalCriterionConfig config)
     {
         if (score is null) return null;
-        if (score.NumericScore.HasValue && config.TemplateItem?.KpiDefinitionId != null)
+        if (score.NumericScore.HasValue && config.IsMeasured())
             return score.NumericScore.Value;
         if (score.ActualValue is not decimal actual || config.KpiTargetValue is null)
             return null;
@@ -4317,9 +4346,9 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             1, MidpointRounding.AwayFromZero);
     }
 
-    /// <summary>A KPI row whose achievement was restated by calibration or an appeal (D-22, A14).</summary>
+    /// <summary>A measured row whose achievement was restated by calibration or an appeal (D-22, A14).</summary>
     private static bool IsAchievementOverridden(CriterionScore? score, PerformanceAppraisalCriterionConfig config)
-        => score?.NumericScore.HasValue == true && config.TemplateItem?.KpiDefinitionId != null;
+        => score?.NumericScore.HasValue == true && config.IsMeasured();
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -4327,32 +4356,39 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         PerformanceAppraisal appraisal,
         EvaluatorEvaluation? selfEval,
         EvaluatorEvaluation? managerEval,
-        List<Guid> appealedTemplateItemIds)
+        List<Guid> appealedCriterionKeys)
     {
         if (!appraisal.CriterionConfigs.Any()) return new();
 
-        var configsByTemplateItemId       = appraisal.CriterionConfigs.ToDictionary(cc => cc.TemplateKey());
-        var selfScoresByTemplateItemId    = selfEval?.CriterionScores.ToDictionary(cs => cs.TemplateKey())
-                                           ?? new Dictionary<Guid, CriterionScore>();
-        var managerScoresByTemplateItemId = managerEval?.CriterionScores.ToDictionary(cs => cs.TemplateKey())
-                                           ?? new Dictionary<Guid, CriterionScore>();
-        var goalsByKpiDefId               = appraisal.Goals
-                                           .Where(g => g.KpiDefinitionId.HasValue)
-                                           .ToLookup(g => g.KpiDefinitionId!.Value);
-        var appealedSet                   = appealedTemplateItemIds.ToHashSet();
+        var configsByKey         = appraisal.CriterionConfigs.ToDictionary(cc => cc.CriterionKey());
+        var selfScoresByKey      = selfEval?.CriterionScores.ToDictionary(cs => cs.CriterionKey())
+                                   ?? new Dictionary<Guid, CriterionScore>();
+        var managerScoresByKey   = managerEval?.CriterionScores.ToDictionary(cs => cs.CriterionKey())
+                                   ?? new Dictionary<Guid, CriterionScore>();
+        var goalsByKpiDefId      = appraisal.Goals
+                                   .Where(g => g.KpiDefinitionId.HasValue)
+                                   .ToLookup(g => g.KpiDefinitionId!.Value);
+        var appealedSet          = appealedCriterionKeys.ToHashSet();
+
+        ManagerEvaluationItemDto Item(PerformanceAppraisalCriterionConfig config, AppraisalTemplateItem? templateItem)
+        {
+            var key = config.CriterionKey();
+            selfScoresByKey.TryGetValue(key, out var selfScore);
+            managerScoresByKey.TryGetValue(key, out var managerScore);
+            var kpiDef = config.TemplateItem?.KpiDefinition;
+            var goal   = kpiDef != null ? goalsByKpiDefId[kpiDef.Id].FirstOrDefault() : null;
+            var item   = MapManagerItem(config, config.TemplateItem?.Competency, kpiDef, goal, selfScore, managerScore, appealedSet.Contains(key));
+            if (templateItem != null)
+            {
+                item.DisplayOrder   = templateItem.DisplayOrder;
+                item.CustomQuestion = templateItem.CustomQuestion;
+            }
+            return item;
+        }
 
         if (appraisal.Template?.Sections == null || !appraisal.Template.Sections.Any())
         {
-            var fallbackItems = appraisal.CriterionConfigs
-                .Select(cc =>
-                {
-                    selfScoresByTemplateItemId.TryGetValue(cc.TemplateKey(), out var selfScore);
-                    managerScoresByTemplateItemId.TryGetValue(cc.TemplateKey(), out var managerScore);
-                    var kpiDef = cc.TemplateItem?.KpiDefinition;
-                    var goal   = kpiDef != null ? goalsByKpiDefId[kpiDef.Id].FirstOrDefault() : null;
-                    return MapManagerItem(cc, cc.TemplateItem?.Competency, kpiDef, goal, selfScore, managerScore, appealedSet.Contains(cc.TemplateKey()));
-                })
-                .ToList();
+            var fallbackItems = appraisal.CriterionConfigs.Select(cc => Item(cc, null)).ToList();
             return new List<ManagerEvaluationSectionDto>
             {
                 new() { SectionName = "Evaluation Criteria", SectionWeight = 100, Items = fallbackItems }
@@ -4361,33 +4397,15 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
         return appraisal.Template.Sections
             .OrderBy(s => s.DisplayOrder)
-            .Select(section =>
+            .Select(section => new ManagerEvaluationSectionDto
             {
-                var items = section.TemplateItems
-                    .OrderBy(ti => ti.DisplayOrder)
-                    .Where(ti => configsByTemplateItemId.ContainsKey(ti.Id))
-                    .Select(ti =>
-                    {
-                        var config = configsByTemplateItemId[ti.Id];
-                        selfScoresByTemplateItemId.TryGetValue(ti.Id, out var selfScore);
-                        managerScoresByTemplateItemId.TryGetValue(ti.Id, out var managerScore);
-                        var kpiDef = config.TemplateItem?.KpiDefinition;
-                        var goal   = kpiDef != null ? goalsByKpiDefId[kpiDef.Id].FirstOrDefault() : null;
-                        var item   = MapManagerItem(config, config.TemplateItem?.Competency, kpiDef, goal, selfScore, managerScore, appealedSet.Contains(ti.Id));
-                        item.DisplayOrder   = ti.DisplayOrder;
-                        item.CustomQuestion = ti.CustomQuestion;
-                        return item;
-                    })
-                    .ToList();
-                return new ManagerEvaluationSectionDto
-                {
-                    SectionId          = section.Id,
-                    SectionName        = section.SectionName,
-                    SectionDescription = section.Description,
-                    DisplayOrder       = section.DisplayOrder,
-                    SectionWeight      = section.ScoredWeight(configsByTemplateItemId),
-                    Items              = items
-                };
+                SectionId          = section.Id,
+                SectionName        = section.SectionName,
+                Kind               = section.Kind,
+                SectionDescription = section.Description,
+                DisplayOrder       = section.DisplayOrder,
+                SectionWeight      = section.ScoredWeight(configsByKey),
+                Items              = section.FormRows(configsByKey).Select(row => Item(row.Config, row.Item)).ToList()
             })
             .Where(s => s.Items.Any())
             .ToList();
@@ -4402,15 +4420,19 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         CriterionScore? managerScore,
         bool isAppealed) => new()
     {
-        TemplateItemId           = config.TemplateKey(),
+        TemplateItemId           = config.TemplateItemId,
         CriterionConfigId        = config.Id,
-        ItemName                 = competency?.CriteriaName ?? kpiDef?.KpiName ?? string.Empty,
+        CriterionKey             = config.CriterionKey(),
+        ScoringMethod            = config.EffectiveScoringMethod(),
+        EmployeeGoalId           = config.EmployeeGoalId,
+        ItemName                 = competency?.CriteriaName ?? kpiDef?.KpiName ?? config.ItemLabel ?? string.Empty,
         ItemDescription          = competency?.Description,
         ItemWeight               = config.WeightUsed,
+        DisplayOrder             = config.DisplayOrder ?? 0,
         RequireEvidence          = competency?.RequireEvidence ?? false,
         KpiDefinitionId          = kpiDef?.Id,
-        KpiUnit                  = kpiDef?.Unit ?? goal?.Unit,
-        MeasurementType          = kpiDef?.MeasurementType,
+        KpiUnit                  = config.Unit ?? kpiDef?.Unit ?? goal?.Unit,
+        MeasurementType          = config.MeasurementType ?? kpiDef?.MeasurementType,
         // The snapshot's values — the ones scored. This read the live goal, so the manager saw a
         // target the score never used whenever the goal moved after generation (A12).
         KpiTargetValue           = config.KpiTargetValue,
@@ -4449,23 +4471,23 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     {
         if (!appraisal.CriterionConfigs.Any()) return new();
 
-        var configsByTemplateItemId = appraisal.CriterionConfigs.ToDictionary(cc => cc.TemplateKey());
-        var scoresByTemplateItemId   = selfEval.CriterionScores.ToDictionary(cs => cs.TemplateKey());
-        var goalsByKpiDefId     = appraisal.Goals
-                                  .Where(g => g.KpiDefinitionId.HasValue)
-                                  .ToLookup(g => g.KpiDefinitionId!.Value);
+        var configsByKey    = appraisal.CriterionConfigs.ToDictionary(cc => cc.CriterionKey());
+        var scoresByKey     = selfEval.CriterionScores.ToDictionary(cs => cs.CriterionKey());
+        var goalsByKpiDefId = appraisal.Goals
+                              .Where(g => g.KpiDefinitionId.HasValue)
+                              .ToLookup(g => g.KpiDefinitionId!.Value);
+
+        SubmittedEvaluationItemDto Item(PerformanceAppraisalCriterionConfig config)
+        {
+            scoresByKey.TryGetValue(config.CriterionKey(), out var score);
+            var kpiDef = config.TemplateItem?.KpiDefinition;
+            var goal   = kpiDef != null ? goalsByKpiDefId[kpiDef.Id].FirstOrDefault() : null;
+            return MapSubmittedItem(config, config.TemplateItem?.Competency, kpiDef, goal, score);
+        }
 
         if (appraisal.Template?.Sections == null || !appraisal.Template.Sections.Any())
         {
-            var fallbackItems = appraisal.CriterionConfigs
-                .Select(cc =>
-                {
-                    scoresByTemplateItemId.TryGetValue(cc.TemplateKey(), out var score);
-                    var kpiDef = cc.TemplateItem?.KpiDefinition;
-                    var goal   = kpiDef != null ? goalsByKpiDefId[kpiDef.Id].FirstOrDefault() : null;
-                    return MapSubmittedItem(cc, cc.TemplateItem?.Competency, kpiDef, goal, score);
-                })
-                .ToList();
+            var fallbackItems = appraisal.CriterionConfigs.Select(Item).ToList();
             return new List<SubmittedEvaluationSectionDto>
             {
                 new() { SectionName = "Evaluation Criteria", SectionWeight = 100, Items = fallbackItems }
@@ -4474,27 +4496,13 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
         return appraisal.Template.Sections
             .OrderBy(s => s.DisplayOrder)
-            .Select(section =>
+            .Select(section => new SubmittedEvaluationSectionDto
             {
-                var items = section.TemplateItems
-                    .OrderBy(ti => ti.DisplayOrder)
-                    .Where(ti => configsByTemplateItemId.ContainsKey(ti.Id))
-                    .Select(ti =>
-                    {
-                        var config = configsByTemplateItemId[ti.Id];
-                        scoresByTemplateItemId.TryGetValue(ti.Id, out var score);
-                        var kpiDef = config.TemplateItem?.KpiDefinition;
-                        var goal   = kpiDef != null ? goalsByKpiDefId[kpiDef.Id].FirstOrDefault() : null;
-                        return MapSubmittedItem(config, config.TemplateItem?.Competency, kpiDef, goal, score);
-                    })
-                    .ToList();
-                return new SubmittedEvaluationSectionDto
-                {
-                    SectionName   = section.SectionName,
-                    SectionWeight = section.ScoredWeight(configsByTemplateItemId),
-                    DisplayOrder  = section.DisplayOrder,
-                    Items         = items
-                };
+                SectionName   = section.SectionName,
+                Kind          = section.Kind,
+                SectionWeight = section.ScoredWeight(configsByKey),
+                DisplayOrder  = section.DisplayOrder,
+                Items         = section.FormRows(configsByKey).Select(row => Item(row.Config)).ToList()
             })
             .Where(s => s.Items.Any())
             .ToList();
@@ -4507,15 +4515,17 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         EmployeeGoal? goal,
         CriterionScore? score) => new()
     {
-        TemplateItemId      = config.TemplateKey(),
-        ItemName            = competency?.CriteriaName ?? kpiDef?.KpiName ?? string.Empty,
+        TemplateItemId      = config.TemplateItemId,
+        CriterionConfigId   = config.Id,
+        CriterionKey        = config.CriterionKey(),
+        ItemName            = competency?.CriteriaName ?? kpiDef?.KpiName ?? config.ItemLabel ?? string.Empty,
         ItemDescription     = competency?.Description,
         ItemWeight          = config.WeightUsed,
         NumericScore        = score?.NumericScore,
         ActualValue         = score?.ActualValue,
         Notes               = score?.Notes,
         EvidenceLinks       = score?.EvidenceLinks,
-        KpiUnit             = kpiDef?.Unit ?? goal?.Unit,
+        KpiUnit             = config.Unit ?? kpiDef?.Unit ?? goal?.Unit,
         // The snapshot's target and the score's own achievement rule (A12).
         KpiTargetValue      = config.KpiTargetValue,
         AchievementPercent  = KpiAchievementShown(score, config)

@@ -82,6 +82,7 @@ public sealed class GoalWorkflowCommandService : IGoalWorkflowCommandService
     private readonly IGenericRepository<EmployeeGoal> _goalRepo;
     private readonly IGenericRepository<Employee>     _employeeRepo;
     private readonly IGenericRepository<AppraisalCycle> _cycleRepo;
+    private readonly IAppraisalGoalRowService         _goalRows;
     private readonly IUnitOfWork                      _unitOfWork;
     private readonly ICurrentUserService              _currentUserService;
     private readonly ICurrentUserProvider             _currentUserProvider;
@@ -92,6 +93,7 @@ public sealed class GoalWorkflowCommandService : IGoalWorkflowCommandService
         IGenericRepository<EmployeeGoal>      goalRepo,
         IGenericRepository<Employee>          employeeRepo,
         IGenericRepository<AppraisalCycle>    cycleRepo,
+        IAppraisalGoalRowService              goalRows,
         IUnitOfWork                           unitOfWork,
         ICurrentUserService                   currentUserService,
         ICurrentUserProvider                  currentUserProvider,
@@ -101,6 +103,7 @@ public sealed class GoalWorkflowCommandService : IGoalWorkflowCommandService
         _goalRepo           = goalRepo;
         _employeeRepo       = employeeRepo;
         _cycleRepo          = cycleRepo;
+        _goalRows           = goalRows;
         _unitOfWork         = unitOfWork;
         _currentUserService = currentUserService;
         _currentUserProvider = currentUserProvider;
@@ -436,6 +439,9 @@ public sealed class GoalWorkflowCommandService : IGoalWorkflowCommandService
         await _goalRepo.UpdateAsync(goal);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        // The appraisal's goals section follows the locked set (L2).
+        await _goalRows.RebuildAsync(goal.EmployeeId, goal.AppraisalCycleId, cancellationToken);
+
         _logger.LogInformation(
             "Goal {GoalId} locked by manager {ManagerId}",
             goalId, managerId);
@@ -510,6 +516,9 @@ public sealed class GoalWorkflowCommandService : IGoalWorkflowCommandService
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // The appraisal's goals section: one row per locked goal (L2).
+        await _goalRows.RebuildAsync(employeeId, appraisalCycleId, cancellationToken);
 
         _logger.LogInformation(
             "Goal set of employee {EmployeeId} for cycle {CycleId} locked by manager {ManagerId}: {Locked} of {InSet} goal(s)",

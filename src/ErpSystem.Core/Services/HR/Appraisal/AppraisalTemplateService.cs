@@ -459,6 +459,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
                 Description = srcSection.Description,
                 DisplayOrder = srcSection.DisplayOrder,
                 Weight = srcSection.Weight,
+                // A copy of a goals section is a goals section (lane L).
+                Kind = srcSection.Kind,
                 TenantId = tenantId
             };
 
@@ -515,6 +517,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         entity.AppraisalTemplateId = templateId;
         entity.TenantId = tenantId;
 
+        if (entity.Kind == AppraisalSectionKind.EmployeeGoals)
+            await EnsureNoOtherGoalsSectionAsync(templateId, null, cancellationToken);
+
         // Auto-assign display order if not provided
         if (entity.DisplayOrder == 0)
         {
@@ -557,6 +562,17 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         var entity = await GetOwnedSectionAsync(templateId, dto.Id);
 
         await AssertTemplateNotInActiveCycleAsync(templateId, cancellationToken);
+
+        // Becoming a goals section: the only one on the template, and empty — its rows are each
+        // employee's goals, and items kept beside them would count the section twice (lane L).
+        if (dto.Kind == AppraisalSectionKind.EmployeeGoals && entity.Kind != AppraisalSectionKind.EmployeeGoals)
+        {
+            await EnsureNoOtherGoalsSectionAsync(templateId, entity.Id, cancellationToken);
+            var tenantId = GetTenantId();
+            if (await _itemRepository.GetQueryable().AnyAsync(i => i.TenantId == tenantId && i.AppraisalTemplateSectionId == entity.Id, cancellationToken))
+                throw new InvalidOperationException(
+                    "A section with items cannot become a goals section: its rows are each employee's goals. Remove its items first.");
+        }
 
         dto.UpdateEntity(entity);
         await _sectionRepository.UpdateAsync(entity);
@@ -616,6 +632,12 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             throw new ArgumentException($"Template section with ID '{sectionId}' not found.");
 
         await AssertTemplateNotInActiveCycleAsync(section.AppraisalTemplateId, cancellationToken);
+
+        // A goals section is filled by each employee's locked goals (lane L); an item beside them
+        // would share the section's weight with every goal and count the section twice.
+        if (section.Kind == AppraisalSectionKind.EmployeeGoals)
+            throw new InvalidOperationException(
+                "This is a goals section: it is filled by each employee's locked goals and takes no items. Add the item to a fixed section.");
 
         // Duplicate check: same competency/KPI cannot appear more than once across all sections of the template
         if (dto.CompetencyId.HasValue)
@@ -886,8 +908,24 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     }
 
     /// <summary>
+    /// Refuses a second goals section on a template (lane L): the goal rows go to the first by
+    /// display order, and the other's weight would score nothing.
+    /// </summary>
+    private async Task EnsureNoOtherGoalsSectionAsync(Guid templateId, Guid? exceptSectionId, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var another = await _sectionRepository.GetQueryable()
+            .AnyAsync(s => s.TenantId == tenantId && s.AppraisalTemplateId == templateId
+                        && s.Kind == AppraisalSectionKind.EmployeeGoals
+                        && (exceptSectionId == null || s.Id != exceptSectionId), cancellationToken);
+        if (another)
+            throw new InvalidOperationException("This template already has a goals section; a template has one.");
+    }
+
+    /// <summary>
     /// Validates that section weights sum to 100 and that item weights within each section sum to 100.
-    /// Called before activating a template to prevent broken scoring calculations.
+    /// Called before activating a template to prevent broken scoring calculations. A goals section
+    /// has no items — its rows are each employee's goals — and counts complete as it is (lane L).
     /// </summary>
     private async Task ValidateTemplateWeightsAsync(Guid templateId, CancellationToken cancellationToken = default)
     {
@@ -913,7 +951,13 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             if (sectionWeightSum != 100)
                 errors.Add($"Section weights must sum to 100 (current total: {sectionWeightSum}).");
 
-            foreach (var section in template.Sections.Where(s => s.TemplateItems.Any()))
+            var goalsSections = template.Sections.Where(s => s.Kind == AppraisalSectionKind.EmployeeGoals).ToList();
+            if (goalsSections.Count > 1)
+                errors.Add($"A template has one goals section (this one has {goalsSections.Count}).");
+            foreach (var section in goalsSections.Where(s => s.TemplateItems.Any()))
+                errors.Add($"Goals section '{section.SectionName}' has items; its rows are each employee's goals, so it takes none.");
+
+            foreach (var section in template.Sections.Where(s => s.TemplateItems.Any() && s.Kind != AppraisalSectionKind.EmployeeGoals))
             {
                 var itemSum = section.TemplateItems.Sum(i => i.Weight);
                 if (itemSum != 100)

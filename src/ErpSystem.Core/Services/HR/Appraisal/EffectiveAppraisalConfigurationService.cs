@@ -25,6 +25,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
     private readonly IGenericRepository<AppraisalTemplate> _templateRepository;
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly IGenericRepository<PerformanceAppraisalCriterionConfig> _criterionConfigRepository;
+    private readonly IAppraisalGoalRowService _goalRows;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<EffectiveAppraisalConfigurationService> _logger;
@@ -36,6 +37,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
         IGenericRepository<AppraisalTemplate> templateRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
         IGenericRepository<PerformanceAppraisalCriterionConfig> criterionConfigRepository,
+        IAppraisalGoalRowService goalRows,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<EffectiveAppraisalConfigurationService> logger)
@@ -46,6 +48,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
         _templateRepository = templateRepository;
         _appraisalRepository = appraisalRepository;
         _criterionConfigRepository = criterionConfigRepository;
+        _goalRows = goalRows;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -169,6 +172,10 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Criterion config snapshot created for appraisal {appraisalId}", performanceAppraisalId);
+
+        // A goal set locked before generation is scored too (closure plan L2): the template rows
+        // above cover the template's items, and the goals section gets one row per locked goal.
+        await _goalRows.RebuildAsync(employeeId, cycleId, cancellationToken);
     }
 
     // ── Private helpers ────────────────────────────────────────────────────
@@ -276,6 +283,11 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
         {
             // Skip items with no source (e.g. pure custom questions with no competency or KPI)
             if (item.CompetencyId == null && item.KpiDefinitionId == null) continue;
+
+            // A goals section's rows are the employee's goals (lane L). An item left in one from
+            // before it became a goals section would share its weight with them and count the
+            // section twice; the template service refuses new ones.
+            if (section.Kind == AppraisalSectionKind.EmployeeGoals) continue;
 
             var gradeRanges = item.GradeRanges.Select(g => new EffectiveGradeRangeDto
             {

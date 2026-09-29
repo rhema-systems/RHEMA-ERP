@@ -22,6 +22,7 @@ public class EmployeeGoalService : IEmployeeGoalService
     private readonly IGenericRepository<EmployeeGoalAppraisalAssessment> _assessmentRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IAppraisalGoalRowService _goalRows;
     private readonly ILogger<EmployeeGoalService> _logger;
 
     public EmployeeGoalService(
@@ -33,6 +34,7 @@ public class EmployeeGoalService : IEmployeeGoalService
         IGenericRepository<EmployeeGoalAppraisalAssessment> assessmentRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IAppraisalGoalRowService goalRows,
         ILogger<EmployeeGoalService> logger)
     {
         _goalRepository = goalRepository;
@@ -43,6 +45,7 @@ public class EmployeeGoalService : IEmployeeGoalService
         _assessmentRepository = assessmentRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+        _goalRows = goalRows;
         _logger = logger;
     }
 
@@ -570,6 +573,12 @@ public class EmployeeGoalService : IEmployeeGoalService
     {
         var entity = await GetOwnedGoalAsync(goalId, cancellationToken);
 
+        // Once the goal's row in the appraisal has been scored, what it measures is part of an
+        // evaluation (closure plan L2): unlocking it would let the goal change under the score.
+        if (await _goalRows.IsScoredAsync(goalId, cancellationToken))
+            throw new InvalidOperationException(
+                "This goal has been scored in its appraisal, so it cannot be unlocked.");
+
         entity.IsLocked = false;
         entity.LockedDate = null;
 
@@ -581,6 +590,9 @@ public class EmployeeGoalService : IEmployeeGoalService
 
         await _goalRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // The unlocked goal leaves the appraisal's goals section (L2).
+        await _goalRows.RebuildAsync(entity.EmployeeId, entity.AppraisalCycleId, cancellationToken);
 
         _logger.LogInformation("Goal {GoalId} unlocked", goalId);
         return true;

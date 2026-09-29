@@ -32,6 +32,11 @@ settings as a policy reference; this document says which of them the code obeys.
 >   *"Since lane L-a"*: `MinGoalsPerEmployee` and `MaxGoalsPerEmployee` now also hold the manager's
 >   *lock goal set* (with the weights adding to 100), and `AutoLockOnDeadline`'s advance past goal
 >   setting locks the agreed set. No verdict moved.
+> - **Lane L-b** (goal rows and scoring) widened two *enforced* settings — marked *"Since lane L-b"*:
+>   `AllowPeerKpiEvaluation` now also governs the employee's **goal rows** (read-only on the peer form,
+>   refused when a peer saves one, required at submission only when it is on), and a
+>   `HRCanModifyScores` restatement can name a goal row. The goal-set lock (`RequireGoalSetting` with
+>   a goals section) now also builds the appraisal's goals section. No verdict moved.
 >
 > Line numbers below are as of 2026-09-17; lanes A and B1 rewrote much of `PerformanceAppraisalService.cs`,
 > and `AppraisalAdvanceHelpers.cs` is gone — its resolver is `AppraisalGates.cs`.
@@ -321,7 +326,7 @@ Grouped by what they actually do, with the strongest evidence line for each.
 | `MinPeerEvaluators` | **Self-eval submit refused** outside the range (`:1449`); phase gate (`:178`); **finalise refused** — *"At least N peer reviews must be completed"* (`:4370`). *Since lane B1:* the nomination step counts **live** nominations — pending ones included, rejected ones not — and the evaluation step submitted ones; the manager's submission waits for the second |
 | `MaxPeerEvaluators` | **Nomination refused** singly (`PeerNominationService.cs:211`) and in batch (`:399`) |
 | `PeerNominationMode` | Who may nominate (`PeerNominationService.cs:100`); who the approval is routed to (`:473`); whether the self-eval submit rule applies (`PerformanceAppraisalService.cs:1446`). *Since lane P:* line 100 was only ever the editing window; the mode now decides **who** — in Manager mode the appraisee is refused both nominate routes (`EnsureMayNominate`) — and every nomination records the login that made it (the batch recorded the appraisee whoever sent it) |
-| `AllowPeerKpiEvaluation` | Which items the peer form renders (`PeerEvaluationService.cs:199`) and **peer submit completeness** (`:321`) |
+| `AllowPeerKpiEvaluation` | Which items the peer form renders (`PeerEvaluationService.cs:199`) and **peer submit completeness** (`:321`). *Since lane L-b:* the employee's **goal rows** follow it too — read-only on the form, **a peer's score on one refused when saved**, required at submission only when it is on. A KPI row is still caught only at submission (lane D) |
 | `AllowSelfSoftSkillRating` | **Self-eval submit requires every competency scored when ON** (`PerformanceAppraisalService.cs:1461`) — see the caveat below |
 
 ### The gates
@@ -332,7 +337,7 @@ Grouped by what they actually do, with the strongest evidence line for each.
 | `HRReviewTiming` | Swaps the calibration / HR-review order in **both** resolvers (`AppraisalWorkflowService.cs:196`, `AppraisalAdvanceHelpers.cs:113`). *Since lane B1:* real on the **write** paths. With `BeforeCalibration`, HR signs off first (the sign-off used to demand calibration whatever the timing, so such a cycle could never be finalised), a panel before the sign-off skips the appraisal, and nothing is published to the talent pools until the panel has committed |
 | `RequireEmployeeAcknowledgment` | **Decides the status finalisation lands on** — `Governance` vs `Completed` (`PerformanceAppraisalService.cs:4388`); phase gate (`:224`). *Since lane A:* the acknowledgment settles the score and publishes it; with calibration and HR review off, the manager's submission settles it first so the employee acknowledges a score, not a blank (it used to finish with none). *Since lane B1:* the last step of the pipeline; where a write leaves the appraisal follows the gates, not this switch alone (a required final conversation used to be skipped when this was off) |
 | `RequireGoalSetting` | Phase gate (`AppraisalWorkflowService.cs:150`). *Since lane B1:* **refuses the self-evaluation submit** until the goals are set — the minimum, the manager's approval and, with a goals section on the template, the goal set's lock — counting the employee's goals in the cycle, linked to the appraisal or not |
-| `HRCanModifyScores` | **Refuses score modifications on appeal resolution** (`PerformanceAppraisalService.cs:3368`). *Since lane A:* the modifications it allows **reach the score** (checked against the item's own scale; a KPI's is a restated achievement %). Before, they were written and the overall re-summed stale weighted scores, so an upheld appeal never moved the result |
+| `HRCanModifyScores` | **Refuses score modifications on appeal resolution** (`PerformanceAppraisalService.cs:3368`). *Since lane A:* the modifications it allows **reach the score** (checked against the item's own scale; a KPI's is a restated achievement %). Before, they were written and the overall re-summed stale weighted scores, so an upheld appeal never moved the result. *Since lane L-b:* a restatement may name a **goal row** by its snapshot row; one naming a criterion that is not the appraisal's is refused |
 | `DefaultHRReviewerId` | Chosen as reviewer when it points at an active employee, else least-loaded fallback (`:3984`) |
 | `AllowEmployeeResponse` | **Refuses the employee's written response** when off (`:1003`) |
 | `AppealReevaluationWindowDays` | Sets `AppealRemandDeadline` (`:3454`) — and **the post-remand re-evaluation is refused after it** (`:2361`) |

@@ -29,6 +29,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     private readonly IGenericRepository<AppraisalManualAdvanceLog> _advanceLogRepository;
     private readonly IAppraisalScoreService _scores;
     private readonly IAppraisalLifecycleService _lifecycle;
+    private readonly IAppraisalGoalRowService _goalRows;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<AppraisalWorkflowService> _logger;
@@ -43,10 +44,12 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         IGenericRepository<AppraisalManualAdvanceLog> advanceLogRepository,
         IAppraisalScoreService scores,
         IAppraisalLifecycleService lifecycle,
+        IAppraisalGoalRowService goalRows,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ILogger<AppraisalWorkflowService> logger)
     {
+        _goalRows             = goalRows;
         _appraisalRepository  = appraisalRepository;
         _evalRepository       = evalRepository;
         _nominationRepository = nominationRepository;
@@ -491,6 +494,15 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         SetTenantId(auditLog, appraisal);
         await _advanceLogRepository.AddAsync(auditLog);
         await _unitOfWork.SaveChangesAsync(ct);
+
+        // HR's waiver of goal setting locked the agreed set, so the appraisal's goals section
+        // follows it (closure plan L2): one row per locked goal, when the template has one.
+        if (stepToComplete == AppraisalSubStatus.GoalSetting)
+        {
+            var built = await _goalRows.RebuildAsync(appraisal.EmployeeId, appraisal.AppraisalCycleId, ct);
+            if (built > 0)
+                actions.Add($"Built the goals section: {built} goal row(s).");
+        }
 
         // ── Where the gates put it now: the major status follows, and completion settles ────
         // An advance that completes the appraisal settles its score and publishes it, like every

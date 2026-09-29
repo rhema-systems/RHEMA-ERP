@@ -186,6 +186,9 @@ public class PeerEvaluationService : IPeerEvaluationService
                 .ThenInclude(a => a.Goals)
             .Include(e => e.CriterionScores)
                 .ThenInclude(cs => cs.TemplateItem)
+            // One query per collection: as a single twelve-way join it needed a memory grant a
+            // loaded server could not give, and timed out reading back every peer save.
+            .AsSplitQuery()
             .FirstOrDefaultAsync(e => e.Id == evaluationId && e.EvaluatorId == evaluatorId, cancellationToken);
 
         if (evaluation == null)
@@ -230,6 +233,7 @@ public class PeerEvaluationService : IPeerEvaluationService
         var evaluation = await TenantEvaluationQuery()
             .Include(e => e.Appraisal)
                 .ThenInclude(a => a.AppraisalCycle)
+                    .ThenInclude(c => c.AppraisalSettings)
             .Include(e => e.Appraisal)
                 .ThenInclude(a => a.Employee)
             .Include(e => e.CriterionScores)
@@ -264,19 +268,28 @@ public class PeerEvaluationService : IPeerEvaluationService
         // section weight and scored a KPI restatement against the band top (A10).
         var scoring = await _scores.LoadScoringAsync(evaluation.AppraisalId, cancellationToken);
 
-        // Update criterion scores from ItemScores (keyed by CriteriaId)
+        // A peer scores the employee's goals only when the cycle lets peers score measured work (L7).
+        var allowPeerKpi = evaluation.Appraisal.AppraisalCycle?.AppraisalSettings?.AllowPeerKpiEvaluation ?? false;
+
+        // Update criterion scores from ItemScores, each resolved to the criterion it names — a
+        // template item, or a goal row's snapshot id (lane L3).
         foreach (var itemInput in saveDto.ItemScores)
         {
             if (!itemInput.NumericScore.HasValue && !itemInput.ActualValue.HasValue)
                 continue;
 
-            var templateItemId = itemInput.TemplateItemId;
+            var criterion = scoring.Resolve(itemInput)
+                ?? throw new InvalidOperationException("An item on this form is not one of this appraisal's criteria.");
+            if (!allowPeerKpi && criterion.CriterionConfigId is Guid configId && scoring.GoalRow(configId) != null)
+                throw new InvalidOperationException("Peers do not score the employee's goals in this cycle.");
 
             var existingScore = evaluation.CriterionScores
-                .FirstOrDefault(cs => cs.TemplateItemId == templateItemId);
+                .FirstOrDefault(cs => (cs.TemplateItemId.HasValue || cs.CriterionConfigId.HasValue)
+                                   && cs.CriterionKey() == criterion.Key);
 
             if (existingScore != null)
             {
+                existingScore.CriterionConfigId ??= criterion.CriterionConfigId;
                 existingScore.NumericScore = itemInput.NumericScore;
                 existingScore.ActualValue  = itemInput.ActualValue;
                 existingScore.Notes = itemInput.Notes;
@@ -290,7 +303,8 @@ public class PeerEvaluationService : IPeerEvaluationService
                 {
                     TenantId = GetTenantId(),
                     EvaluatorEvaluationId = evaluation.Id,
-                    TemplateItemId = templateItemId,
+                    TemplateItemId = criterion.TemplateItemId,
+                    CriterionConfigId = criterion.CriterionConfigId,
                     NumericScore = itemInput.NumericScore,
                     ActualValue  = itemInput.ActualValue,
                     Notes = itemInput.Notes
@@ -340,19 +354,21 @@ public class PeerEvaluationService : IPeerEvaluationService
         await EnsureInPeerWindowAsync(evaluation.AppraisalId, "Peer feedback cannot be submitted yet", cancellationToken);
 
         // Validate all required criteria are scored (using the CriterionConfig snapshot), mirroring
-        // the peer scoring form's IsScoreable rule: competencies are always required; KPI items are
-        // required only when AllowPeerKpiEvaluation is enabled. A KPI item counts as scored when it
-        // has either a numeric score or an actual value.
+        // the peer scoring form's IsScoreable rule: competencies are always required; KPI items and
+        // the employee's goals only when AllowPeerKpiEvaluation is enabled (L7). A measured row
+        // counts as scored when it has either a numeric score or an actual value.
         var allowPeerKpi = evaluation.Appraisal.AppraisalCycle?.AppraisalSettings?.AllowPeerKpiEvaluation ?? false;
 
         var unscoredCount = evaluation.Appraisal.CriterionConfigs
             .Where(cc => cc.TemplateItem?.CompetencyId != null
-                      || (allowPeerKpi && cc.TemplateItem?.KpiDefinitionId != null))
+                      || (allowPeerKpi && (cc.TemplateItem?.KpiDefinitionId != null || cc.IsGoalRow())))
             .Count(cc =>
             {
-                var isKpi = cc.TemplateItem?.KpiDefinitionId != null;
-                return !evaluation.CriterionScores.Any(cs => cs.TemplateItemId == cc.TemplateItemId
-                    && (cs.NumericScore.HasValue || (isKpi && cs.ActualValue.HasValue)));
+                var measured = cc.IsMeasured();
+                var key = cc.CriterionKey();
+                return !evaluation.CriterionScores.Any(cs => (cs.TemplateItemId.HasValue || cs.CriterionConfigId.HasValue)
+                    && cs.CriterionKey() == key
+                    && (cs.NumericScore.HasValue || (measured && cs.ActualValue.HasValue)));
             });
 
         if (unscoredCount > 0)
@@ -449,25 +465,32 @@ public class PeerEvaluationService : IPeerEvaluationService
     {
         if (!appraisal.CriterionConfigs.Any()) return new();
 
-        var configsByTemplateItemId = appraisal.CriterionConfigs.ToDictionary(cc => cc.TemplateKey());
-        var scoresByTemplateItemId  = peerEval.CriterionScores.ToDictionary(cs => cs.TemplateKey());
-        var goalsByKpiDefId         = appraisal.Goals
-                                      .Where(g => g.KpiDefinitionId.HasValue)
-                                      .ToLookup(g => g.KpiDefinitionId!.Value);
+        // Keyed by criterion, so a goals section shows the employee's goal rows (lane L3).
+        var configsByKey    = appraisal.CriterionConfigs.ToDictionary(cc => cc.CriterionKey());
+        var scoresByKey     = peerEval.CriterionScores.ToDictionary(cs => cs.CriterionKey());
+        var goalsByKpiDefId = appraisal.Goals
+                              .Where(g => g.KpiDefinitionId.HasValue)
+                              .ToLookup(g => g.KpiDefinitionId!.Value);
+
+        PeerEvaluationItemDto Item(PerformanceAppraisalCriterionConfig config, AppraisalTemplateItem? templateItem)
+        {
+            scoresByKey.TryGetValue(config.CriterionKey(), out var score);
+            var kpiDef = config.TemplateItem?.KpiDefinition;
+            var goal   = kpiDef != null ? goalsByKpiDefId[kpiDef.Id].FirstOrDefault() : null;
+            // KPI items and the employee's goals only when peers may score measured work (L7).
+            var measuredWork = config.IsGoalRow() || config.TemplateItem?.KpiDefinitionId.HasValue == true;
+            var item = MapPeerItem(config, config.TemplateItem?.Competency, kpiDef, goal, score, !measuredWork || allowPeerKpiEvaluation);
+            if (templateItem != null)
+            {
+                item.DisplayOrder   = templateItem.DisplayOrder;
+                item.CustomQuestion = templateItem.CustomQuestion;
+            }
+            return item;
+        }
 
         if (appraisal.Template?.Sections == null || !appraisal.Template.Sections.Any())
         {
-            var fallbackItems = appraisal.CriterionConfigs
-                .Select(cc =>
-                {
-                    scoresByTemplateItemId.TryGetValue(cc.TemplateKey(), out var score);
-                    var kpiDef    = cc.TemplateItem?.KpiDefinition;
-                    var goal      = kpiDef != null ? goalsByKpiDefId[kpiDef.Id].FirstOrDefault() : null;
-                    bool isKpi    = cc.TemplateItem?.KpiDefinitionId.HasValue == true;
-                    bool scoreable = !isKpi || allowPeerKpiEvaluation;
-                    return MapPeerItem(cc, cc.TemplateItem?.Competency, kpiDef, goal, score, scoreable);
-                })
-                .ToList();
+            var fallbackItems = appraisal.CriterionConfigs.Select(cc => Item(cc, null)).ToList();
             return new List<PeerEvaluationSectionDto>
             {
                 new() { SectionName = "Evaluation Criteria", SectionWeight = 100, Items = fallbackItems }
@@ -476,34 +499,15 @@ public class PeerEvaluationService : IPeerEvaluationService
 
         return appraisal.Template.Sections
             .OrderBy(s => s.DisplayOrder)
-            .Select(section =>
+            .Select(section => new PeerEvaluationSectionDto
             {
-                var items = section.TemplateItems
-                    .OrderBy(ti => ti.DisplayOrder)
-                    .Where(ti => configsByTemplateItemId.ContainsKey(ti.Id))
-                    .Select(ti =>
-                    {
-                        var config    = configsByTemplateItemId[ti.Id];
-                        scoresByTemplateItemId.TryGetValue(ti.Id, out var score);
-                        var kpiDef    = config.TemplateItem?.KpiDefinition;
-                        var goal      = kpiDef != null ? goalsByKpiDefId[kpiDef.Id].FirstOrDefault() : null;
-                        bool isKpi    = config.TemplateItem?.KpiDefinitionId.HasValue == true;
-                        bool scoreable = !isKpi || allowPeerKpiEvaluation;
-                        var item      = MapPeerItem(config, config.TemplateItem?.Competency, kpiDef, goal, score, scoreable);
-                        item.DisplayOrder   = ti.DisplayOrder;
-                        item.CustomQuestion = ti.CustomQuestion;
-                        return item;
-                    })
-                    .ToList();
-                return new PeerEvaluationSectionDto
-                {
-                    SectionId          = section.Id,
-                    SectionName        = section.SectionName,
-                    SectionDescription = section.Description,
-                    DisplayOrder       = section.DisplayOrder,
-                    SectionWeight      = section.ScoredWeight(configsByTemplateItemId),
-                    Items              = items
-                };
+                SectionId          = section.Id,
+                SectionName        = section.SectionName,
+                Kind               = section.Kind,
+                SectionDescription = section.Description,
+                DisplayOrder       = section.DisplayOrder,
+                SectionWeight      = section.ScoredWeight(configsByKey),
+                Items              = section.FormRows(configsByKey).Select(row => Item(row.Config, row.Item)).ToList()
             })
             .Where(s => s.Items.Any())
             .ToList();
@@ -517,15 +521,19 @@ public class PeerEvaluationService : IPeerEvaluationService
         CriterionScore? existingScore,
         bool isScoreable) => new()
     {
-        TemplateItemId          = config.TemplateKey(),
+        TemplateItemId          = config.TemplateItemId,
         CriterionConfigId       = config.Id,
-        ItemName                = competency?.CriteriaName ?? kpiDef?.KpiName ?? string.Empty,
+        CriterionKey            = config.CriterionKey(),
+        ScoringMethod           = config.EffectiveScoringMethod(),
+        EmployeeGoalId          = config.EmployeeGoalId,
+        ItemName                = competency?.CriteriaName ?? kpiDef?.KpiName ?? config.ItemLabel ?? string.Empty,
         ItemDescription         = competency?.Description,
         ItemWeight              = config.WeightUsed,
+        DisplayOrder            = config.DisplayOrder ?? 0,
         RequireEvidence         = competency?.RequireEvidence ?? false,
         KpiDefinitionId         = kpiDef?.Id,
-        KpiUnit                 = kpiDef?.Unit ?? goal?.Unit,
-        MeasurementType         = kpiDef?.MeasurementType,
+        KpiUnit                 = config.Unit ?? kpiDef?.Unit ?? goal?.Unit,
+        MeasurementType         = config.MeasurementType ?? kpiDef?.MeasurementType,
         // The snapshot's target, floor and ceiling — the ones the score uses. This read the live
         // goal, so a peer saw a target the score never used (A12).
         KpiTargetValue          = config.KpiTargetValue,

@@ -488,6 +488,8 @@ public class AppraisalAppealItemDto : BaseDto
     public Guid TenantId { get; set; }
     public Guid AppraisalAppealId { get; set; }
     public Guid? TemplateItemId { get; set; }
+    /// <summary>The appraisal's snapshot row appealed; the only key a goal row has (lane L3).</summary>
+    public Guid? CriterionConfigId { get; set; }
     public string? TemplateItemName { get; set; }
     public string Reason { get; set; } = string.Empty;
     public string? ResolutionNotes { get; set; }
@@ -1839,11 +1841,23 @@ public class EvaluationGradeRangeDto
 /// </summary>
 public class EvaluationItemDto
 {
-    /// <summary>The AppraisalTemplateItem.Id — the scored line item.</summary>
-    public Guid TemplateItemId { get; set; }
+    /// <summary>The AppraisalTemplateItem.Id — the scored line item. Null on a goal row (lane L3).</summary>
+    public Guid? TemplateItemId { get; set; }
 
     /// <summary>The PerformanceAppraisalCriterionConfig.Id for this appraisal (the frozen snapshot row).</summary>
     public Guid CriterionConfigId { get; set; }
+
+    /// <summary>
+    /// The criterion's key — the template item for a template row, the snapshot row for a goal row.
+    /// What a form keys its rows by, and what a save may send back as the item's id.
+    /// </summary>
+    public Guid CriterionKey { get; set; }
+
+    /// <summary>Measured against a target (the input is an actual value) or rated on the grade bands (a score).</summary>
+    public CriterionScoringMethod ScoringMethod { get; set; }
+
+    /// <summary>The goal a goal row scores; null on a template row.</summary>
+    public Guid? EmployeeGoalId { get; set; }
 
     /// <summary>Display name — competency name or KPI name depending on item type.</summary>
     public string ItemName { get; set; } = string.Empty;
@@ -1957,7 +1971,11 @@ public class PeerEvaluationItemDto : EvaluationItemDto
 /// </summary>
 public class SubmittedEvaluationItemDto
 {
-    public Guid TemplateItemId { get; set; }
+    /// <summary>Null on a goal row (lane L3).</summary>
+    public Guid? TemplateItemId { get; set; }
+    public Guid? CriterionConfigId { get; set; }
+    /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
+    public Guid CriterionKey { get; set; }
     public string ItemName { get; set; } = string.Empty;
     public string? ItemDescription { get; set; }
     public Guid? KpiDefinitionId { get; set; }
@@ -1979,6 +1997,8 @@ public class SubmittedEvaluationItemDto
 public class SubmittedEvaluationSectionDto
 {
     public string SectionName { get; set; } = string.Empty;
+    /// <summary>A fixed section, or the employee's goals (lane L).</summary>
+    public AppraisalSectionKind Kind { get; set; } = AppraisalSectionKind.Fixed;
     public int SectionWeight { get; set; }
     public int DisplayOrder { get; set; }
     public List<SubmittedEvaluationItemDto> Items { get; set; } = new();
@@ -1986,12 +2006,15 @@ public class SubmittedEvaluationSectionDto
 
 /// <summary>
 /// Unified input DTO for saving a single scored item, covering both KPI and competency types.
-/// Keyed by TemplateItemId (matches PerformanceAppraisalCriterionConfig.TemplateItemId).
+/// Names its criterion by <see cref="TemplateItemId"/> (a template row's template item — or any
+/// row's criterion key) or by <see cref="CriterionConfigId"/> (the snapshot row); a goal row has no
+/// template item (lane L3). An input naming none of the appraisal's criteria is refused.
 /// </summary>
 public class EvaluationItemInputDto
 {
-    [Required]
-    public Guid TemplateItemId { get; set; }
+    public Guid? TemplateItemId { get; set; }
+
+    public Guid? CriterionConfigId { get; set; }
 
     /// <summary>
     /// For competency / custom-question items: direct 0-100 numeric score.
@@ -2019,6 +2042,8 @@ public class SelfEvaluationSectionDto
 {
     public Guid SectionId { get; set; }
     public string SectionName { get; set; } = string.Empty;
+    /// <summary>A fixed section, or the employee's goals (lane L).</summary>
+    public AppraisalSectionKind Kind { get; set; } = AppraisalSectionKind.Fixed;
     public string? SectionDescription { get; set; }
     public int DisplayOrder { get; set; }
     /// <summary>Section weight (0-100). Should sum to 100 across all sections for the appraisal.</summary>
@@ -2033,6 +2058,8 @@ public class ManagerEvaluationSectionDto
 {
     public Guid SectionId { get; set; }
     public string SectionName { get; set; } = string.Empty;
+    /// <summary>A fixed section, or the employee's goals (lane L).</summary>
+    public AppraisalSectionKind Kind { get; set; } = AppraisalSectionKind.Fixed;
     public string? SectionDescription { get; set; }
     public int DisplayOrder { get; set; }
     /// <summary>Section weight (0-100). Should sum to 100 across all sections for the appraisal.</summary>
@@ -2045,6 +2072,8 @@ public class PeerEvaluationSectionDto
 {
     public Guid SectionId { get; set; }
     public string SectionName { get; set; } = string.Empty;
+    /// <summary>A fixed section, or the employee's goals (lane L).</summary>
+    public AppraisalSectionKind Kind { get; set; } = AppraisalSectionKind.Fixed;
     public string? SectionDescription { get; set; }
     public int DisplayOrder { get; set; }
     /// <summary>Section weight (0-100). Should sum to 100 across all sections for the appraisal.</summary>
@@ -2597,6 +2626,8 @@ public class EvaluationSummaryDto
 public class CompetencyScoreSummaryDto
 {
     public string CriteriaName { get; set; } = string.Empty;
+    /// <summary>One of the employee's goals rather than a template item (lane L3).</summary>
+    public bool IsGoal { get; set; }
     public string? Description { get; set; }
     public int? NumericScore { get; set; }
     public int Weight { get; set; }
@@ -2610,6 +2641,8 @@ public class CompetencyScoreSummaryDto
 public class KpiScoreSummaryDto
 {
     public string KpiName { get; set; } = string.Empty;
+    /// <summary>One of the employee's goals rather than a template item (lane L3).</summary>
+    public bool IsGoal { get; set; }
     public string? Description { get; set; }
     public decimal? TargetValue { get; set; }
     public decimal? ActualValue { get; set; }
@@ -2640,6 +2673,8 @@ public class PeerEvaluationSummaryDto
 public class PeerCompetencyScoreSummaryDto
 {
     public string CriteriaName { get; set; } = string.Empty;
+    /// <summary>One of the employee's goals rather than a template item (lane L3).</summary>
+    public bool IsGoal { get; set; }
     public decimal? AverageScore { get; set; }
     public int ResponseCount { get; set; }
 }
@@ -2650,6 +2685,8 @@ public class PeerCompetencyScoreSummaryDto
 public class PeerKpiScoreSummaryDto
 {
     public string KpiName { get; set; } = string.Empty;
+    /// <summary>One of the employee's goals rather than a template item (lane L3).</summary>
+    public bool IsGoal { get; set; }
     public decimal? AverageTarget { get; set; }
     public decimal? AverageActual { get; set; }
     public int ResponseCount { get; set; }
@@ -2850,6 +2887,13 @@ public class SubmitAppealDto
 public class AppealItemSubmissionDto
 {
     public Guid? TemplateItemId { get; set; }
+
+    /// <summary>
+    /// The snapshot row appealed. A goal row has no template item and is named only by this
+    /// (lane L3); a template row may be named by either.
+    /// </summary>
+    public Guid? CriterionConfigId { get; set; }
+
     public Guid? EmployeeKpiTargetId { get; set; }
     
     [Required]
@@ -2905,7 +2949,11 @@ public class AppealReviewDto
 public class AppealedCriterionReviewDto
 {
     public Guid AppealItemId { get; set; }
-    public Guid TemplateItemId { get; set; }
+    /// <summary>The template item appealed; null on a goal row (lane L3).</summary>
+    public Guid? TemplateItemId { get; set; }
+    public Guid? CriterionConfigId { get; set; }
+    /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
+    public Guid CriterionKey { get; set; }
     public string ItemName { get; set; } = string.Empty;
     public string ItemDescription { get; set; } = string.Empty;
     public decimal Weight { get; set; }
@@ -2965,7 +3013,9 @@ public class AppealedKpiReviewDto
 /// </summary>
 public class CriterionScoreModificationDto
 {
-    public Guid TemplateItemId { get; set; }
+    /// <summary>The template item restated. A goal row has none, and is named by <see cref="CriterionConfigId"/>.</summary>
+    public Guid? TemplateItemId { get; set; }
+    public Guid? CriterionConfigId { get; set; }
     public int NewScore { get; set; }
     
     [Required]
@@ -3055,7 +3105,11 @@ public class PostRemandReviewDto
 /// </summary>
 public class CriterionScoreComparisonDto
 {
-    public Guid TemplateItemId { get; set; }
+    /// <summary>Null on a goal row (lane L3).</summary>
+    public Guid? TemplateItemId { get; set; }
+    public Guid? CriterionConfigId { get; set; }
+    /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
+    public Guid CriterionKey { get; set; }
     public string ItemName { get; set; } = string.Empty;
     public string ItemDescription { get; set; } = string.Empty;
     public decimal Weight { get; set; }
@@ -3169,7 +3223,11 @@ public class EmployeeAppealOutcomeDto
 
 public class FinalCriterionScoreDto
 {
-    public Guid TemplateItemId { get; set; }
+    /// <summary>Null on a goal row (lane L3).</summary>
+    public Guid? TemplateItemId { get; set; }
+    public Guid? CriterionConfigId { get; set; }
+    /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
+    public Guid CriterionKey { get; set; }
     public string ItemName { get; set; } = "";
     public string ItemDescription { get; set; } = "";
     public int? FinalScore { get; set; }
@@ -3532,6 +3590,8 @@ public class AppraisalTemplateSectionDto : BaseDto
     public string? Description { get; set; }
     public int DisplayOrder { get; set; }
     public int Weight { get; set; }
+    /// <summary>What fills the section: the template's own items, or each employee's locked goals (lane L).</summary>
+    public AppraisalSectionKind Kind { get; set; } = AppraisalSectionKind.Fixed;
 }
 
 public class CreateAppraisalTemplateSectionDto : CreateDtoBase
@@ -3550,6 +3610,9 @@ public class CreateAppraisalTemplateSectionDto : CreateDtoBase
 
     [Range(0, 100)]
     public int Weight { get; set; }
+
+    /// <summary>Fixed when omitted. One goals section per template, and it takes no items (lane L).</summary>
+    public AppraisalSectionKind? Kind { get; set; }
 }
 
 public class UpdateAppraisalTemplateSectionDto : UpdateDtoBase
@@ -3568,6 +3631,9 @@ public class UpdateAppraisalTemplateSectionDto : UpdateDtoBase
 
     [Range(0, 100)]
     public int Weight { get; set; }
+
+    /// <summary>Unchanged when omitted. A section with items cannot become a goals section (lane L).</summary>
+    public AppraisalSectionKind? Kind { get; set; }
 }
 
 // ============================================================
@@ -5188,6 +5254,10 @@ public class CalibrationRatingAdjustmentDto : BaseDto
     public string? AppraisalNumber { get; set; }
     public string? EmployeeName { get; set; }
     public Guid? TemplateItemId { get; set; }
+    /// <summary>The snapshot row adjusted; the only key a goal row has (lane L3).</summary>
+    public Guid? CriterionConfigId { get; set; }
+    /// <summary>A restatement of the overall score rather than of one criterion.</summary>
+    public bool IsOverall { get; set; }
     public string? TemplateItemName { get; set; }
     public decimal? OriginalScore { get; set; }
     public decimal? AdjustedScore { get; set; }
@@ -5217,7 +5287,13 @@ public class CalibrationRatingAdjustmentDto : BaseDto
 /// </remarks>
 public class CalibrationCriterionDto
 {
-    public Guid TemplateItemId { get; set; }
+    /// <summary>Null on a goal row (lane L3).</summary>
+    public Guid? TemplateItemId { get; set; }
+    public Guid CriterionConfigId { get; set; }
+    /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
+    public Guid CriterionKey { get; set; }
+    /// <summary>One of the employee's goals rather than a template item.</summary>
+    public bool IsGoal { get; set; }
     public string? TemplateItemName { get; set; }
     public int WeightUsed { get; set; }
 
@@ -5250,7 +5326,13 @@ public class CreateCalibrationRatingAdjustmentDto : CreateDtoBase
     [Required]
     public Guid PerformanceAppraisalId { get; set; }
 
+    /// <summary>
+    /// The criterion restated: a template item, or — for a goal row, which has none —
+    /// <see cref="CriterionConfigId"/>. Neither restates the overall score (lane L3).
+    /// </summary>
     public Guid? TemplateItemId { get; set; }
+
+    public Guid? CriterionConfigId { get; set; }
 
     [Range(0, 100)]
     public decimal? OriginalScore { get; set; }
@@ -5267,7 +5349,13 @@ public class UpdateCalibrationRatingAdjustmentDto : UpdateDtoBase
     [Required]
     public Guid PerformanceAppraisalId { get; set; }
 
+    /// <summary>
+    /// The criterion restated: a template item, or — for a goal row, which has none —
+    /// <see cref="CriterionConfigId"/>. Neither restates the overall score (lane L3).
+    /// </summary>
     public Guid? TemplateItemId { get; set; }
+
+    public Guid? CriterionConfigId { get; set; }
 
     [Range(0, 100)]
     public decimal? OriginalScore { get; set; }

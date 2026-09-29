@@ -31,8 +31,10 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    refinements and its *demo impact*: under strict gates 102 of APC2026's 107 appraisals sit at Goal
    Setting). Lane L is built in three slices (D-31): ~~L-a~~ **Done 2026-09-29**
    (`run-final-goalset.mjs` 157/157 twice; § 4 lane L's L-a State block — read § 1c first: a lock
-   freezes what a goal is, not its year). **L-b (goal rows and scoring) is next**, then L-c, then
-   B2–B8. UAT was rebuilt on 2026-09-29 (Efua 88.56, Cynthia 87.00 — lane A's settle path).
+   freezes what a goal is, not its year). ~~L-b~~ **Done 2026-09-29** (`run-final-goalkpis.mjs`
+   244/244 twice; § 4 lane L's L-b State block — read its refinements: the period rule, what freezes
+   a goals section, and P-71, the remand's dead end, which waits for lane C). **L-c (screens) is
+   next**, then B2–B8. UAT was rebuilt on 2026-09-29 (Efua 88.56, Cynthia 87.00 — lane A's settle path).
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -112,7 +114,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | A | Scoring integrity and the settle path | 2.5 days | D-11, D-13, D-22 (A14–A16 only) | ☑ 2026-09-29 — 177/177 twice; staged |
 | P | Privacy and access *(new — the review)* | 2 days | D-26 (P18 only) | ☑ 2026-09-29 — 339/339 twice; staged |
 | B | One gate evaluator (B1 first); settings enforced or removed | 3.5 days | — | ◐ B1 ☑ 2026-09-29 — 256/256 twice; staged. B3–B5 done; B1 enforces nine of the fourteen settings; B2's rest and B6–B8 open |
-| L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ◐ L-a ☑ 2026-09-29 — 157/157 twice; staged. L-b, L-c open |
+| L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ◐ L-a ☑ 2026-09-29 — 157/157 twice; L-b ☑ 2026-09-29 — 244/244 twice; staged. L-c open |
 | C | One appeal machine | 2 days | D-22 | ☐ |
 | D | Peer nomination and evaluation integrity | 1 day | — | ☐ |
 | E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | 4 days | D-10, D-14, D-17, D-20 | ☐ |
@@ -136,7 +138,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 **Size:** about **53 working days, eleven weeks** (50 without lane N; lane L grew by three, D-31).
 **Migrations:** batch 1 sits at the start of lane A and batch 2 at the start of lane F; batch 3 is
 withdrawn (D-21). **Batch 1 is done and applied to UAT (2026-09-29, § 6 State); lanes A, P and B1
-and slice L-a are done (2026-09-29, each with its State block in § 4); L-b is next.** UAT was rebuilt
+and slices L-a and L-b are done (2026-09-29, each with its State block in § 4); L-c is next.** UAT was rebuilt
 from the migration chain the same day and verified (S10's first rebuild, after lane B's gates).
 
 ---
@@ -860,8 +862,9 @@ because his final review is already held.
 - `EmployeeGoal.Weight` (int) is read by no scoring code.
 - Year-end `EmployeeGoalAppraisalAssessment` rows are stored beside the score.
 
-- [ ] L0 **The template model (D-15).** *(L-a deleted the Tier 1 override; the section kinds are
-      L-b's and the editor's text L-c's.)*
+- [ ] L0 **The template model (D-15).** *(L-a deleted the Tier 1 override. L-b: the section kind on
+      the template's DTOs and the forms, and the template service's rules — one goals section, no
+      items in it, a copy keeps it. The editor's picker and text are L-c's.)*
       - Templates are per population; assignment scopes already exist.
       - Section kinds are `Fixed` (competencies; shared KPIs with one target; free-text questions)
         and `EmployeeGoals`.
@@ -891,7 +894,8 @@ because his final review is already held.
         EmployeeGoalId), CriterionScore (evaluation, CriterionConfigId), and
         EmployeeGoalAppraisalAssessment (goal, appraisal). The last matters because EGS :138 reads the
         assessments with `ToDictionary` and crashes on a duplicate.
-- [ ] L2 **Snapshot at goal-set lock.** *(L-a built the lock itself — the flag, D-29 — the manager's
+- [x] L2 **Snapshot at goal-set lock.** *(L-b built the rows — `AppraisalGoalRowService`, the L-b
+      State block; the deadline sweep that locks a set is H2's, D-16.)* *(L-a built the lock itself — the flag, D-29 — the manager's
       "lock goal set", HR's advance locking the agreed set, the unlock fix and the edit rules (D-30).
       The rows are L-b's. Premise corrected by the source check: `KpiDefinition` carries no default
       grade ranges to copy — a measured row scores by achievement %, a rated row takes the tenant's
@@ -910,7 +914,8 @@ because his final review is already held.
       - Generation before lock leaves the section empty and the GoalSetting gate open.
       - Unlock removes rows while they are unscored and is refused once scored.
       - Goal edit and delete are refused while the goal is locked (EGS :243, :258).
-- [ ] L3 **Forms and scoring.** About 40 sites keyed by `TemplateItemId` move to the config id. The
+- [ ] L3 **Forms and scoring.** *(L-b built the server side — every site below but the frontend
+      bullet, keyed by the criterion key; the frontend bullet is L-c's.)* About 40 sites keyed by `TemplateItemId` move to the config id. The
       review's sweep lists them:
       - scoring core: PAS :848-861, :898-914 (`ToDictionary` throws on a null key), :980-982;
       - form builders: PAS :4624-4700, :4760-4818, :4874-4921; PES :464-475, :507-563;
@@ -939,17 +944,18 @@ because his final review is already held.
       routed path is GWC :124-199. HR reads only. The guide chapter "who decides the KPIs" is written
       from this. *(L-a: `GoalSetRules.LockBlocker`, read by the set lock; the weight total is defined
       once — live goals only — and the team view follows it. The dead EGS guard is lane J's.)*
-- [ ] L6 **Rated goals** (no numeric target, D-16) are scored on the tenant's overall grade scale as
+- [x] L6 *(L-b; the KPI definition's tolerance stays B2's.)* **Rated goals** (no numeric target, D-16) are scored on the tenant's overall grade scale as
       bands. Measured goals use actual vs target/min/max, with the KPI definition's tolerance
       (B2).
-- [ ] L7 **Neighbours.** *(L-a: interim reviews, check-ins and progress entries move a locked goal —
-      D-29. Scoring only the locked set, and the period guard, stay L-b's.)*
+- [x] L7 **Neighbours.** *(L-a: interim reviews, check-ins and progress entries move a locked goal —
+      D-29. L-b: the three bullets below; the period rule is defined in the L-b State block.)*
       - Peers score goal rows only when `AllowPeerKpiEvaluation` is on (PES :321-331, :521, :545).
       - Interim reviews read the locked goal set only (`AppraisalReviewEventService.cs:197-307` scores
         every cycle goal into `OverallPeriodScore` today).
       - A period-scoped goal (Q1, H1) is not counted again at year end.
 
-**Assertion** (`run-final-goalkpis.mjs`):
+**Assertion** (`run-final-goalkpis.mjs` — L-b wrote it with every row below but the free-text item,
+which is L4's and L-c's):
 - Two staff on one template with different locked goals are scored on different items with
   different targets.
 - Goal weights 60/40 → shares 0.6/0.4 of the section.
@@ -1027,6 +1033,88 @@ migration. What exists now:
 target. The rebuild itself moved Efua to **88.56** and Cynthia to **87.00** (lane A's settle path, as
 its dry run said), and Efua's appeal window now runs to 6 October; the guide carries both.
 
+**L-b State (2026-09-29): DONE — built, verified on UAT, staged** (decisions D-15, D-16, D-31). No
+migration: batch 1 had every column and index. What exists now:
+- **The criterion key** (`CriterionTemplateKey`). A template row keeps its template item id as its key,
+  so every row written before L-b needs nothing; a goal row is keyed by its own snapshot row. A score,
+  a remand snapshot row, an appeal item and a calibration adjustment resolve to the same key through
+  `TemplateItemId ?? CriterionConfigId`; an adjustment is the overall by its `IsOverall` flag, no
+  longer by a missing template item.
+- **`AppraisalGoalRowService`** — the goals section's rows. One per locked goal in the year-end
+  periods (full cycle, H2, Q4); weights normalised to 100 by largest remainder; the goal's own target,
+  minimum, maximum and unit (`KpiTargetSource.Goal`); **measured** with a target, **rated** without
+  (D-16), on the tenant's overall grade scale as bands. Rebuilt at a goal's lock, the set lock, HR's
+  advance past goal setting (logged: *"Built the goals section: n goal row(s)."*), generation and an
+  unlock; a rebuild that changes nothing writes nothing. Once a goal row is scored in a **submitted**
+  evaluation the section is fixed: the unlock is refused (422) and a lock adds no row. A goal that
+  leaves the set takes its row, and any draft score on it, with it.
+- **Scoring** (`AppraisalScoreService`). Keyed by criterion. `AppraisalCriterionScoring.Resolve` says
+  what an input names: a template item (what the forms have always sent), a snapshot row, or a goal
+  row's key sent as `templateItemId` (so a form keyed by criterion may send its key) — and refuses an
+  input that names none of the appraisal's criteria. One achievement rule serves the score and the
+  assessment mirror.
+- **The forms** (self, manager, peer, the submitted view). The goals section shows its rows — each
+  with `criterionKey`, `scoringMethod`, `employeeGoalId` and the snapshot's label, target and unit;
+  every section carries its `kind`. `TemplateItemId` is null on a goal row in every DTO that lists
+  rows.
+- **The saves.** Every score row carries its `CriterionConfigId` (a goal row's has no template item).
+  The year-end goal assessments refuse a goal outside the employee's set — they took any goal id —
+  and a goal row scored in the save is mirrored into its assessment (actual when measured, and the
+  percentage) over the panel's figures; the panel's status, notes and evidence stay.
+- **Calibration.** An adjustment names a template item or a snapshot row, refused when it is not the
+  appraisal's; `IsOverall` is set, not inferred; the panel's criteria, the commit and the matrix pair
+  by key; the adjustment lists load the criterion's name (they read "one criterion").
+- **Appeals.** An appeal item may name a goal row (refused when not the appraisal's); the employee's
+  status, HR's review, the resolution's restatements, the post-remand comparison and the outcome pair
+  by key; the remand snapshot keeps `CriterionConfigId` and `ActualValue` (C5 needs both).
+- **HR's review.** A goal row sits with the KPIs or the competencies by its measured flag, flagged
+  `isGoal`.
+- **Templates.** `Kind` on the section DTOs (an update without one keeps it); one goals section per
+  template, no items in it, a section with items cannot become one, a copy keeps the kind;
+  activation counts an empty goals section complete; the snapshot skips a goals section's items. The
+  section endpoints answer 409 for these and for a template on a live cycle (they 500'd).
+- **Neighbours (L7).** A peer sees the goal rows read-only and is refused a score on one unless
+  `AllowPeerKpiEvaluation`; the full interim appraisal lists and scores the locked set only (422
+  otherwise).
+- **The peer form's read** is split per collection — the twelve-way query that timed out in L-a.
+
+**Where the build refines or extends the rows above** (each deliberate; say if one should go back):
+1. **The period rule.** L7 said a period-scoped goal is "not counted again at year end". The year-end
+   section takes full-cycle, H2 and Q4 goals; a Q1, Q2, H1 or Q3 goal belongs to its interim review.
+2. **What freezes the section**: a score in a submitted evaluation, not any score. A self-evaluation
+   draft may be saved during goal setting, and would have frozen the section at its first locked goal.
+3. **Stricter saves**: an input naming a template item outside the appraisal's snapshot is refused;
+   it used to be scored against the live template.
+4. **Peers**: refused a goal-row score when `AllowPeerKpiEvaluation` is off. A KPI row is still caught
+   only at submission — lane D.
+5. **Assessment ownership**, carried from L-a's "found on the way", is refused for any goal outside
+   the employee's set for the cycle.
+6. **The section endpoints' 409**, for every structural refusal on a section.
+
+**Found on the way, carried:**
+- **P-71 — the remand's dead end** (guide chapters 29 and 33, Appendices C and E). The remand leaves
+  the manager's evaluation submitted, so the re-evaluation cannot be saved; the post-remand decision
+  does not wait for one; *Rejected* keeps the current scores. The guide claimed the opposite on all
+  three and offered a remand as a demo ending — corrected: never remand in the demo. **Decided with
+  the user, 2026-09-29: fixed in lane C (C3, C5), not now.**
+- The appeal page's list is still competencies only (C6); goal rows are appealable through the API.
+- **L-c:** the section-kind picker and its text; the forms keyed by criterion — `toItemScores` keys
+  by template item, so a goal row cannot be saved from today's screens; the goal assessment panel
+  for goals with rows; the snapshot labels on the coverage and calibration screens; the manager's
+  *Lock goal set* control.
+- The self and manager saves still include `appraisal.Goals`, which nothing reads now (lane J).
+
+**Verified** (Staging API on `ErpSystemDB_UAT`):
+- `run-final-goalkpis.mjs` **244/244**, then **244/244 again** inside `run-all`.
+- Regression (`run-all.mjs`, eleven suites): interim reviews 133/133 (+5: the locked set), attachments
+  65/65, slice C 51/51, slice D 22/22, **slice E 17/26 — the same 9 stale**, gates 32/32, lane A
+  182/182, lane P 340/340, lane B1 256/256, lane L-a 157/157, lane L-b 244/244. **1499/1508.** API
+  log: no SQL timeout; every save error is defect #23's payroll-profile key, one per fixture employee;
+  the notification sender's failures are Staging's missing SMTP.
+
+**Demo impact:** none. No demo template has a goals section, and a template row scores, shows and
+calibrates as before. The guide carries L-b's notes and P-71.
+
 ### Lane C — One appeal machine
 
 - [ ] C1 Delete legacy `FileAppealAsync` (:311-353), `ResolveAppealAsync(ResolveAppraisalAppealDto)`
@@ -1034,7 +1122,8 @@ its dry run said), and Efua's appeal window now runs to 6 October; the guide car
       (`PerformanceAppraisalsController.cs:334-404`), their DTOs and FE types. No FE caller.
 - [ ] C2 `GetLatestAppealAsync` (newest by `SubmittedDate`) replaces the four unordered lookups;
       one open appeal per appraisal (enforced by C10's index, not only a check).
-- [ ] C3 Remand **keeps `Status=Appealed`** (finding: Active made it a normal pipeline row), clears
+- [ ] C3 *(Confirmed live by L-b — P-71 in the guide; decided 2026-09-29 to wait for this lane.)*
+      Remand **keeps `Status=Appealed`** (finding: Active made it a normal pipeline row), clears
       the manager's `SubmittedDate` and `CalibratedOverallScore`, sets the remand dates; the manager's
       remand re-evaluation settles (`publish:false`), stays Appealed with `CurrentAppealStatus=Remanded`,
       clears `AppealRemandDeadline`, notifies HR; `GetManagerEvaluationContextAsync` :2256
@@ -1043,11 +1132,12 @@ its dry run said), and Efua's appeal window now runs to 6 October; the guide car
       `NumericScore` (D-22, typed like calibration, validated per A11), clear `CalibratedOverallScore`,
       settle; both end Completed + publish. Justification required server-side (FE :105 substitutes
       text today).
-- [ ] C5 `FinalizePostRemandAppealAsync`: `Rejected` restores `NumericScore/ActualValue/Notes` from
+- [ ] C5 *(L-b: the remand snapshot now writes `ActualValue` and `CriterionConfigId`, and the
+      comparison pairs by criterion key — restore by that key.)* `FinalizePostRemandAppealAsync`: `Rejected` restores `NumericScore/ActualValue/Notes` from
       the remand snapshot (needs `AppraisalCriterionScoreSnapshot.ActualValue` — batch 1;
       `CreateManagerEvaluationSnapshotAsync` :2083-2096 writes it); `Upheld` keeps the re-evaluation;
       outcome text matches (:3837 is false today).
-- [ ] C6 KPI items appealable again (the majority of the score): the appeal page lists KPI and goal
+- [ ] C6 *(L-b: goal rows are appealable through the API, by their snapshot row.)* KPI items appealable again (the majority of the score): the appeal page lists KPI and goal
       rows, and a modification is the achievement-% override of D-22 — not an `ActualValue` change;
       remove the "deprecated" hard-empties (PAS :2836, :3398, :3673, :3877).
 - [ ] C7 Appeal on a Governance appraisal refused; resolution never bypasses HR sign-off;

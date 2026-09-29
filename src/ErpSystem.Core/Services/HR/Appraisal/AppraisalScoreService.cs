@@ -17,22 +17,72 @@ namespace ErpSystem.Core.Services.HR.Appraisal;
 public sealed record CriterionScoringInfo(
     decimal Share, decimal MaxScore, bool IsKpi, decimal? KpiTarget, decimal? KpiMin, decimal? KpiMax);
 
+/// <summary>The criterion an evaluation input names, resolved against the appraisal's snapshot.</summary>
+/// <param name="Key">The criterion key: a template row's template item, a goal row's own snapshot id.</param>
+/// <param name="TemplateItemId">What a score stores as its template item — null on a goal row.</param>
+/// <param name="CriterionConfigId">The snapshot row; null only on an appraisal generated without one.</param>
+public sealed record CriterionRef(Guid Key, Guid? TemplateItemId, Guid? CriterionConfigId);
+
 /// <summary>
-/// One appraisal's scoring inputs, keyed by template item. Built by
-/// <see cref="IAppraisalScoreService.LoadScoringAsync"/>; an item missing from the criterion
+/// One appraisal's scoring inputs, keyed by criterion (<see cref="CriterionTemplateKey"/>). Built
+/// by <see cref="IAppraisalScoreService.LoadScoringAsync"/>; an item missing from the criterion
 /// snapshot is resolved from the live template the first time it is asked for and kept.
 /// </summary>
 public sealed class AppraisalCriterionScoring
 {
-    internal AppraisalCriterionScoring(Guid appraisalId, Dictionary<Guid, CriterionScoringInfo> items)
+    private readonly Dictionary<Guid, PerformanceAppraisalCriterionConfig> _rowsByKey = new();
+    private readonly Dictionary<Guid, PerformanceAppraisalCriterionConfig> _rowsById = new();
+
+    internal AppraisalCriterionScoring(
+        Guid appraisalId, Dictionary<Guid, CriterionScoringInfo> items, IEnumerable<PerformanceAppraisalCriterionConfig> rows)
     {
         AppraisalId = appraisalId;
         Items = items;
+        foreach (var row in rows)
+        {
+            _rowsByKey[row.CriterionKey()] = row;
+            _rowsById[row.Id] = row;
+        }
     }
 
     public Guid AppraisalId { get; }
 
     internal Dictionary<Guid, CriterionScoringInfo> Items { get; }
+
+    /// <summary>
+    /// The criterion an input names, or null when it names none of this appraisal's. A template row
+    /// is named by its template item — what the forms have always sent — or by its snapshot row; a
+    /// goal row, which has no template item, by its snapshot row (lane L3). An appraisal generated
+    /// before the snapshot has no rows, and takes any template item as it always did.
+    /// </summary>
+    public CriterionRef? Resolve(EvaluationItemInputDto input)
+    {
+        if (input.CriterionConfigId is Guid configId)
+        {
+            if (!_rowsById.TryGetValue(configId, out var row)) return null;
+            var key = row.CriterionKey();
+            if (input.TemplateItemId is Guid named && named != key) return null;
+            return new CriterionRef(key, row.TemplateItemId, row.Id);
+        }
+
+        if (input.TemplateItemId is not Guid templateItemId) return null;
+        if (_rowsByKey.TryGetValue(templateItemId, out var byKey))
+            return new CriterionRef(templateItemId, byKey.TemplateItemId, byKey.Id);
+        return _rowsById.Count == 0 ? new CriterionRef(templateItemId, templateItemId, null) : null;
+    }
+
+    /// <summary>A goal row of this appraisal's snapshot, by its id; null for a template row or an unknown id.</summary>
+    public PerformanceAppraisalCriterionConfig? GoalRow(Guid criterionConfigId) =>
+        _rowsById.TryGetValue(criterionConfigId, out var row) && row.IsGoalRow() ? row : null;
+
+    /// <summary>
+    /// A score's achievement on its criterion, 0–100, measured as the score is: a rated row against
+    /// the top of its own scale, a measured row's restated percentage (D-22) or its actual against
+    /// the snapshot's target. Null when the score carries no value or its criterion is not in the
+    /// snapshot.
+    /// </summary>
+    public decimal? AchievementPercent(CriterionScore score) =>
+        Items.TryGetValue(score.CriterionKey(), out var info) ? AppraisalScoreService.Achievement(score, info) * 100m : null;
 }
 
 /// <summary>What one settle did.</summary>
@@ -130,7 +180,8 @@ public class AppraisalScoreService : IAppraisalScoreService
             .Select(c => new
             {
                 Config = c,
-                SectionWeight = (int?)c.TemplateItem!.Section.Weight,
+                // A goal row has no template item; its section is on the row itself (lane L).
+                SectionWeight = (int?)c.TemplateItem!.Section.Weight ?? (int?)c.Section!.Weight,
                 TemplateKpiDefinitionId = c.TemplateItem!.KpiDefinitionId,
                 TopBand = c.GradeRanges.Where(r => !r.IsDeleted).Max(r => (int?)r.HighScore),
             })
@@ -141,7 +192,7 @@ public class AppraisalScoreService : IAppraisalScoreService
         foreach (var row in configs)
         {
             var c = row.Config;
-            items[c.TemplateKey()] = new CriterionScoringInfo(
+            items[c.CriterionKey()] = new CriterionScoringInfo(
                 // A0: the section weight frozen at generation; the live section only for rows
                 // written before the freeze and not yet backfilled.
                 Share: AppraisalScoring.CriterionShare(c.SectionWeightUsed ?? row.SectionWeight ?? 0, c.WeightUsed),
@@ -154,24 +205,25 @@ public class AppraisalScoreService : IAppraisalScoreService
                 KpiMax: c.KpiMaxValue);
         }
 
-        return new AppraisalCriterionScoring(appraisalId, items);
+        return new AppraisalCriterionScoring(appraisalId, items, configs.Select(row => row.Config));
     }
 
     /// <summary>
     /// The scoring inputs for one criterion: the snapshot row, or — for an appraisal generated
     /// before the snapshot existed — the live template item, deleted or not (a line removed from
-    /// the template keeps scoring what was scored against it, as a snapshot row does). An id that
-    /// matches no item at all scores nothing (share 0).
+    /// the template keeps scoring what was scored against it, as a snapshot row does). A key that
+    /// matches no item at all — a goal row since removed from the section among them — scores
+    /// nothing (share 0).
     /// </summary>
     private async Task<CriterionScoringInfo> ResolveAsync(
-        AppraisalCriterionScoring scoring, Guid templateItemId, CancellationToken cancellationToken)
+        AppraisalCriterionScoring scoring, Guid criterionKey, CancellationToken cancellationToken)
     {
-        if (scoring.Items.TryGetValue(templateItemId, out var known))
+        if (scoring.Items.TryGetValue(criterionKey, out var known))
             return known;
 
         var tenantId = GetTenantId();
         var live = await _templateItemRepository
-            .GetQueryableIncludingDeleted(i => i.Id == templateItemId && i.TenantId == tenantId)
+            .GetQueryableIncludingDeleted(i => i.Id == criterionKey && i.TenantId == tenantId)
             .Select(i => new
             {
                 i.Weight,
@@ -195,15 +247,15 @@ public class AppraisalScoreService : IAppraisalScoreService
                 live.KpiMinValue,
                 live.KpiMaxValue);
 
-        scoring.Items[templateItemId] = info;
+        scoring.Items[criterionKey] = info;
         return info;
     }
 
     /// <inheritdoc/>
     public async Task<decimal> GetScaleTopAsync(
-        AppraisalCriterionScoring scoring, Guid templateItemId, CancellationToken cancellationToken = default)
+        AppraisalCriterionScoring scoring, Guid criterionKey, CancellationToken cancellationToken = default)
     {
-        var info = await ResolveAsync(scoring, templateItemId, cancellationToken);
+        var info = await ResolveAsync(scoring, criterionKey, cancellationToken);
         // A KPI's NumericScore is an achievement-% override (D-22), always out of 100.
         return info.IsKpi ? AppraisalScoring.MaxScore : info.MaxScore;
     }
@@ -211,8 +263,7 @@ public class AppraisalScoreService : IAppraisalScoreService
     // ── Arithmetic ───────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// A criterion's exact contribution to its evaluator's score, <c>achievement(0–1) × share</c>,
-    /// or null when the row carries no value.
+    /// A row's achievement on its criterion, 0–1, or null when the row carries no value.
     ///
     /// <list type="bullet">
     ///   <item>A rated item: <c>NumericScore ÷ the item's top band</c>.</item>
@@ -226,11 +277,8 @@ public class AppraisalScoreService : IAppraisalScoreService
     /// Achievement is clamped to 0–1, so one item past the top of its scale cannot make up for
     /// another's shortfall. The inputs are validated to the scale as well (A11); the clamp is for
     /// rows saved before that validation existed.
-    ///
-    /// ⚠ The evaluator's weight is deliberately NOT applied here — it belongs once, at aggregation
-    /// (see the model note on <see cref="AppraisalScoring"/>).
     /// </summary>
-    private static decimal? Contribution(CriterionScore score, CriterionScoringInfo info)
+    internal static decimal? Achievement(CriterionScore score, CriterionScoringInfo info)
     {
         decimal achievement;
 
@@ -248,14 +296,24 @@ public class AppraisalScoreService : IAppraisalScoreService
             return null;
         }
 
-        return Math.Clamp(achievement, 0m, 1m) * info.Share;
+        return Math.Clamp(achievement, 0m, 1m);
     }
+
+    /// <summary>
+    /// A criterion's exact contribution to its evaluator's score, <c>achievement(0–1) × share</c>,
+    /// or null when the row carries no value.
+    ///
+    /// ⚠ The evaluator's weight is deliberately NOT applied here — it belongs once, at aggregation
+    /// (see the model note on <see cref="AppraisalScoring"/>).
+    /// </summary>
+    private static decimal? Contribution(CriterionScore score, CriterionScoringInfo info)
+        => Achievement(score, info) is decimal achievement ? achievement * info.Share : null;
 
     /// <inheritdoc/>
     public async Task ScoreCriterionAsync(
         CriterionScore score, AppraisalCriterionScoring scoring, CancellationToken cancellationToken = default)
     {
-        var info = await ResolveAsync(scoring, score.TemplateKey(), cancellationToken);
+        var info = await ResolveAsync(scoring, score.CriterionKey(), cancellationToken);
         score.WeightedScore = Round2(Contribution(score, info)) ?? 0m;
     }
 
@@ -267,7 +325,7 @@ public class AppraisalScoreService : IAppraisalScoreService
 
         foreach (var score in scores)
         {
-            var info = await ResolveAsync(scoring, score.TemplateKey(), cancellationToken);
+            var info = await ResolveAsync(scoring, score.CriterionKey(), cancellationToken);
             var contribution = Contribution(score, info);
 
             // Every row is re-weighted from its raw inputs, so a stored WeightedScore can never be
@@ -434,9 +492,14 @@ public class AppraisalScoreService : IAppraisalScoreService
             if (input.ActualValue is decimal actual && actual < 0)
                 return "An actual value cannot be negative.";
 
+            // Each input names one of this appraisal's criteria (lane L3). An id from another form
+            // used to be scored against the live template, which the snapshot exists to prevent.
+            if (scoring.Resolve(input) is not CriterionRef criterion)
+                return "An item on this form is not one of this appraisal's criteria. Reload the form and try again.";
+
             if (input.NumericScore is not int numeric) continue;
 
-            var top = await GetScaleTopAsync(scoring, input.TemplateItemId, cancellationToken);
+            var top = await GetScaleTopAsync(scoring, criterion.Key, cancellationToken);
             if (numeric < AppraisalScoring.MinScore || numeric > top)
                 return top == AppraisalScoring.MaxScore
                     ? $"Scores must be between {AppraisalScoring.MinScore:0} and {AppraisalScoring.MaxScore:0}."

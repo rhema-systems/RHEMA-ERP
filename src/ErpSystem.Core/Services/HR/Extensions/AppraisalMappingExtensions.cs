@@ -1258,6 +1258,7 @@ public static class AppraisalMappingExtensions
             Description = entity.Description,
             DisplayOrder = entity.DisplayOrder,
             Weight = entity.Weight,
+            Kind = entity.Kind,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -1273,7 +1274,8 @@ public static class AppraisalMappingExtensions
             SectionName = dto.SectionName,
             Description = dto.Description,
             DisplayOrder = dto.DisplayOrder,
-            Weight = dto.Weight
+            Weight = dto.Weight,
+            Kind = dto.Kind ?? AppraisalSectionKind.Fixed
         };
     }
 
@@ -1284,6 +1286,9 @@ public static class AppraisalMappingExtensions
         entity.Description = dto.Description;
         entity.DisplayOrder = dto.DisplayOrder;
         entity.Weight = dto.Weight;
+        // Omitted keeps the kind: the editor's section form predates it (lane L).
+        if (dto.Kind is AppraisalSectionKind kind)
+            entity.Kind = kind;
     }
 
     public static List<AppraisalTemplateSectionDto> ToDtoList(this IEnumerable<AppraisalTemplateSection> entities)
@@ -2558,7 +2563,11 @@ public static class AppraisalMappingExtensions
             AppraisalNumber = entity.PerformanceAppraisal?.AppraisalNumber,
             EmployeeName = entity.PerformanceAppraisal?.Employee?.FullName,
             TemplateItemId = entity.TemplateItemId,
-            TemplateItemName = entity.TemplateItem?.Competency?.CriteriaName ?? entity.TemplateItem?.KpiDefinition?.KpiName,
+            CriterionConfigId = entity.CriterionConfigId,
+            IsOverall = entity.IsOverall,
+            TemplateItemName = entity.TemplateItem?.Competency?.CriteriaName
+                               ?? entity.TemplateItem?.KpiDefinition?.KpiName
+                               ?? entity.CriterionConfig?.ItemLabel,
             OriginalScore = entity.OriginalScore,
             AdjustedScore = entity.AdjustedScore,
             AdjustedById = entity.AdjustedById,
@@ -2579,9 +2588,10 @@ public static class AppraisalMappingExtensions
         {
             PerformanceAppraisalId = dto.PerformanceAppraisalId,
             TemplateItemId = dto.TemplateItemId,
-            // Until goal rows exist (lane L), no item still means the overall — the rule the
-            // batch-1 backfill wrote, kept true for every adjustment written after it.
-            IsOverall = !dto.TemplateItemId.HasValue,
+            CriterionConfigId = dto.CriterionConfigId,
+            // Neither key means the overall. A goal row has no template item (lane L3), so a null
+            // item alone no longer does; the service replaces both keys with the resolved ones.
+            IsOverall = !dto.TemplateItemId.HasValue && !dto.CriterionConfigId.HasValue,
             OriginalScore = dto.OriginalScore,
             AdjustedScore = dto.AdjustedScore,
             AdjustmentDate = DateTime.UtcNow,
@@ -2593,7 +2603,8 @@ public static class AppraisalMappingExtensions
     {
         entity.PerformanceAppraisalId = dto.PerformanceAppraisalId;
         entity.TemplateItemId = dto.TemplateItemId;
-        entity.IsOverall = !dto.TemplateItemId.HasValue;
+        entity.CriterionConfigId = dto.CriterionConfigId;
+        entity.IsOverall = !dto.TemplateItemId.HasValue && !dto.CriterionConfigId.HasValue;
         entity.OriginalScore = dto.OriginalScore;
         entity.AdjustedScore = dto.AdjustedScore;
         entity.Rationale = dto.Rationale;

@@ -536,6 +536,11 @@ public class EmployeeGoalsController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // A scored goal cannot be unlocked (performance closure L2).
+            return BusinessRuleRejected(ex, "unlocking");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error unlocking goal {GoalId}", goalId);

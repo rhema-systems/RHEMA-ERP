@@ -422,9 +422,13 @@ public class CalibrationSessionService : ICalibrationSessionService
         if (adjustedById == Guid.Empty)
             throw new InvalidOperationException("Your user account is not linked to an employee record, so the adjustment cannot be attributed.");
 
-        await ValidateAdjustedScoreAsync(dto.PerformanceAppraisalId, dto.TemplateItemId, dto.AdjustedScore, cancellationToken);
+        var criterion = await ValidateAdjustmentAsync(
+            dto.PerformanceAppraisalId, dto.TemplateItemId, dto.CriterionConfigId, dto.AdjustedScore, cancellationToken);
 
         var entity = dto.ToEntity();
+        entity.TemplateItemId = criterion?.TemplateItemId;
+        entity.CriterionConfigId = criterion?.CriterionConfigId;
+        entity.IsOverall = criterion == null;
         entity.CalibrationSessionId = sessionId;
         entity.TenantId = session.TenantId;
         entity.AdjustedById = adjustedById;
@@ -445,33 +449,39 @@ public class CalibrationSessionService : ICalibrationSessionService
     }
 
     /// <summary>
-    /// An adjusted score has to be one the item can hold (performance closure A11, A13). An
-    /// overall is 0–100. An item's score is a whole number — <c>CriterionScore.NumericScore</c> is
-    /// an integer, and a 72.5 used to be rounded silently at commit — from 0 to the top of the
-    /// item's own scale: its highest grade band, or 100 for a KPI, whose adjustment is a restated
-    /// achievement percentage (D-22).
+    /// The criterion an adjustment restates — null for the overall — and whether its score is one
+    /// the item can hold (performance closure A11, A13). A criterion is named as a form input names
+    /// it: a template item, or a goal row's snapshot id (lane L3); one that is not the appraisal's
+    /// is refused. An overall is 0–100. An item's score is a whole number —
+    /// <c>CriterionScore.NumericScore</c> is an integer, and a 72.5 used to be rounded silently at
+    /// commit — from 0 to the top of the item's own scale: its highest grade band, or 100 for a
+    /// measured row, whose adjustment is a restated achievement percentage (D-22).
     /// </summary>
-    private async Task ValidateAdjustedScoreAsync(
-        Guid appraisalId, Guid? templateItemId, decimal? adjustedScore, CancellationToken cancellationToken)
+    private async Task<CriterionRef?> ValidateAdjustmentAsync(
+        Guid appraisalId, Guid? templateItemId, Guid? criterionConfigId, decimal? adjustedScore, CancellationToken cancellationToken)
     {
-        if (adjustedScore is not decimal score) return;
-
-        if (templateItemId is not Guid itemId)
+        if (templateItemId is null && criterionConfigId is null)
         {
-            if (!AppraisalScoring.IsValidScore(score))
+            if (adjustedScore is decimal overall && !AppraisalScoring.IsValidScore(overall))
                 throw new InvalidOperationException(
                     $"An overall score must be between {AppraisalScoring.MinScore:0} and {AppraisalScoring.MaxScore:0}.");
-            return;
+            return null;
         }
+
+        var scoring = await _scores.LoadScoringAsync(appraisalId, cancellationToken);
+        var criterion = scoring.Resolve(new EvaluationItemInputDto { TemplateItemId = templateItemId, CriterionConfigId = criterionConfigId })
+            ?? throw new InvalidOperationException("That criterion is not one of this appraisal's.");
+
+        if (adjustedScore is not decimal score) return criterion;
 
         if (score != decimal.Truncate(score))
             throw new InvalidOperationException("A criterion score is a whole number.");
 
-        var scoring = await _scores.LoadScoringAsync(appraisalId, cancellationToken);
-        var top = await _scores.GetScaleTopAsync(scoring, itemId, cancellationToken);
+        var top = await _scores.GetScaleTopAsync(scoring, criterion.Key, cancellationToken);
         if (score < AppraisalScoring.MinScore || score > top)
             throw new InvalidOperationException(
                 $"This criterion is scored from {AppraisalScoring.MinScore:0} to {top:0}; {score:0} is outside its scale.");
+        return criterion;
     }
 
     public async Task<IEnumerable<CalibrationRatingAdjustmentDto>> GetRatingAdjustmentsAsync(Guid sessionId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default)
@@ -483,6 +493,10 @@ public class CalibrationSessionService : ICalibrationSessionService
             .Include(a => a.PerformanceAppraisal)
                 .ThenInclude(ap => ap.Employee)
             .Include(a => a.AdjustedBy)
+            // The criterion's name: without these every item adjustment read "one criterion".
+            .Include(a => a.TemplateItem).ThenInclude(ti => ti!.Competency)
+            .Include(a => a.TemplateItem).ThenInclude(ti => ti!.KpiDefinition)
+            .Include(a => a.CriterionConfig)
             .OrderByDescending(a => a.AdjustmentDate)
             .ToListAsync(cancellationToken);
         return entities.ToDtoList();
@@ -498,6 +512,9 @@ public class CalibrationSessionService : ICalibrationSessionService
             .Include(a => a.PerformanceAppraisal)
                 .ThenInclude(ap => ap.Employee)
             .Include(a => a.AdjustedBy)
+            .Include(a => a.TemplateItem).ThenInclude(ti => ti!.Competency)
+            .Include(a => a.TemplateItem).ThenInclude(ti => ti!.KpiDefinition)
+            .Include(a => a.CriterionConfig)
             .OrderByDescending(a => a.AdjustmentDate)
             .ToListAsync(cancellationToken);
         return entities.ToDtoList();
@@ -543,7 +560,7 @@ public class CalibrationSessionService : ICalibrationSessionService
         var adjustments = await _adjustmentRepository
             .GetQueryable(a => a.CalibrationSessionId == sessionId
                             && a.PerformanceAppraisalId == appraisalId
-                            && a.TemplateItemId != null
+                            && !a.IsOverall
                             && a.TenantId == tenantId)
             .ToListAsync(cancellationToken);
 
@@ -552,20 +569,25 @@ public class CalibrationSessionService : ICalibrationSessionService
 
         foreach (var c in configs)
         {
-            var score = managerScores.FirstOrDefault(s => s.TemplateItemId == c.TemplateItemId);
-            var adjustment = adjustments.FirstOrDefault(a => a.TemplateItemId == c.TemplateItemId);
-            var isKpi = c.TemplateItem?.KpiDefinitionId != null;
+            // Paired by criterion key: a goal row has no template item, and every goal row's null
+            // would have matched every other's (lane L3).
+            var key = c.CriterionKey();
+            var score = managerScores.FirstOrDefault(s => s.CriterionKey() == key);
+            var adjustment = adjustments.FirstOrDefault(a => a.CriterionKey() == key);
+            var isKpi = c.IsMeasured();
 
             rows.Add(new CalibrationCriterionDto
             {
-                TemplateItemId = c.TemplateKey(),
-                TemplateItemName = c.TemplateItem?.Competency?.CriteriaName
-                                   ?? c.TemplateItem?.KpiDefinition?.KpiName,
+                TemplateItemId = c.TemplateItemId,
+                CriterionConfigId = c.Id,
+                CriterionKey = key,
+                IsGoal = c.IsGoalRow(),
+                TemplateItemName = c.CriterionName(),
                 WeightUsed = c.WeightUsed,
                 IsKpi = isKpi,
-                // What an adjustment to this row can be (A11): a KPI's is a restated achievement
-                // percentage (D-22), a rated item's a whole score up to its top band.
-                ScaleTop = await _scores.GetScaleTopAsync(scoring, c.TemplateKey(), cancellationToken),
+                // What an adjustment to this row can be (A11): a measured row's is a restated
+                // achievement percentage (D-22), a rated item's a whole score up to its top band.
+                ScaleTop = await _scores.GetScaleTopAsync(scoring, key, cancellationToken),
                 KpiTargetValue = isKpi ? c.KpiTargetValue : null,
                 ManagerScore = score?.NumericScore,
                 ManagerActualValue = score?.ActualValue,
@@ -613,9 +635,13 @@ public class CalibrationSessionService : ICalibrationSessionService
         var scopedIds = await GetScopedAppraisalIdsAsync(sessionId, cancellationToken);
         if (!scopedIds.Contains(dto.PerformanceAppraisalId))
             throw new InvalidOperationException("That appraisal is not in this calibration session's scope.");
-        await ValidateAdjustedScoreAsync(dto.PerformanceAppraisalId, dto.TemplateItemId, dto.AdjustedScore, cancellationToken);
+        var criterion = await ValidateAdjustmentAsync(
+            dto.PerformanceAppraisalId, dto.TemplateItemId, dto.CriterionConfigId, dto.AdjustedScore, cancellationToken);
 
         dto.UpdateEntity(entity);
+        entity.TemplateItemId = criterion?.TemplateItemId;
+        entity.CriterionConfigId = criterion?.CriterionConfigId;
+        entity.IsOverall = criterion == null;
         // A restated decision is still this caller's decision — the audit trail follows the edit.
         if (adjustedById != Guid.Empty)
             entity.AdjustedById = adjustedById;
@@ -813,8 +839,8 @@ public class CalibrationSessionService : ICalibrationSessionService
             forThis ??= new List<CalibrationRatingAdjustment>();
 
             var itemAdjustments = forThis
-                .Where(a => !a.IsOverall && a.TemplateItemId.HasValue && a.AdjustedScore.HasValue)
-                .GroupBy(a => a.TemplateItemId!.Value)
+                .Where(a => !a.IsOverall && a.CriterionKey().HasValue && a.AdjustedScore.HasValue)
+                .GroupBy(a => a.CriterionKey()!.Value)
                 .Select(g => g.First())   // already ordered newest-first
                 .ToList();
             var overallAdjustment = forThis.FirstOrDefault(a => a.IsOverall && a.AdjustedScore.HasValue);
@@ -937,24 +963,24 @@ public class CalibrationSessionService : ICalibrationSessionService
     private async Task<int> ApplyItemAdjustmentsAsync(
         Guid appraisalId, List<CalibrationRatingAdjustment> itemAdjustments, CancellationToken cancellationToken)
     {
-        var templateItemIds = itemAdjustments.Select(a => a.TemplateItemId!.Value).ToList();
-
+        // The manager's rows, paired with each adjustment by criterion key — a goal row has no
+        // template item (lane L3).
         var scores = await _criterionScoreRepository.GetQueryable()
             .Include(cs => cs.EvaluatorEvaluation)
             .Where(cs => cs.EvaluatorEvaluation.AppraisalId == appraisalId
-                      && cs.EvaluatorEvaluation.EvaluatorRole == EvaluatorRole.Manager
-                      && templateItemIds.Contains(cs.TemplateItemId!.Value))
+                      && cs.EvaluatorEvaluation.EvaluatorRole == EvaluatorRole.Manager)
             .ToListAsync(cancellationToken);
 
         var applied = 0;
         foreach (var adjustment in itemAdjustments)
         {
-            var score = scores.FirstOrDefault(s => s.TemplateItemId == adjustment.TemplateItemId!.Value);
+            var key = adjustment.CriterionKey();
+            var score = scores.FirstOrDefault(s => (s.TemplateItemId.HasValue || s.CriterionConfigId.HasValue) && s.CriterionKey() == key);
             if (score == null)
             {
                 _logger.LogWarning(
-                    "Calibration: appraisal {AppraisalId} has no manager score for template item {ItemId}; adjustment skipped.",
-                    appraisalId, adjustment.TemplateItemId);
+                    "Calibration: appraisal {AppraisalId} has no manager score for criterion {Key}; adjustment skipped.",
+                    appraisalId, key);
                 continue;
             }
 
@@ -994,6 +1020,7 @@ public class CalibrationSessionService : ICalibrationSessionService
                 .ThenInclude(ti => ti!.Competency)
             .Include(a => a.TemplateItem)
                 .ThenInclude(ti => ti!.KpiDefinition)
+            .Include(a => a.CriterionConfig)
             .Include(a => a.AdjustedBy)
             .OrderByDescending(a => a.AdjustmentDate)
             .ToListAsync(cancellationToken);
@@ -1030,8 +1057,9 @@ public class CalibrationSessionService : ICalibrationSessionService
                 .ToList();
 
             // Only an overall adjustment restates the final number; an item-level one moves a
-            // single criterion and is shown in the detail list instead.
-            var latestOverall = appraisalAdjustments.FirstOrDefault(a => !a.TemplateItemId.HasValue);
+            // single criterion and is shown in the detail list instead. The flag, not a missing
+            // template item: a goal row has none (lane L3), and read as the overall here.
+            var latestOverall = appraisalAdjustments.FirstOrDefault(a => a.IsOverall);
             var calibratedScore = latestOverall?.AdjustedScore;
 
             // Same fallback as the commit: before HR sign-off the appraisal has no OverallScore,

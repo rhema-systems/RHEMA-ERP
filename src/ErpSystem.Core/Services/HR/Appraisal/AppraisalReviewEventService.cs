@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -203,8 +204,12 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
         var employeeId = ev.Appraisal.EmployeeId;
 
+        // The agreed, locked goal set (closure plan L7): the context listed every goal of the
+        // cycle, drafts and rejected ones included, and the finalize scored whatever it was sent.
         var goals = await _goalRepository
-            .GetQueryable(g => g.TenantId == GetTenantId() && g.EmployeeId == employeeId && g.AppraisalCycleId == ev.AppraisalCycleId)
+            .GetQueryable(g => g.TenantId == GetTenantId() && g.EmployeeId == employeeId && g.AppraisalCycleId == ev.AppraisalCycleId
+                            && g.Status != GoalStatus.Rejected
+                            && (g.IsLocked || g.Status == GoalStatus.Locked))
             .ToListAsync(cancellationToken);
 
         var tenantId = GetTenantId();
@@ -257,6 +262,12 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         // and cycle before scoring it. This also gives us the weights without a second query.
         var scoredGoals = await GetScorableGoalsAsync(
             ev, dto.Scores.Select(s => s.EmployeeGoalId).Distinct().ToList(), cancellationToken);
+
+        // A full interim appraisal scores the locked goal set only, as its context lists it (L7).
+        var outsideSet = scoredGoals.Values.Count(g => !GoalSetRules.IsLive(g.Status) || !GoalSetRules.IsLocked(g.IsLocked, g.Status));
+        if (outsideSet > 0)
+            throw new InvalidOperationException(
+                $"{outsideSet} goal(s) named here are not in the employee's locked goal set; a full interim appraisal scores the agreed, locked goals.");
 
         // Record a score per goal as a GoalProgressEntry tied to this review event, and carry it
         // onto the goal — a full interim appraisal is the period's verdict on those goals, so
