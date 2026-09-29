@@ -838,6 +838,32 @@ public sealed class EstateWorkflowIntegrationRegressionTests
     }
 
     [Fact]
+    public void LandAcquisitionWorkspace_SaveAndDocumentAccess_AreConstrainedToTheRequestedStage()
+    {
+        var source = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Estate",
+            "LandAcquisitionsController.cs");
+        var saveWorkspace = Slice(
+            source,
+            "public async Task<ActionResult<LandAcquisitionWorkspaceResponse>> SaveWorkspace(",
+            "[HttpGet(\"{id:guid}/workspace/{procedureId:int}\")]");
+        var documentAccess = Slice(
+            source,
+            "[HttpGet(\"{id:guid}/documents/{documentId:guid}/download\")]",
+            "[HttpPost(\"workflow-action\")]");
+
+        saveWorkspace.Should().Contain("stageDefinition.WorkspaceKind");
+        saveWorkspace.Should().Contain("Workspace values are required.");
+        saveWorkspace.Should().Contain("ValidateWorkspacePayload(request.Values)");
+        saveWorkspace.Should().Contain("The workspace kind does not match the acquisition procedure.");
+        documentAccess.Should().Contain("CanViewStageAsync(acquisition, (int)document.Procedure");
+        documentAccess.Should().NotContain("CanAccessStageAsync(acquisition, acquisition.StageOrder");
+    }
+
+    [Fact]
     public void DemarcationEditors_ConfirmBeforeReplacingUnsavedDrafts()
     {
         var dialog = ReadSource(
