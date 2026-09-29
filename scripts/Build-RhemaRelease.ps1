@@ -6,6 +6,8 @@ param(
     [uri]$PublicBaseUrl,
     [ValidatePattern('^[0-9a-fA-F]{7,40}$')]
     [string]$ExpectedCommit,
+    [ValidatePattern('^[0-9a-fA-F]{7,40}$')]
+    [string]$ReuseFrontendBuildFromCommit,
     [string]$OutputDirectory,
     [switch]$CleanBuild
 )
@@ -165,6 +167,20 @@ try {
         Assert-True ($commit.StartsWith($ExpectedCommit, [StringComparison]::OrdinalIgnoreCase)) `
             "HEAD $commit does not match ExpectedCommit $ExpectedCommit."
     }
+    $frontendBuildCommit = $commit
+    if ($ReuseFrontendBuildFromCommit) {
+        $frontendBuildCommit = (& git rev-parse "$ReuseFrontendBuildFromCommit`^{commit}").Trim()
+        Assert-True ($LASTEXITCODE -eq 0 -and $frontendBuildCommit -match '^[0-9a-f]{40}$') `
+            "Could not resolve ReuseFrontendBuildFromCommit $ReuseFrontendBuildFromCommit."
+        & git merge-base --is-ancestor $frontendBuildCommit $commit
+        Assert-True ($LASTEXITCODE -eq 0) `
+            "Frontend build commit $frontendBuildCommit is not an ancestor of HEAD $commit."
+        & git diff --quiet "$frontendBuildCommit..$commit" -- frontend
+        Assert-True ($LASTEXITCODE -eq 0) `
+            'Frontend files changed after the requested reusable build commit.'
+        Assert-True (-not $CleanBuild) `
+            'CleanBuild cannot be combined with ReuseFrontendBuildFromCommit.'
+    }
     $dirty = @(& git status --porcelain)
     Assert-True ($dirty.Count -eq 0) `
         'The build worktree is dirty. Use a clean checkout of the exact release commit.'
@@ -246,13 +262,25 @@ try {
     }).Count -eq 0) 'Published API contains protected runtime configuration.'
 
     $nextOutput = Join-Path $frontendRoot '.next-production'
-    Clear-NextOutputPreservingCache -Path $nextOutput -RemoveCache:$CleanBuild
-    Push-Location $frontendRoot
-    try {
-        Invoke-TimedStep 'Next.js production build' {
-            Invoke-NativeChecked 'npm.cmd' @('run', 'build') 'Frontend build failed' | Out-Host
+    if ($ReuseFrontendBuildFromCommit) {
+        Invoke-TimedStep 'Reuse existing Next.js production build' {
+            Assert-True (Test-Path (Join-Path $nextOutput 'BUILD_ID')) `
+                'Reusable frontend BUILD_ID is missing.'
+            Assert-True (Test-Path (Join-Path $nextOutput 'required-server-files.json')) `
+                'Reusable frontend server files are missing.'
+            Assert-True (Test-Path (Join-Path $nextOutput 'server\middleware-manifest.json')) `
+                'Reusable frontend middleware manifest is missing.'
         } | Out-Null
-    } finally { Pop-Location }
+    }
+    else {
+        Clear-NextOutputPreservingCache -Path $nextOutput -RemoveCache:$CleanBuild
+        Push-Location $frontendRoot
+        try {
+            Invoke-TimedStep 'Next.js production build' {
+                Invoke-NativeChecked 'npm.cmd' @('run', 'build') 'Frontend build failed' | Out-Host
+            } | Out-Null
+        } finally { Pop-Location }
+    }
 
     $buildId = (Get-Content (Join-Path $nextOutput 'BUILD_ID') -Raw).Trim()
     Assert-True ($buildId -and $buildId -ne 'development') 'Frontend BUILD_ID is invalid.'
@@ -325,8 +353,7 @@ try {
 
     $compiledFiles = @(Get-ChildItem (Join-Path $frontendOutput '.next\static'),
         (Join-Path $frontendOutput '.next\server') -File -Recurse -ErrorAction Stop)
-    Assert-True (@($compiledFiles | Select-String -Pattern
-        'localhost:5000|localhost:53484|localhost:7095').Count -eq 0) `
+    Assert-True (@($compiledFiles | Select-String -Pattern 'localhost:5000|localhost:53484|localhost:7095').Count -eq 0) `
         'Compiled frontend contains a development API URL.'
 
     $apiZip = Join-Path $releaseDirectory 'api.zip'
@@ -363,6 +390,7 @@ try {
         schemaVersion = 2
         releaseId = $releaseId
         commit = $commit
+        frontendBuildCommit = $frontendBuildCommit
         shortCommit = $shortCommit
         createdUtc = [DateTime]::UtcNow.ToString('o')
         environment = $Environment
