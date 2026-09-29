@@ -2914,77 +2914,13 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance year-end lock.', 1;");
                 && item.IsEnabled && !item.IsDeleted))
                 throw new InvalidOperationException("Retained earnings must have an enabled mapping in the selected accounting book.");
 
-            // Get all revenue and expense accounts with balances for the year
-            var periodIds = fiscalYear.FiscalPeriods.Where(p => !p.IsDeleted).Select(p => p.Id).ToList();
-
-            var revenueExpenseTransactions = await _context.AccountTransactions
-                .Include(t => t.Account)
-                .Where(t => t.TenantId == tenantId
-                    && t.AccountingBookId == cycle.AccountingBookId
-                    && periodIds.Contains(t.FiscalPeriodId)
-                    && !t.IsDeleted
-                    && (t.PostingStatus == "Posted" || t.PostingStatus == "Reversed")
-                    && (t.Account.AccountType == AccountType.Revenue || t.Account.AccountType == AccountType.Expense))
-                .ToListAsync();
-
-            if (revenueExpenseTransactions.Any(item => item.FunctionalCurrencyCode != cycle.FunctionalCurrencyCode
-                || item.Account.TenantId != tenantId || item.Account.IsDeleted))
-                throw new InvalidOperationException("Nominal-account activity does not match the selected book's functional-currency authority.");
-
-            // Calculate balances by account
-            var accountBalances = revenueExpenseTransactions
-                .GroupBy(t => t.AccountId)
-                .Select(g => new
-                {
-                    AccountId = g.Key,
-                    Account = g.First().Account,
-                    Balance = g.Sum(t => t.CreditAmount - t.DebitAmount) // Revenue positive, Expense negative
-                })
-                .Where(b => b.Balance != 0m)
-                .ToList();
-
-            decimal netIncome = accountBalances.Sum(b => b.Balance);
-
-            // A year with no revenue/expense activity closes without a closing journal.
-            if (accountBalances.Count == 0)
-            {
-                return (null, 0m);
-            }
+            var plan = await YearEndClosingPlan.BuildAsync(_context, cycle);
+            if (plan.Lines.Count == 0) return (null, 0m);
 
             var lastPeriod = fiscalYear.FiscalPeriods.Where(p => !p.IsDeleted
                 && p.StartDate.Date <= fiscalYear.EndDate.Date && p.EndDate.Date >= fiscalYear.EndDate.Date)
                 .OrderByDescending(p => p.EndDate).FirstOrDefault()
                 ?? throw new InvalidOperationException("No fiscal period covers the year-end posting date.");
-
-            // Zero each account against its actual net balance rather than by account type so
-            // contra balances (e.g. negative revenue) never produce negative posting amounts.
-            var lines = new List<FinancePostingLineDto>();
-            foreach (var acctBalance in accountBalances)
-            {
-                lines.Add(new FinancePostingLineDto
-                {
-                    AccountId = acctBalance.AccountId,
-                    SourceDocumentLineId = acctBalance.AccountId,
-                    TransactionCurrency = cycle.FunctionalCurrencyCode,
-                    Description = acctBalance.Account.AccountType == AccountType.Revenue
-                        ? "Year-end close - Revenue account"
-                        : "Year-end close - Expense account",
-                    DebitAmount = acctBalance.Balance > 0 ? acctBalance.Balance : 0m,
-                    CreditAmount = acctBalance.Balance < 0 ? Math.Abs(acctBalance.Balance) : 0m,
-                    TransactionTag = "YearEndClose"
-                });
-            }
-
-            if (netIncome != 0m) lines.Add(new FinancePostingLineDto
-            {
-                AccountId = cycle.RetainedEarningsAccountId,
-                SourceDocumentLineId = cycle.RetainedEarningsAccountId,
-                TransactionCurrency = cycle.FunctionalCurrencyCode,
-                Description = $"Year-end close - Net Income transfer: {netIncome:N2}",
-                DebitAmount = netIncome < 0 ? Math.Abs(netIncome) : 0m, // Net loss = debit
-                CreditAmount = netIncome > 0 ? netIncome : 0m, // Net income = credit
-                TransactionTag = "YearEndClose"
-            });
 
             // Post through the finance posting engine so the closing entry gets a posting
             // event, idempotency protection, and correct exact-book balance movements.
@@ -3003,12 +2939,12 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance year-end lock.', 1;");
                 FunctionalCurrencyCode = cycle.FunctionalCurrencyCode,
                 IdempotencyKey = $"GL:YearEndClose:{tenantId:N}:{cycle.AccountingBookId:N}:{cycle.Id:N}",
                 AllowPostingToClosedPeriod = true,
-                Lines = lines
+                Lines = plan.Lines
             };
 
             var postingResult = await _financePostingEngine.PostYearEndAsync(postingRequest, cycle.Id);
 
-            return (postingResult.JournalEntryId, netIncome);
+            return (postingResult.JournalEntryId, plan.NetIncome);
         }
 
         #endregion

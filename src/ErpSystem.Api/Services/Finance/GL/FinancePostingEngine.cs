@@ -1348,6 +1348,12 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         CancellationToken cancellationToken,
         YearEndBookCloseCycle? yearEndCycle = null)
     {
+        YearEndClosingPlan? yearEndPlan = null;
+        if (yearEndCycle?.Status == "Closing")
+        {
+            yearEndPlan = await YearEndClosingPlan.BuildAsync(_context, yearEndCycle, cancellationToken);
+            yearEndPlan.RequireExactLines(request.Lines);
+        }
         if (!await _context.Tenants.AnyAsync(t => t.Id == tenantId && !t.IsDeleted, cancellationToken))
         {
             throw new InvalidOperationException("Finance tenant context is invalid.");
@@ -1653,7 +1659,11 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 exchangeRateDate = null;
             }
 
-            var dimensionSet = await ResolveDimensionSetAsync(
+            // Only a validated immutable close-cycle plan may carry historical coding into
+            // a new nominal/equity transfer. Ordinary producers retain the existing resolver.
+            var dimensionSet = yearEndPlan != null
+                ? ResolveYearEndDimensionSet(yearEndPlan.Sources[line.SourceDocumentLineId!.Value])
+                : await ResolveDimensionSetAsync(
                 tenantId,
                 postingDate,
                 request,
@@ -3422,6 +3432,11 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
 
         return new ValidatedDimensionSet(dimensionSetId, combinationHash, displayValue, resolvedItems, true);
     }
+
+    private static ValidatedDimensionSet? ResolveYearEndDimensionSet(AccountTransaction source) =>
+        source.FinanceDimensionSnapshot != null ? ToValidatedDimensionSet(source.FinanceDimensionSnapshot)
+        : source.FinanceDimensionSet != null ? ToValidatedDimensionSet(source.FinanceDimensionSet, requiresInsert: false)
+        : null;
 
     private async Task EnsureDimensionSetsAsync(
         Guid tenantId,

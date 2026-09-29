@@ -78,6 +78,65 @@ public sealed class FiscalYearCloseTests
     }
 
     [Fact]
+    public async Task Close_PreservesFrozenCodingAndTransfersEachDimensionBucketIntoEquity()
+    {
+        var f = await FixtureWithPostedActivityAsync();
+        var revenue = await f.Db.AccountTransactions.SingleAsync(x => x.AccountId == f.Revenue.Id);
+        var expense = await f.Db.AccountTransactions.SingleAsync(x => x.AccountId == f.Expense.Id);
+        var revenueSet = await AttachFrozenCodingAsync(f, revenue, "A");
+        var expenseSet = await AttachFrozenCodingAsync(f, expense, "B");
+        var result = await f.GlService.CloseFiscalYearAsync(CloseRequest(f));
+        var journal = await f.Db.JournalEntries.Include(x => x.Transactions)
+            .ThenInclude(x => x.FinanceDimensionSnapshot)!.ThenInclude(x => x!.Items)
+            .SingleAsync(x => x.Id == result.ClosingJournalEntryId);
+        journal.Transactions.Should().HaveCount(4);
+        journal.Transactions.Single(x => x.AccountId == f.Revenue.Id).FinanceDimensionSetId.Should().Be(revenueSet);
+        journal.Transactions.Single(x => x.AccountId == f.Expense.Id).FinanceDimensionSetId.Should().Be(expenseSet);
+        var earnings = journal.Transactions.Where(x => x.AccountId == f.RetainedEarnings.Id).ToList();
+        earnings.Single(x => x.FinanceDimensionSetId == revenueSet).CreditAmount.Should().Be(140m);
+        earnings.Single(x => x.FinanceDimensionSetId == expenseSet).DebitAmount.Should().Be(40m);
+        journal.Transactions.Should().OnlyContain(x => x.FinanceDimensionSnapshot != null
+            && x.FinanceDimensionSnapshot.Items.All(item => item.DimensionValueNameSnapshot.StartsWith("Original ")));
+        journal.Transactions.Single(x => x.AccountId == f.Revenue.Id).SegmentString.Should().Be("CC=A");
+        foreach (var accountId in new[] { f.Revenue.Id, f.Expense.Id })
+        {
+            var buckets = (await f.Db.AccountTransactions.Where(x => x.AccountingBookId == f.Book.Id
+                && x.AccountId == accountId).ToListAsync())
+                .GroupBy(x => new { x.AccountId, x.FinanceDimensionSetId, x.SegmentString });
+            buckets.Should().OnlyContain(bucket => bucket.Sum(x => x.CreditAmount - x.DebitAmount) == 0m);
+        }
+        await f.GlService.ReopenFiscalYearAsync(f.FiscalYear.Id, new FiscalYearReopenRequestDto
+        {
+            AccountingBookId = f.Book.Id, BookCloseCycleId = result.BookCloseCycleId!.Value,
+            Reason = "Restore the original coded income for a correction."
+        });
+        (await IncomeAsync(f, f.Book.Id)).Should().Be(100m);
+        var second = await f.GlService.CloseFiscalYearAsync(CloseRequest(f, "coded-cycle-2"));
+        second.NetIncomeTransferred.Should().Be(100m);
+        (await IncomeAsync(f, f.Book.Id)).Should().Be(0m);
+    }
+
+    [Theory]
+    [InlineData("amount")]
+    [InlineData("account")]
+    [InlineData("dimensions")]
+    [InlineData("segment")]
+    public async Task YearEndLeaf_RejectsTamperedClosingBalancePlan(string defect)
+    {
+        var f = await FixtureWithPostedActivityAsync(mutateClose: request =>
+        {
+            var line = request.Lines[0];
+            if (defect == "amount") line.DebitAmount += 1m;
+            if (defect == "account") line.AccountId = Guid.NewGuid();
+            if (defect == "dimensions") line.FinanceDimensionSetId = Guid.NewGuid();
+            if (defect == "segment") line.SegmentString = "FORGED";
+        });
+        await f.GlService.Invoking(x => x.CloseFiscalYearAsync(CloseRequest(f)))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*exact frozen nominal-balance plan*");
+        (await f.Db.FinancePostingEvents.CountAsync(x => x.SourceDocumentType == "YearEndClose")).Should().Be(0);
+    }
+
+    [Fact]
     public async Task CloseRetry_ReturnsOriginalAndChangedAuthorityConflicts()
     {
         var f = await FixtureWithPostedActivityAsync();
@@ -205,6 +264,8 @@ public sealed class FiscalYearCloseTests
         var f = await FixtureWithPostedActivityAsync();
         await f.GlService.CloseFiscalYearAsync(CloseRequest(f));
         f.Period.IsClosed = false; f.Period.IsOpen = true; await f.Db.SaveChangesAsync();
+        (await f.Db.AccountingBookPeriods.SingleAsync()).PeriodStatus = AccountingBookPeriodStatus.Open;
+        await f.Db.SaveChangesAsync();
         var request = ActivityRequest(f.FiscalYear.TenantId, "LATE", new[] {
             new FinancePostingLineDto { AccountId = f.Cash.Id, DebitAmount = 10m },
             new FinancePostingLineDto { AccountId = f.Revenue.Id, CreditAmount = 10m } });
@@ -332,6 +393,39 @@ public sealed class FiscalYearCloseTests
     private static YearEndCloseRequestDto CloseRequest(Fixture f, string key = "cycle-1") => new()
     { FiscalYearId = f.FiscalYear.Id, AccountingBookId = f.Book.Id, RetainedEarningsAccountId = f.RetainedEarnings.Id, IdempotencyKey = key };
 
+    private static async Task<Guid> AttachFrozenCodingAsync(Fixture f, AccountTransaction source, string code)
+    {
+        var tenantId = f.FiscalYear.TenantId;
+        var definition = await f.Db.FinanceDimensionDefinitions.SingleOrDefaultAsync(x => x.Code == "CC");
+        if (definition == null)
+        {
+            definition = new FinanceDimensionDefinition { TenantId = tenantId, Code = "CC",
+                Name = "Current renamed cost centre", IsActive = false };
+            f.Db.FinanceDimensionDefinitions.Add(definition);
+        }
+        var value = new FinanceDimensionValue { TenantId = tenantId, FinanceDimensionDefinitionId = definition.Id,
+            Code = code, Name = "Current renamed " + code, IsActive = false, EffectiveDate = f.FiscalYear.StartDate };
+        f.Db.FinanceDimensionValues.Add(value);
+        var set = new FinanceDimensionSet { TenantId = tenantId, CombinationHash = new string(code[0], 64),
+            DisplayValue = "CC=" + code };
+        set.Items.Add(new FinanceDimensionSetItem { TenantId = tenantId, FinanceDimensionDefinitionId = definition.Id,
+            FinanceDimensionValueId = value.Id, DimensionCodeSnapshot = "CC", DimensionNameSnapshot = "Original cost centre",
+            DimensionValueCodeSnapshot = code, DimensionValueNameSnapshot = "Original " + code });
+        var snapshot = new FinanceDimensionSnapshot { TenantId = tenantId, FinanceDimensionSetId = set.Id,
+            CombinationHashSnapshot = set.CombinationHash, DisplayValueSnapshot = set.DisplayValue };
+        snapshot.Items.Add(new FinanceDimensionSnapshotItem { TenantId = tenantId,
+            FinanceDimensionDefinitionId = definition.Id, FinanceDimensionValueId = value.Id,
+            DimensionCodeSnapshot = "CC", DimensionNameSnapshot = "Original cost centre",
+            DimensionValueCodeSnapshot = code, DimensionValueNameSnapshot = "Original " + code });
+        f.Db.FinanceDimensionSets.Add(set);
+        f.Db.FinanceDimensionSnapshots.Add(snapshot);
+        source.FinanceDimensionSetId = set.Id;
+        source.FinanceDimensionSnapshotId = snapshot.Id;
+        source.SegmentString = "CC=" + code;
+        await f.Db.SaveChangesAsync();
+        return set.Id;
+    }
+
     private static Task<decimal> IncomeAsync(Fixture f, Guid bookId) => f.Db.AccountTransactions
         .Where(x => x.AccountingBookId == bookId && (x.AccountId == f.Revenue.Id || x.AccountId == f.Expense.Id))
         .SumAsync(x => x.CreditAmount - x.DebitAmount);
@@ -377,7 +471,8 @@ public sealed class FiscalYearCloseTests
         FiscalPeriod Period,
         FinancePostingEngine Engine);
 
-    private static async Task<Fixture> FixtureWithPostedActivityAsync(bool closePeriod = true)
+    private static async Task<Fixture> FixtureWithPostedActivityAsync(
+        bool closePeriod = true, Action<FinancePostingRequestV2Dto>? mutateClose = null)
     {
         var tenantId = Guid.NewGuid();
         var db = CreateContext();
@@ -485,9 +580,24 @@ public sealed class FiscalYearCloseTests
             Mock.Of<IFiscalPeriodService>(),
             Mock.Of<IDocumentNumberingService>(),
             Mock.Of<IAccountingBookService>(),
-            engine);
+            BuildYearEndEngine(engine, mutateClose));
 
         return new Fixture(db, glService, fiscalYear, revenue, expense, retainedEarnings, cash, book, period, engine);
+    }
+
+    private static IFinancePostingEngine BuildYearEndEngine(
+        FinancePostingEngine engine, Action<FinancePostingRequestV2Dto>? mutateClose)
+    {
+        if (mutateClose == null) return engine;
+        var guarded = new Mock<IFinancePostingEngine>();
+        guarded.Setup(item => item.PostYearEndAsync(It.IsAny<FinancePostingRequestV2Dto>(),
+                It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((FinancePostingRequestV2Dto request, Guid cycleId, CancellationToken ct) =>
+            {
+                mutateClose(request);
+                return engine.PostYearEndAsync(request, cycleId, ct);
+            });
+        return guarded.Object;
     }
 
     private static FinancePostingRequestV2Dto ActivityRequest(Guid tenantId, string reference, FinancePostingLineDto[] lines)

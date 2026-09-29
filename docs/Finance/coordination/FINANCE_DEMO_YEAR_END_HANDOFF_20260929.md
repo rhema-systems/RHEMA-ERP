@@ -15,6 +15,8 @@ The SQL Server path wraps cycle creation, posting, balance updates and cycle com
 
 Legacy fiscal-year-wide closes are preserved and fail closed pending a separately approved book-authority reconciliation. New book closes do not overwrite global FiscalYear.IsClosed or its legacy journal fields. Fiscal-year deletion now checks cycle evidence even for a no-activity close.
 
+Coordinator review correction: the shared internal YearEndClosingPlan closes each account + historical FinanceDimensionSetId + SegmentString bucket separately. Retained earnings is deliberately split by the same coding buckets, preserving dimension-level balancing instead of aggregating into an uncoded equity line. The posting leaf independently derives and compares the full line plan; only that exact plan can reuse the original frozen snapshot (or immutable historical set for legacy lines). Current dimension defaults, renamed master data and current activity flags do not recode historical closing balances. Ordinary posting dimension validation is unchanged. Reversals retain the resulting exact closing-line coding.
+
 ## Migration and coordinator-owned snapshot
 
 Migration 20260930000100_YearEndBookCloseCycles is hand-authored and UNAPPLIED. Root owns ApplicationDbContextModelSnapshot.cs, which this branch deliberately does not edit.
@@ -41,9 +43,10 @@ The migration adds the immutable-evidence trigger and fails downgrade if any evi
 
 Focused tests cover BASE100 / parallel200 / delta30 isolation, independent USD parallel close, immutable reopen/reclose, retry, independent book-period approval, locked/legacy rejection, currency/retained-earnings errors, pending journals, forged leaf calls, closed-book ordinary posting, preserved normal replication, endpoint permissions, migration operation shape and no-activity cycles. FiscalYearDeletionGuardTests adds zero-journal cycle retention coverage.
 
+Additional queued regressions cover USD parallel reopening, five bound-cycle identity forgeries, four closing-plan payload forgeries, renamed/inactive historical dimensions with coded retained-earnings buckets and coded close/reopen/reclose, and ordinary posting rejection after both global and exact-book periods are reopened. These tests are authored but not yet executed.
+
 Compatibility-only test edit: FxRealizedUnrealizedRevaluationTests.ThrowAfterSuccessfulRevaluationPostingEngine forwards the newly added IFinancePostingEngine.PostYearEndAsync member; its existing revaluation behavior is unchanged.
 
 ## Required release gates
 
 Independent high-risk review is required before integration. Coordinator must integrate the model snapshot and validate migration/model consistency. Apply schema only with separate authorization; otherwise new-cycle queries will not operate. Read-only UAT currently reports zero AccountingBookPeriods, so this workflow correctly refuses close until the existing governed setup and independent approval workflow creates the required book-period authority. No fabricated approvals or silent global IFRS-to-BASE rewrite are included.
-
