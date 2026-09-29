@@ -421,8 +421,10 @@ public class EmployeeGoalsController : ControllerBase
     }
 
     /// <summary>
-    /// Reject a pending goal (manager action).
-    /// Transition: PendingApproval → Rejected.
+    /// Reject a pending goal, or send an approved one back for changes (manager action).
+    /// Transitions: PendingApproval → Rejected; Approved / InProgress / OnTrack / AtRisk →
+    /// Rejected when the goal is not locked — the only way what an approved goal measures can
+    /// change (performance closure decision D-30).
     /// Non-empty feedback is required.
     /// The calling user must be the direct manager of the goal's employee.
     /// </summary>
@@ -458,7 +460,8 @@ public class EmployeeGoalsController : ControllerBase
     /// <summary>
     /// Lock a goal (manager action).
     /// Permitted on goals in Approved / InProgress / AtRisk / OnTrack / Completed status.
-    /// Once locked, no further workflow transitions are permitted.
+    /// Once locked, no further workflow transitions or edits are permitted. The goal's status is
+    /// left alone: a lock freezes what the goal is, not its year (decision D-29).
     /// </summary>
     [HttpPost("{goalId:guid}/lock")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -480,6 +483,36 @@ public class EmployeeGoalsController : ControllerBase
         {
             _logger.LogError(ex, "Error locking goal {GoalId}", goalId);
             return StatusCode(500, new { message = "An error occurred while locking the goal." });
+        }
+    }
+
+    /// <summary>
+    /// Lock an employee's whole goal set for a cycle (manager action; performance closure L2/L5).
+    /// Refused until every live goal is agreed, the count is inside the cycle's minimum and maximum
+    /// and the weights add to 100 — the message names what is missing. Rejected goals are not part
+    /// of the set, and goals already locked stay as they are.
+    /// </summary>
+    [HttpPost("lock-set")]
+    [ProducesResponseType(typeof(GoalSetLockResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> LockSet([FromBody] LockGoalSetRequest request, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _workflowService.LockGoalSetAsync(request.EmployeeId, request.AppraisalCycleId, cancellationToken);
+            return Ok(result);
+        }
+        catch (GoalWorkflowException ex)
+        {
+            return WorkflowError(ex, request.EmployeeId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error locking the goal set of employee {EmployeeId} for cycle {CycleId}",
+                request.EmployeeId, request.AppraisalCycleId);
+            return StatusCode(500, new { message = "An error occurred while locking the goal set." });
         }
     }
 
@@ -516,11 +549,12 @@ public class EmployeeGoalsController : ControllerBase
     /// Maps a <see cref="GoalWorkflowException"/> to the correct HTTP status code
     /// using the typed <see cref="GoalWorkflowFailureReason"/> on the exception.
     /// </summary>
-    private IActionResult WorkflowError(GoalWorkflowException ex, Guid goalId)
+    private IActionResult WorkflowError(GoalWorkflowException ex, Guid subjectId)
     {
+        // The subject is the goal, or the employee for a goal-set lock.
         _logger.LogWarning(
-            "Goal workflow rejected: goalId={GoalId}, reason={Reason}, message={Message}",
-            goalId, ex.Reason, ex.Message);
+            "Goal workflow rejected: subject={SubjectId}, reason={Reason}, message={Message}",
+            subjectId, ex.Reason, ex.Message);
 
         return ex.Reason switch
         {
@@ -696,3 +730,6 @@ public sealed record RejectGoalRequest(string? Feedback);
 /// Allows the manager to attach a brief approval comment.
 /// </summary>
 public sealed record ApproveGoalRequest(string? Feedback);
+
+/// <summary>Request body for <c>POST lock-set</c>: whose goal set, for which cycle.</summary>
+public sealed record LockGoalSetRequest(Guid EmployeeId, Guid AppraisalCycleId);

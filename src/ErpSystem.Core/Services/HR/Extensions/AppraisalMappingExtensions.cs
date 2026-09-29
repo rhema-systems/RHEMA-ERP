@@ -1812,9 +1812,10 @@ public static class AppraisalMappingExtensions
 
     public static void UpdateEntity(this UpdateEmployeeGoalDto dto, EmployeeGoal entity)
     {
-        entity.EmployeeId = dto.EmployeeId;
-        entity.AppraisalCycleId = dto.AppraisalCycleId;
-        entity.PerformanceAppraisalId = dto.PerformanceAppraisalId;
+        // EmployeeId, AppraisalCycleId and PerformanceAppraisalId are NOT copied (performance
+        // closure decision D-30): the owner and cycle are fixed at creation — an edit could move a
+        // goal into a colleague's set — and the appraisal link is the server's. Neither edit form
+        // sends the link, so copying it cleared the link on every edit made in the UI.
         entity.CompanyGoalId = dto.CompanyGoalId;
         entity.UnitGoalId = dto.UnitGoalId;
         entity.ParentGoalId = dto.ParentGoalId;

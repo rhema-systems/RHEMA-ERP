@@ -70,15 +70,16 @@ public interface IGoalWorkflowCommandService
     // ── Transition 3: Reject (manager action) ────────────────────────────────
 
     /// <summary>
-    /// Transitions a goal from <c>PendingApproval</c> to <c>Rejected</c>,
-    /// stores manager feedback, and clears <c>ApprovalDate</c>.  The calling
-    /// manager must be the direct manager of the goal's employee.
-    /// Non-empty feedback is required — rejection without explanation is a
-    /// domain rule violation.
+    /// Transitions a goal to <c>Rejected</c>, stores manager feedback, and clears
+    /// <c>ApprovalDate</c>: a goal awaiting approval is refused, and an approved or running goal
+    /// that is not locked or completed is sent back to the employee for changes — the only way
+    /// what an approved goal measures can change (decision D-30). The calling manager must be the
+    /// direct manager of the goal's employee. Non-empty feedback is required — rejection without
+    /// explanation is a domain rule violation.
     /// </summary>
     /// <param name="feedback">Mandatory rejection reason (non-null, non-whitespace).</param>
     /// <exception cref="ErpSystem.Core.Exceptions.GoalWorkflowException">
-    ///   Thrown when the goal is not found, locked, not in PendingApproval,
+    ///   Thrown when the goal is not found, locked, a draft, already rejected or completed,
     ///   the caller is not the employee's direct manager, or feedback is empty.
     /// </exception>
     Task RejectGoalAsync(Guid goalId, string feedback, CancellationToken cancellationToken = default);
@@ -86,9 +87,10 @@ public interface IGoalWorkflowCommandService
     // ── Transition 4: Lock (manager action) ──────────────────────────────────
 
     /// <summary>
-    /// Locks an approved or in-execution goal, setting <c>IsLocked = true</c>,
-    /// <c>Status = Locked</c>, and <c>LockedDate</c>.  Once locked, no further
-    /// approval or rejection transitions are permitted.
+    /// Locks an approved or in-execution goal, setting <c>IsLocked = true</c> and
+    /// <c>LockedDate</c>. A lock freezes what the goal is — its status is left alone, so
+    /// progress and check-ins keep moving it (decision D-29). Once locked, no approval or
+    /// rejection transition is permitted and the goal cannot be edited.
     /// </summary>
     /// <exception cref="ErpSystem.Core.Exceptions.GoalWorkflowException">
     ///   Thrown when the goal is not found, already locked, not in a lockable
@@ -96,4 +98,20 @@ public interface IGoalWorkflowCommandService
     ///   caller is not the employee's direct manager.
     /// </exception>
     Task LockGoalAsync(Guid goalId, CancellationToken cancellationToken = default);
+
+    // ── Lock the goal set (manager action) ───────────────────────────────────
+
+    /// <summary>
+    /// Locks the employee's whole goal set for a cycle once it is complete (closure plan L2/L5):
+    /// every live goal agreed, the count inside the cycle's minimum and maximum, the weights adding
+    /// to 100. Goals already locked stay as they are; rejected goals are not part of the set.
+    /// </summary>
+    /// <exception cref="ErpSystem.Core.Exceptions.GoalWorkflowException">
+    ///   Thrown when the caller is not the employee's direct manager, the cycle is not found,
+    ///   the set is incomplete (the message names what is missing), or it is already locked.
+    /// </exception>
+    Task<GoalSetLockResult> LockGoalSetAsync(Guid employeeId, Guid appraisalCycleId, CancellationToken cancellationToken = default);
 }
+
+/// <summary>What a goal-set lock did: how many goals it locked, out of how many in the set.</summary>
+public sealed record GoalSetLockResult(Guid EmployeeId, Guid AppraisalCycleId, int GoalsLocked, int GoalsInSet);

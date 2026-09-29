@@ -260,23 +260,45 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
             {
                 // The goals the gate counts: the employee's in this cycle, not only those linked to
                 // the appraisal (a goal agreed before generation has no link).
-                var pendingGoals = await _goalRepository.GetQueryable()
+                //
+                // HR's audited waiver of goal setting (closure plan L2, D-16): the goals the
+                // employee put to the manager are approved on HR's recorded reason, and the agreed
+                // set is locked, so the year is appraised on what was agreed. A draft was never put
+                // to the manager and a rejected goal was refused by them — neither joins the set on
+                // a waiver; they used to be approved along with the rest. The lock is the flag only
+                // (D-29): the goals' year runs on.
+                var goals = await _goalRepository.GetQueryable()
                     .Where(g => g.TenantId == appraisal.TenantId
                              && g.EmployeeId == appraisal.EmployeeId
-                             && g.AppraisalCycleId == appraisal.AppraisalCycleId
-                             && (g.Status == GoalStatus.Draft
-                                 || g.Status == GoalStatus.PendingApproval
-                                 || g.Status == GoalStatus.Rejected))
+                             && g.AppraisalCycleId == appraisal.AppraisalCycleId)
                     .ToListAsync(ct);
 
-                foreach (var g in pendingGoals)
+                var submitted = goals.Where(g => g.Status == GoalStatus.PendingApproval).ToList();
+                foreach (var g in submitted)
                 {
                     g.Status       = GoalStatus.Approved;
                     g.ApprovalDate = now;
-                    await _goalRepository.UpdateAsync(g);
                 }
 
-                actions.Add($"Auto-approved {pendingGoals.Count} pending goal(s) to unblock goal-setting gate.");
+                var toLock = goals
+                    .Where(g => GoalSetRules.IsAgreed(g.Status) && !GoalSetRules.IsLocked(g.IsLocked, g.Status))
+                    .ToList();
+                foreach (var g in toLock)
+                {
+                    g.IsLocked   = true;
+                    g.LockedDate = now;
+                }
+
+                foreach (var g in submitted.Union(toLock))
+                    await _goalRepository.UpdateAsync(g);
+
+                var leftOut = goals.Count(g => g.Status is GoalStatus.Draft or GoalStatus.Rejected);
+                if (submitted.Count > 0)
+                    actions.Add($"Approved {submitted.Count} submitted goal(s) on HR's recorded reason.");
+                if (toLock.Count > 0)
+                    actions.Add($"Locked the agreed goal set: {toLock.Count} goal(s).");
+                if (leftOut > 0)
+                    actions.Add($"Left {leftOut} draft or rejected goal(s) out of the set.");
                 actions.Add($"Waived goal setting: {state.Block.Reason}.");
                 break;
             }

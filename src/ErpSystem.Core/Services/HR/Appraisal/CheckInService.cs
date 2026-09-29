@@ -206,13 +206,18 @@ public class CheckInService : ICheckInService
 
     // ─── Goal Updates ────────────────────────────────────────────────────────
 
-    /// <summary>Statuses a goal may receive check-in updates in — approved and still running.</summary>
+    /// <summary>
+    /// Statuses a goal may receive check-in updates in — approved and still running. A goal the old
+    /// lock left in the Locked status reads as approved: a lock freezes what a goal is, not its year
+    /// (decision D-29).
+    /// </summary>
     private static readonly HashSet<GoalStatus> LiveExecutionStatuses = new()
     {
         GoalStatus.Approved,
         GoalStatus.InProgress,
         GoalStatus.OnTrack,
         GoalStatus.AtRisk,
+        GoalStatus.Locked,
     };
 
     /// <summary>

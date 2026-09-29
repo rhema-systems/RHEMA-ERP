@@ -7,8 +7,8 @@ namespace ErpSystem.Core.Services.HR.Appraisal;
 /// <summary>One of the employee's goals in the cycle, as the goal-setting gate reads it.</summary>
 public sealed record AppraisalGateGoal(GoalStatus Status, bool IsLocked)
 {
-    public bool IsLive => Status != GoalStatus.Rejected;
-    public bool IsSetLocked => IsLocked || Status == GoalStatus.Locked;
+    public bool IsLive => GoalSetRules.IsLive(Status);
+    public bool IsSetLocked => GoalSetRules.IsLocked(IsLocked, Status);
 }
 
 /// <summary>An evaluation, as the gates read it.</summary>

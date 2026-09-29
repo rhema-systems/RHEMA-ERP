@@ -46,7 +46,8 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
     /// Statuses a goal may receive progress in — approved and still running. Mirrors
     /// <c>EmployeeGoalService.LiveExecutionStatuses</c>; a goal that is draft, awaiting approval,
     /// rejected or already complete keeps its status and the entry is still recorded against the
-    /// review as a note.
+    /// review as a note. A locked goal moves like any other — a lock freezes what a goal is, not its
+    /// year (decision D-29) — and one the old lock left in the Locked status reads as approved.
     /// </summary>
     private static readonly HashSet<GoalStatus> LiveExecutionStatuses = new()
     {
@@ -54,6 +55,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         GoalStatus.InProgress,
         GoalStatus.OnTrack,
         GoalStatus.AtRisk,
+        GoalStatus.Locked,
     };
 
     /// <summary>
@@ -277,7 +279,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
             });
 
             var goal = scoredGoals[s.EmployeeGoalId];
-            if (LiveExecutionStatuses.Contains(goal.Status) && !goal.IsLocked)
+            if (LiveExecutionStatuses.Contains(goal.Status))
             {
                 ApplyProgressToGoal(goal, s.Score, entryStatus);
                 await _goalRepository.UpdateAsync(goal);
@@ -528,7 +530,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         await _progressEntryRepository.AddAsync(entity);
 
         // The entry is only half the write — the goal itself has to move. See ApplyProgressToGoal.
-        if (LiveExecutionStatuses.Contains(goal.Status) && !goal.IsLocked)
+        if (LiveExecutionStatuses.Contains(goal.Status))
         {
             ApplyProgressToGoal(goal, entity.ProgressPercent, entity.Status);
             await _goalRepository.UpdateAsync(goal);

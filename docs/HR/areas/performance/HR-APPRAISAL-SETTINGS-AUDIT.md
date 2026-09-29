@@ -28,6 +28,10 @@ settings as a policy reference; this document says which of them the code obeys.
 >   Marked *"Since lane B1"*, and the section A rows whose mechanism changed are too. **The profile
 >   now: 45 enforced, 0 advisory, 2 client-side only, 1 ghost** (`ShowPeerScoresToManager`) — of 48.
 >   The client-side pair and the ghost are lane B2's.
+> - **Lane L-a** (the goal set's governance) changed what three *enforced* settings do — marked
+>   *"Since lane L-a"*: `MinGoalsPerEmployee` and `MaxGoalsPerEmployee` now also hold the manager's
+>   *lock goal set* (with the weights adding to 100), and `AutoLockOnDeadline`'s advance past goal
+>   setting locks the agreed set. No verdict moved.
 >
 > Line numbers below are as of 2026-09-17; lanes A and B1 rewrote much of `PerformanceAppraisalService.cs`,
 > and `AppraisalAdvanceHelpers.cs` is gone — its resolver is `AppraisalGates.cs`.
@@ -242,6 +246,11 @@ pair is asymmetric.
 this cycle requires are set"*), counting the employee's live goals in the cycle whether or not they are
 linked to the appraisal. Surfacing `meetsMinGoalCount` in the manager's governance view is lane B2's.
 
+*Since lane L-a:* the manager's **lock goal set** reads the pair too — it is refused below the minimum
+and **above the maximum**, and unless the live goals' weights add to 100 (`GoalSetRules.LockBlocker`).
+That closes the maximum's one gap: rejecting a goal, adding another and resubmitting the first left
+four live goals under a ceiling of three, because the ceiling is checked only at creation.
+
 ### Group 2 — appeals
 
 #### 11. `EnableAppeals` · 12. `AppealWindowDays`
@@ -327,7 +336,7 @@ Grouped by what they actually do, with the strongest evidence line for each.
 | `DefaultHRReviewerId` | Chosen as reviewer when it points at an active employee, else least-loaded fallback (`:3984`) |
 | `AllowEmployeeResponse` | **Refuses the employee's written response** when off (`:1003`) |
 | `AppealReevaluationWindowDays` | Sets `AppealRemandDeadline` (`:3454`) — and **the post-remand re-evaluation is refused after it** (`:2361`) |
-| `MaxGoalsPerEmployee` | **Refuses goal creation** past the ceiling (`EmployeeGoalService.cs:205`) |
+| `MaxGoalsPerEmployee` | **Refuses goal creation** past the ceiling (`EmployeeGoalService.cs:205`) — and, *since lane L-a*, **refuses the goal-set lock** above it, which catches the set that grew past the ceiling by resubmitting a rejected goal |
 | `EnableCheckIns` | **Refuses check-in creation** (`CheckInService.cs:145`) |
 | `EnablePrivateJournal` | **Refuses a private journal entry** (`PerformanceJournalService.cs:159`) |
 | `PeerReviewsAnonymous` | **Server-side redaction** of peer identity from the appraisee (`PerformanceAppraisalService.cs:4066`). *Since lane P:* an HR officer who is the appraisee is the appraisee — the manager's peer detail, which names each peer, used to open to them through the desk exemption; lane P's suite asserts no peer name in seven of the appraisee's payloads |
@@ -343,7 +352,7 @@ Grouped by what they actually do, with the strongest evidence line for each.
 ### Operations
 | Setting | What it really does |
 |---|---|
-| `AutoLockOnDeadline` | The sweep honours it and reports `AutoLockEnabled` (`AppraisalWorkflowService.cs:699`). *Since lane B1:* each advance is past the step the gates put the appraisal at — a step before the manager's evaluation is **waived** by the advance's own log row |
+| `AutoLockOnDeadline` | The sweep honours it and reports `AutoLockEnabled` (`AppraisalWorkflowService.cs:699`). *Since lane B1:* each advance is past the step the gates put the appraisal at — a step before the manager's evaluation is **waived** by the advance's own log row. *Since lane L-a:* waiving goal setting **locks the agreed set** — submitted goals approved on the recorded reason, every approved or running goal locked, drafts and rejected goals left out (it used to approve all three and lock nothing). The lock is the goal's flag; its year runs on (D-29) |
 | `ProbationExtensionMonths` | The extension actually applied by the probation handler (`ProbationHandlers.cs:157`) |
 | `ManagerWorkloadThreshold` | The "managers over workload" figure (`AppraisalCycleService.cs:1066`) |
 | `DeadlineRiskHighDays` · `MediumDays` · `LowDays` | The risk banding on the cycle progress dashboard (`AppraisalCycleService.cs:516,1070-1072`) |

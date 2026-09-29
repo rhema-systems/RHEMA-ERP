@@ -29,7 +29,10 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    256/256 twice; B3–B5 went with it, and nine of the fourteen settings are now enforced; § 4 lane
    B's B1 State block — read its
    refinements and its *demo impact*: under strict gates 102 of APC2026's 107 appraisals sit at Goal
-   Setting). **Lane L is next**, then B2–B8.
+   Setting). Lane L is built in three slices (D-31): ~~L-a~~ **Done 2026-09-29**
+   (`run-final-goalset.mjs` 157/157 twice; § 4 lane L's L-a State block — read § 1c first: a lock
+   freezes what a goal is, not its year). **L-b (goal rows and scoring) is next**, then L-c, then
+   B2–B8. UAT was rebuilt on 2026-09-29 (Efua 88.56, Cynthia 87.00 — lane A's settle path).
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -92,6 +95,14 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | D-27 | **Check-in ↔ company objective link** (ledger :2178, finish plan lane 2e :494): TDC to confirm intent | Ask TDC with D-24's questions | K |
 | D-28 | **Goal approval for an employee with no line manager.** GWC :148 refuses the submit; § 5 once proposed an HR fallback, which contradicts decision 6 and trips goal-approval-stays-bespoke's revisit trigger | Keep the refusal, word it "you have no line manager on record — HR has been told", and send HR a data-fix notice (lane G). HR fixes the reporting line; it does not approve | G, § 5 |
 
+### 1c. Decisions from lane L's source check — settled with the user, 2026-09-29
+
+| # | Question | Decision (2026-09-29) | Affects |
+|---|---|---|---|
+| D-29 | **What "locked" means.** GWC's lock sets `Status = Locked`, and progress entries, check-in updates and interim reviews only move goals in a live execution status — so a lock ends the goal's year. D-16 locks the set at the goal-setting deadline, which would freeze every goal from February | **A lock freezes what the goal is, not its year.** Title, measure, target, weight and owner are fixed; progress and check-ins keep moving it. The lock is `IsLocked` + `LockedDate`; nothing sets `Status = Locked` any more, and a goal already in that status reads as approved and locked | L-a, L-b, B1's gate |
+| D-30 | **Editing an approved goal.** The update copies owner, cycle and appraisal link from the payload — a UI edit clears the link, an edit can move a goal to another employee — and an approved goal's weight or target changes with no re-approval | **What an approved goal measures cannot be edited**; to change it, the manager rejects it back to the employee (the existing path). Owner, cycle and appraisal link never change through an edit | L-a |
+| D-31 | **Lane L's size and order.** The check found the plan's five days to be seven or eight | **Three slices, each built, verified and staged on its own:** L-a governance (the lock, "lock goal set", governance at lock, edit hardening, the unlock fix, HR's advance, L0); L-b scoring (goal rows, the config-id keying, the forms, assessments, interim reviews); L-c screens (the section-kind picker, the frontend sites, snapshot labels, the manager's lock-set control, the lane suite) | Lane L |
+
 ---
 
 ## 2. Lane status
@@ -101,7 +112,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | A | Scoring integrity and the settle path | 2.5 days | D-11, D-13, D-22 (A14–A16 only) | ☑ 2026-09-29 — 177/177 twice; staged |
 | P | Privacy and access *(new — the review)* | 2 days | D-26 (P18 only) | ☑ 2026-09-29 — 339/339 twice; staged |
 | B | One gate evaluator (B1 first); settings enforced or removed | 3.5 days | — | ◐ B1 ☑ 2026-09-29 — 256/256 twice; staged. B3–B5 done; B1 enforces nine of the fourteen settings; B2's rest and B6–B8 open |
-| L | Goal-driven KPI scoring | 5 days | D-15, D-16 | ☐ |
+| L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ◐ L-a ☑ 2026-09-29 — 157/157 twice; staged. L-b, L-c open |
 | C | One appeal machine | 2 days | D-22 | ☐ |
 | D | Peer nomination and evaluation integrity | 1 day | — | ☐ |
 | E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | 4 days | D-10, D-14, D-17, D-20 | ☐ |
@@ -122,10 +133,11 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
   lane's slice: B's gates break `061` on the next rebuild; E's guards break `sliceC`/`sliceE`; F's
   segregation breaks `061`/`070`/`100`. The shape gaps S-1…S-17 are built at the end.
 
-**Size:** about **50 working days, ten weeks** (47 without lane N). **Migrations:** batch 1 sits at
-the start of lane A and batch 2 at the start of lane F; batch 3 is withdrawn (D-21). **Batch 1 is
-done and applied to UAT (2026-09-29, § 6 State); lanes A, P and B1 are done (2026-09-29, each with
-its State block in § 4); lane L is next.**
+**Size:** about **53 working days, eleven weeks** (50 without lane N; lane L grew by three, D-31).
+**Migrations:** batch 1 sits at the start of lane A and batch 2 at the start of lane F; batch 3 is
+withdrawn (D-21). **Batch 1 is done and applied to UAT (2026-09-29, § 6 State); lanes A, P and B1
+and slice L-a are done (2026-09-29, each with its State block in § 4); L-b is next.** UAT was rebuilt
+from the migration chain the same day and verified (S10's first rebuild, after lane B's gates).
 
 ---
 
@@ -848,14 +860,17 @@ because his final review is already held.
 - `EmployeeGoal.Weight` (int) is read by no scoring code.
 - Year-end `EmployeeGoalAppraisalAssessment` rows are stored beside the score.
 
-- [ ] L0 **The template model (D-15).**
+- [ ] L0 **The template model (D-15).** *(L-a deleted the Tier 1 override; the section kinds are
+      L-b's and the editor's text L-c's.)*
       - Templates are per population; assignment scopes already exist.
       - Section kinds are `Fixed` (competencies; shared KPIs with one target; free-text questions)
         and `EmployeeGoals`.
       - A template KPI item means "the same KPI and target for everyone on this template".
-      - Delete the Tier 1 override (EAC :310-322), so a goal is never counted twice.
+      - ~~Delete the Tier 1 override (EAC :310-322), so a goal is never counted twice.~~ *Done in L-a.*
       - The template editor explains the split in its own text.
-- [ ] L1 **Schema** (batch 1, completed by the review).
+- [x] L1 **Schema** (batch 1, completed by the review). *(Done with batch 1; lane L's source check
+      found every column and all four indexes in the entities, the EF configuration, the model
+      snapshot and the migration. Nothing writes the config ids yet — L-b.)*
       - `AppraisalTemplateSection.Kind` (`Fixed=1`, `EmployeeGoals=2`; the entity default is Fixed,
         because the seeder's sections carry no kind).
       - `PerformanceAppraisalCriterionConfig`: `TemplateItemId` nullable, plus `EmployeeGoalId` (null
@@ -876,7 +891,11 @@ because his final review is already held.
         EmployeeGoalId), CriterionScore (evaluation, CriterionConfigId), and
         EmployeeGoalAppraisalAssessment (goal, appraisal). The last matters because EGS :138 reads the
         assessments with `ToDictionary` and crashes on a duplicate.
-- [ ] L2 **Snapshot at goal-set lock.**
+- [ ] L2 **Snapshot at goal-set lock.** *(L-a built the lock itself — the flag, D-29 — the manager's
+      "lock goal set", HR's advance locking the agreed set, the unlock fix and the edit rules (D-30).
+      The rows are L-b's. Premise corrected by the source check: `KpiDefinition` carries no default
+      grade ranges to copy — a measured row scores by achievement %, a rated row takes the tenant's
+      overall scale (L6).)*
       - `GoalWorkflowCommandService.Lock` and a new manager "lock goal set" action rebuild the
         `EmployeeGoals` section rows for the employee's appraisal in the cycle: one row per locked
         goal, with `WeightUsed = goal.Weight` normalised to 100 within the section, target/min/max
@@ -915,14 +934,16 @@ because his final review is already held.
       - **P-8:** activation and submit-for-approval (`AppraisalTemplateService.cs:922-931, :323`)
         stop demanding grade bands on a weight-0 free-text item.
       - Coverage and calibration screens read labels from the snapshot.
-- [ ] L5 **Governance at goal-set lock:** `Min/MaxGoalsPerEmployee` and weight sum 100 (P-20). The
+- [x] L5 **Governance at goal-set lock:** `Min/MaxGoalsPerEmployee` and weight sum 100 (P-20). The
       only existing weight guard (EGS :278-279, :306-307, :643-659) is never called, because the
       routed path is GWC :124-199. HR reads only. The guide chapter "who decides the KPIs" is written
-      from this.
+      from this. *(L-a: `GoalSetRules.LockBlocker`, read by the set lock; the weight total is defined
+      once — live goals only — and the team view follows it. The dead EGS guard is lane J's.)*
 - [ ] L6 **Rated goals** (no numeric target, D-16) are scored on the tenant's overall grade scale as
       bands. Measured goals use actual vs target/min/max, with the KPI definition's tolerance
       (B2).
-- [ ] L7 **Neighbours.**
+- [ ] L7 **Neighbours.** *(L-a: interim reviews, check-ins and progress entries move a locked goal —
+      D-29. Scoring only the locked set, and the period guard, stay L-b's.)*
       - Peers score goal rows only when `AllowPeerKpiEvaluation` is on (PES :321-331, :521, :545).
       - Interim reviews read the locked goal set only (`AppraisalReviewEventService.cs:197-307` scores
         every cycle goal into `OverallPeriodScore` today).
@@ -939,6 +960,72 @@ because his final review is already held.
 - An appeal on a goal row resolves.
 - A remand with goal rows restores them.
 - A weight-0 free-text item activates with no bands.
+
+**L-a State (2026-09-29): DONE — built, verified on UAT, staged** (decisions D-29–D-31, § 1c). No
+migration. What exists now:
+- **`GoalSetRules`** (`Services/HR/Appraisal/GoalSetRules.cs`) — the goal-set rules in one place: a
+  live goal is any not rejected; an agreed goal is approved or running (the old `Locked` status
+  included); a lock is the flag (the old status still counts); the weight total is live goals only;
+  `LockBlocker` says why a set cannot be locked, in the goal-setting gate's words. The gate's goal
+  record reads the same rules.
+- **The lock (D-29)** — `LockGoalAsync` sets `IsLocked` + `LockedDate` and leaves the status alone.
+  Progress entries (add and amend), check-in goal updates and interim reviews move a locked goal; a
+  goal still in the old `Locked` status reads as approved. Unlock returns such a goal to Approved.
+- **`LockGoalSetAsync`** (`POST api/EmployeeGoals/lock-set`) — the direct manager locks every live,
+  unlocked goal of the employee's set for a cycle once `LockBlocker` passes: all agreed, the count
+  inside the cycle's minimum and maximum, the weights adding to 100.
+- **The edit rules (D-30)** — an edit refuses a changed owner or cycle and never touches the
+  appraisal link (the mapper no longer copies any of the three); a create derives the link on the
+  server; an agreed goal's title, KPI, measure, target, minimum, maximum, unit, weight, period and
+  success criteria are refused (description, priority, dates and alignment are not); the manager's
+  **send-back** is `RejectGoalAsync` extended to an approved or running goal, not locked or completed.
+- **HR's advance past goal setting** approves the submitted goals, locks the agreed set, and leaves
+  drafts and rejected goals out.
+- **L0** — the Tier 1 override is gone; the configuration service no longer reads goals (L-b brings
+  them back for the goal rows).
+- **Team views** — the locked count and Locked tab read the flag; a locked goal can be overdue; the
+  weight total leaves rejected goals out.
+- **Frontend** — *My goals* carries the fields its dialog does not show (an edit used to wipe the KPI,
+  range, success criteria and alignment); *Record progress* stays on a locked goal there and on the
+  desk's goal page; the lock banner says what a lock is; the desk's goal page has **Send back**.
+
+**Where the build refines or extends the rows above** (each deliberate; say if one should go back):
+1. **Send-back needed a code change.** The answer that led to D-30 called rejection "the existing
+   path"; `RejectGoalAsync` refused an approved goal. It now accepts Approved, InProgress, OnTrack
+   and AtRisk; Completed is refused (*"a completed goal's result stands"*), and a locked goal is
+   refused as locked.
+2. **HR's waiver approves only what was submitted.** It used to approve drafts and rejected goals too.
+3. **The measured fields frozen by D-30** are title, KPI, measure, target, minimum, maximum, unit,
+   weight, period and success criteria — what the manager agreed to score.
+4. **The per-goal lock stays**, without the set rules; only the set lock checks the count and weights.
+5. **The overdue rule now leaves rejected goals out** on the overview count, as the Overdue tab
+   already did.
+6. **No data migration for the old `Locked` status**: the rebuilt UAT has none, and code reads it as
+   approved and locked.
+
+**Found on the way, carried:**
+- `GetPeerEvaluationDetailAsync` is one 12-way query. On the rebuilt UAT, with 0.8 GB of RAM free,
+  it timed out on every peer save of `061` (the saves had committed; the reads back failed). A split
+  query would not need a memory grant that large — lane L-b touches the peer form anyway.
+- The evaluation saves accept goal assessments for any goal id — L-b (L3 rewrites them).
+- With `RequireManagerGoalApproval` off, a goal never becomes agreed and so cannot be locked — B2.
+- The manager's *Lock goal set* button — L-c.
+
+**Verified** (Staging API on the rebuilt `ErpSystemDB_UAT`):
+- `run-final-goalset.mjs` **157/157**, then **157/157 again** inside `run-all`.
+- Regression (`run-all.mjs`, ten suites, on the rebuilt UAT): interim reviews 128/128, attachments
+  65/65, slice C 51/51, slice D 22/22, **slice E 17/26 — the same 9 stale**, gates 32/32, lane A
+  182/182, lane P 340/340, lane B1 256/256, lane L-a 157/157. **1250/1259.** API log: no SQL timeout
+  this time; the 270 save errors are all defect #23's payroll-profile key, one per fixture employee.
+- Frontend: scoped `tsc` 0 errors over the two changed pages (a planted error was caught); ESLint
+  clean. Demo pack: `verify-paths` clean after Book 3's goal aside was rewritten.
+- The rebuilt demo under this build: Kwasi at HR Review, Kojo Ansah at Peer Evaluation, the three
+  finished tracks Completed. The only locked goals in APC2026 are ten seeded ones on estate fixtures
+  with no manager, so the team views show the demo nothing new.
+
+**Demo impact:** none on scores — the seeded goals Tier 1 used to read carry the template's own
+target. The rebuild itself moved Efua to **88.56** and Cynthia to **87.00** (lane A's settle path, as
+its dry run said), and Efua's appeal window now runs to 6 October; the guide carries both.
 
 ### Lane C — One appeal machine
 
@@ -1671,7 +1758,11 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
       nothing defines a fixture (§ 6 State). S1 still sets `IsDefault` in the seeder: on a rebuild
       the backfill runs against empty tables.
 - [ ] S10 **Two full rebuilds green** (`scripts/New-UatDatabase.ps1`, exit 0: SCENARIOS, REQUIRED,
-      COUNTS, RUNBOOK): one after lane B (the gates) and one at the end.
+      COUNTS, RUNBOOK): one after lane B (the gates) and one at the end. *(The first ran on 2026-09-29,
+      after B1: DEMO DATASET COMPLETE, and the five demo tracks landed where the books need them. Every
+      peer-evaluation save in `061` answered 500 after a 30-second SQL timeout — the machine had 0.8 GB
+      of RAM free — though each save had committed; see L-a's State block. Book 0's rule stands: check
+      free memory before a rebuild.)*
 - [ ] S11 **Runbook Book 3.**
       - Claims in `runbook-claims.json`: [167] manager authority, removed; [171] locking, now a
         goal-set lock; ~~[172] Q3 one-to-one notes, completion not repeatable~~ *done 2026-09-29 with
