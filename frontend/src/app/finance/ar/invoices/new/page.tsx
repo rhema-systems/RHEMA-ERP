@@ -1143,7 +1143,7 @@ export default function NewInvoicePage() {
                                                 <Input type="number" step="0.01" {...form.register(`lineItems.${index}.unitPrice` as const)} className="text-right" />
                                             </div>
                                             <div className="space-y-2 md:col-span-3 lg:col-auto">
-                                                <Label className="whitespace-nowrap">Trade discount %</Label>
+                                                <Label className="whitespace-nowrap">Line discount %</Label>
                                                 <Input type="number" min="0" max="100" step="0.5" {...form.register(`lineItems.${index}.discountPercentage` as const)} className="text-center" />
                                                 {form.formState.errors.lineItems?.[index]?.discountPercentage && (
                                                     <p className="text-xs text-red-500">Use 0–100</p>
