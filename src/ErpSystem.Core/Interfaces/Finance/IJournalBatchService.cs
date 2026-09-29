@@ -6,6 +6,7 @@ public interface IJournalBatchService
 {
     Task<JournalBatchListResultDto> GetAsync(JournalBatchQueryDto query, CancellationToken cancellationToken = default);
     Task<JournalBatchDetailDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<EligibleJournalBatchBookDto>> GetEligibleBooksAsync(Guid fiscalPeriodId, CancellationToken cancellationToken = default);
     Task<JournalBatchDetailDto> CreateAsync(CreateJournalBatchDto dto, CancellationToken cancellationToken = default);
     Task<JournalBatchDetailDto> UpdateAsync(Guid id, UpdateJournalBatchDto dto, CancellationToken cancellationToken = default);
     Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);

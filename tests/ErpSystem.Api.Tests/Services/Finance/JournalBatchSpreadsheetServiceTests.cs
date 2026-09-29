@@ -33,7 +33,7 @@ public sealed class JournalBatchSpreadsheetServiceTests
         var service = CreateService(db, tenantId, userId);
 
         var template = await service.CreateTemplateAsync();
-        template.FileName.Should().Be("journal-batch-import-v1.xlsx");
+        template.FileName.Should().Be("journal-batch-import-v2.xlsx");
         template.Content.Should().NotBeEmpty();
 
         byte[] workbookBytes;
@@ -166,6 +166,9 @@ public sealed class JournalBatchSpreadsheetServiceTests
         batches
             .Setup(service => service.GetByIdAsync(batchId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(created);
+        batches
+            .Setup(service => service.GetEligibleBooksAsync(period.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(EligibleBooks(db, tenantId));
         var service = CreateService(db, tenantId, userId, batches.Object);
         var template = await service.CreateTemplateAsync();
         var workbookBytes = PopulateValidWorkbook(template.Content, period.Id);
@@ -176,6 +179,8 @@ public sealed class JournalBatchSpreadsheetServiceTests
         preview.IsValid.Should().BeTrue();
         preview.JournalCount.Should().Be(1);
         preview.LineCount.Should().Be(2);
+        preview.TemplateVersion.Should().Be("2");
+        preview.ControlCurrencyCode.Should().Be("GHS");
         preview.ExpectedDebitTotal.Should().Be(100m);
         preview.ActualDebitTotal.Should().Be(100m);
         var storedSession = await db.JournalBatchImportSessions.SingleAsync();
@@ -189,9 +194,11 @@ public sealed class JournalBatchSpreadsheetServiceTests
             IdempotencyKey = "round-trip-import-1"
         });
         committed.Id.Should().Be(batchId);
+        var expectedBookId = db.AccountingBooks.Local.Single(book => book.Code == "IFRS").Id;
         batches.Verify(service => service.CreateAsync(
             It.Is<CreateJournalBatchDto>(dto =>
                 dto.Description == "Imported close journals" &&
+                dto.AccountingBookId == expectedBookId &&
                 dto.ExpectedDebitTotal == 100m &&
                 dto.ExpectedJournalCount == 1),
             It.IsAny<CancellationToken>()), Times.Once);
@@ -214,6 +221,10 @@ public sealed class JournalBatchSpreadsheetServiceTests
             .Should().Be("Balanced imported journal");
         exportedWorkbook.Worksheet("JournalLines").Cell(2, 5).GetValue<decimal>()
             .Should().Be(100m);
+        exportedWorkbook.Worksheet("JournalLines").Cell(1, 11).GetString()
+            .Should().Be("ExchangeRateId");
+        exportedWorkbook.Worksheet("JournalLines").Cell(1, 12).GetString()
+            .Should().Be("DimensionsJson");
         exportedWorkbook.Worksheet("ReviewAndPosting").Cell(2, 2).GetString()
             .Should().Be("JE-2026-000001");
     }
@@ -237,6 +248,8 @@ public sealed class JournalBatchSpreadsheetServiceTests
             .ReturnsAsync(created);
         batches.Setup(service => service.GetByIdAsync(batchId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(created);
+        batches.Setup(service => service.GetEligibleBooksAsync(period.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(EligibleBooks(db, tenantId));
         var service = CreateService(db, tenantId, userId, batches.Object);
         var template = await service.CreateTemplateAsync();
         var firstBytes = PopulateValidWorkbook(template.Content, period.Id);
@@ -317,7 +330,7 @@ public sealed class JournalBatchSpreadsheetServiceTests
     {
         using var workbook = new XLWorkbook(new MemoryStream(template));
         var batch = workbook.Worksheet("Batch");
-        batch.Cell(2, 1).Value = "1";
+        batch.Cell(2, 1).Value = "2";
         batch.Cell(2, 2).Value = "Imported close journals";
         batch.Cell(2, 3).Value = fiscalPeriodId.ToString();
         batch.Cell(2, 4).Value = "IFRS";
@@ -347,6 +360,7 @@ public sealed class JournalBatchSpreadsheetServiceTests
         Guid batchId)
     {
         var accounts = db.Accounts.Local.OrderBy(account => account.AccountNumber).ToList();
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
         var journalId = Guid.NewGuid();
         var journal = new JournalEntry
         {
@@ -362,6 +376,7 @@ public sealed class JournalBatchSpreadsheetServiceTests
             TotalCreditAmount = 100m,
             IsBalanced = true,
             FiscalPeriodId = fiscalPeriodId,
+            AccountingBookId = book.Id,
             BookClassification = "IFRS",
             PostingStatus = "Draft",
             ApprovalStatus = "Draft",
@@ -372,6 +387,8 @@ public sealed class JournalBatchSpreadsheetServiceTests
                     Id = Guid.NewGuid(),
                     TenantId = tenantId,
                     JournalEntryId = journalId,
+                    AccountingBookId = book.Id,
+                    BookClassification = book.Code,
                     AccountId = accounts[0].Id,
                     TransactionDate = new DateTime(2026, 7, 15),
                     DebitAmount = 100m,
@@ -385,6 +402,8 @@ public sealed class JournalBatchSpreadsheetServiceTests
                     Id = Guid.NewGuid(),
                     TenantId = tenantId,
                     JournalEntryId = journalId,
+                    AccountingBookId = book.Id,
+                    BookClassification = book.Code,
                     AccountId = accounts[1].Id,
                     TransactionDate = new DateTime(2026, 7, 15),
                     CreditAmount = 100m,
@@ -402,6 +421,7 @@ public sealed class JournalBatchSpreadsheetServiceTests
             BatchNumber = "JB-2026-00001",
             Description = "Imported close journals",
             FiscalPeriodId = fiscalPeriodId,
+            AccountingBookId = book.Id,
             BookClassification = "IFRS",
             ControlCurrencyCode = "GHS",
             ExpectedDebitTotal = 100m,
@@ -429,9 +449,9 @@ public sealed class JournalBatchSpreadsheetServiceTests
             Code = $"JBS-{tenantId:N}"[..12],
             BaseCurrency = "GHS"
         });
-        db.Accounts.AddRange(
-            new Account
+        var debitAccount = new Account
             {
+                Id = Guid.NewGuid(),
                 TenantId = tenantId,
                 AccountCode = "1000",
                 AccountNumber = "1000",
@@ -440,9 +460,10 @@ public sealed class JournalBatchSpreadsheetServiceTests
                 CurrencyCode = "GHS",
                 Status = AccountStatus.Active,
                 AllowDirectPosting = true
-            },
-            new Account
+            };
+        var creditAccount = new Account
             {
+                Id = Guid.NewGuid(),
                 TenantId = tenantId,
                 AccountCode = "2000",
                 AccountNumber = "2000",
@@ -451,6 +472,24 @@ public sealed class JournalBatchSpreadsheetServiceTests
                 CurrencyCode = "GHS",
                 Status = AccountStatus.Active,
                 AllowDirectPosting = true
+            };
+        db.Accounts.AddRange(debitAccount, creditAccount);
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        };
+        db.AccountingBooks.Add(book);
+        db.AccountAccountingBooks.AddRange(
+            new AccountAccountingBook
+            {
+                TenantId = tenantId, AccountId = debitAccount.Id, AccountingBookId = book.Id, IsEnabled = true
+            },
+            new AccountAccountingBook
+            {
+                TenantId = tenantId, AccountId = creditAccount.Id, AccountingBookId = book.Id, IsEnabled = true
             });
         var period = new FiscalPeriod
         {
@@ -466,6 +505,25 @@ public sealed class JournalBatchSpreadsheetServiceTests
             IsOpen = true
         };
         db.FiscalPeriods.Add(period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, book.Code);
         return period;
+    }
+
+    private static IReadOnlyList<EligibleJournalBatchBookDto> EligibleBooks(ApplicationDbContext db, Guid tenantId)
+    {
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        return
+        [
+            new EligibleJournalBatchBookDto
+            {
+                Id = book.Id,
+                Code = book.Code,
+                Name = book.Name,
+                Purpose = book.Purpose,
+                BookType = book.BookType,
+                FunctionalCurrencyCode = book.FunctionalCurrencyCode,
+                IsDefault = book.IsDefault
+            }
+        ];
     }
 }

@@ -31,7 +31,6 @@ public sealed class FinanceAuditService : IFinanceAuditService
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(auditEvent);
-
         var currentTenantId = _currentUserService.GetRequiredFinanceTenantId();
         if (auditEvent.TenantId == Guid.Empty)
         {
@@ -52,6 +51,52 @@ public sealed class FinanceAuditService : IFinanceAuditService
         {
             throw new InvalidOperationException("Finance audit user context is required.");
         }
+
+        return await RecordCoreAsync(auditEvent, userId,
+            string.IsNullOrWhiteSpace(_currentUserService.UserName) ? "Unknown" : _currentUserService.UserName!,
+            string.IsNullOrWhiteSpace(_currentUserService.IpAddress) ? "Unknown" : _currentUserService.IpAddress!,
+            _currentUserService.UserAgent,
+            cancellationToken);
+    }
+
+    public async Task<AuditLog> RecordSystemAsync(
+        FinanceAuditEventDto auditEvent,
+        Guid technicalInitiatorUserId,
+        string systemActor,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(auditEvent);
+        if (auditEvent.TenantId == Guid.Empty || technicalInitiatorUserId == Guid.Empty)
+            throw new InvalidOperationException("System Finance audit requires a tenant and technical initiator.");
+        if (string.IsNullOrWhiteSpace(systemActor))
+            throw new InvalidOperationException("System Finance audit actor is required.");
+        var initiatorExists = await _context.Users.AsNoTracking().AnyAsync(user =>
+            user.Id == technicalInitiatorUserId && user.TenantId == auditEvent.TenantId,
+            cancellationToken);
+        if (!initiatorExists)
+            throw new InvalidOperationException("The system audit technical initiator does not belong to the event tenant.");
+
+        auditEvent.Context = new
+        {
+            actorType = "System",
+            systemActor = systemActor.Trim(),
+            technicalInitiatorUserId,
+            suppliedContext = auditEvent.Context
+        };
+        return await RecordCoreAsync(auditEvent, technicalInitiatorUserId, systemActor.Trim(),
+            "System", "ERP background worker", cancellationToken);
+    }
+
+    private async Task<AuditLog> RecordCoreAsync(
+        FinanceAuditEventDto auditEvent,
+        Guid userId,
+        string username,
+        string ipAddress,
+        string? userAgent,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(auditEvent.EventType))
+            throw new InvalidOperationException("Finance audit event type is required.");
 
         var idempotencyKey = string.IsNullOrWhiteSpace(auditEvent.IdempotencyKey)
             ? null
@@ -83,9 +128,7 @@ public sealed class FinanceAuditService : IFinanceAuditService
             Id = Guid.NewGuid(),
             TenantId = auditEvent.TenantId,
             UserId = userId,
-            Username = string.IsNullOrWhiteSpace(_currentUserService.UserName)
-                ? "Unknown"
-                : _currentUserService.UserName!,
+            Username = username,
             Action = auditEvent.EventType.Trim(),
             Resource = ResolveResource(auditEvent),
             ResourceId = ResolveResourceId(auditEvent),
@@ -94,13 +137,11 @@ public sealed class FinanceAuditService : IFinanceAuditService
                 ? null
                 : JsonSerializer.Serialize(auditEvent.BeforeValues, JsonOptions),
             NewValues = JsonSerializer.Serialize(BuildPayload(auditEvent, now), JsonOptions),
-            IpAddress = string.IsNullOrWhiteSpace(_currentUserService.IpAddress)
-                ? "Unknown"
-                : _currentUserService.IpAddress!,
-            UserAgent = _currentUserService.UserAgent,
+            IpAddress = ipAddress,
+            UserAgent = userAgent,
             Timestamp = now,
             CreatedAt = now,
-            CreatedBy = _currentUserService.UserName,
+            CreatedBy = username,
             CreatedById = userId
         };
 

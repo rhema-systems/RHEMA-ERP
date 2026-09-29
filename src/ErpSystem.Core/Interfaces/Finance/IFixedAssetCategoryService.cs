@@ -6,6 +6,7 @@ public interface IFixedAssetCategoryService
 {
     Task<FixedAssetCategoryDto?> GetByIdAsync(Guid id);
     Task<IEnumerable<FixedAssetCategoryDto>> GetAllAsync();
+    Task<IReadOnlyList<MaintenanceEligibleFixedAssetDto>> GetMaintenanceEligibleAssetsAsync(CancellationToken cancellationToken = default);
     Task<FixedAssetCategoryDto> CreateAsync(CreateFixedAssetCategoryDto dto);
     Task<FixedAssetCategoryDto> UpdateAsync(Guid id, UpdateFixedAssetCategoryDto dto);
     Task DeleteAsync(Guid id);

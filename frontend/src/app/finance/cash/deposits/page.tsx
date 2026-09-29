@@ -10,8 +10,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import type { BankDeposit } from '@/types/cash-management';
+import { useAuth } from '@/hooks/use-auth';
 
 export default function BankDepositsPage() {
+    const { hasPermission } = useAuth();
     const [items, setItems] = useState<BankDeposit[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
@@ -43,7 +45,9 @@ export default function BankDepositsPage() {
                     <Button variant="ghost" size="icon" asChild><Link href="/finance/cash"><ArrowLeft className="h-4 w-4" /></Link></Button>
                     <div><h1 className="text-3xl font-bold">Banking Deposits</h1><p className="text-muted-foreground">Settle collected receipts and eligible payments into bank accounts.</p></div>
                 </div>
-                <Button asChild><Link href="/finance/cash/deposits/new"><Plus className="mr-2 h-4 w-4" />New deposit</Link></Button>
+                {hasPermission('Finance.Banking.Deposits.Create') && (
+                    <Button asChild><Link href="/finance/cash/deposits/new"><Plus className="mr-2 h-4 w-4" />New deposit</Link></Button>
+                )}
             </div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Open deposits</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">GHS {openTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</CardContent></Card>

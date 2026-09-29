@@ -7,20 +7,33 @@ namespace ErpSystem.Api.Services.Finance.GL;
 /// </summary>
 public sealed class RecurringJournalBackgroundService : BackgroundService
 {
-    private static readonly TimeSpan Interval = TimeSpan.FromMinutes(15);
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<RecurringJournalBackgroundService> _logger;
+    private readonly bool _enabled;
+    private readonly TimeSpan _interval;
 
-    public RecurringJournalBackgroundService(IServiceScopeFactory scopeFactory, ILogger<RecurringJournalBackgroundService> logger)
+    public RecurringJournalBackgroundService(
+        IServiceScopeFactory scopeFactory,
+        IConfiguration configuration,
+        ILogger<RecurringJournalBackgroundService> logger)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
+        _enabled = configuration.GetValue("Finance:RecurringJournals:SchedulerEnabled", true);
+        var intervalMinutes = configuration.GetValue("Finance:RecurringJournals:SchedulerIntervalMinutes", 15);
+        _interval = TimeSpan.FromMinutes(Math.Clamp(intervalMinutes, 1, 1440));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!_enabled)
+        {
+            _logger.LogWarning("Recurring-journal background processing is disabled by configuration.");
+            return;
+        }
+
         await RunSafelyAsync(stoppingToken);
-        using var timer = new PeriodicTimer(Interval);
+        using var timer = new PeriodicTimer(_interval);
         try
         {
             while (await timer.WaitForNextTickAsync(stoppingToken)) await RunSafelyAsync(stoppingToken);

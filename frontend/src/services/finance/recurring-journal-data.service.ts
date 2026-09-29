@@ -77,6 +77,15 @@ export interface RecurringJournalOccurrence {
   reversedAt?: string;
   errorMessage?: string;
   adjustmentExplanation?: string;
+  waivedAt?: string;
+  waivedByUserId?: string;
+  waiverReason?: string;
+  workflowInstanceId?: string;
+  canApprove: boolean;
+  canReject: boolean;
+  canPost: boolean;
+  canRequestWaiver: boolean;
+  actionDisabledReason?: string;
 }
 
 export interface RecurringJournalTemplate extends CreateRecurringJournalTemplate {
@@ -88,6 +97,7 @@ export interface RecurringJournalTemplate extends CreateRecurringJournalTemplate
   lastGeneratedDueDate?: string;
   generatedOccurrenceCount: number;
   submittedAt?: string;
+  submittedByUserId?: string;
   reviewedAt?: string;
   reviewComment?: string;
   activatedAt?: string;
@@ -96,6 +106,9 @@ export interface RecurringJournalTemplate extends CreateRecurringJournalTemplate
   totalDebit: number;
   totalCredit: number;
   rowVersion: string;
+  canApprove: boolean;
+  canReject: boolean;
+  actionDisabledReason?: string;
   lines: RecurringJournalTemplateLine[];
   occurrences: RecurringJournalOccurrence[];
 }
@@ -130,6 +143,8 @@ class RecurringJournalDataService {
   reject = (id: string, comment: string) => this.decide(id, 'reject', comment);
   pause = (id: string, comment: string) => this.decide(id, 'pause', comment);
   resume = (id: string, comment: string) => this.decide(id, 'resume', comment);
+  cancel = (id: string, comment: string) => this.decide(id, 'cancel', comment);
+  createNewVersion = (id: string, comment: string) => this.decide(id, 'new-version', comment);
 
   processDue = (asOfDate?: string) => {
     // Keep the query marker in the literal route so the route-contract test can
@@ -145,6 +160,8 @@ class RecurringJournalDataService {
     apiService.post<RecurringJournalOccurrence>(`/finance/recurring-journals/occurrences/${id}/approve`, { comment });
   rejectOccurrence = (id: string, comment: string) =>
     apiService.post<RecurringJournalOccurrence>(`/finance/recurring-journals/occurrences/${id}/reject`, { comment });
+  requestOccurrenceWaiver = (id: string, comment: string) =>
+    apiService.post<RecurringJournalOccurrence>(`/finance/recurring-journals/occurrences/${id}/request-waiver`, { comment });
   postOccurrence = (id: string) =>
     apiService.post<RecurringJournalOccurrence>(`/finance/recurring-journals/occurrences/${id}/post`, {});
   retryReversal = (id: string) =>

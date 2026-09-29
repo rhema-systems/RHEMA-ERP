@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { journalBatchDataService } from '@/services/finance/journal-batch-data.service';
 import type { JournalBatchListItem } from '@/types/journal-batches';
 
@@ -19,6 +20,9 @@ const money = (value: number, currency: string) =>
 
 export default function JournalBatchesPage() {
     const { toast } = useToast();
+    const { hasPermission } = useAuth();
+    const canCreate = hasPermission('Finance.JournalBatches.Create');
+    const canImport = hasPermission('Finance.JournalBatches.Import');
     const [items, setItems] = useState<JournalBatchListItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
@@ -63,9 +67,9 @@ export default function JournalBatchesPage() {
                     <p className="text-muted-foreground">Control totals, configured approvals, partial posting, and full-batch reversal.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" onClick={downloadTemplate}><Download className="mr-2 h-4 w-4" />Template</Button>
-                    <Button variant="outline" asChild><Link href="/finance/journal-batches/import"><FileSpreadsheet className="mr-2 h-4 w-4" />Import</Link></Button>
-                    <Button asChild><Link href="/finance/journal-batches/new"><Plus className="mr-2 h-4 w-4" />New Batch</Link></Button>
+                    {canImport && <Button variant="outline" onClick={downloadTemplate}><Download className="mr-2 h-4 w-4" />Template</Button>}
+                    {canImport && <Button variant="outline" asChild><Link href="/finance/journal-batches/import"><FileSpreadsheet className="mr-2 h-4 w-4" />Import</Link></Button>}
+                    {canCreate && <Button asChild><Link href="/finance/journal-batches/new"><Plus className="mr-2 h-4 w-4" />New Batch</Link></Button>}
                 </div>
             </div>
 
@@ -129,7 +133,12 @@ export default function JournalBatchesPage() {
                                                 <Link className="font-mono font-semibold text-primary hover:underline" href={`/finance/journal-batches/${batch.id}`}>{batch.batchNumber}</Link>
                                                 <div className="max-w-sm truncate text-muted-foreground">{batch.description}</div>
                                             </td>
-                                            <td className="p-3">{batch.fiscalPeriodName || '—'}<div className="text-xs text-muted-foreground">{batch.bookClassification}</div></td>
+                                            <td className="p-3">
+                                                {batch.fiscalPeriodName || '—'}
+                                                <div className="text-xs text-muted-foreground">
+                                                    {batch.bookClassification} — {batch.accountingBookName} ({batch.accountingBookType})
+                                                </div>
+                                            </td>
                                             <td className="p-3 text-right">{money(batch.expectedDebitTotal, batch.controlCurrencyCode)}</td>
                                             <td className="p-3 text-right">
                                                 {money(batch.actualDebitTotal, batch.controlCurrencyCode)}

@@ -475,6 +475,7 @@ public sealed class JournalBatchSqlServerReleaseGateTests
                 BatchNumber = "JB-SQL-REV-00001",
                 Description = "Disposable reversal",
                 FiscalPeriodId = seeded.PeriodId,
+                AccountingBookId = source.AccountingBookId,
                 BookClassification = "IFRS",
                 ControlCurrencyCode = "GHS",
                 ExpectedDebitTotal = 100m,
@@ -624,12 +625,17 @@ public sealed class JournalBatchSqlServerReleaseGateTests
         string batchNumber)
     {
         await using var context = database.CreateContext();
+        var accountingBookId = await context.JournalBatches
+            .Where(batch => batch.Id == seeded.BatchId && batch.TenantId == seeded.TenantId)
+            .Select(batch => batch.AccountingBookId)
+            .SingleAsync();
         context.JournalBatches.Add(new JournalBatch
         {
             TenantId = seeded.TenantId,
             BatchNumber = batchNumber,
             Description = "Concurrent reversal claim",
             FiscalPeriodId = seeded.PeriodId,
+            AccountingBookId = accountingBookId,
             BookClassification = "IFRS",
             ControlCurrencyCode = "GHS",
             ExpectedDebitTotal = 100m,
@@ -783,6 +789,7 @@ public sealed class JournalBatchSqlServerReleaseGateTests
                 BatchNumber = $"JB-{tenantId:N}"[..20],
                 Description = "Posted source batch",
                 FiscalPeriodId = periodId,
+                AccountingBookId = bookId,
                 BookClassification = "IFRS",
                 ControlCurrencyCode = "GHS",
                 ExpectedDebitTotal = 100m,

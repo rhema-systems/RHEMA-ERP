@@ -211,6 +211,13 @@ namespace ErpSystem.Api.Services.Finance.AR
             CancellationToken cancellationToken)
         {
             await SalesOrderInvoiceGuard.ValidateCreationAsync(_unitOfWork, TenantId, dto, producer, cancellationToken);
+            var manualDiscountEntry = producer is null || producer.RouteId == FinanceDimensionRouteId.FinanceArCustomerInvoice;
+            dto.DiscountReason = ArDiscountGovernancePolicy.NormalizeInvoiceDiscountReason(
+                dto.DiscountAmount,
+                dto.LineItems.Select(line => line.DiscountPercentage),
+                dto.DiscountReason,
+                manualDiscountEntry,
+                producer?.RouteId.ToString() ?? "manual AR invoice");
             var counterparty = await ResolveCustomerCounterpartyAsync(
                 dto.BusinessPartnerId,
                 dto.BusinessPartnerRoleId,
@@ -295,6 +302,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 DueDate = dto.DueDate ?? dto.InvoiceDate.AddDays(paymentTermsDays),
                 Reference = dto.Reference,
                 Notes = dto.Notes,
+                DiscountReason = dto.DiscountReason,
                 IsOpeningBalance = dto.IsOpeningBalance,
                 CurrencyCode = openingExchangeRate?.TransactionCurrency ?? dto.CurrencyCode,
                 CurrencyOverrideReason = currencyOverrideReason,
@@ -503,6 +511,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 && existing.DueDate == resolvedDueDate
                 && string.Equals(existing.Reference ?? string.Empty, dto.Reference ?? string.Empty, StringComparison.Ordinal)
                 && string.Equals(existing.Notes ?? string.Empty, dto.Notes ?? string.Empty, StringComparison.Ordinal)
+                && string.Equals(existing.DiscountReason ?? string.Empty, dto.DiscountReason ?? string.Empty, StringComparison.Ordinal)
                 && existing.IsOpeningBalance == dto.IsOpeningBalance
                 && string.Equals(existing.CurrencyCode, dto.CurrencyCode, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(existing.CurrencyOverrideReason ?? string.Empty, dto.CurrencyOverrideReason?.Trim() ?? string.Empty, StringComparison.Ordinal)
@@ -564,6 +573,13 @@ namespace ErpSystem.Api.Services.Finance.AR
         {
             await InventoryDisposalAuctionInvoiceGuard.RequireNotGeneratedAsync(_unitOfWork, TenantId, dto.Id, cancellationToken);
             await SalesOrderInvoiceGuard.RequireNotGeneratedAsync(_unitOfWork, TenantId, dto.Id, cancellationToken);
+            var manualDiscountEntry = producer is null || producer.RouteId == FinanceDimensionRouteId.FinanceArCustomerInvoice;
+            dto.DiscountReason = ArDiscountGovernancePolicy.NormalizeInvoiceDiscountReason(
+                dto.DiscountAmount,
+                dto.LineItems.Select(line => line.DiscountPercentage),
+                dto.DiscountReason,
+                manualDiscountEntry,
+                producer?.RouteId.ToString() ?? "manual AR invoice");
             var invoice = await _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i => i.TenantId == TenantId && i.Id == dto.Id)
                 .Include(i => i.LineItems)
@@ -629,6 +645,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 ? dto.InvoiceDate.AddDays(invoice.PaymentTermsDays) : (DateTime?)null);
             invoice.Reference = dto.Reference;
             invoice.Notes = dto.Notes;
+            invoice.DiscountReason = dto.DiscountReason;
             invoice.IsOpeningBalance = dto.IsOpeningBalance;
             invoice.CurrencyCode = openingExchangeRate?.TransactionCurrency ?? dto.CurrencyCode;
             invoice.ExchangeRate = openingExchangeRate?.Rate ?? dto.ExchangeRate;
@@ -813,6 +830,16 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             var approvalRequired = await workflow.HasActiveApprovalInstanceAsync("Invoice", id) ||
                 await workflow.HasActiveApprovalWorkflowAsync("Invoice");
+            var hasInvoiceDiscount = ArDiscountGovernancePolicy.HasInvoiceDiscount(
+                invoice.DiscountAmount,
+                lines.Select(line => line.DiscountPercentage));
+            if (hasInvoiceDiscount &&
+                (producer is null || producer.RouteId == FinanceDimensionRouteId.FinanceArCustomerInvoice) &&
+                !approvalRequired)
+            {
+                throw new InvalidOperationException(
+                    "Discounted manual AR invoices require an active Invoice approval workflow before submission.");
+            }
             if (approvalRequired)
             {
                 invoice.Status = InvoiceStatus.PendingApproval;
@@ -2580,6 +2607,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 SubTotal = invoice.SubTotal,
                 TaxAmount = invoice.TaxAmount,
                 DiscountAmount = invoice.DiscountAmount,
+                DiscountReason = invoice.DiscountReason,
                 TotalAmount = invoice.TotalAmount,
                 PaidAmount = invoice.PaidAmount,
                 BalanceAmount = invoice.BalanceAmount,

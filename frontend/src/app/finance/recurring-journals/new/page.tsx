@@ -19,7 +19,7 @@ import {
   type CreateRecurringJournalTemplate,
   type RecurrenceFrequency,
 } from '@/services/finance/recurring-journal-data.service';
-import type { Account } from '@/types/finance';
+import type { Account, AccountingBook } from '@/types/finance';
 import { RecurringJournalLineGrid } from '../recurring-journal-line-grid';
 import {
   newEditableRecurringJournalLine,
@@ -34,6 +34,10 @@ export default function NewRecurringJournalPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [books, setBooks] = useState<AccountingBook[]>([]);
+  const [currencyCode, setCurrencyCode] = useState('');
+  const [bookClassification, setBookClassification] = useState<CreateRecurringJournalTemplate['bookClassification'] | ''>('');
+  const [timeZoneId, setTimeZoneId] = useState('');
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -47,8 +51,23 @@ export default function NewRecurringJournalPage() {
   const [submissionReason, setSubmissionReason] = useState('Configured for independent Finance review and controlled activation.');
 
   useEffect(() => {
-    void financeDataService.getAccounts({ status: 'Active', take: 2000 })
-      .then(items => setAccounts(items.filter(item => item.allowDirectPosting && !item.isControlAccount)))
+    setTimeZoneId(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+    void Promise.all([
+      financeDataService.getAccounts({ status: 'Active', take: 2000 }),
+      financeDataService.getFinanceSettings(),
+      financeDataService.getAccountingBooks(),
+    ])
+      .then(([accountItems, settings, accountingBooks]) => {
+        setAccounts(accountItems.filter(item => item.allowDirectPosting && !item.isControlAccount));
+        setCurrencyCode(settings.baseCurrency);
+        const supportedCodes = new Set(['IFRS', 'LOCAL_STATUTORY', 'MANAGEMENT']);
+        const eligibleBooks = accountingBooks.filter(book =>
+          book.isActive && book.allowsPosting && supportedCodes.has(book.code.toUpperCase()));
+        setBooks(eligibleBooks);
+        const preferred = eligibleBooks.find(book => book.isDefault) ?? eligibleBooks[0];
+        if (preferred)
+          setBookClassification(preferred.code.toUpperCase() as CreateRecurringJournalTemplate['bookClassification']);
+      })
       .catch(error => toast({ title: 'Chart of accounts could not be loaded', description: error instanceof Error ? error.message : 'Please retry.', variant: 'destructive' }));
   }, [toast]);
 
@@ -75,10 +94,10 @@ export default function NewRecurringJournalPage() {
   }, [schedule]);
 
   const lineSummary = useMemo(() => summarizeRecurringJournalLines(lines), [lines]);
-  const canSubmit = !!name.trim() && !!effectiveFrom && submissionReason.trim().length >= 10 && lineSummary.isValid;
+  const canSubmit = !!name.trim() && !!effectiveFrom && !!bookClassification && !!currencyCode && !!timeZoneId.trim() && submissionReason.trim().length >= 10 && lineSummary.isValid;
 
   const submit = async () => {
-    if (!name.trim() || !effectiveFrom || !lineSummary.isValid) {
+    if (!name.trim() || !effectiveFrom || !bookClassification || !currencyCode || !timeZoneId.trim() || !lineSummary.isValid) {
       toast({ title: 'Complete a balanced journal', description: lineSummary.errors[0] ?? 'Name and effective date are required.', variant: 'destructive' });
       return;
     }
@@ -89,9 +108,9 @@ export default function NewRecurringJournalPage() {
 
     const request: CreateRecurringJournalTemplate = {
       name: name.trim(), description: description.trim() || undefined,
-      journalType: 'Recurring', bookClassification: 'IFRS', currencyCode: 'GHS',
+      journalType: 'Recurring', bookClassification, currencyCode,
       referencePattern: referencePattern.trim() || undefined,
-      effectiveFrom, timeZoneId: 'Africa/Accra', frequency: scheduleDefinition.frequency,
+      effectiveFrom, timeZoneId: timeZoneId.trim(), frequency: scheduleDefinition.frequency,
       interval: 1, recurrenceRuleJson: scheduleDefinition.recurrenceRuleJson,
       businessDayConvention: scheduleDefinition.convention,
       autoReverse, reversalRule: autoReverse ? 'FirstDayOfNextFiscalPeriod' : 'None',
@@ -126,7 +145,14 @@ export default function NewRecurringJournalPage() {
       <div className="md:col-span-2"><Label htmlFor="description">Purpose and accounting background</Label><Textarea id="description" value={description} onChange={event => setDescription(event.target.value)} placeholder="Explain why this entry recurs and what it recognises." /></div>
     </CardContent></Card>
 
-    <Card><CardHeader><CardTitle>Balanced IFRS journal</CardTitle></CardHeader><CardContent><RecurringJournalLineGrid accounts={accounts} currencyCode="GHS" lines={lines} onChange={setLines} /></CardContent></Card>
+    <Card><CardHeader><CardTitle>Balanced journal definition</CardTitle></CardHeader><CardContent className="space-y-5">
+      <div className="grid gap-4 md:grid-cols-3">
+        <div><Label>Accounting book</Label><Select value={bookClassification} onValueChange={value => setBookClassification(value as CreateRecurringJournalTemplate['bookClassification'])}><SelectTrigger><SelectValue placeholder="Select an active posting book" /></SelectTrigger><SelectContent>{books.map(book => <SelectItem key={book.id} value={book.code.toUpperCase()}>{book.name}</SelectItem>)}</SelectContent></Select>{books.length === 0 && <p className="mt-1 text-xs text-destructive">No supported active posting book is configured.</p>}</div>
+        <div><Label htmlFor="currency">Functional currency</Label><Input id="currency" value={currencyCode} readOnly aria-readonly="true" /></div>
+        <div><Label htmlFor="timezone">Schedule time zone</Label><Input id="timezone" value={timeZoneId} onChange={event => setTimeZoneId(event.target.value)} placeholder="Africa/Accra" /></div>
+      </div>
+      <RecurringJournalLineGrid accounts={accounts} currencyCode={currencyCode || '—'} lines={lines} onChange={setLines} />
+    </CardContent></Card>
 
     <Card><CardHeader><CardTitle>Schedule, reversal and submission</CardTitle></CardHeader><CardContent className="grid gap-5 md:grid-cols-2">
       <div><Label>Schedule</Label><Select value={schedule} onValueChange={value => setSchedule(value as ScheduleChoice)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="month-end">Last business day monthly</SelectItem><SelectItem value="day-one">First business day monthly</SelectItem><SelectItem value="semi-monthly">15th and month-end</SelectItem></SelectContent></Select><p className="mt-1 text-xs text-muted-foreground">{scheduleDefinition.label}</p></div>

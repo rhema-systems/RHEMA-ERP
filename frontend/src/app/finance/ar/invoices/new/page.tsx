@@ -11,7 +11,6 @@ import {
     Plus,
     Trash2,
     Calendar as CalendarIcon,
-    AlertCircle,
     Check,
     ChevronsUpDown,
 } from 'lucide-react';
@@ -65,10 +64,14 @@ import {
     allocateDocumentTradeDiscount,
     calculateNetTradeDiscountLineAmount,
 } from '@/lib/finance/invoice-trade-discount';
+import {
+    isEligibleManualArRevenueAccount,
+    taxGroupForNewArInvoiceLine,
+} from '@/lib/finance/ar-invoice-entry';
 
 const lineItemSchema = z.object({
     sourceLineId: z.string().uuid(),
-    lineItemType: z.enum(['Product', 'GLAccount']).default('Product'),
+    lineItemType: z.literal('GLAccount').default('GLAccount'),
     productId: z.string().optional(),
     glAccountId: z.string().optional(),
     description: z.string().min(1, 'Description is required'),
@@ -90,6 +93,7 @@ const invoiceSchema = z.object({
     currencyOverrideReason: z.string().max(500, 'Override reason cannot exceed 500 characters').optional().default(''),
     paymentTermId: z.string().optional(),
     discountAmount: z.coerce.number().min(0).optional().default(0),
+    discountReason: z.string().max(500, 'Discount reason cannot exceed 500 characters').optional().default(''),
     isOpeningBalance: z.boolean().default(false),
     notes: z.string().optional(),
     taxGroupId: z.string().optional(),
@@ -103,7 +107,27 @@ const invoiceSchema = z.object({
         context.addIssue({
             code: z.ZodIssueCode.custom,
             path: ['discountAmount'],
-            message: 'Document trade discount cannot exceed the net line amount',
+            message: 'Document discount cannot exceed the net line amount',
+        });
+    }
+    const hasDiscount = (invoice.discountAmount || 0) > 0 ||
+        invoice.lineItems.some(line => (line.discountPercentage || 0) > 0);
+    if (hasDiscount && (invoice.discountReason || '').trim().length < 10) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['discountReason'],
+            message: 'Explain the commercial reason for the discount in at least 10 characters',
+        });
+    }
+    if (!invoice.isOpeningBalance) {
+        invoice.lineItems.forEach((line, index) => {
+            if (!line.glAccountId) {
+                context.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['lineItems', index, 'glAccountId'],
+                    message: 'Revenue account is required',
+                });
+            }
         });
     }
 });
@@ -138,9 +162,9 @@ export default function NewInvoicePage() {
     const { data: glAccountsData, isLoading: glAccountsLoading } = useQuery({
         queryKey: ['gl-accounts-active'],
         queryFn: async () => {
-            const accounts = await financeDataService.getAccounts({ status: 'Active' });
+            const accounts = await financeDataService.getAccounts({ status: 'Active', accountType: 'Revenue' });
             return {
-                items: accounts.filter((account: any) => account.isActive !== false)
+                items: accounts.filter(isEligibleManualArRevenueAccount)
             };
         },
     });
@@ -169,7 +193,8 @@ export default function NewInvoicePage() {
     });
 
     const transactionTaxGroups = (taxGroupsData || []).filter((group: any) =>
-        !group.components?.some((component: any) => component.taxCategory === 'Withholding')
+        !group.components?.some((component: any) =>
+            component.taxCategory === 'Withholding' || component.taxCategory === 'VatWithholding')
     );
 
     // Filter customers based on search
@@ -216,10 +241,11 @@ export default function NewInvoicePage() {
             currencyOverrideReason: '',
             paymentTermId: 'none',
             discountAmount: 0,
+            discountReason: '',
             isOpeningBalance: defaultOpeningBalance,
             notes: '',
             lineItems: [
-                { sourceLineId: crypto.randomUUID(), lineItemType: 'Product' as const, description: 'Service / Product', quantity: 1, unitPrice: 0, discountPercentage: 0 }
+                { sourceLineId: crypto.randomUUID(), lineItemType: 'GLAccount' as const, glAccountId: '', description: '', quantity: 1, unitPrice: 0, discountPercentage: 0 }
             ],
         },
     });
@@ -274,6 +300,7 @@ export default function NewInvoicePage() {
 
     const watchTaxGroupId = form.watch('taxGroupId');
     const watchCurrencyCode = form.watch('currencyCode') || 'GHS';
+    const selectedPaymentTerm = paymentTerms.find(term => term.id === watchPaymentTermId);
     const customerCurrency = selectedCustomer?.currencyCode?.trim().toUpperCase() || '';
     const currencyOverridesCustomer = Boolean(selectedCustomer && customerCurrency && watchCurrencyCode !== customerCurrency);
     const currencyOptions = activeCurrencies.map((currency: any) => ({
@@ -287,6 +314,8 @@ export default function NewInvoicePage() {
         }
     }
     const documentDiscount = Number(form.watch('discountAmount')) || 0;
+    const hasInvoiceDiscount = documentDiscount > 0 ||
+        watchLineItems.some(line => (Number(line.discountPercentage) || 0) > 0);
 
     const applyInvoiceExchangeRate = async (currencyCode: string) => {
         const requestId = ++exchangeRateRequestId.current;
@@ -518,6 +547,7 @@ export default function NewInvoicePage() {
                 currencyOverrideReason: currencyOverridesCustomer ? data.currencyOverrideReason?.trim() : null,
                 paymentTermId: data.paymentTermId === 'none' ? null : (data.paymentTermId || null),
                 discountAmount: Number(data.discountAmount) || 0,
+                discountReason: hasInvoiceDiscount ? data.discountReason?.trim() : null,
                 isOpeningBalance,
                 lineItems: data.lineItems.map(item => ({
                     id: item.sourceLineId,
@@ -533,9 +563,7 @@ export default function NewInvoicePage() {
                 financeDimensions: {
                     defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
                     lines: data.lineItems.flatMap(item => {
-                        const accountId = !isOpeningBalance && item.lineItemType === 'GLAccount'
-                            ? item.glAccountId
-                            : undefined;
+                        const accountId = !isOpeningBalance ? item.glAccountId : undefined;
                         return accountId ? [{
                             sourceLineId: item.sourceLineId,
                             accountId,
@@ -861,24 +889,6 @@ export default function NewInvoicePage() {
                             </span>
                         </div>
 
-                        <div className="space-y-2">
-                            <Label htmlFor="discountAmount">Document Trade Discount</Label>
-                            <Input
-                                id="discountAmount"
-                                type="number"
-                                min="0"
-                                max={documentDiscountBasis}
-                                step="0.01"
-                                {...form.register('discountAmount')}
-                            />
-                            {form.formState.errors.discountAmount && (
-                                <p className="text-sm text-red-500">{form.formState.errors.discountAmount.message}</p>
-                            )}
-                            <span className="text-[11px] text-muted-foreground block mt-1">
-                                Fixed currency amount allocated across invoice lines. It reduces revenue and the taxable base.
-                            </span>
-                        </div>
-
                         {watchCurrencyCode !== (financeSettings?.baseCurrency || 'GHS') && (
                             <div className="border p-4 rounded-lg bg-muted/20 md:col-span-2 space-y-4">
                                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Advanced FX Details</div>
@@ -930,6 +940,66 @@ export default function NewInvoicePage() {
 
                 <Card>
                     <CardHeader>
+                        <CardTitle>Discounts and settlement terms</CardTitle>
+                        <CardDescription>
+                            Record invoice-time price reductions separately from any early-payment discount in the customer&apos;s payment term.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                        <div className="space-y-2">
+                            <Label htmlFor="discountAmount">Document discount amount ({watchCurrencyCode})</Label>
+                            <Input
+                                id="discountAmount"
+                                type="number"
+                                min="0"
+                                max={documentDiscountBasis}
+                                step="0.01"
+                                {...form.register('discountAmount')}
+                            />
+                            {form.formState.errors.discountAmount && (
+                                <p className="text-sm text-red-500">{form.formState.errors.discountAmount.message}</p>
+                            )}
+                            <p className="text-xs text-muted-foreground">
+                                Use this only for a discount shared across the invoice. Finance allocates it proportionately after line discounts, reducing revenue and the taxable base. Put a discount specific to one service on that line instead.
+                            </p>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="discountReason">
+                                Discount reason {hasInvoiceDiscount && <span className="text-destructive">*</span>}
+                            </Label>
+                            <Textarea
+                                id="discountReason"
+                                rows={3}
+                                placeholder="Commercial approval, contract clause, promotion, pricing correction, etc."
+                                {...form.register('discountReason')}
+                            />
+                            {form.formState.errors.discountReason && (
+                                <p className="text-sm text-red-500">{form.formState.errors.discountReason.message}</p>
+                            )}
+                            <p className="text-xs text-muted-foreground">
+                                Required whenever a line or document discount is used. A discounted manual invoice must pass the configured Invoice approval workflow before posting.
+                            </p>
+                        </div>
+                        <div className="rounded-lg border bg-muted/20 p-4 lg:col-span-2">
+                            <div className="text-sm font-semibold">Payment-term discount</div>
+                            {selectedPaymentTerm && (selectedPaymentTerm.discountPercent || 0) > 0 ? (
+                                <div className="mt-1 space-y-1 text-sm text-muted-foreground">
+                                    <p>
+                                        {selectedPaymentTerm.discountPercent}% if settled within {selectedPaymentTerm.discountDays} day(s). This is evaluated when payment is allocated; it is not deducted from this invoice now.
+                                    </p>
+                                    <p>
+                                        For invoices carrying VAT or levies, any later reduction in taxable consideration must use the approved sales credit/adjustment-note process. Direct receipt discounts are blocked.
+                                    </p>
+                                </div>
+                            ) : (
+                                <p className="mt-1 text-sm text-muted-foreground">The selected payment term does not grant an early-payment discount.</p>
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
                         <CardTitle>Finance coding dimensions</CardTitle>
                         <CardDescription>
                             Defaults are convenient; each revenue line remains authoritative.
@@ -947,10 +1017,9 @@ export default function NewInvoicePage() {
                             effectiveDate={format(watchInvoiceDate || new Date(), 'yyyy-MM-dd')}
                             lines={watchLineItems.map((item) => ({
                                 id: item.sourceLineId,
-                                accountId: !watchIsOpeningBalance && item.lineItemType === 'GLAccount'
-                                    ? item.glAccountId
-                                    : undefined,
+                                accountId: !watchIsOpeningBalance ? item.glAccountId : undefined,
                                 accountLabel: item.description || undefined,
+                                accountResolution: watchIsOpeningBalance ? 'SourceDocument' as const : 'UserSelection' as const,
                             }))}
                             defaultValues={defaultDimensionValues}
                             lineValues={lineDimensionValues}
@@ -966,48 +1035,66 @@ export default function NewInvoicePage() {
 
                 {/* Line Items Card */}
                 <Card>
-                    <CardHeader className="flex flex-row items-center justify-between">
-                        <div>
+                    <CardHeader className="flex flex-row items-start justify-between gap-4">
+                        <div className="space-y-1">
                             <CardTitle>Invoice lines</CardTitle>
-                            <CardDescription>Use Product / service for server-resolved revenue, or a controlled GL account for exceptional manual billing.</CardDescription>
+                            <CardDescription>
+                                Manual AR invoices post each line to an approved revenue account. Source-driven sales invoices are created by their owning workflow.
+                            </CardDescription>
                         </div>
-                        <Button type="button" variant="outline" size="sm" onClick={() => append({ sourceLineId: crypto.randomUUID(), lineItemType: 'Product' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: watchIsOpeningBalance ? 'none' : undefined })}>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="shrink-0"
+                            onClick={() => append({
+                                sourceLineId: crypto.randomUUID(),
+                                lineItemType: 'GLAccount' as const,
+                                glAccountId: '',
+                                description: '',
+                                quantity: 1,
+                                unitPrice: 0,
+                                discountPercentage: 0,
+                                taxGroupId: taxGroupForNewArInvoiceLine(watchTaxGroupId, watchIsOpeningBalance),
+                            })}
+                        >
                             <Plus className="mr-2 h-4 w-4" /> Add invoice line
                         </Button>
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-4">
                             {fields.map((field, index) => {
-                                const lineItemType = form.watch(`lineItems.${index}.lineItemType`);
                                 return (
-                                    <div key={field.id} className="grid grid-cols-12 gap-4 items-end border-b pb-4">
-                                        {/* Type Selector */}
-                                        <div className="col-span-2 space-y-2">
-                                            <Label className={index !== 0 ? 'sr-only' : ''}>Type</Label>
-                                            <Controller
-                                                control={form.control}
-                                                name={`lineItems.${index}.lineItemType`}
-                                                render={({ field }) => (
-                                                    <Select
-                                                        value={field.value}
-                                                        onValueChange={field.onChange}
-                                                    >
-                                                        <SelectTrigger>
-                                                            <SelectValue placeholder="Type" />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="Product">Product / service</SelectItem>
-                                                            <SelectItem value="GLAccount">Controlled GL account</SelectItem>
-                                                        </SelectContent>
-                                                    </Select>
-                                                )}
-                                            />
+                                    <div key={field.id} className="space-y-4 rounded-lg border p-4">
+                                        <div className="flex flex-wrap items-start justify-between gap-3">
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-semibold">Line {index + 1}</span>
+                                                    <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                                                        {watchIsOpeningBalance ? 'Opening balance' : 'Manual revenue'}
+                                                    </span>
+                                                </div>
+                                                <p className="mt-1 text-sm text-muted-foreground">
+                                                    {watchIsOpeningBalance
+                                                        ? 'Finance posts this line through the governed opening-balance clearing account.'
+                                                        : 'Finance credits the selected revenue account and keeps receivables on the governed AR control account.'}
+                                                </p>
+                                            </div>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => remove(index)}
+                                                disabled={fields.length === 1}
+                                                aria-label={`Remove invoice line ${index + 1}`}
+                                            >
+                                                <Trash2 className="h-4 w-4 text-red-500" />
+                                            </Button>
                                         </div>
 
-                                        {/* Conditional: GL Account or Description */}
-                                        {lineItemType === 'GLAccount' ? (
-                                            <div className="col-span-3 space-y-2">
-                                                <Label className={index !== 0 ? 'sr-only' : ''}>GL Account</Label>
+                                        {!watchIsOpeningBalance && (
+                                            <div className="max-w-xl space-y-2">
+                                                <Label>Revenue account</Label>
                                                 <Controller
                                                     control={form.control}
                                                     name={`lineItems.${index}.glAccountId`}
@@ -1047,11 +1134,9 @@ export default function NewInvoicePage() {
                                                                             {filteredGlAccounts.map((account: any) => {
                                                                                 const handleSelect = () => {
                                                                                     field.onChange(account.id);
-                                                                                    // Auto-fill description with account name
-                                                                                    form.setValue(
-                                                                                        `lineItems.${index}.description`,
-                                                                                        account.accountName
-                                                                                    );
+                                                                                    if (!form.getValues(`lineItems.${index}.description`)?.trim()) {
+                                                                                        form.setValue(`lineItems.${index}.description`, account.accountName);
+                                                                                    }
                                                                                     setGlAccountOpenIndex(null);
                                                                                     setGlAccountSearch('');
                                                                                 };
@@ -1087,64 +1172,66 @@ export default function NewInvoicePage() {
                                                         </Popover>
                                                     )}
                                                 />
-                                            </div>
-                                        ) : (
-                                            <div className="col-span-3 space-y-2">
-                                                <Label className={index !== 0 ? 'sr-only' : ''}>Description</Label>
-                                                <Input {...form.register(`lineItems.${index}.description` as const)} placeholder="Item description" />
+                                                {form.formState.errors.lineItems?.[index]?.glAccountId && (
+                                                    <p className="text-xs text-red-500">
+                                                        {form.formState.errors.lineItems[index]?.glAccountId?.message}
+                                                    </p>
+                                                )}
+                                                <p className="text-xs text-muted-foreground">
+                                                    Only active, direct-posting revenue accounts are available. Control accounts cannot be selected.
+                                                </p>
                                             </div>
                                         )}
 
-                                        <div className="col-span-1 space-y-2">
-                                            <Label className={index !== 0 ? 'sr-only' : ''}>Qty</Label>
-                                            <Input type="number" step="1" {...form.register(`lineItems.${index}.quantity` as const)} className="text-center" />
-                                        </div>
-                                        <div className="col-span-2 space-y-2">
-                                            <Label className={index !== 0 ? 'sr-only' : ''}>Price</Label>
-                                            <Input type="number" step="0.01" {...form.register(`lineItems.${index}.unitPrice` as const)} className="text-right" />
-                                        </div>
-                                        <div className="col-span-1 space-y-2">
-                                            <Label className={index !== 0 ? 'sr-only' : ''}>Trade Disc %</Label>
-                                            <Input type="number" min="0" max="100" step="0.5" {...form.register(`lineItems.${index}.discountPercentage` as const)} className="text-center" />
-                                            {form.formState.errors.lineItems?.[index]?.discountPercentage && (
-                                                <p className="text-xs text-red-500">Use 0–100</p>
-                                            )}
-                                        </div>
-                                        <div className="col-span-2 space-y-2">
-                                            <Label className={cn("text-amber-600 font-semibold", index !== 0 ? 'sr-only' : '')}>Tax Group</Label>
-                                            <Controller
-                                                control={form.control}
-                                                name={`lineItems.${index}.taxGroupId`}
-                                                render={({ field }) => (
-                                                    <Select 
-                                                        value={watchIsOpeningBalance ? 'none' : (field.value || 'inherit')}
-                                                        onValueChange={(val) => field.onChange(val === 'inherit' ? '' : val)}
-                                                        disabled={watchIsOpeningBalance}
-                                                    >
-                                                        <SelectTrigger className={cn(watchIsOpeningBalance && 'bg-muted text-muted-foreground')}>
-                                                            <SelectValue placeholder="Inherit Default" />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="inherit">
-                                                                {watchTaxGroupId && watchTaxGroupId !== 'none'
-                                                                    ? `Inherited: ${transactionTaxGroups.find((t: any) => t.id === watchTaxGroupId)?.name || ''}`
-                                                                    : 'Inherited: Zero-rated / Exempt'}
-                                                            </SelectItem>
-                                                            <SelectItem value="none">Zero-rated / Exempt</SelectItem>
-                                                            {transactionTaxGroups.map((group: any) => (
-                                                                <SelectItem key={group.id} value={group.id}>
-                                                                    {group.name}
-                                                                </SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
+                                        <div className="grid grid-cols-1 gap-4 md:grid-cols-12 lg:grid-cols-[minmax(190px,1.4fr)_72px_110px_140px_minmax(190px,1fr)] lg:items-end">
+                                            <div className="space-y-2 md:col-span-5 lg:col-auto">
+                                                <Label>Description</Label>
+                                                <Input {...form.register(`lineItems.${index}.description` as const)} placeholder="What is being billed?" />
+                                                {form.formState.errors.lineItems?.[index]?.description && (
+                                                    <p className="text-xs text-red-500">{form.formState.errors.lineItems[index]?.description?.message}</p>
                                                 )}
-                                            />
-                                        </div>
-                                        <div className="col-span-1 flex items-end justify-center">
-                                            <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} disabled={fields.length === 1} className="h-10">
-                                                <Trash2 className="h-4 w-4 text-red-500" />
-                                            </Button>
+                                            </div>
+                                            <div className="space-y-2 md:col-span-2 lg:col-auto">
+                                                <Label>Qty</Label>
+                                                <Input type="number" step="0.01" {...form.register(`lineItems.${index}.quantity` as const)} className="text-center" />
+                                            </div>
+                                            <div className="space-y-2 md:col-span-2 lg:col-auto">
+                                                <Label>Unit price</Label>
+                                                <Input type="number" step="0.01" {...form.register(`lineItems.${index}.unitPrice` as const)} className="text-right" />
+                                            </div>
+                                            <div className="space-y-2 md:col-span-3 lg:col-auto">
+                                                <Label className="whitespace-nowrap">Line discount %</Label>
+                                                <Input type="number" min="0" max="100" step="0.5" {...form.register(`lineItems.${index}.discountPercentage` as const)} className="text-center" />
+                                                {form.formState.errors.lineItems?.[index]?.discountPercentage && (
+                                                    <p className="text-xs text-red-500">Use 0–100</p>
+                                                )}
+                                            </div>
+                                            <div className="space-y-2 md:col-span-5 lg:col-auto">
+                                                <Label className="font-semibold text-amber-600">Tax group</Label>
+                                                <Controller
+                                                    control={form.control}
+                                                    name={`lineItems.${index}.taxGroupId`}
+                                                    render={({ field }) => (
+                                                        <Select
+                                                            value={watchIsOpeningBalance ? 'none' : (field.value || watchTaxGroupId || 'none')}
+                                                            onValueChange={field.onChange}
+                                                            disabled={watchIsOpeningBalance}
+                                                        >
+                                                            <SelectTrigger className={cn(watchIsOpeningBalance && 'bg-muted text-muted-foreground')}>
+                                                                <SelectValue placeholder="Zero-rated / Exempt" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="none">Zero-rated / Exempt</SelectItem>
+                                                                {transactionTaxGroups.map((group: any) => (
+                                                                    <SelectItem key={group.id} value={group.id}>
+                                                                        {group.name}
+                                                                    </SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    )}
+                                                />
+                                            </div>
                                         </div>
                                     </div>
                                 );
@@ -1166,8 +1253,11 @@ export default function NewInvoicePage() {
                                         <li className={!currencyOverridesCustomer || (form.watch('currencyOverrideReason') || '').trim().length >= 10 ? 'text-emerald-700' : 'text-amber-700'}>
                                             {!currencyOverridesCustomer || (form.watch('currencyOverrideReason') || '').trim().length >= 10 ? '✓' : '○'} Customer-currency policy or documented override
                                         </li>
-                                        <li className={watchLineItems.every(line => line.description && Number(line.quantity) > 0 && Number(line.unitPrice) >= 0 && (line.lineItemType !== 'GLAccount' || line.glAccountId)) ? 'text-emerald-700' : 'text-amber-700'}>
-                                            {watchLineItems.every(line => line.description && Number(line.quantity) > 0 && Number(line.unitPrice) >= 0 && (line.lineItemType !== 'GLAccount' || line.glAccountId)) ? '✓' : '○'} Complete, governed invoice lines
+                                        <li className={watchLineItems.every(line => line.description && Number(line.quantity) > 0 && Number(line.unitPrice) >= 0 && (watchIsOpeningBalance || line.glAccountId)) ? 'text-emerald-700' : 'text-amber-700'}>
+                                            {watchLineItems.every(line => line.description && Number(line.quantity) > 0 && Number(line.unitPrice) >= 0 && (watchIsOpeningBalance || line.glAccountId)) ? '✓' : '○'} Complete, governed invoice lines
+                                        </li>
+                                        <li className={!hasInvoiceDiscount || (form.watch('discountReason') || '').trim().length >= 10 ? 'text-emerald-700' : 'text-amber-700'}>
+                                            {!hasInvoiceDiscount || (form.watch('discountReason') || '').trim().length >= 10 ? '✓' : '○'} Discount reason and approval evidence
                                         </li>
                                     </ul>
                                 </div>
@@ -1185,24 +1275,29 @@ export default function NewInvoicePage() {
                                     </div>
                                 )}
                             </div>
-                            <div className="flex flex-col items-end space-y-2 text-right">
-                                <div className="flex justify-between w-72 text-sm text-muted-foreground">
-                                    <span>Subtotal (Net):</span>
-                                    <span className="font-medium">{formatAmountWithCurrency(subtotal)}</span>
+                            <div className="rounded-lg border p-5">
+                                <div className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                                    Invoice totals
                                 </div>
-                                <div className="flex justify-between w-72 text-sm text-muted-foreground">
-                                    <span>Est. Sales Taxes:</span>
-                                    <span className="font-medium text-amber-600">+{formatAmountWithCurrency(totalTax)}</span>
-                                </div>
-                                {documentDiscount > 0 && (
-                                    <div className="flex justify-between w-72 text-sm text-muted-foreground">
-                                        <span>Document Trade Discount:</span>
-                                        <span className="font-medium text-red-600">-{formatAmountWithCurrency(documentDiscount)}</span>
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-[1fr_auto] items-baseline gap-6 text-sm text-muted-foreground">
+                                        <span>Subtotal after line discounts</span>
+                                        <span className="font-medium text-foreground">{formatAmountWithCurrency(subtotal)}</span>
                                     </div>
-                                )}
-                                <div className="flex justify-between w-72 text-xl font-bold border-t pt-2 mt-2">
-                                    <span>Grand Total:</span>
-                                    <span className="text-primary">{formatAmountWithCurrency(totalAmount)}</span>
+                                    {documentDiscount > 0 && (
+                                        <div className="grid grid-cols-[1fr_auto] items-baseline gap-6 text-sm text-muted-foreground">
+                                            <span>Document trade discount</span>
+                                            <span className="font-medium text-red-600">-{formatAmountWithCurrency(documentDiscount)}</span>
+                                        </div>
+                                    )}
+                                    <div className="grid grid-cols-[1fr_auto] items-baseline gap-6 text-sm text-muted-foreground">
+                                        <span>Estimated levies and VAT</span>
+                                        <span className="font-medium text-amber-600">+{formatAmountWithCurrency(totalTax)}</span>
+                                    </div>
+                                    <div className="grid grid-cols-[1fr_auto] items-baseline gap-6 border-t pt-4 text-xl font-bold">
+                                        <span>Invoice total</span>
+                                        <span className="text-primary">{formatAmountWithCurrency(totalAmount)}</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>

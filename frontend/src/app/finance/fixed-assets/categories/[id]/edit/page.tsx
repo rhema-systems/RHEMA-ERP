@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Loader2, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -48,6 +49,7 @@ export default function EditFixedAssetCategoryPage({ params }: { params: Promise
           name: category.name,
           code: category.code,
           description: category.description,
+          requiresMaintenance: category.requiresMaintenance,
           defaultMethod: category.defaultMethod,
           defaultUsefulLifeMonths: category.defaultUsefulLifeMonths,
           defaultResidualValuePercent: category.defaultResidualValuePercent,
@@ -169,6 +171,19 @@ export default function EditFixedAssetCategoryPage({ params }: { params: Promise
               value={formData.description || ''}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
             />
+          </div>
+          <div className="flex items-start gap-3 rounded-md border p-4 md:col-span-2">
+            <Checkbox
+              id="requiresMaintenance"
+              checked={formData.requiresMaintenance}
+              onCheckedChange={(checked) => setFormData({ ...formData, requiresMaintenance: checked === true })}
+            />
+            <div className="space-y-1">
+              <Label htmlFor="requiresMaintenance">Requires maintenance</Label>
+              <p className="text-sm text-muted-foreground">
+                Makes assets in this category available to Maintenance through the read-only integration feed.
+              </p>
+            </div>
           </div>
           <div className="space-y-2">
             <Label htmlFor="defaultMethod">Default Depreciation Method</Label>

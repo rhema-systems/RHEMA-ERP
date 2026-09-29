@@ -78,6 +78,18 @@ public sealed class RecurringJournalController : ControllerBase
         Guid id, [FromBody] RecurringJournalDecisionDto request, CancellationToken cancellationToken) =>
         Ok(await _service.ResumeAsync(id, request.Comment, cancellationToken));
 
+    [HttpPost("{id:guid}/cancel")]
+    [Authorize(Policy = FinancePermissions.EditJournalEntries)]
+    public async Task<ActionResult<RecurringJournalTemplateDto>> Cancel(
+        Guid id, [FromBody] RecurringJournalDecisionDto request, CancellationToken cancellationToken) =>
+        Ok(await _service.CancelAsync(id, request.Comment, cancellationToken));
+
+    [HttpPost("{id:guid}/new-version")]
+    [Authorize(Policy = FinancePermissions.CreateJournalEntries)]
+    public async Task<ActionResult<RecurringJournalTemplateDto>> CreateNewVersion(
+        Guid id, [FromBody] RecurringJournalDecisionDto request, CancellationToken cancellationToken) =>
+        Ok(await _service.CreateNewVersionAsync(id, request.Comment, cancellationToken));
+
     [HttpPost("process-due")]
     [Authorize(Policy = FinancePermissions.CreateJournalEntries)]
     public async Task<ActionResult<RecurringJournalGenerationResultDto>> ProcessDue(
@@ -120,6 +132,12 @@ public sealed class RecurringJournalController : ControllerBase
     public async Task<ActionResult<RecurringJournalOccurrenceDto>> RejectOccurrence(
         Guid occurrenceId, [FromBody] RecurringJournalDecisionDto request, CancellationToken cancellationToken) =>
         Ok(await _service.RejectOccurrenceAsync(occurrenceId, request.Comment, cancellationToken));
+
+    [HttpPost("occurrences/{occurrenceId:guid}/request-waiver")]
+    [Authorize(Policy = FinancePermissions.EditJournalEntries)]
+    public async Task<ActionResult<RecurringJournalOccurrenceDto>> RequestOccurrenceWaiver(
+        Guid occurrenceId, [FromBody] RecurringJournalDecisionDto request, CancellationToken cancellationToken) =>
+        Ok(await _service.RequestOccurrenceWaiverAsync(occurrenceId, request.Comment, cancellationToken));
 
     [HttpPost("occurrences/{occurrenceId:guid}/post")]
     [Authorize(Policy = FinancePermissions.PostJournalEntries)]

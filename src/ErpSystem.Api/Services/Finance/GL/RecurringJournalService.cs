@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
@@ -25,6 +26,7 @@ public sealed class RecurringJournalService : IRecurringJournalService
     private readonly IDocumentNumberingService _numbering;
     private readonly IFinancePostingEngine _postingEngine;
     private readonly IFinanceAuditService _audit;
+    private readonly IWorkflowService _workflow;
     private readonly RecurringJournalGenerationProcessor _generator;
     private readonly RecurringJournalReversalProcessor _reversals;
 
@@ -34,6 +36,7 @@ public sealed class RecurringJournalService : IRecurringJournalService
         IDocumentNumberingService numbering,
         IFinancePostingEngine postingEngine,
         IFinanceAuditService audit,
+        IWorkflowService workflow,
         RecurringJournalGenerationProcessor generator,
         RecurringJournalReversalProcessor reversals)
     {
@@ -42,6 +45,7 @@ public sealed class RecurringJournalService : IRecurringJournalService
         _numbering = numbering;
         _postingEngine = postingEngine;
         _audit = audit;
+        _workflow = workflow;
         _generator = generator;
         _reversals = reversals;
     }
@@ -180,8 +184,18 @@ public sealed class RecurringJournalService : IRecurringJournalService
         template.LastFailure = null;
         Touch(template);
         await _db.SaveChangesAsync(cancellationToken);
+        var workflowResult = await _workflow.StartApprovalWorkflowAsync(nameof(RecurringJournalTemplate), template.Id);
+        if (!workflowResult.Success)
+        {
+            template.Status = RecurringJournalStatus.Draft;
+            template.SubmittedAt = null;
+            template.SubmittedByUserId = null;
+            Touch(template);
+            await _db.SaveChangesAsync(cancellationToken);
+            throw new InvalidOperationException(workflowResult.Message ?? "The recurring-journal approval workflow could not be started.");
+        }
         await AuditAsync(FinanceAuditEvents.RecurringJournalTemplateSubmitted, template.Id, null,
-            new { template.Status, template.SubmittedAt, template.SubmittedByUserId }, comment, cancellationToken);
+            new { template.Status, template.SubmittedAt, template.SubmittedByUserId, workflowResult.WorkflowInstanceId }, comment, cancellationToken);
         return await RequireMappedAsync(template.Id, cancellationToken);
     }
 
@@ -194,29 +208,19 @@ public sealed class RecurringJournalService : IRecurringJournalService
         var reviewerId = CurrentUserIdRequired();
         if (reviewerId == template.CreatedById || reviewerId == template.SubmittedByUserId)
             throw new InvalidOperationException("Maker-checker control requires a different user to approve the recurring-journal template.");
-        await ValidatePersistedDefinitionAsync(template, cancellationToken);
-
-        template.Status = RecurringJournalStatus.Active;
-        template.ReviewedAt = DateTime.UtcNow;
-        template.ReviewedByUserId = reviewerId;
-        template.ReviewComment = comment.Trim();
-        template.ActivatedAt = template.ReviewedAt;
-        template.ActivatedByUserId = reviewerId;
-        template.NextDueDate = RecurringJournalRecurrenceCalculator.NextScheduledDate(
-            template,
-            template.EffectiveFrom.AddDays(-1));
-        if (!template.NextDueDate.HasValue)
-            throw new InvalidOperationException("The approved recurrence rule does not produce an occurrence within its configured limits.");
-        Touch(template);
-        await _db.SaveChangesAsync(cancellationToken);
-        await AuditAsync(FinanceAuditEvents.RecurringJournalTemplateApproved, template.Id, null,
-            new { template.Status, template.ActivatedAt, template.ActivatedByUserId, template.NextDueDate }, comment,
-            cancellationToken);
+        if (!await _workflow.CanUserApproveAsync(nameof(RecurringJournalTemplate), template.Id, reviewerId))
+            throw new UnauthorizedAccessException("This recurring-journal approval is not assigned to the current user or their roles.");
+        var workflowResult = await _workflow.ProcessApprovalStepAsync(
+            nameof(RecurringJournalTemplate), template.Id, reviewerId, "Approve", comment.Trim());
+        if (!workflowResult.Success)
+            throw new InvalidOperationException(workflowResult.Message ?? "The recurring-journal approval step failed.");
+        if (workflowResult.Status == WorkflowInstanceStatus.Completed)
+            await ApplyApprovedTemplateOutcomeAsync(template, reviewerId, comment, cancellationToken);
         return await RequireMappedAsync(template.Id, cancellationToken);
     }
 
     public Task<RecurringJournalTemplateDto> RejectAsync(Guid id, string comment, CancellationToken cancellationToken = default) =>
-        DecideTemplateAsync(id, comment, RecurringJournalStatus.Rejected, FinanceAuditEvents.RecurringJournalTemplateRejected, cancellationToken);
+        DecideTemplateAsync(id, comment, cancellationToken);
 
     public Task<RecurringJournalTemplateDto> PauseAsync(Guid id, string comment, CancellationToken cancellationToken = default) =>
         ChangeOperationalStatusAsync(id, comment, RecurringJournalStatus.Active, RecurringJournalStatus.Paused,
@@ -225,6 +229,73 @@ public sealed class RecurringJournalService : IRecurringJournalService
     public Task<RecurringJournalTemplateDto> ResumeAsync(Guid id, string comment, CancellationToken cancellationToken = default) =>
         ChangeOperationalStatusAsync(id, comment, RecurringJournalStatus.Paused, RecurringJournalStatus.Active,
             FinanceAuditEvents.RecurringJournalTemplateResumed, cancellationToken);
+
+    public async Task<RecurringJournalTemplateDto> CancelAsync(
+        Guid id, string comment, CancellationToken cancellationToken = default)
+    {
+        RequireComment(comment, "Cancellation reason");
+        var template = await LoadAsync(id, includeOccurrences: false, cancellationToken);
+        if (template.Status is not (RecurringJournalStatus.Draft or RecurringJournalStatus.Rejected or
+            RecurringJournalStatus.Active or RecurringJournalStatus.Paused))
+            throw new InvalidOperationException("Only Draft, Rejected, Active, or Paused templates can be cancelled.");
+        var previous = template.Status;
+        template.Status = RecurringJournalStatus.Cancelled;
+        template.NextDueDate = null;
+        template.LastFailure = comment.Trim();
+        Touch(template);
+        await _db.SaveChangesAsync(cancellationToken);
+        await AuditAsync(FinanceAuditEvents.RecurringJournalTemplateCancelled, template.Id,
+            new { Status = previous }, new { template.Status }, comment, cancellationToken);
+        return await RequireMappedAsync(template.Id, cancellationToken);
+    }
+
+    public async Task<RecurringJournalTemplateDto> CreateNewVersionAsync(
+        Guid id, string comment, CancellationToken cancellationToken = default)
+    {
+        RequireComment(comment, "Version reason");
+        var source = await LoadAsync(id, includeOccurrences: false, cancellationToken);
+        if (source.Status is not (RecurringJournalStatus.Active or RecurringJournalStatus.Paused or RecurringJournalStatus.Completed))
+            throw new InvalidOperationException("A new version can be created only from an Active, Paused, or Completed template.");
+        var tenantId = TenantId;
+        var now = DateTime.UtcNow;
+        var userId = CurrentUserIdRequired();
+        var nextVersion = await _db.RecurringJournalTemplates.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && item.DefinitionKey == source.DefinitionKey && !item.IsDeleted)
+            .MaxAsync(item => (int?)item.Version, cancellationToken) + 1 ?? source.Version + 1;
+        var version = new RecurringJournalTemplate
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            TemplateNumber = await _numbering.GenerateAsync(DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.RecurringJournal, tenantId, DateTime.UtcNow,
+                nameof(RecurringJournalTemplate), cancellationToken: cancellationToken),
+            DefinitionKey = source.DefinitionKey, Version = nextVersion,
+            SupersedesTemplateId = source.Id, Status = RecurringJournalStatus.Draft,
+            CreatedAt = now, CreatedBy = _currentUser.UserName ?? "Finance user", CreatedById = userId
+        };
+        ApplyDefinition(version, new CreateRecurringJournalTemplateDto
+        {
+            Name = source.Name, Description = source.Description, JournalType = source.JournalType,
+            BookClassification = source.BookClassification, CurrencyCode = source.CurrencyCode,
+            ReferencePattern = source.ReferencePattern, Notes = source.Notes, OwnerUserId = source.OwnerUserId,
+            EffectiveFrom = source.EffectiveFrom, EndDate = source.EndDate, MaximumOccurrences = source.MaximumOccurrences,
+            TimeZoneId = source.TimeZoneId, Frequency = source.Frequency, Interval = source.Interval,
+            RecurrenceRuleJson = source.RecurrenceRuleJson, BusinessDayConvention = source.BusinessDayConvention,
+            AutoReverse = source.AutoReverse, ReversalRule = source.ReversalRule,
+            ReversalDayOffset = source.ReversalDayOffset
+        });
+        RecurringJournalLineDefinitionEditor.Apply(version, source.Lines.Where(line => !line.IsDeleted)
+            .OrderBy(line => line.LineNumber).Select(line => new RecurringJournalTemplateLineInputDto
+            {
+                AccountId = line.AccountId, IsDebit = line.IsDebit, FixedAmount = line.FixedAmount,
+                Description = line.Description, DimensionValuesJson = line.DimensionValuesJson
+            }).ToList(), now, userId, version.CreatedBy, allowExistingLineIds: false);
+        _db.RecurringJournalTemplates.Add(version);
+        await _db.SaveChangesAsync(cancellationToken);
+        await AuditAsync(FinanceAuditEvents.RecurringJournalTemplateVersionCreated, version.Id,
+            null, new { version.TemplateNumber, version.Version, version.SupersedesTemplateId, version.DefinitionKey },
+            comment, cancellationToken);
+        return await RequireMappedAsync(version.Id, cancellationToken);
+    }
 
     public Task<RecurringJournalGenerationResultDto> GenerateDueAsync(DateOnly asOfDate, CancellationToken cancellationToken = default) =>
         _generator.ProcessTenantAsync(TenantId, asOfDate, _currentUser.UserName ?? "Finance user", cancellationToken);
@@ -245,34 +316,14 @@ public sealed class RecurringJournalService : IRecurringJournalService
         var reviewerId = CurrentUserIdRequired();
         if (reviewerId == occurrence.Template.CreatedById || reviewerId == occurrence.Template.SubmittedByUserId)
             throw new InvalidOperationException("The template maker cannot approve a generated accounting occurrence.");
-        occurrence.Status = RecurringJournalOccurrenceStatus.Approved;
-        occurrence.ReviewedAt = DateTime.UtcNow;
-        occurrence.ReviewedByUserId = reviewerId;
-        occurrence.ReviewComment = comment.Trim();
-        if (occurrence.ReversalDueDate.HasValue)
-        {
-            // The approval screen explicitly tells the checker that this decision
-            // authorises both this occurrence and its exact mechanical reversal.
-            occurrence.ReversalStatus = RecurringJournalReversalStatus.Scheduled;
-            occurrence.ReversalAuthorizedAt = occurrence.ReviewedAt;
-            occurrence.ReversalAuthorizedByUserId = reviewerId;
-            occurrence.ReversalError = null;
-        }
-        occurrence.UpdatedAt = DateTime.UtcNow;
-        occurrence.UpdatedBy = _currentUser.UserName;
-        occurrence.LastModifiedById = reviewerId;
-        await _db.SaveChangesAsync(cancellationToken);
-        await AuditAsync(FinanceAuditEvents.RecurringJournalOccurrenceApproved, occurrence.Id, null,
-            new
-            {
-                occurrence.Status,
-                occurrence.ReviewedAt,
-                occurrence.ReviewedByUserId,
-                occurrence.ReversalDueDate,
-                occurrence.ReversalStatus,
-                occurrence.ReversalAuthorizedAt,
-                occurrence.ReversalAuthorizedByUserId
-            }, comment, cancellationToken);
+        if (!await _workflow.CanUserApproveAsync(nameof(RecurringJournalOccurrence), occurrence.Id, reviewerId))
+            throw new UnauthorizedAccessException("This occurrence approval is not assigned to the current user or their roles.");
+        var workflowResult = await _workflow.ProcessApprovalStepAsync(
+            nameof(RecurringJournalOccurrence), occurrence.Id, reviewerId, "Approve", comment.Trim());
+        if (!workflowResult.Success)
+            throw new InvalidOperationException(workflowResult.Message ?? "The occurrence approval step failed.");
+        if (workflowResult.Status == WorkflowInstanceStatus.Completed)
+            await ApplyApprovedOccurrenceOutcomeAsync(occurrence, reviewerId, comment, cancellationToken);
         return MapOccurrence(occurrence);
     }
 
@@ -288,17 +339,59 @@ public sealed class RecurringJournalService : IRecurringJournalService
         var reviewerId = CurrentUserIdRequired();
         if (reviewerId == occurrence.Template.CreatedById || reviewerId == occurrence.Template.SubmittedByUserId)
             throw new InvalidOperationException("The template maker cannot reject a generated accounting occurrence.");
-        occurrence.Status = RecurringJournalOccurrenceStatus.Failed;
-        occurrence.ReviewedAt = DateTime.UtcNow;
-        occurrence.ReviewedByUserId = reviewerId;
-        occurrence.ReviewComment = comment.Trim();
-        occurrence.ErrorMessage = comment.Trim();
+        if (!await _workflow.CanUserApproveAsync(nameof(RecurringJournalOccurrence), occurrence.Id, reviewerId))
+            throw new UnauthorizedAccessException("This occurrence decision is not assigned to the current user or their roles.");
+        var workflowResult = await _workflow.ProcessApprovalStepAsync(
+            nameof(RecurringJournalOccurrence), occurrence.Id, reviewerId, "Reject", comment.Trim());
+        if (!workflowResult.Success)
+            throw new InvalidOperationException(workflowResult.Message ?? "The occurrence rejection step failed.");
+        if (workflowResult.Status is WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed)
+            await ApplyRejectedOccurrenceOutcomeAsync(occurrence, reviewerId, comment, cancellationToken);
+        return MapOccurrence(occurrence);
+    }
+
+    public async Task<RecurringJournalOccurrenceDto> RequestOccurrenceWaiverAsync(
+        Guid occurrenceId,
+        string comment,
+        CancellationToken cancellationToken = default)
+    {
+        RequireComment(comment, "Waiver reason");
+        var occurrence = await LoadOccurrenceAsync(occurrenceId, cancellationToken);
+        if (occurrence.JournalEntryId.HasValue || occurrence.Status == RecurringJournalOccurrenceStatus.Posted)
+            throw new InvalidOperationException("A posted occurrence cannot be waived; use the controlled reversal process.");
+        if (occurrence.Status is not (RecurringJournalOccurrenceStatus.PendingApproval or
+            RecurringJournalOccurrenceStatus.Approved or RecurringJournalOccurrenceStatus.Failed or
+            RecurringJournalOccurrenceStatus.SubmissionFailed))
+            throw new InvalidOperationException("This occurrence is not eligible for a waiver request.");
+        var previous = occurrence.Status;
+        var workflowResult = await _workflow.StartApprovalWorkflowAsync(
+            "RecurringJournalOccurrenceWaiver", occurrence.Id);
+        if (!workflowResult.Success || !workflowResult.WorkflowInstanceId.HasValue)
+            throw new InvalidOperationException(workflowResult.Message ?? "The occurrence waiver workflow could not be started.");
+
+        if (previous == RecurringJournalOccurrenceStatus.PendingApproval)
+        {
+            var cancellation = await _workflow.CancelWorkflowAsync(nameof(RecurringJournalOccurrence), occurrence.Id,
+                "Superseded by a controlled waiver request.");
+            if (!cancellation.Success)
+            {
+                await _workflow.CancelWorkflowAsync("RecurringJournalOccurrenceWaiver", occurrence.Id,
+                    "The original occurrence approval could not be cancelled.");
+                throw new InvalidOperationException(cancellation.Message ??
+                    "The original occurrence approval could not be replaced by a waiver workflow.");
+            }
+        }
+
+        occurrence.Status = RecurringJournalOccurrenceStatus.WaiverPending;
+        occurrence.WaiverReason = comment.Trim();
+        occurrence.WorkflowInstanceId = workflowResult.WorkflowInstanceId;
         occurrence.UpdatedAt = DateTime.UtcNow;
         occurrence.UpdatedBy = _currentUser.UserName;
-        occurrence.LastModifiedById = reviewerId;
+        occurrence.LastModifiedById = CurrentUserIdRequired();
         await _db.SaveChangesAsync(cancellationToken);
-        await AuditAsync(FinanceAuditEvents.RecurringJournalOccurrenceRejected, occurrence.Id, null,
-            new { occurrence.Status, occurrence.ReviewedAt, occurrence.ReviewedByUserId }, comment, cancellationToken);
+        await AuditAsync(FinanceAuditEvents.RecurringJournalOccurrenceWaiverRequested, occurrence.Id,
+            new { Status = previous }, new { occurrence.Status, occurrence.WaiverReason, occurrence.WorkflowInstanceId },
+            comment, cancellationToken);
         return MapOccurrence(occurrence);
     }
 
@@ -309,6 +402,8 @@ public sealed class RecurringJournalService : IRecurringJournalService
         var occurrence = await LoadOccurrenceAsync(occurrenceId, cancellationToken);
         if (occurrence.Status is not (RecurringJournalOccurrenceStatus.Approved or RecurringJournalOccurrenceStatus.SubmissionFailed))
             throw new InvalidOperationException("Only an approved recurring-journal occurrence can be posted.");
+        if (!occurrence.ReviewedAt.HasValue || !occurrence.ReviewedByUserId.HasValue)
+            throw new InvalidOperationException("The occurrence has not completed its independent approval workflow.");
         var posterId = CurrentUserIdRequired();
         if (posterId == occurrence.ReviewedByUserId)
             throw new InvalidOperationException("Segregation of duties requires a different user to post the approved occurrence.");
@@ -399,8 +494,7 @@ public sealed class RecurringJournalService : IRecurringJournalService
     }
 
     private async Task<RecurringJournalTemplateDto> DecideTemplateAsync(
-        Guid id, string comment, RecurringJournalStatus targetStatus, string auditEvent,
-        CancellationToken cancellationToken)
+        Guid id, string comment, CancellationToken cancellationToken)
     {
         RequireComment(comment, "Decision reason");
         var template = await LoadAsync(id, includeOccurrences: false, cancellationToken);
@@ -409,16 +503,117 @@ public sealed class RecurringJournalService : IRecurringJournalService
         var reviewerId = CurrentUserIdRequired();
         if (reviewerId == template.CreatedById || reviewerId == template.SubmittedByUserId)
             throw new InvalidOperationException("Maker-checker control requires a different user to decide the template.");
-        template.Status = targetStatus;
+        if (!await _workflow.CanUserApproveAsync(nameof(RecurringJournalTemplate), template.Id, reviewerId))
+            throw new UnauthorizedAccessException("This recurring-journal decision is not assigned to the current user or their roles.");
+        var workflowResult = await _workflow.ProcessApprovalStepAsync(
+            nameof(RecurringJournalTemplate), template.Id, reviewerId, "Reject", comment.Trim());
+        if (!workflowResult.Success)
+            throw new InvalidOperationException(workflowResult.Message ?? "The recurring-journal rejection step failed.");
+        if (workflowResult.Status is WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed)
+            await ApplyRejectedTemplateOutcomeAsync(template, reviewerId, comment, cancellationToken);
+        return await RequireMappedAsync(template.Id, cancellationToken);
+    }
+
+    private async Task ApplyApprovedTemplateOutcomeAsync(
+        RecurringJournalTemplate template,
+        Guid reviewerId,
+        string comment,
+        CancellationToken cancellationToken)
+    {
+        await ValidatePersistedDefinitionAsync(template, cancellationToken);
+        template.Status = RecurringJournalStatus.Active;
+        template.ReviewedAt = DateTime.UtcNow;
+        template.ReviewedByUserId = reviewerId;
+        template.ReviewComment = comment.Trim();
+        template.ActivatedAt = template.ReviewedAt;
+        template.ActivatedByUserId = reviewerId;
+        template.NextDueDate = RecurringJournalRecurrenceCalculator.NextScheduledDate(
+            template, template.EffectiveFrom.AddDays(-1));
+        if (!template.NextDueDate.HasValue)
+            throw new InvalidOperationException("The approved recurrence rule does not produce an occurrence within its configured limits.");
+        Touch(template);
+        if (template.SupersedesTemplateId.HasValue)
+        {
+            var superseded = await _db.RecurringJournalTemplates.FirstOrDefaultAsync(item =>
+                item.Id == template.SupersedesTemplateId.Value && item.TenantId == template.TenantId && !item.IsDeleted,
+                cancellationToken);
+            if (superseded != null && superseded.Status is RecurringJournalStatus.Active or RecurringJournalStatus.Paused)
+            {
+                superseded.Status = RecurringJournalStatus.Completed;
+                superseded.NextDueDate = null;
+                superseded.UpdatedAt = DateTime.UtcNow;
+                superseded.UpdatedBy = _currentUser.UserName;
+                superseded.LastModifiedById = reviewerId;
+            }
+        }
+        await _db.SaveChangesAsync(cancellationToken);
+        await AuditAsync(FinanceAuditEvents.RecurringJournalTemplateApproved, template.Id, null,
+            new { template.Status, template.ActivatedAt, template.ActivatedByUserId, template.NextDueDate }, comment,
+            cancellationToken);
+    }
+
+    private async Task ApplyRejectedTemplateOutcomeAsync(
+        RecurringJournalTemplate template,
+        Guid reviewerId,
+        string comment,
+        CancellationToken cancellationToken)
+    {
+        template.Status = RecurringJournalStatus.Rejected;
         template.ReviewedAt = DateTime.UtcNow;
         template.ReviewedByUserId = reviewerId;
         template.ReviewComment = comment.Trim();
         template.LastFailure = comment.Trim();
         Touch(template);
         await _db.SaveChangesAsync(cancellationToken);
-        await AuditAsync(auditEvent, template.Id, null,
+        await AuditAsync(FinanceAuditEvents.RecurringJournalTemplateRejected, template.Id, null,
             new { template.Status, template.ReviewedAt, template.ReviewedByUserId }, comment, cancellationToken);
-        return await RequireMappedAsync(template.Id, cancellationToken);
+    }
+
+    private async Task ApplyApprovedOccurrenceOutcomeAsync(
+        RecurringJournalOccurrence occurrence,
+        Guid reviewerId,
+        string comment,
+        CancellationToken cancellationToken)
+    {
+        occurrence.Status = RecurringJournalOccurrenceStatus.Approved;
+        occurrence.ReviewedAt = DateTime.UtcNow;
+        occurrence.ReviewedByUserId = reviewerId;
+        occurrence.ReviewComment = comment.Trim();
+        occurrence.ErrorMessage = null;
+        if (occurrence.ReversalDueDate.HasValue)
+        {
+            occurrence.ReversalStatus = RecurringJournalReversalStatus.Scheduled;
+            occurrence.ReversalAuthorizedAt = occurrence.ReviewedAt;
+            occurrence.ReversalAuthorizedByUserId = reviewerId;
+            occurrence.ReversalError = null;
+        }
+        occurrence.UpdatedAt = DateTime.UtcNow;
+        occurrence.UpdatedBy = _currentUser.UserName;
+        occurrence.LastModifiedById = reviewerId;
+        await _db.SaveChangesAsync(cancellationToken);
+        await AuditAsync(FinanceAuditEvents.RecurringJournalOccurrenceApproved, occurrence.Id, null,
+            new { occurrence.Status, occurrence.ReviewedAt, occurrence.ReviewedByUserId,
+                occurrence.ReversalDueDate, occurrence.ReversalStatus, occurrence.ReversalAuthorizedAt,
+                occurrence.ReversalAuthorizedByUserId }, comment, cancellationToken);
+    }
+
+    private async Task ApplyRejectedOccurrenceOutcomeAsync(
+        RecurringJournalOccurrence occurrence,
+        Guid reviewerId,
+        string comment,
+        CancellationToken cancellationToken)
+    {
+        occurrence.Status = RecurringJournalOccurrenceStatus.Failed;
+        occurrence.ReviewedAt = DateTime.UtcNow;
+        occurrence.ReviewedByUserId = reviewerId;
+        occurrence.ReviewComment = comment.Trim();
+        occurrence.ErrorMessage = comment.Trim();
+        occurrence.UpdatedAt = DateTime.UtcNow;
+        occurrence.UpdatedBy = _currentUser.UserName;
+        occurrence.LastModifiedById = reviewerId;
+        await _db.SaveChangesAsync(cancellationToken);
+        await AuditAsync(FinanceAuditEvents.RecurringJournalOccurrenceRejected, occurrence.Id, null,
+            new { occurrence.Status, occurrence.ReviewedAt, occurrence.ReviewedByUserId }, comment, cancellationToken);
     }
 
     private async Task<RecurringJournalTemplateDto> ChangeOperationalStatusAsync(
@@ -451,6 +646,28 @@ public sealed class RecurringJournalService : IRecurringJournalService
             throw new InvalidOperationException("Recurrence interval must be between 1 and 366.");
         if (request.MaximumOccurrences is <= 0)
             throw new InvalidOperationException("Maximum occurrences must be positive when supplied.");
+        if (request.MaximumOccurrences is > 100000)
+            throw new InvalidOperationException("Maximum occurrences cannot exceed 100,000.");
+        if (string.IsNullOrWhiteSpace(request.TimeZoneId))
+            throw new InvalidOperationException("A schedule time zone is required.");
+        try { _ = TimeZoneInfo.FindSystemTimeZoneById(request.TimeZoneId.Trim()); }
+        catch (TimeZoneNotFoundException) { throw new InvalidOperationException("The schedule time zone is not recognized by the server."); }
+        catch (InvalidTimeZoneException) { throw new InvalidOperationException("The schedule time zone is invalid."); }
+        if (!string.IsNullOrWhiteSpace(request.ReferencePattern))
+        {
+            if (request.ReferencePattern.Trim().Length > 200)
+                throw new InvalidOperationException("Reference pattern cannot exceed 200 characters.");
+            var allowedTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { "TemplateNumber", "Period", "ScheduledDate", "Sequence" };
+            var tokens = Regex.Matches(request.ReferencePattern, "\\{([^{}]+)\\}")
+                .Select(match => match.Groups[1].Value);
+            var unknown = tokens.FirstOrDefault(token => !allowedTokens.Contains(token));
+            if (unknown != null)
+                throw new InvalidOperationException($"Reference pattern token '{{{unknown}}}' is not supported.");
+            var withoutTokens = Regex.Replace(request.ReferencePattern, "\\{[^{}]+\\}", string.Empty);
+            if (withoutTokens.Contains('{') || withoutTokens.Contains('}'))
+                throw new InvalidOperationException("Reference pattern contains an unmatched brace.");
+        }
         if (request.Lines.Count < 2)
             throw new InvalidOperationException("A recurring journal requires at least two balanced lines.");
         if (request.Lines.Where(line => line.Id.HasValue).Select(line => line.Id!.Value).Distinct().Count() !=
@@ -556,7 +773,7 @@ public sealed class RecurringJournalService : IRecurringJournalService
         var accountIds = template.Lines.Select(line => line.AccountId).Distinct().ToList();
         var accounts = await _db.Accounts.AsNoTracking().Where(account => account.TenantId == TenantId && accountIds.Contains(account.Id))
             .ToDictionaryAsync(account => account.Id, cancellationToken);
-        return new RecurringJournalTemplateDto
+        var result = new RecurringJournalTemplateDto
         {
             Id = template.Id, TemplateNumber = template.TemplateNumber, Name = template.Name, Description = template.Description,
             JournalType = template.JournalType, BookClassification = template.BookClassification, CurrencyCode = template.CurrencyCode,
@@ -587,6 +804,42 @@ public sealed class RecurringJournalService : IRecurringJournalService
                 ? template.Occurrences.Where(item => !item.IsDeleted).OrderByDescending(item => item.ScheduledDate).Select(MapOccurrence).ToList()
                 : []
         };
+        var userId = CurrentUserId();
+        if (userId.HasValue && template.Status == RecurringJournalStatus.PendingApproval)
+        {
+            var makerBlocked = userId == template.CreatedById || userId == template.SubmittedByUserId;
+            result.CanApprove = !makerBlocked &&
+                await _workflow.CanUserApproveAsync(nameof(RecurringJournalTemplate), template.Id, userId.Value);
+            result.CanReject = result.CanApprove;
+            if (makerBlocked)
+                result.ActionDisabledReason = "Maker-checker control prevents the template creator or submitter from deciding this request.";
+            else if (!result.CanApprove)
+                result.ActionDisabledReason = "This approval is assigned to another workflow user or role.";
+        }
+        if (includeOccurrences && userId.HasValue)
+        {
+            foreach (var occurrence in result.Occurrences)
+            {
+                if (occurrence.Status == RecurringJournalOccurrenceStatus.PendingApproval)
+                {
+                    var makerBlocked = userId == template.CreatedById || userId == template.SubmittedByUserId;
+                    occurrence.CanApprove = !makerBlocked &&
+                        await _workflow.CanUserApproveAsync(nameof(RecurringJournalOccurrence), occurrence.Id, userId.Value);
+                    occurrence.CanReject = occurrence.CanApprove;
+                    occurrence.ActionDisabledReason = makerBlocked
+                        ? "The standing-instruction maker cannot decide its generated accounting occurrence."
+                        : occurrence.CanApprove ? null : "This approval is assigned to another workflow user or role.";
+                }
+                occurrence.CanPost = (occurrence.Status is RecurringJournalOccurrenceStatus.Approved or RecurringJournalOccurrenceStatus.SubmissionFailed)
+                    && occurrence.ReviewedAt.HasValue && occurrence.ReviewedByUserId.HasValue
+                    && occurrence.ReviewedByUserId != userId;
+                occurrence.CanRequestWaiver = !occurrence.JournalEntryId.HasValue &&
+                    occurrence.Status is RecurringJournalOccurrenceStatus.PendingApproval or
+                        RecurringJournalOccurrenceStatus.Approved or RecurringJournalOccurrenceStatus.Failed or
+                        RecurringJournalOccurrenceStatus.SubmissionFailed;
+            }
+        }
+        return result;
     }
 
     private async Task<RecurringJournalTemplateDto> RequireMappedAsync(Guid id, CancellationToken cancellationToken) =>
@@ -605,7 +858,9 @@ public sealed class RecurringJournalService : IRecurringJournalService
         ReversalPostingEventId = item.ReversalPostingEventId, ReversalProcessedBy = item.ReversalProcessedBy,
         ReviewedAt = item.ReviewedAt, ReviewedByUserId = item.ReviewedByUserId, ReviewComment = item.ReviewComment,
         PostedAt = item.PostedAt, PostedByUserId = item.PostedByUserId, ReversedAt = item.ReversedAt,
-        ErrorMessage = item.ErrorMessage, AdjustmentExplanation = item.AdjustmentExplanation
+        ErrorMessage = item.ErrorMessage, AdjustmentExplanation = item.AdjustmentExplanation,
+        WaivedAt = item.WaivedAt, WaivedByUserId = item.WaivedByUserId, WaiverReason = item.WaiverReason,
+        WorkflowInstanceId = item.WorkflowInstanceId
     };
 
     private static void ApplyDefinition(RecurringJournalTemplate template, CreateRecurringJournalTemplateDto request)
@@ -752,22 +1007,29 @@ public sealed class RecurringJournalGenerationProcessor
     private readonly ApplicationDbContext _db;
     private readonly IBusinessCalendarProvider _calendar;
     private readonly IFinanceAuditService _audit;
+    private readonly IWorkflowService _workflow;
     private readonly ILogger<RecurringJournalGenerationProcessor> _logger;
 
     public RecurringJournalGenerationProcessor(ApplicationDbContext db, IBusinessCalendarProvider calendar,
-        IFinanceAuditService audit, ILogger<RecurringJournalGenerationProcessor> logger)
+        IFinanceAuditService audit, IWorkflowService workflow, ILogger<RecurringJournalGenerationProcessor> logger)
     {
         _db = db;
         _calendar = calendar;
         _audit = audit;
+        _workflow = workflow;
         _logger = logger;
     }
 
     public async Task<RecurringJournalGenerationResultDto> ProcessAllAsync(DateOnly asOfDate, CancellationToken cancellationToken = default)
     {
-        var tenants = await _db.RecurringJournalTemplates.IgnoreQueryFilters().AsNoTracking()
+        var dueTenants = _db.RecurringJournalTemplates.IgnoreQueryFilters().AsNoTracking()
             .Where(item => !item.IsDeleted && item.Status == RecurringJournalStatus.Active && item.NextDueDate <= asOfDate)
-            .Select(item => item.TenantId).Distinct().ToListAsync(cancellationToken);
+            .Select(item => item.TenantId);
+        var retryTenants = _db.RecurringJournalOccurrences.IgnoreQueryFilters().AsNoTracking()
+            .Where(item => !item.IsDeleted && item.Status == RecurringJournalOccurrenceStatus.SubmissionFailed &&
+                item.WorkflowInstanceId == null && item.JournalEntryId == null)
+            .Select(item => item.TenantId);
+        var tenants = await dueTenants.Union(retryTenants).Distinct().ToListAsync(cancellationToken);
         var total = new RecurringJournalGenerationResultDto();
         foreach (var tenantId in tenants)
         {
@@ -784,6 +1046,7 @@ public sealed class RecurringJournalGenerationProcessor
         Guid tenantId, DateOnly asOfDate, string actor, CancellationToken cancellationToken = default)
     {
         var result = new RecurringJournalGenerationResultDto();
+        await RecoverWorkflowSubmissionFailuresAsync(tenantId, actor, result, cancellationToken);
         var templateIds = await _db.RecurringJournalTemplates.IgnoreQueryFilters().AsNoTracking()
             .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.Status == RecurringJournalStatus.Active && item.NextDueDate <= asOfDate)
             .OrderBy(item => item.NextDueDate).Select(item => item.Id).Take(250).ToListAsync(cancellationToken);
@@ -843,8 +1106,11 @@ public sealed class RecurringJournalGenerationProcessor
                     template.UpdatedBy = actor;
                     if (!template.NextDueDate.HasValue) template.Status = RecurringJournalStatus.Completed;
                     await _db.SaveChangesAsync(cancellationToken);
-                    result.GeneratedCount++;
-                    await RecordGenerationAuditAsync(tenantId, occurrence, actor, cancellationToken);
+                    if (await TryStartOccurrenceWorkflowAsync(occurrence, template, actor, cancellationToken))
+                        result.GeneratedCount++;
+                    else
+                        result.FailedCount++;
+                    await RecordGenerationAuditAsync(tenantId, occurrence, template, actor, cancellationToken);
                 }
             }
             catch (DbUpdateConcurrencyException exception)
@@ -879,6 +1145,66 @@ public sealed class RecurringJournalGenerationProcessor
         return result;
     }
 
+    private async Task RecoverWorkflowSubmissionFailuresAsync(
+        Guid tenantId,
+        string actor,
+        RecurringJournalGenerationResultDto result,
+        CancellationToken cancellationToken)
+    {
+        var failed = await _db.RecurringJournalOccurrences.IgnoreQueryFilters()
+            .Include(item => item.Template)
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted &&
+                item.Status == RecurringJournalOccurrenceStatus.SubmissionFailed &&
+                item.WorkflowInstanceId == null && item.JournalEntryId == null)
+            .OrderBy(item => item.ScheduledDate)
+            .Take(250)
+            .ToListAsync(cancellationToken);
+        foreach (var occurrence in failed)
+        {
+            if (await TryStartOccurrenceWorkflowAsync(occurrence, occurrence.Template, actor, cancellationToken))
+                result.ExistingCount++;
+            else
+                result.FailedCount++;
+        }
+    }
+
+    private async Task<bool> TryStartOccurrenceWorkflowAsync(
+        RecurringJournalOccurrence occurrence,
+        RecurringJournalTemplate template,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var initiatorId = template.SubmittedByUserId ?? template.CreatedById
+                ?? throw new InvalidOperationException("The recurring template has no durable maker identity.");
+            var workflowResult = await _workflow.StartApprovalWorkflowAsAsync(
+                nameof(RecurringJournalOccurrence), occurrence.Id, initiatorId, occurrence.TenantId);
+            if (!workflowResult.Success || !workflowResult.WorkflowInstanceId.HasValue)
+                throw new InvalidOperationException(workflowResult.Message ?? "The occurrence approval workflow could not be started.");
+            occurrence.WorkflowInstanceId = workflowResult.WorkflowInstanceId;
+            occurrence.Status = RecurringJournalOccurrenceStatus.PendingApproval;
+            occurrence.ErrorMessage = null;
+            occurrence.UpdatedAt = DateTime.UtcNow;
+            occurrence.UpdatedBy = actor;
+            await _db.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            occurrence.Status = RecurringJournalOccurrenceStatus.SubmissionFailed;
+            occurrence.ErrorMessage = exception.Message.Length <= 2000 ? exception.Message : exception.Message[..2000];
+            occurrence.AttemptCount++;
+            occurrence.UpdatedAt = DateTime.UtcNow;
+            occurrence.UpdatedBy = actor;
+            await _db.SaveChangesAsync(cancellationToken);
+            _logger.LogError(exception,
+                "Recurring occurrence {OccurrenceId} could not enter its approval workflow; it remains a close-blocking exception.",
+                occurrence.Id);
+            return false;
+        }
+    }
+
     private async Task<DateOnly?> ResolveReversalDueDateAsync(RecurringJournalTemplate template, DateOnly effective,
         CancellationToken cancellationToken)
     {
@@ -892,31 +1218,29 @@ public sealed class RecurringJournalGenerationProcessor
         return nextPeriod.HasValue ? DateOnly.FromDateTime(nextPeriod.Value) : null;
     }
 
-    private async Task RecordGenerationAuditAsync(Guid tenantId, RecurringJournalOccurrence occurrence, string actor,
+    private async Task RecordGenerationAuditAsync(Guid tenantId, RecurringJournalOccurrence occurrence,
+        RecurringJournalTemplate template, string actor,
         CancellationToken cancellationToken)
     {
-        try
+        var auditEvent = new FinanceAuditEventDto
         {
-            await _audit.RecordAsync(new FinanceAuditEventDto
-            {
-                EventType = FinanceAuditEvents.RecurringJournalOccurrenceGenerated, TenantId = tenantId,
-                SourceModule = "GL", SourceDocumentType = nameof(RecurringJournalOccurrence), SourceDocumentId = occurrence.Id,
-                AfterValues = new { occurrence.TemplateId, occurrence.TemplateVersion, occurrence.SequenceNumber,
-                    occurrence.ScheduledDate, occurrence.EffectiveDate, occurrence.Status, occurrence.ReversalDueDate },
-                Resource = "Finance.RecurringJournalOccurrence", ResourceId = occurrence.Id.ToString()
-            }, cancellationToken);
-        }
-        catch (InvalidOperationException exception) when (actor == "RecurringJournalScheduler")
+            EventType = FinanceAuditEvents.RecurringJournalOccurrenceGenerated, TenantId = tenantId,
+            SourceModule = "GL", SourceDocumentType = nameof(RecurringJournalOccurrence), SourceDocumentId = occurrence.Id,
+            WorkflowInstanceId = occurrence.WorkflowInstanceId,
+            IdempotencyKey = $"RecurringJournal:{tenantId:N}:{occurrence.Id:N}:Generated",
+            AfterValues = new { occurrence.TemplateId, occurrence.TemplateVersion, occurrence.SequenceNumber,
+                occurrence.ScheduledDate, occurrence.EffectiveDate, occurrence.Status, occurrence.ReversalDueDate,
+                occurrence.WorkflowInstanceId },
+            Resource = "Finance.RecurringJournalOccurrence", ResourceId = occurrence.Id.ToString()
+        };
+        if (actor == "RecurringJournalScheduler")
         {
-            // FinanceAuditService intentionally requires an authenticated user,
-            // while a host worker has no request principal to impersonate. The
-            // occurrence row is itself durable system evidence (actor, snapshot,
-            // timestamps and dates); do not falsely attribute it to a human or
-            // roll it back. Manual catch-up runs still require the normal audit.
-            _logger.LogWarning(exception,
-                "Recurring occurrence {OccurrenceId} was generated by the system worker; the occurrence record is the durable generation evidence.",
-                occurrence.Id);
+            var initiatorId = template.SubmittedByUserId ?? template.CreatedById
+                ?? throw new InvalidOperationException("The recurring template has no durable maker identity for system audit.");
+            await _audit.RecordSystemAsync(auditEvent, initiatorId, actor, cancellationToken);
+            return;
         }
+        await _audit.RecordAsync(auditEvent, cancellationToken);
     }
 }
 

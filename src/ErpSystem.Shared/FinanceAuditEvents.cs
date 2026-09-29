@@ -81,9 +81,13 @@ public static class FinanceAuditEvents
     public const string RecurringJournalTemplateRejected = "Finance.RecurringJournal.TemplateRejected";
     public const string RecurringJournalTemplatePaused = "Finance.RecurringJournal.TemplatePaused";
     public const string RecurringJournalTemplateResumed = "Finance.RecurringJournal.TemplateResumed";
+    public const string RecurringJournalTemplateCancelled = "Finance.RecurringJournal.TemplateCancelled";
+    public const string RecurringJournalTemplateVersionCreated = "Finance.RecurringJournal.TemplateVersionCreated";
     public const string RecurringJournalOccurrenceGenerated = "Finance.RecurringJournal.OccurrenceGenerated";
     public const string RecurringJournalOccurrenceApproved = "Finance.RecurringJournal.OccurrenceApproved";
     public const string RecurringJournalOccurrenceRejected = "Finance.RecurringJournal.OccurrenceRejected";
+    public const string RecurringJournalOccurrenceWaiverRequested = "Finance.RecurringJournal.OccurrenceWaiverRequested";
+    public const string RecurringJournalOccurrenceWaived = "Finance.RecurringJournal.OccurrenceWaived";
     public const string RecurringJournalOccurrencePosted = "Finance.RecurringJournal.OccurrencePosted";
     public const string RecurringJournalGenerationFailed = "Finance.RecurringJournal.GenerationFailed";
 

@@ -21104,6 +21104,11 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<bool>("RequiresMaintenance")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<Guid?>("RevaluationLossAccountId")
                         .HasColumnType("uniqueidentifier");
 
@@ -22868,6 +22873,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("DiscountAmount")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("DiscountReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<DateTime?>("DueDate")
                         .HasColumnType("datetime2");
 
@@ -23123,6 +23132,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
 
+                    b.Property<Guid>("AccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("ApprovalStatus")
                         .IsRequired()
                         .HasMaxLength(30)
@@ -23271,6 +23283,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AccountingBookId");
+
                     b.HasIndex("FiscalPeriodId");
 
                     b.HasIndex("ReversalOfJournalBatchId");
@@ -23284,6 +23298,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "ReversalOfJournalBatchId")
                         .IsUnique()
                         .HasFilter("[ReversalOfJournalBatchId] IS NOT NULL AND [IsDeleted] = 0 AND [IsVoided] = 0");
+
+                    b.HasIndex("TenantId", "AccountingBookId", "FiscalPeriodId");
 
                     b.HasIndex("TenantId", "ApprovalStatus", "FiscalPeriodId");
 
@@ -191299,6 +191315,12 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.JournalBatch", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany()
+                        .HasForeignKey("AccountingBookId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.FiscalPeriod", "FiscalPeriod")
                         .WithMany()
                         .HasForeignKey("FiscalPeriodId")
@@ -191315,6 +191337,8 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("AccountingBook");
 
                     b.Navigation("FiscalPeriod");
 

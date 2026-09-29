@@ -1286,6 +1286,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new JournalBatchPostingRunItemConfiguration());
         builder.ApplyConfiguration(new JournalBatchAttachmentConfiguration());
         builder.ApplyConfiguration(new JournalBatchImportSessionConfiguration());
+        builder.ApplyConfiguration(new FixedAssetCategoryConfiguration());
         builder.ApplyConfiguration(new VendorInvoiceOptionalApprovalConfiguration());
         builder.ApplyConfiguration<FinancePurchaseOrder>(new FinancePurchasingOptionalApprovalConfiguration());
         builder.ApplyConfiguration<FinancePurchaseOrderReceipt>(new FinancePurchasingOptionalApprovalConfiguration());

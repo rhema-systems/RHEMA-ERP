@@ -1117,6 +1117,11 @@ export default function NewReceiptPage() {
                                                                     Discount available: {formatCurrency(availableDiscount, inv.currencyCode)}
                                                                 </div>
                                                             )}
+                                                            {inv.requiresTaxAdjustmentForDiscount && (
+                                                                <div className="max-w-[260px] text-xs text-amber-700">
+                                                                    Early-payment discount requires an approved sales credit/adjustment note because this invoice carries VAT or levies.
+                                                                </div>
+                                                            )}
                                                         </td>
                                                         <td className="p-3">
                                                             {inv.dueDate ? format(new Date(inv.dueDate), 'MMM dd, yyyy') : '-'}

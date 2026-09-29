@@ -158,6 +158,12 @@ class FixedAssetsDataService {
     return apiService.get<FixedAssetCategory[]>('/finance/fixed-asset-categories');
   }
 
+  async getMaintenanceEligibleAssets(): Promise<import('@/types/fixed-assets').MaintenanceEligibleFixedAsset[]> {
+    return apiService.get<import('@/types/fixed-assets').MaintenanceEligibleFixedAsset[]>(
+      '/finance/fixed-asset-categories/maintenance-assets'
+    );
+  }
+
   async getCategoryById(id: string): Promise<FixedAssetCategory> {
     return apiService.get<FixedAssetCategory>(`/finance/fixed-asset-categories/${id}`);
   }

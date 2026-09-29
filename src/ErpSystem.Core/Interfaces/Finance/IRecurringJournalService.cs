@@ -13,8 +13,11 @@ public interface IRecurringJournalService
     Task<RecurringJournalTemplateDto> RejectAsync(Guid id, string comment, CancellationToken cancellationToken = default);
     Task<RecurringJournalTemplateDto> PauseAsync(Guid id, string comment, CancellationToken cancellationToken = default);
     Task<RecurringJournalTemplateDto> ResumeAsync(Guid id, string comment, CancellationToken cancellationToken = default);
+    Task<RecurringJournalTemplateDto> CancelAsync(Guid id, string comment, CancellationToken cancellationToken = default);
+    Task<RecurringJournalTemplateDto> CreateNewVersionAsync(Guid id, string comment, CancellationToken cancellationToken = default);
     Task<RecurringJournalOccurrenceDto> ApproveOccurrenceAsync(Guid occurrenceId, string comment, CancellationToken cancellationToken = default);
     Task<RecurringJournalOccurrenceDto> RejectOccurrenceAsync(Guid occurrenceId, string comment, CancellationToken cancellationToken = default);
+    Task<RecurringJournalOccurrenceDto> RequestOccurrenceWaiverAsync(Guid occurrenceId, string comment, CancellationToken cancellationToken = default);
     Task<RecurringJournalOccurrenceDto> PostOccurrenceAsync(Guid occurrenceId, CancellationToken cancellationToken = default);
     Task<RecurringJournalGenerationResultDto> GenerateDueAsync(DateOnly asOfDate, CancellationToken cancellationToken = default);
     Task<RecurringJournalReversalProcessingResultDto> ProcessDueReversalsAsync(DateOnly asOfDate, Guid? occurrenceId = null, CancellationToken cancellationToken = default);

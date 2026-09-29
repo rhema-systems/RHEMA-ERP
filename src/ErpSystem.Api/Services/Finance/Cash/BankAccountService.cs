@@ -147,7 +147,6 @@ public class BankAccountService : IBankAccountService
             ?? throw new ArgumentException("Bank account number is required.");
         if (accountNumber.Length == 0)
             throw new ArgumentException("Bank account number is required.");
-
         var duplicateExists = await _context.BankAccounts.AnyAsync(account =>
             account.TenantId == tenantId &&
             !account.IsDeleted &&

@@ -58,6 +58,9 @@ namespace ErpSystem.Core.Entities.Finance
         
         [Column(TypeName = "decimal(18,2)")]
         public decimal DiscountAmount { get; set; }
+
+        [MaxLength(500)]
+        public string? DiscountReason { get; set; }
         
         [Column(TypeName = "decimal(18,2)")]
         public decimal TotalAmount { get; set; }

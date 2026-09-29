@@ -2,6 +2,7 @@ using ErpSystem.Api.Services.Finance.FixedAssets;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
@@ -14,6 +15,39 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class FixedAssetCategoryRoleFamilyTests
 {
+    [Fact]
+    public async Task MaintenanceFeed_ReturnsOnlyTenantAssetsFromOptedInCategories()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase($"fixed-asset-maintenance-feed-{Guid.NewGuid():N}")
+                .Options);
+
+        var eligibleCategory = CategoryEntity(tenantId, "VEH", requiresMaintenance: true);
+        var excludedCategory = CategoryEntity(tenantId, "LAND", requiresMaintenance: false);
+        var otherTenantCategory = CategoryEntity(otherTenantId, "OTHER", requiresMaintenance: true);
+        db.FixedAssetCategories.AddRange(eligibleCategory, excludedCategory, otherTenantCategory);
+        db.FixedAssets.AddRange(
+            Asset(tenantId, eligibleCategory, "FA-001"),
+            Asset(tenantId, excludedCategory, "FA-002"),
+            Asset(otherTenantId, otherTenantCategory, "FA-003"));
+        await db.SaveChangesAsync();
+
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(item => item.TenantId).Returns(tenantId);
+        currentUser.SetupGet(item => item.UserId).Returns(Guid.NewGuid().ToString());
+        currentUser.SetupGet(item => item.UserName).Returns("maintenance.reader");
+        var service = new FixedAssetCategoryService(db, currentUser.Object);
+
+        var result = await service.GetMaintenanceEligibleAssetsAsync();
+
+        result.Should().ContainSingle(item => item.AssetCode == "FA-001");
+        result.Should().OnlyContain(item => item.FixedAssetCategoryCode == "VEH");
+        new FixedAssetCategory().RequiresMaintenance.Should().BeFalse();
+    }
+
     [Fact]
     public async Task Categories_SelectDistinctAccountsFromRepeatableFixedAssetRoleFamilies()
     {
@@ -84,6 +118,36 @@ public sealed class FixedAssetCategoryRoleFamilyTests
         AccumulatedDepreciationAccountId = accumulatedDepreciationAccountId,
         DepreciationExpenseAccountId = depreciationExpenseAccountId
     };
+
+    private static FixedAssetCategory CategoryEntity(Guid tenantId, string code, bool requiresMaintenance)
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = code,
+            Name = code,
+            RequiresMaintenance = requiresMaintenance,
+            AssetAccountId = Guid.NewGuid(),
+            AccumulatedDepreciationAccountId = Guid.NewGuid(),
+            DepreciationExpenseAccountId = Guid.NewGuid()
+        };
+
+    private static FixedAsset Asset(Guid tenantId, FixedAssetCategory category, string assetCode)
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AssetCode = assetCode,
+            Name = assetCode,
+            FixedAssetCategoryId = category.Id,
+            Category = category,
+            PurchaseDate = new DateTime(2026, 9, 1),
+            PurchasePrice = 1000m,
+            AcquisitionCost = 1000m,
+            NetBookValue = 1000m,
+            UsefulLifeMonths = 60,
+            Status = FixedAssetStatus.Active
+        };
 
     private static Account AddAccount(
         ApplicationDbContext db,

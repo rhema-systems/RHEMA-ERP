@@ -568,6 +568,101 @@ public sealed class FxFunctionalCurrencyGovernanceTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FXFoundation")]
     [Trait("Category", "FX")]
+    public async Task LegacyCurrencyQuickRateUpdateFailsClosedInsteadOfReportingFalseSuccess()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        SeedCurrency(db, tenantId, "GHS", isBase: true);
+        var usd = SeedCurrency(db, tenantId, "USD", isBase: false);
+        await db.SaveChangesAsync();
+
+        var service = CreateCurrencyService(db, tenantId);
+
+        await service.Invoking(item => item.UpdateExchangeRateAsync(usd.Id, 15m))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*legacy currency quick-rate endpoint is retired*");
+        (await db.ExchangeRates.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
+    public async Task BulkRateValidationIsAllOrNothing()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        SeedCurrency(db, tenantId, "GHS", isBase: true);
+        SeedCurrency(db, tenantId, "USD", isBase: false);
+        await db.SaveChangesAsync();
+
+        var service = CreateExchangeRateService(db, tenantId);
+        var upload = () => service.BulkUploadRatesAsync(new List<CreateExchangeRateDto>
+        {
+            new()
+            {
+                BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD", Rate = 15m,
+                EffectiveDate = new DateTime(2026, 9, 29), RateType = "Daily", QuoteSide = "Mid"
+            },
+            new()
+            {
+                BaseCurrencyCode = "GHS", TargetCurrencyCode = "EUR", Rate = 18m,
+                EffectiveDate = new DateTime(2026, 9, 29), RateType = "Daily", QuoteSide = "Mid"
+            }
+        });
+
+        await upload.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*No exchange rates were imported*EUR*not active*");
+        (await db.ExchangeRates.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
+    public async Task CurrencyConversionFailsClosedWhenNoApprovedDailyMidRateExists()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        SeedCurrency(db, tenantId, "GHS", isBase: true);
+        SeedCurrency(db, tenantId, "USD", isBase: false);
+        var pending = SeedExchangeRate(db, tenantId, "GHS", "USD", 15m, DateTime.UtcNow.Date.AddDays(-1));
+        pending.ApprovalStatus = RateApprovalStatus.Pending;
+        await db.SaveChangesAsync();
+
+        var service = CreateCurrencyService(db, tenantId);
+
+        await service.Invoking(item => item.ConvertAsync(100m, "USD", "GHS"))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*No active approved Daily/Mid exchange-rate path exists*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
+    public async Task CurrencyConversionUsesApprovedDirectAndFunctionalTriangulatedRates()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        SeedCurrency(db, tenantId, "GHS", isBase: true);
+        SeedCurrency(db, tenantId, "USD", isBase: false);
+        SeedCurrency(db, tenantId, "EUR", isBase: false);
+        SeedExchangeRate(db, tenantId, "GHS", "USD", 15m, DateTime.UtcNow.Date.AddDays(-1));
+        SeedExchangeRate(db, tenantId, "GHS", "EUR", 18m, DateTime.UtcNow.Date.AddDays(-1));
+        await db.SaveChangesAsync();
+
+        var service = CreateCurrencyService(db, tenantId);
+
+        (await service.ConvertAsync(10m, "USD", "GHS")).Should().Be(150m);
+        (await service.ConvertAsync(180m, "GHS", "EUR")).Should().Be(10m);
+        (await service.ConvertAsync(10m, "EUR", "USD")).Should().Be(12m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
     public async Task PostingCapturesRateSnapshotLocksRateAndEmitsAudit()
     {
         var tenantId = Guid.NewGuid();
@@ -922,6 +1017,23 @@ public sealed class FxFunctionalCurrencyGovernanceTests
             new TenantSettingsService(db, currentUser),
             Mock.Of<ILogger<ExchangeRateService>>(),
             workflowService: workflowService);
+    }
+
+    private static CurrencyService CreateCurrencyService(ApplicationDbContext db, Guid tenantId)
+    {
+        var currentUser = CreateCurrentUser(tenantId).Object;
+        var tenantSettings = new TenantSettingsService(db, currentUser);
+        var exchangeRates = new ExchangeRateService(
+            new UnitOfWork(db),
+            currentUser,
+            tenantSettings,
+            Mock.Of<ILogger<ExchangeRateService>>());
+        return new CurrencyService(
+            new UnitOfWork(db),
+            currentUser,
+            tenantSettings,
+            exchangeRates,
+            Mock.Of<ILogger<CurrencyService>>());
     }
 
     private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId)
