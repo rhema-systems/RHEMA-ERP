@@ -66,7 +66,8 @@ public sealed class GlobalSearchEstateLegalTests
             Mock.Of<IEstateProcedureCatalogService>(), Mock.Of<IFacilitiesProcedureCatalogService>(),
             Mock.Of<IPropertyManagementProcedureCatalogService>(), Mock.Of<IPlanningProcedureCatalogService>(),
             Mock.Of<IWorkflowEngine>(), Mock.Of<INotificationService>(), Mock.Of<IFileStorageService>(),
-            Mock.Of<IInvoiceService>(), Mock.Of<ICentralDocumentPdfSigningService>(), Mock.Of<IJobCardService>());
+            Mock.Of<IInvoiceService>(), Mock.Of<ICentralDocumentPdfSigningService>(), Mock.Of<IJobCardService>(),
+            Mock.Of<IEhcTicketService>());
 
         var results = await service.SearchCasesAsync("Legal", " BOUNDARY ", 1);
         Assert.Equal(visible.Id, Assert.Single(results).Id);
@@ -135,7 +136,7 @@ public sealed class GlobalSearchEstateLegalTests
         using var db = Database();
         var catalog = new Mock<ILegalProcedureCatalogService>();
         catalog.Setup(value => value.GetProcedures()).Returns(Enumerable.Range(0, 20)
-            .Select(index => new LegalProcedureCatalogItem($"Court {index}", $"LegalCourt{index}", "Legal", "", "", 1, "")).ToList());
+            .Select(index => new LegalProcedureCatalogItem($"Court {index}", $"LegalCourt{index}", "Legal", 1, "")).ToList());
         var controller = new LegalProceduresController(catalog.Object, db, User());
         Assert.Equal(10, Rows(controller.SearchProcedures("COURT", 500)).GetArrayLength());
         Assert.Empty(Rows(controller.SearchProcedures("x")).EnumerateArray());

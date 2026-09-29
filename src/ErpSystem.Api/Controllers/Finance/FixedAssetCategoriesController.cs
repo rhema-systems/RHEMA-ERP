@@ -47,6 +47,16 @@ public class FixedAssetCategoriesController : ControllerBase
         return Ok(category);
     }
 
+    /// <summary>
+    /// Finance-owned, read-only integration feed for Maintenance. Only assets whose category is
+    /// explicitly marked as requiring maintenance are returned; no financial amounts or GL
+    /// mappings are disclosed.
+    /// </summary>
+    [HttpGet("maintenance-assets")]
+    public async Task<ActionResult<IReadOnlyList<MaintenanceEligibleFixedAssetDto>>> GetMaintenanceAssets(
+        CancellationToken cancellationToken)
+        => Ok(await _categoryService.GetMaintenanceEligibleAssetsAsync(cancellationToken));
+
     [HttpGet("gl-accounts")]
     public async Task<ActionResult<FixedAssetGlAccountOptionsDto>> GetGlAccounts()
     {

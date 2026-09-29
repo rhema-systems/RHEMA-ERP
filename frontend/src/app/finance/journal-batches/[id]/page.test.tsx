@@ -6,7 +6,13 @@ const mocks = vi.hoisted(() => ({ get: vi.fn(), submit: vi.fn(), post: vi.fn(), 
 vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'batch-1' }), useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ hasPermission: mocks.permission }) }));
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast: mocks.toast }) }));
-vi.mock('@/services/finance/finance-data.service', () => ({ financeDataService: { getAccounts: vi.fn(async () => []) } }));
+vi.mock('@/services/finance/finance-data.service', () => ({
+  financeDataService: {
+    getAccounts: vi.fn(async () => []),
+    getFinanceDimensions: vi.fn(async () => []),
+    getFinanceDimensionRules: vi.fn(async () => []),
+  },
+}));
 vi.mock('@/services/finance/journal-batch-data.service', () => ({ journalBatchDataService: { getBatch: mocks.get, submit: mocks.submit, post: mocks.post } }));
 vi.mock('@/services/workflow-api.service', () => ({ workflowApiService: { getWorkflowEntitySummary: mocks.summary } }));
 import Page from './page';
@@ -15,7 +21,7 @@ const item = { id: 'item-1', journalEntryId: 'journal-1', journalEntryNumber: 'J
   description: 'Balanced journal', totalDebit: 100, lineCount: 2, reviewStatus: 'Pending', postingStatus: 'NotEligible', reviews: [] };
 const draft = { id: 'batch-1', batchNumber: 'JB-1', description: 'Batch test', displayStatus: 'Draft', approvalStatus: 'Draft',
   approvalRequired: true, batchType: 'Standard', controlCurrencyCode: 'GHS', expectedDebitTotal: 100, actualDebitTotal: 100,
-  variance: 0, entryCount: 1, canSubmit: true, canEdit: false, canReview: false, canPostAny: false, items: [item], postingRuns: [] };
+  variance: 0, entryCount: 1, canSubmit: true, canEdit: false, canReview: false, canPostAny: false, items: [item], postingRuns: [], attachments: [] };
 const direct = { entityType: 'JournalBatch', entityId: 'batch-1', approvalRequired: false, hasActiveInstance: false, hasWorkflowHistory: false };
 const ready = { ...draft, approvalRequired: false, approvalStatus: 'ReadyToPost', displayStatus: 'Ready to Post', canSubmit: false,
   canPostAny: true, items: [{ ...item, reviewStatus: 'NotRequired', postingStatus: 'Ready' }] };

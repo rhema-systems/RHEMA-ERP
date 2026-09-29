@@ -184,7 +184,7 @@ public sealed class JournalBatchServiceTests
     private static async Task<JournalBatchDetailDto> CreateDraftBatchAsync(JournalBatchService service, Guid periodId, IReadOnlyList<JournalEntry> journals)
     {
         var batch = await service.CreateAsync(new CreateJournalBatchDto { Description = "Optional approval test", FiscalPeriodId = periodId,
-            BookClassification = "IFRS", ControlCurrencyCode = "GHS", ExpectedDebitTotal = 300m, ExpectedJournalCount = 2 });
+            AccountingBookId = journals.First().AccountingBookId, ControlCurrencyCode = "GHS", ExpectedDebitTotal = 300m, ExpectedJournalCount = 2 });
         foreach (var journal in journals) batch = await service.AddExistingJournalAsync(batch.Id, journal.Id);
         return batch;
     }

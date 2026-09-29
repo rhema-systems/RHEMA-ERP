@@ -265,6 +265,16 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         selectedPurchaseOrder.procurementCategory !== 'Goods' &&
         selectedPurchaseOrder.procurementCategory !== 'Works';
     const goodsCategory = selectedPurchaseOrder?.procurementCategory === 'Goods';
+    const governedAcceptedSupply = Boolean(
+        editInvoice?.acceptedSupplyKind && editInvoice?.acceptedSupplySourceId
+    );
+    const acceptedSupplyLabel = editInvoice?.acceptedSupplyKind === 'WorksPaymentCertificate'
+        ? 'Service / Works certificate'
+        : editInvoice?.acceptedSupplyKind === 'ServiceCompletion'
+            ? 'Approved service completion'
+            : editInvoice?.acceptedSupplyKind
+                ? 'Accepted supply evidence'
+                : null;
     const { data: goodsEntry, error: goodsEntryError, isFetching: goodsEntryLoading } = useQuery({
         queryKey: ['ap-goods-invoice-entry', currentTenantCode, selectedPurchaseOrderId, editInvoiceId],
         queryFn: () => accountsPayableService.getGoodsInvoiceEntry(selectedPurchaseOrderId, editInvoiceId),
@@ -903,7 +913,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 }
             }
             const isOpeningBalance = data.isOpeningBalance;
-            if (!data.purchaseOrderId && data.lineItems.some(line => line.lineItemType !== 'Expense')) {
+            if (!data.purchaseOrderId && !governedAcceptedSupply && data.lineItems.some(line => line.lineItemType !== 'Expense')) {
                 toast({
                     title: 'Manual invoices use GL expense lines',
                     description: 'Inventory and service lines must come from their governed Procurement or accepted-supply source.',
@@ -1661,16 +1671,21 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                             <CardTitle>Invoice lines</CardTitle>
                             <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                                 <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
-                                    {selectedPurchaseOrderId ? 'Source-controlled invoice' : 'Manual GL invoice'}
+                                    {selectedPurchaseOrderId || governedAcceptedSupply ? 'Source-controlled invoice' : 'Manual GL invoice'}
                                 </span>
                                 <span>
-                                    {selectedPurchaseOrderId
+                                    {selectedPurchaseOrderId || governedAcceptedSupply
                                         ? 'Line type and posting treatment come from the approved procurement evidence.'
                                         : 'Each line posts to the expense or asset account you select below.'}
                                 </span>
+                                {acceptedSupplyLabel && (
+                                    <span className="rounded-full border px-2.5 py-1 text-xs font-medium text-foreground">
+                                        {acceptedSupplyLabel}
+                                    </span>
+                                )}
                             </div>
                         </div>
-                        {!selectedPurchaseOrderId && <Button type="button" variant="outline" size="sm" onClick={() => append({
+                        {!selectedPurchaseOrderId && !governedAcceptedSupply && <Button type="button" variant="outline" size="sm" onClick={() => append({
                             sourceLineId: crypto.randomUUID(),
                             lineItemType: 'Expense' as const,
                             description: '',
@@ -1707,7 +1722,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                                 onOpenChange={(open) => { setGlAccountOpenIndex(open ? index : null); if (!open) setGlAccountSearch(''); }}
                                                             >
                                                                 <PopoverTrigger asChild>
-                                                                    <Button variant="outline" role="combobox" className="h-10 w-full min-w-0 justify-between overflow-hidden px-3 text-left font-medium">
+                                                                    <Button variant="outline" role="combobox" disabled={governedAcceptedSupply} className="h-10 w-full min-w-0 justify-between overflow-hidden px-3 text-left font-medium">
                                                                         <span className="min-w-0 flex-1 truncate text-sm">
                                                                             {getAccountDisplay(accountField.value) || (glAccountsLoading ? "Loading..." : "Select account...")}
                                                                         </span>
@@ -2008,7 +2023,9 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                     sourceModule: 'AP',
                                     sourceDocumentType: 'VendorInvoice',
                                     postingAction: 'Post',
-                                    sourceRoute: 'finance.ap.vendor-invoices.manual',
+                                    sourceRoute: governedAcceptedSupply
+                                        ? 'finance.ap.vendor-invoices.governed-source'
+                                        : 'finance.ap.vendor-invoices.manual',
                                     contractVersion: '1.0',
                                 }}
                                 effectiveDate={format(watchInvoiceDate || new Date(), 'yyyy-MM-dd')}
@@ -2016,11 +2033,14 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                     id: item.sourceLineId,
                                     ...getSourceLineDimensionAccounts(watchIsOpeningBalance ? undefined : editInvoice?.financeDimensions, item.sourceLineId, !watchIsOpeningBalance
                                         && !selectedPurchaseOrderId
+                                        && !governedAcceptedSupply
                                         && (item.lineItemType === 'Expense' || item.lineItemType === 'Service')
                                         ? item.glAccountId
                                         : undefined),
                                     accountLabel: item.description || undefined,
-                                    accountResolution: selectedPurchaseOrderId ? 'SourceDocument' as const : 'UserSelection' as const,
+                                    accountResolution: selectedPurchaseOrderId || governedAcceptedSupply
+                                        ? 'SourceDocument' as const
+                                        : 'UserSelection' as const,
                                 }))}
                                 defaultValues={defaultDimensionValues}
                                 lineValues={lineDimensionValues}

@@ -43,7 +43,7 @@ async function prepareInvoice(choice: 'Yes' | 'No' | 'Dismiss' = 'No') {
   const result = render(<VendorInvoiceFormPage />);
   fireEvent.click(screen.getByRole('combobox', { name: 'Supplier' }));
   fireEvent.click(await screen.findByText(/Freight Vendor/));
-  const confirmation = await screen.findByRole('dialog', { name: 'Apply withholding to this invoice?' });
+  const confirmation = await screen.findByRole('dialog', { name: 'Classify this invoice for WHT at payment?' });
   fireEvent.click(within(confirmation).getByRole('button', { name: choice === 'Dismiss' ? 'Close' : choice }));
   if (choice === 'Yes') {
     fireEvent.change(await screen.findByLabelText('WHT Contract / Reference'), { target: { value: 'CONTRACT-001' } });
@@ -52,9 +52,8 @@ async function prepareInvoice(choice: 'Yes' | 'No' | 'Dismiss' = 'No') {
     fireEvent.click(within(categoryArea).getByRole('combobox'));
     fireEvent.click(await screen.findByRole('option', { name: 'Services' }));
   }
-  const checkbox = await screen.findByRole('checkbox', { name: 'Use supplier defaults' });
+  const checkbox = await screen.findByRole('checkbox', { name: 'Use approved supplier invoice defaults' });
   expect(checkbox).toBeChecked();
-  await waitFor(() => expect(screen.getByLabelText('Accounts Payable')).toHaveTextContent('2100'));
   fireEvent.change(screen.getByPlaceholderText('Notes'), { target: { value: 'Freight service' } });
   const priceInput = result.container.querySelector('input[name="lineItems.0.unitPrice"]');
   if (!priceInput) throw new Error('Invoice price input was not rendered.');
@@ -76,7 +75,10 @@ describe('new AP invoice visible supplier defaults', () => {
     render(<VendorInvoiceFormPage editInvoiceId="invoice" />);
     expect((await screen.findAllByText('Service / Works certificate')).length).toBeGreaterThan(0);
     await waitFor(() => expect(accountsPayableService.getInvoiceBudgetCells).toHaveBeenCalled());
-    await waitFor(() => expect(within(screen.getByText('GL Account').parentElement!).getAllByRole('combobox')).toHaveLength(2));
+    const glAccountField = screen.getByText('GL Account').parentElement;
+    if (!glAccountField) throw new Error('GL Account field was not rendered.');
+    await waitFor(() => expect(within(glAccountField).getAllByRole('combobox')).toHaveLength(1));
+    expect(within(glAccountField).getByRole('combobox')).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
     await waitFor(() => expect(accountsPayableService.updateInvoice).toHaveBeenCalled());
     expect(vi.mocked(accountsPayableService.updateInvoice).mock.calls[0][1]).toMatchObject({
@@ -113,13 +115,12 @@ describe('new AP invoice visible supplier defaults', () => {
   });
   it('applies other supplier defaults but retains an explicit No withholding decision', async () => {
     await prepareInvoice();
-    expect(screen.getByRole('switch', { name: 'Subject to withholding' })).not.toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Classify for WHT at payment' })).not.toBeChecked();
     expect(screen.getAllByText('VAT Five').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: 'Record Invoice' }));
     await waitFor(() => expect(accountsPayableService.createInvoice).toHaveBeenCalled());
     const request = vi.mocked(accountsPayableService.createInvoice).mock.calls[0][0];
     expect(request.applyBusinessPartnerDefaults).toBe(true);
-    expect(request.apAccountId).toBe('ap');
     expect(request.expenseAccountId).toBe('expense');
     expect(request.lineItems[0].taxGroupId).toBe('vat');
     expect(request.lineItems[0].taxRate).toBe(5);
@@ -160,12 +161,12 @@ describe('new AP invoice visible supplier defaults', () => {
 
   it('applies supplier WHT only after Yes, shows the deduction once, and saves an editable rate override', async () => {
     await prepareInvoice('Yes');
-    expect(screen.getByRole('switch', { name: 'Subject to withholding' })).toBeChecked();
-    expect(screen.getByLabelText('WHT Rate (%)')).toHaveValue(7.5);
-    expect(screen.getByText('Estimated WHT at payment (7.5%):')).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Classify for WHT at payment' })).toBeChecked();
+    expect(screen.getByLabelText('Expected WHT Rate (%)')).toHaveValue(7.5);
+    expect(screen.getByText('Estimated WHT deducted at payment (7.5%)')).toBeInTheDocument();
     expect(screen.getByText(/-.*7\.50/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('WHT Rate (%)'), { target: { value: '5' } });
-    expect(screen.getByText('Estimated WHT at payment (5%):')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Expected WHT Rate (%)'), { target: { value: '5' } });
+    expect(screen.getByText('Estimated WHT deducted at payment (5%)')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Record Invoice' }));
     await waitFor(() => expect(accountsPayableService.createInvoice).toHaveBeenCalled());
     expect(vi.mocked(accountsPayableService.createInvoice).mock.calls[0][0]).toMatchObject({ applySupplierWithholdingDefaults: true, withholdingTaxId: 'wht', withholdingTaxRate: 5, withholdingTaxRateOverride: 5, withholdingTaxAccountId: 'wht-account' });
@@ -173,7 +174,7 @@ describe('new AP invoice visible supplier defaults', () => {
 
   it('retains an explicit zero rate and does not substitute the supplier rate', async () => {
     await prepareInvoice('Yes');
-    fireEvent.change(screen.getByLabelText('WHT Rate (%)'), { target: { value: '0' } });
+    fireEvent.change(screen.getByLabelText('Expected WHT Rate (%)'), { target: { value: '0' } });
     fireEvent.click(screen.getByRole('button', { name: 'Record Invoice' }));
     await waitFor(() => expect(accountsPayableService.createInvoice).toHaveBeenCalled());
     expect(vi.mocked(accountsPayableService.createInvoice).mock.calls[0][0]).toMatchObject({ applySupplierWithholdingDefaults: true, withholdingTaxRate: 0, withholdingTaxRateOverride: 0 });
@@ -181,9 +182,9 @@ describe('new AP invoice visible supplier defaults', () => {
 
   it('does not record a decline or apply WHT when the prompt is dismissed', async () => {
     await prepareInvoice('Dismiss');
-    expect(screen.getByRole('switch', { name: 'Subject to withholding' })).not.toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Classify for WHT at payment' })).not.toBeChecked();
     fireEvent.click(screen.getByRole('button', { name: 'Record Invoice' }));
-    expect(await screen.findByRole('dialog', { name: 'Apply withholding to this invoice?' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'Classify this invoice for WHT at payment?' })).toBeInTheDocument();
     expect(accountsPayableService.createInvoice).not.toHaveBeenCalled();
   });
 
@@ -192,10 +193,10 @@ describe('new AP invoice visible supplier defaults', () => {
     await prepareInvoice('Yes');
     fireEvent.click(screen.getByRole('combobox', { name: 'Supplier' }));
     fireEvent.click(await screen.findByText(/Second Vendor/));
-    const prompt = await screen.findByRole('dialog', { name: 'Apply withholding to this invoice?' });
+    const prompt = await screen.findByRole('dialog', { name: 'Classify this invoice for WHT at payment?' });
     fireEvent.click(within(prompt).getByRole('button', { name: 'No' }));
-    expect(screen.getByRole('switch', { name: 'Subject to withholding' })).not.toBeChecked();
-    expect(screen.getByLabelText('WHT Rate (%)')).toHaveValue(0);
+    expect(screen.getByRole('switch', { name: 'Classify for WHT at payment' })).not.toBeChecked();
+    expect(screen.getByLabelText('Expected WHT Rate (%)')).toHaveValue(0);
   });
 
   it('preserves an existing draft choice, rate override and account despite catalogue changes', async () => {
@@ -208,8 +209,8 @@ describe('new AP invoice visible supplier defaults', () => {
     };
     render(<VendorInvoiceFormPage editInvoiceId="invoice" />);
     await screen.findByRole('button', { name: 'Save Changes' });
-    expect(screen.queryByRole('dialog', { name: 'Apply withholding to this invoice?' })).not.toBeInTheDocument();
-    expect(screen.getByLabelText('WHT Rate (%)')).toHaveValue(4.25);
+    expect(screen.queryByRole('dialog', { name: 'Classify this invoice for WHT at payment?' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Expected WHT Rate (%)')).toHaveValue(4.25);
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
     await waitFor(() => expect(accountsPayableService.updateInvoice).toHaveBeenCalled());
     expect(vi.mocked(accountsPayableService.updateInvoice).mock.calls[0][1]).toMatchObject({ applySupplierWithholdingDefaults: true, withholdingTaxRate: 4.25, withholdingTaxRateOverride: 4.25, withholdingTaxAccountId: 'stored-wht-account' });
@@ -223,7 +224,7 @@ describe('new AP invoice visible supplier defaults', () => {
       lineItems: [{ id: '2d7b93c1-8f53-4d9c-b594-d76c43e2f0c8', lineItemType: 'Expense', glAccountId: 'expense', description: 'Landed cost', quantity: 1, unitPrice: 100, unit: 'EA' }],
     };
     render(<VendorInvoiceFormPage editInvoiceId="invoice" />);
-    const prompt = await screen.findByRole('dialog', { name: 'Apply withholding to this invoice?' });
+    const prompt = await screen.findByRole('dialog', { name: 'Classify this invoice for WHT at payment?' });
     fireEvent.click(within(prompt).getByRole('button', { name: 'No' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
     await waitFor(() => expect(accountsPayableService.updateInvoice).toHaveBeenCalled());

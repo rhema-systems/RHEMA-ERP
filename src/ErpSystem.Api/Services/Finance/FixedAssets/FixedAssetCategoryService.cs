@@ -49,6 +49,39 @@ public class FixedAssetCategoryService : IFixedAssetCategoryService
         return categories.Select(MapToDto).ToList();
     }
 
+    public async Task<IReadOnlyList<MaintenanceEligibleFixedAssetDto>> GetMaintenanceEligibleAssetsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        return await _context.FixedAssets
+            .AsNoTracking()
+            .Where(asset =>
+                asset.TenantId == TenantId &&
+                !asset.IsDeleted &&
+                asset.Category.RequiresMaintenance)
+            .OrderBy(asset => asset.AssetCode)
+            .Select(asset => new MaintenanceEligibleFixedAssetDto
+            {
+                Id = asset.Id,
+                AssetCode = asset.AssetCode,
+                Name = asset.Name,
+                Description = asset.Description,
+                FixedAssetCategoryId = asset.FixedAssetCategoryId,
+                FixedAssetCategoryName = asset.Category.Name,
+                FixedAssetCategoryCode = asset.Category.Code,
+                SerialNumber = asset.SerialNumber,
+                Location = asset.Location,
+                CurrentCustodianId = asset.CurrentCustodianId,
+                CurrentCustodianName = asset.CurrentCustodian == null
+                    ? null
+                    : asset.CurrentCustodian.FirstName + " " + asset.CurrentCustodian.LastName,
+                PlacedInServiceDate = asset.PlacedInServiceDate,
+                Status = asset.Status,
+                MaintenanceAssetId = asset.MaintenanceAssetId,
+                UpdatedAt = asset.UpdatedAt
+            })
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<FixedAssetCategoryDto> CreateAsync(CreateFixedAssetCategoryDto dto)
     {
         ValidateDepreciationPolicy(
@@ -64,6 +97,7 @@ public class FixedAssetCategoryService : IFixedAssetCategoryService
             Name = dto.Name,
             Code = dto.Code,
             Description = dto.Description,
+            RequiresMaintenance = dto.RequiresMaintenance,
             DefaultMethod = dto.DefaultMethod,
             DefaultUsefulLifeMonths = dto.DefaultUsefulLifeMonths,
             DefaultResidualValuePercent = dto.DefaultResidualValuePercent,
@@ -92,7 +126,7 @@ public class FixedAssetCategoryService : IFixedAssetCategoryService
         await RecordCategoryAuditAsync(
             FinanceAuditEvents.FixedAssetCategoryCreated,
             category,
-            afterValues: new { category.Code, category.Name },
+            afterValues: new { category.Code, category.Name, category.RequiresMaintenance },
             comment: "Fixed asset category created.");
         await RecordCategoryAuditAsync(
             FinanceAuditEvents.FixedAssetCategoryAccountMappingChanged,
@@ -116,10 +150,12 @@ public class FixedAssetCategoryService : IFixedAssetCategoryService
             dto.DefaultLifetimeProductionCapacity);
         await ValidateCategoryDtoAsync(dto, id);
         var beforeMapping = BuildAccountMappingSnapshot(category);
+        var beforeCategory = new { category.Code, category.Name, category.RequiresMaintenance };
 
         category.Name = dto.Name;
         category.Code = dto.Code;
         category.Description = dto.Description;
+        category.RequiresMaintenance = dto.RequiresMaintenance;
         category.DefaultMethod = dto.DefaultMethod;
         category.DefaultUsefulLifeMonths = dto.DefaultUsefulLifeMonths;
         category.DefaultResidualValuePercent = dto.DefaultResidualValuePercent;
@@ -144,7 +180,8 @@ public class FixedAssetCategoryService : IFixedAssetCategoryService
         await RecordCategoryAuditAsync(
             FinanceAuditEvents.FixedAssetCategoryUpdated,
             category,
-            afterValues: new { category.Code, category.Name },
+            beforeValues: beforeCategory,
+            afterValues: new { category.Code, category.Name, category.RequiresMaintenance },
             comment: "Fixed asset category updated.");
 
         var afterMapping = BuildAccountMappingSnapshot(category);
@@ -187,6 +224,7 @@ public class FixedAssetCategoryService : IFixedAssetCategoryService
             Name = category.Name,
             Code = category.Code,
             Description = category.Description,
+            RequiresMaintenance = category.RequiresMaintenance,
             DefaultMethod = category.DefaultMethod,
             DefaultUsefulLifeMonths = category.DefaultUsefulLifeMonths,
             DefaultResidualValuePercent = category.DefaultResidualValuePercent,

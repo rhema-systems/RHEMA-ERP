@@ -9,6 +9,7 @@ public class FixedAssetCategoryDto
     public string Name { get; set; } = string.Empty;
     public string Code { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public bool RequiresMaintenance { get; set; }
     public DepreciationMethod DefaultMethod { get; set; }
     public int DefaultUsefulLifeMonths { get; set; }
     public decimal DefaultResidualValuePercent { get; set; }
@@ -35,6 +36,7 @@ public class CreateFixedAssetCategoryDto
     public string Name { get; set; } = string.Empty;
     public string Code { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public bool RequiresMaintenance { get; set; }
     public DepreciationMethod DefaultMethod { get; set; } = DepreciationMethod.StraightLine;
     public int DefaultUsefulLifeMonths { get; set; } = 36;
     public decimal DefaultResidualValuePercent { get; set; }
@@ -59,6 +61,7 @@ public class UpdateFixedAssetCategoryDto
     public string Name { get; set; } = string.Empty;
     public string Code { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public bool RequiresMaintenance { get; set; }
     public DepreciationMethod DefaultMethod { get; set; } = DepreciationMethod.StraightLine;
     public int DefaultUsefulLifeMonths { get; set; } = 36;
     public decimal DefaultResidualValuePercent { get; set; }
@@ -140,6 +143,29 @@ public class FixedAssetDto
     public string? UpdatedBy { get; set; }
     public List<FixedAssetBookValueDto> BookValues { get; set; } = new();
     public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
+}
+
+/// <summary>
+/// Minimal, tenant-scoped, read-only handoff from the Finance fixed-asset register to
+/// Maintenance. Financial amounts and GL mappings are intentionally not exposed.
+/// </summary>
+public sealed class MaintenanceEligibleFixedAssetDto
+{
+    public Guid Id { get; set; }
+    public string AssetCode { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public Guid FixedAssetCategoryId { get; set; }
+    public string FixedAssetCategoryName { get; set; } = string.Empty;
+    public string FixedAssetCategoryCode { get; set; } = string.Empty;
+    public string? SerialNumber { get; set; }
+    public string? Location { get; set; }
+    public Guid? CurrentCustodianId { get; set; }
+    public string? CurrentCustodianName { get; set; }
+    public DateTime? PlacedInServiceDate { get; set; }
+    public FixedAssetStatus Status { get; set; }
+    public Guid? MaintenanceAssetId { get; set; }
+    public DateTime? UpdatedAt { get; set; }
 }
 
 /// <summary>

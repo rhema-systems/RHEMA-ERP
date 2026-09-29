@@ -34,16 +34,19 @@ public sealed class ControlledOpeningBalancePostingTests
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
-        db.Suppliers.Add(new Supplier
+        var supplier = new BusinessPartner
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            SupplierCode = "SUP-001",
-            Name = "Opening Supplier",
+            PartnerCode = "SUP-001",
+            PartnerName = "Opening Supplier",
+            PartnerType = "Supplier",
+            RegistrationStatus = "Approved",
+            ApprovalStatus = "Approved",
             IsActive = true,
-            Status = "Active"
-        });
-        db.BusinessPartners.Add(new BusinessPartner
+            Currency = "GHS"
+        };
+        var customer = new BusinessPartner
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
@@ -51,7 +54,38 @@ public sealed class ControlledOpeningBalancePostingTests
             CustomerAccountNumber = "AR-CUS-001",
             PartnerName = "Opening Customer",
             PartnerType = "Customer",
+            RegistrationStatus = "Approved",
+            ApprovalStatus = "Approved",
+            Currency = "GHS",
             IsActive = true
+        };
+        var supplierRole = new BusinessPartnerRole
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerId = supplier.Id,
+            RoleType = BusinessPartnerRoleType.Supplier, Status = BusinessPartnerRoleStatus.Active,
+            ActiveFromUtc = new DateTime(2025, 1, 1)
+        };
+        var customerRole = new BusinessPartnerRole
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerId = customer.Id,
+            RoleType = BusinessPartnerRoleType.Customer, Status = BusinessPartnerRoleStatus.Active,
+            ActiveFromUtc = new DateTime(2025, 1, 1)
+        };
+        db.BusinessPartners.AddRange(supplier, customer);
+        db.BusinessPartnerRoles.AddRange(supplierRole, customerRole);
+        db.BusinessPartnerApProfileVersions.Add(new BusinessPartnerApProfileVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = supplierRole.Id,
+            VersionNumber = 1, Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2025, 1, 1), ApprovedAtUtc = new DateTime(2025, 1, 1),
+            ApprovedById = Guid.NewGuid()
+        });
+        db.BusinessPartnerArProfileVersions.Add(new BusinessPartnerArProfileVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = customerRole.Id,
+            VersionNumber = 1, Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2025, 1, 1), ApprovedAtUtc = new DateTime(2025, 1, 1),
+            ApprovedById = Guid.NewGuid()
         });
         await db.SaveChangesAsync();
 
@@ -232,13 +266,13 @@ public sealed class ControlledOpeningBalancePostingTests
             GLAccountId = bankGl.Id, OpeningBalance = 0m, CurrentBalance = 0m, AvailableBalance = 0m,
             IsActive = true
         };
-        // The governed quote stores functional GHS per one USD; 12.5 therefore converts
-        // USD 50,000 to GHS 625,000, while the inverse remains USD 0.08 per GHS.
+        // The governed directional quote stores USD per one functional GHS; its inverse
+        // therefore converts USD 50,000 to GHS 625,000.
         var rate = new ExchangeRate
         {
             Id = Guid.NewGuid(), TenantId = tenantId,
             BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
-            Rate = 12.5m, InverseRate = 0.08m,
+            Rate = 0.08m, InverseRate = 12.5m,
             EffectiveDate = new DateTime(2026, 1, 1),
             RateType = ExchangeRateType.Daily,
             QuoteSide = ExchangeRateQuoteSide.Mid,
@@ -1181,7 +1215,7 @@ public sealed class ControlledOpeningBalancePostingTests
         var rate = new ExchangeRate
         {
             Id = Guid.NewGuid(), TenantId = tenantId, BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
-            Rate = 15m, InverseRate = 0.066667m, EffectiveDate = new DateTime(2026, 1, 1),
+            Rate = 0.066667m, InverseRate = 15m, EffectiveDate = new DateTime(2026, 1, 1),
             RateType = ExchangeRateType.Daily, RateSource = "TDC cutover evidence", IsActive = true,
             ApprovalStatus = RateApprovalStatus.Approved, CreatedByUserId = Guid.NewGuid(), CreatedDate = DateTime.UtcNow
         };
@@ -3001,17 +3035,45 @@ public sealed class ControlledOpeningBalancePostingTests
         var customerAdvance = SeedAccount(db, tenantId, "2200", AccountType.Liability);
         var whtPayable = SeedAccount(db, tenantId, "2300", AccountType.Liability);
         var whtReceivable = SeedAccount(db, tenantId, "1300", AccountType.Asset);
-        var supplier = new Supplier
+        var supplier = new BusinessPartner
         {
-            Id = Guid.NewGuid(), TenantId = tenantId, SupplierCode = $"SUP-{tenantId:N}"[..12],
-            Name = "TDC cutover supplier", IsActive = true, Status = "Active", TaxId = "TDC-SUP-TIN"
+            Id = Guid.NewGuid(), TenantId = tenantId, PartnerCode = $"SUP-{tenantId:N}"[..12],
+            PartnerName = "TDC cutover supplier", PartnerType = "Supplier",
+            RegistrationStatus = "Approved", ApprovalStatus = "Approved",
+            IsActive = true, TaxIdentificationNumber = "TDC-SUP-TIN", Currency = "GHS"
         };
         var customer = new BusinessPartner
         {
             Id = Guid.NewGuid(), TenantId = tenantId, PartnerCode = $"CUS-{tenantId:N}"[..12],
             CustomerAccountNumber = $"AR-{tenantId:N}"[..12], PartnerName = "TDC cutover customer",
-            PartnerType = "Customer", RegistrationStatus = "Active", ApprovalStatus = "Approved",
+            PartnerType = "Customer", RegistrationStatus = "Approved", ApprovalStatus = "Approved",
             IsActive = true, Currency = "GHS"
+        };
+        var supplierRole = new BusinessPartnerRole
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerId = supplier.Id,
+            RoleType = BusinessPartnerRoleType.Supplier, Status = BusinessPartnerRoleStatus.Active,
+            ActiveFromUtc = new DateTime(2025, 1, 1)
+        };
+        var supplierProfile = new BusinessPartnerApProfileVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = supplierRole.Id,
+            VersionNumber = 1, Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2025, 1, 1), SubjectToWithholding = false,
+            ApprovedAtUtc = new DateTime(2025, 1, 1), ApprovedById = Guid.NewGuid()
+        };
+        var customerRole = new BusinessPartnerRole
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerId = customer.Id,
+            RoleType = BusinessPartnerRoleType.Customer, Status = BusinessPartnerRoleStatus.Active,
+            ActiveFromUtc = new DateTime(2025, 1, 1)
+        };
+        var customerProfile = new BusinessPartnerArProfileVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = customerRole.Id,
+            VersionNumber = 1, Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2025, 1, 1),
+            ApprovedAtUtc = new DateTime(2025, 1, 1), ApprovedById = Guid.NewGuid()
         };
         var withholdingTax = new Tax
         {
@@ -3020,8 +3082,10 @@ public sealed class ControlledOpeningBalancePostingTests
             Applicability = TaxApplicability.Both, IsActive = true,
             TaxPayableAccountId = whtPayable.Id, TaxReceivableAccountId = whtReceivable.Id
         };
-        db.Suppliers.Add(supplier);
-        db.BusinessPartners.Add(customer);
+        db.BusinessPartners.AddRange(supplier, customer);
+        db.BusinessPartnerRoles.AddRange(supplierRole, customerRole);
+        db.BusinessPartnerApProfileVersions.Add(supplierProfile);
+        db.BusinessPartnerArProfileVersions.Add(customerProfile);
         db.Taxes.Add(withholdingTax);
         db.FinanceSettings.Add(new FinanceSettings
         {
@@ -3112,6 +3176,10 @@ public sealed class ControlledOpeningBalancePostingTests
             TenantId = tenantId,
             Code = "IFRS",
             Name = "IFRS Primary",
+            Purpose = "Primary",
+            BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
             IsDefault = true,
             IsActive = true,
             AllowsPosting = true
@@ -3339,7 +3407,7 @@ public sealed class ControlledOpeningBalancePostingTests
         Account CustomerAdvance,
         Account WhtPayable,
         Account WhtReceivable,
-        Supplier Supplier,
+        BusinessPartner Supplier,
         BusinessPartner Customer,
         Tax WithholdingTax);
     private sealed record FixedAssetOpeningFixture(

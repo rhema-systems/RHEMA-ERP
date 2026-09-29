@@ -377,49 +377,50 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             var fromCurrency = NormalizeCurrencyCode(fromCode, "Source currency");
             var toCurrency = NormalizeCurrencyCode(toCode, "Target currency");
 
-            var activeCodes = await _unitOfWork.Repository<Currency>()
+            var activeCurrencies = await _unitOfWork.Repository<Currency>()
                 .GetQueryable(currency => currency.TenantId == TenantId
                     && !currency.IsDeleted
                     && currency.IsActive
                     && (currency.CurrencyCode == fromCurrency || currency.CurrencyCode == toCurrency))
-                .Select(currency => currency.CurrencyCode)
-                .Distinct()
+                .Select(currency => new { currency.CurrencyCode, currency.DecimalPlaces })
                 .ToListAsync(cancellationToken);
-            if (!activeCodes.Contains(fromCurrency, StringComparer.OrdinalIgnoreCase)
-                || !activeCodes.Contains(toCurrency, StringComparer.OrdinalIgnoreCase))
+            if (!activeCurrencies.Any(currency => string.Equals(currency.CurrencyCode, fromCurrency, StringComparison.OrdinalIgnoreCase))
+                || !activeCurrencies.Any(currency => string.Equals(currency.CurrencyCode, toCurrency, StringComparison.OrdinalIgnoreCase)))
             {
                 throw new InvalidOperationException(
                     $"Both {fromCurrency} and {toCurrency} must be active tenant currencies before conversion.");
             }
             if (fromCurrency == toCurrency) return amount;
+            var targetDecimalPlaces = activeCurrencies.Single(currency =>
+                string.Equals(currency.CurrencyCode, toCurrency, StringComparison.OrdinalIgnoreCase)).DecimalPlaces;
 
             var date = DateTime.UtcNow.Date;
 
-            // A stored quote is expressed as units of Base Currency for one unit of Target
-            // Currency. Prefer an approved direct quote before using functional-currency
-            // triangulation.
-            var targetBaseQuote = await _exchangeRateService.GetCurrentRateAsync(
-                fromCurrency,
+            // The governed public contract is directional: one unit of BaseCurrencyCode
+            // equals Rate units of TargetCurrencyCode. Prefer that direct path, then its
+            // mathematical inverse, before triangulating through the functional currency.
+            var directQuote = await _exchangeRateService.GetCurrentRateAsync(
                 toCurrency,
+                fromCurrency,
                 date,
                 ExchangeRateType.Daily.ToString(),
                 ExchangeRateQuoteSide.Mid.ToString(),
                 cancellationToken);
-            if (targetBaseQuote is { Rate: > 0m })
+            if (directQuote is { Rate: > 0m })
             {
-                return amount * targetBaseQuote.Rate;
+                return RoundConvertedAmount(amount * directQuote.Rate, targetDecimalPlaces);
             }
 
-            var baseTargetQuote = await _exchangeRateService.GetCurrentRateAsync(
-                toCurrency,
+            var inverseQuote = await _exchangeRateService.GetCurrentRateAsync(
                 fromCurrency,
+                toCurrency,
                 date,
                 ExchangeRateType.Daily.ToString(),
                 ExchangeRateQuoteSide.Mid.ToString(),
                 cancellationToken);
-            if (baseTargetQuote is { Rate: > 0m })
+            if (inverseQuote is { Rate: > 0m })
             {
-                return amount / baseTargetQuote.Rate;
+                return RoundConvertedAmount(amount / inverseQuote.Rate, targetDecimalPlaces);
             }
 
             var functionalCurrency = NormalizeCurrencyCode(
@@ -449,8 +450,15 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 throw MissingApprovedRate(fromCurrency, toCurrency, date);
             }
 
-            return amount * fromFunctionalQuote.Rate / toFunctionalQuote.Rate;
+            // Both legs are functional -> currency quotes. Convert the source amount back
+            // to functional currency, then out to the requested target currency.
+            return RoundConvertedAmount(
+                amount * toFunctionalQuote.Rate / fromFunctionalQuote.Rate,
+                targetDecimalPlaces);
         }
+
+        private static decimal RoundConvertedAmount(decimal amount, int decimalPlaces) =>
+            decimal.Round(amount, Math.Clamp(decimalPlaces, 0, 28), MidpointRounding.AwayFromZero);
 
         private static InvalidOperationException MissingApprovedRate(string fromCurrency, string toCurrency, DateTime date) =>
             new($"No active approved Daily/Mid exchange-rate path exists for {fromCurrency}/{toCurrency} on {date:yyyy-MM-dd}. Conversion was not performed.");

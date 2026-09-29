@@ -468,31 +468,6 @@ public sealed class FinanceBudgetCommitmentServiceTests
             column.Table == "BudgetRevisionLines" && column.Name == "FinanceDimensionSetId");
     }
 
-    [Fact]
-    public void Dimension_revision_migration_adds_exact_cell_identity_and_reverses_cleanly()
-    {
-        var up = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableDimensionRevisionMigration().ApplyUp(up);
-
-        up.Operations.OfType<AddColumnOperation>().Should().ContainSingle(column =>
-            column.Table == "BudgetRevisionLines"
-            && column.Name == "FinanceDimensionSetId"
-            && column.IsNullable);
-        up.Operations.OfType<CreateIndexOperation>().Should().Contain(index =>
-            index.Name == "UX_BudgetRevisionLines_Cell"
-            && index.IsUnique
-            && index.Columns.Contains("FinanceDimensionSetId"));
-        up.Operations.OfType<AddForeignKeyOperation>().Should().ContainSingle(key =>
-            key.Table == "BudgetRevisionLines"
-            && key.PrincipalTable == "FinanceDimensionSets"
-            && key.OnDelete == ReferentialAction.Restrict);
-
-        var down = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableDimensionRevisionMigration().ApplyDown(down);
-        down.Operations.OfType<DropColumnOperation>().Should().ContainSingle(column =>
-            column.Table == "BudgetRevisionLines" && column.Name == "FinanceDimensionSetId");
-    }
-
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<BudgetCommitmentTestDbContext>()
@@ -772,12 +747,6 @@ public sealed class FinanceBudgetCommitmentServiceTests
         BudgetEntry Entry,
         DateTime BudgetDate,
         Guid PrimaryBookId);
-
-    private sealed class TestableDimensionRevisionMigration : AddDimensionAwareBudgetRevisions
-    {
-        public void ApplyUp(MigrationBuilder builder) => Up(builder);
-        public void ApplyDown(MigrationBuilder builder) => Down(builder);
-    }
 
     private sealed class TestableDimensionRevisionMigration : AddDimensionAwareBudgetRevisions
     {

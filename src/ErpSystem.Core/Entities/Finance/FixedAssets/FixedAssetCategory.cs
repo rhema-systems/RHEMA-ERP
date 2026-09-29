@@ -18,6 +18,13 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [MaxLength(500)]
         public string? Description { get; set; }
 
+        /// <summary>
+        /// Finance-owned classification used by Maintenance to discover assets that belong in
+        /// its operational register. Existing and new categories remain excluded until Finance
+        /// explicitly opts the category in.
+        /// </summary>
+        public bool RequiresMaintenance { get; set; }
+
         // --- Default Depreciation Config (Templates for new Assets) ---
         public DepreciationMethod DefaultMethod { get; set; } = DepreciationMethod.StraightLine;
         

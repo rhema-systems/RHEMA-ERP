@@ -21104,6 +21104,11 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<bool>("RequiresMaintenance")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<Guid?>("RevaluationLossAccountId")
                         .HasColumnType("uniqueidentifier");
 
