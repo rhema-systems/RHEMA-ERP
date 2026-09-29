@@ -277,8 +277,9 @@ namespace ErpSystem.Api.Controllers.Finance
         ///
         /// **Business Rules:**
         /// - All rates must be valid
-        /// - Duplicate rates are skipped or updated based on configuration
-        /// - Transaction is atomic (all or nothing)
+        /// - Validation is all-or-nothing: no row is persisted when any row is invalid
+        /// - Accepted rows enter the governed approval workflow; a workflow-start failure is retained
+        ///   as rejected audit evidence rather than being silently deleted
         ///
         /// **Authorization:** Requires Finance.Write permission
         /// </remarks>
