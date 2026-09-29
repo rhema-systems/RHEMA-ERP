@@ -139,6 +139,18 @@ public sealed class FinanceRouteContractTests
             "/procurement/business-partners/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
     }
 
+    [Theory]
+    [Trait("Category", "RouteContract")]
+    [Trait("Requirement", "FR-GL-006")]
+    [InlineData("RecurringJournalTemplate")]
+    [InlineData("RecurringJournalOccurrence")]
+    [InlineData("RecurringJournalOccurrenceWaiver")]
+    public void RecurringJournalWorkflows_ShouldBeVisibleInFinanceApprovalQueue(string entityType)
+    {
+        FinanceApprovalsController.IsFinanceEntity(entityType).Should().BeTrue(
+            "recurring-journal approvals must use the shared assignment-aware Finance workbench");
+    }
+
     private sealed record FrontendCall(string Verb, string Route, string File);
 
     private static bool MatchesAnyBackendRoute(FrontendCall call, IReadOnlyList<(string Verb, string[] Segments)> backendRoutes)
@@ -228,9 +240,12 @@ public sealed class FinanceRouteContractTests
                 "apiService\\.(get|post|put|delete|patch)\\s*(?:<[^;]*?>)?\\s*\\(\\s*(`[^`]+`|'[^']+'|\"[^\"]+\")"))
             {
                 var raw = m.Groups[2].Value[1..^1];
-                raw = raw.Split('?')[0];
-
                 var route = Regex.Replace(raw, @"\$\{[^}]+\}", "*").Replace("//", "/");
+                // Normalize template expressions before removing a query string.
+                // Otherwise the '?' in a ternary such as
+                // `${isActive ? 'activate' : 'deactivate'}` is mistaken for the
+                // beginning of a URL query and produces a phantom route failure.
+                route = route.Split('?')[0];
                 if (!route.StartsWith('/'))
                     continue; // dynamic base URL - out of scope
 

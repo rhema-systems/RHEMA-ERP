@@ -102,6 +102,15 @@ namespace ErpSystem.Web.Services
                     "Independent approval of accounting-book opening, period, or lifecycle evidence.")
             };
 
+        private static readonly IReadOnlyList<WorkflowApprovalStageSeed> RecurringJournalApprovalStages =
+            new List<WorkflowApprovalStageSeed>
+            {
+                new(
+                    "Financial Controller Approval",
+                    new[] { "Financial Controller" },
+                    "Independent controller approval of the recurring standing instruction, generated occurrence, or requested waiver.")
+            };
+
         private static readonly JsonSerializerOptions WorkflowSeedJsonOptions = CreateWorkflowSeedJsonOptions();
 
         private sealed record FinanceWorkflowSeedSpec(
@@ -1609,10 +1618,12 @@ namespace ErpSystem.Web.Services
                     await RetireAccountingBookApplicabilityWorkflowDefinitionsAsync(tenantId);
                     foreach (var spec in GetFinanceWorkflowSeedSpecs())
                     {
-                        var approvalStages = spec.EntityCode is
-                            "AccountingBookInitialization" or "AccountingBookPeriodLifecycle" or "AccountingBookLifecycle"
-                                or "DeltaAdjustmentJournal"
-                            ? AccountingBookApprovalStages
+                        var approvalStages = spec.EntityCode.StartsWith("RecurringJournal", StringComparison.Ordinal)
+                            ? RecurringJournalApprovalStages
+                            : spec.EntityCode is
+                                "AccountingBookInitialization" or "AccountingBookPeriodLifecycle" or "AccountingBookLifecycle"
+                                    or "DeltaAdjustmentJournal"
+                                ? AccountingBookApprovalStages
                             : spec.EntityCode is "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
                                 ? FinancePaymentApprovalStages
                                 : FinanceApprovalStages;
@@ -2037,6 +2048,16 @@ namespace ErpSystem.Web.Services
                     "Accounting Book Period Lifecycle Approval", "Independent approval of exact-book period opening and close transitions."),
                 new("AccountingBookLifecycle", "Accounting Book Lifecycle", typeof(AccountingBook).FullName,
                     "Accounting Book Lifecycle Approval", "Independent approval of governed accounting-book state transitions."),
+                new("RecurringJournalTemplate", "Recurring Journal Template", typeof(RecurringJournalTemplate).FullName,
+                    "Recurring Journal Template Approval",
+                    "Independent approval of a versioned standing journal instruction before schedule activation."),
+                new("RecurringJournalOccurrence", "Recurring Journal Occurrence", typeof(RecurringJournalOccurrence).FullName,
+                    "Recurring Journal Occurrence Approval",
+                    "Independent approval of each generated accounting occurrence before controlled posting."),
+                new("RecurringJournalOccurrenceWaiver", "Recurring Journal Occurrence Waiver", typeof(RecurringJournalOccurrence).FullName,
+                    "Recurring Journal Occurrence Waiver Approval",
+                    "Independent approval of an evidenced decision not to post a generated recurring occurrence."),
+
                 // Accounts Payable
                 new("FinancePurchaseOrder", "Finance Purchase Order", typeof(FinancePurchaseOrder).FullName, "Finance Purchase Order Approval",
                     "AP purchase order approval before supplier commitment, receiving, invoicing, or closure."),

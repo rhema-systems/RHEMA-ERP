@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { ArrowLeft, CalendarClock, FileText, Loader2, Pause, Pencil, Play, RotateCcw, Save, ShieldCheck, ThumbsDown, ThumbsUp, X } from 'lucide-react';
+import { useParams, useRouter } from 'next/navigation';
+import { ArrowLeft, Ban, CalendarClock, Copy, FileText, Loader2, Pause, Pencil, Play, RotateCcw, Save, ShieldCheck, ThumbsDown, ThumbsUp, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,8 +29,13 @@ const label = (value: string) => value.replace(/([a-z])([A-Z])/g, '$1 $2');
 
 export default function RecurringJournalDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { toast } = useToast();
   const { hasPermission } = useAuth();
+  const canEdit = hasPermission('Finance.JournalEntries.Edit');
+  const canCreate = hasPermission('Finance.JournalEntries.Create');
+  const canApprove = hasPermission('Finance.JournalEntries.Approve');
+  const canPost = hasPermission('Finance.JournalEntries.Post');
   const canRetryReversal = hasPermission('Finance.JournalEntries.Post');
   const [item, setItem] = useState<RecurringJournalTemplate>();
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -92,6 +97,18 @@ export default function RecurringJournalDetailPage() {
     } finally { setWorking(undefined); }
   };
 
+  const createVersion = async () => {
+    if (!item || reason.trim().length < 10) return;
+    setWorking('new-version');
+    try {
+      const version = await recurringJournalDataService.createNewVersion(item.id, reason);
+      toast({ title: `Version ${version.version} draft created` });
+      router.push(`/finance/recurring-journals/${version.id}`);
+    } catch (error) {
+      toast({ title: 'New version could not be created', description: error instanceof Error ? error.message : 'Please retry.', variant: 'destructive' });
+    } finally { setWorking(undefined); }
+  };
+
   if (loading) return <div className="p-8 text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading recurring journal...</div>;
   if (!item) return <div className="p-8">Recurring journal not found.</div>;
 
@@ -112,13 +129,16 @@ export default function RecurringJournalDetailPage() {
     <Card><CardHeader><CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5" />Controlled actions</CardTitle></CardHeader><CardContent className="space-y-4">
       <div><Label htmlFor="decision-reason">Decision / operational reason</Label><Textarea id="decision-reason" value={reason} onChange={event => setReason(event.target.value)} /></div>
       <div className="flex flex-wrap gap-2">
-        {(item.status === 'Draft' || item.status === 'Rejected') && !editingLines && <Button variant="outline" onClick={() => setEditingLines(item.lines.map(editRecurringJournalLine))} disabled={!!working}><Pencil className="mr-2 h-4 w-4" />Edit journal lines</Button>}
-        {item.status === 'PendingApproval' && <><Button onClick={() => run('approve-template', () => recurringJournalDataService.approve(item.id, reason), 'Template activated')} disabled={!!working}><ThumbsUp className="mr-2 h-4 w-4" />Approve template</Button><Button variant="destructive" onClick={() => run('reject-template', () => recurringJournalDataService.reject(item.id, reason), 'Template rejected')} disabled={!!working}><ThumbsDown className="mr-2 h-4 w-4" />Reject template</Button></>}
-        {item.status === 'Active' && <Button variant="outline" onClick={() => run('pause', () => recurringJournalDataService.pause(item.id, reason), 'Template paused')} disabled={!!working}><Pause className="mr-2 h-4 w-4" />Pause schedule</Button>}
-        {item.status === 'Paused' && <Button onClick={() => run('resume', () => recurringJournalDataService.resume(item.id, reason), 'Template resumed')} disabled={!!working}><Play className="mr-2 h-4 w-4" />Resume schedule</Button>}
+        {canEdit && (item.status === 'Draft' || item.status === 'Rejected') && !editingLines && <Button variant="outline" onClick={() => setEditingLines(item.lines.map(editRecurringJournalLine))} disabled={!!working}><Pencil className="mr-2 h-4 w-4" />Edit journal lines</Button>}
+        {canApprove && item.status === 'PendingApproval' && item.canApprove && <><Button onClick={() => run('approve-template', () => recurringJournalDataService.approve(item.id, reason), 'Approval step completed')} disabled={!!working}><ThumbsUp className="mr-2 h-4 w-4" />Approve template</Button><Button variant="destructive" onClick={() => run('reject-template', () => recurringJournalDataService.reject(item.id, reason), 'Template rejected')} disabled={!!working}><ThumbsDown className="mr-2 h-4 w-4" />Reject template</Button></>}
+        {canEdit && item.status === 'Active' && <Button variant="outline" onClick={() => run('pause', () => recurringJournalDataService.pause(item.id, reason), 'Template paused')} disabled={!!working}><Pause className="mr-2 h-4 w-4" />Pause schedule</Button>}
+        {canEdit && item.status === 'Paused' && <Button onClick={() => run('resume', () => recurringJournalDataService.resume(item.id, reason), 'Template resumed')} disabled={!!working}><Play className="mr-2 h-4 w-4" />Resume schedule</Button>}
+        {canCreate && (item.status === 'Active' || item.status === 'Paused' || item.status === 'Completed') && <Button variant="outline" onClick={createVersion} disabled={!!working}><Copy className="mr-2 h-4 w-4" />Create new version</Button>}
+        {canEdit && (item.status === 'Draft' || item.status === 'Rejected' || item.status === 'Active' || item.status === 'Paused') && <Button variant="destructive" onClick={() => run('cancel', () => recurringJournalDataService.cancel(item.id, reason), 'Template cancelled')} disabled={!!working}><Ban className="mr-2 h-4 w-4" />Cancel template</Button>}
         {!!working && <Loader2 className="h-5 w-5 animate-spin self-center" />}
       </div>
-      <p className="text-xs text-muted-foreground">Permissions and maker-checker separation are enforced by the API. A template maker cannot approve it or its generated accounting events.</p>
+      {item.status === 'PendingApproval' && !item.canApprove && <p className="text-sm text-amber-700">{item.actionDisabledReason ?? 'This request is waiting for its assigned workflow approver.'}</p>}
+      <p className="text-xs text-muted-foreground">Actions are shown only when both your Finance permission and the active workflow assignment authorize them.</p>
     </CardContent></Card>
 
     {editingLines && <Card><CardHeader><CardTitle>Edit balanced journal lines</CardTitle></CardHeader><CardContent className="space-y-4">
@@ -137,8 +157,10 @@ export default function RecurringJournalDetailPage() {
             <td className="p-3 text-center"><div>{occurrence.journalEntryId ? <Link className="text-blue-700 hover:underline" href={`/finance/journal-entries/${occurrence.journalEntryId}`}>Original journal</Link> : '—'}</div>{occurrence.postedAt && <div className="text-xs text-muted-foreground">Posted {new Date(occurrence.postedAt).toLocaleString()}</div>}{occurrence.reversalJournalEntryId && <div><Link className="text-blue-700 hover:underline" href={`/finance/journal-entries/${occurrence.reversalJournalEntryId}`}>Reversal journal</Link></div>}</td>
             <td className="p-3 text-center">{occurrence.reversalDueDate ? <div className="space-y-1"><div>Due {occurrence.reversalDueDate}</div><Badge variant={occurrence.reversalStatus === 'Posted' ? 'default' : occurrence.reversalStatus === 'Failed' ? 'destructive' : 'outline'}>{label(occurrence.reversalStatus)}</Badge>{occurrence.reversedAt && <div className="text-xs text-muted-foreground">Reversed {new Date(occurrence.reversedAt).toLocaleString()}</div>}{occurrence.reversalAttemptCount > 0 && <div className="text-xs text-muted-foreground">Attempts {occurrence.reversalAttemptCount}{occurrence.reversalLastAttemptAt ? ` · ${new Date(occurrence.reversalLastAttemptAt).toLocaleString()}` : ''}</div>}{occurrence.reversalError && <div className="max-w-xs text-xs text-destructive">{occurrence.reversalError}</div>}</div> : 'Not configured'}</td>
             <td className="p-3 text-right"><div className="flex justify-end gap-2">
-              {occurrence.status === 'PendingApproval' && <><Button size="sm" onClick={() => run(`approve-${occurrence.id}`, () => recurringJournalDataService.approveOccurrence(occurrence.id, reason), occurrence.reversalDueDate ? 'Occurrence and exact automatic reversal authorized' : 'Occurrence approved')} disabled={!!working}>{occurrence.reversalDueDate ? 'Approve + authorize reversal' : 'Approve'}</Button><Button size="sm" variant="destructive" onClick={() => run(`reject-${occurrence.id}`, () => recurringJournalDataService.rejectOccurrence(occurrence.id, reason), 'Occurrence rejected')} disabled={!!working}>Reject</Button></>}
-              {(occurrence.status === 'Approved' || occurrence.status === 'SubmissionFailed') && <Button size="sm" onClick={() => run('post', () => recurringJournalDataService.postOccurrence(occurrence.id), 'Occurrence posted')} disabled={!!working}>Post to GL</Button>}
+              {canApprove && occurrence.status === 'PendingApproval' && occurrence.canApprove && <><Button size="sm" onClick={() => run(`approve-${occurrence.id}`, () => recurringJournalDataService.approveOccurrence(occurrence.id, reason), occurrence.reversalDueDate ? 'Approval step completed; reversal authorization follows final approval' : 'Approval step completed')} disabled={!!working}>{occurrence.reversalDueDate ? 'Approve + authorize reversal' : 'Approve'}</Button><Button size="sm" variant="destructive" onClick={() => run(`reject-${occurrence.id}`, () => recurringJournalDataService.rejectOccurrence(occurrence.id, reason), 'Occurrence rejected')} disabled={!!working}>Reject</Button></>}
+              {canPost && occurrence.canPost && <Button size="sm" onClick={() => run('post', () => recurringJournalDataService.postOccurrence(occurrence.id), 'Occurrence posted')} disabled={!!working}>Post to GL</Button>}
+              {canEdit && occurrence.canRequestWaiver && <Button size="sm" variant="outline" onClick={() => run(`waive-${occurrence.id}`, () => recurringJournalDataService.requestOccurrenceWaiver(occurrence.id, reason), 'Waiver submitted for independent approval')} disabled={!!working}>Request waiver</Button>}
+              {occurrence.status === 'PendingApproval' && !occurrence.canApprove && <span className="max-w-48 text-xs text-muted-foreground">{occurrence.actionDisabledReason ?? 'Waiting for assigned approver'}</span>}
               {canRetryReversal && occurrence.status === 'Posted' && occurrence.reversalStatus === 'Failed' && <Button size="sm" variant="outline" onClick={() => run(`retry-${occurrence.id}`, () => recurringJournalDataService.retryReversal(occurrence.id), 'Automatic reversal retry processed')} disabled={!!working}><RotateCcw className="mr-1 h-4 w-4" />Retry reversal</Button>}
             </div></td>
           </tr>)}
