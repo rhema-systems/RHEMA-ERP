@@ -7,10 +7,12 @@ import type {
   CancelRoomBooking,
   CheckOutEvent,
   CloseFiscalPeriod,
+  ClosureType,
   CompanyEvent,
   CompanyEventDetail,
   CompanyEventSummary,
   CompanyMilestone,
+  CompanyScheduleReminderRun,
   CompleteEvent,
   CompleteEventTask,
   CreateBusinessClosure,
@@ -37,10 +39,12 @@ import type {
   MeetingRoom,
   MeetingRoomSummary,
   MilestoneCategory,
+  PersonalSchedule,
   RescheduleEvent,
   RespondToEventInvitation,
   RoomBooking,
   RoomBookingSummary,
+  TeamSchedule,
   UpdateBusinessClosure,
   UpdateCompanyEvent,
   UpdateCompanyMilestone,
@@ -49,7 +53,6 @@ import type {
   UpdateFiscalYear,
   UpdateMeetingRoom,
   UpdateRoomBooking,
-  ClosureType,
 } from '@/types/hr/company-schedule';
 
 /**
@@ -67,6 +70,27 @@ import type {
 
 class CompanyEventService {
   private readonly baseUrl = '/CompanySchedule';
+
+  /**
+   * Chases everybody who has not answered their invitation. Returns how many were reached. Counts as
+   * the event's RSVP chase: the hourly sweep will not send it again (round 4, lane N-b2).
+   */
+  sendRsvpReminders(eventId: string): Promise<{ sent: number }> {
+    return apiService.post<{ sent: number }>(`${this.baseUrl}/events/${eventId}/rsvp-reminders`, {});
+  }
+
+  /**
+   * Reminds every participant who has not declined. Returns how many were reached. Counts as the
+   * event's reminder for its current date: the hourly sweep will not send it again.
+   */
+  sendEventReminders(eventId: string): Promise<{ sent: number }> {
+    return apiService.post<{ sent: number }>(`${this.baseUrl}/events/${eventId}/reminders`, {});
+  }
+
+  /** Runs the reminder sweep now for the tenant — what the hourly host runs (lane N-b2). */
+  runDueReminders(): Promise<CompanyScheduleReminderRun> {
+    return apiService.post<CompanyScheduleReminderRun>(`${this.baseUrl}/reminders/run`, {});
+  }
 
   getAll(): Promise<CompanyEvent[]> {
     return apiService.get<CompanyEvent[]>(`${this.baseUrl}/events`);
@@ -507,9 +531,40 @@ class FiscalYearService {
   }
 }
 
+
+
+/**
+ * The diary and the chase doors (round 4, D5/D6).
+ *
+ * ⚠ Its own class rather than methods on `companyEventService`: a personal schedule is not an event,
+ * and the reminder doors act on an event but are about telling people. They share the controller,
+ * not the subject.
+ */
+class PersonalScheduleService {
+  private readonly baseUrl = '/CompanySchedule';
+
+  /**
+   * Everything the SIGNED-IN employee is committed to between two dates.
+   *
+   * ⚠ No employee id parameter, deliberately: the server takes it from the token. One here would
+   * let any signed-in user read a colleague's leave and travel.
+   *
+   * ⚠ Sixty days maximum — the server refuses a wider range rather than walking it.
+   */
+  getMySchedule(from: string, to: string): Promise<PersonalSchedule> {
+    return apiService.get<PersonalSchedule>(`${this.baseUrl}/my-schedule`, { from, to });
+  }
+
+  /** A unit and its subtree. Gated on the company-schedule WRITE policy — it exposes other people's leave. */
+  getTeamSchedule(organizationUnitId: string, from: string, to: string): Promise<TeamSchedule> {
+    return apiService.get<TeamSchedule>(`${this.baseUrl}/team-schedule/${organizationUnitId}`, { from, to });
+  }
+}
+
 export const companyEventService = new CompanyEventService();
 export const meetingRoomService = new MeetingRoomService();
 export const roomBookingService = new RoomBookingService();
 export const companyMilestoneService = new CompanyMilestoneService();
 export const businessClosureService = new BusinessClosureService();
 export const fiscalYearService = new FiscalYearService();
+export const personalScheduleService = new PersonalScheduleService();

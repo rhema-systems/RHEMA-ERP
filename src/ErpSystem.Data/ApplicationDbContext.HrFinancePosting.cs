@@ -55,6 +55,8 @@ public partial class ApplicationDbContext
             entity.Property(x => x.IdempotencyKey).HasMaxLength(200);
             entity.Property(x => x.PostingAction).HasMaxLength(50);
             entity.Property(x => x.VendorInvoiceNumber).HasMaxLength(50);
+            entity.Property(x => x.CustomerInvoiceNumber).HasMaxLength(50);
+            entity.HasIndex(x => x.CustomerInvoiceId);
             entity.Property(x => x.ExternalStatus).HasMaxLength(50);
             entity.HasIndex(x => x.VendorInvoiceId);
 

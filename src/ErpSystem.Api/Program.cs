@@ -1009,6 +1009,24 @@ if (!skipStartupInitialization)
 
     if (databaseInitializationSucceeded)
     {
+        app.Logger.LogInformation("Starting Estate acquisition land bank parcel seeding...");
+        try
+        {
+            await SeedEstateAcquisitionLandBankParcelsAsync(app);
+            app.Logger.LogInformation("Estate acquisition land bank parcel seeding completed");
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError(ex, "Estate acquisition land bank parcel seeding failed");
+            if (failFastOnDatabaseInitializationError)
+            {
+                throw;
+            }
+        }
+    }
+
+    if (databaseInitializationSucceeded)
+    {
         app.Logger.LogInformation("Starting baseline Finance close-template seeding...");
         try
         {
@@ -1171,6 +1189,13 @@ async Task SeedPaymentTermBaselineAsync(WebApplication app)
     using var scope = app.Services.CreateScope();
     var seeder = scope.ServiceProvider.GetRequiredService<PaymentTermBaselineSeeder>();
     await seeder.SeedAllActiveTenantsAsync();
+}
+
+async Task SeedEstateAcquisitionLandBankParcelsAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+    await seedingService.SeedEstateAcquisitionLandBankParcelsAsync();
 }
 
 async Task SeedFinanceCloseTemplateBaselineAsync(WebApplication app)

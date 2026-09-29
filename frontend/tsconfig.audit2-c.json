@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/leave.ts",
+    "src/components/hr/common/ResourceCollectionTab.tsx",
+    "src/components/hr/leave/LeaveAccrualPoliciesTab.tsx",
+    "src/components/hr/leave/LeaveAllocationsTab.tsx",
+    "src/components/hr/leave/LeaveTypeForm.tsx",
+    "src/app/hr/leave/adjustments/page.tsx",
+    "src/app/hr/leave/compliance/page.tsx",
+    "src/app/hr/leave/encashments/page.tsx",
+    "src/app/hr/leave/plans/page.tsx",
+    "src/app/hr/leave/register/page.tsx",
+    "src/app/hr/leave/requests/page.tsx",
+    "src/app/hr/leave/year-end/page.tsx"
+  ]
+}

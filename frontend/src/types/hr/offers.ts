@@ -660,3 +660,55 @@ export interface ApplyCheckTemplate {
   /** Replaces existing items of the same check type rather than skipping them. */
   overwriteExisting: boolean;
 }
+
+// ── The offer defaults proposal (round 4, lane G) ──────────────────────────
+
+/**
+ * What the system proposes for a new offer, and where each value came from.
+ *
+ * ⚠ `sources` carries an entry **only** where a value was actually resolved. A field the system
+ * could not derive comes back null with no source line and is named in `unresolved` instead —
+ * rendering a confident caption under an empty box would be worse than showing nothing.
+ *
+ * Nothing here is authoritative: every value is a starting point the recruiter may overwrite, and
+ * the server's own rules (the salary band check, the position snapshot, the status gate) still run
+ * on create and still win.
+ */
+export interface JobOfferDefaults {
+  jobApplicationId: string;
+  applicationNumber: string;
+  candidateName: string;
+  vacancyNumber: string;
+  positionTitle: string;
+  departmentName: string;
+  employmentTypeName: string;
+
+  locationLevelId?: string | null;
+  locationId?: string | null;
+  locationName?: string | null;
+
+  contractDurationMonths?: number | null;
+  probationPeriodMonths?: number | null;
+  noticePeriodMonths?: number | null;
+  annualLeaveDays?: number | null;
+  weeklyHours?: number | null;
+  isConditional: boolean;
+  proposedStartDate?: string | null;
+  expiryDate?: string | null;
+
+  salaryGradeId?: string | null;
+  salaryGradeName?: string | null;
+  salaryGradeMin?: number | null;
+  salaryGradeMax?: number | null;
+  salaryLevelId?: string | null;
+  salaryLevelName?: string | null;
+  salaryNotchId?: string | null;
+  salaryNotchNumber?: number | null;
+  baseSalary?: number | null;
+  currencyCode?: string | null;
+
+  /** camelCase field name → the one-line explanation of where that value came from. */
+  sources: Record<string, string>;
+  /** What the system could not propose, and why — so the screen can say what HR must supply. */
+  unresolved: string[];
+}

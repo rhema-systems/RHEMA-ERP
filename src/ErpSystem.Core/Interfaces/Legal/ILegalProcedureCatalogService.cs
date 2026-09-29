@@ -9,8 +9,6 @@ public interface ILegalProcedureCatalogService
 public sealed record LegalProcedureCatalogItem(
     string Title,
     string EntityType,
-    string Source,
-    string Summary,
     string Icon,
     int StageCount,
     string Accent);
@@ -26,7 +24,6 @@ public sealed record LegalProcedureWorkspace(
 public sealed record LegalWorkspaceStage(
     string Name,
     string Owner,
-    string Summary,
     IReadOnlyList<string> Checklist);
 
 public sealed record LegalWorkspaceDocument(

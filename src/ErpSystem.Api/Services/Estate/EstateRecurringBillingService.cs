@@ -38,6 +38,8 @@ public sealed class EstateRecurringBillingService(
         var rentIds = await db.EstateManagedAssets.AsNoTracking()
             .Where(item => item.TenantId == tenantId && !item.IsDeleted
                 && item.AutoGenerateRentInvoices && item.NextRentBillingDate <= today
+                && (item.Status == EstateManagedAssetStatus.Leased
+                    || item.Status == EstateManagedAssetStatus.Occupied)
                 && item.AssetType != EstateManagedAssetType.Land)
             .Select(item => item.Id)
             .ToListAsync(cancellationToken);

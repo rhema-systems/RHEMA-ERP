@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/leave.ts",
+    "src/components/hr/employee/tabs/fields.tsx",
+    "src/components/hr/leave/LeaveTypeForm.tsx",
+    "src/components/hr/leave/LeaveAccrualPoliciesTab.tsx",
+    "src/components/hr/leave/LeaveAllocationsTab.tsx",
+    "src/components/hr/leave/LeaveEligibilityTab.tsx",
+    "src/app/administration/hr/leave-types/**/*.tsx",
+    "src/app/administration/hr/settings/policy/page.tsx",
+    "src/types/hr/attendance.ts",
+    "src/app/administration/hr/attendance/holiday-calendars/**/*.tsx"
+  ]
+}

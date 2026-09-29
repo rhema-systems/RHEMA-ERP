@@ -64,7 +64,12 @@ import {
   resolveProfileTab,
   visibleProfileTabs,
 } from '@/components/hr/employee/profileTabGroups';
-import { offPayrollReasonLabel, PAYROLL_ISSUE_LABELS, PROBATION_SOURCE_LABEL } from '@/types/hr/employee';
+import {
+  CONFIRMATION_SOURCE_LABEL,
+  offPayrollReasonLabel,
+  PAYROLL_ISSUE_LABELS,
+  PROBATION_SOURCE_LABEL,
+} from '@/types/hr/employee';
 
 function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
@@ -363,7 +368,18 @@ function EmployeeDetailPageInner() {
               label="Expected Confirmation"
               value={e.confirmationDate ? null : e.expectedConfirmationDate}
             />
-            <InfoRow label="Confirmed On" value={e.confirmationDate} />
+            {/* Lane 11: a date worked out from the hire date and the term reads as such, so it is
+                never mistaken for one somebody supplied. */}
+            <InfoRow
+              label="Confirmed On"
+              value={
+                e.confirmationDate
+                  ? `${e.confirmationDate}${
+                      e.confirmationSource ? ` — ${CONFIRMATION_SOURCE_LABEL[e.confirmationSource]}` : ''
+                    }`
+                  : null
+              }
+            />
           </InfoCard>
 
           <InfoCard title="Compensation & Tax">

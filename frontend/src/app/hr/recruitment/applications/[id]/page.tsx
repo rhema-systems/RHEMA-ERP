@@ -29,6 +29,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { GatedPhoto } from '@/components/hr/common/PhotoDialog';
 import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
@@ -38,7 +39,7 @@ import { ApplicationReviewsPanel } from '@/components/hr/recruitment/Application
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, formatDateTime, humanizeEnum } from '@/lib/hr/attendance-format';
 import { jobOfferService } from '@/services/hr/offers.service';
-import { jobApplicationService } from '@/services/hr/recruitment-pipeline.service';
+import { jobApplicationService, jobCandidateService } from '@/services/hr/recruitment-pipeline.service';
 import {
   APPLICANT_TEST_TYPES,
   COMMUNICATION_DIRECTIONS,
@@ -305,7 +306,17 @@ export default function ApplicationDetailPage() {
           </Card>
 
           <Card>
-            <CardHeader className="pb-2">
+            {/* Round 4, lane B5. The photograph was built in round 3 (lane C2) and rendered on the
+                CANDIDATE screens only, so a recruiter working an APPLICATION — where the decisions
+                are actually made — never saw a face. Same gated route, same flag guarding against a
+                request that would 404. */}
+            <CardHeader className="flex-row items-center gap-3 space-y-0 pb-2">
+              <GatedPhoto
+                endpoint={jobCandidateService.photoUrl(a.jobCandidateId)}
+                enabled={a.candidateHasPhoto}
+                alt={a.candidateName}
+                className="h-12 w-12"
+              />
               <CardTitle className="text-base">Candidate</CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-x-6">

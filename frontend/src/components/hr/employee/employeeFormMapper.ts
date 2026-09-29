@@ -94,5 +94,12 @@ export function employeeFormToRequest(
     badgeNumber: s(values.badgeNumber),
     notes: s(values.notes),
     isExpatriate: values.isExpatriate,
+    // Round 4, lane O. The choice always travels, so "Follow the position" can hand a by-hand
+    // setting back to the post. ⚠ The three texts go as they stand, NOT through s(): the update reads
+    // null as "leave it", so an emptied field must arrive as '' to be cleared.
+    maintenanceAssignment: values.maintenanceAssignment,
+    specialization: (values.specialization ?? '').trim(),
+    certificationLevel: (values.certificationLevel ?? '').trim(),
+    experienceLevel: values.experienceLevel ?? '',
   };
 }

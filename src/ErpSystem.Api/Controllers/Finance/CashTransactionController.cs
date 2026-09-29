@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -69,6 +70,7 @@ public class CashTransactionController : ControllerBase
     /// <response code="401">Not authenticated. A valid authentication token is required.</response>
     /// <response code="500">Internal server error occurred while retrieving transactions.</response>
     [HttpGet]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<IEnumerable<CashTransactionDto>>> GetAll(
         [FromQuery] DateTime? fromDate = null,
         [FromQuery] DateTime? toDate = null)
@@ -105,6 +107,7 @@ public class CashTransactionController : ControllerBase
     /// <response code="401">Not authenticated. A valid authentication token is required.</response>
     /// <response code="500">Internal server error occurred while retrieving the transaction.</response>
     [HttpGet("{id}")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<CashTransactionDto>> GetById(Guid id)
     {
         var transaction = await _cashTransactionService.GetByIdAsync(id);
@@ -118,6 +121,7 @@ public class CashTransactionController : ControllerBase
     /// Returns the immutable cash/bank operational, posting, journal-line, and audit trail.
     /// </summary>
     [HttpGet("{id}/trace")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<CashTransactionTraceDto>> GetTrace(
         Guid id,
         CancellationToken cancellationToken)
@@ -164,6 +168,7 @@ public class CashTransactionController : ControllerBase
     /// <response code="401">Not authenticated. A valid authentication token is required.</response>
     /// <response code="500">Internal server error occurred while retrieving transactions.</response>
     [HttpGet("bank-account/{bankAccountId}")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<IEnumerable<CashTransactionDto>>> GetByBankAccount(
         Guid bankAccountId,
         [FromQuery] DateTime? fromDate = null,
@@ -210,6 +215,7 @@ public class CashTransactionController : ControllerBase
     /// <response code="401">Not authenticated. A valid authentication token is required.</response>
     /// <response code="500">Internal server error occurred while retrieving unreconciled transactions.</response>
     [HttpGet("bank-account/{bankAccountId}/unreconciled")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<IEnumerable<CashTransactionDto>>> GetUnreconciled(Guid bankAccountId)
     {
         try
@@ -256,6 +262,7 @@ public class CashTransactionController : ControllerBase
     /// <response code="401">Not authenticated. A valid authentication token is required.</response>
     /// <response code="500">Internal server error occurred while creating the receipt.</response>
     [HttpPost("receipt")]
+    [Authorize(Policy = FinancePermissions.RecordCashBankTransactions)]
     public async Task<ActionResult<CashTransactionDto>> CreateReceipt([FromBody] CreateCashReceiptDto dto)
     {
         try
@@ -306,6 +313,7 @@ public class CashTransactionController : ControllerBase
     /// <response code="401">Not authenticated. A valid authentication token is required.</response>
     /// <response code="500">Internal server error occurred while creating the payment.</response>
     [HttpPost("payment")]
+    [Authorize(Policy = FinancePermissions.RecordCashBankTransactions)]
     public async Task<ActionResult<CashTransactionDto>> CreatePayment([FromBody] CreateCashPaymentDto dto)
     {
         try
@@ -361,6 +369,7 @@ public class CashTransactionController : ControllerBase
     /// projected realised FX for a transfer without creating operational or ledger records.
     /// </summary>
     [HttpPost("transfer/preview")]
+    [Authorize(Policy = FinancePermissions.RecordCashBankTransactions)]
     public async Task<ActionResult<BankTransferPreviewDto>> PreviewTransfer(
         [FromBody] CreateBankTransferDto dto,
         CancellationToken cancellationToken)
@@ -380,6 +389,7 @@ public class CashTransactionController : ControllerBase
     }
 
     [HttpPost("transfer")]
+    [Authorize(Policy = FinancePermissions.RecordCashBankTransactions)]
     public async Task<ActionResult<object>> CreateTransfer([FromBody] CreateBankTransferDto dto)
     {
         try
@@ -398,6 +408,7 @@ public class CashTransactionController : ControllerBase
     }
 
     [HttpPost("{id}/submit")]
+    [Authorize(Policy = FinancePermissions.RecordCashBankTransactions)]
     public async Task<ActionResult<CashTransactionDto>> Submit(Guid id, CancellationToken cancellationToken)
     {
         try
@@ -416,6 +427,7 @@ public class CashTransactionController : ControllerBase
     }
 
     [HttpPost("{id}/approve")]
+    [Authorize(Policy = FinancePermissions.WorkflowApprove)]
     public async Task<ActionResult<CashTransactionDto>> Approve(Guid id, [FromBody] CashTransactionWorkflowActionDto? request, CancellationToken cancellationToken)
     {
         try
@@ -434,6 +446,7 @@ public class CashTransactionController : ControllerBase
     }
 
     [HttpPost("{id}/reject")]
+    [Authorize(Policy = FinancePermissions.WorkflowReject)]
     public async Task<ActionResult<CashTransactionDto>> Reject(Guid id, [FromBody] CashTransactionWorkflowActionDto? request, CancellationToken cancellationToken)
     {
         try
@@ -452,6 +465,7 @@ public class CashTransactionController : ControllerBase
     }
 
     [HttpPost("{id}/return")]
+    [Authorize(Policy = FinancePermissions.WorkflowRequestChanges)]
     public async Task<ActionResult<CashTransactionDto>> Return(Guid id, [FromBody] CashTransactionWorkflowActionDto? request, CancellationToken cancellationToken)
     {
         try
@@ -470,6 +484,7 @@ public class CashTransactionController : ControllerBase
     }
 
     [HttpPost("{id}/cancel")]
+    [Authorize(Policy = FinancePermissions.WorkflowCancel)]
     public async Task<ActionResult<CashTransactionDto>> Cancel(Guid id, [FromBody] CashTransactionWorkflowActionDto? request, CancellationToken cancellationToken)
     {
         try
@@ -488,6 +503,7 @@ public class CashTransactionController : ControllerBase
     }
 
     [HttpPost("{id}/post")]
+    [Authorize(Policy = FinancePermissions.WorkflowPostAfterApproval)]
     public async Task<ActionResult<CashTransactionDto>> Post(Guid id, CancellationToken cancellationToken)
     {
         try
@@ -510,6 +526,7 @@ public class CashTransactionController : ControllerBase
     /// compensating operational and ledger entries. Reconciled transactions are blocked.
     /// </summary>
     [HttpPost("{id}/reverse")]
+    [Authorize(Policy = FinancePermissions.ReverseCashBankTransactions)]
     public async Task<ActionResult<CashTransactionDto>> Reverse(
         Guid id,
         [FromBody] ReverseCashTransactionDto dto,
@@ -566,6 +583,7 @@ public class CashTransactionController : ControllerBase
     /// <response code="404">No cash transaction exists with the specified ID.</response>
     /// <response code="500">Internal server error occurred while deleting the transaction.</response>
     [HttpDelete("{id}")]
+    [Authorize(Policy = FinancePermissions.RecordCashBankTransactions)]
     public async Task<ActionResult> Delete(Guid id)
     {
         try

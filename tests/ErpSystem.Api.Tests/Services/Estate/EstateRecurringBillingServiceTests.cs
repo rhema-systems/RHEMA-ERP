@@ -149,6 +149,37 @@ public sealed class EstateRecurringBillingServiceTests
     }
 
     [Fact]
+    public async Task FormerRentalProperty_DoesNotGenerateAnotherInvoice()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options, tenantId);
+        db.EstateManagedAssets.Add(new EstateManagedAsset
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AssetCode = "APT-FORMER", Name = "Former rental",
+            AssetType = EstateManagedAssetType.Property, Status = EstateManagedAssetStatus.Available,
+            ExternalListingType = "Rent", ExternalMonthlyRent = 2500m,
+            CustomerBusinessPartnerId = Guid.NewGuid(), PropertyFileReference = "OLD-AGREEMENT",
+            AutoGenerateRentInvoices = true, NextRentBillingDate = DateTime.UtcNow.Date.AddDays(-1)
+        });
+        await db.SaveChangesAsync();
+        var invoices = new Mock<IInvoiceService>();
+        var lockService = new Mock<IDistributedLockService>();
+        lockService.Setup(item => item.TryAcquireAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Lease());
+        var runner = new EstateRecurringBillingService(db, invoices.Object,
+            Mock.Of<IGroundRentAdministrationService>(), lockService.Object,
+            NullLogger<EstateRecurringBillingService>.Instance);
+
+        var result = await runner.RunForTenantAsync(tenantId, CancellationToken.None);
+
+        result.RentInvoices.Should().Be(0);
+        result.Failures.Should().Be(0);
+        invoices.Verify(item => item.CreateAsync(It.IsAny<InvoiceCreateDto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task GroundRent_RejectsAccountForFormerCustomer()
     {
         var tenantId = Guid.NewGuid();

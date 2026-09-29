@@ -9,8 +9,6 @@ public interface IPlanningProcedureCatalogService
 public sealed record PlanningProcedureCatalogItem(
     string Title,
     string EntityType,
-    string Source,
-    string Summary,
     string Icon,
     int StageCount,
     string Accent);
@@ -26,7 +24,6 @@ public sealed record PlanningProcedureWorkspace(
 public sealed record PlanningWorkspaceStage(
     string Name,
     string Owner,
-    string Summary,
     IReadOnlyList<string> Checklist);
 
 public sealed record PlanningWorkspaceDocument(

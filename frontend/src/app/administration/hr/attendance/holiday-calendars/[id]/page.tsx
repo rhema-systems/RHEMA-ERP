@@ -174,6 +174,9 @@ export default function HolidayCalendarDetailPage() {
         ]}
         schema={holidaySchema as any}
         emptyForm={{ ...emptyHoliday, dateFrom: `${year}-01-01`, dateTo: `${year}-01-01` }}
+        // ⚠ Round 5, lane N4: every field the save writes. The four after isActive used to fall back
+        // to the empty form, so renaming a holiday blanked its description, its observed date and its
+        // pay multiplier, and reset its recurring flag.
         toForm={(h) => ({
           ...emptyHoliday,
           holidayName: h.holidayName,
@@ -182,6 +185,10 @@ export default function HolidayCalendarDetailPage() {
           observanceType: h.observanceType,
           attractsHolidayPay: h.attractsHolidayPay,
           isActive: h.isActive,
+          description: h.description ?? '',
+          substitutionDate: h.substitutionDate ?? '',
+          holidayPayMultiplier: h.holidayPayMultiplier ?? undefined,
+          isRecurringAnnually: h.isRecurringAnnually ?? emptyHoliday.isRecurringAnnually,
         })}
         renderFields={(form) => (
           <>

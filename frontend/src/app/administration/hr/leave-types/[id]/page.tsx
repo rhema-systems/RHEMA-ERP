@@ -4,7 +4,6 @@ import { useParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/hr/common/PageHeader';
@@ -15,7 +14,6 @@ import { LeaveAllocationsTab } from '@/components/hr/leave/LeaveAllocationsTab';
 import { LeaveEligibilityTab } from '@/components/hr/leave/LeaveEligibilityTab';
 import { LeaveAccrualPoliciesTab } from '@/components/hr/leave/LeaveAccrualPoliciesTab';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
-import { ENCASHMENT_RATE_BASIS_OPTIONS } from '@/types/hr/leave';
 
 function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
@@ -97,11 +95,17 @@ export default function LeaveTypeDetailPage() {
         <TabsContent value="overview" className="space-y-4 pt-4">
           <InfoCard title="Entitlement">
             <InfoRow label="Default days / year" value={t.defaultDaysPerYear} />
-            <InfoRow label="Max days / year" value={t.maxDaysPerYear} />
+            {/* Round 5, lane N2: only annual leave's maximum binds, as the highest allocation allowed. */}
+            {t.category === 'Annual' && (
+              <InfoRow label="Highest allocation allowed" value={t.maxDaysPerYear} />
+            )}
             <InfoRow label="Minimum notice (days)" value={t.minDaysNotice} />
             <InfoRow label="Min service to access (months)" value={t.minServiceMonthsToAccess} />
             <InfoRow label="Paid" value={yn(t.isPaid)} />
-            <InfoRow label="Mandatory annual leave" value={yn(t.mandatoryAnnualLeave)} />
+            <InfoRow
+              label="Kind"
+              value={t.category === 'Annual' ? 'Annual leave' : t.category === 'Maternity' ? 'Maternity leave' : 'Other'}
+            />
             <InfoRow label="Requires excuse duty" value={yn(t.requiresMedicalCertificate)} />
             {t.requiresMedicalCertificate && (
               <>
@@ -126,6 +130,12 @@ export default function LeaveTypeDetailPage() {
             <InfoRow label="Counts holidays" value={yn(t.countHolidaysAsLeave)} />
             <InfoRow label="Requires approval" value={yn(t.requiresApproval)} />
             <InfoRow label="Requires reliever" value={yn(t.requiresReliever)} />
+            {t.category === 'Other' && (
+              <InfoRow
+                label="Beyond the limit"
+                value={t.allowOffsetAgainstAnnual ? 'May be charged to annual leave' : 'Refused'}
+              />
+            )}
             <InfoRow label="Has sub-types" value={yn(t.hasSubTypes)} />
           </InfoCard>
 
@@ -148,25 +158,9 @@ export default function LeaveTypeDetailPage() {
             />
           </InfoCard>
 
+          {/* Leave settings audit 2 (L-73): no rate here — HR records days, Finance values them. */}
           <InfoCard title="Encashment">
-            <InfoRow label="Allow cash conversion" value={yn(t.allowCashConversion)} />
-            <InfoRow
-              label="Rate basis"
-              value={
-                ENCASHMENT_RATE_BASIS_OPTIONS.find((o) => o.value === t.encashmentRateBasis)
-                  ?.label ?? t.encashmentRateBasis
-              }
-            />
-            <InfoRow label="Rate per day" value={t.encashmentRatePerDay} />
-            <InfoRow label="Working days / month" value={t.encashmentWorkingDaysPerMonth} />
-            <InfoRow
-              label="Allowance components"
-              value={
-                t.allowanceComponentIds?.length ? (
-                  <Badge variant="secondary">{t.allowanceComponentIds.length} linked</Badge>
-                ) : undefined
-              }
-            />
+            <InfoRow label="Cash conversion while employed" value={yn(t.allowCashConversion)} />
           </InfoCard>
         </TabsContent>
 

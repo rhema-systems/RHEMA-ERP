@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.StaffLeave;
+using ErpSystem.Core.Enums;
 // ⚠ This file sits in ErpSystem.Application.Extensions, NOT under Services.HR, so LeaveYear
 // needs an explicit using — namespace lookup does not walk into an unrelated tree.
 using ErpSystem.Core.Services.HR;
@@ -37,10 +38,8 @@ namespace ErpSystem.Application.Extensions
             ForfeitUnusedAfterMonths = entity.ForfeitUnusedAfterMonths,
             YearEndBasis = entity.YearEndBasis,
             ProRateFirstYearEntitlement = entity.ProRateFirstYearEntitlement,
-            MandatoryAnnualLeave = entity.MandatoryAnnualLeave,
-            EncashmentRateBasis = entity.EncashmentRateBasis,
-            EncashmentRatePerDay = entity.EncashmentRatePerDay,
-            EncashmentWorkingDaysPerMonth = entity.EncashmentWorkingDaysPerMonth,
+            Category = entity.Category,
+            AllowOffsetAgainstAnnual = entity.AllowOffsetAgainstAnnual,
             RequiresMedicalCertificate = entity.RequiresMedicalCertificate,
             SelfCertificationDays = entity.SelfCertificationDays,
             MedicalBoardThresholdDays = entity.MedicalBoardThresholdDays,
@@ -58,7 +57,8 @@ namespace ErpSystem.Application.Extensions
             MinDaysNotice = dto.MinDaysNotice,
             RequiresApproval = dto.RequiresApproval,
             CalendarColor = dto.CalendarColor,
-            HasSubTypes = dto.HasSubTypes,
+            // Derived from the sub-types (lane N2); a new type has none yet.
+            HasSubTypes = false,
             AllowCarryOver = dto.AllowCarryOver,
             MaxCarryOverDays = dto.MaxCarryOverDays,
             CountWeekendsAsLeave = dto.CountWeekendsAsLeave,
@@ -70,10 +70,8 @@ namespace ErpSystem.Application.Extensions
             ForfeitUnusedAfterMonths = dto.ForfeitUnusedAfterMonths,
             YearEndBasis = dto.YearEndBasis,
             ProRateFirstYearEntitlement = dto.ProRateFirstYearEntitlement,
-            MandatoryAnnualLeave = dto.MandatoryAnnualLeave,
-            EncashmentRateBasis = dto.EncashmentRateBasis,
-            EncashmentRatePerDay = dto.EncashmentRatePerDay,
-            EncashmentWorkingDaysPerMonth = dto.EncashmentWorkingDaysPerMonth,
+            Category = dto.Category ?? LeaveTypeCategory.Other,
+            AllowOffsetAgainstAnnual = dto.AllowOffsetAgainstAnnual ?? false,
             RequiresMedicalCertificate = dto.RequiresMedicalCertificate,
             SelfCertificationDays = dto.SelfCertificationDays,
             MedicalBoardThresholdDays = dto.MedicalBoardThresholdDays
@@ -100,7 +98,10 @@ namespace ErpSystem.Application.Extensions
             LeaveTypeId = dto.LeaveTypeId,
             SubTypeName = dto.SubTypeName,
             Description = dto.Description,
-            MaxDaysAllowed = dto.MaxDaysAllowed
+            MaxDaysAllowed = dto.MaxDaysAllowed,
+            // Round 5, lane N (guide L-44): it was not mapped, so a sub-type created switched off
+            // came out active and was offered to every request. Left out, it is active.
+            IsActive = dto.IsActive ?? true
         };
 
         public static List<LeaveSubTypeDto> ToDtoList(this IEnumerable<LeaveSubType> entities)
@@ -113,8 +114,6 @@ namespace ErpSystem.Application.Extensions
             Id = entity.Id,
             LeaveTypeId = entity.LeaveTypeId,
             LeaveTypeName = entity.LeaveType?.Name ?? string.Empty,
-            LeaveSubTypeId = entity.LeaveSubTypeId,
-            LeaveSubTypeName = entity.LeaveSubType?.SubTypeName,
             StaffLevelId = entity.StaffLevelId,
             StaffLevelName = entity.StaffLevel?.Name ?? string.Empty,
             AllocationDays = entity.AllocationDays,
@@ -125,7 +124,9 @@ namespace ErpSystem.Application.Extensions
         public static LeaveCategoryAllocation ToEntity(this CreateLeaveCategoryAllocationDto dto) => new LeaveCategoryAllocation
         {
             LeaveTypeId = dto.LeaveTypeId,
-            LeaveSubTypeId = dto.LeaveSubTypeId,
+            // Always the whole type (round 5, lane N2): a balance is kept per type. The sub-type
+            // field left the DTO and the table in leave settings audit 2 (L-76); an older caller
+            // that still sends it is ignored by the serializer.
             StaffLevelId = dto.StaffLevelId,
             AllocationDays = dto.AllocationDays,
             EffectiveFrom = dto.EffectiveFrom,
@@ -189,7 +190,8 @@ namespace ErpSystem.Application.Extensions
             AccrualRate = dto.AccrualRate,
             MinServiceMonths = dto.MinServiceMonths,
             ProRateOnJoin = dto.ProRateOnJoin,
-            ProRateOnExit = dto.ProRateOnExit
+            ProRateOnExit = dto.ProRateOnExit,
+            IsActive = dto.IsActive ?? true
         };
 
         public static List<LeaveAccrualPolicyDto> ToDtoList(this IEnumerable<LeaveAccrualPolicy> entities)
@@ -229,7 +231,9 @@ namespace ErpSystem.Application.Extensions
             WorkflowInstanceId = entity.WorkflowInstanceId,
             ApprovedById = entity.ApprovedById,
             ApprovedDate = entity.ApprovedDate,
-            RejectionReason = entity.RejectionReason
+            RejectionReason = entity.RejectionReason,
+            CancellationDate = entity.CancellationDate,
+            CancellationReason = entity.CancellationReason
         };
 
         public static LeavePlan ToEntity(this CreateLeavePlanDto dto) => new LeavePlan
@@ -270,7 +274,8 @@ namespace ErpSystem.Application.Extensions
             SecondRelieverEmployeeId = dto.SecondRelieverEmployeeId,
             RelieverNotes = dto.RelieverNotes,
             HandoverNotes = dto.HandoverNotes,
-            LeavePlanId = dto.LeavePlanId
+            LeavePlanId = dto.LeavePlanId,
+            ChargeExcessToAnnual = dto.ChargeExcessToAnnual
         };
 
         public static LeaveRequestDto ToDto(this LeaveRequest entity) => new LeaveRequestDto
@@ -282,6 +287,8 @@ namespace ErpSystem.Application.Extensions
             EmployeeName = entity.Employee?.FullName ?? string.Empty,
             LeaveTypeId = entity.LeaveTypeId,
             LeaveTypeName = entity.LeaveType?.Name ?? string.Empty,
+            // Null when the read did not load the type: unknown, not Other.
+            LeaveTypeCategory = entity.LeaveType?.Category,
             IsPaidLeave = entity.LeaveType?.IsPaid ?? false,
             LeaveSubTypeId = entity.LeaveSubTypeId,
             LeaveSubTypeName = entity.LeaveSubType?.SubTypeName,
@@ -298,6 +305,8 @@ namespace ErpSystem.Application.Extensions
             SecondRelieverEmployeeName = entity.SecondRelieverEmployee?.FullName,
             RelieverNotes = entity.RelieverNotes,
             LeavePlanId = entity.LeavePlanId,
+            ChargeExcessToAnnual = entity.ChargeExcessToAnnual,
+            SplitFromRequestId = entity.SplitFromRequestId,
             ApprovedById = entity.ApprovedById,
             ApprovedDate = entity.ApprovedDate,
             RejectionReason = entity.RejectionReason,
@@ -326,6 +335,11 @@ namespace ErpSystem.Application.Extensions
             ClosureNotes = entity.ClosureNotes,
             CancellationDate = entity.CancellationDate,
             CancellationReason = entity.CancellationReason,
+            ResumptionDate = entity.ResumptionDate,
+            ResumptionReportedDate = entity.ResumptionReportedDate,
+            ResumptionReportedById = entity.ResumptionReportedById,
+            ClosureConfirmedById = entity.ClosureConfirmedById,
+            OverstayDays = entity.OverstayDays,
             CreatedAt = entity.CreatedAt
         };
 
@@ -339,9 +353,11 @@ namespace ErpSystem.Application.Extensions
             Id = entity.Id,
             EmployeeId = entity.EmployeeId,
             EmployeeName = entity.Employee?.FullName ?? string.Empty,
+            EmployeeNumber = entity.Employee?.EmployeeNumber,
             OrganizationUnitName = entity.Employee?.OrganizationUnit?.Name,
             LeaveTypeId = entity.LeaveTypeId,
             LeaveTypeName = entity.LeaveType?.Name ?? string.Empty,
+            LeaveTypeCategory = entity.LeaveType?.Category,
             LeaveSubTypeId = entity.LeaveSubTypeId,
             LeaveSubTypeName = entity.LeaveSubType?.SubTypeName,
             Year = entity.Year,

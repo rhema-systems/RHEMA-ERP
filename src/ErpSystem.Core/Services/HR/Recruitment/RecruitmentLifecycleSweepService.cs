@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR;
+﻿using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -12,13 +12,16 @@ namespace ErpSystem.Core.Services.HR.Recruitment;
 public sealed class RecruitmentLifecycleSweepService : IRecruitmentLifecycleSweepService
 {
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IRecruitmentTestService _testService;
     private readonly ILogger<RecruitmentLifecycleSweepService> _logger;
 
     public RecruitmentLifecycleSweepService(
         IUnitOfWork unitOfWork,
+        IRecruitmentTestService testService,
         ILogger<RecruitmentLifecycleSweepService> logger)
     {
         _unitOfWork = unitOfWork;
+        _testService = testService;
         _logger = logger;
     }
 
@@ -34,6 +37,14 @@ public sealed class RecruitmentLifecycleSweepService : IRecruitmentLifecycleSwee
             OffersExpired    = await ExpireOffersAsync(tenantId, now, triggeredByUserId, cancellationToken),
             PostingsExpired  = await ExpirePostingsAsync(tenantId, now, triggeredByUserId, cancellationToken),
             VacanciesOpened  = await OpenDueVacanciesAsync(tenantId, now, triggeredByUserId, cancellationToken),
+
+            // ⚠ The one member of this sweep that SAVES for itself, because it writes answer rows
+            // as well as a status. Evaluated last (object-initialiser members run in source order),
+            // so its save also commits the three status writes above; the outer SaveChanges then
+            // finds nothing left to do. A failure here still fails the whole sweep, exactly as a
+            // failure in any of the other three does.
+            SittingsExpired  = await _testService.ExpireOverdueSittingsAsync(
+                                   tenantId, now, triggeredByUserId, cancellationToken),
         };
 
         if (result.TotalChanged > 0)
@@ -42,8 +53,10 @@ public sealed class RecruitmentLifecycleSweepService : IRecruitmentLifecycleSwee
 
             _logger.LogInformation(
                 "Recruitment lifecycle sweep ({Trigger}) for tenant {TenantId}: " +
-                "{Offers} offer(s) expired, {Postings} advert(s) expired, {Vacancies} anticipated vacancy(ies) opened.",
-                trigger, tenantId, result.OffersExpired, result.PostingsExpired, result.VacanciesOpened);
+                "{Offers} offer(s) expired, {Postings} advert(s) expired, {Vacancies} anticipated vacancy(ies) opened, " +
+                "{Sittings} test sitting(s) expired.",
+                trigger, tenantId, result.OffersExpired, result.PostingsExpired, result.VacanciesOpened,
+                result.SittingsExpired);
         }
         else
         {

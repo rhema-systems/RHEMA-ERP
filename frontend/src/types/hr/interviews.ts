@@ -133,6 +133,8 @@ export interface InterviewQuestion {
   weight: number;
   minScore: number;
   maxScore: number;
+  /** What a good answer sounds like. Printed beside the question on the paper scoring sheet. */
+  scoringGuide?: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt?: string | null;
@@ -144,6 +146,7 @@ export interface CreateInterviewQuestion {
   weight: number;
   minScore: number;
   maxScore: number;
+  scoringGuide?: string | null;
   isActive: boolean;
 }
 
@@ -232,6 +235,20 @@ export interface JobInterview {
   intervieweeCount: number;
   panelistCount: number;
   questionPresetId?: string | null;
+
+  // ── Round 4, lane D ──────────────────────────────────────────────────────
+  /** The room this interview holds, if any (D8). */
+  roomBookingId?: string | null;
+  roomName?: string | null;
+  roomBookingNumber?: string | null;
+  /**
+   * Set when this interview was scheduled over a panelist's confirmed commitment. Null is the
+   * ordinary case; a value means somebody decided, and said why.
+   */
+  panelClashOverrideReason?: string | null;
+  panelClashOverrideDetail?: string | null;
+  panelClashOverriddenAt?: string | null;
+
   createdAt: string;
   updatedAt?: string | null;
 }
@@ -289,6 +306,25 @@ export interface CreateJobInterview {
   panelistEmployeeIds?: string[];
   externalPanelistAssociateIds?: string[];
   questionPresetId?: string | null;
+
+  /**
+   * Why this interview may be scheduled despite a panelist's CONFIRMED commitment
+   * (round 4, D3; decision D-5).
+   *
+   * ⚠ Without it the server REFUSES the save when the clash is hard — the check stopped being
+   * advisory in round 4. Supplying it schedules anyway and records the reason, who gave it and what
+   * was overridden, on the interview. A reason sent where there is no clash is discarded, so it is
+   * safe to send whatever is in the box.
+   */
+  panelClashOverrideReason?: string | null;
+
+  /**
+   * The room to HOLD, booked through the meeting-room register (D8).
+   *
+   * ⚠ Distinct from `locationOrLink`, which is free text and reserves nothing — a room named only
+   * there is invisible to the room's own double-booking check.
+   */
+  roomBookingId?: string | null;
 }
 
 /**
@@ -308,6 +344,25 @@ export interface UpdateJobInterview {
   locationOrLink?: string | null;
   instructions?: string | null;
   questionPresetId?: string | null;
+
+  /**
+   * Why this interview may be scheduled despite a panelist's CONFIRMED commitment
+   * (round 4, D3; decision D-5).
+   *
+   * ⚠ Without it the server REFUSES the save when the clash is hard — the check stopped being
+   * advisory in round 4. Supplying it schedules anyway and records the reason, who gave it and what
+   * was overridden, on the interview. A reason sent where there is no clash is discarded, so it is
+   * safe to send whatever is in the box.
+   */
+  panelClashOverrideReason?: string | null;
+
+  /**
+   * The room to HOLD, booked through the meeting-room register (D8).
+   *
+   * ⚠ Distinct from `locationOrLink`, which is free text and reserves nothing — a room named only
+   * there is invisible to the room's own double-booking check.
+   */
+  roomBookingId?: string | null;
 }
 
 export interface RescheduleJobInterview {
@@ -317,6 +372,25 @@ export interface RescheduleJobInterview {
   newEndTime: string;
   locationOrLink?: string | null;
   rescheduleReason: string;
+
+  /**
+   * Why this interview may be scheduled despite a panelist's CONFIRMED commitment
+   * (round 4, D3; decision D-5).
+   *
+   * ⚠ Without it the server REFUSES the save when the clash is hard — the check stopped being
+   * advisory in round 4. Supplying it schedules anyway and records the reason, who gave it and what
+   * was overridden, on the interview. A reason sent where there is no clash is discarded, so it is
+   * safe to send whatever is in the box.
+   */
+  panelClashOverrideReason?: string | null;
+
+  /**
+   * The room to HOLD, booked through the meeting-room register (D8).
+   *
+   * ⚠ Distinct from `locationOrLink`, which is free text and reserves nothing — a room named only
+   * there is invisible to the room's own double-booking check.
+   */
+  roomBookingId?: string | null;
 }
 
 export interface CancelJobInterview {
@@ -422,6 +496,13 @@ export interface JobInterviewSelectedQuestion {
   weight: number;
   minScore: number;
   maxScore: number;
+  /**
+   * Read live from the bank question, like `questionText`, `weight` and the band beside it — the
+   * drawn row holds only the reference. Editing the guide changes what an already-drawn question
+   * prints, which is what you want for guidance and is worth knowing before rewording one
+   * mid-campaign.
+   */
+  scoringGuide?: string | null;
   displayOrder: number;
 }
 
@@ -508,6 +589,26 @@ export interface JobInterviewScoreSummary {
   evaluationDate: string;
   isFinalized: boolean;
   finalizedDate?: string | null;
+  /**
+   * How the card reached the system (round 4, lane F4). **Derived by the server from who called**,
+   * never sent by the client — a provenance the caller could assert is worth nothing.
+   *
+   * ⚠ Null means "recorded before this was tracked", which is *not* the same as `Online`. Do not
+   * render a null as "filed online".
+   */
+  scoreSource?: 'Online' | 'PaperSheet' | null;
+  /**
+   * The HR person who filed it on the panelist's behalf. Null when the panelist filed it.
+   *
+   * ⚠ An **employee** id, not a user id. HR's actor columns are employee references throughout,
+   * and the value the service stores is `_currentUser.EmployeeId` — despite reaching it through a
+   * parameter the controller family calls `createdByUserId`.
+   */
+  filedByHrOnBehalfOfEmployeeId?: string | null;
+  /** Their name, when the read loaded it. */
+  filedByHrOnBehalfOfName?: string | null;
+  /** A ready-made provenance line, or null when the panelist filed it themselves. */
+  filedOnBehalfNote?: string | null;
 }
 
 export interface JobInterviewScoreSummaryDetail extends JobInterviewScoreSummary {
@@ -567,27 +668,47 @@ export interface SaveInterviewScoreDraft {
 
 // ── availability ───────────────────────────────────────────────────────────
 
-export interface PanelistInterviewConflict {
-  interviewId: string;
-  interviewNumber: string;
-  jobTitle: string;
-  scheduledDate: string;
-  startTime: string;
-  endTime: string;
-  status: JobInterviewStatus;
-}
+// CommitmentKind — HREnums.cs. One member per registered IPanelistCommitmentSource.
+export const COMMITMENT_KINDS = [
+  'Interview',
+  'Leave',
+  'Travel',
+  'Event',
+  'RoomBooking',
+  'Training',
+  'Closure',
+  'Holiday',
+] as const;
+export type CommitmentKind = (typeof COMMITMENT_KINDS)[number];
 
-export interface PanelistLeaveConflict {
-  startDate: string;
-  endDate: string;
-  status: string;
-}
+/**
+ * Whether a clash refuses the write or merely warns (round 4, decision D-5).
+ *
+ * ⚠ `Hard` means confirmed AND time-precise — another interview, a Confirmed room booking, a
+ * Confirmed meeting this person accepted. Those REFUSE a create, update or reschedule unless
+ * `panelClashOverrideReason` is supplied. `Soft` is day-granular or unconfirmed evidence — leave,
+ * travel, a Tentative booking, a training nomination, a closure — and never refuses.
+ */
+export const COMMITMENT_HARDNESS = ['Soft', 'Hard'] as const;
+export type CommitmentHardness = (typeof COMMITMENT_HARDNESS)[number];
 
-export interface PanelistTravelConflict {
-  requestNumber: string;
-  startDate: string;
-  endDate: string;
-  status: string;
+/** One thing standing between a panelist and the proposed window. */
+export interface PanelistCommitment {
+  kind: CommitmentKind;
+  kindName: string;
+  hardness: CommitmentHardness;
+  hardnessName: string;
+  /** What a recruiter reads — "Interview panel for Senior Accountant". */
+  label: string;
+  start: string;
+  end: string;
+  /**
+   * ⚠ True when the source records whole DAYS, so `start`/`end` are the day's bounds rather than a
+   * real window. Never render one as "09:00–11:00": that is a precision the record does not have,
+   * and it is exactly why these are soft.
+   */
+  isDayGranular: boolean;
+  reference?: string | null;
 }
 
 export interface PanelistAvailability {
@@ -596,14 +717,31 @@ export interface PanelistAvailability {
   employeeName: string;
   isExternal: boolean;
   hasConflicts: boolean;
-  interviewConflicts: PanelistInterviewConflict[];
-  leaveConflicts: PanelistLeaveConflict[];
-  travelConflicts: PanelistTravelConflict[];
+  hasHardConflicts: boolean;
+  /**
+   * ⚠ Round 4, lane D1 replaced `interviewConflicts` / `leaveConflicts` / `travelConflicts` with
+   * this one list. There are seven sources now and there will be more; a field per source means
+   * editing this type and every screen each time the organisation learns to track something else.
+   */
+  commitments: PanelistCommitment[];
 }
 
-/** Advisory only — the server never refuses a booking because of a clash. */
+/**
+ * ⚠ No longer advisory. A HARD clash refuses the write unless `panelClashOverrideReason` is
+ * supplied, and the reason is recorded on the interview. Reading this endpoint stays advisory —
+ * that is what it is for, showing the clash before the recruiter commits to a time.
+ */
 export interface PanelistAvailabilityCheck {
   hasConflicts: boolean;
+  hasHardConflicts: boolean;
+  /**
+   * Which sources answered.
+   *
+   * ⚠ Load-bearing, not decorative. A commitment source that exists but was never registered in DI
+   * contributes nothing and the check cheerfully reports "free". If a source you expect is absent
+   * here, it is not wired up — and the answer is wrong rather than empty.
+   */
+  sourcesConsulted: string[];
   panelists: PanelistAvailability[];
 }
 
@@ -614,6 +752,28 @@ export interface PanelistAvailabilityQuery {
   start: string;
   end: string;
   excludeInterviewId?: string;
+}
+
+/** A window where the whole panel is free (round 4, D4). */
+export interface PanelSlotSuggestion {
+  date: string;
+  startTime: string;
+  endTime: string;
+  /** The slot is still offered — soft conflicts flag it rather than hide it. */
+  hasSoftConflicts: boolean;
+  softConflictSummary?: string | null;
+}
+
+export interface PanelSlotSuggestionQuery {
+  panelistIds?: string[];
+  externalPanelistIds?: string[];
+  from: string;
+  to: string;
+  dayStart?: string;
+  dayEnd?: string;
+  durationMinutes?: number;
+  excludeInterviewId?: string;
+  maxSuggestions?: number;
 }
 
 // ── invitations ────────────────────────────────────────────────────────────
@@ -663,3 +823,155 @@ export interface SendPanelistNotifications {
 // not have shown either even though both were on the wire. Transcribed from a live payload in
 // slice 8 and now kept in one place.
 export type { ExternalAssociateSearchResult } from './external-associate';
+
+// ── slot apportionment (round 4, lane C) ───────────────────────────────────
+
+/** A rest period inside the interview window that no candidate may be booked into. */
+export interface InterviewBreak {
+  /** `HH:mm:ss`. */
+  start: string;
+  /** `HH:mm:ss`. */
+  end: string;
+  /** Printed on the timetable — "Lunch", "Panel conference". */
+  label?: string | null;
+}
+
+export interface ApportionSlotsRequest {
+  slotMinutes: number;
+  bufferMinutes: number;
+  breaks: InterviewBreak[];
+  /**
+   * The candidates to place, in the order they should be seen. Omit to place everyone currently
+   * booked in, in the order they were added.
+   */
+  applicationIds?: string[] | null;
+}
+
+export interface InterviewSlotAssignment {
+  intervieweeId: string;
+  jobApplicationId: string;
+  candidateName: string;
+  applicationNumber: string;
+  /** 1-based position in the day. Zero for a candidate who did not fit. */
+  ordinal: number;
+  slotStartTime: string;
+  slotEndTime: string;
+}
+
+/**
+ * The timetable, and the fact the screen leads with: whether everybody actually fits.
+ *
+ * ⚠ `unplaced` is not an error list. It is the answer to "can we see all of them today?", and it
+ * carries the candidates in the order they would have been seen — so a recruiter can decide who
+ * moves rather than being told only that somebody must.
+ */
+export interface InterviewSlotPlan {
+  interviewId: string;
+  scheduledDate: string;
+  windowStart: string;
+  windowEnd: string;
+  slotMinutes: number;
+  bufferMinutes: number;
+  breaks: InterviewBreak[];
+  slots: InterviewSlotAssignment[];
+  unplaced: InterviewSlotAssignment[];
+  allFit: boolean;
+  /** First free time of day after the window. Null when everybody fits. The DATE is the user's. */
+  firstFreeAfterWindow?: string | null;
+  summary: string;
+}
+
+// ── The printed interview paper (round 4, lane F) ───────────────────────────
+
+/**
+ * Which paper to print.
+ *
+ * ⚠ These are the server enum's *names*, not numbers. The API serialises enums as strings, and
+ * model-binds a query value back by name, so the same literal travels in both directions.
+ */
+export type InterviewPaperVariant = 'ScoreSheet' | 'Questions' | 'Pack';
+
+/**
+ * The rendered paper. HTML the client prints; there is deliberately no PDF — a scoring sheet is
+ * written on and signed, so the browser's own print is the target, and the wording belongs to an
+ * HR-editable template rather than to a document builder in C#.
+ */
+export interface InterviewPaper {
+  interviewId: string;
+  interviewNumber: string;
+  jobTitle: string;
+  variant: InterviewPaperVariant;
+  /** How many physical sheets this prints — said before the print dialog opens, not after. */
+  sheetCount: number;
+  /** Each sheet is a `<section class="interview-paper-sheet">` carrying its own page break. */
+  htmlBody: string;
+}
+
+/** The filters the paper endpoint accepts. Both narrow; omitting both prints everything. */
+export interface InterviewPaperRequest {
+  variant?: InterviewPaperVariant;
+  /** Print only this panelist's sheets. Omit for one per panelist per candidate. */
+  panelistId?: string | null;
+  /** Print only these candidates. Omit for everyone booked in, in slot order. */
+  intervieweeIds?: string[];
+}
+
+// ── The panelist's own scorecard worklist (round 4, lane F5) ────────────────
+
+/** Where one of the caller's own scorecards has got to. Derived by the server, not stored. */
+export type PanelistScorecardState = 'NotStarted' | 'Draft' | 'Saved' | 'SignedOff';
+
+/**
+ * One candidate the caller has to score.
+ *
+ * ⚠ Carries the **caller's own** card only. A colleague's mark never appears here, even for a
+ * candidate the caller has already filed for and could therefore see on the interview's Scores tab.
+ */
+export interface PanelistScorecardCandidate {
+  intervieweeId: string;
+  jobApplicationId: string;
+  candidateName: string;
+  applicationNumber: string;
+  /** Their slot, when the day was apportioned. Null means "sometime in the session". */
+  slotStartTime?: string | null;
+  slotEndTime?: string | null;
+  /** Whether they turned up. Null before the day. */
+  candidateAttended?: boolean | null;
+  scoreSummaryId?: string | null;
+  state: PanelistScorecardState;
+  totalWeightedScore?: number | null;
+  recommendation?: JobInterviewRecommendation | null;
+  recommendationName?: string | null;
+  /** True once nothing further is owed. ⚠ A draft is NOT complete — it is private and unfiled. */
+  isComplete: boolean;
+}
+
+/** One interview the caller sits on, with the scorecards they owe on it. */
+export interface PanelistScorecardWorklistItem {
+  interviewId: string;
+  interviewNumber: string;
+  jobTitle: string;
+  vacancyNumber: string;
+  round: number;
+  type: JobInterviewType;
+  typeName: string;
+  mode: InterviewMode;
+  modeName: string;
+  status: JobInterviewStatus;
+  statusName: string;
+  scheduledDate: string;
+  startTime: string;
+  endTime: string;
+  locationOrLink?: string | null;
+  /** The caller's own seat — the id a scorecard is filed against, and the paper filter. */
+  panelistId: string;
+  role: JobInterviewPanelistRole;
+  roleName: string;
+  isRequired: boolean;
+  isConfirmed: boolean;
+  hasQuestionPlan: boolean;
+  candidates: PanelistScorecardCandidate[];
+  outstandingCount: number;
+  /** False once the session is Completed or Cancelled — nothing further can be filed. */
+  isOpen: boolean;
+}

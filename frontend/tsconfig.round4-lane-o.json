@@ -1,0 +1,22 @@
+{
+  "//": "Round 4, lane O — the technician-role flag and the Maintenance door it feeds. Scoped because `npm run type-check` over the whole tree does not complete on this branch; see the hr-coverage README.",
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/**/*.ts",
+    "src/services/hr/**/*.ts",
+    "src/components/hr/position/**/*.tsx",
+    "src/components/hr/employee/**/*.ts",
+    "src/components/hr/employee/**/*.tsx",
+    "src/app/administration/hr/positions/**/*.tsx",
+    "src/app/hr/employees/page.tsx",
+    "src/app/hr/employees/new/page.tsx",
+    "src/app/hr/employees/[id]/**/*.tsx",
+    "src/services/maintenanceDataService.ts",
+    "src/services/maintenanceApiService.ts",
+    "src/app/maintenance/emergency/page.tsx",
+    "src/app/maintenance/scheduled/page.tsx",
+    "src/app/maintenance/work-orders/page.tsx",
+    "src/components/maintenance/JobCardManagement.tsx"
+  ]
+}

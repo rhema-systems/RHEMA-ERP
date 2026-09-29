@@ -145,8 +145,8 @@ the sweep is a re-survey after all.
 | area | likely money events | status |
 |---|---|---|
 | 2 — Leave | leave encashment — in service and on separation | ✅ **recorded 2026-09-17**, see below |
-| 4 — Compensation | pay components, allowances, the payroll boundary | 🔲 to record |
-| 7 — Training | service bonds **POST 2026-09-20** (slice 4: breached / settled / waived); budget transactions **deliberately not posted** (a memo of a Finance document — design § 3.1e); the budget *read* is slice 6 | ✅ bonds; budget read pending |
+| 4 — Compensation | pay components, allowances, the payroll boundary — **recorded 2026-09-21: nothing to post.** Salary grades/notches (sweep row 10) are reference data; pay-component amounts (row 11) and movement-driven salary changes (row 57) are *authorisations* that feed payroll's next run, and payroll's own journal (route `HrPayrollJournal`) is the accounting event. HR posts none of it; the HR↔payroll settings register covers the boundary | ✅ recorded — payroll's |
+| 7 — Training | service bonds **POST 2026-09-20** (slice 4: breached / settled / waived); budget transactions **deliberately not posted** (a memo of a Finance document — design § 3.1e); the budget *read* **BUILT 2026-09-21** (`GET training-budgets/{id}/finance-actuals`, design § 3.1f) | ✅ built |
 | 11 — Medical | claim create → approve → **pay** - **POSTS 2026-09-20** (`MEDICAL_CLAIM_APPROVED`, `MEDICAL_CLAIM_PAID`; salary deduction is Skipped for payroll). Insurance premium, insurer recovery and NHIS recovery **POST 2026-09-20** (slice 5: `MEDICAL_PREMIUM_PAID`, `MEDICAL_INSURER_RECOVERY_RECEIVED`, `NHIS_CLAIM_REIMBURSED`) | ✅ built |
 | 10 — SHE | incident insurance proceeds **POST 2026-09-20** (slice 5: `SHE_INSURANCE_CLAIM_RECEIVED`); no other SHE money field exists to post | ✅ built |
 

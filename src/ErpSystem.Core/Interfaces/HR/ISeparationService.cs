@@ -35,6 +35,14 @@ public interface ISeparationService
     Task<EmployeeSeparationDetailDto> CancelAsync(
         Guid id, CancelEmployeeSeparationDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Names the medical board a medical retirement rests on, or clears it with null (round 5, lane
+    /// K-II-a). ⚠ Draft only, medical retirement only, and the board's case about this employee must
+    /// be decided and recommend medical retirement. Separation reads the board; it never writes one.
+    /// </summary>
+    Task<EmployeeSeparationDetailDto> LinkMedicalBoardAsync(
+        Guid id, Guid? medicalBoardId, CancellationToken cancellationToken = default);
+
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -240,6 +248,16 @@ public interface ISeparationService
         Guid lineId, UpdateSettlementLineDto dto, CancellationToken cancellationToken = default);
 
     Task<bool> DeleteSettlementLineAsync(Guid lineId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Finance values one pay line HR recorded in days or facts (leave settings audit 2, P2). The
+    /// caller holds <c>HR.Pay.Value</c>; the line records who valued it and when.
+    /// </summary>
+    Task<SeparationSettlementLineDto> ValueSettlementLineAsync(
+        Guid lineId, ValueSettlementLineDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>Finance's queue: statements with pay lines awaiting a figure, oldest last day first.</summary>
+    Task<IReadOnlyList<PayToValueItemDto>> GetSettlementsAwaitingValuationAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Closes the statement for Internal Audit's review (FR-HR-185). Refused while any line could

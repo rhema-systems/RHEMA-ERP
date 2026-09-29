@@ -3,6 +3,7 @@ import type {
   AddJobInterviewExternalPanelist,
   AddJobInterviewPanelist,
   AddJobInterviewee,
+  ApportionSlotsRequest,
   CancelJobInterview,
   CommitInterviewQuestions,
   CreateInterviewQuestion,
@@ -11,12 +12,15 @@ import type {
   CreateJobInterview,
   CreateJobInterviewQuestionPlan,
   CreateJobInterviewScoreSummary,
+  InterviewPaper,
+  InterviewPaperRequest,
   InterviewQuestion,
   InterviewQuestionPreset,
   InterviewQuestionPresetSummary,
   InterviewQuestionType,
   InterviewQuestionTypeSummary,
   InterviewScoreDraft,
+  InterviewSlotPlan,
   JobInterview,
   JobInterviewDetail,
   JobInterviewExternalPanelist,
@@ -28,8 +32,11 @@ import type {
   JobInterviewStatus,
   JobInterviewSummary,
   JobInterviewee,
+  PanelSlotSuggestion,
+  PanelSlotSuggestionQuery,
   PanelistAvailabilityCheck,
   PanelistAvailabilityQuery,
+  PanelistScorecardWorklistItem,
   QuestionPlanPreview,
   RescheduleJobInterview,
   SaveInterviewScoreDraft,
@@ -109,6 +116,25 @@ class JobInterviewService {
     if (query.externalPanelistIds?.length) params.externalPanelistIds = query.externalPanelistIds;
     if (query.excludeInterviewId) params.excludeInterviewId = query.excludeInterviewId;
     return apiService.get<PanelistAvailabilityCheck>(`${this.baseUrl}/panelist-availability`, params);
+  }
+
+  /**
+   * Round 4, D4 — the windows in a range where the WHOLE panel is free.
+   *
+   * ⚠ A slot carrying soft conflicts still comes back, flagged. Filtering those out client-side
+   * would throw away the windows HR most often wants: the ones where the only obstacle is a
+   * day-granular record that may not apply to the hour.
+   */
+  suggestSlots(query: PanelSlotSuggestionQuery): Promise<PanelSlotSuggestion[]> {
+    const params: Record<string, unknown> = { from: query.from, to: query.to };
+    if (query.panelistIds?.length) params.panelistIds = query.panelistIds;
+    if (query.externalPanelistIds?.length) params.externalPanelistIds = query.externalPanelistIds;
+    if (query.dayStart) params.dayStart = query.dayStart;
+    if (query.dayEnd) params.dayEnd = query.dayEnd;
+    if (query.durationMinutes) params.durationMinutes = query.durationMinutes;
+    if (query.excludeInterviewId) params.excludeInterviewId = query.excludeInterviewId;
+    if (query.maxSuggestions) params.maxSuggestions = query.maxSuggestions;
+    return apiService.get<PanelSlotSuggestion[]>(`${this.baseUrl}/suggest-slots`, params);
   }
 
   // ── scheduling ───────────────────────────────────────────────────────────
@@ -247,6 +273,60 @@ class JobInterviewService {
       intervieweeId,
       slotStartTime,
       slotEndTime,
+    });
+  }
+
+  // ── Slot apportionment (round 4, lane C) ─────────────────────────────────
+
+  /**
+   * What the day would look like at this interval. **Writes nothing** — call it as often as the
+   * user changes the numbers.
+   *
+   * ⚠ Times go over the wire as `HH:mm:ss`. `<input type="time">` yields `HH:mm`, so append
+   * `:00` — the same correction the scheduling form already makes for the session window.
+   */
+  previewSlots(interviewId: string, plan: ApportionSlotsRequest): Promise<InterviewSlotPlan> {
+    return apiService.post<InterviewSlotPlan>(`${this.baseUrl}/${interviewId}/slots/preview`, {
+      ...plan,
+      interviewId,
+    });
+  }
+
+  /** Writes the timetable onto the session's candidates. HR only. */
+  applySlots(interviewId: string, plan: ApportionSlotsRequest): Promise<InterviewSlotPlan> {
+    return apiService.post<InterviewSlotPlan>(`${this.baseUrl}/${interviewId}/slots/apply`, {
+      ...plan,
+      interviewId,
+    });
+  }
+
+  /**
+   * The caller's own scorecard worklist — the sessions they sit on, the candidates on each, and how
+   * far their own card for each has got. Backs `/me/panel` (round 4, lane F5).
+   *
+   * ⚠ Takes the employee from the token, like `getMyPanelSlots`. Returns the caller's **own** cards
+   * only; a colleague's mark never appears on it.
+   */
+  getMyScorecardWorklist(): Promise<PanelistScorecardWorklistItem[]> {
+    return apiService.get<PanelistScorecardWorklistItem[]>(`${this.baseUrl}/me/scorecard-worklist`);
+  }
+
+  // ── The printed paper (round 4, lane F) ──────────────────────────────────
+
+  /**
+   * The interview paper as HTML, ready to print.
+   *
+   * ⚠ Gated on **read** access, not on HR — a panelist on this interview may print their own
+   * sheets. That is the point of the sheet: it goes to the person doing the scoring.
+   *
+   * `intervieweeIds` goes over the wire as a repeated query key, which is what `[FromQuery] Guid[]`
+   * binds; `apiService` already serialises an array that way.
+   */
+  getPaper(interviewId: string, request: InterviewPaperRequest = {}): Promise<InterviewPaper> {
+    return apiService.get<InterviewPaper>(`${this.baseUrl}/${interviewId}/paper`, {
+      variant: request.variant ?? 'ScoreSheet',
+      panelistId: request.panelistId ?? undefined,
+      intervieweeIds: request.intervieweeIds?.length ? request.intervieweeIds : undefined,
     });
   }
 

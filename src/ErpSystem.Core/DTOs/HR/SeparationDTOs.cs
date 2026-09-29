@@ -49,6 +49,12 @@ public class EmployeeSeparationDetailDto : EmployeeSeparationListDto
     public string? ReasonCategoryName { get; set; }
     public string? ReasonNotes { get; set; }
 
+    /// <summary>
+    /// The medical board whose finding a medical retirement rests on (round 5, lane K-II-a). A bare
+    /// id: the board is a Medical record, read by its own screen under the Medical permissions.
+    /// </summary>
+    public Guid? MedicalBoardId { get; set; }
+
     public DateOnly? NoticeGivenOn { get; set; }
     public int? NoticeDays { get; set; }
 
@@ -592,6 +598,25 @@ public class SeparationSettlementLineDto
     public Guid? SourceTravelAdvanceId { get; set; }
     public bool IsSystemGenerated { get; set; }
     public int SortOrder { get; set; }
+
+    /// <summary>
+    /// The days HR recorded on a pay line — notice paid in lieu, annual leave owed (leave settings
+    /// audit 2). Null where the line is not a count of days.
+    /// </summary>
+    public decimal? Days { get; set; }
+
+    /// <summary>True when this is PAY: HR records its facts and Finance values it (audit 2, P3).</summary>
+    public bool IsPayLine { get; set; }
+
+    /// <summary>
+    /// A pay line still waiting for Finance's figure — not valued by Finance and not a stated zero.
+    /// True also where HR put a figure on it before pay moved to Finance: only Finance's settles it.
+    /// </summary>
+    public bool AwaitingFinance { get; set; }
+
+    /// <summary>Who in Finance valued the line, and when. Null until it has been.</summary>
+    public string? ValuedByName { get; set; }
+    public DateTime? ValuedOn { get; set; }
 }
 
 /// <summary>What a leaver is owed and owes back, with the totals derived from the lines.</summary>
@@ -670,8 +695,14 @@ public class AddSettlementLineDto
     [MaxLength(300)]
     public string Description { get; set; } = string.Empty;
 
-    /// <summary>Omit to record the line as still uncomputed.</summary>
+    /// <summary>
+    /// Omit to record the line as still uncomputed. ⚠ Refused on a PAY line (unpaid salary, notice
+    /// pay, leave owed, gratuity, pension, tax): Finance values those (leave settings audit 2, P3).
+    /// </summary>
     public decimal? Amount { get; set; }
+
+    /// <summary>The days, where the line is a count of days (a pay line's fact).</summary>
+    public decimal? Days { get; set; }
 
     /// <summary>
     /// Where a hand-entered figure came from — a payroll report, a loan statement, a letter.
@@ -687,12 +718,64 @@ public class UpdateSettlementLineDto
     [MaxLength(300)]
     public string? Description { get; set; }
 
+    /// <summary>⚠ Refused on a pay line — Finance values those (leave settings audit 2, P3).</summary>
     public decimal? Amount { get; set; }
+
+    /// <summary>
+    /// A pay line's days. Changing them after Finance valued the line clears Finance's figure, and
+    /// the statement waits for Finance again.
+    /// </summary>
+    public decimal? Days { get; set; }
 
     [MaxLength(300)]
     public string? SourceReference { get; set; }
 
     public bool? IsDeduction { get; set; }
+}
+
+/// <summary>
+/// Finance's valuation of one pay line (<c>HR.Pay.Value</c>, leave settings audit 2, P2): the
+/// amount, and where it came from.
+/// </summary>
+public class ValueSettlementLineDto
+{
+    /// <summary>The amount for the line's days or facts. Zero is allowed, and is a claim.</summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>Where the figure came from — the payroll computation, a worksheet. Required.</summary>
+    [MaxLength(300)]
+    public string SourceReference { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// One item in Finance's queue (<c>HR.Pay.Value</c>): a leaver's statement with pay lines awaiting
+/// a figure, or leave cashed in and approved, awaiting payment.
+/// </summary>
+public class PayToValueItemDto
+{
+    /// <summary><c>Settlement</c> or <c>Encashment</c>.</summary>
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>The separation (for a settlement) or the encashment (for leave cashed in).</summary>
+    public Guid Id { get; set; }
+
+    public string Reference { get; set; } = string.Empty;
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? EmployeeNumber { get; set; }
+
+    /// <summary>The leaver's last day, for a settlement.</summary>
+    public DateOnly? LastDay { get; set; }
+
+    public string CurrencyCode { get; set; } = string.Empty;
+
+    /// <summary>Pay lines still to be valued (a settlement), or 1 (an encashment).</summary>
+    public int AwaitingCount { get; set; }
+
+    /// <summary>The days awaiting a figure, where they are days.</summary>
+    public decimal? Days { get; set; }
+
+    /// <summary>What the item is, in a line: "Notice pay 30 days; annual leave 12 days".</summary>
+    public string Summary { get; set; } = string.Empty;
 }
 
 /// <summary>Close the statement for Internal Audit's review.</summary>

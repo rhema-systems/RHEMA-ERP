@@ -1147,6 +1147,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<EstateGroundRentCharge> EstateGroundRentCharges { get; set; }
     public DbSet<EstateGroundRentReview> EstateGroundRentReviews { get; set; }
     public DbSet<EstateFacilityDutyRoster> EstateFacilityDutyRosters { get; set; }
+    public DbSet<EstateFacilityDutyAttendance> EstateFacilityDutyAttendances { get; set; }
+    public DbSet<EstateFacilityProviderRate> EstateFacilityProviderRates { get; set; }
     public DbSet<EstateGisConfiguration> EstateGisConfigurations { get; set; }
     public DbSet<LandAcquisitionNote> LandAcquisitionNotes { get; set; }
     public DbSet<LandAcquisitionChecklistResponse> LandAcquisitionChecklistResponses { get; set; }
@@ -3654,9 +3656,6 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
             entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.ParentClassificationId, item.DisplayOrder });
-            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.SystemRole })
-                .IsUnique()
-                .HasFilter("[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] <> 1 AND [SystemRole] <> 2");
             entity.Property(item => item.Code).HasMaxLength(50).IsRequired();
             entity.Property(item => item.Name).HasMaxLength(200).IsRequired();
             entity.Property(item => item.Description).HasMaxLength(1000);
@@ -3721,6 +3720,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.FinancialStatementLayoutId, e.VersionNumber }).IsUnique();
             entity.HasIndex(e => new { e.TenantId, e.FinancialStatementLayoutId, e.Status, e.EffectiveFrom, e.EffectiveTo });
             entity.Property(e => e.PublishedByName).HasMaxLength(200);
+            entity.Property(e => e.SubmittedByName).HasMaxLength(200);
+            entity.Property(e => e.LastDecisionByName).HasMaxLength(200);
+            entity.Property(e => e.LastDecisionReason).HasMaxLength(500);
             entity.Property(e => e.Notes).HasMaxLength(1000);
             entity.Property(e => e.PublicationSnapshotSchemaVersion).HasMaxLength(20);
             entity.Property(e => e.PublishedAccountingBookCode).HasMaxLength(20);
@@ -9142,14 +9144,20 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     line.BudgetRevisionId,
                     line.SegmentValueId,
                     line.AccountId,
-                    line.FiscalPeriodId
+                    line.FiscalPeriodId,
+                    line.FinanceDimensionSetId
                 })
                 .IsUnique()
+                .HasDatabaseName("UX_BudgetRevisionLines_Cell")
                 .HasFilter("[IsDeleted] = 0");
             entity.HasOne(line => line.BudgetRevision)
                 .WithMany(revision => revision.Lines)
                 .HasForeignKey(line => line.BudgetRevisionId)
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(line => line.FinanceDimensionSet)
+                .WithMany()
+                .HasForeignKey(line => line.FinanceDimensionSetId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 
@@ -10575,6 +10583,22 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(item => new { item.TenantId, item.LinkedComplaintReference });
         });
 
+        builder.Entity<EstateFacilityDutyAttendance>(entity =>
+        {
+            entity.ToTable("EstateFacilityDutyAttendances");
+            entity.HasIndex(item => new { item.TenantId, item.DutyRosterId, item.DutyDate }).IsUnique();
+            entity.HasOne(item => item.DutyRoster).WithMany()
+                .HasForeignKey(item => item.DutyRosterId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EstateFacilityProviderRate>(entity =>
+        {
+            entity.ToTable("EstateFacilityProviderRates");
+            entity.Property(item => item.Rate).HasPrecision(18, 4);
+            entity.HasIndex(item => new { item.TenantId, item.BusinessPartnerId, item.IsActive });
+            entity.HasIndex(item => new { item.TenantId, item.ContractId });
+        });
+
         builder.Entity<LandAcquisitionNote>(entity =>
         {
             entity.ToTable("LandAcquisitionNotes");
@@ -10672,6 +10696,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     private async Task<int> SaveWithInventoryCostProjectionAsync(bool acceptAllChanges, CancellationToken cancellationToken)
     {
         await SynchronizeInventoryAverageCostsAsync(true, cancellationToken);
+        // HR, round 4 lane O: before the audit pass, so the holders it moves are stamped too.
+        await ApplyTechnicianRoleRuleAsync(true, cancellationToken);
         UpdateAuditableEntities();
         NormalizeProcurementAwardReadinessAuditEnvelopes();
         NormalizeProcurementBidderCommunicationAuditEnvelopes();
@@ -10697,6 +10723,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     private int SaveWithInventoryCostProjection(bool acceptAllChanges)
     {
         SynchronizeInventoryAverageCostsAsync(false, CancellationToken.None).GetAwaiter().GetResult();
+        // HR, round 4 lane O — see the async path.
+        ApplyTechnicianRoleRuleAsync(false, CancellationToken.None).GetAwaiter().GetResult();
         UpdateAuditableEntities();
         NormalizeProcurementAwardReadinessAuditEnvelopes();
         NormalizeProcurementBidderCommunicationAuditEnvelopes();

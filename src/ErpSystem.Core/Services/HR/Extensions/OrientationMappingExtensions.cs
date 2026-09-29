@@ -13,6 +13,9 @@ namespace ErpSystem.Application.HR.Extensions;
 /// </summary>
 public static class OrientationMappingExtensions
 {
+    /// <summary>Round 4, lane R: whitespace is no text, so a blank declaration falls back to the default.</summary>
+    private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
     // ========================================================================
     // SECTION 1 — CATALOG
     // ========================================================================
@@ -104,6 +107,8 @@ public static class OrientationMappingExtensions
             RequiresAssessment = entity.RequiresAssessment,
             PassingScorePercent = entity.PassingScorePercent,
             RequiresAcknowledgement = entity.RequiresAcknowledgement,
+            AcknowledgementTitle = entity.AcknowledgementTitle,
+            AcknowledgementText = entity.AcknowledgementText,
             CompletionDeadlineDays = entity.CompletionDeadlineDays,
             IsCertificateIssued = entity.IsCertificateIssued,
             CertificateValidityMonths = entity.CertificateValidityMonths,
@@ -130,6 +135,8 @@ public static class OrientationMappingExtensions
 
     public static OrientationProgramSummaryDto ToSummaryDto(this OrientationProgram entity)
     {
+        var closedBecause = OrientationProgramEnrolment.WhyNotTaking(
+            entity.Status, entity.EffectiveFrom, entity.EffectiveTo, DateOnly.FromDateTime(DateTime.UtcNow));
         return new OrientationProgramSummaryDto
         {
             Id = entity.Id,
@@ -143,6 +150,10 @@ public static class OrientationMappingExtensions
             EstimatedDurationMinutes = entity.EstimatedDurationMinutes,
             IsCertificateIssued = entity.IsCertificateIssued,
             RequiresAssessment = entity.RequiresAssessment,
+            IsRecurring = entity.IsRecurring,
+            RecurrenceFrequency = entity.RecurrenceFrequency,
+            AcceptsEnrolment = closedBecause is null,
+            ClosedBecause = closedBecause,
             ModuleCount = entity.Modules.Count,
             EnrollmentCount = entity.Enrollments.Count,
             CompletedCount = entity.Enrollments.Count(e => e.CompletionStatus == OrientationCompletionStatus.Completed),
@@ -168,6 +179,8 @@ public static class OrientationMappingExtensions
             RequiresAssessment = dto.RequiresAssessment,
             PassingScorePercent = dto.PassingScorePercent,
             RequiresAcknowledgement = dto.RequiresAcknowledgement,
+            AcknowledgementTitle = Blank(dto.AcknowledgementTitle),
+            AcknowledgementText = Blank(dto.AcknowledgementText),
             CompletionDeadlineDays = dto.CompletionDeadlineDays,
             IsCertificateIssued = dto.IsCertificateIssued,
             CertificateValidityMonths = dto.CertificateValidityMonths,
@@ -198,6 +211,8 @@ public static class OrientationMappingExtensions
         entity.RequiresAssessment = dto.RequiresAssessment;
         entity.PassingScorePercent = dto.PassingScorePercent;
         entity.RequiresAcknowledgement = dto.RequiresAcknowledgement;
+        entity.AcknowledgementTitle = Blank(dto.AcknowledgementTitle);
+        entity.AcknowledgementText = Blank(dto.AcknowledgementText);
         entity.CompletionDeadlineDays = dto.CompletionDeadlineDays;
         entity.IsCertificateIssued = dto.IsCertificateIssued;
         entity.CertificateValidityMonths = dto.CertificateValidityMonths;
@@ -408,6 +423,7 @@ public static class OrientationMappingExtensions
             Description = entity.Description,
             TargetType = entity.TargetType,
             TargetEntityId = entity.TargetEntityId,
+            Population = entity.Population,
             Trigger = entity.Trigger,
             EnrollmentDelayDays = entity.EnrollmentDelayDays,
             IsInclusive = entity.IsInclusive,
@@ -425,6 +441,7 @@ public static class OrientationMappingExtensions
             Description = dto.Description,
             TargetType = dto.TargetType,
             TargetEntityId = dto.TargetEntityId,
+            Population = dto.Population,
             Trigger = dto.Trigger,
             EnrollmentDelayDays = dto.EnrollmentDelayDays,
             IsInclusive = dto.IsInclusive,
@@ -439,6 +456,7 @@ public static class OrientationMappingExtensions
         entity.Description = dto.Description;
         entity.TargetType = dto.TargetType;
         entity.TargetEntityId = dto.TargetEntityId;
+        entity.Population = dto.Population;
         entity.Trigger = dto.Trigger;
         entity.EnrollmentDelayDays = dto.EnrollmentDelayDays;
         entity.IsInclusive = dto.IsInclusive;
@@ -497,6 +515,7 @@ public static class OrientationMappingExtensions
 
     public static OrientationSessionSummaryDto ToSummaryDto(this OrientationSession entity)
     {
+        var closedBecause = OrientationSessionEnrolment.WhyNotOpen(entity.Status, entity.EnrollmentDeadlineAt, DateTime.UtcNow);
         return new OrientationSessionSummaryDto
         {
             Id = entity.Id,
@@ -508,6 +527,9 @@ public static class OrientationMappingExtensions
             Status = entity.Status,
             ScheduledStartAt = entity.ScheduledStartAt,
             MaxParticipants = entity.MaxParticipants,
+            EnrollmentDeadlineAt = entity.EnrollmentDeadlineAt,
+            AcceptsEnrolment = closedBecause is null,
+            ClosedBecause = closedBecause,
             // Filled from a batched count in the service — list reads do not include Enrollments.
             EnrolledCount = entity.Enrollments.Count(e => OrientationEnrollmentStatuses.Occupying.Contains(e.EnrollmentStatus)),
         };
@@ -581,6 +603,8 @@ public static class OrientationMappingExtensions
             ExternalFacilitatorName = entity.ExternalFacilitatorName,
             ExternalFacilitatorEmail = entity.ExternalFacilitatorEmail,
             ExternalFacilitatorOrganization = entity.ExternalFacilitatorOrganization,
+            ExternalFacilitatorVendorId = entity.ExternalFacilitatorVendorId,
+            ExternalFacilitatorTrainerProfileId = entity.ExternalFacilitatorTrainerProfileId,
             Role = entity.Role,
             HasConfirmed = entity.HasConfirmed,
             Notes = entity.Notes,
@@ -702,6 +726,9 @@ public static class OrientationMappingExtensions
             EmployeeId = entity.EmployeeId,
             EnrollmentStatus = entity.EnrollmentStatus,
             EnrollmentSource = entity.EnrollmentSource,
+            AudienceRuleId = entity.AudienceRuleId,
+            TriggerEvent = entity.TriggerEvent,
+            TriggerDate = entity.TriggerDate,
             EnrolledAt = entity.EnrolledAt,
             EnrolledByEmployeeId = entity.EnrolledByEmployeeId,
             StartedAt = entity.StartedAt,
@@ -713,6 +740,9 @@ public static class OrientationMappingExtensions
             AttemptCount = entity.AttemptCount,
             IsPassed = entity.IsPassed,
             AcknowledgementSigned = entity.AcknowledgementSigned,
+            AttendanceConfirmedAt = entity.AttendanceConfirmedAt,
+            AttendanceConfirmedByEmployeeId = entity.AttendanceConfirmedByEmployeeId,
+            AttendanceConfirmationNote = entity.AttendanceConfirmationNote,
             CertificateIssued = entity.CertificateIssued,
             CertificateSerialNumber = entity.CertificateSerialNumber,
             CertificateExpiresAt = entity.CertificateExpiresAt,
@@ -747,6 +777,12 @@ public static class OrientationMappingExtensions
             EnrolledAt = entity.EnrolledAt,
             CompletedAt = entity.CompletedAt,
             NextDueDate = entity.NextDueDate,
+            EnrollmentSource = entity.EnrollmentSource,
+            AudienceRuleId = entity.AudienceRuleId,
+            TriggerEvent = entity.TriggerEvent,
+            TriggerDate = entity.TriggerDate,
+            CertificateIssued = entity.CertificateIssued,
+            CertificateSerialNumber = entity.CertificateSerialNumber,
         };
     }
 

@@ -31,6 +31,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { TalentPoolScreeningPanel } from '@/components/hr/recruitment/TalentPoolScreeningPanel';
+import { AddressFields } from '@/components/reference/AddressFields';
 import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
@@ -42,16 +44,29 @@ import { jobArchitectureService } from '@/services/hr/job-architecture.service';
 import { talentPoolService } from '@/services/hr/talent-pool.service';
 import {
   BULK_POOL_OPERATIONS,
+  TALENT_POOL_SORT_KEYS,
   TALENT_POOL_SOURCES,
   TALENT_POOL_STATUSES,
   type BulkPoolOperation,
   type CandidateTalentSegment,
   type TalentPoolBulkResult,
+  type TalentPoolFilter,
+  type TalentPoolSortKey,
   type TalentPoolSource,
   type TalentPoolStatus,
 } from '@/types/hr/talent-pool';
+import { PREFERRED_WORK_ARRANGEMENTS } from '@/types/hr/recruitment-pipeline';
 
 const PAGE_SIZE = 25;
+
+/** The server's sort keys are lower-case and terse; these are what they mean on screen. */
+const SORT_LABELS: Record<TalentPoolSortKey, string> = {
+  fullname: 'Name',
+  dateadded: 'Date added',
+  lastengaged: 'Last engaged',
+  reviewdate: 'Next review',
+  experience: 'Experience',
+};
 const ANY = '__any__';
 // Radix refuses an empty SelectItem value, so "nobody / nothing" needs a sentinel of its own.
 const NONE = '__none__';
@@ -95,12 +110,58 @@ export default function TalentPoolPage() {
   const canAdmin = hasPermission('HR.Recruitment.Admin');
 
   // filters
+  //
+  // WARNING (round 4, lane B2): the server has always honoured ten filters and this screen wired
+  // five of them. Min/max experience, available-before, dormant-days, work arrangement and the sort
+  // were live server-side and unreachable from here, which reads to a recruiter as "the pool cannot
+  // do that" rather than "the control is missing".
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<string>(ANY);
   const [source, setSource] = useState<string>(ANY);
   const [segmentId, setSegmentId] = useState<string>(ANY);
   const [overdueOnly, setOverdueOnly] = useState(false);
+  const [workArrangement, setWorkArrangement] = useState<string>(ANY);
+  const [minExperience, setMinExperience] = useState('');
+  const [maxExperience, setMaxExperience] = useState('');
+  const [availableBefore, setAvailableBefore] = useState('');
+  const [dormantDays, setDormantDays] = useState('');
+  const [sortBy, setSortBy] = useState<TalentPoolSortKey>('fullname');
+  const [sortDescending, setSortDescending] = useState(false);
+  // The location filter is subtree containment on the geography tree, so the cascade emits the
+  // deepest area the recruiter picked and the server widens it downwards, never upwards.
+  const [filterCountryId, setFilterCountryId] = useState('');
+  const [filterAreaId, setFilterAreaId] = useState('');
   const [page, setPage] = useState(1);
+
+  /** One filter object, so the list and the Screen tab cannot select different people. */
+  const poolFilter: TalentPoolFilter = useMemo(() => {
+    const toNumber = (raw: string) => {
+      const n = Number(raw);
+      return raw.trim() !== '' && Number.isFinite(n) ? n : undefined;
+    };
+    return {
+      search: search.trim() || undefined,
+      status: status === ANY ? undefined : (status as TalentPoolStatus),
+      source: source === ANY ? undefined : (source as TalentPoolSource),
+      segmentIds: segmentId === ANY ? undefined : [segmentId],
+      overdueForReview: overdueOnly || undefined,
+      workArrangement:
+        workArrangement === ANY
+          ? undefined
+          : (workArrangement as TalentPoolFilter['workArrangement']),
+      minExperienceYears: toNumber(minExperience),
+      maxExperienceYears: toNumber(maxExperience),
+      availableBefore: availableBefore || undefined,
+      dormantMoreThanDays: toNumber(dormantDays),
+      geoAreaId: filterAreaId || undefined,
+      sortBy,
+      sortDescending,
+    };
+  }, [
+    search, status, source, segmentId, overdueOnly, workArrangement,
+    minExperience, maxExperience, availableBefore, dormantDays, filterAreaId,
+    sortBy, sortDescending,
+  ]);
 
   // bulk
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -137,20 +198,12 @@ export default function TalentPoolPage() {
   });
 
   const candidates = useQuery({
-    queryKey: [
-      'hr', 'talent-pool', 'candidates',
-      { search, status, source, segmentId, overdueOnly, page },
-    ],
+    queryKey: ['hr', 'talent-pool', 'candidates', { ...poolFilter, page }],
     queryFn: () =>
       talentPoolService.getCandidates({
-        search: search.trim() || undefined,
-        status: status === ANY ? undefined : (status as TalentPoolStatus),
-        source: source === ANY ? undefined : (source as TalentPoolSource),
-        segmentIds: segmentId === ANY ? undefined : [segmentId],
-        overdueForReview: overdueOnly || undefined,
+        ...poolFilter,
         pageNumber: page,
         pageSize: PAGE_SIZE,
-        sortBy: 'fullname',
       }),
   });
 
@@ -253,8 +306,13 @@ export default function TalentPoolPage() {
       <Tabs defaultValue="pool">
         <TabsList>
           <TabsTrigger value="pool">Pool</TabsTrigger>
+          <TabsTrigger value="screen">Screen</TabsTrigger>
           <TabsTrigger value="segments">Segments ({(segments.data ?? []).length})</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="screen" className="mt-4">
+          <TalentPoolScreeningPanel canManage={canManage} poolFilter={poolFilter} />
+        </TabsContent>
 
         <TabsContent value="pool" className="mt-4 space-y-4">
           <Card>
@@ -329,6 +387,105 @@ export default function TalentPoolPage() {
                 />
                 Overdue for review
               </label>
+              <div className="space-y-1.5">
+                <Label>Work arrangement</Label>
+                <Select value={workArrangement} onValueChange={(v) => { setWorkArrangement(v); setPage(1); }}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ANY}>Any arrangement</SelectItem>
+                    {PREFERRED_WORK_ARRANGEMENTS.map((w) => (
+                      <SelectItem key={w} value={w}>
+                        {humanizeEnum(w)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pool-min-exp">Experience (yrs)</Label>
+                <div className="flex items-center gap-1">
+                  <Input
+                    id="pool-min-exp"
+                    type="number"
+                    min={0}
+                    className="w-20"
+                    placeholder="min"
+                    value={minExperience}
+                    onChange={(e) => { setMinExperience(e.target.value); setPage(1); }}
+                  />
+                  <span className="text-muted-foreground">–</span>
+                  <Input
+                    type="number"
+                    min={0}
+                    className="w-20"
+                    placeholder="max"
+                    aria-label="Maximum years of experience"
+                    value={maxExperience}
+                    onChange={(e) => { setMaxExperience(e.target.value); setPage(1); }}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pool-available">Available before</Label>
+                <Input
+                  id="pool-available"
+                  type="date"
+                  className="w-40"
+                  value={availableBefore}
+                  onChange={(e) => { setAvailableBefore(e.target.value); setPage(1); }}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pool-dormant">Not engaged for (days)</Label>
+                <Input
+                  id="pool-dormant"
+                  type="number"
+                  min={0}
+                  className="w-32"
+                  placeholder="e.g. 90"
+                  value={dormantDays}
+                  onChange={(e) => { setDormantDays(e.target.value); setPage(1); }}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Sort by</Label>
+                <div className="flex items-center gap-2">
+                  <Select value={sortBy} onValueChange={(v) => { setSortBy(v as TalentPoolSortKey); setPage(1); }}>
+                    <SelectTrigger className="w-36">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TALENT_POOL_SORT_KEYS.map((k) => (
+                        <SelectItem key={k} value={k}>
+                          {SORT_LABELS[k]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => { setSortDescending((d) => !d); setPage(1); }}
+                  >
+                    {sortDescending ? 'Desc' : 'Asc'}
+                  </Button>
+                </div>
+              </div>
+              <div className="w-full space-y-1.5 border-t pt-3">
+                <Label>Where they are</Label>
+                {/* Subtree containment: pick Greater Accra and the person recorded in Tema comes
+                    back. A candidate with only a typed city is NOT matched — the search box above
+                    is the tool for that, and the server says so rather than guessing at a name. */}
+                <AddressFields
+                  countryId={filterCountryId}
+                  onCountryChange={(v) => { setFilterCountryId(v); setFilterAreaId(''); setPage(1); }}
+                  geoAreaId={filterAreaId}
+                  onGeoAreaChange={(v) => { setFilterAreaId(v); setPage(1); }}
+                  fallback={() => null}
+                />
+              </div>
             </CardContent>
           </Card>
 

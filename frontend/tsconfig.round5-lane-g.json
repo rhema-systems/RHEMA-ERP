@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/leave.ts",
+    "src/types/hr/leave-request.ts",
+    "src/services/hr/leave.service.ts",
+    "src/components/hr/leave/use-leave-year.ts",
+    "src/app/hr/leave/year-end/page.tsx"
+  ]
+}

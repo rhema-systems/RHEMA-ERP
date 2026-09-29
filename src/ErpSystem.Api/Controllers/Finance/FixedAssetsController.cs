@@ -767,15 +767,37 @@ public class FixedAssetsController : ControllerBase
     [HttpGet("reports/export/excel")]
     public async Task<IActionResult> ExportToExcel([FromQuery] string reportType, [FromQuery] FixedAssetReportQueryDto query)
     {
-        var fileBytes = await _reportsService.ExportToExcelAsync(reportType, query);
-        return File(fileBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"{reportType}_{DateTime.UtcNow:yyyyMMdd}.xlsx");
+        try
+        {
+            var fileBytes = await _reportsService.ExportToExcelAsync(reportType, query);
+            return File(fileBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"{reportType}_{DateTime.UtcNow:yyyyMMdd}.xlsx");
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 
     [HttpGet("reports/export/pdf")]
     public async Task<IActionResult> ExportToPdf([FromQuery] string reportType, [FromQuery] FixedAssetReportQueryDto query)
     {
-        var fileBytes = await _reportsService.ExportToPdfAsync(reportType, query);
-        return File(fileBytes, "application/pdf", $"{reportType}_{DateTime.UtcNow:yyyyMMdd}.pdf");
+        try
+        {
+            var fileBytes = await _reportsService.ExportToPdfAsync(reportType, query);
+            return File(fileBytes, "application/pdf", $"{reportType}_{DateTime.UtcNow:yyyyMMdd}.pdf");
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 
     // Bulk Import

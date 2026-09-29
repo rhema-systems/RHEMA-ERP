@@ -5,7 +5,10 @@ import Link from 'next/link';
 import {
   ArrowRight,
   BarChart3,
+  Building2,
+  CalendarClock,
   ClipboardList,
+  Download,
   FileText,
   Loader2,
   RefreshCw,
@@ -14,6 +17,7 @@ import {
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import {
   Card,
   CardContent,
@@ -33,6 +37,7 @@ import {
   documentManagementService,
   type CentralDocumentRecord,
 } from '@/services/document-management.service';
+import { downloadFacilitiesCaseReport } from './facilities-case-report';
 
 function isOpen(status: string) {
   return !['Completed', 'Closed', 'Cancelled', 'Canceled'].includes(status);
@@ -52,6 +57,11 @@ export default function FacilitiesDashboardPage() {
   const [documents, setDocuments] = React.useState<CentralDocumentRecord[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const exportCases = (format: 'xlsx' | 'pdf' | 'csv') => {
+    void downloadFacilitiesCaseReport(cases, format).catch(() =>
+      setLoadError('Unable to export the Facilities case register.')
+    );
+  };
 
   const load = React.useCallback(async () => {
     setIsLoading(true);
@@ -119,6 +129,25 @@ export default function FacilitiesDashboardPage() {
             </h1>
           </div>
           <div className="flex flex-wrap gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" disabled={isLoading || cases.length === 0}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Export cases
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => exportCases('xlsx')}>
+                  Excel
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => exportCases('csv')}>
+                  CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => exportCases('pdf')}>
+                  PDF
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button variant="outline" onClick={() => void load()}>
               <RefreshCw className="mr-2 h-4 w-4" />
               Refresh
@@ -174,6 +203,16 @@ export default function FacilitiesDashboardPage() {
             );
           })}
         </div>
+
+        <section className="flex flex-wrap items-center gap-2 border-y py-3" aria-label="Facilities operations and source records">
+          <h2 className="mr-auto text-sm font-semibold">Operations</h2>
+          <Button asChild size="sm" variant="outline"><Link href="/estate/facilities/EstateFacilityPropertySite"><Building2 className="mr-2 h-4 w-4" />Sites & units</Link></Button>
+          <Button asChild size="sm" variant="outline"><Link href="/estate/facilities/EstateFacilityLease"><CalendarClock className="mr-2 h-4 w-4" />Lease alerts</Link></Button>
+          <Button asChild size="sm" variant="outline"><Link href="/inventory/warehouse-items">Inventory stock</Link></Button>
+          <Button asChild size="sm" variant="outline"><Link href="/estate/facilities/budget">Budget vs actual</Link></Button>
+          <Button asChild size="sm" variant="outline"><Link href="/procurement/supplier-invoices">Provider invoices</Link></Button>
+          <Button asChild size="sm" variant="outline"><Link href="/maintenance/reports">Maintenance reports</Link></Button>
+        </section>
 
         <div className="grid gap-4 xl:grid-cols-2">
           <Card>

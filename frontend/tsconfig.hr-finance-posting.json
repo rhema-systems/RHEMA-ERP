@@ -21,6 +21,13 @@
     "src/app/hr/medical/nhis/page.tsx",
     "src/app/hr/safety/incidents/[id]/page.tsx",
     "src/app/hr/recruitment/requisitions/[id]/page.tsx",
+    "src/components/hr/common/FinanceCustomerPicker.tsx",
+    "src/components/hr/common/FinanceActualsCard.tsx",
+    "src/app/hr/consulting/clients/page.tsx",
+    "src/app/hr/consulting/clients/[id]/page.tsx",
+    "src/app/hr/consulting/invoices/page.tsx",
+    "src/app/hr/manpower-budgets/[id]/page.tsx",
+    "src/app/hr/training/budgets/[id]/page.tsx",
     "src/config/hr-setup-nav.ts"
   ]
 }

@@ -21,6 +21,8 @@ public sealed record EstateFacilityDutyRosterDto(
     string? SupervisorName,
     string? ToolsIssued,
     string? SuppliesIssued,
+    Guid? InventoryIssueVoucherId,
+    string? InventoryIssueVoucherNumber,
     string? Checklist,
     string AttendanceStatus,
     string CompletionStatus,
@@ -53,6 +55,8 @@ public sealed class UpsertEstateFacilityDutyRosterDto
     public string? SupervisorName { get; set; }
     public string? ToolsIssued { get; set; }
     public string? SuppliesIssued { get; set; }
+    public Guid? InventoryIssueVoucherId { get; set; }
+    public string? InventoryIssueVoucherNumber { get; set; }
     public string? Checklist { get; set; }
     public string AttendanceStatus { get; set; } = "Pending";
     public string CompletionStatus { get; set; } = "Scheduled";

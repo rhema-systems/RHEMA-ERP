@@ -38,6 +38,9 @@ public sealed class ApplicationSnapshotService : IApplicationSnapshotService
                     DisplayName    = display,
                     Institution    = q.Institution.Trim(),
                     QualificationId = q.QualificationId,
+                    // Round 4, lane Q: the EFFECTIVE rung, frozen with the rest — its own, or else
+                    // the catalogue entry's (loaded with the name above).
+                    QualificationLevelId = q.QualificationLevelId ?? q.Qualification?.QualificationLevelId,
                 };
             })
             .Where(q => q.NormalisedName.Length > 0)
@@ -71,7 +74,16 @@ public sealed class ApplicationSnapshotService : IApplicationSnapshotService
             DateOfBirth          = candidate.DateOfBirth,
             Gender               = candidate.Gender,
             City                 = candidate.City?.Trim(),
+            // Round 4, lane A. The path is taken from the navigation and is therefore null unless
+            // the caller Included GeoArea — which JobCandidateRepository.GetWithFullDetailsAsync
+            // now does. A null path is not a failure: the scorer resolves it from GeoAreaId against
+            // the live tree instead, and only falls back to the free-text city when both are absent.
+            GeoAreaId            = candidate.GeoAreaId,
+            GeoAreaPath          = string.IsNullOrWhiteSpace(candidate.GeoArea?.Path)
+                                       ? null
+                                       : candidate.GeoArea!.Path,
             TotalYearsExperience = candidate.TotalYearsExperience,
+            QualificationLevelsRecorded = true,   // round 4, lane Q
             Skills               = skills.AsReadOnly(),
             Qualifications       = qualifications.AsReadOnly(),
             Languages            = languages.AsReadOnly(),

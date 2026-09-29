@@ -1,6 +1,6 @@
 'use client';
 
-import { Building2, Landmark, SlidersHorizontal } from 'lucide-react';
+import { Building2, Landmark, Mail, SlidersHorizontal } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid, type NavCardItem } from '@/components/hr/common/NavCardGrid';
 
@@ -23,6 +23,13 @@ const items: NavCardItem[] = [
       'Retirement ages, probation and notice defaults, reminder lead times, enforcement modes and succession weights.',
     href: '/administration/hr/settings/policy',
     icon: SlidersHorizontal,
+  },
+  {
+    title: 'Letter & Email Templates',
+    description:
+      'The wording of every email HR sends and document it prints — offers, invitations, reminders, letters, interview papers — with a preview, a test send and reset.',
+    href: '/administration/hr/settings/letter-templates',
+    icon: Mail,
   },
   {
     title: 'Finance Posting',

@@ -56,18 +56,26 @@ export default function EmployeesPage() {
   // 'all' | 'on' | 'off' — whether the person is paid through the payroll run.
   const [payrollFilter, setPayrollFilter] = useState<'all' | 'on' | 'off'>('all');
   const isOnPayroll = payrollFilter === 'all' ? undefined : payrollFilter === 'on';
+  // Round 4, lane O — the people Maintenance may assign work to. The first caller the search's
+  // MaintenanceTechniciansOnly criterion ever had.
+  const [techniciansOnly, setTechniciansOnly] = useState(false);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['hr', 'employees', page, PAGE_SIZE, debouncedSearch, payrollFilter],
+    queryKey: ['hr', 'employees', page, PAGE_SIZE, debouncedSearch, payrollFilter, techniciansOnly],
     queryFn: () =>
       employeeService.searchPaged(
-        { searchTerm: debouncedSearch || undefined, isOnPayroll },
+        {
+          searchTerm: debouncedSearch || undefined,
+          isOnPayroll,
+          maintenanceTechniciansOnly: techniciansOnly || undefined,
+        },
         page,
         PAGE_SIZE,
       ),
   });
 
   const employees = data?.items ?? [];
+  const filtering = !!debouncedSearch || payrollFilter !== 'all' || techniciansOnly;
 
   const runAction = async () => {
     if (!pending) return false;
@@ -137,6 +145,21 @@ export default function EmployeesPage() {
                   <SelectItem value="off">Not on payroll</SelectItem>
                 </SelectContent>
               </Select>
+              <Select
+                value={techniciansOnly ? 'technicians' : 'all'}
+                onValueChange={(v) => {
+                  setTechniciansOnly(v === 'technicians');
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="w-52" aria-label="Maintenance filter">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Any role</SelectItem>
+                  <SelectItem value="technicians">Maintenance technicians</SelectItem>
+                </SelectContent>
+              </Select>
               <div className="relative w-72">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -180,12 +203,16 @@ export default function EmployeesPage() {
                     <TableCell colSpan={5}>
                       <EmptyState
                         icon={Users}
-                        title={debouncedSearch ? 'No matching employees' : 'No employees yet'}
+                        title={filtering ? 'No matching employees' : 'No employees yet'}
                         description={
-                          debouncedSearch ? 'Try a different search.' : 'Add your first employee.'
+                          !filtering
+                            ? 'Add your first employee.'
+                            : techniciansOnly && !debouncedSearch && payrollFilter === 'all'
+                              ? 'Nobody is available to Maintenance yet. Mark a position as a technician role, or include a person by hand on their record.'
+                              : 'Try a different search or filter.'
                         }
                         action={
-                          !debouncedSearch ? (
+                          !filtering ? (
                             <Button size="sm" onClick={() => router.push('/hr/employees/new')}>
                               <Plus className="mr-2 h-4 w-4" /> New Employee
                             </Button>
@@ -220,6 +247,11 @@ export default function EmployeesPage() {
                           {emp.isOnPayroll === false && (
                             <span className="inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-100">
                               Not on payroll
+                            </span>
+                          )}
+                          {emp.canBeAssignedToMaintenance && (
+                            <span className="inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-800 dark:bg-sky-900 dark:text-sky-100">
+                              Technician
                             </span>
                           )}
                         </div>

@@ -12,6 +12,7 @@
  * rather than implementing their own approval UI.
  */
 import type { PagedResult } from './common';
+import type { AccrualFrequency, AccrualMode, LeaveTypeCategory } from './leave';
 
 export type LeaveStatus =
   | 'Draft'
@@ -62,6 +63,8 @@ export interface LeaveRequest {
   employeeName: string;
   leaveTypeId: string;
   leaveTypeName: string;
+  /** The leave type's kind (round 5, A4). */
+  leaveTypeCategory?: LeaveTypeCategory | null;
   isPaidLeave: boolean;
   leaveSubTypeId?: string | null;
   leaveSubTypeName?: string | null;
@@ -82,6 +85,34 @@ export interface LeaveRequest {
   leavePlanId?: string | null;
   /** The plan this came from, named rather than shown as a Guid. Single-request read only. */
   leavePlanReference?: string | null;
+  /**
+   * Raised from an APPROVED plan and asking for exactly its dates (round 5, decision B4). Set on the
+   * single-request read and on the approvals queue; the approver sees the dates were already agreed.
+   */
+  matchesApprovedPlan?: boolean;
+
+  // ── Beyond the limit, charged to annual leave (round 5, lane H, decision A5) ──────────────────
+  /** The employee asked for the days beyond this leave's limit to go to annual leave. */
+  chargeExcessToAnnual?: boolean;
+  /**
+   * While undecided: the days approving it now would charge to annual leave, and why they could
+   * not be, when they could not. Single-request read only.
+   */
+  excessToAnnualDays?: number | null;
+  excessToAnnualRefusal?: string | null;
+  /** On a request split at approval: the annual part that took the rest of the absence. */
+  chargedToAnnualRequestId?: string | null;
+  chargedToAnnualRequestNumber?: string | null;
+  chargedToAnnualLeaveTypeName?: string | null;
+  chargedToAnnualDays?: number | null;
+  chargedToAnnualEndDate?: string | null;
+  chargedToAnnualStatus?: LeaveStatus | null;
+  /** On the annual part of a split: the request it was split from, where the absence began. */
+  splitFromRequestId?: string | null;
+  splitFromRequestNumber?: string | null;
+  splitFromLeaveTypeName?: string | null;
+  splitFromStartDate?: string | null;
+  splitFromStatus?: LeaveStatus | null;
 
   /**
    * Attendance days recorded as OnLeave against this request. Single-request read only. It should
@@ -137,7 +168,41 @@ export interface LeaveRequest {
   closureNotes?: string | null;
   cancellationDate?: string | null;
   cancellationReason?: string | null;
+
+  // Coming back (round 5, B3): the employee reports the day, their manager or HR confirms it.
+  resumptionDate?: string | null;
+  resumptionReportedDate?: string | null;
+  resumptionReportedById?: string | null;
+  resumptionReportedByName?: string | null;
+  closureConfirmedById?: string | null;
+  closureConfirmedByName?: string | null;
+  /** Working days away after they were due back. Recorded at confirmation; previewed before it. */
+  overstayDays?: number | null;
+  /** The first working day after the leave. Single read only. */
+  expectedReturnDate?: string | null;
+  resumptionTiming?: 'Early' | 'OnTime' | 'Late' | null;
+  /** What the viewer may do, decided by the server. Single read only. */
+  viewerActions?: LeaveRequestViewerActions | null;
+
   createdAt: string;
+}
+
+/**
+ * The actions a request's screen may offer this viewer (round 5, lane D). Server-decided: two of
+ * the rules turn on who the viewer is to the employee, and on today's date against the first day.
+ */
+export interface LeaveRequestViewerActions {
+  canCancel: boolean;
+  /** Cancelling approved leave takes back something granted, so it must say why. */
+  cancelNeedsReason: boolean;
+  canRecall: boolean;
+  canReportResumption: boolean;
+  canConfirmResumption: boolean;
+}
+
+/** "I'm back at work" — the day defaults to today on the server. */
+export interface ReportResumptionRequest {
+  resumedOn?: string | null;
 }
 
 /** An approver sending a request back with dates of their own. */
@@ -183,6 +248,31 @@ export interface CreateLeaveRequest {
   leavePlanId?: string | null;
   /** Keep as Draft instead of entering the approval workflow immediately. */
   saveAsDraft: boolean;
+  /**
+   * Charge the days beyond the leave type's limit to annual leave, HR deciding (round 5, A5). The
+   * API refuses it on a type that does not allow it; see `LeaveExcessPreview`.
+   */
+  chargeExcessToAnnual?: boolean;
+}
+
+/**
+ * What a request for these dates would cost its leave type, and of annual leave beyond the type's
+ * limit (round 5, lane H). `GET api/Leaves/excess-preview`; saves nothing.
+ */
+export interface LeaveExcessPreview {
+  /** The days the dates cost on this leave type, counted by its own rules. */
+  requestedDays: number;
+  /** What the type has left that can be taken now. */
+  availableDays: number;
+  /** The whole days beyond what the type can take: 0 when the request fits. */
+  excessDays: number;
+  allowsOffsetAgainstAnnual: boolean;
+  annualLeaveTypeName?: string | null;
+  /** What annual leave would be charged, counted by its own rules. */
+  annualDays?: number | null;
+  annualAvailableDays?: number | null;
+  /** Why the extra days cannot be charged to annual leave, when they cannot. */
+  refusal?: string | null;
 }
 
 export interface ApproveLeaveRequest {
@@ -195,8 +285,11 @@ export interface RejectLeaveRequest {
   rejectionReason: string;
 }
 
+/** Confirming the return, which is what closes the leave (round 5, B3). */
 export interface CloseLeaveRequest {
   closureNotes?: string | null;
+  /** The first day back, when the confirmer knows better than the report, or nobody reported it. */
+  resumptionDate?: string | null;
 }
 
 export type LeaveRequestPagedResult = PagedResult<LeaveRequest>;
@@ -204,17 +297,33 @@ export type LeaveRequestPagedResult = PagedResult<LeaveRequest>;
 // ── Balances ────────────────────────────────────────────────────────────────────
 
 export interface LeaveBalance {
+  /** Empty (all zeros) on a row without a record — see `hasRecord`. */
   id: string;
+  /**
+   * False on annual leave worked out live for somebody no request has opened a record for yet
+   * (round 5, lane J). There is nothing to open, adjust or recalculate; the figures are what the
+   * record will hold when it is created.
+   */
+  hasRecord?: boolean;
   employeeId: string;
   employeeName: string;
+  /** The staff number, for finding a person in a long list. */
+  employeeNumber?: string | null;
   organizationUnitName?: string | null;
   leaveTypeId: string;
   leaveTypeName: string;
+  /** The leave type's kind (round 5, A4). */
+  leaveTypeCategory?: LeaveTypeCategory | null;
   leaveSubTypeId?: string | null;
   leaveSubTypeName?: string | null;
   year: number;
   entitledDays: number;
   accruedToDateDays: number;
+  /**
+   * The date `accruedToDateDays` is worked out to (round 5, lane C2): today, the year end, or a
+   * leaver's last day. Null for a leave type that does not accrue.
+   */
+  accruedAsOf?: string | null;
   usedDays: number;
   pendingDays: number;
   carriedOverDays: number;
@@ -224,6 +333,8 @@ export interface LeaveBalance {
   availableDays: number;
   /** What the server's create check actually enforces — accrued replaces entitled for accruing types. */
   accruedAvailableDays: number;
+  /** Before the qualifying service is served: the first day this leave may be taken (lane J). */
+  accessibleFrom?: string | null;
 }
 
 export interface LeaveBalanceDetail extends LeaveBalance {
@@ -231,6 +342,125 @@ export interface LeaveBalanceDetail extends LeaveBalance {
   requests: LeaveRequest[];
   encashments: LeaveEncashment[];
   adjustments: LeaveAdjustment[];
+}
+
+// ── Accrual statement (round 5, lane C2) ────────────────────────────────────────
+
+export type LeaveAccrualState = 'NoPolicy' | 'YearNotStarted' | 'NotYetEligible' | 'FullGrant' | 'Accruing';
+export type LeaveAccrualAsOfLimit = 'None' | 'YearEnd' | 'LastDayOfService';
+export type LeaveEntitlementSource = 'LeaveTypeDefault' | 'StaffLevelAllocation';
+
+export interface LeaveAccrualStatementLine {
+  start: string;
+  end: string;
+  /** The days this period added — less than the rate when the cap stopped it. */
+  days: number;
+  runningTotal: number;
+  capped: boolean;
+}
+
+/** How one balance's accrual is worked out as at a date, from the same arithmetic the create check uses. */
+export interface LeaveAccrualStatement {
+  balanceId: string;
+  employeeId: string;
+  employeeName: string;
+  leaveTypeId: string;
+  leaveTypeName: string;
+  leaveTypeCategory?: LeaveTypeCategory | null;
+  year: number;
+  yearStart: string;
+  yearEnd: string;
+  requestedAsOf: string;
+  /** The date it is worked out to — earlier than asked at the year end or a leaver's last day. */
+  asOf: string;
+  asOfLimit: LeaveAccrualAsOfLimit;
+  state: LeaveAccrualState;
+  annualEntitledDays: number;
+  entitlementSource: LeaveEntitlementSource;
+  entitlementBaseDays: number;
+  staffLevelName?: string | null;
+  allocationEffectiveFrom?: string | null;
+  ceilingDays?: number | null;
+  firstYearMonthsPresent?: number | null;
+  /** The entitlement stored on the balance row; accrual follows the rulebook when they differ. */
+  storedEntitledDays: number;
+  hasPolicy: boolean;
+  frequency?: AccrualFrequency | null;
+  mode?: AccrualMode | null;
+  minServiceMonths?: number | null;
+  proRateOnJoin: boolean;
+  proRateOnExit: boolean;
+  hiredOn?: string | null;
+  leftOn?: string | null;
+  eligibleFrom?: string | null;
+  windowStart?: string | null;
+  periodsPerYear: number;
+  ratePerPeriod: number;
+  rateIsDerived: boolean;
+  periods: LeaveAccrualStatementLine[];
+  nextPeriodStart?: string | null;
+  nextPeriodEnd?: string | null;
+  /** The next period runs past the year end, so its days inside the year are never credited. */
+  tailNotCredited: boolean;
+  accruedDays: number;
+  capReached: boolean;
+}
+
+// ── Leave owed as at a date (round 5, lane C6) ──────────────────────────────────
+
+/** One employee's annual leave as at the report date. Owed = built up + carried in + adjustments − taken − cashed in. */
+export interface LeaveOwedRow {
+  employeeId: string;
+  employeeName: string;
+  staffNumber?: string | null;
+  organizationUnitName?: string | null;
+  hiredOn?: string | null;
+  leftOn?: string | null;
+  entitledDays: number;
+  builtUpDays: number;
+  carriedInDays: number;
+  adjustmentDays: number;
+  takenDays: number;
+  cashedInDays: number;
+  owedDays: number;
+  /** Approved leave after the date — owed, and already spoken for. */
+  bookedDays: number;
+  /** Leave awaiting approval — owed, and asked for. */
+  awaitingApprovalDays: number;
+}
+
+export interface LeaveOwedTotals {
+  employees: number;
+  entitledDays: number;
+  builtUpDays: number;
+  carriedInDays: number;
+  adjustmentDays: number;
+  takenDays: number;
+  cashedInDays: number;
+  owedDays: number;
+  bookedDays: number;
+  awaitingApprovalDays: number;
+}
+
+export interface LeaveOwedReport {
+  asOf: string;
+  year: number;
+  yearStart: string;
+  yearEnd: string;
+  leaveTypeId: string;
+  leaveTypeName: string;
+  /** The last day carried-in days are usable this year, if they lapse at all. */
+  carryOverExpiresOn?: string | null;
+  rows: LeaveOwedRow[];
+  totals: LeaveOwedTotals;
+}
+
+/** The tenant's current leave year (round 5, lane C4). */
+export interface LeaveYearInfo {
+  startMonth: number;
+  currentYear: number;
+  startDate: string;
+  endDate: string;
 }
 
 export interface RecalculateLeaveBalanceRequest {
@@ -383,12 +613,35 @@ export interface LeavePlan {
    */
   raisedLeaveRequestId?: string | null;
   raisedLeaveRequestNumber?: string | null;
+  /** When and why the plan was cancelled (round 5 lane E5). */
+  cancellationDate?: string | null;
+  cancellationReason?: string | null;
+  /**
+   * The employee's own reliever roster, by priority — filled on the single-plan read only, so
+   * whoever opens the plan (the approver included) can pick relievers from it. (Round 5 lane E2/E3.)
+   */
+  relieverRoster?: LeavePlanRosterReliever[];
   /**
    * Why the named reliever(s) may not be free over the plan's dates — their own plans, their own
    * live leave requests, or another plan in the window that already names them. Empty when clear.
    * Advisory: the plan can still be saved and approved. (Finish-plan lane 4.)
    */
   relieverClashes: LeaveRelieverClash[];
+}
+
+/** One entry of an employee's reliever roster, as a plan offers it. */
+export interface LeavePlanRosterReliever {
+  employeeId: string;
+  name: string;
+  positionName?: string | null;
+  /** 1 = primary, 2 = backup, and so on. */
+  priority: number;
+}
+
+/** The approver's one edit to a plan: both reliever slots, replaced together. */
+export interface UpdateLeavePlanRelieversRequest {
+  relieverId: string | null;
+  secondRelieverId: string | null;
 }
 
 /** One reason a reliever is not free over a leave plan's dates. Shape probed from GET /hr/leave-plans. */
@@ -450,12 +703,9 @@ export interface LeaveEncashment {
   amountPaid: number;
 
   /**
-   * How the amount was arrived at, in words — the monthly figure, the divisor, the resulting
-   * daily rate, and where that divisor came from.
-   *
-   * ⚠ **Recorded at payout time, not recomputed.** The divisor behind it is a setting, so a
-   * figure that cannot name its own basis stops reconciling the moment somebody edits it. This
-   * is what finding L-20 was missing: the row showed an amount and nothing to check it against.
+   * How the amount was arrived at, in words. ⚠ Since leave settings audit 2 it is Finance's, set
+   * when Finance marks the days paid; until then the amount is 0 and this is empty ("awaiting
+   * Finance"). Rows paid before carry HR's old sentence (monthly figure ÷ divisor).
    */
   rateBasis?: string | null;
 
@@ -476,14 +726,19 @@ export interface CreateLeaveEncashmentRequest {
   employeeId: string;
   leaveTypeId: string;
   year: number;
+  /** Days only (leave settings audit 2): Finance enters the amount when it pays. */
   daysEncashed: number;
-  amountPaid: number;
   notes?: string | null;
 }
 
-/** The processor is stamped server-side from the caller's employee id, never sent. */
+/**
+ * Finance marks cashed-in leave paid (`HR.Pay.Value`, leave settings audit 2): the amount it paid,
+ * how it worked it out (optional), and the payment reference. The processor is stamped server-side.
+ */
 export interface ProcessLeaveEncashmentRequest {
   paymentReference: string;
+  amount: number;
+  basis?: string | null;
 }
 
 // ── Year-end ────────────────────────────────────────────────────────────────────
@@ -550,6 +805,9 @@ export interface LeaveYearEndResult {
 
   totalDaysCarriedOver: number;
   totalDaysForfeited: number;
+  /** Carried-over days that lapsed, not taken before their expiry (round 5, lane G). */
+  totalDaysExpired: number;
+  /** The first note is the run's summary in words; the rest are per balance. */
   notes: string[];
 }
 

@@ -91,9 +91,20 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
         {
             // Validate unit account exists
             var account = await _unitOfWork.Repository<UnitAccount>()
-                .FirstOrDefaultAsync(a => a.Id == dto.UnitAccountId && a.TenantId == TenantId && !a.IsDeleted);
+                .FirstOrDefaultAsync(a => a.Id == dto.UnitAccountId && a.TenantId == TenantId && a.IsActive && !a.IsDeleted);
             if (account == null)
-                throw new ArgumentException($"Unit account with ID '{dto.UnitAccountId}' not found.");
+                throw new ArgumentException($"Active unit account with ID '{dto.UnitAccountId}' not found.");
+
+            var period = await _unitOfWork.Repository<FiscalPeriod>()
+                .FirstOrDefaultAsync(p => p.Id == dto.FiscalPeriodId && p.TenantId == TenantId && !p.IsDeleted);
+            if (period == null)
+                throw new ArgumentException($"Fiscal period with ID '{dto.FiscalPeriodId}' not found.");
+            if (period.FiscalYearId != dto.FiscalYearId)
+                throw new InvalidOperationException("The selected fiscal period does not belong to the selected fiscal year.");
+
+            var budgetVersion = string.IsNullOrWhiteSpace(dto.BudgetVersion)
+                ? "Original"
+                : dto.BudgetVersion.Trim();
 
             // Check for duplicate budget entry
             var existing = await _unitOfWork.Repository<UnitAccountBudget>()
@@ -101,7 +112,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                     b.TenantId == TenantId && 
                     b.UnitAccountId == dto.UnitAccountId && 
                     b.FiscalPeriodId == dto.FiscalPeriodId &&
-                    b.BudgetVersion == (dto.BudgetVersion ?? "Original") &&
+                    b.BudgetVersion == budgetVersion &&
                     !b.IsDeleted);
             if (existing != null)
                 throw new InvalidOperationException("A budget entry already exists for this account and period.");
@@ -115,7 +126,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 FiscalPeriodId = dto.FiscalPeriodId,
                 BudgetQuantity = dto.BudgetQuantity,
                 Notes = dto.Notes,
-                BudgetVersion = dto.BudgetVersion ?? "Original",
+                BudgetVersion = budgetVersion,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = UserName
@@ -194,7 +205,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                         && balance.UnitAccountId == budget.UnitAccountId
                         && balance.FiscalPeriodId == budget.FiscalPeriodId
                         && !balance.IsDeleted)
-                    .Select(balance => (decimal?)balance.ClosingBalance)
+                    .Select(balance => (decimal?)balance.PeriodActivity)
                     .FirstOrDefaultAsync(cancellationToken) ?? 0m;
 
                 var budgetQuantity = budget.BudgetQuantity;

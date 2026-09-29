@@ -87,6 +87,7 @@ const invoiceSchema = z.object({
     exchangeRateId: z.string().optional(),
     exchangeRateDate: z.date().optional(),
     exchangeRateSource: z.string().optional().default('Daily'),
+    currencyOverrideReason: z.string().max(500, 'Override reason cannot exceed 500 characters').optional().default(''),
     paymentTermId: z.string().optional(),
     discountAmount: z.coerce.number().min(0).optional().default(0),
     isOpeningBalance: z.boolean().default(false),
@@ -161,6 +162,16 @@ export default function NewInvoicePage() {
         enabled: Boolean(currentTenantCode),
     });
 
+    const { data: activeCurrencies = [] } = useQuery({
+        queryKey: ['finance-currencies', currentTenantCode, 'active'],
+        queryFn: () => financeDataService.getCurrencies({ isActive: true }),
+        enabled: Boolean(currentTenantCode),
+    });
+
+    const transactionTaxGroups = (taxGroupsData || []).filter((group: any) =>
+        !group.components?.some((component: any) => component.taxCategory === 'Withholding')
+    );
+
     // Filter customers based on search
     const filteredCustomers = customersData?.items?.filter((customer: any) => {
         if (!customerSearch) return true;
@@ -202,6 +213,7 @@ export default function NewInvoicePage() {
             exchangeRateId: undefined,
             exchangeRateDate: new Date(),
             exchangeRateSource: 'Daily',
+            currencyOverrideReason: '',
             paymentTermId: 'none',
             discountAmount: 0,
             isOpeningBalance: defaultOpeningBalance,
@@ -262,6 +274,18 @@ export default function NewInvoicePage() {
 
     const watchTaxGroupId = form.watch('taxGroupId');
     const watchCurrencyCode = form.watch('currencyCode') || 'GHS';
+    const customerCurrency = selectedCustomer?.currencyCode?.trim().toUpperCase() || '';
+    const currencyOverridesCustomer = Boolean(selectedCustomer && customerCurrency && watchCurrencyCode !== customerCurrency);
+    const currencyOptions = activeCurrencies.map((currency: any) => ({
+        id: currency.id,
+        currencyCode: currency.currencyCode,
+        currencyName: currency.currencyName,
+    }));
+    for (const code of [watchCurrencyCode, customerCurrency, financeSettings?.baseCurrency || 'GHS'].filter(Boolean)) {
+        if (!currencyOptions.some((currency: any) => currency.currencyCode === code)) {
+            currencyOptions.push({ id: `fallback-${code}`, currencyCode: code, currencyName: 'Configured currency' });
+        }
+    }
     const documentDiscount = Number(form.watch('discountAmount')) || 0;
 
     const applyInvoiceExchangeRate = async (currencyCode: string) => {
@@ -342,7 +366,7 @@ export default function NewInvoicePage() {
 
             // Resolve line tax group override or default to header
             const activeGroupId = item.taxGroupId || watchTaxGroupId;
-            const activeGroup = taxGroupsData?.find(tg => tg.id === activeGroupId);
+            const activeGroup = transactionTaxGroups.find((tg: any) => tg.id === activeGroupId);
 
             if (activeGroup && activeGroup.components) {
                 let cumulativeBase = lineSubtotal;
@@ -475,6 +499,15 @@ export default function NewInvoicePage() {
                 });
                 return;
             }
+            if (currencyOverridesCustomer && (data.currencyOverrideReason || '').trim().length < 10) {
+                form.setError('currencyOverrideReason', { message: 'Explain the customer-currency override in at least 10 characters' });
+                toast({
+                    title: 'Currency override reason required',
+                    description: `This customer defaults to ${customerCurrency}. Record why ${data.currencyCode} is appropriate for this invoice.`,
+                    variant: 'destructive',
+                });
+                return;
+            }
             await arService.createInvoice({
                 ...data,
                 invoiceDate: data.invoiceDate.toISOString(),
@@ -482,6 +515,7 @@ export default function NewInvoicePage() {
                 taxGroupId: isOpeningBalance || data.taxGroupId === 'none' ? null : (data.taxGroupId || null),
                 exchangeRate: Number(data.exchangeRate) || 1.0,
                 exchangeRateId: data.exchangeRateId,
+                currencyOverrideReason: currencyOverridesCustomer ? data.currencyOverrideReason?.trim() : null,
                 paymentTermId: data.paymentTermId === 'none' ? null : (data.paymentTermId || null),
                 discountAmount: Number(data.discountAmount) || 0,
                 isOpeningBalance,
@@ -575,10 +609,13 @@ export default function NewInvoicePage() {
                                             onValueChange={setCustomerSearch}
                                         />
                                         <CommandList>
-                                            <CommandEmpty>
-                                                {customersLoading ? "Loading..." : "No customer found."}
-                                            </CommandEmpty>
                                             <CommandGroup>
+                                                {customersLoading && <div className="px-3 py-6 text-center text-sm text-muted-foreground">Loading customers…</div>}
+                                                {!customersLoading && customerSearch.trim() && filteredCustomers.length === 0 && (
+                                                    <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                                                        No customer matches “{customerSearch}”.
+                                                    </div>
+                                                )}
                                                 {filteredCustomers.map((customer: any) => {
                                                     const handleSelect = () => {
                                                         onCustomerChange(customer.id);
@@ -736,15 +773,32 @@ export default function NewInvoicePage() {
                                             <SelectValue placeholder="Select Currency" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="GHS">GHS - Ghana Cedi</SelectItem>
-                                            <SelectItem value="USD">USD - US Dollar</SelectItem>
-                                            <SelectItem value="EUR">EUR - Euro</SelectItem>
-                                            <SelectItem value="GBP">GBP - British Pound</SelectItem>
+                                            {currencyOptions.map((currency: any) => (
+                                                <SelectItem key={currency.id} value={currency.currencyCode}>
+                                                    {currency.currencyCode} - {currency.currencyName}
+                                                    {currency.currencyCode === customerCurrency ? ' (customer default)' : ''}
+                                                </SelectItem>
+                                            ))}
                                         </SelectContent>
                                     </Select>
                                 )}
                             />
                         </div>
+
+                        {currencyOverridesCustomer && (
+                            <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-4 md:col-span-2">
+                                <Label htmlFor="currencyOverrideReason" className="text-amber-900">Customer-currency override reason</Label>
+                                <Textarea
+                                    id="currencyOverrideReason"
+                                    placeholder={`Explain why this invoice is in ${watchCurrencyCode} instead of the approved customer default ${customerCurrency}.`}
+                                    {...form.register('currencyOverrideReason')}
+                                />
+                                <p className="text-xs text-amber-800">Required for audit whenever a manual invoice departs from the customer currency.</p>
+                                {form.formState.errors.currencyOverrideReason && (
+                                    <p className="text-sm text-red-600">{form.formState.errors.currencyOverrideReason.message}</p>
+                                )}
+                            </div>
+                        )}
 
                         {watchCurrencyCode !== (financeSettings?.baseCurrency || 'GHS') && (
                             <div className="space-y-2">
@@ -793,7 +847,7 @@ export default function NewInvoicePage() {
                                         </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="none">No Tax (Zero/Exempt)</SelectItem>
-                                            {taxGroupsData?.map((tg: any) => (
+                                            {transactionTaxGroups.map((tg: any) => (
                                                 <SelectItem key={tg.id} value={tg.id}>{tg.name}</SelectItem>
                                             ))}
                                         </SelectContent>
@@ -913,9 +967,12 @@ export default function NewInvoicePage() {
                 {/* Line Items Card */}
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between">
-                        <CardTitle>Line Items</CardTitle>
+                        <div>
+                            <CardTitle>Invoice lines</CardTitle>
+                            <CardDescription>Use Product / service for server-resolved revenue, or a controlled GL account for exceptional manual billing.</CardDescription>
+                        </div>
                         <Button type="button" variant="outline" size="sm" onClick={() => append({ sourceLineId: crypto.randomUUID(), lineItemType: 'Product' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: watchIsOpeningBalance ? 'none' : undefined })}>
-                            <Plus className="mr-2 h-4 w-4" /> Add Item
+                            <Plus className="mr-2 h-4 w-4" /> Add invoice line
                         </Button>
                     </CardHeader>
                     <CardContent>
@@ -939,8 +996,8 @@ export default function NewInvoicePage() {
                                                             <SelectValue placeholder="Type" />
                                                         </SelectTrigger>
                                                         <SelectContent>
-                                                            <SelectItem value="Product">Product</SelectItem>
-                                                            <SelectItem value="GLAccount">GL Account</SelectItem>
+                                                            <SelectItem value="Product">Product / service</SelectItem>
+                                                            <SelectItem value="GLAccount">Controlled GL account</SelectItem>
                                                         </SelectContent>
                                                     </Select>
                                                 )}
@@ -1070,11 +1127,11 @@ export default function NewInvoicePage() {
                                                         <SelectContent>
                                                             <SelectItem value="inherit">
                                                                 {watchTaxGroupId && watchTaxGroupId !== 'none'
-                                                                    ? `Inherited: ${taxGroupsData?.find((t: any) => t.id === watchTaxGroupId)?.name || ''}`
+                                                                    ? `Inherited: ${transactionTaxGroups.find((t: any) => t.id === watchTaxGroupId)?.name || ''}`
                                                                     : 'Inherited: Zero-rated / Exempt'}
                                                             </SelectItem>
                                                             <SelectItem value="none">Zero-rated / Exempt</SelectItem>
-                                                            {taxGroupsData?.map((group: any) => (
+                                                            {transactionTaxGroups.map((group: any) => (
                                                                 <SelectItem key={group.id} value={group.id}>
                                                                     {group.name}
                                                                 </SelectItem>
@@ -1096,7 +1153,24 @@ export default function NewInvoicePage() {
 
                         {/* Dynamic Tax and Totals Breakdown */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-8 border-t mt-8">
-                            <div>
+                            <div className="space-y-4">
+                                <div className="rounded-lg border p-4">
+                                    <div className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Posting readiness</div>
+                                    <ul className="space-y-2 text-sm">
+                                        <li className={selectedCustomer ? 'text-emerald-700' : 'text-amber-700'}>
+                                            {selectedCustomer ? '✓' : '○'} Approved customer and AR profile
+                                        </li>
+                                        <li className={watchCurrencyCode === (financeSettings?.baseCurrency || 'GHS') || Boolean(form.watch('exchangeRateId')) ? 'text-emerald-700' : 'text-amber-700'}>
+                                            {watchCurrencyCode === (financeSettings?.baseCurrency || 'GHS') || Boolean(form.watch('exchangeRateId')) ? '✓' : '○'} Currency and approved exchange-rate evidence
+                                        </li>
+                                        <li className={!currencyOverridesCustomer || (form.watch('currencyOverrideReason') || '').trim().length >= 10 ? 'text-emerald-700' : 'text-amber-700'}>
+                                            {!currencyOverridesCustomer || (form.watch('currencyOverrideReason') || '').trim().length >= 10 ? '✓' : '○'} Customer-currency policy or documented override
+                                        </li>
+                                        <li className={watchLineItems.every(line => line.description && Number(line.quantity) > 0 && Number(line.unitPrice) >= 0 && (line.lineItemType !== 'GLAccount' || line.glAccountId)) ? 'text-emerald-700' : 'text-amber-700'}>
+                                            {watchLineItems.every(line => line.description && Number(line.quantity) > 0 && Number(line.unitPrice) >= 0 && (line.lineItemType !== 'GLAccount' || line.glAccountId)) ? '✓' : '○'} Complete, governed invoice lines
+                                        </li>
+                                    </ul>
+                                </div>
                                 {taxEstimate.taxList.length > 0 && (
                                     <div className="p-4 bg-muted/40 rounded-lg space-y-2 border">
                                         <div className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">Estimated Sales Levies & VAT Details</div>

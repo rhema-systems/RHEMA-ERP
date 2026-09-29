@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Estate;
 using System.Globalization;
 using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -23,6 +24,132 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
     {
         _db = db;
         _currentUserService = currentUserService;
+    }
+
+    [HttpGet("staff")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Facilities Officer,Facilities Manager")]
+    public async Task<IActionResult> SearchStaff([FromQuery] string? search, CancellationToken cancellationToken)
+    {
+        var term = search?.Trim();
+        if (string.IsNullOrWhiteSpace(term) || term.Length < 2)
+            return Ok(new { success = true, data = Array.Empty<object>() });
+
+        var tenantId = GetTenantId();
+        var employees = await _db.Employees.AsNoTracking()
+            .Where(employee => employee.TenantId == tenantId && !employee.IsDeleted && employee.IsActive
+                && (employee.EmployeeNumber.Contains(term) || employee.FirstName.Contains(term)
+                    || employee.LastName.Contains(term)
+                    || (employee.FirstName + " " + employee.LastName).Contains(term)
+                    || (employee.FirstName + " " + employee.MiddleName + " " + employee.LastName).Contains(term)))
+            .OrderByDescending(employee => employee.EmployeeNumber == term)
+            .ThenBy(employee => employee.LastName).ThenBy(employee => employee.FirstName)
+            .Take(20)
+            .Select(employee => new
+            {
+                employee.Id,
+                employee.EmployeeNumber,
+                StaffName = employee.FirstName + " " + (employee.MiddleName == null ? "" : employee.MiddleName + " ") + employee.LastName,
+                Department = _db.Departments
+                    .Where(department => department.TenantId == tenantId && department.Id == employee.DepartmentId)
+                    .Select(department => department.Name).FirstOrDefault(),
+                Position = _db.EmployeePositions
+                    .Where(position => position.TenantId == tenantId && position.Id == employee.PositionId)
+                    .Select(position => position.Title).FirstOrDefault(),
+                EmployeeProfileId = _db.PayrollEmployeeProfiles
+                    .Where(profile => profile.TenantId == tenantId && !profile.IsDeleted && profile.EmployeeId == employee.Id)
+                    .Select(profile => (Guid?)profile.Id).FirstOrDefault()
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(new { success = true, data = employees });
+    }
+
+    [HttpGet("properties")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Facilities Officer,Facilities Manager")]
+    public async Task<IActionResult> SearchProperties([FromQuery] string? search, CancellationToken cancellationToken)
+    {
+        var term = search?.Trim();
+        if (string.IsNullOrWhiteSpace(term) || term.Length < 2)
+            return Ok(new { success = true, data = Array.Empty<object>() });
+
+        var tenantId = GetTenantId();
+        var assets = await _db.EstateManagedAssets.AsNoTracking()
+            .Where(asset => asset.TenantId == tenantId && !asset.IsDeleted
+                && (asset.AssetCode.Contains(term) || asset.Name.Contains(term)
+                    || (asset.ProjectCode != null && asset.ProjectCode.Contains(term))
+                    || (asset.ProjectTitle != null && asset.ProjectTitle.Contains(term))
+                    || (asset.Location != null && asset.Location.Contains(term))))
+            .OrderByDescending(asset => asset.AssetCode == term)
+            .ThenBy(asset => asset.Name).ThenBy(asset => asset.AssetCode)
+            .Take(20)
+            .Select(asset => new
+            {
+                asset.Id, asset.AssetCode, asset.Name, asset.Location,
+                asset.ProjectCode, asset.ProjectTitle, asset.BlockName, asset.FloorLabel,
+                asset.UnitType, asset.AssetType
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(new { success = true, data = assets });
+    }
+
+    [HttpGet("issue-vouchers")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Facilities Officer,Facilities Manager")]
+    public async Task<IActionResult> SearchIssueVouchers([FromQuery] string? search, CancellationToken cancellationToken)
+    {
+        var term = search?.Trim();
+        if (string.IsNullOrWhiteSpace(term) || term.Length < 2)
+            return Ok(new { success = true, data = Array.Empty<object>() });
+
+        var vouchers = await _db.InventoryIssueVouchers.AsNoTracking()
+            .Include(item => item.Lines).ThenInclude(line => line.InventoryItem)
+            .Where(item => item.TenantId == GetTenantId() && !item.IsDeleted
+                && item.VoucherNumber.Contains(term))
+            .OrderByDescending(item => item.IssuedAtUtc).Take(20)
+            .ToListAsync(cancellationToken);
+        return Ok(new
+        {
+            success = true,
+            data = vouchers.Select(item => new
+            {
+                item.Id, item.VoucherNumber, Status = item.Status.ToString(), item.IssuedAtUtc,
+                Supplies = FormatIssuedSupplies(item)
+            })
+        });
+    }
+
+    [HttpGet("properties/{propertyId:guid}/units")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Facilities Officer,Facilities Manager")]
+    public async Task<IActionResult> SearchUnits(Guid propertyId, [FromQuery] string? search, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var property = await _db.EstateManagedAssets.AsNoTracking()
+            .Where(asset => asset.TenantId == tenantId && !asset.IsDeleted && asset.Id == propertyId)
+            .Select(asset => new { asset.Id, asset.ProjectCode })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (property is null) return NotFound(new { success = false, message = "Property was not found." });
+
+        var term = search?.Trim();
+        var query = _db.EstateManagedAssets.AsNoTracking()
+            .Where(asset => asset.TenantId == tenantId && !asset.IsDeleted);
+        query = string.IsNullOrWhiteSpace(property.ProjectCode)
+            ? query.Where(asset => asset.Id == property.Id)
+            : query.Where(asset => asset.ProjectCode == property.ProjectCode);
+        if (!string.IsNullOrWhiteSpace(term))
+            query = query.Where(asset => asset.AssetCode.Contains(term) || asset.Name.Contains(term)
+                || (asset.ProjectUnitCode != null && asset.ProjectUnitCode.Contains(term))
+                || (asset.BlockName != null && asset.BlockName.Contains(term))
+                || (asset.FloorLabel != null && asset.FloorLabel.Contains(term)));
+
+        var units = await query.OrderBy(asset => asset.BlockName).ThenBy(asset => asset.FloorLabel)
+            .ThenBy(asset => asset.Name).Take(20)
+            .Select(asset => new
+            {
+                asset.Id, asset.AssetCode, asset.Name, asset.ProjectUnitCode,
+                asset.BlockName, asset.FloorLabel, asset.UnitType, asset.AssetType
+            })
+            .ToListAsync(cancellationToken);
+        return Ok(new { success = true, data = units });
     }
 
     [HttpGet]
@@ -54,9 +181,19 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
             .ToListAsync(cancellationToken);
 
         var date = from?.Date == to?.Date && from.HasValue ? from.Value.Date : (DateTime?)null;
+        var attendanceByRosterId = new Dictionary<Guid, EstateFacilityDutyAttendance>();
+        if (date.HasValue && items.Count > 0)
+        {
+            var rosterIds = items.Select(item => item.Id).ToList();
+            attendanceByRosterId = await _db.EstateFacilityDutyAttendances.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                    && item.DutyDate == date.Value && rosterIds.Contains(item.DutyRosterId))
+                .ToDictionaryAsync(item => item.DutyRosterId, cancellationToken);
+        }
         var roster = items
             .Where(item => !date.HasValue || IsScheduledOn(item, date.Value))
-            .Select(item => ToDto(item, date))
+            .Select(item => ToDto(item, date,
+                attendanceByRosterId.GetValueOrDefault(item.Id)))
             .Where(item => string.IsNullOrWhiteSpace(status) || string.Equals(status, "all", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(item.CompletionStatus, status, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(item.AttendanceStatus, status, StringComparison.OrdinalIgnoreCase))
@@ -76,6 +213,10 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         {
             return BadRequest(new { success = false, message = validation });
         }
+
+        var sourceError = await ResolveDutySourcesAsync(request, cancellationToken);
+        if (sourceError is not null)
+            return BadRequest(new { success = false, message = sourceError });
 
         var now = DateTime.UtcNow;
         var item = new EstateFacilityDutyRoster
@@ -112,6 +253,10 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         {
             return BadRequest(new { success = false, message = validation });
         }
+
+        var sourceError = await ResolveDutySourcesAsync(request, cancellationToken);
+        if (sourceError is not null)
+            return BadRequest(new { success = false, message = sourceError });
 
         var tenantId = GetTenantId();
         var item = await _db.EstateFacilityDutyRosters
@@ -163,6 +308,33 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         item.UpdatedBy = _currentUserService.UserName ?? "System";
         item.LastModifiedById = GetUserId();
 
+        var attendance = await _db.EstateFacilityDutyAttendances.FirstOrDefaultAsync(row =>
+            row.TenantId == tenantId && row.DutyRosterId == id && row.DutyDate == now.Date && !row.IsDeleted,
+            cancellationToken);
+        if (attendance is null)
+        {
+            attendance = new EstateFacilityDutyAttendance
+            {
+                TenantId = tenantId,
+                DutyRosterId = id,
+                DutyDate = now.Date,
+                CreatedAt = now,
+                CreatedBy = _currentUserService.UserName ?? "System",
+                CreatedById = GetUserId()
+            };
+            _db.EstateFacilityDutyAttendances.Add(attendance);
+        }
+        attendance.AttendanceStatus = item.AttendanceStatus;
+        attendance.CompletionStatus = item.CompletionStatus;
+        attendance.QualityStatus = item.QualityStatus;
+        attendance.LinkedMaintenanceReference = item.LinkedMaintenanceReference;
+        attendance.LinkedComplaintReference = item.LinkedComplaintReference;
+        attendance.Notes = MergeNotes(attendance.Notes, request.Notes);
+        attendance.RecordedAt = now;
+        attendance.UpdatedAt = now;
+        attendance.UpdatedBy = _currentUserService.UserName ?? "System";
+        attendance.LastModifiedById = GetUserId();
+
         await _db.SaveChangesAsync(cancellationToken);
 
         return Ok(new
@@ -180,6 +352,74 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
 
     private Guid? GetUserId()
         => Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : null;
+
+    private async Task<string?> ResolveDutySourcesAsync(
+        UpsertEstateFacilityDutyRosterDto request, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        if (!string.IsNullOrWhiteSpace(request.EmployeeNumber))
+        {
+            var number = request.EmployeeNumber.Trim();
+            var employee = await _db.Employees.AsNoTracking()
+                .Where(row => row.TenantId == tenantId && !row.IsDeleted && row.IsActive
+                    && row.EmployeeNumber == number)
+                .Select(row => new { row.Id, row.FirstName, row.MiddleName, row.LastName, row.EmployeeNumber })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (employee is null) return "Select an active employee from HR.";
+
+            request.EmployeeNumber = employee.EmployeeNumber;
+            request.StaffName = string.Join(" ", new[] { employee.FirstName, employee.MiddleName, employee.LastName }
+                .Where(part => !string.IsNullOrWhiteSpace(part)));
+            request.EmployeeProfileId = await _db.PayrollEmployeeProfiles.AsNoTracking()
+                .Where(profile => profile.TenantId == tenantId && !profile.IsDeleted && profile.EmployeeId == employee.Id)
+                .Select(profile => (Guid?)profile.Id).FirstOrDefaultAsync(cancellationToken);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.PropertyReference))
+        {
+            var reference = request.PropertyReference.Trim();
+            var property = await _db.EstateManagedAssets.AsNoTracking()
+                .Where(asset => asset.TenantId == tenantId && !asset.IsDeleted && asset.AssetCode == reference)
+                .Select(asset => new { asset.Id, asset.AssetCode, asset.ProjectCode })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (property is null) return "Select a property or site from Estate.";
+            request.PropertyReference = property.AssetCode;
+
+            if (!string.IsNullOrWhiteSpace(request.PropertyUnit))
+            {
+                var unitReference = request.PropertyUnit.Trim();
+                var unit = await _db.EstateManagedAssets.AsNoTracking()
+                    .Where(asset => asset.TenantId == tenantId && !asset.IsDeleted
+                        && (asset.AssetCode == unitReference || asset.ProjectUnitCode == unitReference)
+                        && (asset.Id == property.Id
+                            || (property.ProjectCode != null && asset.ProjectCode == property.ProjectCode)))
+                    .Select(asset => new { asset.AssetCode, asset.ProjectUnitCode })
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (unit is null) return "Select a unit or parcel belonging to the selected property.";
+                request.PropertyUnit = unit.ProjectUnitCode ?? unit.AssetCode;
+            }
+        }
+
+        if (request.InventoryIssueVoucherId is { } voucherId)
+        {
+            var voucher = await _db.InventoryIssueVouchers.AsNoTracking()
+                .Include(item => item.Lines).ThenInclude(line => line.InventoryItem)
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && item.Id == voucherId
+                    && !item.IsDeleted && (item.Status == InventoryIssueVoucherStatus.Issued
+                        || item.Status == InventoryIssueVoucherStatus.Acknowledged), cancellationToken);
+            if (voucher is null) return "Select an issued Inventory voucher belonging to this tenant.";
+            var supplies = FormatIssuedSupplies(voucher);
+            if (supplies.Length > 500) return "The Inventory voucher contains too many items for a duty summary.";
+            request.InventoryIssueVoucherNumber = voucher.VoucherNumber;
+            request.SuppliesIssued = supplies;
+        }
+
+        return null;
+    }
+
+    private static string FormatIssuedSupplies(InventoryIssueVoucher voucher)
+        => string.Join(", ", voucher.Lines.Where(line => !line.IsDeleted)
+            .Select(line => $"{line.InventoryItem?.Name ?? line.InventoryItemId.ToString()} x{line.Quantity:0.####} {line.UnitOfMeasure}"));
 
     private async Task<string> NextRosterReferenceAsync(CancellationToken cancellationToken)
     {
@@ -212,6 +452,9 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         item.SupervisorName = TrimToNull(request.SupervisorName);
         item.ToolsIssued = TrimToNull(request.ToolsIssued);
         item.SuppliesIssued = TrimToNull(request.SuppliesIssued);
+        item.InventoryIssueVoucherId = request.InventoryIssueVoucherId;
+        item.InventoryIssueVoucherNumber = request.InventoryIssueVoucherId.HasValue
+            ? TrimToNull(request.InventoryIssueVoucherNumber) : null;
         item.Checklist = TrimToNull(request.Checklist);
         item.AttendanceStatus = TrimOrDefault(request.AttendanceStatus, "Pending");
         item.CompletionStatus = TrimOrDefault(request.CompletionStatus, "Scheduled");
@@ -231,6 +474,15 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
 
     internal static string? ValidateRequest(UpsertEstateFacilityDutyRosterDto request)
     {
+        if (string.IsNullOrWhiteSpace(request.StaffType)
+            || string.Equals(request.StaffType, "Cleaner", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(request.EmployeeNumber))
+                return "Select a cleaner from HR.";
+            if (string.IsNullOrWhiteSpace(request.PropertyReference))
+                return "Select a property or site from Estate.";
+        }
+
         if (string.IsNullOrWhiteSpace(request.StaffName))
         {
             return "Cleaner or staff name is required.";
@@ -291,8 +543,13 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         return days.Count > 0;
     }
 
-    private static EstateFacilityDutyRosterDto ToDto(EstateFacilityDutyRoster item, DateTime? date = null) =>
-        new(
+    private static EstateFacilityDutyRosterDto ToDto(
+        EstateFacilityDutyRoster item,
+        DateTime? date = null,
+        EstateFacilityDutyAttendance? attendance = null)
+    {
+        var recordedForDate = item.LastAttendanceAt?.Date == (date ?? DateTime.UtcNow.Date);
+        return new(
             item.Id,
             item.RosterReference,
             item.EmployeeProfileId,
@@ -313,20 +570,22 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
             item.SupervisorName,
             item.ToolsIssued,
             item.SuppliesIssued,
+            item.InventoryIssueVoucherId,
+            item.InventoryIssueVoucherNumber,
             item.Checklist,
-            item.LastAttendanceAt?.Date == (date ?? DateTime.UtcNow.Date) || item.Frequency == "One-off"
-                ? item.AttendanceStatus : "Pending",
-            item.LastAttendanceAt?.Date == (date ?? DateTime.UtcNow.Date) || item.Frequency == "One-off"
-                ? item.CompletionStatus : "Scheduled",
-            item.LastAttendanceAt?.Date == (date ?? DateTime.UtcNow.Date) || item.Frequency == "One-off"
-                ? item.QualityStatus : "Not inspected",
-            item.LinkedMaintenanceReference,
-            item.LinkedComplaintReference,
+            attendance?.AttendanceStatus ?? (recordedForDate ? item.AttendanceStatus : "Pending"),
+            attendance?.CompletionStatus ?? (recordedForDate ? item.CompletionStatus : "Scheduled"),
+            attendance?.QualityStatus ?? (recordedForDate ? item.QualityStatus : "Not inspected"),
+            attendance is not null ? attendance.LinkedMaintenanceReference
+                : recordedForDate ? item.LinkedMaintenanceReference : null,
+            attendance is not null ? attendance.LinkedComplaintReference
+                : recordedForDate ? item.LinkedComplaintReference : null,
             item.LinkedProcedureCaseReference,
-            item.LastAttendanceAt,
-            item.Notes,
+            attendance?.RecordedAt ?? (recordedForDate ? item.LastAttendanceAt : null),
+            attendance is not null ? attendance.Notes : recordedForDate ? item.Notes : null,
             item.CreatedAt,
             item.UpdatedAt);
+    }
 
     private static string TrimOrDefault(string? value, string fallback)
         => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();

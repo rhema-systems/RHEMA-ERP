@@ -35,6 +35,7 @@ public static class HrPermissions
     public const string CategoryCompetency = "HR - Competency";
     public const string CategoryManpowerBudget = "HR - Manpower Budget & Establishment";
     public const string CategorySeparation = "HR - Separation, Clearance & Exit";
+    public const string CategoryPayValuation = "HR - Pay Valuation (Finance)";
     public const string CategoryAwards = "HR - Staff Awards & Recognition";
     public const string CategoryPerformance = "HR - Performance";
     public const string CategoryEmployee = "HR - Employee Records & Foundation";
@@ -157,6 +158,19 @@ public static class HrPermissions
     public const string SeparationReadPolicy = "HR.Policy.SeparationRead";
     public const string SeparationWritePolicy = "HR.Policy.SeparationWrite";
     public const string SeparationAdminPolicy = "HR.Policy.SeparationAdmin";
+
+    /// <summary>
+    /// Finance's valuation of the pay HR records (leave settings audit 2, decision P2): a leaver's
+    /// settlement pay lines and leave cashed in while employed. HR records the days; the holder of
+    /// this puts the money on them.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Deliberately NOT in <see cref="HrStaffGrants"/>: the one who counts the days is not the one
+    /// who prices them. The stakeholders asked for HR to leave the calculation to Finance, and until
+    /// this existed the "indicative" figure HR worked out went into Finance's books on release.
+    /// </remarks>
+    public const string ValueHrPay = "HR.Pay.Value";
+    public const string PayValuePolicy = "HR.Policy.PayValue";
 
     public const string ViewPerformance = "HR.Performance.Read";
     public const string MaintainPerformance = "HR.Performance.Write";
@@ -432,6 +446,10 @@ public static class HrPermissions
         new(AdministerSeparation, "Administer Separation, Clearance & Exit",
             "Delete separation records and administer the clearance-item catalogue and separation authorities. Signing a termination (FR-HR-092) and reviewing a settlement (FR-HR-185) are NOT this permission — those are read off the record, see the remarks on RoleGrants.",
             CategorySeparation),
+
+        new(ValueHrPay, "Value HR pay (Finance)",
+            "Put the amounts on the pay HR records in days — a leaver's settlement pay lines (unpaid salary, notice pay, leave owed, gratuity, pension, tax) and leave cashed in while employed — and mark cashed-in leave as paid. Finance's step: HR records the days and cannot price them.",
+            CategoryPayValuation),
 
         new(ViewAwards, "View Staff Awards & Recognition",
             "View the award catalogue and its levels, budgets and eligibility rules, the nomination register, award committees and their scoring, conferred awards and long-service milestones.",
@@ -785,6 +803,23 @@ public static class HrPermissions
     };
 
     /// <summary>
+    /// What Finance holds in HR (leave settings audit 2, decision P2): the valuation step, and
+    /// nothing else. Finance works from its own queue of what awaits a figure, so it needs no read
+    /// of HR's records at large.
+    /// </summary>
+    /// <remarks>
+    /// Granted by default to the three roles below, which TDC is asked to confirm or replace
+    /// (HR-OPEN-QUESTIONS-FOR-TDC.md, "Who in Finance values a leaver's final pay").
+    /// </remarks>
+    private static readonly string[] FinancePayValuerGrants =
+    {
+        ValueHrPay
+    };
+
+    /// <summary>The Finance roles that value HR's pay by default. Bare literals, as the seeder names them.</summary>
+    public static readonly string[] FinancePayValuerRoles = { "Finance Officer", "Senior Accountant", "Chief Accountant" };
+
+    /// <summary>
     /// Per-role HR permission grants. This is the single source for both the database seed
     /// (<c>DatabaseSeedingService</c>) and the role fallback
     /// (<c>HrPermissionRoleFallbackAuthorizationHandler</c>).
@@ -848,7 +883,12 @@ public static class HrPermissions
             // what they are about to sign.
             [Constants.Roles.ManagingDirector] = ApprovalReaderGrants,
             [Constants.Roles.TdcManagingDirector] = ApprovalReaderGrants,
-            [Constants.Roles.InternalAudit] = ApprovalReaderGrants
+            [Constants.Roles.InternalAudit] = ApprovalReaderGrants,
+
+            // Finance values the pay HR records in days (leave settings audit 2, P2).
+            [FinancePayValuerRoles[0]] = FinancePayValuerGrants,
+            [FinancePayValuerRoles[1]] = FinancePayValuerGrants,
+            [FinancePayValuerRoles[2]] = FinancePayValuerGrants
         };
 
     /// <summary>

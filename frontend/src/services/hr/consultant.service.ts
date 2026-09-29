@@ -3,6 +3,7 @@ import type { PagedResult } from '@/types/hr/common';
 import type {
   ConsultantClient,
   ConsultantClientSummary,
+  HrCustomerOption,
   CreateConsultantClient,
   UpdateConsultantClient,
   ConsultantClientPortalAccountSummary,
@@ -130,6 +131,15 @@ class ConsultantClientService {
 
   resendPortalInvite(clientId: string, email: string): Promise<void> {
     return apiService.post<void>(`${this.baseUrl}/${clientId}/portal-invite/resend`, { email });
+  }
+
+  /** Finance customers a consultant client can be billed as — HR's narrow read door (lane 8, slice 6). */
+  searchCustomers(search?: string, includeInactive = false): Promise<HrCustomerOption[]> {
+    return apiService.get<HrCustomerOption[]>('/hr/customers', { search: search || undefined, take: 50, includeInactive });
+  }
+
+  getCustomer(id: string): Promise<HrCustomerOption> {
+    return apiService.get<HrCustomerOption>(`/hr/customers/${id}`);
   }
 }
 

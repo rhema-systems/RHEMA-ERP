@@ -35,6 +35,9 @@ import {
   EMPLOYMENT_TYPE_OPTIONS,
   BLOOD_TYPE_OPTIONS,
   OFF_PAYROLL_REASON_OPTIONS,
+  MAINTENANCE_ASSIGNMENT_OPTIONS,
+  EXPERIENCE_LEVEL_OPTIONS,
+  type MaintenanceAssignmentMode,
 } from '@/types/hr/employee';
 import type { EmployeePosition } from '@/types/hr/position';
 import type { OrganizationLevel } from '@/types/hr/organization';
@@ -104,6 +107,11 @@ export const employeeSchema = z.object({
   tinNumber: opt,
   badgeNumber: opt,
   notes: opt,
+  // Round 4, lane O — whether Maintenance may assign this person work, and their trade.
+  maintenanceAssignment: z.enum(['FollowPosition', 'Include', 'Exclude']),
+  specialization: z.string().max(100, 'At most 100 characters').optional().or(z.literal('')),
+  certificationLevel: z.string().max(50, 'At most 50 characters').optional().or(z.literal('')),
+  experienceLevel: opt,
 }).superRefine((v, ctx) => {
   if (!v.isOnPayroll && !v.offPayrollReason) {
     ctx.addIssue({
@@ -162,6 +170,10 @@ export const emptyEmployee: EmployeeFormValues = {
   tinNumber: '',
   badgeNumber: '',
   notes: '',
+  maintenanceAssignment: 'FollowPosition',
+  specialization: '',
+  certificationLevel: '',
+  experienceLevel: '',
 };
 
 interface EmployeeFormProps {
@@ -341,6 +353,20 @@ export function EmployeeForm({
   const isOnPayroll = form.watch('isOnPayroll');
   const managerId = form.watch('managerId') || null;
   const selectedPosition = positions.find((p) => p.id === positionId);
+
+  // Round 4, lane O — what the Maintenance choice means for the position chosen above, in words.
+  // ⚠ The answer to "follow the position" is the POST's flag, read live, so changing the position
+  // on this form changes the answer before anything is saved.
+  const maintenanceAssignment = form.watch('maintenanceAssignment');
+  const maintenanceHint = !selectedPosition
+    ? 'Choose a position first. A technician role makes its holders available to Maintenance.'
+    : maintenanceAssignment === 'FollowPosition'
+      ? selectedPosition.isTechnicianRole
+        ? `Available: ${selectedPosition.title} is a technician role, so Maintenance can assign this person work orders.`
+        : `Not available: ${selectedPosition.title} is not a technician role.`
+      : maintenanceAssignment === 'Include'
+        ? 'Available by HR’s decision for this person, whatever the position says — for example, seconded in. Kept if they change position.'
+        : 'Not available by HR’s decision for this person, even in a technician role — for example, long-term light duties. Kept if they change position.';
 
   // Whoever holds the position this one reports to — offered as the manager, rather than leaving
   // a free search over 1,507 people to guess at a line the org chart already knows.
@@ -948,6 +974,63 @@ export function EmployeeForm({
                   onChange={(v) => form.setValue('isExpatriate', v)}
                 />
               </div>
+            </div>
+          </Section>
+
+          {/* Maintenance — round 4, lane O. Who Maintenance may assign work to is decided by the
+              position; this person can be an exception either way. The trade and the two levels are
+              what Maintenance's technician list shows and filters on. */}
+          <Section title="Maintenance">
+            <div className={GRID3}>
+              <Field
+                label="Available to Maintenance"
+                htmlFor="maintenanceAssignment"
+                hint={maintenanceHint}
+                className="sm:col-span-2 lg:col-span-3"
+              >
+                <Select
+                  value={maintenanceAssignment}
+                  onValueChange={(v) =>
+                    form.setValue('maintenanceAssignment', v as MaintenanceAssignmentMode, { shouldDirty: true })
+                  }
+                >
+                  <SelectTrigger id="maintenanceAssignment">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MAINTENANCE_ASSIGNMENT_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field
+                label="Specialization"
+                htmlFor="specialization"
+                error={err('specialization')}
+                hint="The trade, e.g. Electrical installation"
+              >
+                <Input id="specialization" maxLength={100} {...form.register('specialization')} />
+              </Field>
+              <Field
+                label="Certification level"
+                htmlFor="certificationLevel"
+                error={err('certificationLevel')}
+                hint="E.g. Level 2"
+              >
+                <Input id="certificationLevel" maxLength={50} {...form.register('certificationLevel')} />
+              </Field>
+              <Field label="Experience level" htmlFor="experienceLevel">
+                <OptionalSelect
+                  id="experienceLevel"
+                  value={form.watch('experienceLevel') ?? ''}
+                  onChange={(v) => form.setValue('experienceLevel', v, { shouldDirty: true })}
+                  placeholder="Not recorded"
+                  options={EXPERIENCE_LEVEL_OPTIONS.map((level) => ({ value: level, label: level }))}
+                />
+              </Field>
             </div>
           </Section>
 

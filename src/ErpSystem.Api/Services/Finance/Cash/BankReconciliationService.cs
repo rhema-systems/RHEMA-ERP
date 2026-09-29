@@ -168,6 +168,7 @@ public class BankReconciliationService : IBankReconciliationService
                 t.TransactionDate <= reconciliation.ReconciliationDate.Date.AddDays(1).AddTicks(-1) &&
                 t.IsPosted &&
                 t.ApprovalStatus == CashTransactionApprovalStatus.Posted &&
+                !t.IsReversed &&
                 t.JournalEntryId.HasValue &&
                 _context.JournalEntries.Any(j =>
                     j.TenantId == tenantId &&
@@ -493,6 +494,7 @@ public class BankReconciliationService : IBankReconciliationService
                 t.TransactionDate <= reconciliationDate.Date.AddDays(1).AddTicks(-1) &&
                 t.IsPosted &&
                 t.ApprovalStatus == CashTransactionApprovalStatus.Posted &&
+                !t.IsReversed &&
                 t.JournalEntryId.HasValue &&
                 _context.JournalEntries.Any(j =>
                     j.TenantId == tenantId &&
@@ -964,6 +966,7 @@ public class BankReconciliationService : IBankReconciliationService
                 t.TransactionDate <= reconciliation.ReconciliationDate.Date.AddDays(1).AddTicks(-1) &&
                 t.IsPosted &&
                 t.ApprovalStatus == CashTransactionApprovalStatus.Posted &&
+                !t.IsReversed &&
                 t.JournalEntryId.HasValue &&
                 _context.JournalEntries.Any(j =>
                     j.TenantId == tenantId &&
@@ -1102,6 +1105,7 @@ public class BankReconciliationService : IBankReconciliationService
 
         if (!transaction.IsPosted ||
             transaction.ApprovalStatus != CashTransactionApprovalStatus.Posted ||
+            transaction.IsReversed ||
             !transaction.JournalEntryId.HasValue)
         {
             throw new InvalidOperationException("Only posted cash/bank transactions can be reconciled.");

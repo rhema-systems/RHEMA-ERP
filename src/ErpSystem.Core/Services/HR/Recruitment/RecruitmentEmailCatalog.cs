@@ -36,6 +36,41 @@ public static class RecruitmentEmailCatalog
         public const string OfferIssued                = "OfferIssued";
         public const string OfferAccepted              = "OfferAccepted";
         public const string OfferLetter                = "OfferLetter";
+        /// <summary>
+        /// The link that activates a self-registered careers account — round 4.
+        /// </summary>
+        /// <remarks>
+        /// ⚠ This is the FIRST thing a candidate ever receives from the organisation, sent before
+        /// they can sign in, and for many it is the only one they will see if it does not work. It
+        /// belongs in the catalogue for the same reason every other letter does: the wording of
+        /// something that leaves the building is the employer's, not a developer's.
+        /// </remarks>
+        public const string CandidateAccountActivation = "CandidateAccountActivation";
+
+        /// <summary>
+        /// Sent when HR screens the talent pool against a vacancy and asks a pooled candidate to
+        /// apply for it - round 4, lane B.
+        /// </summary>
+        /// <remarks>
+        /// The only recruitment email the candidate did not set in motion themselves. They gave
+        /// their details once, possibly a year ago, for a different role; this is the organisation
+        /// coming back to them. The wording matters more than most, which is why it is a template
+        /// HR owns rather than a string in a service.
+        /// </remarks>
+        public const string TalentPoolInvitation = "TalentPoolInvitation";
+
+        /// <summary>
+        /// Asks a candidate to sit a test online - round 4, lane E.
+        /// </summary>
+        /// <remarks>
+        /// ⚠ NOT <see cref="AssessmentPending"/>, and the difference is not cosmetic. That one says
+        /// "you have reached the assessment stage, check your portal" and links to the dashboard; it
+        /// carries no paper, no duration, no deadline and no attempt count. A candidate who has to
+        /// find a timed test on their own, with no idea how long it runs or when it shuts, is a
+        /// candidate who opens it on a phone with ten minutes to spare. Both are kept: the stage
+        /// notice is still the stage notice.
+        /// </remarks>
+        public const string TestInvitation = "TestInvitation";
     }
 
     private static IReadOnlyList<EmailEventDescriptor>? _all;
@@ -67,12 +102,64 @@ public static class RecruitmentEmailCatalog
 
     private static EmailTokenDescriptor T(string token, string desc, string sample) => new(token, desc, sample);
 
+    /// <summary>A token the system fills with ready-made HTML — the only kind a template may place raw.</summary>
+    private static EmailTokenDescriptor H(string token, string desc, string sample) => new(token, desc, sample) { IsHtml = true };
+
     private static readonly EmailTokenDescriptor PortalUrlToken =
         T("PortalUrl", "Base URL of the candidate careers portal.", "https://careers.example.com");
 
     private static List<EmailEventDescriptor> Build()
     {
         var list = new List<EmailEventDescriptor>();
+
+        // ── 0. Account activation ──────────────────────────────────────────────
+        // Deliberately first: it is the earliest email in the candidate's whole journey, and it
+        // is the one that decides whether there IS a journey.
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.CandidateAccountActivation,
+            Name = "Careers Account Activation",
+            Category = "Account",
+            Description =
+                "Sent the moment someone registers on the careers site. The link both confirms the "
+                + "email address and activates the account — until it is followed the account cannot "
+                + "sign in, so this is the one recruitment email that must never be switched off.",
+            DefaultSubject = "Activate your {{CompanyName}} careers account",
+            DefaultHtmlBody = Shell(BlueGradient, "Confirm your email address",
+                @"  <p>Hi <strong>{{CandidateName}}</strong>,</p>
+  <p>
+    Thank you for creating a careers account with <strong>{{CompanyName}}</strong>. Confirm your
+    email address to activate it — you will not be able to sign in or apply for a role until you do.
+  </p>" +
+                PrimaryButton("{{ActivationLink}}", "Activate my account") + @"
+  <p style='color:#6b7280;font-size:0.875rem;margin-top:1.5rem'>
+    This link expires in {{ExpiryHours}} hours and can be used once. If it has expired, request a
+    new one from the sign-in page.
+  </p>
+  <div style='background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:0.875rem;margin-top:1rem'>
+    <div style='color:#6b7280;font-size:0.8rem;margin-bottom:0.35rem'>
+      If the button does not work, paste this address into your browser:
+    </div>
+    <div style='font-family:monospace;font-size:0.75rem;word-break:break-all;color:#374151'>{{ActivationLink}}</div>
+  </div>
+  <p style='color:#9ca3af;font-size:0.8rem;margin-top:2rem'>
+    If you did not create this account, no action is needed — it stays inactive and the link expires
+    on its own. {{#if SupportEmail}}Questions? Write to {{SupportEmail}}.{{/if}}
+  </p>"),
+            Tokens = new()
+            {
+                T("CandidateName", "The name the candidate registered with.", "Ada Boahen"),
+                T("CompanyName", "The employer's name, from the company profile.", "Tema Development Corporation"),
+                // ⚠ A whole URL, not a portal base plus a path. The token is single-use and bound to
+                // one account, so the link cannot be reconstructed from parts in the template.
+                T("ActivationLink", "The complete, single-use activation URL. Do not split it.",
+                  "https://careers.example.com/careers/verify-email?uid=…&token=…"),
+                T("ExpiryHours", "How long the link remains valid.", "24"),
+                T("SupportEmail", "Where to write for help. Omitted when none is configured.",
+                  "recruitment@example.com"),
+            }
+        });
 
         // ── 1. Application received ────────────────────────────────────────────
         list.Add(new EmailEventDescriptor
@@ -95,7 +182,7 @@ public static class RecruitmentEmailCatalog
     </div>
   </div>
   <p>You can track your application status at any time using your application reference number.</p>" +
-                PrimaryButton("{{PortalUrl}}/careers/portal/dashboard", "Track my application") + @"
+                PrimaryButton("{{PortalUrl}}/external-portal/careers", "Track my application") + @"
   <p style='color:#9ca3af;font-size:0.8rem;margin-top:2rem'>
     Our team will review your application and be in touch if your profile matches our requirements.
   </p>"),
@@ -146,7 +233,7 @@ public static class RecruitmentEmailCatalog
                 @"  <p>Hi <strong>{{CandidateName}}</strong>,</p>
   <p>Good news — your application for <strong>{{JobTitle}}</strong> (ref: <strong>{{ApplicationNumber}}</strong>) is now being actively reviewed by our recruitment team.</p>
   <p>We will be in touch with an update once our review is complete. No action is required from you at this stage.</p>" +
-                PrimaryButton("{{PortalUrl}}/careers/portal/dashboard", "Track my application") + @"
+                PrimaryButton("{{PortalUrl}}/external-portal/careers", "Track my application") + @"
   <p style='color:#9ca3af;font-size:0.8rem;margin-top:2rem'>Thank you for your patience.</p>"),
             Tokens = new()
             {
@@ -174,7 +261,7 @@ public static class RecruitmentEmailCatalog
     <p style='color:#166534;margin:0;font-weight:600'>What happens next?</p>
     <p style='color:#166534;margin:0.5rem 0 0'>You may be invited for an interview or an assessment. Keep an eye on your inbox and phone for communications from our team.</p>
   </div>" +
-                PrimaryButton("{{PortalUrl}}/careers/portal/dashboard", "View my application status")),
+                PrimaryButton("{{PortalUrl}}/external-portal/careers", "View my application status")),
             Tokens = new()
             {
                 T("CandidateName", "Candidate's full name.", "Ada Boahen"),
@@ -228,7 +315,7 @@ public static class RecruitmentEmailCatalog
     <p style='color:#92400e;margin:0;font-weight:600'>&#9888; Action required</p>
     <p style='color:#92400e;margin:0.5rem 0 0'>Please check your portal for assessment instructions and any deadlines that may apply.</p>
   </div>" +
-                PrimaryButton("{{PortalUrl}}/careers/portal/dashboard", "View assessment details")),
+                PrimaryButton("{{PortalUrl}}/external-portal/careers", "View assessment details")),
             Tokens = new()
             {
                 T("CandidateName", "Candidate's full name.", "Ada Boahen"),
@@ -240,6 +327,18 @@ public static class RecruitmentEmailCatalog
         });
 
         // ── 7 & 8. Interview invitation / rescheduled (shared details table) ────
+        //
+        // ⚠ /careers/confirm-interview/{token}, NOT /careers/portal/... . Until 2026-09-22 this
+        // button pointed into the retired portal namespace at a page that had never been built, so
+        // "Confirm attendance" was a 404 in every invitation and every reschedule the system had
+        // ever sent — while the API half (GET api/job-interviews/confirm-attendance/{token},
+        // anonymous, rate-limited on PublicPortalPolicy) sat live the whole time. The page now
+        // exists and is ANONYMOUS by design: it lives under /careers, whose layout carries no
+        // AuthGuard, because somebody reading an invitation on their phone will not sign in first.
+        //
+        // ⚠ The endpoint CONFIRMS AND SPENDS the token on a GET. Anything that follows the link
+        // consumes it — including a mail scanner that pre-fetches, which is why the page treats
+        // "already confirmed" as a success rather than an error.
         const string interviewDetailsTable = @"
   <table style='width:100%;border-collapse:collapse;margin:1rem 0'>
     <tr><td style='padding:0.5rem;background:#fff;border:1px solid #e5e7eb;font-weight:600;width:40%'>Date</td><td style='padding:0.5rem;background:#fff;border:1px solid #e5e7eb'>{{Date}}</td></tr>
@@ -249,14 +348,14 @@ public static class RecruitmentEmailCatalog
     <tr><td style='padding:0.5rem;background:#f9fafb;border:1px solid #e5e7eb;font-weight:600'>Location / Link</td><td style='padding:0.5rem;background:#f9fafb;border:1px solid #e5e7eb'>{{Location}}</td></tr>
   </table>
   <p style='margin-top:1.5rem'>
-    <a href='{{PortalUrl}}/careers/portal/confirm-interview/{{ConfirmToken}}'
+    <a href='{{PortalUrl}}/careers/confirm-interview/{{ConfirmToken}}'
        style='background:#1a56db;color:#fff;padding:0.75rem 1.5rem;border-radius:6px;text-decoration:none;font-weight:600'>
       Confirm attendance
     </a>
   </p>
   <p style='color:#6b7280;font-size:0.85rem;margin-top:0.5rem'>
     If the button does not work, copy this link into your browser:<br/>
-    <a href='{{PortalUrl}}/careers/portal/confirm-interview/{{ConfirmToken}}' style='color:#1a56db;word-break:break-all'>{{PortalUrl}}/careers/portal/confirm-interview/{{ConfirmToken}}</a>
+    <a href='{{PortalUrl}}/careers/confirm-interview/{{ConfirmToken}}' style='color:#1a56db;word-break:break-all'>{{PortalUrl}}/careers/confirm-interview/{{ConfirmToken}}</a>
   </p>
   <p style='color:#9ca3af;font-size:0.8rem;margin-top:2rem'>If you have any questions, please contact our recruitment team.</p>";
 
@@ -367,6 +466,7 @@ public static class RecruitmentEmailCatalog
             DefaultHtmlBody = Shell(BlueGradient, "&#127881; You have received a job offer!",
                 @"  <p>Hi <strong>{{CandidateName}}</strong>,</p>
   <p>Congratulations! We are delighted to extend to you an offer of employment for the position of <strong>{{PositionTitle}}</strong> (ref: <strong>{{OfferNumber}}</strong>).</p>
+  {{#if LetterAttached}}<p>Your offer letter is attached to this email as a PDF for you to keep.</p>{{/if}}
   <p>Please log in to the candidate portal to review the full offer details and submit your response before the expiry date.</p>
   <table style='width:100%;border-collapse:collapse;margin:1rem 0'>
     <tr><td style='padding:0.5rem;background:#fff;border:1px solid #e5e7eb;font-weight:600'>Position</td><td style='padding:0.5rem;background:#fff;border:1px solid #e5e7eb'>{{PositionTitle}}</td></tr>
@@ -390,7 +490,11 @@ public static class RecruitmentEmailCatalog
                 T("SalaryLine", "Formatted salary line; row hidden when empty.", "GHS 90,000.00 per annum"),
                 T("StartDate", "Proposed start date; row hidden when empty.", "Monday, 3 August 2026"),
                 T("ExpiryDate", "Offer expiry date; row hidden when empty.", "Friday, 25 July 2026"),
-                T("RespondUrl", "Deep link that signs the candidate in to view the offer.", "https://careers.example.com/careers/portal/login"),
+                T("RespondUrl", "Link the candidate follows to read and answer the offer.",
+                  "https://careers.example.com/careers/portal/offer-response?token=…"),
+                // Round 4 lane N-b: set only when the letter really went with the email — the sentence
+                // must never promise an attachment the conversion could not make.
+                T("LetterAttached", "Set when the offer letter is attached as a PDF; leave its sentence inside {{#if LetterAttached}}.", "yes"),
                 PortalUrlToken,
             }
         });
@@ -412,7 +516,7 @@ public static class RecruitmentEmailCatalog
     <p style='color:#166534;margin:0.5rem 0 0'>{{#if StartDate}}Your proposed start date is <strong>{{StartDate}}</strong>. Our HR team will be in touch with onboarding details.{{else}}Our HR team will be in touch shortly with onboarding details and your confirmed start date.{{/if}}</p>
   </div>
   <p>If you have any questions in the meantime, please don't hesitate to reach out to our HR team.</p>" +
-                PrimaryButton("{{PortalUrl}}/careers/portal/dashboard", "Go to my portal")),
+                PrimaryButton("{{PortalUrl}}/external-portal/careers", "Go to my portal")),
             Tokens = new()
             {
                 T("CandidateName", "Candidate's full name.", "Ada Boahen"),
@@ -424,10 +528,12 @@ public static class RecruitmentEmailCatalog
         });
 
         // ── 12. Offer letter (formal document) ─────────────────────────────────
-        // A full, HR-editable offer-of-employment letter. Rendered on demand (portal view,
-        // print-to-PDF, and as the email body) by OfferLetterService, which supplies the rich
-        // token set below — including pre-built HTML fragments ({{{SalaryBreakdownTable}}},
-        // {{{BenefitsList}}}, {{{DutiesList}}}, {{{ConditionsList}}}) it assembles itself.
+        // A full, HR-editable offer-of-employment letter. Rendered on demand by OfferLetterService —
+        // HR's preview, the candidate's portal view — and, since round 4 lane N-b, as a PDF attached to
+        // the Offer Issued email. It supplies the rich token set below, including pre-built HTML
+        // fragments ({{{SalaryBreakdownTable}}}, {{{BenefitsList}}}, {{{DutiesList}}},
+        // {{{PreEmploymentChecklist}}}, and {{{ConditionsList}}} for a tenant that places it) it
+        // assembles itself.
         list.Add(new EmailEventDescriptor
         {
             Module = Module,
@@ -464,17 +570,21 @@ public static class RecruitmentEmailCatalog
                 T("IsBargainingUnit", "Truthy when the role is covered by a collective agreement (shows the union clause).", "true"),
                 T("UnionName", "Union / bargaining unit name; shown inside the union clause.", "Industrial & Commercial Workers' Union"),
                 T("JobSummary", "Role summary paragraph; block hidden when empty.", "Lead the financial reporting function…"),
-                T("DutiesList", "Pre-built HTML <ul> of key duties; block hidden when empty.", "<ul><li>Prepare monthly accounts</li></ul>"),
+                H("DutiesList", "Pre-built HTML <ul> of key duties; block hidden when empty.", "<ul><li>Prepare monthly accounts</li></ul>"),
                 T("EssentialFunctions", "Essential-functions note; block hidden when empty.", "Must be able to meet statutory reporting deadlines."),
-                T("SalaryBreakdownTable", "Pre-built HTML table itemising basic + allowances + gross.", "<table>…</table>"),
+                H("SalaryBreakdownTable", "Pre-built HTML table itemising basic + allowances + gross.", "<table>…</table>"),
                 T("BaseSalaryLine", "Formatted basic salary line.", "GHS 90,000.00 per annum"),
                 T("GrossSalaryLine", "Formatted gross (basic + allowances) line; hidden when empty.", "GHS 108,000.00 per annum"),
                 T("BonusTerms", "Bonus terms; block hidden when empty.", "Discretionary annual bonus up to 10% of basic."),
                 T("CommissionStructure", "Commission structure; block hidden when empty.", "2% of net sales."),
-                T("BenefitsList", "Pre-built HTML <ul> of benefits; block hidden when empty.", "<ul><li>Medical cover</li></ul>"),
+                H("BenefitsList", "Pre-built HTML <ul> of benefits; block hidden when empty.", "<ul><li>Medical cover</li></ul>"),
                 T("NdaRequired", "Truthy when a non-disclosure agreement is required (shows the NDA clause).", "true"),
                 T("IsConditional", "Truthy when the offer is conditional (shows conditions-precedent block).", "true"),
-                T("ConditionsList", "Pre-built HTML <ul> of pre-employment conditions; shown when conditional.", "<ul><li>Satisfactory references</li></ul>"),
+                H("ConditionsList", "Pre-built HTML <ul> of pre-employment conditions; shown when conditional.", "<ul><li>Satisfactory references</li></ul>"),
+                // Round 4, lane H3. The same list, offered to EVERY letter rather than only a
+                // conditional one — a permanent appointment still asks for references and a medical.
+                T("HasPreEmploymentChecks", "Truthy when the offer carries a pre-employment check set.", "true"),
+                H("PreEmploymentChecklist", "⚠ Raw HTML — the checks the candidate must produce, with instructions and expected turnaround.", "<ul><li>Police clearance</li></ul>"),
                 T("AdditionalTerms", "Free-text additional terms; block hidden when empty.", "Relocation assistance provided."),
                 T("ExpiryDate", "Offer expiry date; acceptance clause hidden when empty.", "Friday, 25 July 2026"),
                 T("AcceptanceInstructions", "How to accept the offer.", "Sign and return one copy of this letter, or accept via the candidate portal."),
@@ -485,6 +595,127 @@ public static class RecruitmentEmailCatalog
                 // in force, which is also what happens after a seal is withdrawn.
                 T("SignatureImageUrl", "Authorised signature image, embedded; hidden when none is in force.", ""),
                 T("CompanySealImageUrl", "Company seal image, embedded; hidden when none is in force.", ""),
+            }
+        });
+
+
+        // -- 13. Talent-pool invitation ------------------------------------------
+        // Round 4, lane B. HR screened the pool against a vacancy's real criteria and is asking
+        // somebody who already trusted them with their details to come back for this one.
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.TalentPoolInvitation,
+            Name = "Talent Pool Invitation",
+            Category = "Application",
+            Description =
+                "Sent when HR invites a pooled candidate to apply for a specific vacancy. Unlike every "
+                + "other recruitment email, the candidate did not start this exchange - they may have "
+                + "joined the pool long ago and for a different role - so the letter says who is writing, "
+                + "why this role, and how to stop hearing from us.",
+            DefaultSubject = "We think you fit: {{JobTitle}} at {{CompanyName}}",
+            DefaultHtmlBody = Shell(GreenGradient, "An opening we think suits you",
+                @"  <p>Hi <strong>{{CandidateName}}</strong>,</p>
+  <p>
+    You are on <strong>{{CompanyName}}</strong>'s talent register, and a role has just opened that
+    looks like a fit for the experience you shared with us.
+  </p>
+  <div style='background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:1rem;margin:1rem 0'>
+    <div style='font-size:1.125rem;font-weight:700;color:#111827'>{{JobTitle}}</div>
+    <div style='color:#6b7280;font-size:0.875rem;margin-top:0.25rem'>Reference: {{VacancyNumber}}</div>
+    {{#if ClosingDate}}<div style='margin-top:0.75rem;font-size:0.875rem'>
+      <strong>Applications close:</strong> {{ClosingDate}}
+    </div>{{/if}}
+    {{#if ApplicationNumber}}<div style='margin-top:0.75rem;font-size:0.875rem'>
+      <strong>Your reference:</strong> {{ApplicationNumber}}
+    </div>{{/if}}
+  </div>
+  {{#if InvitationNote}}<p style='white-space:pre-wrap'>{{InvitationNote}}</p>{{/if}}
+  <p>
+    We have opened an application for you so nothing is lost - please review it, attach anything you
+    would like us to see, and confirm you want to be considered.
+  </p>" +
+                PrimaryButton("{{PortalUrl}}/external-portal/careers", "Review my application") + @"
+  <p style='color:#9ca3af;font-size:0.8rem;margin-top:2rem'>
+    You are receiving this because you asked to be kept on our talent register. If you would rather
+    not hear about openings, reply to this message and we will take you off it.
+  </p>"),
+            Tokens = new()
+            {
+                T("CandidateName", "The pooled candidate's full name.", "Ada Boahen"),
+                T("CompanyName", "The employer's name, from the company profile.", "Tema Development Corporation"),
+                T("JobTitle", "The vacancy being offered.", "Senior Accountant"),
+                T("VacancyNumber", "The vacancy's reference.", "VAC-000042"),
+                T("ApplicationNumber", "The application opened on the candidate's behalf; hidden when none.", "APP-000311"),
+                T("ClosingDate", "The application deadline; the whole line is hidden when the vacancy has none.", "Friday, 10 October 2026"),
+                T("InvitationNote", "What the recruiter typed when inviting; hidden when they typed nothing.",
+                  "Your work at Ghana Ports looked directly relevant to this one."),
+                PortalUrlToken,
+            }
+        });
+
+        // ── 14. Test invitation ────────────────────────────────────────────────
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.TestInvitation,
+            Name = "Test Invitation",
+            Category = "Assessment",
+            Description =
+                "Sent when HR assigns a recruitment test and invites the candidates who must sit it. "
+                + "Carries the four things a candidate needs before they open a timed paper: what it "
+                + "is, how long it runs, when the window shuts and how many attempts they have.",
+            DefaultSubject = "Assessment to complete: {{TestName}} ({{ApplicationNumber}})",
+            DefaultHtmlBody = Shell(BlueGradient, "An assessment to complete",
+                @"  <p>Hi <strong>{{CandidateName}}</strong>,</p>
+  <p>
+    As part of your application for <strong>{{JobTitle}}</strong> (ref:
+    <strong>{{ApplicationNumber}}</strong>), we would like you to complete an assessment.
+  </p>
+  <div style='background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:1rem;margin:1rem 0'>
+    <div style='font-size:1.125rem;font-weight:700;color:#111827'>{{TestName}}</div>
+    <div style='color:#6b7280;font-size:0.875rem;margin-top:0.5rem'>
+      {{QuestionCount}} question(s) &middot; {{DurationText}} &middot; {{AttemptsAllowed}} attempt(s)
+    </div>
+    {{#if OpensAt}}<div style='margin-top:0.75rem;font-size:0.875rem'>
+      <strong>Opens:</strong> {{OpensAt}}
+    </div>{{/if}}
+    {{#if ClosesAt}}<div style='margin-top:0.25rem;font-size:0.875rem'>
+      <strong>Closes:</strong> {{ClosesAt}}
+    </div>{{/if}}
+  </div>
+  {{#if TestInstructions}}<p style='white-space:pre-wrap'>{{TestInstructions}}</p>{{/if}}
+  <div style='background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:1rem;margin:1rem 0'>
+    <p style='color:#92400e;margin:0;font-weight:600'>&#9888; Before you start</p>
+    <p style='color:#92400e;margin:0.5rem 0 0'>
+      The clock starts the moment you open the paper and keeps running if you close the page, so
+      begin only when you have the time free and a connection you trust. Your answers are saved as
+      you go.
+    </p>
+  </div>" +
+                // ⚠ /external-portal/careers/..., NOT /careers/portal/... . The candidate area
+                // moved into the shared external-portal shell when the standalone portal was retired
+                // (2026-08-31), and six buttons in this file went on pointing at the old path for
+                // three weeks — every one of them a 404. They were corrected on 2026-09-22; the
+                // only survivor is the confirm-attendance link above, which is a missing PAGE
+                // rather than a moved one.
+                PrimaryButton("{{PortalUrl}}/external-portal/careers/assessments", "Open my assessments")),
+            Tokens = new()
+            {
+                T("CandidateName", "Candidate's full name.", "Ada Boahen"),
+                T("JobTitle", "The role applied for.", "Senior Accountant"),
+                T("ApplicationNumber", "Reference number of this application.", "APP-000456"),
+                T("TestName", "The name of the paper.", "Numerical Reasoning"),
+                T("TestInstructions", "The paper's own instructions; the paragraph is hidden when it has none.",
+                  "Answer every question. Calculators are permitted."),
+                T("DurationText", "How long it runs, in words.", "45 minutes"),
+                T("QuestionCount", "How many questions are on the paper.", "20"),
+                T("OpensAt", "When the window opens; the line is hidden when it is already open.",
+                  "Monday, 28 September 2026 at 09:00"),
+                T("ClosesAt", "When the window shuts; the line is hidden when there is no closing date.",
+                  "Friday, 2 October 2026 at 17:00"),
+                T("AttemptsAllowed", "How many times the candidate may sit it.", "1"),
+                PortalUrlToken,
             }
         });
 
@@ -542,9 +773,9 @@ public static class RecruitmentEmailCatalog
   {{#if BenefitsList}}<h3 style='font-size:0.95rem;color:#1e3a8a;border-bottom:1px solid #e5e7eb;padding-bottom:0.25rem;margin:1.25rem 0 0.5rem'>4. Benefits</h3>
   {{{BenefitsList}}}{{/if}}
 
-  {{#if IsConditional}}<h3 style='font-size:0.95rem;color:#b45309;border-bottom:1px solid #fde68a;padding-bottom:0.25rem;margin:1.25rem 0 0.5rem'>Conditions Precedent</h3>
-  <p style='font-size:13px'>This offer is conditional upon satisfactory completion of the following pre-employment checks:</p>
-  {{{ConditionsList}}}{{/if}}
+  {{#if HasPreEmploymentChecks}}<h3 style='font-size:0.95rem;color:#b45309;border-bottom:1px solid #fde68a;padding-bottom:0.25rem;margin:1.25rem 0 0.5rem'>{{#if IsConditional}}Conditions Precedent{{else}}Pre-employment Requirements{{/if}}</h3>
+  <p style='font-size:13px'>{{#if IsConditional}}This offer is conditional upon satisfactory completion of the following pre-employment checks:{{else}}Please arrange the following before your start date. They do not affect this offer, but your appointment cannot be finalised until they are complete:{{/if}}</p>
+  {{{PreEmploymentChecklist}}}{{/if}}
 
   {{#if NdaRequired}}<p style='font-size:13px;margin:1rem 0 0'>Your employment is subject to your signing the company's Non-Disclosure Agreement.</p>{{/if}}
   {{#if AdditionalTerms}}<h3 style='font-size:0.95rem;color:#1e3a8a;border-bottom:1px solid #e5e7eb;padding-bottom:0.25rem;margin:1.25rem 0 0.5rem'>Additional Terms</h3>

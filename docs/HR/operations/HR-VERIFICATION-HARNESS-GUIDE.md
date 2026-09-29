@@ -75,8 +75,11 @@ that file.** It is also local-only, so teammates and CI are unaffected. Run `dot
 
 - SQL Server (`MSSQLSERVER`) is often stopped after a reboot despite Automatic; starting it needs
   elevation — ask the user.
-- Rebuilding the database (`rebuild-db`, `New-UatDatabase.ps1`) builds from the **EF model**, not
-  migrations; migration-only objects (a Procurement check constraint) are lost. Never for go-live.
+- `rebuild-db` builds from the **EF model**, not migrations, so every migration-only object is
+  lost — since master's baseline that is **500 guard triggers**, 7 functions, a view and 65 default
+  constraints, and the database cannot migrate forward afterwards. ⚠ Since 2026-09-27
+  `New-UatDatabase.ps1` builds through the chain instead (drop, create empty, `apply-migrations`,
+  `seed-db`). Do the same by hand for any database a harness must trust. Defects doc § 31.
 - Two databases exist (`ErpSystemDB`, `ErpSystemDB_UAT`); one API on port 5000 serves whichever
   the connection string names — check before asserting counts.
 - Permission grants seed via the **`seed-db` command**, not API startup. A post-build green

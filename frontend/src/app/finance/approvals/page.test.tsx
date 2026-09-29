@@ -106,4 +106,36 @@ describe('Finance approval workbench', () => {
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
   });
+
+  it('shows an assigned Business Partner identity once and routes the decision to its record', async () => {
+    apiServiceMock.get.mockResolvedValue([{
+      approvalId: 'approval-partner-1',
+      entityId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      entityType: 'BusinessPartner',
+      reference: 'SUP260001',
+      title: 'Akwaaba Technical Services Ltd',
+      detailHref: '/procurement/business-partners/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      documentType: 'Business Partner',
+      module: 'Procurement / Finance Master Data',
+      currentStep: 'Financial Controller Review',
+      statusLabel: 'Pending Approval',
+      decisionOnDetailPage: true,
+      canApprove: false,
+      canReject: false,
+    }]);
+
+    render(
+      <ApprovalWorkbench
+        title="Finance Approval Workbench"
+        description="Finance approvals"
+        definitions={getFinanceApprovalQueueDefinitions()}
+      />
+    );
+
+    expect(await screen.findByText('Akwaaba Technical Services Ltd')).toBeInTheDocument();
+    expect(screen.getAllByText('Akwaaba Technical Services Ltd')).toHaveLength(1);
+    expect(screen.getByRole('link', { name: 'Review & decide' })).toHaveAttribute(
+      'href', '/procurement/business-partners/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    );
+  });
 });

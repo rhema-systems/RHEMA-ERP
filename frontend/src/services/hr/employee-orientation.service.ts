@@ -6,6 +6,8 @@ import type {
   EmployeeOrientationUpdateRequest,
   BulkEnrollOrientationRequest,
   WithdrawOrientationRequest,
+  ConfirmOrientationAttendanceRequest,
+  OrientationSessionCompletionPreview,
   OrientationCompletionStatus,
   OrientationModule,
   OrientationContentProgress,
@@ -106,6 +108,20 @@ class EmployeeOrientationService {
 
   withdraw(id: string, data: WithdrawOrientationRequest): Promise<void> {
     return apiService.post<void>(`${this.baseUrl}/${id}/withdraw`, data);
+  }
+
+  /**
+   * Round 4, lane R — HR's "Mark completed" on an enrolment whose programme is only its live
+   * session. Refused (422) on any other programme, on an enrolment HR ended, and without a note.
+   * The completion rule still runs: a declaration the programme requires is still to be signed.
+   */
+  confirmAttendance(id: string, data: ConfirmOrientationAttendanceRequest): Promise<EmployeeOrientation> {
+    return apiService.post<EmployeeOrientation>(`${this.baseUrl}/${id}/confirm-attendance`, data);
+  }
+
+  /** Round 4, lane R — what marking the session Completed would do, for its confirmation to say. */
+  getSessionCompletionPreview(sessionId: string): Promise<OrientationSessionCompletionPreview> {
+    return apiService.get<OrientationSessionCompletionPreview>(`${this.baseUrl}/session/${sessionId}/completion-preview`);
   }
 
   remove(id: string): Promise<void> {

@@ -314,12 +314,15 @@ export function SelectField<T extends FieldValues>({
   allowEmpty = false,
   emptyLabel = 'None',
   description,
+  disabled,
 }: BaseProps<T> & {
   options: { value: string; label: string }[];
   allowEmpty?: boolean;
   emptyLabel?: string;
   /** A line under the control explaining what the choice changes. */
   description?: string;
+  /** Shows the value but does not let it change — say why in `description`. */
+  disabled?: boolean;
 }) {
   const raw = form.watch(name) as unknown as string | undefined;
   const value = raw ? String(raw) : allowEmpty ? NONE_VALUE : '';
@@ -328,6 +331,7 @@ export function SelectField<T extends FieldValues>({
     <div className="space-y-2">
       <FieldLabel htmlFor={name} label={label} required={required} />
       <Select
+        disabled={disabled}
         value={value}
         onValueChange={(next) =>
           form.setValue(name, (next === NONE_VALUE ? '' : next) as any, { shouldValidate: true })

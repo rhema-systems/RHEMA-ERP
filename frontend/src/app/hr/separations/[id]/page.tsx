@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/select';
 import { separationService } from '@/services/hr/separation.service';
 import { ExitInterviewTab } from '@/components/hr/separations/exit-interview-tab';
+import { SeparationMedicalBoardPanel } from '@/components/hr/separations/SeparationMedicalBoardPanel';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
@@ -38,6 +39,7 @@ import type {
   SeparationType,
   SettlementLineCategory,
 } from '@/types/hr/separation';
+import { PAY_LINE_CATEGORIES } from '@/types/hr/separation';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 
@@ -110,6 +112,9 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [lineAmount, setLineAmount] = useState('');
   const [lineSource, setLineSource] = useState('');
+  // Leave settings audit 2: on a pay line HR edits the days, never the amount.
+  const [lineDays, setLineDays] = useState('');
+  const [newLineDays, setNewLineDays] = useState('');
   const [newLineDescription, setNewLineDescription] = useState('');
   const [newLineCategory, setNewLineCategory] = useState<SettlementLineCategory>('OtherEarning');
   const [noticeChoice, setNoticeChoice] = useState<'waive' | 'payInLieu' | 'neither'>('neither');
@@ -322,6 +327,14 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
               )}
             </CardContent>
           </Card>
+
+          {/*
+            ⚠ Round 5, lane K-II-a: the control for `MedicalBoardId`, which nothing could set. Shown
+            for a medical retirement, or whenever a board is still named (the type changed since).
+          */}
+          {(s.separationType === 'MedicalRetirement' || s.medicalBoardId) && (
+            <SeparationMedicalBoardPanel separation={s} onChanged={refresh} />
+          )}
 
           <Card>
             <CardHeader><CardTitle className="text-base">Notice</CardTitle></CardHeader>
@@ -595,16 +608,23 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
                 ⚠ The most important warning on this screen. A statement with unvalued lines has a
                 net figure that is NOT the whole story, and somebody could sign it believing it is.
               */}
-              {settlement.uncomputedLines > 0 && (
-                <Alert variant="destructive">
-                  <AlertTriangle className="h-4 w-4" />
-                  <AlertDescription>
-                    {settlement.uncomputedLines} line(s) could not be valued, so the net figure above
-                    is incomplete. Enter each amount with its source, or remove the line if nothing
-                    is owed.
-                  </AlertDescription>
-                </Alert>
-              )}
+              {settlement.uncomputedLines > 0 && (() => {
+                // Leave settings audit 2 (P2/P3): pay lines wait on Finance, not on HR.
+                const awaitingFinance = settlement.lines.filter((l) => l.awaitingFinance).length;
+                const other = settlement.uncomputedLines - awaitingFinance;
+                return (
+                  <Alert variant="destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>
+                      The net figure above is incomplete.
+                      {awaitingFinance > 0 &&
+                        ` ${awaitingFinance} pay line(s) await Finance, which values them in Pay to value — HR records the days, not the money.`}
+                      {other > 0 &&
+                        ` ${other} other line(s) could not be valued: enter each amount with its source, or remove the line if nothing is owed.`}
+                    </AlertDescription>
+                  </Alert>
+                );
+              })()}
 
               {settlement.returnCount > 0 && (
                 <Alert>
@@ -633,31 +653,61 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
                           ⚠ NEVER render an uncomputed line as 0.00. Null means "we do not know",
                           and a zero on a document somebody signs is a claim nobody checked.
                         */}
-                        {line.computation === 'CannotCompute' ? (
+                        {line.days != null && (
+                          <span className="text-sm text-muted-foreground tabular-nums">{line.days} day(s)</span>
+                        )}
+                        {line.computation === 'CannotCompute' && !line.isPayLine ? (
                           <Badge variant="destructive">Not computed</Badge>
+                        ) : line.awaitingFinance && line.amount == null ? (
+                          // Leave settings audit 2: HR records the days; Finance puts the money on them.
+                          <Badge variant="outline" className="border-amber-400 text-amber-700 dark:text-amber-300">
+                            Awaiting Finance
+                          </Badge>
                         ) : (
                           <span className={`tabular-nums ${line.isDeduction ? 'text-rose-600 dark:text-rose-400' : ''}`}>
                             {line.isDeduction ? '−' : ''}{money(line.amount, settlement.currencyCode)}
                           </span>
                         )}
+                        {/* A figure HR put on a pay line before it was Finance's: shown, but not settled. */}
+                        {line.awaitingFinance && line.amount != null && (
+                          <Badge variant="outline" className="border-amber-400 text-xs text-amber-700 dark:text-amber-300">
+                            HR&apos;s figure — awaiting Finance
+                          </Badge>
+                        )}
                         {line.computation === 'ManuallyEntered' && (
                           <Badge variant="outline" className="text-xs">Entered by hand</Badge>
                         )}
+                        {line.computation === 'ValuedByFinance' && (
+                          <Badge variant="outline" className="text-xs">
+                            Valued by Finance{line.valuedByName ? ` — ${line.valuedByName}` : ''}
+                          </Badge>
+                        )}
 
-                        {/* Editable only while the statement is a draft awaiting finalisation. */}
-                        {!settlement.isFinalised && s.status === 'SettlementPending' && (
+                        {/*
+                          Editable only while the statement is a draft awaiting finalisation. On a
+                          pay line HR may change the DAYS (which sends it back to Finance), never the
+                          amount; a pay line with no days has nothing for HR to change.
+                          ⚠ Keyed on the status, not isFinalised: a statement Internal Audit
+                          returned keeps its finalised date as history, and is editable again.
+                        */}
+                        {s.status === 'SettlementPending' && (
                           <>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setEditingLineId(editingLineId === line.id ? null : line.id);
-                                setLineAmount(line.amount == null ? '' : String(line.amount));
-                                setLineSource(line.sourceReference ?? '');
-                              }}
-                            >
-                              {line.computation === 'CannotCompute' ? 'Enter the amount' : 'Amend'}
-                            </Button>
+                            {(!line.isPayLine || line.days != null) && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setEditingLineId(editingLineId === line.id ? null : line.id);
+                                  setLineAmount(line.amount == null ? '' : String(line.amount));
+                                  setLineSource(line.sourceReference ?? '');
+                                  setLineDays(line.days == null ? '' : String(line.days));
+                                }}
+                              >
+                                {line.isPayLine
+                                  ? 'Amend the days'
+                                  : line.computation === 'CannotCompute' ? 'Enter the amount' : 'Amend'}
+                              </Button>
+                            )}
                             {!line.isSystemGenerated && (
                               <Button
                                 variant="ghost"
@@ -672,7 +722,41 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
                         )}
                       </div>
 
-                      {editingLineId === line.id && (
+                      {editingLineId === line.id && line.isPayLine && (
+                        <div className="mt-3 w-full space-y-3 rounded bg-muted/40 p-3">
+                          <div className="w-[160px] space-y-1">
+                            <Label className="text-xs">Days</Label>
+                            <Input
+                              type="number"
+                              step="0.5"
+                              min={0}
+                              value={lineDays}
+                              onChange={(e) => setLineDays(e.target.value)}
+                            />
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            HR records the days; Finance values them. Changing the days after Finance
+                            has valued the line clears its figure, and the line waits for Finance again.
+                          </p>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              disabled={act.isPending || lineDays === ''}
+                              onClick={() => run(async () => {
+                                await separationService.updateSettlementLine(line.id, { days: Number(lineDays) });
+                                setEditingLineId(null);
+                              })}
+                            >
+                              Save
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => setEditingLineId(null)}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+
+                      {editingLineId === line.id && !line.isPayLine && (
                         <div className="mt-3 w-full space-y-3 rounded bg-muted/40 p-3">
                           <div className="flex flex-wrap gap-3">
                             <div className="w-[160px] space-y-1">
@@ -727,7 +811,7 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
                   ))}
 
                   {/* A line HR adds by hand — the FR-HR-184 items the system cannot work out. */}
-                  {!settlement.isFinalised && s.status === 'SettlementPending' && (
+                  {s.status === 'SettlementPending' && (
                     <div className="flex flex-wrap items-end gap-3 rounded border border-dashed p-3">
                       <div className="min-w-[220px] flex-1 space-y-1">
                         <Label className="text-xs">Add a line</Label>
@@ -751,6 +835,18 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
                           </SelectContent>
                         </Select>
                       </div>
+                      {PAY_LINE_CATEGORIES.includes(newLineCategory) && (
+                        <div className="w-[120px] space-y-1">
+                          <Label className="text-xs">Days (if any)</Label>
+                          <Input
+                            type="number"
+                            step="0.5"
+                            min={0}
+                            value={newLineDays}
+                            onChange={(e) => setNewLineDays(e.target.value)}
+                          />
+                        </div>
+                      )}
                       <Button
                         size="sm"
                         disabled={act.isPending || !newLineDescription.trim()}
@@ -759,24 +855,30 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
                             category: newLineCategory,
                             description: newLineDescription.trim(),
                             isDeduction: DEDUCTION_CATEGORIES.includes(newLineCategory),
+                            days: PAY_LINE_CATEGORIES.includes(newLineCategory) && newLineDays !== ''
+                              ? Number(newLineDays)
+                              : null,
                           });
                           setNewLineDescription('');
+                          setNewLineDays('');
                         })}
                       >
                         Add
                       </Button>
                       <p className="w-full text-xs text-muted-foreground">
-                        Added without an amount, as something owed but not yet valued — which holds
-                        the statement open until somebody supplies the figure.
+                        {PAY_LINE_CATEGORIES.includes(newLineCategory)
+                          ? 'Pay: added with its days and facts only. Finance values it in Pay to value, and the statement stays open until it has.'
+                          : 'Added without an amount, as something owed but not yet valued — which holds the statement open until somebody supplies the figure.'}
                       </p>
                     </div>
                   )}
                 </CardContent>
               </Card>
 
+              {/* Statements prepared before leave settings audit 2 keep the rate HR worked out. */}
               {settlement.dailyRateBasis && (
                 <p className="text-xs text-muted-foreground">
-                  Rate basis: {settlement.dailyRateBasis}
+                  Rate basis (HR&apos;s, before Finance valued pay): {settlement.dailyRateBasis}
                 </p>
               )}
 
@@ -874,7 +976,10 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
                 </Select>
                 {DOC_REQUIRED_BY[s.separationType] === docCategory && (
                   <p className="text-xs text-muted-foreground">
-                    This separation cannot be submitted until this document is attached.
+                    {/* ⚠ Lane K-II-a: a medical retirement has a second way through. */}
+                    {s.separationType === 'MedicalRetirement'
+                      ? 'This separation cannot be submitted until this document is attached, or a medical board’s finding recommending retirement is linked on the Overview.'
+                      : 'This separation cannot be submitted until this document is attached.'}
                   </p>
                 )}
               </div>

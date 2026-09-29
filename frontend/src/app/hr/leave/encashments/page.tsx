@@ -36,12 +36,13 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { FinancePostingInlineStatus } from '@/components/hr/common/FinancePostingCard';
+import { HR_ADMIN_ROLES, PAY_VALUER_ROLES } from '@/components/hr/common/PermissionGate';
+import { useLeaveYear } from '@/components/hr/leave/use-leave-year';
+import { useAuth } from '@/hooks/use-auth';
 import { leaveEncashmentService } from '@/services/hr/leave.service';
 import type { LeaveEncashment } from '@/types/hr/leave-request';
 
 const ALL = '__all__';
-const currentYear = new Date().getFullYear();
-const years = [currentYear + 1, currentYear, currentYear - 1, currentYear - 2];
 const statuses = ['Draft', 'Submitted', 'PendingApproval', 'Approved', 'Rejected', 'Processed', 'Cancelled'];
 
 type Pending =
@@ -57,11 +58,21 @@ type Pending =
 export default function LeaveEncashmentsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [year, setYear] = useState(String(currentYear));
+  // ⚠ Leave settings audit 2, L-95: the current leave year, not the calendar year; the choice is
+  // kept apart so a late answer moves the default and never overrides it (see useLeaveYear).
+  const { currentYear } = useLeaveYear();
+  const years = [currentYear + 1, currentYear, currentYear - 1, currentYear - 2];
+  const [chosenYear, setYear] = useState<string | null>(null);
+  const year = chosenYear ?? String(currentYear);
   const [status, setStatus] = useState(ALL);
   const [pending, setPending] = useState<Pending | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
+  // Leave settings audit 2 (P4): paying is Finance's, with the amount it paid.
+  const [paidAmount, setPaidAmount] = useState('');
+  const [paidBasis, setPaidBasis] = useState('');
+  const { hasAnyPermission, hasAnyRole } = useAuth();
+  const canPay = hasAnyPermission(['HR.Pay.Value']) || hasAnyRole([...PAY_VALUER_ROLES, ...HR_ADMIN_ROLES]);
 
   const queryKey = ['hr', 'leave-encashments', year, status];
 
@@ -78,8 +89,11 @@ export default function LeaveEncashmentsPage() {
         return leaveEncashmentService.reject(p.row.id, rejectReason.trim());
       }
       if (!paymentReference.trim()) throw new Error('A payment reference is required.');
+      if (!(Number(paidAmount) > 0)) throw new Error('Enter the amount paid for these days.');
       return leaveEncashmentService.markAsProcessed(p.row.id, {
         paymentReference: paymentReference.trim(),
+        amount: Number(paidAmount),
+        basis: paidBasis.trim() || null,
       });
     },
     onSuccess: async () => {
@@ -89,6 +103,8 @@ export default function LeaveEncashmentsPage() {
       setPending(null);
       setRejectReason('');
       setPaymentReference('');
+      setPaidAmount('');
+      setPaidBasis('');
     },
     onError: (e: any) =>
       toast({ title: 'Error', description: e?.message || 'Action failed.', variant: 'destructive' }),
@@ -194,7 +210,12 @@ export default function LeaveEncashmentsPage() {
                       <TableCell>{e.year}</TableCell>
                       <TableCell className="text-right">{e.daysEncashed}</TableCell>
                       <TableCell className="text-right">
-                        {e.amountPaid?.toLocaleString() ?? '—'}
+                        {/* Leave settings audit 2: no amount until Finance pays it. Zero is not a figure. */}
+                        {e.status !== 'Processed' && !e.amountPaid ? (
+                          <span className="text-xs italic text-muted-foreground">awaiting Finance</span>
+                        ) : (
+                          e.amountPaid?.toLocaleString() ?? '—'
+                        )}
                       </TableCell>
                       {/*
                         ⚠ L-20. The row used to show an amount and nothing else — not the rate, not the
@@ -206,6 +227,8 @@ export default function LeaveEncashmentsPage() {
                       <TableCell className="max-w-xs text-xs text-muted-foreground">
                         {e.rateBasis ? (
                           <span title={e.rateBasis}>{e.rateBasis}</span>
+                        ) : e.status !== 'Processed' ? (
+                          <span className="italic">Finance values the days when it pays them</span>
                         ) : (
                           <span className="italic">
                             not recorded — paid before the basis was kept
@@ -245,7 +268,8 @@ export default function LeaveEncashmentsPage() {
                                 </DropdownMenuItem>
                               </>
                             )}
-                            {e.status === 'Approved' && (
+                            {/* Finance's step (HR.Pay.Value): the API refuses anyone else. */}
+                            {e.status === 'Approved' && canPay && (
                               <DropdownMenuItem
                                 onClick={() => setPending({ kind: 'process', row: e })}
                               >
@@ -276,7 +300,7 @@ export default function LeaveEncashmentsPage() {
         }
         description={
           pending?.kind === 'process'
-            ? 'Records the payment against this approved encashment.'
+            ? `Finance's step: the amount paid for ${pending.row.daysEncashed} day(s), and the payment it went out on.`
             : undefined
         }
         confirmText={
@@ -306,14 +330,36 @@ export default function LeaveEncashmentsPage() {
           </div>
         )}
         {pending?.kind === 'process' && (
-          <div className="space-y-2">
-            <Label htmlFor="paymentReference">Payment reference</Label>
-            <Input
-              id="paymentReference"
-              value={paymentReference}
-              onChange={(ev) => setPaymentReference(ev.target.value)}
-              placeholder="Payment voucher or transaction id"
-            />
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="paidAmount">Amount paid</Label>
+              <Input
+                id="paidAmount"
+                type="number"
+                step="0.01"
+                min={0}
+                value={paidAmount}
+                onChange={(ev) => setPaidAmount(ev.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="paidBasis">How it was worked out (optional)</Label>
+              <Input
+                id="paidBasis"
+                value={paidBasis}
+                onChange={(ev) => setPaidBasis(ev.target.value)}
+                placeholder="e.g. basic + housing allowance ÷ 22 × 5 days"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="paymentReference">Payment reference</Label>
+              <Input
+                id="paymentReference"
+                value={paymentReference}
+                onChange={(ev) => setPaymentReference(ev.target.value)}
+                placeholder="Payment voucher or transaction id"
+              />
+            </div>
           </div>
         )}
       </ConfirmationDialog>

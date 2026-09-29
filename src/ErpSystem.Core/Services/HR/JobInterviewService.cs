@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text;
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.HR;
@@ -240,6 +241,18 @@ public class JobInterviewService : IJobInterviewService
     private readonly IGenericRepository<Entities.HR.ExternalAssociate> _associateRepository;
     private readonly IGenericRepository<Entities.HR.StaffLeave.LeaveRequest> _leaveRepository;
     private readonly IGenericRepository<Entities.HR.StaffTravel.StaffTravelRequest> _travelRepository;
+
+    /// <summary>
+    /// Every place a panelist may already be committed (round 4, lane D1).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Injected as the whole set. Adding a source is a class plus a registration; nothing here
+    /// needs to change, and nothing here can quietly stop asking one. What CAN go wrong is a source
+    /// that is written and never registered — it contributes nothing and the check answers "free" —
+    /// which is why the result carries <c>SourcesConsulted</c>.
+    /// </remarks>
+    private readonly IReadOnlyList<IPanelistCommitmentSource> _commitmentSources;
+
     private readonly string _portalUrl;
 
     public JobInterviewService(
@@ -267,6 +280,7 @@ public class JobInterviewService : IJobInterviewService
         IGenericRepository<Entities.HR.ExternalAssociate> associateRepository,
         IGenericRepository<Entities.HR.StaffLeave.LeaveRequest> leaveRepository,
         IGenericRepository<Entities.HR.StaffTravel.StaffTravelRequest> travelRepository,
+        IEnumerable<IPanelistCommitmentSource> commitmentSources,
         IConfiguration configuration)
     {
         _interviewRepository = interviewRepository;
@@ -285,6 +299,7 @@ public class JobInterviewService : IJobInterviewService
         _currentUserProvider = currentUserProvider;
         _currentUser = currentUser;
         _unitOfWork = unitOfWork;
+        _commitmentSources = (commitmentSources ?? Array.Empty<IPanelistCommitmentSource>()).ToList();
         _logger = logger;
         _email = email;
         _templatedEmail = templatedEmail;
@@ -438,7 +453,20 @@ public class JobInterviewService : IJobInterviewService
     /// The client used to name the panelist in the payload (or the query string, for drafts), so any
     /// authenticated user could submit — or read — a scorecard in someone else's name.
     /// </summary>
-    private async Task EnsureCanScoreAsAsync(Guid intervieweeId, Guid? internalPanelistId, Guid? externalPanelistId)
+    /// <returns>
+    /// How the resulting scorecard reached the system (round 4, lane F4) —
+    /// <see cref="InterviewScoreSource.Online"/> when the caller <i>is</i> the panelist, and
+    /// <see cref="InterviewScoreSource.PaperSheet"/> when somebody is filing on their behalf.
+    /// </returns>
+    /// <remarks>
+    /// ⚠ <b>Provenance is decided here and nowhere else, and the client cannot influence it.</b>
+    /// This method already knows the only fact that settles it — whether the caller is the panelist
+    /// — so the answer comes back with the authorization rather than being asserted in the payload
+    /// and trusted. A card HR types in is a real card; it is just not one the panelist typed, and an
+    /// audit trail that cannot tell the difference is not an audit trail.
+    /// </remarks>
+    private async Task<InterviewScoreSource> EnsureCanScoreAsAsync(
+        Guid intervieweeId, Guid? internalPanelistId, Guid? externalPanelistId)
     {
         if (internalPanelistId is null && externalPanelistId is null)
             throw new InvalidOperationException("A scorecard must name the panelist it belongs to.");
@@ -455,8 +483,10 @@ public class JobInterviewService : IJobInterviewService
             if (panelist.JobInterviewId != interviewee.JobInterviewId)
                 throw new InvalidOperationException("That panelist does not sit on this candidate's interview.");
 
-            if (IsHr) return;
-            if (panelist.EmployeeId == CallerEmployeeId) return;
+            // Checked BEFORE the HR branch: an HR user who also sits on this panel is filing their
+            // own card, and stamping it "on behalf of" would be wrong about the one person it names.
+            if (panelist.EmployeeId == CallerEmployeeId) return InterviewScoreSource.Online;
+            if (IsHr) return InterviewScoreSource.PaperSheet;
 
             throw new UnauthorizedAccessException("You can only score as yourself.");
         }
@@ -465,8 +495,74 @@ public class JobInterviewService : IJobInterviewService
         if (external.JobInterviewId != interviewee.JobInterviewId)
             throw new InvalidOperationException("That panelist does not sit on this candidate's interview.");
 
-        // External associates have no login, so only HR can record on their behalf.
+        // External associates have no login, so only HR can record on their behalf — which makes
+        // every external scorecard a filing on somebody's behalf, by construction.
         EnsureHr("record scores for an external panelist");
+        return InterviewScoreSource.PaperSheet;
+    }
+
+    // ── Blind scoring (round 4, lane F5) ─────────────────────────────────────
+
+    /// <summary>
+    /// Narrows a candidate's scorecards to what the caller may see: their own always, everybody
+    /// else's only once they have filed their own.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why.</b> Every score read on this controller was gated on <i>read</i> access — "HR,
+    /// or a panelist on this interview" — so any panelist could open the Scores tab and read a
+    /// colleague's totals, recommendation and private comments <i>before</i> filing their own. A
+    /// panel member who looks first is anchored by whoever filed before them, which is the one
+    /// thing a panel of independent assessors exists to avoid.</para>
+    ///
+    /// <para><b>⚠ The unit is the CANDIDATE, not the interview.</b> A panelist who has filed for
+    /// Ada but not for Kwame sees the panel's cards for Ada and none for Kwame. Blinding per
+    /// interview would either unblind Kwame the moment Ada was scored, or keep Ada blind until the
+    /// whole day was done — and the anchoring risk is per person being judged.</para>
+    ///
+    /// <para><b>HR is never blinded</b>, because HR files on a panelist's behalf from a paper sheet
+    /// and has to see what is already recorded to know whether they are correcting or duplicating.
+    /// Nor is the panel blinded after the fact: once their own card is in, the full set opens, which
+    /// is the calibration conversation this is meant to protect rather than prevent.</para>
+    /// </remarks>
+    private async Task<List<JobInterviewScoreSummary>> ApplyBlindScoringAsync(
+        Guid interviewId, List<JobInterviewScoreSummary> cards)
+    {
+        if (IsHr) return cards;
+
+        var seat = await GetCallerPanelistAsync(interviewId);
+        // No seat and not HR means the read gate let an external or service caller through; there is
+        // no "own card" to measure against, so nothing is narrowed here rather than silently emptied.
+        if (seat is null) return cards;
+
+        return cards.Any(c => c.InternalPanelistId == seat.Id)
+            ? cards
+            : cards.Where(c => c.InternalPanelistId == seat.Id).ToList();
+    }
+
+    /// <summary>
+    /// The same rule for a card reached by its own id, where there is nothing to narrow — so it
+    /// refuses instead.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Without this, blinding the list read would be theatre: the ids are in the DOM of any screen
+    /// that ever showed the list, and <c>score-summaries/{id}</c> and its <c>/entries</c> sibling
+    /// would hand the card straight back.
+    /// </remarks>
+    private async Task EnsureCanSeeScoreCardAsync(Guid interviewId, JobInterviewScoreSummary card)
+    {
+        if (IsHr) return;
+
+        var seat = await GetCallerPanelistAsync(interviewId);
+        if (seat is null) return;
+        if (card.InternalPanelistId == seat.Id) return;
+
+        var tenantId = GetTenantId();
+        var hasFiledOwn = (await _scoreSummaryRepository.GetByIntervieweeIdAsync(card.JobIntervieweeId))
+            .Any(c => c.TenantId == tenantId && !c.IsDeleted && c.InternalPanelistId == seat.Id);
+
+        if (!hasFiledOwn)
+            throw new UnauthorizedAccessException(
+                "Scoring is blind until you have filed your own scorecard for this candidate.");
     }
 
     private async Task<string> GenerateInterviewNumberAsync(CancellationToken cancellationToken = default)
@@ -553,170 +649,316 @@ public class JobInterviewService : IJobInterviewService
     }
 
     // ── Availability / conflict detection ──────────────────────────────────────
+    //
+    // ⚠ Round 4, lane D1–D2. This used to know about exactly three things — other interviews, leave
+    // and travel — hard-coded into one method, and it read the SESSION window rather than the
+    // candidate's slot. It now fans out over every registered IPanelistCommitmentSource, and the
+    // caller may narrow the window to one candidate's slot.
+    //
+    // ⚠ The old version also called GetByEmployeeIdAsync INSIDE the per-employee loop (§ 3 defect
+    // 10) while leave and travel, three lines below it, were batch-loaded. Each source now issues
+    // its own query for the whole panel.
 
     public async Task<PanelistAvailabilityCheckDto> CheckPanelistAvailabilityAsync(
         IReadOnlyList<Guid> panelistEmployeeIds, IReadOnlyList<Guid> externalAssociateIds,
         DateOnly date, TimeSpan start, TimeSpan end,
         Guid? excludeInterviewId, CancellationToken cancellationToken = default)
     {
-        // This reads other employees' leave and travel to explain a clash. That is HR's to see.
+        // This reads other employees' leave, travel, meetings and training to explain a clash.
+        // That is HR's to see.
         EnsureHr("check panel availability");
-
-        var result = new PanelistAvailabilityCheckDto();
-
-        var ids       = (panelistEmployeeIds ?? Array.Empty<Guid>()).Distinct().ToList();
-        var assocIds  = (externalAssociateIds ?? Array.Empty<Guid>()).Distinct().ToList();
-        if (ids.Count == 0 && assocIds.Count == 0)
-            return result;
-
-        var blockingInterviewStatuses = new[]
-        {
-            JobInterviewStatus.Scheduled, JobInterviewStatus.Rescheduled, JobInterviewStatus.InProgress
-        };
-
-        bool OverlapsSlot(JobInterview i) =>
-            i.Id != excludeInterviewId
-            && !i.IsDeleted
-            && i.TenantId == GetTenantId()
-            && blockingInterviewStatuses.Contains(i.Status)
-            && i.ScheduledDate == date
-            && i.StartTime < end && i.EndTime > start;
-
-        static PanelistInterviewConflictDto ToConflict(JobInterview i) => new()
-        {
-            InterviewId     = i.Id,
-            InterviewNumber = i.InterviewNumber,
-            JobTitle        = i.JobVacancy?.JobTitle ?? string.Empty,
-            ScheduledDate   = i.ScheduledDate,
-            StartTime       = i.StartTime,
-            EndTime         = i.EndTime,
-            Status          = i.Status,
-        };
-
-        await AddInternalPanelistRowsAsync(result, ids, date, OverlapsSlot, ToConflict);
-        await AddExternalPanelistRowsAsync(result, assocIds, OverlapsSlot, ToConflict);
-
-        result.HasConflicts = result.Panelists.Any(p => p.HasConflicts);
-        return result;
-    }
-
-    private async Task AddInternalPanelistRowsAsync(
-        PanelistAvailabilityCheckDto result, List<Guid> ids, DateOnly date,
-        Func<JobInterview, bool> overlapsSlot, Func<JobInterview, PanelistInterviewConflictDto> toConflict)
-    {
-        if (ids.Count == 0) return;
-
-        var tenantId = GetTenantId();
-
-        // Resolve display names once.
-        var employees = (await _employeeRepository.FindAsync(e => ids.Contains(e.Id)))
-            .Where(e => e.TenantId == tenantId)
-            .ToList();
-        var nameById = employees.ToDictionary(e => e.Id, e => $"{e.FirstName} {e.LastName}".Trim());
-
-        // Approved/pending leave that spans the interview day.
-        var activeLeaveStatuses = new[] { LeaveStatus.Approved, LeaveStatus.Pending, LeaveStatus.InProgress };
-        var leaves = (await _leaveRepository.FindAsync(l =>
-                ids.Contains(l.EmployeeId)
-                && activeLeaveStatuses.Contains(l.Status)
-                && l.StartDate <= date && l.EndDate >= date))
-            .Where(l => l.TenantId == tenantId)
-            .ToList();
-
-        // Approved/submitted/in-progress travel that spans the interview day.
-        var activeTravelStatuses = new[]
-        {
-            StaffTravelRequestStatus.Approved, StaffTravelRequestStatus.Submitted, StaffTravelRequestStatus.InProgress
-        };
-        var travels = (await _travelRepository.FindAsync(t =>
-                ids.Contains(t.EmployeeId)
-                && activeTravelStatuses.Contains(t.Status)
-                && t.TravelStartDate <= date && t.TravelEndDate >= date))
-            .Where(t => t.TenantId == tenantId)
-            .ToList();
-
-        foreach (var empId in ids)
-        {
-            var row = new PanelistAvailabilityDto
-            {
-                EmployeeId   = empId,
-                EmployeeName = nameById.TryGetValue(empId, out var n) && !string.IsNullOrWhiteSpace(n) ? n : "Panelist",
-                IsExternal   = false,
-            };
-
-            // Overlapping interviews this employee already sits on (same day, time windows intersect).
-            var panelSlots = await _panelistRepository.GetByEmployeeIdAsync(empId);
-            row.InterviewConflicts = panelSlots
-                .Where(p => p.TenantId == tenantId && p.JobInterview != null && overlapsSlot(p.JobInterview))
-                .OrderBy(p => p.JobInterview!.StartTime)
-                .Select(p => toConflict(p.JobInterview!))
-                .ToList();
-
-            row.LeaveConflicts = leaves
-                .Where(l => l.EmployeeId == empId)
-                .OrderBy(l => l.StartDate)
-                .Select(l => new PanelistLeaveConflictDto
-                {
-                    StartDate = l.StartDate,
-                    EndDate   = l.EndDate,
-                    Status    = l.Status.ToString(),
-                })
-                .ToList();
-
-            row.TravelConflicts = travels
-                .Where(t => t.EmployeeId == empId)
-                .OrderBy(t => t.TravelStartDate)
-                .Select(t => new PanelistTravelConflictDto
-                {
-                    RequestNumber = t.RequestNumber,
-                    StartDate     = t.TravelStartDate,
-                    EndDate       = t.TravelEndDate,
-                    Status        = t.Status.ToString(),
-                })
-                .ToList();
-
-            row.HasConflicts = row.InterviewConflicts.Count > 0 || row.LeaveConflicts.Count > 0 || row.TravelConflicts.Count > 0;
-            result.Panelists.Add(row);
-        }
+        return await GatherAvailabilityAsync(
+            panelistEmployeeIds, externalAssociateIds, date, start, end, excludeInterviewId, cancellationToken);
     }
 
     /// <summary>
-    /// External associates: interview-overlap only. Grouped per associate; associates with no overlapping
-    /// interview simply produce no row (we only surface conflicts). No leave/travel is tracked for them.
+    /// The check itself, without the HR gate — so the write paths can enforce it for a caller who
+    /// is already past their own authorisation.
     /// </summary>
-    private async Task AddExternalPanelistRowsAsync(
-        PanelistAvailabilityCheckDto result, List<Guid> assocIds,
-        Func<JobInterview, bool> overlapsSlot, Func<JobInterview, PanelistInterviewConflictDto> toConflict)
+    private async Task<PanelistAvailabilityCheckDto> GatherAvailabilityAsync(
+        IReadOnlyList<Guid> panelistEmployeeIds, IReadOnlyList<Guid> externalAssociateIds,
+        DateOnly date, TimeSpan start, TimeSpan end,
+        Guid? excludeInterviewId, CancellationToken cancellationToken)
     {
-        if (assocIds.Count == 0) return;
+        var result = new PanelistAvailabilityCheckDto();
+
+        var ids      = (panelistEmployeeIds ?? Array.Empty<Guid>()).Distinct().ToList();
+        var assocIds = (externalAssociateIds ?? Array.Empty<Guid>()).Distinct().ToList();
+        if (ids.Count == 0 && assocIds.Count == 0)
+            return result;
 
         var tenantId = GetTenantId();
-        var extRows = (await _externalPanelistRepository.FindAsync(
-                x => assocIds.Contains(x.AssociateId),
-                x => x.JobInterview,
-                x => x.ExternalAssociate))
-            .Where(x => x.TenantId == tenantId && x.JobInterview != null && overlapsSlot(x.JobInterview))
-            .ToList();
+        var dayStart = date.ToDateTime(TimeOnly.MinValue);
+        var query = new PanelistCommitmentQuery(
+            ids, assocIds, dayStart + start, dayStart + end, excludeInterviewId, tenantId);
 
-        foreach (var grp in extRows.GroupBy(x => x.AssociateId))
+        // ── Fan out ───────────────────────────────────────────────────────────
+        //
+        // ⚠ A source that throws must not take the whole check down with it, but it must not pass
+        // silently either: a swallowed exception here means "everybody is free", which is the
+        // answer that gets somebody double-booked. The source is dropped from SourcesConsulted, so
+        // the caller can see which question went unanswered.
+        var commitments = new List<PanelistCommitment>();
+        foreach (var source in _commitmentSources)
         {
-            var first = grp.First();
-            var name  = $"{first.ExternalAssociate?.FirstName} {first.ExternalAssociate?.LastName}".Trim();
+            try
+            {
+                commitments.AddRange(await source.GetCommitmentsAsync(query, cancellationToken));
+                result.SourcesConsulted.Add(source.SourceName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Panelist commitment source '{Source}' failed for {Date} {Start}–{End}. The availability "
+                  + "check is INCOMPLETE and does not include it.",
+                    source.SourceName, date, start, end);
+            }
+        }
+
+        // ── Names ─────────────────────────────────────────────────────────────
+        var nameById = new Dictionary<Guid, string>();
+        if (ids.Count > 0)
+        {
+            foreach (var e in (await _employeeRepository.FindAsync(e => ids.Contains(e.Id)))
+                         .Where(e => e.TenantId == tenantId))
+                nameById[e.Id] = $"{e.FirstName} {e.LastName}".Trim();
+        }
+        if (assocIds.Count > 0)
+        {
+            foreach (var a in (await _associateRepository.FindAsync(a => assocIds.Contains(a.Id)))
+                         .Where(a => a.TenantId == tenantId && !a.IsDeleted))
+                nameById[a.Id] = $"{a.FirstName} {a.LastName}".Trim();
+        }
+
+        // ── One row per panelist, INCLUDING the ones with nothing ─────────────
+        //
+        // ⚠ The external half used to emit a row only where there was a conflict, so a panel of
+        // three externals with one clash rendered as one row and the screen could not show that the
+        // other two had been checked at all. "Checked and clear" and "not checked" must look
+        // different.
+        foreach (var (subjectId, isExternal) in
+                 ids.Select(i => (i, false)).Concat(assocIds.Select(a => (a, true))))
+        {
+            var mine = commitments
+                .Where(c => c.SubjectId == subjectId)
+                .OrderByDescending(c => c.Hardness)
+                .ThenBy(c => c.Start)
+                .ToList();
 
             var row = new PanelistAvailabilityDto
             {
-                EmployeeId         = grp.Key,
-                EmployeeName       = string.IsNullOrWhiteSpace(name) ? "External panelist" : name,
-                IsExternal         = true,
-                InterviewConflicts = grp
-                    .OrderBy(x => x.JobInterview!.StartTime)
-                    .Select(x => toConflict(x.JobInterview!))
-                    .ToList(),
+                EmployeeId   = subjectId,
+                EmployeeName = nameById.TryGetValue(subjectId, out var n) && !string.IsNullOrWhiteSpace(n)
+                    ? n
+                    : isExternal ? "External panelist" : "Panelist",
+                IsExternal       = isExternal,
+                HasConflicts     = mine.Count > 0,
+                HasHardConflicts = mine.Any(c => c.Hardness == CommitmentHardness.Hard),
+                Commitments      = mine.Select(c => new PanelistCommitmentDto
+                {
+                    Kind          = c.Kind,
+                    Hardness      = c.Hardness,
+                    Label         = c.Label,
+                    Start         = c.Start,
+                    End           = c.End,
+                    IsDayGranular = c.IsDayGranular,
+                    Reference     = c.Reference,
+                }).ToList(),
             };
-            row.HasConflicts = row.InterviewConflicts.Count > 0;
             result.Panelists.Add(row);
         }
+
+        result.HasConflicts     = result.Panelists.Any(p => p.HasConflicts);
+        result.HasHardConflicts = result.Panelists.Any(p => p.HasHardConflicts);
+        return result;
     }
+
+    /// <summary>
+    /// The clash check made binding (round 4, D3): a HARD clash refuses the write unless the caller
+    /// supplies an override reason, which is recorded on the interview.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ Before this, <c>CheckPanelistAvailabilityAsync</c> was advisory and was called from
+    /// <b>nothing but its own endpoint</b> (§ 3 defect 7). A recruiter who never opened the
+    /// availability panel — or who opened it, saw a clash and pressed Save anyway — scheduled the
+    /// double-booking with no record that anyone had been warned.</para>
+    ///
+    /// <para>Soft clashes never refuse. They are day-granular or unconfirmed evidence, and the
+    /// system overruling a recruiter on that basis would be worse than saying nothing. This is the
+    /// <c>RoomBooking</c> rule — which already refuses a double booking — applied to people, with
+    /// the override the room rule lacks.</para>
+    /// </remarks>
+    /// <returns>The clash detail, so the caller can record what was overridden.</returns>
+    private async Task<PanelistAvailabilityCheckDto> EnsurePanelIsFreeAsync(
+        IReadOnlyList<Guid> panelistEmployeeIds, IReadOnlyList<Guid> externalAssociateIds,
+        DateOnly date, TimeSpan start, TimeSpan end, Guid? excludeInterviewId,
+        string? overrideReason, CancellationToken cancellationToken)
+    {
+        var availability = await GatherAvailabilityAsync(
+            panelistEmployeeIds, externalAssociateIds, date, start, end, excludeInterviewId, cancellationToken);
+
+        if (!availability.HasHardConflicts) return availability;
+        if (!string.IsNullOrWhiteSpace(overrideReason)) return availability;
+
+        var blocked = availability.Panelists.Where(p => p.HasHardConflicts).ToList();
+        var detail = string.Join("; ", blocked.Select(p =>
+        {
+            var worst = p.Commitments.First(c => c.Hardness == CommitmentHardness.Hard);
+            return $"{p.EmployeeName} — {worst.Label}"
+                 + (worst.IsDayGranular ? "" : $" ({worst.Start:HH:mm}–{worst.End:HH:mm})");
+        }));
+
+        throw new InvalidOperationException(
+            $"{blocked.Count} panelist(s) are already committed at that time: {detail}. "
+          + "Pick another time, drop them from the panel, or supply a reason to schedule anyway "
+          + "(panelClashOverrideReason) — the reason is recorded on the interview.");
+    }
+
+    /// <summary>
+    /// Records that a hard clash was scheduled over, and who decided to (round 4, D3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Written only when there was actually something to override. A reason typed into the box on
+    /// an interview with no clash is discarded rather than stored: a record saying somebody
+    /// overrode a clash that never existed is worse than no record.
+    /// </remarks>
+    private static void RecordClashOverride(
+        JobInterview entity, PanelistAvailabilityCheckDto availability, string? reason, Guid actingUserId)
+    {
+        if (!availability.HasHardConflicts || string.IsNullOrWhiteSpace(reason)) return;
+
+        var summary = string.Join("; ", availability.Panelists
+            .Where(p => p.HasHardConflicts)
+            .Select(p => $"{p.EmployeeName}: {p.Commitments.First(c => c.Hardness == CommitmentHardness.Hard).Label}"));
+
+        entity.PanelClashOverrideReason   = reason.Trim();
+        entity.PanelClashOverriddenById   = actingUserId;
+        entity.PanelClashOverriddenAt     = DateTime.UtcNow;
+        entity.PanelClashOverrideDetail   = summary.Length <= 2000 ? summary : summary[..2000];
+    }
+
+    /// <summary>
+    /// Round 4, D8 — the room an interview holds must exist, belong to this tenant, be live, and
+    /// actually cover the interview's window.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ A booking that does not span the interview is refused rather than silently accepted.
+    /// The whole point of holding a room instead of typing its name into <c>LocationOrLink</c> is
+    /// that the hold is real; a booking for 09:00–10:00 attached to an interview running until noon
+    /// is the free-text problem again, wearing a foreign key.</para>
+    ///
+    /// <para>The booking is NOT created here. It is made through the meeting-room register, whose
+    /// own blocking double-booking check is what makes the hold worth having — recreating that rule
+    /// here would be the second copy this module keeps learning not to write.</para>
+    /// </remarks>
+    private async Task ValidateRoomBookingAsync(
+        Guid? roomBookingId, DateOnly date, TimeSpan start, TimeSpan end,
+        Guid? interviewId, Guid tenantId, CancellationToken cancellationToken)
+    {
+        if (roomBookingId is not { } bookingId) return;
+
+        var booking = await _unitOfWork.Repository<Entities.HR.CompanySchedule.RoomBooking>()
+            .GetQueryable()
+            .Include(b => b.Room)
+            .FirstOrDefaultAsync(b => b.Id == bookingId && b.TenantId == tenantId && !b.IsDeleted, cancellationToken);
+
+        if (booking is null)
+            throw new ArgumentException($"Room booking '{bookingId}' not found.");
+
+        if (booking.IsCancelled || booking.Status == BookingStatus.Cancelled)
+            throw new InvalidOperationException(
+                $"Booking {booking.BookingNumber} has been cancelled, so it holds no room for this interview.");
+
+        var day = date.ToDateTime(TimeOnly.MinValue);
+        if (booking.StartDateTime > day + start || booking.EndDateTime < day + end)
+            throw new InvalidOperationException(
+                $"Booking {booking.BookingNumber} covers "
+              + $"{booking.StartDateTime:dd MMM HH:mm}–{booking.EndDateTime:HH:mm}, which does not span the "
+              // ⚠ Verbatim: TimeSpan needs `hh\:mm` to escape the colon, and `\:` is not a legal
+              // escape in an ordinary interpolated string.
+              + $@"interview ({date:dd MMM} {start:hh\:mm}–{end:hh\:mm}). Extend the booking, or move the interview.");
+
+        // One booking, one interview. Two interviews pointing at the same hold is the double-booking
+        // the hold exists to prevent, arriving from inside recruitment.
+        var takenBy = await _interviewRepository.GetQueryable()
+            .Where(i => i.RoomBookingId == bookingId && i.TenantId == tenantId && !i.IsDeleted
+                     && i.Id != interviewId
+                     && i.Status != JobInterviewStatus.Cancelled)
+            .Select(i => i.InterviewNumber)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (takenBy is not null)
+            throw new InvalidOperationException(
+                $"Booking {booking.BookingNumber} is already held by interview {takenBy}.");
+    }
+
+    /// <summary>
+    /// Round 4, D4 — the windows in a date range where the WHOLE panel is free.
+    /// </summary>
+    /// <remarks>
+    /// <para>A clash check that only says no is half a tool. This walks the range at the requested
+    /// interval and returns the windows where nobody has a hard commitment, so the answer to
+    /// "they're all busy" is a list of times rather than a shrug.</para>
+    ///
+    /// <para>⚠ Soft commitments do not exclude a window, but they are reported on it. A slot where
+    /// two panelists are nominally on leave is still a slot HR may want — and hiding it would be the
+    /// system making that call on day-granular evidence.</para>
+    /// </remarks>
+    public async Task<List<PanelSlotSuggestionDto>> SuggestPanelSlotsAsync(
+        IReadOnlyList<Guid> panelistEmployeeIds, IReadOnlyList<Guid> externalAssociateIds,
+        DateOnly fromDate, DateOnly toDate, TimeSpan dayStart, TimeSpan dayEnd,
+        int durationMinutes, Guid? excludeInterviewId, int maxSuggestions = 20,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureHr("suggest interview slots");
+
+        if (toDate < fromDate)
+            throw new InvalidOperationException("The end of the range falls before its start.");
+        if (durationMinutes <= 0)
+            throw new InvalidOperationException("A suggested slot needs a duration.");
+        if (dayEnd <= dayStart)
+            throw new InvalidOperationException("The working window ends before it starts.");
+        if ((toDate.DayNumber - fromDate.DayNumber) > 60)
+            throw new InvalidOperationException(
+                "Sixty days is the most that can be searched at once — narrow the range.");
+
+        var duration = TimeSpan.FromMinutes(durationMinutes);
+        if (duration > dayEnd - dayStart)
+            throw new InvalidOperationException(
+                $"A {durationMinutes}-minute interview does not fit inside the working window given.");
+
+        var suggestions = new List<PanelSlotSuggestionDto>();
+
+        for (var day = fromDate; day <= toDate && suggestions.Count < maxSuggestions; day = day.AddDays(1))
+        {
+            for (var t = dayStart; t + duration <= dayEnd; t += duration)
+            {
+                if (suggestions.Count >= maxSuggestions) break;
+
+                var availability = await GatherAvailabilityAsync(
+                    panelistEmployeeIds, externalAssociateIds, day, t, t + duration,
+                    excludeInterviewId, cancellationToken);
+
+                if (availability.HasHardConflicts) continue;
+
+                suggestions.Add(new PanelSlotSuggestionDto
+                {
+                    Date      = day,
+                    StartTime = t,
+                    EndTime   = t + duration,
+                    HasSoftConflicts = availability.HasConflicts,
+                    SoftConflictSummary = availability.HasConflicts
+                        ? string.Join("; ", availability.Panelists
+                            .Where(p => p.HasConflicts)
+                            .Select(p => $"{p.EmployeeName}: {p.Commitments[0].Label}"))
+                        : null,
+                });
+            }
+        }
+
+        return suggestions;
+    }
+
 
     // ── CRUD ──────────────────────────────────────────────────────────────────
 
@@ -732,9 +974,23 @@ public class JobInterviewService : IJobInterviewService
             createDto.ApplicationIds, cancellationToken);
         await ValidatePanelAsync(createDto.PanelistEmployeeIds, createDto.ExternalPanelistAssociateIds, current);
 
+        // ⚠ Round 4, D3. The clash check BINDS here now. It existed before this lane and was called
+        // from nothing but its own endpoint (§ 3 defect 7) — a recruiter who never opened the
+        // availability panel scheduled the double-booking with no record that anybody was warned.
+        var clash = await EnsurePanelIsFreeAsync(
+            createDto.PanelistEmployeeIds ?? new List<Guid>(),
+            createDto.ExternalPanelistAssociateIds ?? new List<Guid>(),
+            createDto.ScheduledDate, createDto.StartTime, createDto.EndTime,
+            excludeInterviewId: null, createDto.PanelClashOverrideReason, cancellationToken);
+
+        await ValidateRoomBookingAsync(createDto.RoomBookingId, createDto.ScheduledDate,
+            createDto.StartTime, createDto.EndTime, null, current, cancellationToken);
+
         var entity = createDto.ToEntity(current, createdByUserId);
         entity.InterviewNumber = await GenerateInterviewNumberAsync(cancellationToken);
         entity.Status = JobInterviewStatus.Scheduled;
+        entity.RoomBookingId = createDto.RoomBookingId;
+        RecordClashOverride(entity, clash, createDto.PanelClashOverrideReason, createdByUserId);
 
         await _interviewRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -746,6 +1002,10 @@ public class JobInterviewService : IJobInterviewService
 
         if (createDto.ApplicationIds?.Count > 0)
         {
+            // Slots placed so far in this loop, so two candidates on the same payload cannot be
+            // given the same time. Nothing is on the database yet to compare against.
+            var placedSlots = new List<(TimeSpan Start, TimeSpan End)>();
+
             foreach (var appId in createDto.ApplicationIds)
             {
                 var ie = new AddJobIntervieweeDto
@@ -757,8 +1017,18 @@ public class JobInterviewService : IJobInterviewService
                 var slot = createDto.ApplicationSlots?.FirstOrDefault(s => s.ApplicationId == appId);
                 if (slot != null)
                 {
+                    // ⚠ Round 4, lane C. These arrived from the payload and were written straight
+                    // onto the row — a slot could sit outside the session it belongs to, or on top
+                    // of the candidate booked before it, and nothing said so until two people
+                    // turned up together. Checked here against the session and the slots already
+                    // placed in this same loop.
+                    ValidateSlotAgainstWindow(entity, slot.SlotStartTime, slot.SlotEndTime, placedSlots);
+
                     ie.SlotStartTime = slot.SlotStartTime;
                     ie.SlotEndTime   = slot.SlotEndTime;
+
+                    if (slot.SlotStartTime.HasValue && slot.SlotEndTime.HasValue)
+                        placedSlots.Add((slot.SlotStartTime.Value, slot.SlotEndTime.Value));
                 }
 
                 await _intervieweeRepository.AddAsync(ie);
@@ -852,9 +1122,27 @@ public class JobInterviewService : IJobInterviewService
         if (entity.Status == JobInterviewStatus.Completed || entity.Status == JobInterviewStatus.Cancelled)
             throw new InvalidOperationException("Completed or cancelled interviews cannot be updated.");
 
+        // ⚠ The panel is re-checked against the NEW window, excluding this interview — otherwise it
+        // finds itself and every edit refuses.
+        var panelIds = (await _panelistRepository.GetByInterviewIdAsync(entity.Id))
+            .Where(p => p.TenantId == entity.TenantId && !p.IsDeleted)
+            .Select(p => p.EmployeeId).ToList();
+        var externalIds = (await _externalPanelistRepository.GetByInterviewIdAsync(entity.Id))
+            .Where(p => p.TenantId == entity.TenantId && !p.IsDeleted)
+            .Select(p => p.AssociateId).ToList();
+
+        var clash = await EnsurePanelIsFreeAsync(
+            panelIds, externalIds, updateDto.ScheduledDate, updateDto.StartTime, updateDto.EndTime,
+            excludeInterviewId: entity.Id, updateDto.PanelClashOverrideReason, cancellationToken);
+
+        await ValidateRoomBookingAsync(updateDto.RoomBookingId, updateDto.ScheduledDate,
+            updateDto.StartTime, updateDto.EndTime, entity.Id, entity.TenantId, cancellationToken);
+
         // Status is deliberately NOT taken from the payload — see UpdateJobInterviewDto. It is owned by
         // reschedule / cancel / complete, each of which carries the side effects a bare status write skips.
         entity.UpdateEntity(updateDto, updatedByUserId);
+        entity.RoomBookingId = updateDto.RoomBookingId;
+        RecordClashOverride(entity, clash, updateDto.PanelClashOverrideReason, updatedByUserId);
         await _interviewRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -887,6 +1175,25 @@ public class JobInterviewService : IJobInterviewService
 
         ValidateSlot(dto.NewDate, dto.NewStartTime, dto.NewEndTime, "rescheduled to a past date");
 
+        // ⚠ A reschedule is the write MOST likely to create a clash — it is moving a confirmed panel
+        // onto a window nobody checked — and it was the one write path with no check at all.
+        var reschedulePanelIds = (await _panelistRepository.GetByInterviewIdAsync(entity.Id))
+            .Where(p => p.TenantId == entity.TenantId && !p.IsDeleted)
+            .Select(p => p.EmployeeId).ToList();
+        var rescheduleExternalIds = (await _externalPanelistRepository.GetByInterviewIdAsync(entity.Id))
+            .Where(p => p.TenantId == entity.TenantId && !p.IsDeleted)
+            .Select(p => p.AssociateId).ToList();
+
+        var rescheduleClash = await EnsurePanelIsFreeAsync(
+            reschedulePanelIds, rescheduleExternalIds, dto.NewDate, dto.NewStartTime, dto.NewEndTime,
+            excludeInterviewId: entity.Id, dto.PanelClashOverrideReason, cancellationToken);
+
+        await ValidateRoomBookingAsync(dto.RoomBookingId ?? entity.RoomBookingId, dto.NewDate,
+            dto.NewStartTime, dto.NewEndTime, entity.Id, entity.TenantId, cancellationToken);
+
+        RecordClashOverride(entity, rescheduleClash, dto.PanelClashOverrideReason, updatedByUserId);
+        if (dto.RoomBookingId.HasValue) entity.RoomBookingId = dto.RoomBookingId;
+
         // The original date is what the reschedule audit is for; it was on the entity and never written.
         entity.OriginalDate ??= entity.ScheduledDate;
         entity.ScheduledDate = dto.NewDate;
@@ -895,6 +1202,16 @@ public class JobInterviewService : IJobInterviewService
         entity.LocationOrLink = dto.LocationOrLink;
         entity.RescheduleReason = dto.RescheduleReason;
         entity.Status = JobInterviewStatus.Rescheduled;
+
+        // ⚠ Round 4, lane C — § 3 defect 23. The window moved and every candidate's slot stayed
+        // where it was, and the reschedule notice below then emailed each candidate their ORIGINAL
+        // time against the NEW date, with a fresh confirmation token inviting them to confirm it.
+        // Move a 09:00–11:00 session to 14:00–16:00 and everyone was told to arrive at 09:20.
+        //
+        // Where the day was apportioned, lay it out again at the same interval. Where it was not,
+        // CLEAR the slots: a hand-typed time that no longer sits inside the session is worse than
+        // no time at all, because it reads as deliberate.
+        await ReapportionAfterRescheduleAsync(entity, cancellationToken);
 
         await _interviewRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1542,12 +1859,309 @@ public class JobInterviewService : IJobInterviewService
         if (dto.SlotStartTime.HasValue && dto.SlotEndTime.HasValue && dto.SlotEndTime <= dto.SlotStartTime)
             throw new InvalidOperationException("A candidate's slot must end after it starts.");
 
+        // ⚠ Round 4, lane C. Until this, a slot was checked for nothing beyond ending after it
+        // started: it could sit wholly outside the session, land on top of another candidate, or
+        // fall inside the lunch break, and the only sign was two people in the corridor.
+        var interview = await GetOwnedInterviewAsync(entity.JobInterviewId);
+        await EnsureSlotIsUsableAsync(interview, entity.Id, dto.SlotStartTime, dto.SlotEndTime, cancellationToken);
+
         entity.SlotStartTime = dto.SlotStartTime;
         entity.SlotEndTime   = dto.SlotEndTime;
 
         await _intervieweeRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    /// <summary>
+    /// Refuses a slot that does not sit inside the session, collides with another candidate, or
+    /// falls in a break — round 4, lane C.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>A half-supplied slot is refused too.</b> A start with no end is not a shorter
+    /// interview, it is a record nobody can read: the timetable cannot place it, the invitation
+    /// cannot state it, and the clash check cannot compare it.</para>
+    ///
+    /// <para><b>Overlap is tested against the OTHER candidates, excluding this one</b>, so saving a
+    /// slot unchanged is never refused for colliding with itself.</para>
+    /// </remarks>
+    private async Task EnsureSlotIsUsableAsync(
+        JobInterview interview,
+        Guid intervieweeId,
+        TimeSpan? start,
+        TimeSpan? end,
+        CancellationToken cancellationToken)
+    {
+        // Clearing a slot is always allowed — it returns the candidate to "see them during the
+        // session", which is what an un-apportioned interview means.
+        if (start is null && end is null) return;
+
+        if (start is null || end is null)
+            throw new InvalidOperationException(
+                "A slot needs both a start and an end time. Give both, or clear both to put the "
+                + "candidate back on the session's own time.");
+
+        if (start < interview.StartTime || end > interview.EndTime)
+            throw new InvalidOperationException(
+                $"That slot falls outside the interview, which runs {interview.StartTime:hh\\:mm}"
+                + $"–{interview.EndTime:hh\\:mm}. Move the slot, or widen the session first.");
+
+        foreach (var b in ReadBreaks(interview))
+        {
+            if (start < b.End && b.Start < end)
+                throw new InvalidOperationException(
+                    $"That slot runs into the {b.Label ?? "break"} at {b.Start:hh\\:mm}–{b.End:hh\\:mm}.");
+        }
+
+        var others = (await _intervieweeRepository.GetByInterviewIdAsync(interview.Id))
+            .Where(i => i.Id != intervieweeId && i.TenantId == interview.TenantId && !i.IsDeleted)
+            .Where(i => i.SlotStartTime.HasValue && i.SlotEndTime.HasValue);
+
+        foreach (var other in others)
+        {
+            if (start < other.SlotEndTime && other.SlotStartTime < end)
+            {
+                var who = other.JobApplication?.JobCandidate?.FullName ?? "another candidate";
+                throw new InvalidOperationException(
+                    $"That slot overlaps {who} at {other.SlotStartTime:hh\\:mm}–{other.SlotEndTime:hh\\:mm}. "
+                    + "Two candidates cannot be seen at once.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Re-lays the day after a reschedule, or clears the slots when there is no layout to reproduce.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Called BEFORE the reschedule emails go out, because those emails read
+    /// <c>ie.SlotStartTime</c>. Moving this after them puts the defect straight back.
+    /// </remarks>
+    private async Task ReapportionAfterRescheduleAsync(JobInterview interview, CancellationToken cancellationToken)
+    {
+        var attendees = (await _intervieweeRepository.GetByInterviewIdAsync(interview.Id))
+            .Where(i => i.TenantId == interview.TenantId && !i.IsDeleted)
+            .ToList();
+        if (attendees.Count == 0) return;
+
+        if (interview.SlotMinutes is { } slotMinutes)
+        {
+            var plan = InterviewSlotApportioner.Apportion(
+                interview.StartTime,
+                interview.EndTime,
+                slotMinutes,
+                interview.SlotBufferMinutes ?? 0,
+                ReadBreaks(interview),
+                attendees.Select(a => a.JobApplicationId).ToList());
+
+            var bySlot = plan.Slots.ToDictionary(s => s.ApplicationId);
+            foreach (var attendee in attendees)
+            {
+                var hit = bySlot.TryGetValue(attendee.JobApplicationId, out var slot);
+                attendee.SlotStartTime = hit ? slot!.Start : null;
+                attendee.SlotEndTime = hit ? slot!.End : null;
+                await _intervieweeRepository.UpdateAsync(attendee);
+            }
+
+            if (!plan.AllFit)
+                _logger.LogWarning(
+                    "Interview {InterviewNumber} was rescheduled into a window that holds only "
+                    + "{Placed} of {Total} candidates; {Unplaced} lost their slot.",
+                    interview.InterviewNumber, plan.Slots.Count, attendees.Count, plan.Unplaced.Count);
+            return;
+        }
+
+        // Never apportioned: any slot present was typed by hand against the OLD window.
+        foreach (var attendee in attendees.Where(a => a.SlotStartTime.HasValue || a.SlotEndTime.HasValue))
+        {
+            attendee.SlotStartTime = null;
+            attendee.SlotEndTime = null;
+            await _intervieweeRepository.UpdateAsync(attendee);
+        }
+    }
+
+    /// <summary>
+    /// The synchronous half of the slot rules, for the create path — where nothing is on the
+    /// database yet and the only slots to collide with are the ones on the same payload.
+    /// </summary>
+    private static void ValidateSlotAgainstWindow(
+        JobInterview interview,
+        TimeSpan? start,
+        TimeSpan? end,
+        IReadOnlyList<(TimeSpan Start, TimeSpan End)> alreadyPlaced)
+    {
+        if (start is null && end is null) return;
+
+        if (start is null || end is null)
+            throw new InvalidOperationException(
+                "A slot needs both a start and an end time. Give both, or omit both.");
+
+        if (end <= start)
+            throw new InvalidOperationException("A candidate's slot must end after it starts.");
+
+        if (start < interview.StartTime || end > interview.EndTime)
+            throw new InvalidOperationException(
+                $"A slot of {start:hh\\:mm}–{end:hh\\:mm} falls outside the interview, which runs "
+                + $"{interview.StartTime:hh\\:mm}–{interview.EndTime:hh\\:mm}.");
+
+        foreach (var (otherStart, otherEnd) in alreadyPlaced)
+        {
+            if (start < otherEnd && otherStart < end)
+                throw new InvalidOperationException(
+                    $"Two candidates are booked into overlapping slots ({start:hh\\:mm}–{end:hh\\:mm} "
+                    + $"and {otherStart:hh\\:mm}–{otherEnd:hh\\:mm}). They cannot be seen at once.");
+        }
+    }
+
+    /// <summary>The interview's stored breaks, or an empty set when the day was never apportioned.</summary>
+    private static IReadOnlyList<InterviewSlotApportioner.Break> ReadBreaks(JobInterview interview)
+    {
+        if (string.IsNullOrWhiteSpace(interview.BreaksJson))
+            return Array.Empty<InterviewSlotApportioner.Break>();
+        try
+        {
+            return JsonSerializer.Deserialize<List<InterviewSlotApportioner.Break>>(interview.BreaksJson)
+                   ?? (IReadOnlyList<InterviewSlotApportioner.Break>)Array.Empty<InterviewSlotApportioner.Break>();
+        }
+        catch (JsonException)
+        {
+            // A break list that will not parse must not make the interview unsaveable. The day
+            // simply has no breaks as far as validation is concerned, and the log says so.
+            return Array.Empty<InterviewSlotApportioner.Break>();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<InterviewSlotPlanDto> PreviewSlotApportionmentAsync(
+        ApportionInterviewSlotsDto dto, CancellationToken cancellationToken = default)
+    {
+        var interview = await GetOwnedInterviewWithDetailsAsync(dto.InterviewId);
+        await EnsureCanReadInterviewAsync(interview.Id);
+        return BuildPlan(interview, dto);
+    }
+
+    /// <inheritdoc />
+    public async Task<InterviewSlotPlanDto> ApplySlotApportionmentAsync(
+        ApportionInterviewSlotsDto dto, CancellationToken cancellationToken = default)
+    {
+        var interview = await GetOwnedInterviewWithDetailsAsync(dto.InterviewId);
+        EnsureHr("apportion interview slots");
+
+        if (interview.Status is JobInterviewStatus.Completed or JobInterviewStatus.Cancelled)
+            throw new InvalidOperationException(
+                $"A {interview.Status.ToString().ToLowerInvariant()} interview cannot be re-timetabled.");
+
+        var plan = BuildPlan(interview, dto);
+
+        // ⚠ The parameters are stored even when somebody did not fit. The day WAS apportioned at
+        // this interval, and a reschedule must be able to reproduce it — refusing to remember the
+        // shape of a partially-placed day would mean the reschedule silently fell back to clearing
+        // every slot, which is the defect this column exists to close.
+        interview.SlotMinutes = dto.SlotMinutes;
+        interview.SlotBufferMinutes = dto.BufferMinutes;
+        interview.BreaksJson = plan.Breaks.Count == 0
+            ? null
+            : JsonSerializer.Serialize(plan.Breaks.Select(b =>
+                new InterviewSlotApportioner.Break(b.Start, b.End, b.Label)));
+
+        var bySlot = plan.Slots.ToDictionary(s => s.IntervieweeId);
+        var attendees = (await _intervieweeRepository.GetByInterviewIdAsync(interview.Id))
+            .Where(i => i.TenantId == interview.TenantId && !i.IsDeleted)
+            .ToList();
+
+        foreach (var attendee in attendees)
+        {
+            if (bySlot.TryGetValue(attendee.Id, out var slot))
+            {
+                attendee.SlotStartTime = slot.SlotStartTime;
+                attendee.SlotEndTime = slot.SlotEndTime;
+            }
+            else
+            {
+                // Everyone who did not fit loses any slot they had. Leaving a stale time on a
+                // candidate the new layout could not place is exactly how somebody arrives for an
+                // appointment nobody is expecting to keep.
+                attendee.SlotStartTime = null;
+                attendee.SlotEndTime = null;
+            }
+            await _intervieweeRepository.UpdateAsync(attendee);
+        }
+
+        await _interviewRepository.UpdateAsync(interview);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Interview {InterviewNumber} apportioned: {Placed} placed, {Unplaced} unplaced at {Slot} min.",
+            interview.InterviewNumber, plan.Slots.Count, plan.Unplaced.Count, dto.SlotMinutes);
+
+        return plan;
+    }
+
+    /// <summary>Runs the apportioner over one interview's attendees and dresses the result for a screen.</summary>
+    private static InterviewSlotPlanDto BuildPlan(JobInterview interview, ApportionInterviewSlotsDto dto)
+    {
+        var attendees = (interview.Interviewees ?? new List<JobInterviewee>())
+            .Where(i => !i.IsDeleted)
+            .ToList();
+
+        // The caller may name an order; otherwise take them as they were added. Ids the caller
+        // supplies that are not on this interview are ignored rather than refused — a stale board
+        // should not make the preview unusable.
+        var ordered = dto.ApplicationIds is { Count: > 0 }
+            ? dto.ApplicationIds
+                .Select(id => attendees.FirstOrDefault(a => a.JobApplicationId == id))
+                .Where(a => a is not null)
+                .Select(a => a!)
+                .ToList()
+            : attendees;
+
+        var breaks = dto.Breaks?
+            .Select(b => new InterviewSlotApportioner.Break(b.Start, b.End, b.Label))
+            ?? Array.Empty<InterviewSlotApportioner.Break>();
+
+        var plan = InterviewSlotApportioner.Apportion(
+            interview.StartTime,
+            interview.EndTime,
+            dto.SlotMinutes,
+            dto.BufferMinutes,
+            breaks,
+            ordered.Select(a => a.JobApplicationId).ToList());
+
+        InterviewSlotAssignmentDto Describe(JobInterviewee a, InterviewSlotApportioner.Slot? s) => new()
+        {
+            IntervieweeId = a.Id,
+            JobApplicationId = a.JobApplicationId,
+            CandidateName = a.JobApplication?.JobCandidate?.FullName ?? "Candidate",
+            ApplicationNumber = a.JobApplication?.ApplicationNumber ?? string.Empty,
+            Ordinal = s?.Ordinal ?? 0,
+            SlotStartTime = s?.Start ?? default,
+            SlotEndTime = s?.End ?? default,
+        };
+
+        var byApplication = ordered.ToDictionary(a => a.JobApplicationId);
+
+        return new InterviewSlotPlanDto
+        {
+            InterviewId = interview.Id,
+            ScheduledDate = interview.ScheduledDate,
+            WindowStart = interview.StartTime,
+            WindowEnd = interview.EndTime,
+            SlotMinutes = dto.SlotMinutes,
+            BufferMinutes = dto.BufferMinutes,
+            Breaks = plan.Breaks
+                .Select(b => new InterviewBreakDto { Start = b.Start, End = b.End, Label = b.Label })
+                .ToList(),
+            Slots = plan.Slots
+                .Where(s => byApplication.ContainsKey(s.ApplicationId))
+                .Select(s => Describe(byApplication[s.ApplicationId], s))
+                .ToList(),
+            Unplaced = plan.Unplaced
+                .Where(byApplication.ContainsKey)
+                .Select(id => Describe(byApplication[id], null))
+                .ToList(),
+            AllFit = plan.AllFit,
+            FirstFreeAfterWindow = plan.FirstFreeAfterWindow,
+            Summary = plan.Summary,
+        };
     }
 
     public async Task<bool> RecordAttendanceAsync(Guid intervieweeId, bool? attended, string? noShowReason, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -1856,7 +2470,8 @@ public class JobInterviewService : IJobInterviewService
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
         var interviewee = await GetOwnedIntervieweeAsync(createDto.JobIntervieweeId);
-        await EnsureCanScoreAsAsync(createDto.JobIntervieweeId, createDto.InternalPanelistId, createDto.ExternalPanelistId);
+        var scoreSource = await EnsureCanScoreAsAsync(
+            createDto.JobIntervieweeId, createDto.InternalPanelistId, createDto.ExternalPanelistId);
 
         // 1. One scorecard per panelist per candidate. There is no update endpoint, so without this a
         //    corrected submission simply piled a second scorecard on top of the first and every
@@ -1874,10 +2489,25 @@ public class JobInterviewService : IJobInterviewService
         var entries = await BuildScoreEntriesAsync(
             interviewee, createDto.ScoreEntries, current, createdByUserId, cancellationToken);
 
+        // Who filed it, recorded on every write — including a replacement, because the person who
+        // corrects a scorecard is the person who is claiming it now. An upsert that kept the first
+        // filer's provenance would say the panelist typed a card HR later rewrote.
+        //
+        // ⚠ `CallerEmployeeId`, not the `createdByUserId` parameter. They hold the same value today
+        // — the controller passes `_currentUser.EmployeeId` into a parameter the whole family calls
+        // `createdByUserId` — but the column is an EMPLOYEE reference and should be read from
+        // something that says employee. Taking it from the misnamed parameter is how the next
+        // refactor of that signature silently writes a user id into an employee FK.
+        var filedOnBehalfOf = scoreSource == InterviewScoreSource.PaperSheet
+            ? CallerEmployeeId
+            : null;
+
         JobInterviewScoreSummary entity;
         if (existing is null)
         {
             entity = createDto.ToEntity(current, createdByUserId);
+            entity.ScoreSource = scoreSource;
+            entity.FiledByHrOnBehalfOfEmployeeId = filedOnBehalfOf;
             await _scoreSummaryRepository.AddAsync(entity);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
@@ -1887,6 +2517,8 @@ public class JobInterviewService : IJobInterviewService
             entity.Recommendation = createDto.Recommendation;
             entity.Comments       = createDto.Comments;
             entity.EvaluationDate = createDto.EvaluationDate;
+            entity.ScoreSource    = scoreSource;
+            entity.FiledByHrOnBehalfOfEmployeeId = filedOnBehalfOf;
             entity.UpdatedAt      = DateTime.UtcNow;
             entity.UpdatedBy      = createdByUserId.ToString();
 
@@ -1995,8 +2627,12 @@ public class JobInterviewService : IJobInterviewService
         var interviewee = await GetOwnedIntervieweeAsync(intervieweeId);
         await EnsureCanReadInterviewAsync(interviewee.JobInterviewId);
         var tenantId = GetTenantId();
-        var entities = await _scoreSummaryRepository.GetByIntervieweeIdAsync(intervieweeId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
+        var entities = (await _scoreSummaryRepository.GetByIntervieweeIdAsync(intervieweeId))
+            .Where(e => e.TenantId == tenantId)
+            .ToList();
+
+        var visible = await ApplyBlindScoringAsync(interviewee.JobInterviewId, entities);
+        return visible.Select(e => e.ToDto());
     }
 
     public async Task<JobInterviewScoreSummaryDetailDto> GetScoreSummaryDetailAsync(Guid scoreSummaryId, CancellationToken cancellationToken = default)
@@ -2007,6 +2643,7 @@ public class JobInterviewService : IJobInterviewService
 
         var interviewee = await GetOwnedIntervieweeAsync(entity.JobIntervieweeId);
         await EnsureCanReadInterviewAsync(interviewee.JobInterviewId);
+        await EnsureCanSeeScoreCardAsync(interviewee.JobInterviewId, entity);
         return entity.ToDetailDto();
     }
 
@@ -2087,6 +2724,120 @@ public class JobInterviewService : IJobInterviewService
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
+    /// <summary>
+    /// The caller's own scorecard worklist — each session they sit on, the candidates on it, and how
+    /// far their own card for each has got (round 4, lane F5).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this read exists.</b> A panelist's only route to a scorecard ran through HR's
+    /// interview desk screen and its Candidates tab, and the portal diary listed interview
+    /// <i>numbers</i> while describing itself as "the scorecards you owe". This is what lets the
+    /// portal keep that promise.</para>
+    ///
+    /// <para>⚠ <b>Only the caller's own cards.</b> A colleague's mark never appears here, even for
+    /// a candidate the caller has already filed for and could therefore see elsewhere. A worklist
+    /// showing somebody else's answer is the anchoring problem in a different shape.</para>
+    ///
+    /// <para>⚠ <b>Three queries, not three per session.</b> The seats, then every card across those
+    /// seats, then which of them hold a draft — round 4 § 3 defect 10 is a per-row repository call
+    /// made inside a loop in this very service.</para>
+    /// </remarks>
+    public async Task<IEnumerable<PanelistScorecardWorklistDto>> GetMyScorecardWorklistAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var employeeId = CallerEmployeeId;
+        if (employeeId is null || employeeId == Guid.Empty)
+            throw new UnauthorizedAccessException("Your user account is not linked to an employee record.");
+
+        var tenantId = GetTenantId();
+
+        var seats = (await _panelistRepository.GetWorklistByEmployeeIdAsync(employeeId.Value))
+            .Where(p => p.TenantId == tenantId && p.JobInterview is not null && !p.JobInterview.IsDeleted)
+            .ToList();
+        if (seats.Count == 0) return Array.Empty<PanelistScorecardWorklistDto>();
+
+        var seatIds = seats.Select(p => p.Id).ToList();
+
+        var cards = (await _scoreSummaryRepository.GetByInternalPanelistIdsAsync(seatIds))
+            .Where(c => c.TenantId == tenantId)
+            .ToList();
+        // One card per (seat, candidate) — the create path upserts on exactly that pair.
+        var cardBySeatAndCandidate = cards
+            .GroupBy(c => (Seat: c.InternalPanelistId!.Value, Candidate: c.JobIntervieweeId))
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(c => c.UpdatedAt ?? c.CreatedAt).First());
+
+        var draftedFor = (await _draftRepository
+                .GetIntervieweeIdsWithDraftAsync(seatIds, cancellationToken))
+            .ToHashSet();
+
+        var worklist = new List<PanelistScorecardWorklistDto>();
+        foreach (var seat in seats)
+        {
+            var interview = seat.JobInterview!;
+
+            var candidates = (interview.Interviewees ?? new List<JobInterviewee>())
+                .Where(ie => !ie.IsDeleted && ie.TenantId == tenantId)
+                // Slotted candidates first and in time order, then the unslotted — the order the
+                // panel will actually see people, which is the only order that helps in the room.
+                .OrderBy(ie => ie.SlotStartTime.HasValue ? 0 : 1)
+                .ThenBy(ie => ie.SlotStartTime ?? TimeSpan.Zero)
+                .ThenBy(ie => ie.JobApplication?.JobCandidate?.FullName)
+                .Select(ie =>
+                {
+                    cardBySeatAndCandidate.TryGetValue((seat.Id, ie.Id), out var card);
+                    return new PanelistScorecardCandidateDto
+                    {
+                        IntervieweeId = ie.Id,
+                        JobApplicationId = ie.JobApplicationId,
+                        CandidateName = ie.JobApplication?.JobCandidate?.FullName ?? "Candidate",
+                        ApplicationNumber = ie.JobApplication?.ApplicationNumber ?? string.Empty,
+                        SlotStartTime = ie.SlotStartTime,
+                        SlotEndTime = ie.SlotEndTime,
+                        CandidateAttended = ie.CandidateAttended,
+                        ScoreSummaryId = card?.Id,
+                        TotalWeightedScore = card?.TotalWeightedScore,
+                        Recommendation = card?.Recommendation,
+                        // ⚠ A draft is NOT a filed card: it is private, it does not unblind the
+                        // panel, and it leaves the scorecard still owed. Collapsing the two would
+                        // let a panelist's own to-do list tell them they were finished.
+                        State = card is null
+                            ? (draftedFor.Contains(ie.Id)
+                                ? PanelistScorecardState.Draft
+                                : PanelistScorecardState.NotStarted)
+                            : card.IsFinalized
+                                ? PanelistScorecardState.SignedOff
+                                : PanelistScorecardState.Saved,
+                    };
+                })
+                .ToList();
+
+            worklist.Add(new PanelistScorecardWorklistDto
+            {
+                InterviewId = interview.Id,
+                InterviewNumber = interview.InterviewNumber,
+                JobTitle = interview.JobVacancy?.JobTitle ?? "Interview",
+                VacancyNumber = interview.JobVacancy?.VacancyNumber ?? string.Empty,
+                Round = interview.Round,
+                Type = interview.Type,
+                Mode = interview.Mode,
+                Status = interview.Status,
+                ScheduledDate = interview.ScheduledDate,
+                StartTime = interview.StartTime,
+                EndTime = interview.EndTime,
+                LocationOrLink = interview.LocationOrLink,
+                PanelistId = seat.Id,
+                Role = seat.Role,
+                IsRequired = seat.IsRequired,
+                IsConfirmed = seat.IsConfirmed,
+                HasQuestionPlan = (interview.Questions ?? new List<JobInterviewQuestion>())
+                    .Any(q => !q.IsDeleted),
+                Candidates = candidates,
+            });
+        }
+
+        return worklist;
+    }
+
     public async Task<IEnumerable<JobInterviewPanelistDto>> GetInterviewsByPanelistAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         // Reading someone else's interview diary is HR's; reading your own goes through /me above, which
@@ -2132,8 +2883,14 @@ public class JobInterviewService : IJobInterviewService
         var interviewee = await GetOwnedIntervieweeAsync(intervieweeId);
         await EnsureCanReadInterviewAsync(interviewee.JobInterviewId);
         var tenantId = GetTenantId();
-        var entities = await _scoreSummaryRepository.GetFinalizedForIntervieweeAsync(intervieweeId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
+        // ⚠ Blinded too. "Finalized" is not a lesser read — a signed-off card is the strongest
+        // anchor there is, and this endpoint would otherwise be the way round the rule.
+        var entities = (await _scoreSummaryRepository.GetFinalizedForIntervieweeAsync(intervieweeId))
+            .Where(e => e.TenantId == tenantId)
+            .ToList();
+
+        var visible = await ApplyBlindScoringAsync(interviewee.JobInterviewId, entities);
+        return visible.Select(e => e.ToDto());
     }
 
     public async Task<IEnumerable<JobInterviewScoreEntryDto>> GetScoreEntriesAsync(Guid scoreSummaryId, CancellationToken cancellationToken = default)
@@ -2141,6 +2898,7 @@ public class JobInterviewService : IJobInterviewService
         var summary = await GetOwnedScoreSummaryAsync(scoreSummaryId);
         var interviewee = await GetOwnedIntervieweeAsync(summary.JobIntervieweeId);
         await EnsureCanReadInterviewAsync(interviewee.JobInterviewId);
+        await EnsureCanSeeScoreCardAsync(interviewee.JobInterviewId, summary);
         var entities = await _scoreEntryRepository.GetBySummaryIdAsync(scoreSummaryId);
         return entities.Where(e => e.TenantId == summary.TenantId).Select(e => e.ToDto());
     }

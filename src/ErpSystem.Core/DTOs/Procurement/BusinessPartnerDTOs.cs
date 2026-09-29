@@ -362,7 +362,9 @@ public class UpdateBusinessPartnerDto
     public string? Currency { get; set; }
 
     [MaxLength(50)]
-    public string Status { get; set; } = "Active";
+    // Lifecycle transitions are not ordinary master-data edits. This remains optional only so
+    // older clients can receive a clear validation error instead of silently activating a partner.
+    public string? Status { get; set; }
 
     public bool IsPreferred { get; set; }
 

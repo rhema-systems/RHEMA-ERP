@@ -41,7 +41,8 @@ internal static class HrAttachmentUpload
         string? description,
         Func<Guid, HrControlledDocument, Task<T>> persist,
         CancellationToken cancellationToken,
-        string category = ControlledFileUploadCategories.HrAppraisalAttachments)
+        string category = ControlledFileUploadCategories.HrAppraisalAttachments,
+        string? accessProfile = null)
     {
         if (file is null || file.Length == 0)
             return controller.BadRequest(new { message = "No file provided" });
@@ -70,7 +71,10 @@ internal static class HrAttachmentUpload
                     SourceRecordId   = sourceRecordId,
                     Title            = Path.GetFileName(file.FileName),
                     DocumentType     = documentType,
-                    ChangeSummary    = description
+                    ChangeSummary    = description,
+                    // Medical papers register as "Medical restricted", as exam documents do; every
+                    // other caller keeps the HR default.
+                    AccessProfile    = accessProfile ?? HrDocumentDmsRegistration.DefaultAccessProfile
                 }
             }, cancellationToken);
         }

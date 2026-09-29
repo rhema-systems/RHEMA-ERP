@@ -7,6 +7,7 @@ using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -50,12 +51,17 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
     /// </summary>
     private static readonly FinancePostingProducerContext ApProducer = new(FinanceDimensionRouteId.FinanceApVendorInvoice);
 
+    /// <summary>The receivables twin of <see cref="ApProducer"/>: the manual-AR route Finance's own AR screen uses.</summary>
+    private static readonly FinancePostingProducerContext ArProducer = new(FinanceDimensionRouteId.FinanceArCustomerInvoice);
+
     private static readonly JsonSerializerOptions SnapshotJson = new(JsonSerializerDefaults.Web);
 
     private readonly IHrFinancePostingStore _store;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IFinancePostingEngine _engine;
     private readonly IVendorInvoiceService _vendorInvoices;
+    private readonly IInvoiceService _customerInvoices;
+    private readonly ICustomerService _customers;
     private readonly HrCurrencyBridge _currency;
     private readonly ICurrentUserProvider _currentUser;
     private readonly ILogger<HrFinancePostingAdapter> _logger;
@@ -65,6 +71,8 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
         IUnitOfWork unitOfWork,
         IFinancePostingEngine engine,
         IVendorInvoiceService vendorInvoices,
+        IInvoiceService customerInvoices,
+        ICustomerService customers,
         HrCurrencyBridge currency,
         ICurrentUserProvider currentUser,
         ILogger<HrFinancePostingAdapter> logger)
@@ -73,6 +81,8 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
         _unitOfWork = unitOfWork;
         _engine = engine;
         _vendorInvoices = vendorInvoices;
+        _customerInvoices = customerInvoices;
+        _customers = customers;
         _currency = currency;
         _currentUser = currentUser;
         _logger = logger;
@@ -99,14 +109,19 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
                 await _store.SaveChangesAsync(cancellationToken);
                 return null;
             }
+            if (PostsAfterCommit(command))
+                throw new InvalidOperationException(
+                    $"'{command.EventCode}' raises a Finance customer invoice, which cannot run inside a caller-owned transaction (Finance's AR service opens its own). HR defect.");
             return await PostInsideTransactionAsync(command, actedByUserId, cancellationToken);
         }
 
         HrFinancePostingCommand? failedCommand = null;
+        HrFinancePostingCommand? deferred = null;
         string? failureReason = null;
+        HrFinancePostingOutcome? committed;
         try
         {
-            return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+            committed = await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
                 await _unitOfWork.BeginTransactionAsync(cancellationToken);
                 try
@@ -116,6 +131,17 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
                     if (command is null)
                     {
                         await _store.SaveChangesAsync(cancellationToken);
+                    }
+                    else if (PostsAfterCommit(command))
+                    {
+                        // ⚠ Finance's AR service wraps every call in its own transaction and cannot
+                        // join ours ("the connection is already in a transaction" — found live). So
+                        // the HR change commits first and the customer invoice is raised straight
+                        // after; a Finance refusal then leaves a Failed row to post again from the
+                        // register rather than rolling the HR action back. Journals and AP invoices
+                        // keep the all-or-nothing path.
+                        await _store.SaveChangesAsync(cancellationToken);
+                        deferred = command;
                     }
                     else
                     {
@@ -145,7 +171,26 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
             await RecordFailureAsync(failedCommand, failureReason ?? "Finance refused the posting.", actedByUserId, cancellationToken);
             throw;
         }
+
+        if (deferred is null) return committed;
+        try
+        {
+            return await PostInsideTransactionAsync(deferred, actedByUserId, cancellationToken);
+        }
+        catch (HrFinancePostingException ex)
+        {
+            // The HR action is already committed; the refusal is the register's to show and retry.
+            await RecordFailureAsync(deferred, ex.Message, actedByUserId, cancellationToken);
+            _logger.LogWarning("HR Finance posting {EventCode} for {SourceReference} failed after the HR change committed: {Message}",
+                deferred.EventCode, deferred.SourceReference, ex.Message);
+            var row = await _store.FindRecordAsync(GetTenantId(), deferred.EventCode, deferred.SourceDocumentId, cancellationToken);
+            return row is null ? null : ToOutcome(row, wasDuplicate: false);
+        }
     }
+
+    /// <summary>Events whose Finance document must be raised after HR's own commit (see <see cref="RunAsync"/>).</summary>
+    private static bool PostsAfterCommit(HrFinancePostingCommand command)
+        => HrFinancePostingEventCatalog.GetRequired(command.EventCode).Kind == HrFinancePostingKind.CustomerInvoice;
 
     public Task<HrFinancePostingOutcome> PostAsync(
         HrFinancePostingCommand command,
@@ -239,6 +284,8 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
         record.JournalEntryNumber = null;
         record.VendorInvoiceId = null;
         record.VendorInvoiceNumber = null;
+        record.CustomerInvoiceId = null;
+        record.CustomerInvoiceNumber = null;
         record.ExternalStatus = null;
         record.ExternalStatusAt = null;
         record.PostedAt = null;
@@ -299,6 +346,8 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
 
             if (definition.Kind == HrFinancePostingKind.VendorInvoice)
                 return await PostVendorInvoiceAsync(tenantId, definition, command, record, isNew, effectiveLines, mappings, now, cancellationToken);
+            if (definition.Kind == HrFinancePostingKind.CustomerInvoice)
+                return await PostCustomerInvoiceAsync(tenantId, definition, command, record, isNew, effectiveLines, mappings, now, cancellationToken);
 
             // Functional-currency conversion for a foreign source, through Finance's own rate.
             var rate = 1m;
@@ -534,6 +583,97 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
     }
 
     /// <summary>
+    /// The AR hand-off (slice 6): HR's one revenue. A customer invoice to the client's Finance
+    /// customer with one service line, submitted into Finance's AR approval; Finance issues,
+    /// collects and posts it. The line is the billed hours before tax — Finance's tax group, not
+    /// HR's typed percentage, is authoritative for the receivable.
+    /// </summary>
+    private async Task<HrFinancePostingOutcome> PostCustomerInvoiceAsync(
+        Guid tenantId,
+        HrFinancePostingEventDefinition definition,
+        HrFinancePostingCommand command,
+        HrFinancePostingRecord record,
+        bool isNew,
+        IReadOnlyList<HrFinancePostingLine> effectiveLines,
+        IReadOnlyDictionary<HrFinanceAccountRole, HrFinanceAccountSnapshot> mappings,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        if (effectiveLines.Count != 1 || effectiveLines[0].IsDebit)
+            throw new InvalidOperationException($"'{definition.Name}' must produce exactly one revenue line for an AR invoice. HR defect.");
+        if (command.PayeeCustomerId is not { } customerId || customerId == Guid.Empty)
+            throw new InvalidOperationException($"'{definition.Name}' names no Finance customer to invoice.");
+
+        // ⚠ A Finance customer is a BusinessPartner row read through Finance's own service (which
+        // scopes the tenant as AR does), not the Sales Customer entity — the first live run looked
+        // in the wrong table.
+        var customer = await _customers.GetByIdAsync(customerId, cancellationToken)
+            ?? throw new InvalidOperationException("The client's Finance customer does not exist in this tenant.");
+        if (!customer.IsActive)
+            throw new InvalidOperationException($"Finance customer {customer.CustomerName} is inactive; it cannot be invoiced.");
+
+        var line = effectiveLines[0];
+        var account = mappings[line.Role];
+        var functional = (await _store.GetTenantContextAsync(tenantId, cancellationToken)).FunctionalCurrencyCode;
+        var currency = string.IsNullOrWhiteSpace(command.TransactionCurrencyCode) ? functional : command.TransactionCurrencyCode.Trim().ToUpperInvariant();
+        var isForeign = !string.Equals(currency, functional, StringComparison.OrdinalIgnoreCase);
+        var rate = isForeign ? await _currency.GetRateToBaseAsync(currency, DateOnly.FromDateTime(record.PostingDate), cancellationToken) : 1m;
+        var amount = decimal.Round(line.Amount, 2, MidpointRounding.AwayFromZero);
+
+        record.TransactionCurrencyCode = isForeign ? currency : null;
+        record.TransactionAmount = isForeign ? amount : null;
+        record.Amount = isForeign ? decimal.Round(amount * rate, 2, MidpointRounding.AwayFromZero) : amount;
+        record.IdempotencyKey = BuildIdempotencyKey(command.EventCode, command.SourceDocumentId, record.AccountingBookCode ?? "?", record.Generation);
+        record.LinesSnapshot = JsonSerializer.Serialize(new List<HrFinancePostingLineSnapshotDto>
+        {
+            new()
+            {
+                Role = line.Role, RoleName = HrFinanceAccountRoleNames.Name(line.Role),
+                AccountId = account.Id, AccountCode = account.AccountNumber, AccountName = account.AccountName,
+                Debit = 0m, Credit = record.Amount,
+                Description = isForeign ? $"{line.Description} ({currency} {amount:N2} @ {rate:0.######})" : line.Description
+            }
+        }, SnapshotJson);
+
+        var reference = $"HR-{definition.Code}:{command.SourceDocumentId:N}" + (record.Generation > 1 ? $"#{record.Generation}" : string.Empty);
+        var created = await _customerInvoices.CreateAsync(new InvoiceCreateDto
+        {
+            // Finance's canonical cutover renamed CustomerId; the customer read above IS the partner.
+            BusinessPartnerId = customer.Id,
+            InvoiceDate = (command.SourceDate ?? now).Date,
+            CurrencyCode = currency,
+            ExchangeRate = rate,
+            Reference = reference,
+            Notes = Truncate($"Raised by HR from {definition.Name.ToLowerInvariant()} {command.SourceReference}. {command.Description}", 1000),
+            LineItems =
+            [
+                new InvoiceLineItemCreateDto
+                {
+                    LineItemType = "Service",
+                    GLAccountId = account.Id,
+                    Description = Truncate(line.Description, 500),
+                    Quantity = 1m,
+                    UnitPrice = amount,
+                    Unit = "Invoice"
+                }
+            ]
+        }, ArProducer, cancellationToken);
+        var submitted = await _customerInvoices.SubmitAsync(created.Id, ArProducer, cancellationToken);
+
+        record.CustomerInvoiceId = submitted.Id;
+        record.CustomerInvoiceNumber = Truncate(submitted.InvoiceNumber, 50);
+        record.ExternalStatus = Truncate(submitted.Status, 50);
+        record.ExternalStatusAt = now;
+        record.PostedAt = now;
+        var outcome = await FinishAsync(record, isNew, HrFinancePostingStatus.Posted, null, cancellationToken);
+
+        _logger.LogInformation(
+            "HR Finance posting {EventCode} for {SourceReference} raised AR invoice {Invoice} to {Customer} ({Amount} {Currency})",
+            command.EventCode, command.SourceReference, submitted.InvoiceNumber, customer.CustomerName, amount, currency);
+        return outcome;
+    }
+
+    /// <summary>
     /// Persists a Failed row after the transaction that carried the attempt was rolled back. Runs
     /// on a clean change tracker; the row is looked up again because the tracked one is gone.
     /// </summary>
@@ -736,6 +876,7 @@ public static class HrFinanceAccountRoleNames
         HrFinanceAccountRole.StaffReceivableWriteOff => "Staff receivable write-off",
         HrFinanceAccountRole.RecruitmentExpense => "Recruitment expense",
         HrFinanceAccountRole.InsuranceRecoveriesIncome => "Insurance recoveries income",
+        HrFinanceAccountRole.ConsultingRevenue => "Consulting revenue",
         _ => role.ToString()
     };
 
@@ -756,6 +897,7 @@ public static class HrFinanceAccountRoleNames
         HrFinanceAccountRole.StaffReceivableWriteOff => "Expense. A staff receivable forgiven: a waived surcharge, fine or bond.",
         HrFinanceAccountRole.RecruitmentExpense => "Expense. The cost of filling a post — adverts, agency fees, assessments, medicals. The expense line on the AP invoice HR raises to the supplier.",
         HrFinanceAccountRole.InsuranceRecoveriesIncome => "Revenue. What an insurer or the NHIS pays the company back on a medical, NHIS or incident claim.",
+        HrFinanceAccountRole.ConsultingRevenue => "Revenue. Consultants' billed hours — the service line on the AR invoice HR raises to a client.",
         _ => string.Empty
     };
 }

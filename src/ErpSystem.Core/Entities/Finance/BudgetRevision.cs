@@ -87,6 +87,15 @@ public class BudgetRevisionLine : TenantEntity
     [ForeignKey(nameof(SegmentValueId))]
     public virtual SegmentLookupValue? SegmentValue { get; set; }
 
+    /// <summary>
+    /// Immutable controlling-dimension combination for the exact official-budget cell.
+    /// Null is valid only for legacy scenarios that declare no controlling dimensions.
+    /// </summary>
+    public Guid? FinanceDimensionSetId { get; set; }
+
+    [ForeignKey(nameof(FinanceDimensionSetId))]
+    public virtual FinanceDimensionSet? FinanceDimensionSet { get; set; }
+
     [Required]
     public Guid AccountId { get; set; }
 

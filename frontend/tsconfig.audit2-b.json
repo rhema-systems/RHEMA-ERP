@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/separation.ts",
+    "src/types/hr/leave-request.ts",
+    "src/app/hr/separations/[id]/page.tsx",
+    "src/app/hr/pay-valuation/page.tsx",
+    "src/app/hr/leave/requests/[id]/page.tsx",
+    "src/app/me/leave/[id]/page.tsx",
+    "src/components/hr/leave/LeaveAttachmentsPanel.tsx",
+    "src/components/hr/leave/MedicalBoardLinkPanel.tsx"
+  ]
+}

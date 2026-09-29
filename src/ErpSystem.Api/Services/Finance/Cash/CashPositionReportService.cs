@@ -30,10 +30,22 @@ public sealed class CashPositionReportService : ICashPositionReportService
         var accounts = (await _bankAccountService.GetActiveAccountsAsync()).ToList();
         var baseCurrency = NormalizeCurrency(await _tenantSettingsService.GetBaseCurrencyAsync());
         var asOfDate = DateTime.UtcNow.Date;
+        if (accounts.Count == 0)
+        {
+            return new CashPositionSummaryDto
+            {
+                AsOfDate = asOfDate,
+                TotalBalance = 0m,
+                Currency = baseCurrency,
+                AccountCount = 0
+            };
+        }
+
         var ledger = await _generalLedgerService.GenerateCashBankLedgerAsync(new CashBankLedgerRequestDto
         {
             StartDate = asOfDate,
-            EndDate = asOfDate
+            EndDate = asOfDate,
+            BankAccountIds = accounts.Select(account => account.Id).ToList()
         });
         var ledgerBalances = ledger.Accounts.ToDictionary(
             account => account.BankAccountId,

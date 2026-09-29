@@ -73,7 +73,10 @@ public sealed class HrDocumentDmsRegistration
     /// Governs who can reach the document through the DMS UI. HR documents are personal
     /// data, so the default is the restricted profile rather than a module-wide one.
     /// </summary>
-    public string AccessProfile { get; init; } = "HR restricted";
+    public string AccessProfile { get; init; } = DefaultAccessProfile;
+
+    /// <summary>The profile every HR document gets unless its caller names a narrower one.</summary>
+    public const string DefaultAccessProfile = "HR restricted";
 
     public string? ChangeSummary { get; init; }
 }

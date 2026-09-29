@@ -30,7 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { geographyService } from '@/services/reference/geography.service';
+import { geographyReader } from '@/services/reference/geography.service';
 import { countryService } from '@/services/hr/country.service';
 import type { GeoAreaOption } from '@/types/reference/geography';
 
@@ -54,6 +54,19 @@ export interface AddressFieldsProps {
 
   disabled?: boolean;
   className?: string;
+
+  /**
+   * Read the anonymous careers catalogue for this tenant instead of the internal route.
+   *
+   * ⚠ Set this on candidate-facing pages and nowhere else. `api/reference/geo` is InternalOnly,
+   * which is a blocklist excluding the Candidate role — so without it the cascade is refused for
+   * every candidate and, because a failed query renders as an empty list, silently shows "this
+   * country has no scheme" rather than an error. Round 4, lane A.
+   */
+  publicTenantId?: string | null;
+
+  /** Pre-fetched country list, for a page that already has one (the careers portal does). */
+  countryOptions?: { id: string; name: string }[] | null;
 }
 
 export function AddressFields({
@@ -64,7 +77,12 @@ export function AddressFields({
   fallback,
   disabled = false,
   className,
+  publicTenantId,
+  countryOptions,
 }: AddressFieldsProps) {
+  // One reader for the whole component and its tiers — internal by default, the anonymous careers
+  // catalogue when a public tenant is named. See geographyReader for why this split exists.
+  const geo = useMemo(() => geographyReader(publicTenantId), [publicTenantId]);
   /**
    * One entry per tier: the area chosen at that depth, or '' if the user stopped above it.
    * Kept as its own state rather than derived, because the user's *intent* — "Greater Accra, and I
@@ -72,14 +90,17 @@ export function AddressFields({
    */
   const [chain, setChain] = useState<string[]>([]);
 
-  const { data: countries = [] } = useQuery({
+  const { data: fetchedCountries = [] } = useQuery({
     queryKey: ['reference', 'countries', 'active'],
     queryFn: () => countryService.getActive(),
+    // The careers pages already hold a public country list and cannot read the internal one.
+    enabled: !countryOptions,
   });
+  const countries = countryOptions ?? fetchedCountries;
 
   const { data: scheme, isLoading: schemeLoading } = useQuery({
-    queryKey: ['reference', 'geo', 'scheme-for-country', countryId],
-    queryFn: () => geographyService.getSchemeForCountry(countryId),
+    queryKey: ['reference', 'geo', 'scheme-for-country', countryId, publicTenantId ?? 'internal'],
+    queryFn: () => geo.getSchemeForCountry(countryId),
     enabled: !!countryId,
   });
 
@@ -102,7 +123,7 @@ export function AddressFields({
     // Already reflected — do not re-fetch on every keystroke elsewhere in the form.
     if (chain.filter(Boolean).at(-1) === geoAreaId) return;
 
-    geographyService
+    geo
       .getAncestors(geoAreaId)
       .then((ancestors) => {
         if (!cancelled) setChain(ancestors.map((a) => a.id));
@@ -181,6 +202,8 @@ export function AddressFields({
               disabled={disabled || (index > 0 && !chain[index - 1])}
               value={chain[index] ?? ''}
               onChange={(value) => handleTierChange(index, value)}
+              geo={geo}
+              readerKey={publicTenantId ?? 'internal'}
             />
           ))}
       </div>
@@ -205,6 +228,8 @@ function TierSelect({
   disabled,
   value,
   onChange,
+  geo,
+  readerKey,
 }: {
   levelId: string;
   label: string;
@@ -213,10 +238,14 @@ function TierSelect({
   disabled: boolean;
   value: string;
   onChange: (value: string) => void;
+  /** The parent's reader, so every tier speaks to the same route. */
+  geo: ReturnType<typeof geographyReader>;
+  /** Distinguishes the internal and public caches — the same tier, read two ways, is two answers. */
+  readerKey: string;
 }) {
   const { data: options = [], isLoading } = useQuery({
-    queryKey: ['reference', 'geo', 'options', levelId, parentId ?? 'root'],
-    queryFn: () => geographyService.getAreaOptions(levelId, parentId),
+    queryKey: ['reference', 'geo', 'options', levelId, parentId ?? 'root', readerKey],
+    queryFn: () => geo.getAreaOptions(levelId, parentId),
     // The root tier needs no parent; every tier below one does, and asking without it would
     // return the whole tier flattened.
     enabled: !disabled,

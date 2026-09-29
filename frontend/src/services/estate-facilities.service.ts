@@ -4,8 +4,6 @@ import type { ProcedureWorkspaceType } from '@/lib/procedure-workspace';
 export interface FacilitiesProcedure {
   title: string;
   entityType: string;
-  source: string;
-  summary: string;
   icon: string;
   stageCount: number;
   accent: string;
@@ -15,7 +13,6 @@ export interface FacilitiesProcedure {
 export interface FacilitiesWorkspaceStage {
   name: string;
   owner: string;
-  summary: string;
   checklist: string[];
 }
 
@@ -45,6 +42,85 @@ export interface FacilitiesProcedureWorkspace {
   intakeFields: FacilitiesWorkspaceField[];
   outputs: string[];
   handoffs: FacilitiesWorkspaceHandoff[];
+}
+
+export interface FacilitiesProviderOption {
+  id: string;
+  partnerCode: string;
+  partnerName: string;
+  partnerType: string;
+  performanceRating?: number | null;
+  phone?: string | null;
+  email?: string | null;
+  categories: string[];
+  contracts: Array<{
+    id: string;
+    businessPartnerId: string;
+    contractNumber: string;
+    contractTitle: string;
+    contractValue: number;
+    currency: string;
+    paymentTerms?: string | null;
+    startDate?: string | null;
+    endDate?: string | null;
+  }>;
+}
+
+export interface FacilitiesProviderInvoice {
+  id: string;
+  invoiceNumber: string;
+  supplierInvoiceNumber?: string | null;
+  invoiceDate: string;
+  dueDate?: string | null;
+  purchaseOrderId?: string | null;
+  totalAmount: number;
+  paidAmount: number;
+  currencyCode: string;
+  status: string | number;
+}
+
+export interface FacilitiesProviderRate {
+  id: string;
+  businessPartnerId: string;
+  contractId?: string | null;
+  contractNumber?: string | null;
+  serviceName: string;
+  unitOfMeasure: string;
+  rate: number;
+  currency: string;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  isActive: boolean;
+}
+
+export type FacilitiesProviderRateRequest = Omit<FacilitiesProviderRate, 'id' | 'businessPartnerId' | 'contractNumber'>;
+
+export interface FacilitiesBudgetYear {
+  id: string;
+  fiscalYearName: string;
+  fiscalYearCode: string;
+  startDate: string;
+  endDate: string;
+  hasOfficialBudget: boolean;
+}
+
+export interface FacilitiesBudgetReport {
+  fiscalYearId: string;
+  fiscalYearName: string;
+  currencyCode: string;
+  scenarioName: string;
+  plannedAmount: number;
+  actualExpense: number;
+  variance: number;
+  lines: Array<{
+    accountCode: string;
+    accountName: string;
+    periodCode: string;
+    periodNumber: number;
+    plannedAmount: number;
+    actualExpense: number;
+    variance: number;
+  }>;
 }
 
 export interface PublishFacilitiesBillingDocumentRequest {
@@ -98,6 +174,7 @@ export interface CreateFacilitiesArInvoiceLineItem {
 
 export interface CreateFacilitiesArInvoiceRequest {
   customerId: string;
+  propertyUnit: string;
   invoiceDate: string;
   dueDate?: string;
   reference?: string;
@@ -184,6 +261,8 @@ export interface EstateFacilityDutyRosterItem {
   supervisorName?: string | null;
   toolsIssued?: string | null;
   suppliesIssued?: string | null;
+  inventoryIssueVoucherId?: string | null;
+  inventoryIssueVoucherNumber?: string | null;
   checklist?: string | null;
   attendanceStatus: string;
   completionStatus: string;
@@ -216,6 +295,8 @@ export interface UpsertEstateFacilityDutyRosterRequest {
   supervisorName?: string | null;
   toolsIssued?: string | null;
   suppliesIssued?: string | null;
+  inventoryIssueVoucherId?: string | null;
+  inventoryIssueVoucherNumber?: string | null;
   checklist?: string | null;
   attendanceStatus: string;
   completionStatus: string;
@@ -224,6 +305,60 @@ export interface UpsertEstateFacilityDutyRosterRequest {
   linkedComplaintReference?: string | null;
   linkedProcedureCaseReference?: string | null;
   notes?: string | null;
+}
+
+export interface FacilitiesPropertyInvoice {
+  id: string;
+  invoiceNumber: string;
+  reference?: string | null;
+  invoiceDate: string;
+  dueDate?: string | null;
+  status: string;
+  totalAmount: number;
+  paidAmount: number;
+  currencyCode: string;
+  canRelease: boolean;
+}
+
+export interface FacilitiesStaffOption {
+  id: string;
+  employeeProfileId: string | null;
+  employeeNumber: string;
+  staffName: string;
+  department: string | null;
+  position: string | null;
+}
+
+export interface FacilitiesIssueVoucherOption {
+  id: string;
+  voucherNumber: string;
+  status: string;
+  issuedAtUtc: string;
+  supplies: string;
+}
+
+export interface FacilitiesPropertyOption {
+  id: string;
+  assetCode: string;
+  name: string;
+  location: string | null;
+  projectCode: string | null;
+  projectTitle: string | null;
+  blockName: string | null;
+  floorLabel: string | null;
+  unitType: string | null;
+  assetType: string | number;
+}
+
+export interface FacilitiesUnitOption {
+  id: string;
+  assetCode: string;
+  name: string;
+  projectUnitCode: string | null;
+  blockName: string | null;
+  floorLabel: string | null;
+  unitType: string | null;
+  assetType: string | number;
 }
 
 export interface UpdateEstateFacilityDutyAttendanceRequest {
@@ -242,6 +377,109 @@ interface ApiResponse<T> {
 }
 
 class EstateFacilitiesService {
+  async getBudgetYears(): Promise<FacilitiesBudgetYear[]> {
+    const response = await apiService.get<ApiResponse<FacilitiesBudgetYear[]>>(
+      '/estate/facilities/budget/fiscal-years'
+    );
+    return response.data || [];
+  }
+
+  async getBudgetReport(fiscalYearId: string): Promise<FacilitiesBudgetReport> {
+    const response = await apiService.get<ApiResponse<FacilitiesBudgetReport>>(
+      `/estate/facilities/budget/fiscal-years/${encodeURIComponent(fiscalYearId)}`
+    );
+    return response.data;
+  }
+
+  async searchIssueVouchers(search: string): Promise<FacilitiesIssueVoucherOption[]> {
+    const response = await apiService.get<ApiResponse<FacilitiesIssueVoucherOption[]>>(
+      `/estate/facilities/duty-roster/issue-vouchers?search=${encodeURIComponent(search)}`
+    );
+    return response.data || [];
+  }
+
+  async assignSiteOfficer(assetId: string, employeeId: string): Promise<{
+    id: string;
+    responsibleOfficerEmployeeId: string;
+    responsibleOfficerEmployeeNumber: string;
+    responsibleOfficerName: string;
+  }> {
+    return apiService.put<{
+      id: string;
+      responsibleOfficerEmployeeId: string;
+      responsibleOfficerEmployeeNumber: string;
+      responsibleOfficerName: string;
+    }>(`/estate/facilities/sites/${assetId}/responsible-officer`, { employeeId });
+  }
+
+  async getPropertyArInvoices(propertyUnit: string): Promise<FacilitiesPropertyInvoice[]> {
+    return apiService.get<FacilitiesPropertyInvoice[]>(
+      `/estate/facilities/ar-billing/invoices?propertyUnit=${encodeURIComponent(propertyUnit)}`
+    );
+  }
+
+  async releaseArInvoice(id: string, propertyUnit: string): Promise<FacilitiesArInvoice> {
+    return apiService.post<FacilitiesArInvoice>(
+      `/estate/facilities/ar-billing/invoices/${id}/release`, { propertyUnit }
+    );
+  }
+
+  async searchDutyStaff(search: string): Promise<FacilitiesStaffOption[]> {
+    const response = await apiService.get<ApiResponse<FacilitiesStaffOption[]>>(
+      `/estate/facilities/duty-roster/staff?search=${encodeURIComponent(search)}`
+    );
+    return response.data || [];
+  }
+
+  async searchDutyProperties(search: string): Promise<FacilitiesPropertyOption[]> {
+    const response = await apiService.get<ApiResponse<FacilitiesPropertyOption[]>>(
+      `/estate/facilities/duty-roster/properties?search=${encodeURIComponent(search)}`
+    );
+    return response.data || [];
+  }
+
+  async searchDutyUnits(propertyId: string, search: string): Promise<FacilitiesUnitOption[]> {
+    const response = await apiService.get<ApiResponse<FacilitiesUnitOption[]>>(
+      `/estate/facilities/duty-roster/properties/${encodeURIComponent(propertyId)}/units?search=${encodeURIComponent(search)}`
+    );
+    return response.data || [];
+  }
+
+  async getProviderInvoices(providerId: string): Promise<FacilitiesProviderInvoice[]> {
+    const response = await apiService.get<ApiResponse<FacilitiesProviderInvoice[]>>(
+      `/estate/facilities/providers/${providerId}/invoices`
+    );
+    return response.data || [];
+  }
+
+  async getProviderRates(providerId: string): Promise<FacilitiesProviderRate[]> {
+    const response = await apiService.get<ApiResponse<FacilitiesProviderRate[]>>(
+      `/estate/facilities/providers/${encodeURIComponent(providerId)}/rates`
+    );
+    return response.data || [];
+  }
+
+  async createProviderRate(providerId: string, request: FacilitiesProviderRateRequest): Promise<FacilitiesProviderRate> {
+    const response = await apiService.post<ApiResponse<FacilitiesProviderRate>>(
+      `/estate/facilities/providers/${encodeURIComponent(providerId)}/rates`, request
+    );
+    return response.data;
+  }
+
+  async updateProviderRate(providerId: string, rateId: string, request: FacilitiesProviderRateRequest): Promise<FacilitiesProviderRate> {
+    const response = await apiService.put<ApiResponse<FacilitiesProviderRate>>(
+      `/estate/facilities/providers/${encodeURIComponent(providerId)}/rates/${encodeURIComponent(rateId)}`, request
+    );
+    return response.data;
+  }
+
+  async getApprovedProviders(): Promise<FacilitiesProviderOption[]> {
+    const response = await apiService.get<ApiResponse<FacilitiesProviderOption[]>>(
+      '/estate/facilities/providers'
+    );
+    return response.data || [];
+  }
+
   async getProcedures(): Promise<FacilitiesProcedure[]> {
     const response = await apiService.get<ApiResponse<FacilitiesProcedure[]>>(
       '/estate/facilities/procedures'
@@ -275,7 +513,7 @@ class EstateFacilitiesService {
       {
         invoice: request,
         sourceRecordReference: request.reference || null,
-        propertyUnit: null,
+        propertyUnit: request.propertyUnit,
       }
     );
   }

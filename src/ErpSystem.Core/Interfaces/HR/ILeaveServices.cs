@@ -9,6 +9,14 @@ public interface ILeaveService
 {
     Task<LeaveRequestDto> CreateLeaveRequestAsync(CreateLeaveRequestDto dto);
     Task<LeaveRequestDto> UpdateDraftAsync(Guid id, CreateLeaveRequestDto dto);
+
+    /// <summary>
+    /// What a request for these dates would ask of its leave type, and of annual leave for the days
+    /// beyond the type's limit (round 5, lane H). Saves nothing; the request forms read it.
+    /// </summary>
+    Task<LeaveExcessPreviewDto> PreviewExcessAsync(
+        Guid employeeId, Guid leaveTypeId, Guid? leaveSubTypeId, DateOnly startDate, DateOnly endDate);
+
     Task<bool> SubmitForApprovalAsync(Guid id);
     Task<LeaveRequestDto> ApproveLeaveAsync(Guid id, ApproveLeaveDto dto);
     Task<LeaveRequestDto> RejectLeaveAsync(Guid id, RejectLeaveDto dto);
@@ -69,12 +77,72 @@ public interface ILeaveService
     /// </remarks>
     Task<PagedResult<LeaveRequestDto>> GetMyPendingApprovalsAsync(
         int pageNumber, int pageSize, CancellationToken ct = default);
-    Task<IEnumerable<LeaveBalanceDto>> GetEmployeeLeaveBalancesAsync(Guid employeeId, int year);
+    /// <summary>
+    /// One employee's balances for a year, annual leave first. With <paramref name="includeLiveAnnual"/>,
+    /// an employee with no annual record yet gets their annual leave worked out live (round 5, lane J),
+    /// marked <c>HasRecord = false</c>; nothing is created.
+    /// </summary>
+    Task<IEnumerable<LeaveBalanceDto>> GetEmployeeLeaveBalancesAsync(Guid employeeId, int year, bool includeLiveAnnual = false);
     Task<IEnumerable<LeaveBalanceDto>> GetAllLeaveBalancesAsync(int year, Guid? employeeId, Guid? leaveTypeId);
+
+    /// <summary>
+    /// Annual leave for every employee still serving and hired by the year's end (round 5, lane J):
+    /// the stored record where there is one, the figures worked out live where there is none. Leavers
+    /// are left out; a unit takes everything beneath it. Creates nothing.
+    /// </summary>
+    Task<IReadOnlyList<LeaveBalanceDto>> GetAnnualBalancesAsync(
+        int year, Guid? employeeId, Guid? organizationUnitId, CancellationToken ct = default);
     Task<LeaveBalanceDetailDto?> GetLeaveBalanceDetailAsync(Guid balanceId);
+
+    /// <summary>
+    /// How a balance's accrual is worked out as at <paramref name="asOf"/> (today when null): the
+    /// accrual statement (round 5, lane C2). <c>null</c> when the balance is not this tenant's.
+    /// </summary>
+    Task<LeaveAccrualStatementDto?> GetAccrualStatementAsync(Guid balanceId, DateOnly? asOf, CancellationToken ct = default);
+
+    /// <summary>
+    /// Annual leave built up and not yet taken, for every employee on the books at
+    /// <paramref name="asOf"/> (today when null) — the "leave owed as at a date" report (round 5,
+    /// lane C6, decision A7). Days only.
+    /// </summary>
+    Task<LeaveOwedReportDto> GetLeaveOwedAsync(DateOnly? asOf, CancellationToken ct = default);
+
+    /// <summary>The same report as a CSV, one row per employee.</summary>
+    Task<byte[]> ExportLeaveOwedCsvAsync(DateOnly? asOf, CancellationToken ct = default);
     Task<IEnumerable<MandatoryLeaveComplianceDto>> GetMandatoryLeaveComplianceAsync(int year);
-    Task<bool> CancelLeaveRequestAsync(Guid id, string cancellationReason);
+    /// <summary>
+    /// Cancel a request (round 5, R5-D3 + B2): the employee until it is approved; the desk also
+    /// approved or started leave up to and including its first day, with a reason.
+    /// </summary>
+    /// <param name="actingAsDesk">The caller holds the leave write tier.</param>
+    Task<bool> CancelLeaveRequestAsync(Guid id, string? cancellationReason, bool actingAsDesk);
+
+    /// <summary>
+    /// Confirm the employee's return, which closes the leave (round 5, B3): an early return cuts the
+    /// leave short, a late one records the working days overstayed.
+    /// </summary>
     Task<LeaveRequestDto> CloseLeaveRequestAsync(Guid id, CloseLeaveDto dto);
+
+    /// <summary>"I'm back at work": the employee's own report, waiting for confirmation (round 5, B3).</summary>
+    Task<LeaveRequestDto> ReportResumptionAsync(Guid id, ReportResumptionDto dto);
+
+    /// <summary>
+    /// Whether <paramref name="actorEmployeeId"/> manages <paramref name="subjectEmployeeId"/>: their
+    /// supervisor, or the head of their unit or of any unit above it (TDC's definitions, finish plan
+    /// lane 7). The authority that may recall them and confirm their return (round 5, B1/B3).
+    /// </summary>
+    Task<bool> IsLineAuthorityAsync(Guid subjectEmployeeId, Guid actorEmployeeId, CancellationToken ct = default);
+
+    /// <summary>Returns the caller has been asked to confirm, as their line authority (round 5, B3).</summary>
+    Task<IReadOnlyList<LeaveRequestDto>> GetResumptionsToConfirmAsync(Guid actorEmployeeId, CancellationToken ct = default);
+
+    /// <summary>
+    /// What the caller may do with this request, so a screen offers only what would succeed (round 5,
+    /// lane D). The endpoints enforce the same rules on their own.
+    /// </summary>
+    /// <param name="actingAsDesk">The caller holds the leave write tier.</param>
+    Task<LeaveRequestViewerActionsDto> GetViewerActionsAsync(
+        LeaveRequestDto request, bool actingAsDesk, CancellationToken ct = default);
 
     /// <summary>
     /// Leave drawn as time rather than rows, for a date range and an audience.
@@ -141,12 +209,22 @@ public interface ILeaveService
     /// <summary>The balances screen as a CSV, with the same filters it offers.</summary>
     Task<byte[]> ExportBalancesCsvAsync(int year, Guid? employeeId, Guid? leaveTypeId, CancellationToken ct = default);
 
+    /// <summary>The annual view of the balances screen as a CSV (round 5, lane J): the same rows.</summary>
+    Task<byte[]> ExportAnnualBalancesCsvAsync(
+        int year, Guid? employeeId, Guid? organizationUnitId, CancellationToken ct = default);
+
     /// <summary>The mandatory-leave compliance register as a CSV.</summary>
     Task<byte[]> ExportComplianceCsvAsync(int year, CancellationToken ct = default);
 
+    /// <summary>Leave drawn as time. The three scopes are described on <c>LeavesController.GetCalendar</c>.</summary>
+    /// <param name="callerEmployeeId">Who <c>Mine</c> and <c>Team</c> are measured from: the token's
+    /// employee, never a query parameter.</param>
+    /// <param name="organizationUnitId">Organisation scope only: the unit and every unit beneath it.</param>
+    /// <param name="onlyEmployeeId">One employee's calendar (round 5 lane F). It narrows whatever the
+    /// scope shows and can never widen it.</param>
     Task<LeaveCalendarDto> GetCalendarAsync(
-        DateOnly from, DateOnly to, LeaveCalendarScope scope, Guid? employeeId,
-        Guid? leaveTypeId, Guid? organizationUnitId, CancellationToken ct = default);
+        DateOnly from, DateOnly to, LeaveCalendarScope scope, Guid? callerEmployeeId,
+        Guid? leaveTypeId, Guid? organizationUnitId, Guid? onlyEmployeeId, CancellationToken ct = default);
 
     // ─── Leave Adjustments ───────────────────────────────────────────────────
     Task<LeaveAdjustmentDto> AddAdjustmentAsync(CreateLeaveAdjustmentDto dto);
@@ -173,6 +251,12 @@ public interface ILeaveService
     Task<IEnumerable<LeaveRequestAttachmentDto>> GetAttachmentsAsync(Guid leaveRequestId);
     Task<LeaveRequestAttachmentDto?> GetAttachmentByIdAsync(Guid attachmentId);
     Task<bool> DeleteAttachmentAsync(Guid attachmentId);
+
+    /// <summary>
+    /// Refuses removing medical evidence from a request that has been submitted (leave settings audit
+    /// 2, L-77). Asked BEFORE the stored file is removed, so a refused delete destroys nothing.
+    /// </summary>
+    Task EnsureAttachmentRemovableAsync(Guid attachmentId);
 }
 
 /// <summary>
@@ -234,7 +318,20 @@ public interface ILeavePlanService
     Task<LeavePlanDto> RejectLeavePlanAsync(Guid id, string reason);
     Task<LeavePlanDto> SuggestChangesAsync(Guid id, SuggestLeavePlanChangesDto dto);
     Task<LeavePlanDto> RespondToSuggestionAsync(Guid id, RespondToLeaveSuggestionDto dto);
-    Task CancelLeavePlanAsync(Guid id);
+
+    /// <summary>
+    /// Cancels a plan (round 5 lane E5). <paramref name="actingAsDesk"/> is true when the caller
+    /// holds the leave write tier: the desk may also cancel an APPROVED plan no request has been
+    /// raised from, and must say why. The employee may cancel their own plan until it is approved.
+    /// A live approval is withdrawn either way.
+    /// </summary>
+    Task CancelLeavePlanAsync(Guid id, string? reason, bool actingAsDesk);
+
+    /// <summary>
+    /// The approver's one edit to a plan: its relievers (round 5 lane E3). Allowed while the plan
+    /// is Submitted, ChangesSuggested or Approved; the caller's authority is the controller's check.
+    /// </summary>
+    Task<LeavePlanDto> UpdateRelieversAsync(Guid id, UpdateLeavePlanRelieversDto dto);
 
     /// <summary>
     /// Why <paramref name="relieverId"/> may not be free between the two dates: their own leave
@@ -250,6 +347,12 @@ public interface ILeavePlanService
 /// </summary>
 public interface ILeaveEncashmentService
 {
+    /// <summary>
+    /// Whether leave may be cashed in while still employed — the company's switch (round 5, lane
+    /// L1). Off, the only route to cash is the leaver's settlement, and the portal hides its screen.
+    /// </summary>
+    Task<bool> IsInServiceAllowedAsync();
+
     Task<LeaveEncashmentDto>              RequestEncashmentAsync(CreateLeaveEncashmentDto dto);
     Task<LeaveEncashmentDto>              ApproveEncashmentAsync(Guid id);
     Task<LeaveEncashmentDto>              RejectEncashmentAsync(Guid id, string reason);
@@ -261,6 +364,13 @@ public interface ILeaveEncashmentService
         Guid?     leaveTypeId  = null,
         DateTime? from         = null,
         DateTime? to           = null,
-        string?   search       = null);
+        string?   search       = null,
+        LeaveEncashmentStatus? status = null);
     Task<LeaveEncashmentDto>              GetByIdAsync(Guid id);
+
+    /// <summary>
+    /// Finance's queue (leave settings audit 2, P4): leave cashed in, approved, awaiting payment —
+    /// the days, for Finance to value when it marks them paid.
+    /// </summary>
+    Task<IReadOnlyList<PayToValueItemDto>> GetAwaitingPaymentAsync();
 }

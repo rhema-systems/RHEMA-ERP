@@ -66,6 +66,36 @@ public sealed class FinanceBudgetCommitmentServiceTests
     }
 
     [Fact]
+    public async Task Position_excludes_posted_actuals_from_parallel_books()
+    {
+        await using var db = CreateContext();
+        var fixture = SeedBudget(db, 1_000m);
+        SeedPostedActual(db, fixture, 125m);
+        var parallelBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            Code = "LOCAL", Name = "Local statutory",
+            BookType = AccountingBookType.ParallelFull,
+            IsDefault = false, IsActive = true, AllowsPosting = true
+        };
+        var parallelJournal = PostedJournal(fixture, 900m);
+        parallelJournal.AccountingBookId = parallelBook.Id;
+        parallelJournal.BookClassification = parallelBook.Code;
+        foreach (var transaction in parallelJournal.Transactions)
+        {
+            transaction.AccountingBookId = parallelBook.Id;
+            transaction.BookClassification = parallelBook.Code;
+        }
+        db.AddRange(parallelBook, parallelJournal);
+        await db.SaveChangesAsync();
+
+        var position = await CreateService(db).GetBudgetPositionAsync(fixture.Entry.Id, fixture.BudgetDate);
+
+        position.PostedActualAmount.Should().Be(125m);
+        position.AvailableAmount.Should().Be(875m);
+    }
+
+    [Fact]
     public async Task Dimensioned_position_counts_only_posted_sets_containing_the_budget_assignments()
     {
         await using var db = CreateContext();
@@ -322,6 +352,56 @@ public sealed class FinanceBudgetCommitmentServiceTests
     }
 
     [Fact]
+    public async Task Actual_reversal_evidence_is_append_only_and_idempotent()
+    {
+        await using var db = CreateContext();
+        var fixture = SeedBudget(db, 1_000m);
+        await db.SaveChangesAsync();
+        var service = CreateService(db);
+        var sourceId = Guid.NewGuid();
+        var request = Request(fixture, "reserve-ap-reversal", 300m);
+        request.SourceDocumentType = "VendorInvoice";
+        request.SourceDocumentId = sourceId;
+        var reservation = (await service.ReserveAsync(request)).Reservations.Single();
+
+        var originalJournal = PostedJournal(fixture, 300m);
+        var originalEvent = PostingEvent(originalJournal, Guid.NewGuid(), "VendorInvoice", sourceId);
+        db.AddRange(originalJournal, originalEvent);
+        await db.SaveChangesAsync();
+        await service.ConsumeForPostingAsync(
+            TenantId, "VendorInvoice", sourceId, new[] { reservation.Id },
+            originalJournal.Id, originalEvent.Id);
+        await db.SaveChangesAsync();
+
+        var reversalJournal = PostedJournal(fixture, 300m);
+        reversalJournal.OriginalJournalEntryId = originalJournal.Id;
+        var reversalEvent = PostingEvent(
+            reversalJournal, Guid.NewGuid(), "VendorInvoiceReversal", sourceId);
+        reversalEvent.PostingAction = "Reverse";
+        db.AddRange(reversalJournal, reversalEvent);
+        await db.SaveChangesAsync();
+
+        await service.RecordActualReversalAsync(
+            TenantId, "VendorInvoice", sourceId,
+            originalJournal.Id, originalEvent.Id,
+            reversalJournal.Id, reversalEvent.Id);
+        await service.RecordActualReversalAsync(
+            TenantId, "VendorInvoice", sourceId,
+            originalJournal.Id, originalEvent.Id,
+            reversalJournal.Id, reversalEvent.Id);
+
+        var consumed = await db.FinanceBudgetReservations.SingleAsync(item => item.Id == reservation.Id);
+        consumed.Status.Should().Be("Consumed");
+        consumed.JournalEntryId.Should().Be(originalJournal.Id);
+        (await db.FinanceBudgetReservationOperations.CountAsync(item =>
+            item.OperationType == "RecordActualReversal")).Should().Be(1);
+        var reversalOperation = await db.FinanceBudgetReservationOperations.SingleAsync(item =>
+            item.OperationType == "RecordActualReversal");
+        reversalOperation.JournalEntryId.Should().Be(reversalJournal.Id);
+        reversalOperation.PostingEventId.Should().Be(reversalEvent.Id);
+    }
+
+    [Fact]
     public async Task Cross_tenant_budget_entry_is_concealed()
     {
         await using var db = CreateContext();
@@ -363,12 +443,45 @@ public sealed class FinanceBudgetCommitmentServiceTests
             "migrationBuilder.DropColumn" }) source.Should().Contain(token);
     }
 
+    [Fact]
+    public void Dimension_revision_migration_adds_exact_cell_identity_and_reverses_cleanly()
+    {
+        var up = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        new TestableDimensionRevisionMigration().ApplyUp(up);
+
+        up.Operations.OfType<AddColumnOperation>().Should().ContainSingle(column =>
+            column.Table == "BudgetRevisionLines"
+            && column.Name == "FinanceDimensionSetId"
+            && column.IsNullable);
+        up.Operations.OfType<CreateIndexOperation>().Should().Contain(index =>
+            index.Name == "UX_BudgetRevisionLines_Cell"
+            && index.IsUnique
+            && index.Columns.Contains("FinanceDimensionSetId"));
+        up.Operations.OfType<AddForeignKeyOperation>().Should().ContainSingle(key =>
+            key.Table == "BudgetRevisionLines"
+            && key.PrincipalTable == "FinanceDimensionSets"
+            && key.OnDelete == ReferentialAction.Restrict);
+
+        var down = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        new TestableDimensionRevisionMigration().ApplyDown(down);
+        down.Operations.OfType<DropColumnOperation>().Should().ContainSingle(column =>
+            column.Table == "BudgetRevisionLines" && column.Name == "FinanceDimensionSetId");
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<BudgetCommitmentTestDbContext>()
             .UseInMemoryDatabase($"finance-budget-commitment-{Guid.NewGuid():N}")
             .Options;
-        return new BudgetCommitmentTestDbContext(options);
+        var db = new BudgetCommitmentTestDbContext(options);
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            Code = "PRIMARY", Name = "Primary book",
+            BookType = AccountingBookType.PrimaryFull,
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        });
+        return db;
     }
 
     private static FinanceBudgetCommitmentService CreateService(
@@ -452,7 +565,11 @@ public sealed class FinanceBudgetCommitmentServiceTests
                 CoaType = "Segmented",
                 AccountSeparator = "-"
             });
-        return new BudgetFixture(period, expense, scenario, budgetReturn, entry, new DateTime(2026, 1, 15));
+        var primaryBookId = tenant == TenantId
+            ? db.AccountingBooks.Local.Single(book => book.IsDefault).Id
+            : Guid.Empty;
+        return new BudgetFixture(
+            period, expense, scenario, budgetReturn, entry, new DateTime(2026, 1, 15), primaryBookId);
     }
 
     private static FinanceBudgetCommitmentRequestDto Request(
@@ -565,6 +682,7 @@ public sealed class FinanceBudgetCommitmentServiceTests
         Description = "Posted controlled expense",
         PostingStatus = "Posted",
         BookClassification = "IFRS",
+        AccountingBookId = fixture.PrimaryBookId,
         TotalDebitAmount = amount,
         TotalCreditAmount = amount,
         IsBalanced = true,
@@ -573,6 +691,7 @@ public sealed class FinanceBudgetCommitmentServiceTests
             new()
             {
                 TenantId = TenantId,
+                AccountingBookId = fixture.PrimaryBookId,
                 AccountId = fixture.Expense.Id,
                 FiscalPeriodId = fixture.Period.Id,
                 TransactionDate = fixture.BudgetDate,
@@ -626,7 +745,14 @@ public sealed class FinanceBudgetCommitmentServiceTests
         BudgetScenario Scenario,
         BudgetReturn Return,
         BudgetEntry Entry,
-        DateTime BudgetDate);
+        DateTime BudgetDate,
+        Guid PrimaryBookId);
+
+    private sealed class TestableDimensionRevisionMigration : AddDimensionAwareBudgetRevisions
+    {
+        public void ApplyUp(MigrationBuilder builder) => Up(builder);
+        public void ApplyDown(MigrationBuilder builder) => Down(builder);
+    }
 
     /// <summary>
     /// ApplicationDbContext currently embeds a constructor tenant in its cached EF model. A

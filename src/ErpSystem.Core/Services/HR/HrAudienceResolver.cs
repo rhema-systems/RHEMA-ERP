@@ -29,16 +29,20 @@ public class HrAudienceResolver : IHrAudienceResolver
         return tenantId;
     }
 
-    public async Task<IReadOnlyCollection<Guid>> ResolveAsync(
+    public Task<IReadOnlyCollection<Guid>> ResolveAsync(
         IEnumerable<HrAudienceRule> rules, CancellationToken cancellationToken = default)
+        => ResolveForTenantAsync(GetTenantId(), rules, cancellationToken);
+
+    public async Task<IReadOnlyCollection<Guid>> ResolveForTenantAsync(
+        Guid tenantId, IEnumerable<HrAudienceRule> rules, CancellationToken cancellationToken = default)
     {
         var all = rules?.ToList() ?? [];
 
         // No rules reaches NOBODY, on purpose. Defaulting an empty audience to "everyone" would
         // turn a forgotten step into a tenant-wide broadcast.
         if (all.Count == 0) return [];
-
-        var tenantId = GetTenantId();
+        if (tenantId == Guid.Empty)
+            throw new UnauthorizedAccessException("No tenant was given to resolve the audience in.");
 
         var included = new HashSet<Guid>();
         foreach (var rule in all.Where(r => !r.IsExclusion))
@@ -123,6 +127,26 @@ public class HrAudienceResolver : IHrAudienceResolver
     {
         if (unitId == Guid.Empty) return [];
         return await DescendantsOfAsync(GetTenantId(), unitId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Guid>> UnitAncestryAsync(
+        Guid tenantId, Guid unitId, CancellationToken cancellationToken = default)
+    {
+        if (unitId == Guid.Empty || tenantId == Guid.Empty) return [];
+
+        var parents = (await UnitEdgesAsync(tenantId, cancellationToken))
+            .ToDictionary(e => e.Id, e => e.ParentUnitId);
+
+        var chain = new List<Guid> { unitId };
+        var seen = new HashSet<Guid> { unitId };
+        var current = unitId;
+        while (parents.TryGetValue(current, out var parent) && parent is { } parentId)
+        {
+            if (!seen.Add(parentId)) break; // a cycle in the data
+            chain.Add(parentId);
+            current = parentId;
+        }
+        return chain;
     }
 
     // ── Internals ─────────────────────────────────────────────────────────────

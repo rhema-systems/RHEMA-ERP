@@ -51,6 +51,9 @@ public interface IOrientationProgramService
 
     // Program CRUD + lifecycle
     Task<OrientationProgramDto> CreateAsync(CreateOrientationProgramDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Round 4, lane J2: copy a programme and everything it is made of, as a Draft.</summary>
+    Task<OrientationProgramDto> CloneAsync(Guid sourceId, CloneOrientationProgramDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<OrientationProgramDto> UpdateAsync(UpdateOrientationProgramDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> ChangeStatusAsync(ChangeOrientationProgramStatusDto changeDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
@@ -101,6 +104,9 @@ public interface IOrientationSessionService
 
     // CRUD + lifecycle
     Task<OrientationSessionDto> CreateAsync(CreateOrientationSessionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Round 4, lane J3: run a session again on a new date.</summary>
+    Task<OrientationSessionDto> CloneAsync(Guid sourceId, CloneOrientationSessionDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<OrientationSessionDto> UpdateAsync(UpdateOrientationSessionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> ChangeStatusAsync(ChangeOrientationSessionStatusDto changeDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
@@ -165,6 +171,14 @@ public interface IEmployeeOrientationService
     Task<IEnumerable<OrientationAcknowledgementDto>> GetAcknowledgementsAsync(Guid enrollmentId, CancellationToken cancellationToken = default);
     Task<OrientationAcknowledgementDto> SignAcknowledgementAsync(SignOrientationAcknowledgementDto signDto, string? ipAddress, Guid signedByUserId, CancellationToken cancellationToken = default);
 
+    // Completion by attendance (round 4, lane R) — for a programme that is only its live session
+    /// <summary>HR's "Mark completed": confirms attendance on one enrolment, with a note, and runs the completion rule.</summary>
+    Task<EmployeeOrientationDto> ConfirmAttendanceAsync(ConfirmOrientationAttendanceDto dto, Guid officerEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>The session was marked Completed: confirms attendance for everybody its register shows there. Returns how many completed.</summary>
+    Task<int> CompleteAttendedOnSessionAsync(Guid sessionId, Guid officerEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>What marking the session Completed would do, for its confirmation to say first.</summary>
+    Task<OrientationSessionCompletionPreviewDto> PreviewSessionCompletionAsync(Guid sessionId, CancellationToken cancellationToken = default);
+
     // Feedback
     Task<OrientationFeedbackDto> SubmitFeedbackAsync(CreateOrientationFeedbackDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<IEnumerable<OrientationFeedbackDto>> GetFeedbackAsync(Guid enrollmentId, CancellationToken cancellationToken = default);
@@ -208,6 +222,15 @@ public interface IOrientationNotificationService
     /// </summary>
     Task<bool> MarkAsReadAsync(Guid notificationId, Guid recipientEmployeeId, CancellationToken cancellationToken = default);
     Task<int> MarkAllAsReadAsync(Guid recipientEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Every notice the tenant sent in the last <paramref name="days"/> days — who was told what, and
+    /// what its email did (round 4, lane K-b). Newest first, at most 1,000.
+    /// </summary>
+    /// <param name="kind">A catalogue event key, to show one kind of notice.</param>
+    /// <param name="emailStatus">An email status, or <c>None</c> for notices never meant to be emailed.</param>
+    Task<IEnumerable<OrientationNoticeLogEntryDto>> GetRecentAsync(
+        int days = 14, string? kind = null, string? emailStatus = null, CancellationToken cancellationToken = default);
 }
 
 #endregion

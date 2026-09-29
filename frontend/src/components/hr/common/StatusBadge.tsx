@@ -274,6 +274,9 @@ const STATUS_VARIANTS: Record<string, BadgeVariant> = {
   // settled outcome. `cancelled` and `requested` are already mapped above.
   convened: 'secondary',
   concluded: 'default',
+  // Round 5, lane K5: a board stopped after it was convened is DISSOLVED — the same status as a
+  // cancelled request (`Cancelled`), shown by what happened to it (`boardStatusLabel`).
+  dissolved: 'destructive',
 
   // PreEmploymentCheckStatus. "CompletedWithCaution" is not clean but is not a failure either.
   completedwithcaution: 'secondary',

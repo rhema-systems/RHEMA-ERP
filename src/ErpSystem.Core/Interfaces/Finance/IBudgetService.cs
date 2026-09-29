@@ -42,6 +42,9 @@ public interface IBudgetService
     Task<BudgetRevisionDto> SubmitRevisionAsync(Guid id, string rowVersion);
     Task<BudgetRevisionDto> ApplyRevisionAsync(Guid id, string rowVersion);
 
+    Task<FinanceBudgetReconciliationReportDto> GetBudgetReconciliationAsync(
+        CancellationToken cancellationToken = default);
+
     // Analytics
     Task<BudgetSummaryDto> GetScenarioSummaryAsync(Guid scenarioId);
 }

@@ -15,4 +15,10 @@ namespace ErpSystem.Core.Interfaces.HR.Services;
 public interface ICompanyProfileProvider
 {
     Task<CompanyProfile> GetAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The named tenant's profile — for a sender with no signed-in user to say whose it is (a background
+    /// job, an anonymous careers request), which <see cref="GetAsync"/> cannot serve: it throws there.
+    /// </summary>
+    Task<CompanyProfile> GetForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
 }

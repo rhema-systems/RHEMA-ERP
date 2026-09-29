@@ -1,0 +1,14 @@
+{
+  "//": "Round 4, lane F — the printed interview paper and the panelist's portal scorecard. Scoped because `npm run type-check` over the whole tree does not complete on this branch; see the hr-coverage README.",
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/**/*.ts",
+    "src/lib/hr/**/*.ts",
+    "src/services/hr/**/*.ts",
+    "src/components/hr/recruitment/**/*.tsx",
+    "src/components/hr/common/**/*.tsx",
+    "src/app/hr/recruitment/interviews/**/*.tsx",
+    "src/app/me/panel/**/*.tsx"
+  ]
+}

@@ -310,7 +310,8 @@ public sealed class PropertyListingEnquiryTests
             Mock.Of<IFileStorageService>(),
             Mock.Of<IInvoiceService>(),
             Mock.Of<ICentralDocumentPdfSigningService>(),
-            Mock.Of<IJobCardService>());
+            Mock.Of<IJobCardService>(),
+            Mock.Of<IEhcTicketService>());
 
         var created = await procedures.CreateCaseAsync(new CreateProcedureCaseRequest(
             "PropertyManagement",

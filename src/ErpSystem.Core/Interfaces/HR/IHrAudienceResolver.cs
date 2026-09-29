@@ -56,4 +56,24 @@ public interface IHrAudienceResolver
     /// </summary>
     Task<bool> IncludesAsync(
         IEnumerable<HrAudienceRule> rules, Guid employeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// <see cref="ResolveAsync"/> for a tenant named by the caller rather than read off the
+    /// signed-in user (round 4, lane I).
+    /// </summary>
+    /// <remarks>
+    /// A nightly sweep has no signed-in user, and neither does an employee import committing in the
+    /// background — every other method here throws in both. The caller takes responsibility for
+    /// the tenant being the right one: pass the tenant of the RECORD being acted on (the employee,
+    /// the programme), never a value from a request body.
+    /// </remarks>
+    Task<IReadOnlyCollection<Guid>> ResolveForTenantAsync(
+        Guid tenantId, IEnumerable<HrAudienceRule> rules, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// A unit followed by every unit above it, nearest first — the order a "most specific match
+    /// wins" rule needs (round 4, lane I4: onboarding template precedence).
+    /// </summary>
+    Task<IReadOnlyList<Guid>> UnitAncestryAsync(
+        Guid tenantId, Guid unitId, CancellationToken cancellationToken = default);
 }

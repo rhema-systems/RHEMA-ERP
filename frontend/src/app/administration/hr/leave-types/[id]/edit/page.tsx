@@ -24,8 +24,6 @@ export default function EditLeaveTypePage() {
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
 
-  // The detail projection carries allowanceComponentIds, which the update must echo back
-  // or the existing links are wiped.
   const { data: leaveType, isLoading, isError } = useQuery({
     queryKey: ['hr', 'leave-types', id, 'detail'],
     queryFn: () => leaveTypeService.getDetail(id),
@@ -70,6 +68,8 @@ export default function EditLeaveTypePage() {
       ) : (
         <LeaveTypeForm
           defaultValues={{
+            // The kind (round 5, A4). Seeded like everything else, so a save never resets it.
+            category: leaveType.category ?? 'Other',
             name: leaveType.name,
             code: leaveType.code,
             description: leaveType.description ?? '',
@@ -93,11 +93,8 @@ export default function EditLeaveTypePage() {
             countHolidaysAsLeave: leaveType.countHolidaysAsLeave,
             allowCashConversion: leaveType.allowCashConversion,
             requiresReliever: leaveType.requiresReliever,
-            mandatoryAnnualLeave: leaveType.mandatoryAnnualLeave,
-            // ⚠ Seeded from the DETAIL projection. If this were ever fetched from the plain
-            // GET it would arrive undefined, the form would show nothing ticked, and saving
-            // would clear every link — which is exactly the money-losing shape L-13 was about.
-            allowanceComponentIds: leaveType.allowanceComponentIds ?? [],
+            // Seeded like the rest, so a save never switches it off (round 5, lane H).
+            allowOffsetAgainstAnnual: leaveType.allowOffsetAgainstAnnual ?? false,
             requiresMedicalCertificate: leaveType.requiresMedicalCertificate,
             selfCertificationDays: String(leaveType.selfCertificationDays ?? 3),
             // Blank, not '0' — no board at all is a different statement from a zero threshold.
@@ -106,9 +103,6 @@ export default function EditLeaveTypePage() {
                 ? ''
                 : String(leaveType.medicalBoardThresholdDays),
             minServiceMonthsToAccess: str(leaveType.minServiceMonthsToAccess),
-            encashmentRateBasis: leaveType.encashmentRateBasis,
-            encashmentRatePerDay: str(leaveType.encashmentRatePerDay),
-            encashmentWorkingDaysPerMonth: leaveType.encashmentWorkingDaysPerMonth,
             isActive: leaveType.isActive,
           }}
           onSubmit={handleSubmit}

@@ -684,6 +684,28 @@ public class SeparationSettlementLine : TenantEntity
     [Required]
     public SettlementLineComputation Computation { get; set; } = SettlementLineComputation.ManuallyEntered;
 
+    /// <summary>
+    /// The quantity HR records on a pay line that Finance values — the days of notice paid in
+    /// lieu, the days of annual leave owed (leave settings audit 2, P1 and P3). Null where the line
+    /// is not a count of days, such as a loan balance.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The stakeholders' words: HR leaves the money to Finance and submits the details, "such as
+    /// the days being encashed". The days are data here, not only words in <see cref="Basis"/>.
+    /// </remarks>
+    public decimal? Days { get; set; }
+
+    /// <summary>
+    /// Who in Finance put the amount on a pay line — the holder of <c>HR.Pay.Value</c> — and when.
+    /// Null on every line valued before leave settings audit 2, and on lines HR carries (recoveries).
+    /// </summary>
+    public Guid? ValuedByEmployeeId { get; set; }
+
+    [ForeignKey(nameof(ValuedByEmployeeId))]
+    public virtual Employee? ValuedByEmployee { get; set; }
+
+    public DateTime? ValuedOn { get; set; }
+
     /// <summary>How the amount was arrived at, or why it could not be.</summary>
     [MaxLength(500)]
     public string? Basis { get; set; }

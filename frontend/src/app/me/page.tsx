@@ -71,7 +71,9 @@ const TILE_SECTIONS: { title: string; tiles: Tile[] }[] = [
       { label: 'My Journal', hint: 'Your private work notes', href: '/me/performance/journal', icon: BookOpen },
       { label: 'My Training', hint: 'Courses, requests and certificates', href: '/me/training', icon: GraduationCap },
       { label: 'My Learning Paths', hint: 'Guided development journeys', href: '/me/learning', icon: Compass },
-      { label: 'My Orientations', hint: 'Onboarding checklists', href: '/me/orientation', icon: ClipboardList },
+      { label: 'My Orientations', hint: 'Programmes you are enrolled on', href: '/me/orientation', icon: ClipboardList },
+      // Round 4, lane K-b2 — the hint above said "Onboarding checklists" while the page held none.
+      { label: 'My Onboarding', hint: 'Your onboarding, and tasks given to you', href: '/me/onboarding', icon: Rocket },
       { label: 'Peer Reviews', hint: 'Feedback you owe colleagues', href: '/me/performance/peer-reviews', icon: Users },
     ],
   },
@@ -188,9 +190,13 @@ export default function MeLandingPage() {
       home.assetsAwaitingAcknowledgement
     : 0;
 
-  // The most meaningful balance first: the type with the most available days.
+  // The most meaningful balance first: ANNUAL leave (round 5, A4), and only without one the type
+  // with the most days available. "Most available" alone could put sick leave on the tile. Since
+  // lane J the server works annual leave out live when no request has opened its record, so the
+  // fallback is for a tenant with no annual leave at all.
   const topBalance = home?.leaveBalances?.length
-    ? [...home.leaveBalances].sort((a, b) => b.availableDays - a.availableDays)[0]
+    ? home.leaveBalances.find((b) => b.leaveTypeCategory === 'Annual') ??
+      [...home.leaveBalances].sort((a, b) => b.availableDays - a.availableDays)[0]
     : null;
   const leaveTypesCount = home?.leaveBalances?.length ?? 0;
   const openReqs = home?.openAssetRequisitionCount ?? 0;
@@ -272,13 +278,17 @@ export default function MeLandingPage() {
           </p>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {/*
+              Round 5, lane J: what can be booked today — the figure a request is checked against —
+              with the year's figure beside it when the two differ (leave that builds up).
+            */}
             <StatCard
               icon={TreePalm}
-              title="Leave available"
+              title="Leave you can take now"
               value={
                 topBalance ? (
                   <>
-                    {topBalance.availableDays}
+                    {topBalance.accruedAvailableDays}
                     <span className="ml-1 text-sm font-normal text-muted-foreground">days</span>
                   </>
                 ) : (
@@ -287,7 +297,15 @@ export default function MeLandingPage() {
               }
               detail={
                 topBalance
-                  ? `${topBalance.leaveTypeName}${leaveTypesCount > 1 ? ` · +${leaveTypesCount - 1} more types` : ''}`
+                  ? [
+                      topBalance.leaveTypeName,
+                      topBalance.accruedAvailableDays !== topBalance.availableDays
+                        ? `${topBalance.availableDays} for the year`
+                        : null,
+                      leaveTypesCount > 1 ? `+${leaveTypesCount - 1} more types` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
                   : 'No balance recorded yet'
               }
               href="/me/leave"

@@ -11,6 +11,7 @@ import type {
   OnboardingPlanTemplateSummary,
   OnboardingPlanTemplateCreateRequest,
   OnboardingPlanTemplateUpdateRequest,
+  CloneOnboardingPlanTemplateRequest,
   OnboardingTaskTemplate,
   OnboardingTaskTemplateCreateRequest,
   OnboardingTaskTemplateUpdateRequest,
@@ -27,6 +28,11 @@ import type {
   OnboardingAssetCreateRequest,
   OnboardingAssetUpdateRequest,
 } from '@/types/hr/onboarding';
+import type {
+  HrAudienceTargetType,
+  OnboardingPlanTemplateAudience,
+  OnboardingTemplateApplicability,
+} from '@/types/hr/orientation';
 
 /**
  * Onboarding plan templates. Backend route: api/onboarding-plan-templates. HR-only.
@@ -64,6 +70,14 @@ class OnboardingPlanTemplateService {
     return apiService.put<OnboardingPlanTemplate>(`${this.baseUrl}/${id}`, data);
   }
 
+  /**
+   * Round 4, lane J1: copy a template and its tasks under a new name. 422 when the name is taken.
+   * The copy is never the default and has no audience of its own yet.
+   */
+  clone(id: string, data: CloneOnboardingPlanTemplateRequest): Promise<OnboardingPlanTemplateDetail> {
+    return apiService.post<OnboardingPlanTemplateDetail>(`${this.baseUrl}/${id}/clone`, data);
+  }
+
   /** Refused with 422 for the default template — assign a new default first. */
   remove(id: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/${id}`);
@@ -97,6 +111,37 @@ class OnboardingPlanTemplateService {
 
   removeTaskTemplate(taskTemplateId: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/task-templates/${taskTemplateId}`);
+  }
+
+  // ── Who a template is for (round 4, lane I4) ──────────────────────────────
+
+  getAudiences(templateId: string): Promise<OnboardingPlanTemplateAudience[]> {
+    return apiService.get<OnboardingPlanTemplateAudience[]>(`${this.baseUrl}/${templateId}/audiences`);
+  }
+
+  addAudience(
+    templateId: string,
+    data: { targetType: HrAudienceTargetType; targetEntityId?: string | null; isInclusive: boolean },
+  ): Promise<OnboardingPlanTemplateAudience> {
+    return apiService.post<OnboardingPlanTemplateAudience>(`${this.baseUrl}/${templateId}/audiences`, data);
+  }
+
+  removeAudience(templateId: string, audienceId: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/${templateId}/audiences/${audienceId}`);
+  }
+
+  /** Which template a placement (or an employee's current placement) would get, and why. */
+  getApplicable(query: {
+    employeeId?: string;
+    positionId?: string;
+    organizationUnitId?: string;
+    organizationLevelId?: string;
+    locationId?: string;
+  }): Promise<OnboardingTemplateApplicability> {
+    const qs = new URLSearchParams(
+      Object.entries(query).filter(([, v]) => !!v) as [string, string][],
+    ).toString();
+    return apiService.get<OnboardingTemplateApplicability>(`${this.baseUrl}/applicable${qs ? `?${qs}` : ''}`);
   }
 }
 

@@ -278,7 +278,42 @@ public sealed class ApplicationPipelineService : IApplicationPipelineService
                 vacancy?.JobTitle ?? "the position",
                 targetStage.Name);
         }
+
+        // Email #6 — Under Review, ONCE: on the first move a person makes into a review stage (round 4,
+        // lane N-b). The older door sent it after every move, whatever the stage — "your application is
+        // now being actively reviewed" on the way into an interview or an offer — and the board's door
+        // never sent it. Both doors come through here now.
+        // ⚠ Not "from Submitted": a submission is PLACED in the pipeline's first stage, usually a review
+        // stage, so an application is "under review" before anyone has looked at it. What marks a real
+        // review is a person moving it — the placement row records no mover.
+        if (IsReviewStage(targetStage.StageType)
+            && !await HasBeenMovedIntoReviewBeforeAsync(applicationId, newHistory.Id, cancellationToken))
+        {
+            var candUr = await _candidateRepository.GetByIdAsync(application.JobCandidateId);
+            await SendUnderReviewEmailAsync(
+                candUr?.Email ?? string.Empty,
+                candUr?.FullName ?? "Candidate",
+                application.ApplicationNumber,
+                vacancy?.JobTitle ?? "the position");
+        }
     }
+
+    private static bool IsReviewStage(RecruitmentPipelineStageType type) =>
+        type is RecruitmentPipelineStageType.ApplicationReview
+             or RecruitmentPipelineStageType.Screening
+             or RecruitmentPipelineStageType.HiringManagerReview;
+
+    /// <summary>
+    /// Whether a person — not the placement on submission, which records no mover — has moved this
+    /// application into a review stage before the move just made.
+    /// </summary>
+    private Task<bool> HasBeenMovedIntoReviewBeforeAsync(Guid applicationId, Guid exceptHistoryId, CancellationToken cancellationToken) =>
+        _stageHistoryRepository.GetQueryable()
+            .Where(h => h.JobApplicationId == applicationId && h.Id != exceptHistoryId && h.MovedById != null && !h.IsDeleted)
+            .AnyAsync(h => h.PipelineStage.StageType == RecruitmentPipelineStageType.ApplicationReview
+                        || h.PipelineStage.StageType == RecruitmentPipelineStageType.Screening
+                        || h.PipelineStage.StageType == RecruitmentPipelineStageType.HiringManagerReview,
+                      cancellationToken);
 
     // =========================================================================
     // GET PIPELINE BY VACANCY (KANBAN BOARD)
@@ -708,6 +743,32 @@ public sealed class ApplicationPipelineService : IApplicationPipelineService
         {
             _logger.LogWarning(ex,
                 "Failed to send assessment pending email to {Email} — the stage move itself succeeded.",
+                toEmail);
+        }
+    }
+
+    private async Task SendUnderReviewEmailAsync(
+        string toEmail, string candidateName, string applicationNumber, string jobTitle)
+    {
+        if (string.IsNullOrWhiteSpace(toEmail)) return;
+
+        var tokens = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["CandidateName"]     = candidateName,
+            ["JobTitle"]          = jobTitle,
+            ["ApplicationNumber"] = applicationNumber,
+        };
+
+        // Best-effort, as Assessment Pending: the move is already committed.
+        try
+        {
+            await _templatedEmail.SendAsync(
+                RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.ApplicationUnderReview, toEmail, tokens);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to send the under-review email to {Email} — the stage move itself succeeded.",
                 toEmail);
         }
     }

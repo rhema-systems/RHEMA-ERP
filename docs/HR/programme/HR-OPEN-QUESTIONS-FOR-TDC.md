@@ -239,6 +239,11 @@ is worth resolving before it causes a grant to land on the empty one.
 
 ## How is a daily rate worked out for exit pay? (raised 2026-08-20)
 
+> ✅ **Answered by design, 2026-09-27 (leave settings audit 2).** HR no longer works out a daily
+> rate. It records the days — notice paid in lieu, annual leave owed — and **Finance values them** in
+> its own step, entering each amount and its source; a statement cannot be finalised until it has.
+> The question becomes *who in Finance does it* — see the last section. Kept below as raised.
+
 The final settlement (FR-HR-184) turns a monthly salary into a daily rate to value **notice pay in
 lieu** and **leave encashment**. The system currently uses **monthly salary × 12 ÷ 365** — a
 calendar-day basis — and writes that basis in words onto every computed line so the figure can be
@@ -551,7 +556,9 @@ re-opens the approval.** Anything else would let an approval mean something it d
 leave and the days; what that is worth is payroll's. Raised separately in
 `docs/HR/integration/handoffs/HANDOFF-PAYROLL-LEAVE.md`. **Not built, and should not be built inside HR.**
 
-### L-D7 · ⚠ One daily-rate basis, or two? *(NOT built — needs an answer)*
+### L-D7 · ⚠ One daily-rate basis, or two? *(✅ settled 2026-09-27 — neither is HR's)*
+
+> Leave settings audit 2 removed both HR rates: Finance values leave cashed in and a leaver's pay.
 
 Two formulas are live in one product. **Leave encashment** uses `(basic + linked allowances) ÷ 22`;
 the **separation settlement** uses `monthly × 12 ÷ 365`. On GHS 6,000/month those differ by about
@@ -627,3 +634,144 @@ document. That is the difference between a control and a filing cabinet.
 Recorded in `docs/HR/areas/leave/HR-LEAVE-CLOSURE-PLAN.md` § 3.3b as **R-15**.
 
 ---
+
+## Staff leave after the September demo — five questions *(raised 2026-09-25)*
+
+These come from the stakeholders' notes on the leave demo (*HR Demo Changes 180926*) and from
+checking the module against the **Labour Act 2003 (Act 651)** and the Public Services Commission's
+*Human Resource Management Policy Framework and Manual* (2015). What is being changed, in plain
+terms, is in `docs/HR/areas/leave/HR-LEAVE-ROUND-5-WHAT-CHANGES.md`.
+
+**None of these blocks the work.** Each has a default the system runs on until TDC answers.
+
+### R5-Q1 · May we have TDC's conditions of service or collective agreement?
+
+Most of the numbers in the leave module are TDC's to set, and they live in that document, not in the
+Act. As TDC Ghana Limited, TDC is bound by the Act's minimums — 15 working days of annual leave a
+year, 12 weeks' maternity leave — but not by the public-service manual, so we cannot simply adopt its
+figures. We need:
+
+- annual leave days by grade (the public service uses 21 / 28 / 36 working days; the demo uses
+  15 / 21 / 30);
+- **when a new employee may first take annual leave, and whether their first months earn any** — the
+  stakeholders said 12 months; the public service gives pro-rata leave after 6 months, earned from
+  the first day;
+- carry-over: how many days, for how long, and who approves a deferral;
+- casual and compassionate leave days (the public service gives up to 10 working days of each);
+- sick pay (the public service: up to a year on full pay, then a year on half pay) and when a medical
+  board must sit;
+- maternity leave, if TDC gives more than the statutory 12 weeks.
+
+**Meanwhile:** the demo figures; a new employee waits 12 months before taking annual leave and earns
+none before then.
+
+### R5-Q2 · Leave cashed in while employed, and the daily rate — L-D8 and L-D7
+
+Still open from 17 September (above). The Act says *"Any agreement to relinquish the entitlement to
+annual leave or to forgo such leave is void"* (s.31); the public service pays for unused leave only at
+the end of service; and FR-HR-046 says leave is encashed *"only on exit"*.
+
+**Meanwhile (built 26 September, round 5 lane L):** cashing in while employed is switched off, and
+the employee portal no longer offers it. Unused annual leave is paid only in a leaver's settlement:
+this leave year's days built up to the last day, plus carried days not yet lapsed, less what was
+taken or cashed in — the line says how each number was reached — capped at 56 days (now a setting),
+nothing on summary dismissal. **Please confirm this.** *(The daily rate this asked about is no
+longer HR's: since 2026-09-27 HR records the days and Finance values them — see the last section.)*
+
+### R5-Q3 · Is a leave allowance paid?
+
+Some Ghanaian public bodies pay a leave allowance when staff proceed on annual leave (the Local
+Government Service: one month's basic salary) or advance salary (GES: two months, recovered over
+twelve). If TDC pays either, it is a payroll element triggered by approved annual leave, and nothing
+in the system triggers it today.
+
+**Meanwhile:** none.
+
+### R5-Q4 · Who keeps the holiday calendar up to date?
+
+This extends item 3 above. The Public Holidays and Commemorative Days (Amendment) Act 2025 restored
+1 July (Republic Day), moved Founders' Day back to 21 September (4 August is no longer a holiday),
+added Shaqq Day (the day after Eid al-Fitr), and lets the President move a midweek holiday to a
+Friday or a Monday. Leave days are counted around public holidays, so a stale calendar charges people
+the wrong number of days.
+
+**Meanwhile:** HR maintains the calendar; the demo list is being updated to the 2025 changes.
+
+### R5-Q5 · The medical board — please confirm these defaults
+
+*(Reframed 2026-09-26. It first asked how TDC's board works, and the second step waited for the
+answer. It no longer waits: the system is built for more organisations than TDC, so the board follows
+the standard pattern, with the law's figures as defaults that TDC can change.)*
+
+The stakeholders asked for boards beyond excuse duty, boards that review several employees, and
+boards that decide the extent of a disability and recommend compensation. In the public service a
+board is three medical officers — nominated by the employer, SSNIT and the union — and declares an
+officer fit or unfit for duty. The degree of incapacity and the compensation for an **injury at work**
+come from the Workmen's Compensation Law 1987 (PNDCL 187).
+
+**What is being built:** a board is a panel that hears **cases** — one per employee, each with its own
+finding, decided at a recorded sitting. For an injury at work the case records the **incapacity**
+(temporary or permanent, and a percentage, from the law's schedule of injuries or the panel's
+judgement) and an **indicative compensation**, which Finance pays; the amount the Labour Department
+notifies is recorded when it arrives. Please confirm or change:
+
+| | Default | |
+|---|---|---|
+| **1** | **One** deciding member — the chair or a member; a secretary or observer does not count — must be present at the sitting that decides a case. *(Built 2026-09-26 as the HR policy setting "Quorum — deciding members present".)* | or TDC's number (a public-service board has three medical officers) |
+| **2** | Compensation for permanent total incapacity is **96 months' earnings** (PNDCL 187 s.5), and a partial one the schedule's percentage of it (s.6) | or TDC pays more |
+| **3** | The **law's schedule** of injuries and percentages | or TDC's own |
+| **4** | TDC holds **its own** board; the two statutory boards are recorded when one sits — for a disputed disfigurement, appointed by the Chief Labour Officer (First Schedule), and for an internal-organ injury, appointed by the Minister (Third Schedule) | or TDC relies on the statutory boards only |
+| **5** | ⚠ **The earnings ceiling (s.36).** The Act computes compensation on at most **25,000 cedis a year** of earnings, revisable by legislative instrument. That figure predates the 2007 redenomination, and we found no revision. **Until TDC or counsel names the ceiling in force, the system shows the figure without it and says so** | the ceiling in force, and its source |
+
+*(Checked 2026-09-26 against the Act's primary text, Parliament's revised edition — recorded in
+`docs/HR/catalogues/HR-WORKMENS-COMPENSATION-SCHEDULES.md`. Compensation under the Act is paid to the
+Court (s.11(3)) and nothing may be set off against it (s.27), so the system never shows it as money
+HR pays out or nets it against a leaver's settlement.)*
+
+**Meanwhile:** boards have a purpose, physicians as members, documents, and a clear cancel/dissolve;
+and they hear **cases** — several employees per board, each decided at a sitting whose attendance is
+recorded, on default 1 above; and incapacity and an indicative compensation, on defaults 2–5 — the
+Act's schedules loaded as the starting schedule, 96 months, and **no earnings ceiling until TDC names
+one** (all built 2026-09-26).
+
+---
+
+## Staff confirmed years ago but shown as on probation *(raised 2026-09-25)*
+
+The staff list TDC supplied has no confirmation dates. So the system put every imported permanent
+employee on probation from their hire date, including **1,454 people hired more than five years
+ago**. It now shows about 1,800 overdue probation reviews that nobody needs to do.
+
+**What we are doing (decided 2026-09-25):** each such person's confirmation date will be their
+**hire date plus their probation term**, marked in the system as *derived* rather than supplied.
+They then show as confirmed staff.
+
+**We need from TDC:**
+
+- **the exceptions:** anyone who is genuinely still on probation, or whose probation was extended.
+  Their derived date will be corrected by hand;
+- **hire dates for 271 staff who have none.** Without a hire date no confirmation date can be
+  derived, so they stay on probation in the system. We will send the list;
+- for any future import, **confirmation dates as a column**, where TDC holds them.
+
+**Meanwhile:** until the correction runs, the system shows most TDC staff as on probation.
+
+---
+
+---
+
+## Who in Finance values a leaver's final pay? *(raised 2026-09-27)*
+
+TDC's stakeholders asked HR to leave the money to Finance and hand over the facts, such as the days
+of leave encashed. The system now works that way: **HR records the days** — notice paid in lieu,
+annual leave owed on exit, leave cashed in — **and Finance puts the money on them** in its own screen,
+*Pay to value*, entering each amount and where it came from. A leaver's statement cannot be finalised
+until Finance has valued every pay line, and nothing HR priced reaches Finance's books.
+
+**We need from TDC:** **which roles in Finance should do this** — often the payroll unit within
+Finance. The system gives it to **Finance Officer, Senior Accountant and Chief Accountant** by default.
+
+This also answers the 2026-08-20 question *"How is a daily rate worked out for exit pay?"*: Finance
+works it out.
+
+**Meanwhile:** the three default roles can value pay; HR cannot.

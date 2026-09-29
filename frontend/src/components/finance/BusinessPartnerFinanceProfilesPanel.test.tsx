@@ -6,7 +6,9 @@ import { businessPartnerFinanceProfileService, type BusinessPartnerApProfile, ty
 import { businessPartnerService, type BusinessPartnerPostingOptions } from '@/services/businessPartnerService';
 
 const { errorToast } = vi.hoisted(() => ({ errorToast: vi.fn() }));
+const auth = vi.hoisted(() => ({ userId: 'checker-user', canApprove: true }));
 vi.mock('sonner', () => ({ toast: { error: errorToast, success: vi.fn() } }));
+vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ user: { id: auth.userId }, hasPermission: () => auth.canApprove }) }));
 vi.mock('@/services/businessPartnerFinanceProfileService', () => ({ businessPartnerFinanceProfileService: { get: vi.fn(), saveAp: vi.fn(), saveAr: vi.fn(), decide: vi.fn() } }));
 vi.mock('@/services/businessPartnerService', () => ({ businessPartnerService: { getPostingOptions: vi.fn() } }));
 // Native selections keep these tests focused on profile selection/save behaviour, not Radix portals.
@@ -55,6 +57,8 @@ async function ready() { await screen.findByDisplayValue('AP-42'); }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  auth.userId = 'checker-user';
+  auth.canApprove = true;
   vi.mocked(businessPartnerFinanceProfileService.get).mockResolvedValue(structuredClone(data));
   vi.mocked(businessPartnerService.getPostingOptions).mockResolvedValue(options);
   vi.mocked(businessPartnerFinanceProfileService.saveAp).mockResolvedValue(draft);
@@ -157,6 +161,34 @@ describe('canonical Finance profiles regression', () => {
     render(<BusinessPartnerFinanceProfilesPanel {...props} />); await ready();
     fireEvent.click(within(apCard()).getByRole('button', { name: 'Submit for approval' }));
     await waitFor(() => expect(businessPartnerFinanceProfileService.decide).toHaveBeenCalledWith('partner-1', 'ap', 'ap-draft', 'submit', ''));
+  });
+
+  it('does not offer approval actions to the user who submitted the profile', async () => {
+    auth.userId = 'maker-user';
+    vi.mocked(businessPartnerFinanceProfileService.get).mockResolvedValue({
+      ...data,
+      roles: [{ ...data.roles[0], apProfiles: [{ ...draft, status: 'Submitted', submittedById: 'MAKER-USER' }] }],
+    });
+    render(<BusinessPartnerFinanceProfilesPanel {...props} />);
+    await screen.findByText('Version 2 — Submitted');
+    expect(screen.getByText(/maker-checker control prevents you/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
+  });
+
+  it('offers approval actions only to a different user with Finance profile approval permission', async () => {
+    vi.mocked(businessPartnerFinanceProfileService.get).mockResolvedValue({
+      ...data,
+      roles: [{ ...data.roles[0], apProfiles: [{ ...draft, status: 'Submitted', submittedById: 'maker-user' }] }],
+    });
+    const { rerender } = render(<BusinessPartnerFinanceProfilesPanel {...props} />);
+    await screen.findByText('Version 2 — Submitted');
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+
+    auth.canApprove = false;
+    rerender(<BusinessPartnerFinanceProfilesPanel {...props} />);
+    expect(screen.getByText(/Approve Business Partner Finance Profiles permission/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
   });
 
   it('requires edited AP and AR drafts to be saved before submitting their persisted versions', async () => {

@@ -228,6 +228,22 @@ export interface TerminateProbationPeriod {
   notes?: string | null;
 }
 
+/**
+ * `ProbationConfirmationRepairResult` — the imported-confirmation repair (HR finish plan lane 11).
+ * Every employee examined lands in exactly one of the other four counts.
+ */
+export interface ProbationConfirmationRepairResult {
+  /** ⚠ True when NOTHING was written. */
+  isDryRun: boolean;
+  examined: number;
+  confirmed: number;
+  noHireDate: number;
+  stillOnProbation: number;
+  heldBack: number;
+  /** The summary sentence first, then one line per employee held back. */
+  notes: string[];
+}
+
 /** `ProbationConfirmationLetterDto` — rendered on demand, never stored. */
 export interface ProbationConfirmationLetter {
   probationId: string;

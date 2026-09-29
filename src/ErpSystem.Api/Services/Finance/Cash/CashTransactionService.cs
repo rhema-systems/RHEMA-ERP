@@ -176,10 +176,13 @@ public class CashTransactionService : ICashTransactionService
             query = query.Where(t => permittedBankAccountIds.Contains(t.BankAccountId));
 
         if (fromDate.HasValue)
-            query = query.Where(t => t.TransactionDate >= fromDate.Value);
+            query = query.Where(t => t.TransactionDate >= fromDate.Value.Date);
 
         if (toDate.HasValue)
-            query = query.Where(t => t.TransactionDate <= toDate.Value);
+        {
+            var endExclusive = toDate.Value.Date.AddDays(1);
+            query = query.Where(t => t.TransactionDate < endExclusive);
+        }
 
         return await query
             .Select(t => new CashTransactionDto
@@ -228,10 +231,13 @@ public class CashTransactionService : ICashTransactionService
             .Where(t => t.TenantId == tenantId && t.BankAccountId == bankAccountId && !t.IsDeleted);
 
         if (fromDate.HasValue)
-            query = query.Where(t => t.TransactionDate >= fromDate.Value);
+            query = query.Where(t => t.TransactionDate >= fromDate.Value.Date);
 
         if (toDate.HasValue)
-            query = query.Where(t => t.TransactionDate <= toDate.Value);
+        {
+            var endExclusive = toDate.Value.Date.AddDays(1);
+            query = query.Where(t => t.TransactionDate < endExclusive);
+        }
 
         return await query
             .Select(t => new CashTransactionDto
@@ -272,7 +278,19 @@ public class CashTransactionService : ICashTransactionService
             bankAccountId,
             FinanceAccessLevel.Read);
         return await _context.Set<CashTransaction>()
-            .Where(t => t.TenantId == tenantId && t.BankAccountId == bankAccountId && !t.IsReconciled && !t.IsDeleted)
+            .Where(t => t.TenantId == tenantId
+                && t.BankAccountId == bankAccountId
+                && t.IsPosted
+                && t.ApprovalStatus == CashTransactionApprovalStatus.Posted
+                && t.JournalEntryId.HasValue
+                && !t.IsReversed
+                && !t.IsReconciled
+                && !t.IsDeleted
+                && _context.JournalEntries.Any(j =>
+                    j.TenantId == tenantId
+                    && j.Id == t.JournalEntryId.Value
+                    && j.PostingStatus == "Posted"
+                    && !j.IsDeleted))
             .Select(t => new CashTransactionDto
             {
                 Id = t.Id,

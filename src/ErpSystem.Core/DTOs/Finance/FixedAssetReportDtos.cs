@@ -201,6 +201,7 @@ public class FixedAssetValuationMovementReportDto
     public decimal TotalRevaluationIncrease { get; set; }
     public decimal TotalRevaluationDecrease { get; set; }
     public decimal TotalImpairmentLoss { get; set; }
+    public decimal TotalImpairmentReversal { get; set; }
     public decimal TotalPostedGlMovement { get; set; }
 }
 
@@ -219,6 +220,7 @@ public class FixedAssetValuationMovementReportItemDto
     public decimal RevaluationSurplus { get; set; }
     public decimal RevaluationDeficit { get; set; }
     public decimal ImpairmentLoss { get; set; }
+    public decimal ImpairmentReversal { get; set; }
     public Guid? JournalEntryId { get; set; }
     public Guid? PostingEventId { get; set; }
     public decimal PostedGlMovement { get; set; }
@@ -240,10 +242,13 @@ public class FixedAssetRollForwardRowDto
     public string BookClassification { get; set; } = "IFRS";
     public int AssetCount { get; set; }
     public decimal OpeningCost { get; set; }
+    public decimal OpeningAccumulatedDepreciation { get; set; }
+    public decimal OpeningAccumulatedImpairment { get; set; }
     public decimal Additions { get; set; }
     public decimal RevaluationIncrease { get; set; }
     public decimal RevaluationDecrease { get; set; }
     public decimal ImpairmentAdditions { get; set; }
+    public decimal ImpairmentReversals { get; set; }
     public decimal DepreciationCharge { get; set; }
     public decimal AccumulatedDepreciationMovement { get; set; }
     public decimal Disposals { get; set; }

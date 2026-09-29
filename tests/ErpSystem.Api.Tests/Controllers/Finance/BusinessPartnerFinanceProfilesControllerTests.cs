@@ -77,6 +77,31 @@ public sealed class BusinessPartnerFinanceProfilesControllerTests
         Problem(edit).Title.Should().Be("PROFILE_NOT_DRAFT");
     }
 
+    [Fact]
+    public async Task Pending_approval_queue_is_shared_with_checkers_but_excludes_the_maker()
+    {
+        await using var fixture = new Fixture();
+        await fixture.SeedAsync();
+        var makerId = fixture.UserId;
+        var created = await fixture.Controller.CreateApDraft(fixture.Partner.Id, fixture.ApRequest(), default);
+        var profileId = ((BusinessPartnerApProfileDto)((OkObjectResult)created.Result!).Value!).Id;
+        await fixture.Controller.SubmitAp(fixture.Partner.Id, profileId, default);
+
+        var makerResult = await fixture.Controller.GetPendingApprovals(default);
+        ((IReadOnlyList<BusinessPartnerFinanceProfileApprovalQueueItemDto>)
+            ((OkObjectResult)makerResult.Result!).Value!).Should().BeEmpty();
+
+        fixture.UserId = Guid.NewGuid();
+        var checkerResult = await fixture.Controller.GetPendingApprovals(default);
+        var pending = (IReadOnlyList<BusinessPartnerFinanceProfileApprovalQueueItemDto>)
+            ((OkObjectResult)checkerResult.Result!).Value!;
+        pending.Should().ContainSingle();
+        pending.Single().ProfileId.Should().Be(profileId);
+        pending.Single().BusinessPartnerId.Should().Be(fixture.Partner.Id);
+        pending.Single().SubmittedById.Should().Be(makerId);
+        pending.Single().Ledger.Should().Be("ap");
+    }
+
     [Theory]
     [InlineData("expense-tenant", "AP_EXPENSE_ACCOUNT_INVALID")]
     [InlineData("expense-inactive", "AP_EXPENSE_ACCOUNT_INVALID")]
@@ -109,6 +134,29 @@ public sealed class BusinessPartnerFinanceProfilesControllerTests
         await fixture.SeedAsync();
         var result = await fixture.Controller.CreateApDraft(fixture.Partner.Id, fixture.ApRequest(), default);
         Problem(result).Title.Should().Be(code);
+        fixture.Context.BusinessPartnerApProfileVersions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Withholding_only_group_cannot_be_saved_as_the_invoice_tax_default()
+    {
+        await using var fixture = new Fixture();
+        await fixture.SeedAsync();
+        var withholding = new Tax
+        {
+            TenantId = fixture.TenantId, Code = "WHT-ONLY", Name = "WHT only", Rate = 7.5m,
+            EffectiveFrom = new(2026, 1, 1), Applicability = TaxApplicability.Purchases,
+            Category = TaxCategory.Withholding, IsActive = true
+        };
+        fixture.Context.AddRange(withholding, new TaxGroupComponent
+        {
+            TenantId = fixture.TenantId, TaxGroupId = fixture.TaxGroup.Id,
+            TaxId = withholding.Id, Tax = withholding, TaxGroup = fixture.TaxGroup
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Controller.CreateApDraft(fixture.Partner.Id, fixture.ApRequest(), default);
+        Problem(result).Title.Should().Be("AP_TAX_GROUP_WITHHOLDING_ONLY");
         fixture.Context.BusinessPartnerApProfileVersions.Should().BeEmpty();
     }
 

@@ -88,6 +88,19 @@ export interface ResourceCollectionTabProps<TItem, TForm extends FieldValues> {
    * point: a button that always answers 403 is worse than no button.
    */
   allowRemove?: boolean;
+  /**
+   * Per-row Edit (round 5 lane E4). `allowUpdate` is all-or-nothing, which offered Edit on every
+   * leave plan whatever its status — the form opened fully editable on a submitted plan and the
+   * save was then refused. When supplied, Edit shows only on rows it returns true for.
+   */
+  canEditItem?: (item: TItem) => boolean;
+  /**
+   * Open a row's own detail view (round 5 lane E4). When supplied, clicking a row calls it and the
+   * row menu gains an item for it at the top; the menu's own clicks do not reach the row.
+   */
+  onOpenItem?: (item: TItem) => void;
+  /** Label for {@link onOpenItem}'s menu item. Defaults to "Open". */
+  openItemLabel?: string;
 
   columns: CollectionColumn<TItem>[];
   actions?: CollectionAction<TItem>[];
@@ -135,6 +148,12 @@ export interface ResourceCollectionTabProps<TItem, TForm extends FieldValues> {
   /** Sentence under the dialog title, e.g. "Add a sub-type to this leave type." */
   dialogHint?: string;
   /**
+   * The saved toast's description, from what the save returned — for a save that does more than
+   * store the row (leave settings audit 2, L-89: an allocation re-works the current leave year's
+   * balances and says how many moved). Returning nothing keeps the default "… added/updated."
+   */
+  savedDescription?: (saved: unknown, editing: boolean) => string | null | undefined;
+  /**
    * Whose record this collection belongs to, e.g. the employee's full name (round 3, lane P1 —
    * the demo asked for the employee's name in every sub-detail dialog). Shown in the dialog
    * description ("On Ama Mensah's profile") and in the remove confirmation. Optional: ~30 screens
@@ -170,6 +189,9 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   allowRemove = true,
   allowUpdate = true,
   allowCreate = true,
+  canEditItem,
+  onOpenItem,
+  openItemLabel = 'Open',
   columns,
   actions = [],
   schema,
@@ -181,6 +203,7 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   dialogClassName = 'sm:max-w-[560px]',
   emptyDescription,
   dialogHint,
+  savedDescription,
   subjectLabel,
   itemLabel,
   prefill,
@@ -228,9 +251,14 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   const saveMutation = useMutation({
     mutationFn: async (values: TForm) =>
       editing ? update(parentId, getId(editing), values) : create(parentId, values),
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
       await invalidate();
-      toast({ title: 'Saved', description: `${cap(singular)} ${editing ? 'updated' : 'added'}.` });
+      toast({
+        title: 'Saved',
+        description:
+          savedDescription?.(saved, editing !== null) ||
+          `${cap(singular)} ${editing ? 'updated' : 'added'}.`,
+      });
       setDialogOpen(false);
       setEditing(null);
     },
@@ -308,7 +336,7 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   const canAdd = !readOnly && allowCreate;
   const canEdit = !readOnly && allowUpdate;
   const canRemove = !readOnly && allowRemove && !!remove;
-  const hasRowMenu = canEdit || canRemove || actions.length > 0;
+  const hasRowMenu = canEdit || canRemove || actions.length > 0 || !!onOpenItem;
 
   return (
     <div className="space-y-4">
@@ -363,14 +391,20 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
                 </TableHeader>
                 <TableBody>
                   {rows.map((item) => (
-                    <TableRow key={getId(item)}>
+                    <TableRow
+                      key={getId(item)}
+                      className={onOpenItem ? 'cursor-pointer' : undefined}
+                      onClick={onOpenItem ? () => onOpenItem(item) : undefined}
+                    >
                       {columns.map((c) => (
                         <TableCell key={c.header} className={c.className}>
                           {c.cell(item)}
                         </TableCell>
                       ))}
                       {hasRowMenu && (
-                        <TableCell>
+                        // ⚠ The menu renders in a portal, but React events still bubble through
+                        // the component tree — without this, every menu click also opened the row.
+                        <TableCell onClick={(e) => e.stopPropagation()}>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -379,7 +413,12 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              {canEdit && (
+                              {onOpenItem && (
+                                <DropdownMenuItem onClick={() => onOpenItem(item)}>
+                                  {openItemLabel}
+                                </DropdownMenuItem>
+                              )}
+                              {canEdit && (!canEditItem || canEditItem(item)) && (
                                 <DropdownMenuItem onClick={() => openEdit(item)}>
                                   <Pencil className="mr-2 h-4 w-4" />
                                   Edit

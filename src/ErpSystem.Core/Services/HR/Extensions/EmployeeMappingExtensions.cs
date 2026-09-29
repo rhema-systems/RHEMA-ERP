@@ -133,6 +133,7 @@ public static class EmployeeMappingExtensions
                 ? hired.AddDays(e.ProbationPeriodDays)
                 : null,
             ConfirmationDate = e.ConfirmationDate,
+            ConfirmationSource = e.ConfirmationSource,
             RetirementDate = e.RetirementDate,
             TaxNumber = e.TaxNumber,
             SocialSecurityNumber = e.SocialSecurityNumber,
@@ -151,6 +152,12 @@ public static class EmployeeMappingExtensions
             PayBasisNote = e.PayBasisNote,
             BadgeNumber = e.BadgeNumber,
             Notes = e.Notes,
+            // Round 4, lane O.
+            MaintenanceAssignment = e.MaintenanceAssignment,
+            PositionIsTechnicianRole = e.Position != null && e.Position.IsTechnicianRole,
+            Specialization = e.Specialization,
+            CertificationLevel = e.CertificationLevel,
+            ExperienceLevel = e.ExperienceLevel,
             LastPromotionDate = e.LastPromotionDate,
             LastReviewDate = e.LastReviewDate,
             NextReviewDate = e.NextReviewDate,
@@ -261,6 +268,7 @@ public static class EmployeeMappingExtensions
         to.ProbationSource = from.ProbationSource;
         to.ExpectedConfirmationDate = from.ExpectedConfirmationDate;
         to.ConfirmationDate = from.ConfirmationDate;
+        to.ConfirmationSource = from.ConfirmationSource;
         to.RetirementDate = from.RetirementDate;
         to.TaxNumber = from.TaxNumber;
         to.TINNumber = from.TINNumber;
@@ -278,6 +286,12 @@ public static class EmployeeMappingExtensions
         to.PayBasisNote = from.PayBasisNote;
         to.BadgeNumber = from.BadgeNumber;
         to.Notes = from.Notes;
+        // Round 4, lane O — a field this copy omits reaches the 360 screens as its default.
+        to.MaintenanceAssignment = from.MaintenanceAssignment;
+        to.PositionIsTechnicianRole = from.PositionIsTechnicianRole;
+        to.Specialization = from.Specialization;
+        to.CertificationLevel = from.CertificationLevel;
+        to.ExperienceLevel = from.ExperienceLevel;
         to.LastPromotionDate = from.LastPromotionDate;
         to.LastReviewDate = from.LastReviewDate;
         to.NextReviewDate = from.NextReviewDate;
@@ -397,7 +411,15 @@ public static class EmployeeMappingExtensions
             // ⚠ PicturePath deliberately NOT set from the DTO — see Apply below.
             Notes = dto.Notes,
             IsExpatriate = dto.IsExpatriate,
-            IsActive = IsLiveRecordFor(dto.StaffStatus)
+            IsActive = IsLiveRecordFor(dto.StaffStatus),
+
+            // Round 4, lane O. Following the position (or saying nothing) leaves both false, and the
+            // save-time rule derives the answer from the post; Include / Exclude record HR's say-so.
+            MaintenanceAssignmentSetByHand = dto.MaintenanceAssignment is MaintenanceAssignmentMode.Include or MaintenanceAssignmentMode.Exclude,
+            CanBeAssignedToMaintenance = dto.MaintenanceAssignment == MaintenanceAssignmentMode.Include,
+            Specialization = NullIfBlank(dto.Specialization),
+            CertificationLevel = NullIfBlank(dto.CertificationLevel),
+            ExperienceLevel = NullIfBlank(dto.ExperienceLevel)
         };
 
     public static void Apply(this UpdateEmployeeDto dto, Employee e, Guid? organizationLevelId = null, Guid? locationLevelId = null)
@@ -490,6 +512,29 @@ public static class EmployeeMappingExtensions
 
         if (dto.BadgeNumber != null) e.BadgeNumber = dto.BadgeNumber;
         if (dto.Notes != null) e.Notes = dto.Notes;
+
+        // Round 4, lane O — who decides whether Maintenance may assign this person work. ⚠ Following
+        // the position only hands the answer back to the post: the value itself is derived at save
+        // time (ApplicationDbContext.HrTechnicianRole.cs), the one place that reads the post's flag.
+        switch (dto.MaintenanceAssignment)
+        {
+            case MaintenanceAssignmentMode.FollowPosition:
+                e.MaintenanceAssignmentSetByHand = false;
+                break;
+            case MaintenanceAssignmentMode.Include:
+                e.MaintenanceAssignmentSetByHand = true;
+                e.CanBeAssignedToMaintenance = true;
+                break;
+            case MaintenanceAssignmentMode.Exclude:
+                e.MaintenanceAssignmentSetByHand = true;
+                e.CanBeAssignedToMaintenance = false;
+                break;
+        }
+        // Null = not supplied; blank = clear. The strings above cannot be emptied from a form that
+        // sends blanks as null; these three can, because the form sends them as they stand.
+        if (dto.Specialization != null) e.Specialization = NullIfBlank(dto.Specialization);
+        if (dto.CertificationLevel != null) e.CertificationLevel = NullIfBlank(dto.CertificationLevel);
+        if (dto.ExperienceLevel != null) e.ExperienceLevel = NullIfBlank(dto.ExperienceLevel);
         // ⚠ PicturePath is NOT written from the DTO. It is the legacy caller-supplied file
         // location, kept so ported images still resolve; the photo is set through the gated
         // upload endpoint on EmployeeDocumentsController. Accepting it here let a caller point

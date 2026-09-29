@@ -198,6 +198,13 @@ public class Employee : TenantEntity, IDisabilityTypeConsumer
     /// </remarks>
     public DateOnly? ConfirmationDate { get; set; }
 
+    /// <summary>
+    /// Where <see cref="ConfirmationDate"/> came from: the probation record, the import file, or
+    /// worked out from the hire date and the probation term (HR finish plan lane 11).
+    /// </summary>
+    /// <remarks>⚠ Null before lane 11. See <see cref="Core.Enums.ConfirmationSource"/>.</remarks>
+    public ConfirmationSource? ConfirmationSource { get; set; }
+
     public DateOnly? RetirementDate { get; set; }
 
     public DateOnly? EndDate { get; set; } // Populated on exit
@@ -336,7 +343,37 @@ public class Employee : TenantEntity, IDisabilityTypeConsumer
 
     // Maintenance-specific properties (for employees who are technicians)
 
+    /// <summary>
+    /// Whether Maintenance may assign this person work: THE answer to "is this person a
+    /// technician?", read by HR's technician door and by Maintenance's work-order, labour and
+    /// schedule gates alike (round 4, lane O).
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ Maintained, not typed. Unless <see cref="MaintenanceAssignmentSetByHand"/> is set it
+    /// equals the position's <see cref="EmployeePosition.IsTechnicianRole"/>, and the database context
+    /// re-establishes that on every save that touches the employee or the position
+    /// (<c>ApplicationDbContext.HrTechnicianRole.cs</c>). So a hire, an edit, a movement, an import
+    /// or a seeder that places someone in a technician post makes them a technician, and leaving the
+    /// post takes it away again.</para>
+    ///
+    /// <para>Why stored rather than computed from the position: Maintenance's gates read this
+    /// column directly. A computed rule would let HR's door offer a technician that a work-order
+    /// assignment then refused.</para>
+    /// </remarks>
     public bool CanBeAssignedToMaintenance { get; set; }
+
+    /// <summary>
+    /// True when HR set <see cref="CanBeAssignedToMaintenance"/> for this person, so the position no
+    /// longer decides it: included although the post is not a technician role (someone seconded in),
+    /// or excluded although it is (long-term light duties). Round 4, lane O.
+    /// </summary>
+    /// <remarks>
+    /// Cleared by choosing "Follow the position" on the employee form, which hands the answer back
+    /// to the post. ⚠ A write of <see cref="CanBeAssignedToMaintenance"/> by anything other than the
+    /// save-time rule counts as setting it by hand — so a value another module writes sticks, and is
+    /// visible to HR as such, rather than being silently undone by the next save.
+    /// </remarks>
+    public bool MaintenanceAssignmentSetByHand { get; set; }
 
     /// <summary>
     /// Primary technical specialization (for maintenance technicians)
@@ -359,12 +396,25 @@ public class Employee : TenantEntity, IDisabilityTypeConsumer
     /// <summary>
     /// Current workload percentage for maintenance technicians (0-100)
     /// </summary>
+    /// <remarks>
+    /// ⚠ Written by NOTHING (measured round 4, lane O), so it is always its default of 0 — yet
+    /// Maintenance's <c>TechnicianService</c> reads it for a technician's <c>IsAvailable</c>
+    /// (<c>CurrentWorkload &lt; MaxWorkload</c>), its list filter and its utilisation figures, so that
+    /// screen reports every technician free. Real utilisation is computed from work orders in
+    /// <c>TechnicianSchedulingService</c>. HR does not surface it and its technician door does not
+    /// read it: a load is Maintenance's to know. Register § 2.9.
+    /// </remarks>
     [Column(TypeName = "decimal(5,2)")]
     public decimal CurrentWorkload { get; set; } = 0;
 
     /// <summary>
     /// Maximum workload capacity percentage for maintenance technicians
     /// </summary>
+    /// <remarks>
+    /// ⚠ Maintenance's capacity figure, not HR's: written only by <c>TechnicianService</c>'s
+    /// create/update technician methods (which no controller calls) and read by the same service.
+    /// Not surfaced by HR. Register § 2.9.
+    /// </remarks>
     [Column(TypeName = "decimal(5,2)")]
     public decimal MaxWorkload { get; set; } = 100;
 
@@ -404,6 +454,12 @@ public class Employee : TenantEntity, IDisabilityTypeConsumer
 
     [NotMapped]
     public bool IsOnProbation => StaffStatus == StaffStatus.Probation;
+
+    /// <summary>How <see cref="CanBeAssignedToMaintenance"/> is decided for this person (round 4, lane O).</summary>
+    [NotMapped]
+    public MaintenanceAssignmentMode MaintenanceAssignment => !MaintenanceAssignmentSetByHand
+        ? MaintenanceAssignmentMode.FollowPosition
+        : CanBeAssignedToMaintenance ? MaintenanceAssignmentMode.Include : MaintenanceAssignmentMode.Exclude;
 
     // Alias properties for service compatibility
     /// <summary>
@@ -1030,6 +1086,41 @@ public class EmployeePosition : TenantEntity
     public int? NumberOfGuarantors { get; set; }
 
     public bool RequiresLicense { get; set; }
+
+    /// <summary>
+    /// Whether this is a technician role: its holders are available to Maintenance to be assigned
+    /// work (round 4, lane O).
+    /// </summary>
+    /// <remarks>
+    /// <para>The rule; the person is the exception. Every holder's
+    /// <see cref="Employee.CanBeAssignedToMaintenance"/> follows this flag unless HR set that holder's
+    /// value by hand (<see cref="Employee.MaintenanceAssignmentSetByHand"/>), and turning the flag on
+    /// or off moves every such holder in or out of Maintenance's pool in the same save.</para>
+    ///
+    /// <para>Per POSITION because it is a fact about the post: every Artisan does maintenance work,
+    /// and it should not have to be ticked person by person — which is why, before this flag, the
+    /// question had four disagreeing answers, two of them magic strings over unit and department
+    /// names.</para>
+    /// </remarks>
+    public bool IsTechnicianRole { get; set; }
+
+    /// <summary>
+    /// The pre-employment check set an offer for this post starts from (round 4, lane H1).
+    /// </summary>
+    /// <remarks>
+    /// <para>Null means "no post-specific set" — an offer then falls back to the tenant’s single
+    /// active template, and to nothing at all if there is none or if there are several. ⚠ It does
+    /// NOT guess between templates: picking one of three arbitrarily would put checks on an offer
+    /// letter that nobody chose, and the letter is a commitment to the candidate.</para>
+    ///
+    /// <para>Why it matters beyond convenience: <c>AcceptConditionallyAsync</c> refuses an offer
+    /// with no check set, because the condition in "conditionally accepted" IS the check set.
+    /// Seeding one at offer creation is what stops that refusal being a dead end.</para>
+    /// </remarks>
+    public Guid? PreEmploymentCheckTemplateId { get; set; }
+
+    [ForeignKey(nameof(PreEmploymentCheckTemplateId))]
+    public virtual ErpSystem.Core.Entities.HR.Recruitment.PreEmploymentCheckTemplate? PreEmploymentCheckTemplate { get; set; }
 
     public bool IsActive { get; set; } = true;
 

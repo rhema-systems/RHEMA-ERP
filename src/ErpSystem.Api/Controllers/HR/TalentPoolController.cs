@@ -1,4 +1,4 @@
-using ErpSystem.Api.Filters;
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -6,6 +6,7 @@ using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -31,17 +32,20 @@ public class TalentPoolController : ControllerBase
     private readonly IJobCandidateService _candidateService;
     private readonly ICandidateTalentSegmentService _segmentService;
     private readonly ICandidateEngagementEventService _engagementService;
+    private readonly ITalentPoolScreeningService _screeningService;
     private readonly ICurrentUserService _currentUser;
 
     public TalentPoolController(
         IJobCandidateService candidateService,
         ICandidateTalentSegmentService segmentService,
         ICandidateEngagementEventService engagementService,
+        ITalentPoolScreeningService screeningService,
         ICurrentUserService currentUser)
     {
         _candidateService  = candidateService;
         _segmentService    = segmentService;
         _engagementService = engagementService;
+        _screeningService  = screeningService;
         _currentUser       = currentUser;
     }
 
@@ -158,6 +162,63 @@ public class TalentPoolController : ControllerBase
         Guid candidateId,
         [FromQuery] int topN = 10)
         => Ok(await _candidateService.MatchCandidateToVacanciesAsync(candidateId, topN));
+
+    // =========================================================================
+    // SCREENING BY REAL CRITERIA, AND ACTING ON IT  (round 4, lane B)
+    // =========================================================================
+    //
+    // The two blocks above match the pool by a blind 40/30/20 rubric over experience, work mode
+    // and availability. These run the vacancy's OWN shortlisting criteria — the same ones the
+    // applications are scored by, through the same engine — and then let a recruiter act on the
+    // answer without leaving the screen.
+    //
+    // ⚠ POST, not GET, for both screens. They carry a filter and, for the ad-hoc door, a whole
+    // criteria set; that is a body, not a query string. Neither writes anything.
+
+    /// <summary>Screens the talent pool against one vacancy's live shortlisting criteria.</summary>
+    [HttpPost("screen/{vacancyId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
+    public async Task<ActionResult<TalentPoolScreenResultDto>> ScreenAgainstVacancy(
+        Guid vacancyId,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] TalentPoolScreenRequestDto? request)
+        => Ok(await _screeningService.ScreenAgainstVacancyAsync(
+            vacancyId, request ?? new TalentPoolScreenRequestDto()));
+
+    /// <summary>
+    /// Screens the pool against criteria supplied in the request and stored nowhere — "who do we
+    /// have who could do this?", asked before any vacancy exists.
+    /// </summary>
+    [HttpPost("screen")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
+    public async Task<ActionResult<TalentPoolScreenResultDto>> ScreenAdHoc(
+        [FromBody] TalentPoolScreenRequestDto request)
+        => Ok(await _screeningService.ScreenAdHocAsync(request));
+
+    /// <summary>Opens an application for each named pool member and invites them by email.</summary>
+    [HttpPost("invite-to-apply")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<RecruitmentBulkOperationResultDto>> InviteToApply(
+        [FromBody] TalentPoolInviteToApplyDto dto)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Tenant context could not be resolved.");
+
+        return Ok(await _screeningService.InviteToApplyAsync(dto, employeeId.Value));
+    }
+
+    /// <summary>Books each named pool member into an existing interview session.</summary>
+    [HttpPost("book-interview")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<RecruitmentBulkOperationResultDto>> BookForInterview(
+        [FromBody] TalentPoolBookInterviewDto dto)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Tenant context could not be resolved.");
+
+        return Ok(await _screeningService.BookForInterviewAsync(dto, employeeId.Value));
+    }
 
     // =========================================================================
     // SEGMENTS

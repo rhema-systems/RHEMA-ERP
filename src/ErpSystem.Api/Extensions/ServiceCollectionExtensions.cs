@@ -168,7 +168,7 @@ namespace ErpSystem.Api.Extensions
 
             // Bind the external-portal URL options. Without this, IOptions<CandidatePortalOptions>.Value
             // .PortalUrl is empty and the candidate/consultant portal auth services build relative
-            // verification / password-reset links (e.g. "/careers/portal/verify-email?...") that recipients
+            // verification / password-reset links (e.g. "/careers/verify-email?...") that recipients
             // cannot follow. ValidateOnStart makes a missing/empty PortalUrl fail fast at boot rather than
             // shipping broken emails.
             services.AddOptions<ErpSystem.Core.Models.CandidatePortalOptions>()
@@ -527,6 +527,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Api.Services.Estate.IEstateSalesListingApplicationHandoffService, ErpSystem.Api.Services.Estate.EstateSalesListingApplicationHandoffService>();
             services.AddScoped<ErpSystem.Api.Services.Estate.IGroundRentAdministrationService, ErpSystem.Api.Services.Estate.GroundRentAdministrationService>();
             services.AddScoped<ErpSystem.Api.Services.Estate.EstateRecurringBillingService>();
+            services.AddScoped<ErpSystem.Api.Services.Estate.FacilitiesLeaseReminderService>();
             services.AddHostedService<ErpSystem.Api.Services.Estate.EstateRecurringBillingBackgroundService>();
             services
                 .AddOptions<ErpSystem.Api.Services.Estate.EstateGisNetworkSecurityOptions>()
@@ -1201,6 +1202,15 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                                ErpSystem.Core.Services.HR.EmployeeGuarantorGeoAreaConsumer>();
             services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
                                ErpSystem.Core.Services.HR.EmployeeWorkHistoryGeoAreaConsumer>();
+
+            // Round 4, lane A — recruitment. The candidate's own address, and the areas a vacancy's
+            // Location criterion screens on. The second is not an address and earns a probe anyway:
+            // deleting an area a live vacancy accepts would silently stop matching the candidates
+            // who are in it, and a shortlist that quietly shrinks explains nothing on screen.
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.JobCandidateGeoAreaConsumer>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.ShortlistingCriteriaGeoAreaConsumer>();
 
             // The company seal and signature, versioned rather than overwritten.
             services.AddScoped<ErpSystem.Core.Services.HR.ICompanySealAssetService,
@@ -1954,7 +1964,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                         HrPermissions.AdministerSeparation)))
                 .AddPolicy(HrPermissions.SeparationAdminPolicy, policy =>
                     policy.Requirements.Add(new PermissionRequirement(
-                        HrPermissions.AdministerSeparation)));
+                        HrPermissions.AdministerSeparation)))
+                // Finance's valuation of the pay HR records (leave settings audit 2, P2). Not on
+                // the separation ladder: Administer Separation must NOT imply it — the one who
+                // counts is not the one who prices.
+                .AddPolicy(HrPermissions.PayValuePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ValueHrPay)));
 
             // Staff Awards & Recognition. Same ladder: Administer implies Write implies
             // Read. What is deliberately NOT gated on this family is the employee's own surface:
@@ -2634,6 +2650,36 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // statuses drifted without bound. Sweep logic is scoped
             // (IRecruitmentLifecycleSweepService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.RecruitmentLifecycleSweepBackgroundService>();
+
+            // Orientation triggers (round 4, lane I3): nightly — scheduled audience rules, plus the
+            // dated ones (hire, transfer, promotion) whose day has come or whose event hook failed.
+            // Before this, OrientationEnrollmentTrigger was written by the seeder and read by
+            // nothing. Logic is scoped (IOrientationEnrollmentTriggerService.RunSweepForTenantAsync)
+            // so POST api/orientation-programs/triggers/run shares it.
+            // ⚠ Registered in the same change as the service, because two HR sweeps here were not.
+            services.AddHostedService<ErpSystem.Api.Services.HR.OrientationTriggerBackgroundService>();
+
+            // Orientation & onboarding reminders (round 4, lane K): daily — onboarding tasks due soon,
+            // overdue or awaiting sign-off; orientations due soon, overdue, or waiting on an assessment
+            // or an acknowledgement; certificates expiring. The first HR sweep that DELIVERS: one
+            // in-app notification per person, emailed too. Logic is scoped
+            // (IOnboardingOrientationReminderService) so POST api/orientation-reminders/run shares it.
+            // ⚠ Registered in the same change as the service (lane K5) — two HR sweeps here were not.
+            services.AddHostedService<ErpSystem.Api.Services.HR.OnboardingOrientationReminderBackgroundService>();
+
+            // Orientation & onboarding notice emails (round 4, lane K-b): every minute, sends what the
+            // lifecycle notices queued — enrolled, a session placed, moved or called off, completed,
+            // certificate issued. The notice itself is written with the event; the email follows.
+            // Logic is scoped (IOrientationNoticeEmailDispatcher), shared with
+            // POST api/orientation-notifications/send-queued. ⚠ Registered with its class.
+            services.AddHostedService<ErpSystem.Api.Services.HR.OrientationNoticeEmailBackgroundService>();
+
+            // Company schedule reminders (round 4, lane N-b2): hourly — each event's reminder the days
+            // before its form asks for, and the chase of unanswered invitations ahead of the RSVP
+            // deadline, each ONCE (stamped on the event). Logic is scoped
+            // (ICompanyEventService.SendDueRemindersAsync), shared with
+            // POST api/CompanySchedule/reminders/run. ⚠ Registered with its class.
+            services.AddHostedService<ErpSystem.Api.Services.HR.CompanyScheduleReminderBackgroundService>();
 
             // Team reminder engine (round 2, lane F2): daily sweep — a task due within the tenant's
             // lead time, a task already overdue, an objective past its date, a meeting tomorrow, and

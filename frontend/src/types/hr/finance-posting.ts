@@ -20,10 +20,11 @@ export type HrFinanceAccountRole =
   | 'StaffReceivables'
   | 'StaffReceivableWriteOff'
   | 'RecruitmentExpense'
-  | 'InsuranceRecoveriesIncome';
+  | 'InsuranceRecoveriesIncome'
+  | 'ConsultingRevenue';
 
-/** What the event produces in Finance: a GL journal, or an AP vendor invoice Finance approves and pays. */
-export type HrFinancePostingKind = 'Journal' | 'VendorInvoice';
+/** What the event produces in Finance: a GL journal, an AP vendor invoice Finance approves and pays, or an AR customer invoice Finance issues and collects. */
+export type HrFinancePostingKind = 'Journal' | 'VendorInvoice' | 'CustomerInvoice';
 
 export type HrFinancePostingStatus = 'Posted' | 'Failed' | 'Unposted' | 'Skipped' | 'Reversed';
 
@@ -143,6 +144,9 @@ export interface HrFinancePostingRecord {
   /** AP hand-off rows: the Finance vendor invoice and its status as last pulled. */
   vendorInvoiceId: string | null;
   vendorInvoiceNumber: string | null;
+  /** AR hand-off rows: the Finance customer invoice. */
+  customerInvoiceId: string | null;
+  customerInvoiceNumber: string | null;
   externalStatus: string | null;
   externalStatusAt: string | null;
   /** True for a posted AP row: Finance's status (and the voucher, once paid) can be pulled. */
@@ -187,3 +191,40 @@ export const HR_FINANCE_POSTING_STATUSES: HrFinancePostingStatus[] = [
   'Skipped',
   'Reversed',
 ];
+
+/** What Finance says was spent against an HR budget (manpower or training): a read of its book balances. */
+export interface HrBudgetFinanceActualsPeriod {
+  fiscalPeriodId: string;
+  periodName: string;
+  startDate: string;
+  endDate: string;
+  /** The fiscal period starts before or ends after the budget's window; the whole period is counted. */
+  partlyOutsideBudget: boolean;
+  debits: number;
+  credits: number;
+  netMovement: number;
+  transactionCount: number;
+}
+
+export interface HrBudgetFinanceActuals {
+  budgetId: string;
+  budgetNumber: string;
+  budgetKind: 'Manpower' | 'Training' | string;
+  unitName: string | null;
+  periodStart: string;
+  periodEnd: string;
+  /** True when an account and Finance's book were resolved and the periods were read. */
+  linked: boolean;
+  /** Why the actuals could not be read, when they could not — a sentence for the screen. */
+  problem: string | null;
+  accountId: string | null;
+  accountCode: string | null;
+  accountName: string | null;
+  accountingBookCode: string | null;
+  functionalCurrencyCode: string;
+  budget: number;
+  actual: number;
+  variance: number;
+  variancePercentage: number;
+  periods: HrBudgetFinanceActualsPeriod[];
+}

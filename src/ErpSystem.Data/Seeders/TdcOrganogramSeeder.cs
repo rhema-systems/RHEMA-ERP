@@ -256,6 +256,8 @@ public class TdcOrganogramSeeder
                 ProbationPeriodMonths = hasGrade ? meta.ProbationMonths : 6,
                 // Headcount is filled in from the staff extracts in a later pass; 1 is the safe default.
                 ExpectedHeadcount = 1,
+                // Round 4, lane O: its holders are Maintenance's technicians, without a tick each.
+                IsTechnicianRole = TechnicianRoleCodes.Contains(def.Code),
                 IsActive = true,
                 CreatedAt = now,
                 CreatedBy = by
@@ -366,6 +368,17 @@ public class TdcOrganogramSeeder
     };
 
     // ════════════════════════════════════════════════════════════════════════════════════════════
+    /// <summary>
+    /// TDC's technician roles (round 4, lane O): the posts whose holders Maintenance may assign work
+    /// orders to. The chart has exactly three maintenance trades — the building-maintenance section's
+    /// supervisor and artisans, and MIS's computer technician. Surveying and draughting posts are
+    /// technical but are not maintenance work, so they are not listed.
+    /// </summary>
+    private static readonly HashSet<string> TechnicianRoleCodes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "DV-BMS", "DV-ART", "MS-CT",
+    };
+
     private sealed record PositionDef(
         string Code, string Title, string UnitCode, string? ReportsToCode, string Grade);
 

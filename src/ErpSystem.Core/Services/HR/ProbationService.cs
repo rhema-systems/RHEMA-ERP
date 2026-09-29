@@ -365,11 +365,13 @@ public class ProbationService : IProbationService
     /// <para>⚠ Clearing the flag makes a dormant rule live in both directions, so the harness
     /// asserts the <b>benefit consequence</b> rather than the flag.</para>
     /// </remarks>
-    private static void MarkEmployeeConfirmed(Employee employee, DateOnly confirmedOn)
+    private static void MarkEmployeeConfirmed(
+        Employee employee, DateOnly confirmedOn, ConfirmationSource source = ConfirmationSource.Probation)
     {
         if (employee.StaffStatus == StaffStatus.Probation)
             employee.StaffStatus = StaffStatus.Active;
         employee.ConfirmationDate = confirmedOn;
+        employee.ConfirmationSource = source;
     }
 
     // ── Workflow ──────────────────────────────────────────────────────────────
@@ -434,6 +436,147 @@ public class ProbationService : IProbationService
             "Probation {ProbationId} confirmed by {UserId}; employee {EmployeeId} confirmed on {Date}",
             probationId, confirmedByUserId, employee.Id, employee.ConfirmationDate);
         return true;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para><b>Why it exists.</b> The import had no confirmation column, and the hire path opens a
+    /// probation for every permanent employee who arrives without a confirmation date — so the whole
+    /// imported workforce was put on probation from a hire date years back. On UAT, 2026-09-26: 2,234
+    /// on probation, 1,830 of them with a term that ended before they were entered. The probation
+    /// screen listed them all as overdue, and every rule that treats probation differently (benefits
+    /// withheld during probation, first) applied to people confirmed a decade ago.</para>
+    ///
+    /// <para><b>The term</b> is the open probation record's end date when there is one — hire date
+    /// plus the term, as the hire path wrote it — and otherwise the employee's own probation days,
+    /// by the same rule (<see cref="ConfirmationDerivation"/>). <b>Entered</b> is the day the
+    /// employee record was created.</para>
+    ///
+    /// <para>⚠ It writes what <c>ConfirmAsync</c> writes — the record Completed, the employee Active
+    /// and confirmed — and nothing else: no letter and no notification, because nobody here is
+    /// being confirmed today. The confirming authority is not asked either; the decision to confirm
+    /// by rule was the user's (2026-09-25), and TDC names the exceptions, corrected by hand.</para>
+    /// </remarks>
+    public async Task<ProbationConfirmationRepairResult> RepairImportedConfirmationsAsync(
+        Guid? employeeId, bool dryRun, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var result = new ProbationConfirmationRepairResult { IsDryRun = dryRun };
+
+        // Tracked: the ones confirmed are written in place.
+        var employees = await _employeeRepository.GetQueryable()
+            .Where(e => e.TenantId == tenantId
+                        && e.StaffStatus == StaffStatus.Probation
+                        && e.ConfirmationDate == null
+                        && (employeeId == null || e.Id == employeeId))
+            .OrderBy(e => e.EmployeeNumber)
+            .ToListAsync(cancellationToken);
+
+        // The probation records still open for them. Reached through the employee rather than a
+        // list of ids: on UAT that list is two thousand long.
+        var openStatuses = new[]
+        {
+            ProbationStatus.Active, ProbationStatus.PendingConfirmation, ProbationStatus.ConfirmationApproved,
+        };
+        var open = (await _probationRepository.GetQueryable()
+                .Where(p => p.TenantId == tenantId
+                            && openStatuses.Contains(p.Status)
+                            && p.Employee.StaffStatus == StaffStatus.Probation
+                            && p.Employee.ConfirmationDate == null
+                            && (employeeId == null || p.EmployeeId == employeeId))
+                .ToListAsync(cancellationToken))
+            .GroupBy(p => p.EmployeeId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var reviewed = (await _reviewRepository.GetQueryable()
+                .Where(r => r.TenantId == tenantId && openStatuses.Contains(r.ProbationPeriod.Status))
+                .Select(r => r.ProbationPeriodId)
+                .Distinct()
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+
+        foreach (var employee in employees)
+        {
+            result.Examined++;
+            var who = $"{employee.EmployeeNumber} {employee.FirstName} {employee.LastName}".Trim();
+
+            if (employee.DateEmployed is not { } hired)
+            {
+                result.NoHireDate++;
+                continue;
+            }
+
+            open.TryGetValue(employee.Id, out var records);
+            if (records is { Count: > 1 })
+            {
+                result.HeldBack++;
+                result.Notes.Add($"{who}: {records.Count} probation records are open, so which term applies is a person's call.");
+                continue;
+            }
+
+            var probation = records?.Single();
+            DateOnly? termEnd = probation?.CurrentEndDate
+                ?? (employee.ProbationPeriodDays > 0
+                    ? ConfirmationDerivation.TermEnd(hired, employee.ProbationPeriodDays)
+                    : null);
+            if (termEnd is null)
+            {
+                result.HeldBack++;
+                result.Notes.Add($"{who}: on probation with no probation record and no term to work from.");
+                continue;
+            }
+
+            var enteredOn = DateOnly.FromDateTime(employee.CreatedAt);
+            if (ConfirmationDerivation.Derive(termEnd.Value, enteredOn) is not { } confirmedOn)
+            {
+                result.StillOnProbation++;
+                continue;
+            }
+
+            // Somebody has already acted on this probation: it is theirs to finish.
+            var heldBecause = probation switch
+            {
+                { Status: ProbationStatus.PendingConfirmation } => "it is with the confirming authority",
+                { Status: ProbationStatus.ConfirmationApproved } => "its confirmation is approved and awaits HR",
+                { ExtensionCount: > 0 } extended => $"it was extended {extended.ExtensionCount} time(s)",
+                { } any when reviewed.Contains(any.Id) => "a review is on file",
+                _ => null,
+            };
+            if (heldBecause != null)
+            {
+                result.HeldBack++;
+                result.Notes.Add($"{who}: the term ended {termEnd:yyyy-MM-dd}, before entry, but {heldBecause}.");
+                continue;
+            }
+
+            result.Confirmed++;
+            if (dryRun) continue;
+
+            if (probation != null)
+            {
+                probation.Status = ProbationStatus.Completed;
+                probation.OutcomeNotes =
+                    $"Confirmed by rule (HR finish plan lane 11): the term ended {termEnd:yyyy-MM-dd}, before the employee "
+                    + $"was entered on {enteredOn:yyyy-MM-dd}. The confirmation date is derived, not supplied.";
+            }
+            MarkEmployeeConfirmed(employee, confirmedOn, ConfirmationSource.Derived);
+        }
+
+        if (!dryRun && result.Confirmed > 0)
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        result.Notes.Insert(0,
+            $"{(dryRun ? "Would confirm" : "Confirmed")} {result.Confirmed} of {result.Examined} employee(s) on probation "
+            + $"with no confirmation date. Left alone: {result.NoHireDate} with no hire date, {result.StillOnProbation} "
+            + $"whose term had not ended when they were entered, {result.HeldBack} held back.");
+
+        _logger.LogInformation(
+            "Imported-confirmation repair ({Mode}) for tenant {TenantId}: examined {Examined}, confirmed {Confirmed}, "
+            + "no hire date {NoHireDate}, still on probation {Still}, held back {HeldBack}",
+            dryRun ? "dry run" : "applied", tenantId, result.Examined, result.Confirmed,
+            result.NoHireDate, result.StillOnProbation, result.HeldBack);
+
+        return result;
     }
 
     public async Task<bool> TerminateAsync(TerminateProbationPeriodDto dto, Guid terminatedByUserId, CancellationToken cancellationToken = default)

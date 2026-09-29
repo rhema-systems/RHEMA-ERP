@@ -160,6 +160,11 @@ public class TrainerService : ITrainerService
     {
         var entity = await GetOwnedProfileAsync(id);
 
+        // Round 4, lane M3: orientation sessions can name a vendor's trainer as their facilitator.
+        if (await _unitOfWork.WhyStillBookedAsync(entity.TenantId, null, entity.Id, entity.Name,
+                "make the trainer inactive, which keeps their record and stops them being picked", cancellationToken) is { } booked)
+            throw new InvalidOperationException(booked);
+
         await _profileRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 

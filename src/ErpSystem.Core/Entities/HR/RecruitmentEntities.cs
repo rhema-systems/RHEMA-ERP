@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.HR.CompanySchedule;
 using ErpSystem.Core.Entities.HR.Requisition;
 using ErpSystem.Core.Enums;
 
@@ -768,8 +769,18 @@ public class JobCandidate : TenantEntity
 	[MaxLength(100)]
 	public string LastName { get; set; } = string.Empty;
 
+    /// <remarks>
+    /// ⚠ <c>.Trim()</c> is not enough on its own: it strips the ends, not the gap left in the
+    /// middle. The previous form — <c>$"{FirstName} {MiddleName ?? ""} {LastName}".Trim()</c> —
+    /// rendered every candidate without a middle name as <i>"Yaaba&#160;&#160;Nkrumah"</i>, a
+    /// double space, on every screen and on the printed interview scoring sheet somebody signs.
+    /// Caught by the round 4 lane F harness. <c>Employee.FullName</c> has always had it right and
+    /// this now matches it.
+    /// </remarks>
     [NotMapped]
-    public string FullName => $"{FirstName} {MiddleName ?? string.Empty} {LastName}".Trim();
+    public string FullName => string.IsNullOrWhiteSpace(MiddleName)
+        ? $"{FirstName} {LastName}".Trim()
+        : $"{FirstName} {MiddleName} {LastName}".Trim();
 
     public DateTime DateOfBirth { get; set; }
     public Gender Gender { get; set; }
@@ -790,8 +801,46 @@ public class JobCandidate : TenantEntity
     [MaxLength(30)]
     public string? DigitalAddress { get; set; }
 
+    /// <summary>
+    /// ⚠ A DISPLAY SNAPSHOT since round 4, not the source of truth, on the same terms as
+    /// <see cref="Employee.City"/>. When <see cref="GeoAreaId"/> is set the service overwrites this
+    /// with the resolved town or district name. Kept because it is the only address a candidate
+    /// recorded before the tree existed has, because the careers portal of a country with no scheme
+    /// still has to write something, and because the shortlisting engine falls back to it.
+    /// </summary>
     [MaxLength(100)]
     public string City { get; set; } = string.Empty;
+
+    /// <summary>
+    /// ⚠ A DISPLAY SNAPSHOT since round 4 — see <see cref="City"/>. Holds the resolved tier-1 name
+    /// (region/state) when <see cref="GeoAreaId"/> is set, and is null otherwise. Added so the
+    /// candidate register can say where somebody is without walking the tree on every row.
+    /// </summary>
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
+    /// <summary>
+    /// Where this candidate lives, as one reference to the administrative geography tree.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>⚠ One FK, not one per tier.</b> It points at the <i>lowest</i> tier known — a
+    /// community if that is what was chosen, a district if not — and the ancestors come from
+    /// <c>GeoArea.Path</c>. Same shape as <see cref="Employee.GeoAreaId"/>, and the reason a
+    /// vacancy's Location criterion can match "Greater Accra" against a candidate in Tema.</para>
+    ///
+    /// <para>Nullable and expected to stay null on plenty of rows: the register predates the tree,
+    /// most countries have no scheme loaded, and an anonymous public application may supply nothing
+    /// but a typed city. <see cref="City"/> carries whatever those rows already said, and the
+    /// scoring engine falls back to it. See docs/GEOGRAPHY-REFERENCE-DESIGN.md.</para>
+    ///
+    /// <para>⚠ A soft-deleted area does not fire this key, so
+    /// <c>JobCandidateGeoAreaConsumer</c> in <c>GeoAreaConsumers.cs</c> is what actually protects
+    /// it. Registering the probe is not optional.</para>
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
+    [ForeignKey(nameof(GeoAreaId))]
+    public virtual ErpSystem.Core.Entities.Reference.GeoArea? GeoArea { get; set; }
 
     /// <summary>
     /// The candidate's country. <b>Optional</b> — an external applicant supplies it on the public
@@ -1002,6 +1051,23 @@ public class JobCandidateQualification : TenantEntity
 
     [ForeignKey(nameof(QualificationId))]
     public virtual Qualification? Qualification { get; set; }
+
+    /// <summary>
+    /// Where this qualification sits on the tenant's ladder, as the candidate or HR stated it
+    /// (round 4, lane Q; decision Q-D1).
+    /// </summary>
+    /// <remarks>
+    /// <para>The EFFECTIVE level is this, or else the catalogue entry's
+    /// (<c>Qualification.QualificationLevelId</c>). A typed qualification has only this. Both doors
+    /// require it for an Education row, and leave it optional for a licence or a membership, which
+    /// may sit on no rung at all.</para>
+    /// <para>⚠ An "Education level" criterion compares the RANK of this rung. A qualification with
+    /// no effective level can never pass one: it counts as a miss (decision Q-D4).</para>
+    /// </remarks>
+    public Guid? QualificationLevelId { get; set; }
+
+    [ForeignKey(nameof(QualificationLevelId))]
+    public virtual QualificationLevel? QualificationLevel { get; set; }
 
     /// <summary>
     /// Free-text qualification name entered by the candidate (populated when QualificationId is null).
@@ -1528,8 +1594,42 @@ public sealed class ApplicationCandidateSnapshot
     [MaxLength(100)]
     public string? City { get; init; }
 
+    /// <summary>
+    /// The candidate's administrative area at the moment they applied, frozen with the rest of the
+    /// profile so a re-score uses the address they had then.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Null on every snapshot written before round 4, and on any candidate with no area on file.
+    /// The Location criterion falls back to <see cref="City"/> for exactly those rows — see
+    /// <c>JobApplicationService.EvaluateCriterion</c>.
+    /// </remarks>
+    public Guid? GeoAreaId { get; init; }
+
+    /// <summary>
+    /// The materialised ancestor path of <see cref="GeoAreaId"/>, frozen at the same moment.
+    /// </summary>
+    /// <remarks>
+    /// Stored so containment ("is this candidate anywhere under Greater Accra?") can be answered
+    /// from the snapshot alone, without a second read of a tree that may have been re-parented, or
+    /// the area soft-deleted, since the application was submitted.
+    /// </remarks>
+    [MaxLength(1000)]
+    public string? GeoAreaPath { get; init; }
+
     /// <summary>Self-reported total years of professional experience from candidate profile.</summary>
     public int? TotalYearsExperience { get; init; }
+
+    /// <summary>
+    /// True on every snapshot written since round 4, lane Q, whose qualifications carry
+    /// <see cref="SnapshotQualification.QualificationLevelId"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The flag is what tells "no level" from "written before levels existed". A qualification
+    /// frozen with no level stays unlevelled: a licence has no rung. On an OLDER snapshot the level
+    /// is back-filled from the candidate's live profile before scoring, as
+    /// <see cref="GeoAreaPath"/> is from the live tree. Absent from old JSON, so it reads false.
+    /// </remarks>
+    public bool QualificationLevelsRecorded { get; init; }
 
     // ── Collections ───────────────────────────────────────────────────────────
 
@@ -1571,6 +1671,13 @@ public sealed class SnapshotQualification
 
     /// <summary>Catalogue Qualification ID, when the candidate linked their qualification to the master record.</summary>
     public Guid? QualificationId { get; init; }
+
+    /// <summary>
+    /// The rung of the qualification ladder this qualification sat on when the candidate applied:
+    /// its own stated level, or else its catalogue entry's (round 4, lane Q). Null when it sat on
+    /// none. The rank is read from the live ladder at scoring time.
+    /// </summary>
+    public Guid? QualificationLevelId { get; init; }
 }
 
 /// <summary>Frozen language entry within <see cref="ApplicationCandidateSnapshot"/>.</summary>
@@ -1720,9 +1827,25 @@ public class JobInterviewQuestionDetail : TenantEntity
     public int Weight { get; set; } = 1;
 	
 	public int MinScore { get; set; } = 1;
-	
+
 	public int MaxScore { get; set; } = 10;
-	
+
+    /// <summary>
+    /// What a good answer sounds like — printed beside the question on the paper scoring sheet.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ Added in round 4 lane C's sibling, F, because the bank held a question, a weight and
+    /// a band and <b>nothing about how to judge the answer</b>. On screen that gap is invisible: the
+    /// person scoring usually wrote the question. On paper, handed to a panelist who did not, a
+    /// question marked out of ten with no guidance is ten marks awarded on instinct — and the
+    /// weighted total then reads as precision it does not have.</para>
+    ///
+    /// <para>Optional, and printed only when set: a question that genuinely needs no guidance should
+    /// not carry an empty heading on every sheet.</para>
+    /// </remarks>
+    [MaxLength(2000)]
+    public string? ScoringGuide { get; set; }
+
     public Guid QuestionTypeId { get; set; }
  
     [ForeignKey(nameof(QuestionTypeId))]
@@ -1821,6 +1944,85 @@ public class JobInterview : TenantEntity
 
     [ForeignKey(nameof(QuestionPresetId))]
     public virtual InterviewQuestionPreset? QuestionPreset { get; set; }
+
+    // ── Slot apportionment (round 4, lane C) ────────────────────────────────────────────────────
+    //
+    // ⚠ These three exist so a RESCHEDULE can re-apportion rather than re-ask. Without them,
+    // moving a session moved the window and left every candidate's slot behind — and the reschedule
+    // notice then emailed each candidate their ORIGINAL time against the NEW date, with a fresh
+    // confirmation token inviting them to confirm it. Recorded as round 4 § 3 defect 23.
+    //
+    // Null means the day was never apportioned: slots were typed by hand, or there are none. A
+    // reschedule then CLEARS the slots rather than shifting them, because a time that no longer
+    // sits inside the session is worse than no time at all.
+
+    /// <summary>How long each candidate gets, when the day was apportioned.</summary>
+    public int? SlotMinutes { get; set; }
+
+    /// <summary>
+    /// Turnaround between candidates. Applied between slots and never after the last, so it cannot
+    /// by itself push the day past its end.
+    /// </summary>
+    public int? SlotBufferMinutes { get; set; }
+
+    /// <summary>
+    /// The day's breaks, as JSON — <c>[{"start":"12:30:00","end":"13:30:00","label":"Lunch"}]</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>JSON rather than a child table, deliberately.</b> A break has no identity anyone
+    /// refers to, nothing points at one, and it is only ever read as a whole set while laying out
+    /// one day. A table would buy cascade deletes and an id nobody needs, and cost a join on every
+    /// read of the interview. The same call the appraisal breakdown and the application profile
+    /// snapshot already make.</para>
+    ///
+    /// <para>Written and read only through <c>InterviewSlotApportioner.Break</c>, which normalises
+    /// them — clipped to the window, overlaps merged — so nothing downstream has to cope with a
+    /// break that runs past midnight or two that overlap.</para>
+    /// </remarks>
+    public string? BreaksJson { get; set; }
+
+    // ── Round 4, lane D — the panel clash check made binding, and the room actually held ────────
+
+    /// <summary>
+    /// The room this interview HOLDS, rather than the one its <see cref="LocationOrLink"/> mentions.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ D8. <c>LocationOrLink</c> is free text: typing "Board room" into it books nothing,
+    /// reserves nothing and is invisible to the room's own double-booking check — so two interviews
+    /// and a meeting could all name the same room for the same hour and every screen would look
+    /// fine. With a booking, the room module's existing blocking check does the work.</para>
+    ///
+    /// <para>Optional, because a virtual interview has no room and an interview held somewhere the
+    /// register does not cover is a normal state, not an error.</para>
+    /// </remarks>
+    public Guid? RoomBookingId { get; set; }
+
+    [ForeignKey(nameof(RoomBookingId))]
+    public virtual RoomBooking? RoomBooking { get; set; }
+
+    /// <summary>
+    /// Why this interview was scheduled over a panelist's confirmed commitment (decision D-5).
+    /// </summary>
+    /// <remarks>
+    /// <para>A hard clash refuses the write unless a reason is given; the reason lands here, with
+    /// who gave it and when. Following the requisition-budget precedent — the override exists
+    /// because a recruiter who knows the panelist swapped a meeting should not be blocked by the
+    /// system's second-hand information, and the price of that is that the decision is on record.</para>
+    ///
+    /// <para>⚠ Written only when a hard clash was actually present. A reason typed on an interview
+    /// with no clash is discarded: a record of overriding something that never existed is worse
+    /// than no record at all.</para>
+    /// </remarks>
+    [MaxLength(1000)]
+    public string? PanelClashOverrideReason { get; set; }
+
+    /// <summary>What was overridden, captured at the moment it was, so the record survives the diary changing.</summary>
+    [MaxLength(2000)]
+    public string? PanelClashOverrideDetail { get; set; }
+
+    public Guid? PanelClashOverriddenById { get; set; }
+
+    public DateTime? PanelClashOverriddenAt { get; set; }
 
 	public virtual ICollection<JobInterviewee> Interviewees { get; set; } = new List<JobInterviewee>();
     public virtual ICollection<JobInterviewPanelist> Panelists { get; set; } = new List<JobInterviewPanelist>();
@@ -2045,6 +2247,40 @@ public class JobInterviewScoreSummary : TenantEntity
     public bool IsFinalized { get; set; }
 
     public DateTime? FinalizedDate { get; set; }
+
+    /// <summary>
+    /// How this scorecard reached the system — typed by the panelist, or transcribed by HR from a
+    /// signed paper sheet (round 4, lane F4).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Nullable, and that is deliberate.</b> Null means "recorded before this was tracked",
+    /// which is not the same claim as <see cref="InterviewScoreSource.Online"/>. Defaulting the
+    /// existing rows to Online would assert of every historical scorecard that the panelist typed
+    /// it themselves — a fact nobody checked, written into an audit trail. New rows always carry a
+    /// value; the service supplies one on every write path.
+    /// </remarks>
+    public InterviewScoreSource? ScoreSource { get; set; }
+
+    /// <summary>
+    /// The HR person who filed this on the panelist's behalf. Null when the panelist filed it.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>An EMPLOYEE id, not an ApplicationUser id</b>, and the name says so. The round 4
+    /// plan called this <c>FiledByHrOnBehalfOfUserId</c> — but the value that reaches the service is
+    /// <c>_currentUser.EmployeeId</c>, passed into a parameter the controller family misleadingly
+    /// calls <c>createdByUserId</c>. A column named <c>...UserId</c> holding an employee id is a
+    /// trap that only shows up the day somebody joins it to <c>AspNetUsers</c> and gets nothing.
+    /// HR's actor columns are employee references throughout (<c>ApprovedById</c> and the rest), so
+    /// this follows the house convention rather than inventing a second one.</para>
+    ///
+    /// <para>Why a column at all, when <c>CreatedBy</c> exists: a scorecard is <b>upserted</b>. A
+    /// correction rewrites <c>UpdatedBy</c> and leaves <c>CreatedBy</c> pointing at whoever happened
+    /// to be first, so provenance inferred from those two is wrong exactly when it matters.</para>
+    /// </remarks>
+    public Guid? FiledByHrOnBehalfOfEmployeeId { get; set; }
+
+    [ForeignKey(nameof(FiledByHrOnBehalfOfEmployeeId))]
+    public virtual Employee? FiledByHrOnBehalfOf { get; set; }
 
     public virtual ICollection<JobInterviewScoreEntry> ScoreEntries { get; set; } = new List<JobInterviewScoreEntry>();
 
@@ -2892,11 +3128,52 @@ public class OnboardingPlanTemplate : TenantEntity
     [MaxLength(1000)]
     public string? Description { get; set; }
  
+    /// <summary>
+    /// The fallback: used when a hire's start is confirmed and no template's <see cref="Audiences"/>
+    /// reach them. At most one per tenant.
+    /// </summary>
     public bool IsDefault { get; set; }
- 
+
     public bool IsActive { get; set; } = true;
- 
+
     public virtual ICollection<OnboardingTaskTemplate> TaskTemplates { get; set; } = new List<OnboardingTaskTemplate>();
+
+    /// <summary>
+    /// Who this template is for (round 4, lane I4). A template with none is chosen by hand only,
+    /// unless it is the <see cref="IsDefault"/> fallback.
+    /// </summary>
+    public virtual ICollection<OnboardingPlanTemplateAudience> Audiences { get; set; } = new List<OnboardingPlanTemplateAudience>();
+}
+
+/// <summary>
+/// One statement of who an onboarding plan template applies to (round 4, lane I4).
+/// </summary>
+/// <remarks>
+/// <para><b>The shape two comments had always described.</b> The template's own summary said it
+/// "can be assigned to new hires based on job family, department, or grade", and
+/// <see cref="OnboardingPlan"/> said it was "generated from an OnboardingPlanTemplate when a
+/// HireRecord is confirmed" — and nothing stored who a template was for, so neither was true.
+/// <c>OnboardingTemplateApplicabilityService</c> reads these rows and states which template wins
+/// and why.</para>
+///
+/// <para><b>Same axis as every other HR audience</b> — <see cref="HrAudienceTargetType"/>, where a
+/// unit includes the units beneath it. The <c>Employee</c> axis is refused: a template is chosen
+/// before the hire is an employee.</para>
+/// </remarks>
+public class OnboardingPlanTemplateAudience : TenantEntity
+{
+    public Guid PlanTemplateId { get; set; }
+
+    [ForeignKey(nameof(PlanTemplateId))]
+    public virtual OnboardingPlanTemplate PlanTemplate { get; set; } = null!;
+
+    public HrAudienceTargetType TargetType { get; set; }
+
+    /// <summary>The position, unit, level or location. Null only for AllEmployees.</summary>
+    public Guid? TargetEntityId { get; set; }
+
+    /// <summary>False makes this row an exclusion: a hire it matches never gets the template.</summary>
+    public bool IsInclusive { get; set; } = true;
 }
  
 // =============================================================================
@@ -2953,6 +3230,12 @@ public class OnboardingTaskTemplate : TenantEntity
 /// The onboarding plan instance created for a specific new hire.
 /// Generated from an OnboardingPlanTemplate when a HireRecord is confirmed.
 /// </summary>
+/// <remarks>
+/// ⚠ That second sentence was false until round 4 lane I4 — plans were only ever created by a
+/// person pressing a button. <c>JobOfferHireService.ConfirmStartAsync</c> now creates one from the
+/// applicable template after the hire commits, and <see cref="TemplateSelectionReason"/> says why
+/// that template.
+/// </remarks>
 public class OnboardingPlan : TenantEntity
 {
     public Guid EmployeeId { get; set; }
@@ -2985,7 +3268,15 @@ public class OnboardingPlan : TenantEntity
  
     [MaxLength(2000)]
     public string? Notes { get; set; }
- 
+
+    /// <summary>
+    /// Set when the SYSTEM created this plan on hire confirmation: which template it chose and on
+    /// what grounds ("Position: Estates Officer"; "the default template — no audience matched").
+    /// Null on a plan a person created.
+    /// </summary>
+    [MaxLength(500)]
+    public string? TemplateSelectionReason { get; set; }
+
     public virtual ICollection<OnboardingTask> Tasks { get; set; } = new List<OnboardingTask>();
     public virtual ICollection<OnboardingAsset> Assets { get; set; } = new List<OnboardingAsset>();
 }

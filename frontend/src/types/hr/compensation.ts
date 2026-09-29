@@ -179,16 +179,6 @@ export interface EmployeeEmolumentSummary {
   components: EffectivePayComponent[];
 }
 
-/**
- * `GET api/hr/emoluments/encashment-rate` — the per-day rate leave encashment pays at, and the
- * payout for a given number of days. Pass `days` to get `amount`; it is 0 without one.
- */
-export interface EncashmentRateResult {
-  dailyRate: number;
-  days: number;
-  amount: number;
-}
-
 /** Body for `PUT api/hr/emoluments/positions/components/{id}`. */
 export interface UpdatePositionPayComponentRequest {
   amount?: number | null;
