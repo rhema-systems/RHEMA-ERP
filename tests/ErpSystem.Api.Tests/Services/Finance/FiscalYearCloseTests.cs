@@ -20,205 +20,306 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class FiscalYearCloseTests
 {
     [Fact]
-    [Trait("Batch", "FinanceReviewHardening")]
-    [Trait("Category", "YearEndClose")]
-    public async Task CloseFiscalYearAsync_ShouldPostClosingEntryThroughEngineAndZeroIncomeStatementAccounts()
+    public async Task Close_TransfersOnlyBaseIncomeAndDoesNotReplicateItsClosingJournal()
     {
-        var fixture = await FixtureWithPostedActivityAsync();
-
-        var result = await fixture.GlService.CloseFiscalYearAsync(new YearEndCloseRequestDto
-        {
-            FiscalYearId = fixture.FiscalYear.Id,
-            RetainedEarningsAccountId = fixture.RetainedEarnings.Id,
-            ClosingNotes = "FY2026 close"
-        });
-
+        var f = await FixtureWithPostedActivityAsync();
+        var parallel = await AddBookActivityAsync(f, "USD_PARALLEL", AccountingBookType.ParallelFull, 200m, "USD");
+        var delta = await AddBookActivityAsync(f, "IFRS_ADJUSTMENTS", AccountingBookType.Delta, 30m, "GHS");
+        var result = await f.GlService.CloseFiscalYearAsync(CloseRequest(f));
         result.Success.Should().BeTrue();
-
-        var year = await fixture.Db.FiscalYears.SingleAsync(y => y.Id == fixture.FiscalYear.Id);
-        year.IsClosed.Should().BeTrue();
-        year.Status.Should().Be("Closed");
-        year.ClosingJournalEntryId.Should().NotBeNull();
-        year.NetIncomeTransferred.Should().Be(600m);
-        year.RetainedEarningsTransferComplete.Should().BeTrue();
-
-        var closingEntry = await fixture.Db.JournalEntries
-            .Include(j => j.Transactions)
-            .SingleAsync(j => j.Id == year.ClosingJournalEntryId!.Value);
-        closingEntry.PostingStatus.Should().Be("Posted");
-        closingEntry.Transactions.Should().HaveCount(3);
-        closingEntry.Transactions.Single(t => t.AccountId == fixture.Revenue.Id).DebitAmount.Should().Be(1000m);
-        closingEntry.Transactions.Single(t => t.AccountId == fixture.Expense.Id).CreditAmount.Should().Be(400m);
-        closingEntry.Transactions.Single(t => t.AccountId == fixture.RetainedEarnings.Id).CreditAmount.Should().Be(600m);
-
-        // Posting-event back-reference proves the engine (not direct GL writes) posted the close.
-        var postingEvent = await fixture.Db.FinancePostingEvents
-            .SingleAsync(e => e.SourceDocumentType == "YearEndClose" && e.SourceDocumentId == fixture.FiscalYear.Id);
-        postingEvent.JournalEntryId.Should().Be(closingEntry.Id);
-
-        (await fixture.Db.AccountBalances.Where(x => x.AccountId == fixture.Revenue.Id).SumAsync(x => x.PeriodDebits - x.PeriodCredits)).Should().Be(0m);
-        (await fixture.Db.AccountBalances.Where(x => x.AccountId == fixture.Expense.Id).SumAsync(x => x.PeriodDebits - x.PeriodCredits)).Should().Be(0m);
-        (await fixture.Db.AccountBalances.Where(x => x.AccountId == fixture.RetainedEarnings.Id).SumAsync(x => x.PeriodDebits - x.PeriodCredits)).Should().Be(-600m);
+        result.NetIncomeTransferred.Should().Be(100m);
+        result.AccountingBookId.Should().Be(f.Book.Id);
+        var cycle = await f.Db.YearEndBookCloseCycles.SingleAsync();
+        cycle.AccountingBookCode.Should().Be("BASE");
+        cycle.FunctionalCurrencyCode.Should().Be("GHS");
+        cycle.PeriodAuthoritySnapshotJson.Should().Contain("DecidedByUserId");
+        f.FiscalYear.IsClosed.Should().BeFalse();
+        f.FiscalYear.ClosingJournalEntryId.Should().BeNull();
+        var journal = await f.Db.JournalEntries.Include(x => x.Transactions).SingleAsync(x => x.Id == result.ClosingJournalEntryId);
+        journal.AccountingBookId.Should().Be(f.Book.Id);
+        journal.Transactions.Should().HaveCount(3).And.OnlyContain(x => x.AccountingBookId == f.Book.Id);
+        journal.Transactions.Single(x => x.AccountId == f.Revenue.Id).DebitAmount.Should().Be(140m);
+        journal.Transactions.Single(x => x.AccountId == f.Expense.Id).CreditAmount.Should().Be(40m);
+        journal.Transactions.Single(x => x.AccountId == f.RetainedEarnings.Id).CreditAmount.Should().Be(100m);
+        (await IncomeAsync(f, f.Book.Id)).Should().Be(0m);
+        (await IncomeAsync(f, parallel.Id)).Should().Be(200m);
+        (await IncomeAsync(f, delta.Id)).Should().Be(30m);
+        (await f.Db.JournalEntries.CountAsync(x => x.ReplicatedFromJournalEntryId == journal.Id)).Should().Be(0);
+        (await f.Db.AccountBalances.Where(x => x.AccountingBookId == f.Book.Id && x.AccountId == f.Revenue.Id)
+            .SumAsync(x => x.PeriodCredits - x.PeriodDebits)).Should().Be(0m);
     }
 
     [Fact]
-    [Trait("Batch", "FinanceReviewHardening")]
-    [Trait("Category", "YearEndClose")]
-    public async Task CloseFiscalYearAsync_ShouldFailWhilePeriodsRemainOpen()
+    public async Task ParallelBook_ClosesIndependentlyInItsOwnCurrency()
     {
-        var fixture = await FixtureWithPostedActivityAsync(closePeriod: false);
-
-        var result = await fixture.GlService.CloseFiscalYearAsync(new YearEndCloseRequestDto
-        {
-            FiscalYearId = fixture.FiscalYear.Id,
-            RetainedEarningsAccountId = fixture.RetainedEarnings.Id
-        });
-
-        result.Success.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e => e.Contains("still open"));
-        (await fixture.Db.FiscalYears.SingleAsync(y => y.Id == fixture.FiscalYear.Id)).IsClosed.Should().BeFalse();
+        var f = await FixtureWithPostedActivityAsync();
+        var parallel = await AddBookActivityAsync(f, "USD_PARALLEL", AccountingBookType.ParallelFull, 200m, "USD");
+        await f.GlService.CloseFiscalYearAsync(CloseRequest(f));
+        var request = CloseRequest(f, "parallel-1"); request.AccountingBookId = parallel.Id;
+        var result = await f.GlService.CloseFiscalYearAsync(request);
+        result.NetIncomeTransferred.Should().Be(200m);
+        (await IncomeAsync(f, parallel.Id)).Should().Be(0m);
+        (await IncomeAsync(f, f.Book.Id)).Should().Be(0m);
+        var posting = await f.Db.FinancePostingEvents.SingleAsync(x => x.JournalEntryId == result.ClosingJournalEntryId);
+        posting.BookClassification.Should().Be("USD_PARALLEL");
+        posting.FunctionalCurrencyCode.Should().Be("USD");
+        (await f.Db.YearEndBookCloseCycles.CountAsync()).Should().Be(2);
     }
 
     [Fact]
-    [Trait("Batch", "FinanceReviewHardening")]
-    [Trait("Category", "YearEndClose")]
-    public async Task CloseFiscalYearAsync_ShouldFailWhenDraftJournalRemainsInClosedPeriod()
+    public async Task CloseRetry_ReturnsOriginalAndChangedAuthorityConflicts()
     {
-        var fixture = await FixtureWithPostedActivityAsync();
-        var periodId = await fixture.Db.FiscalPeriods
-            .Where(p => p.FiscalYearId == fixture.FiscalYear.Id)
-            .Select(p => p.Id)
-            .SingleAsync();
-        var book = await fixture.Db.AccountingBooks.SingleAsync(item =>
-            item.TenantId == fixture.FiscalYear.TenantId && item.Code == "IFRS");
-
-        fixture.Db.JournalEntries.Add(new JournalEntry
-        {
-            Id = Guid.NewGuid(),
-            TenantId = fixture.FiscalYear.TenantId,
-            JournalEntryNumber = "JE-DRAFT-001",
-            Description = "Unposted year-end adjustment",
-            EntryDate = new DateTime(2026, 12, 31),
-            FiscalPeriodId = periodId,
-            AccountingBookId = book.Id,
-            BookClassification = book.Code,
-            PostingStatus = "Draft",
-            ApprovalStatus = "Draft"
-        });
-        await fixture.Db.SaveChangesAsync();
-
-        var result = await fixture.GlService.CloseFiscalYearAsync(new YearEndCloseRequestDto
-        {
-            FiscalYearId = fixture.FiscalYear.Id,
-            RetainedEarningsAccountId = fixture.RetainedEarnings.Id
-        });
-
-        result.Success.Should().BeFalse();
-        result.Message.Should().Contain("unposted journal entries");
-        result.Errors.Should().ContainSingle(e => e.Contains("1 journal entry is not posted"));
-        (await fixture.Db.FiscalYears.SingleAsync(y => y.Id == fixture.FiscalYear.Id))
-            .IsClosed.Should().BeFalse();
+        var f = await FixtureWithPostedActivityAsync();
+        var request = CloseRequest(f);
+        var first = await f.GlService.CloseFiscalYearAsync(request);
+        var retry = await f.GlService.CloseFiscalYearAsync(request);
+        retry.BookCloseCycleId.Should().Be(first.BookCloseCycleId);
+        retry.ClosingJournalEntryId.Should().Be(first.ClosingJournalEntryId);
+        (await f.Db.FinancePostingEvents.CountAsync(x => x.SourceDocumentType == "YearEndClose")).Should().Be(1);
+        request.AccountingBookId = Guid.NewGuid();
+        await f.GlService.Invoking(x => x.CloseFiscalYearAsync(request)).Should().ThrowAsync<InvalidOperationException>().WithMessage("*idempotency conflict*");
     }
 
     [Fact]
-    [Trait("Batch", "FinanceReviewHardening")]
-    [Trait("Category", "YearEndClose")]
-    public async Task CloseFiscalYearAsync_ShouldFailWhenUnpostedTransactionLineRemains()
+    public async Task ReopenAndReclose_PreserveOriginalEvidenceAndCreateAnotherCycle()
     {
-        var fixture = await FixtureWithPostedActivityAsync();
-        var periodId = await fixture.Db.FiscalPeriods
-            .Where(p => p.FiscalYearId == fixture.FiscalYear.Id)
-            .Select(p => p.Id)
-            .SingleAsync();
-        var book = await fixture.Db.AccountingBooks.SingleAsync(item =>
-            item.TenantId == fixture.FiscalYear.TenantId && item.Code == "IFRS");
+        var f = await FixtureWithPostedActivityAsync();
+        var parallel = await AddBookActivityAsync(f, "USD_PARALLEL", AccountingBookType.ParallelFull, 200m, "USD");
+        var first = await f.GlService.CloseFiscalYearAsync(CloseRequest(f));
+        var reopen = new FiscalYearReopenRequestDto { AccountingBookId = f.Book.Id, BookCloseCycleId = first.BookCloseCycleId!.Value,
+            Reason = "Late supplier invoices require the year-end correction." };
+        (await f.GlService.ReopenFiscalYearAsync(f.FiscalYear.Id, reopen)).Success.Should().BeTrue();
+        var firstCycle = await f.Db.YearEndBookCloseCycles.SingleAsync();
+        firstCycle.Status.Should().Be("Reopened");
+        firstCycle.ClosingJournalEntryId.Should().Be(first.ClosingJournalEntryId);
+        firstCycle.ReversalJournalEntryId.Should().NotBeNull();
+        (await IncomeAsync(f, f.Book.Id)).Should().Be(100m);
+        (await IncomeAsync(f, parallel.Id)).Should().Be(200m);
+        var retry = await f.GlService.ReopenFiscalYearAsync(f.FiscalYear.Id, reopen);
+        retry.ReversalJournalEntryId.Should().Be(firstCycle.ReversalJournalEntryId);
+        await f.GlService.Invoking(x => x.CloseFiscalYearAsync(CloseRequest(f))).Should().ThrowAsync<InvalidOperationException>().WithMessage("*new key*");
+        var second = await f.GlService.CloseFiscalYearAsync(CloseRequest(f, "cycle-2"));
+        second.ClosingJournalEntryId.Should().NotBe(first.ClosingJournalEntryId!.Value);
+        second.NetIncomeTransferred.Should().Be(100m);
+        (await f.Db.YearEndBookCloseCycles.MaxAsync(x => x.CycleNumber)).Should().Be(2);
+        (await IncomeAsync(f, f.Book.Id)).Should().Be(0m);
+        (await f.Db.FinancePostingEvents.CountAsync(x => x.SourceDocumentType == "YearEndCloseReversal")).Should().Be(1);
+        var reverse = await f.Db.JournalEntries.Include(x => x.Transactions).SingleAsync(x => x.Id == firstCycle.ReversalJournalEntryId);
+        reverse.OriginalJournalEntryId.Should().Be(first.ClosingJournalEntryId);
+        reverse.Transactions.Should().OnlyContain(x => x.FunctionalCurrencyCode == "GHS" && x.AccountingBookId == f.Book.Id);
+    }
 
-        fixture.Db.AccountTransactions.Add(new AccountTransaction
-        {
-            Id = Guid.NewGuid(),
-            TenantId = fixture.FiscalYear.TenantId,
-            AccountId = fixture.Expense.Id,
-            JournalEntryId = Guid.NewGuid(),
-            FiscalPeriodId = periodId,
-            AccountingBookId = book.Id,
-            BookClassification = book.Code,
-            TransactionDate = new DateTime(2026, 12, 31),
-            PostingStatus = "Draft",
-            FunctionalCurrencyCode = "GHS",
-            DebitAmount = 25m
-        });
-        await fixture.Db.SaveChangesAsync();
-
-        var result = await fixture.GlService.CloseFiscalYearAsync(new YearEndCloseRequestDto
-        {
-            FiscalYearId = fixture.FiscalYear.Id,
-            RetainedEarningsAccountId = fixture.RetainedEarnings.Id
-        });
-
-        result.Success.Should().BeFalse();
-        result.Message.Should().Contain("unposted transaction lines");
-        result.Errors.Should().ContainSingle(e => e.Contains("1 account transaction line is not posted"));
-        (await fixture.Db.FiscalYears.SingleAsync(y => y.Id == fixture.FiscalYear.Id))
-            .IsClosed.Should().BeFalse();
+    [Theory]
+    [InlineData("Open")]
+    [InlineData("Missing")]
+    [InlineData("Pending")]
+    [InlineData("SelfApproved")]
+    public async Task Close_RequiresCompleteIndependentBookPeriodApproval(string defect)
+    {
+        var f = await FixtureWithPostedActivityAsync();
+        var authority = await f.Db.AccountingBookPeriods.SingleAsync();
+        if (defect == "Open") authority.PeriodStatus = AccountingBookPeriodStatus.Open;
+        if (defect == "Missing") f.Db.AccountingBookPeriods.Remove(authority);
+        if (defect == "Pending") authority.PendingStatus = AccountingBookPeriodStatus.Open;
+        if (defect == "SelfApproved") authority.DecidedByUserId = authority.RequestedByUserId;
+        await f.Db.SaveChangesAsync();
+        (await f.GlService.CloseFiscalYearAsync(CloseRequest(f))).Success.Should().BeFalse();
+        (await f.Db.YearEndBookCloseCycles.CountAsync()).Should().Be(0);
     }
 
     [Fact]
-    [Trait("Batch", "FinanceReviewHardening")]
-    [Trait("Category", "YearEndClose")]
-    public async Task CloseFiscalYearAsync_ShouldRejectSecondCloseWithoutReopen()
+    public async Task Close_RejectsLockedFiscalYearAndLegacyYearWideClose()
     {
-        var fixture = await FixtureWithPostedActivityAsync();
-
-        var first = await fixture.GlService.CloseFiscalYearAsync(new YearEndCloseRequestDto
-        {
-            FiscalYearId = fixture.FiscalYear.Id,
-            RetainedEarningsAccountId = fixture.RetainedEarnings.Id
-        });
-        first.Success.Should().BeTrue();
-        var closingJournalEntryId = (await fixture.Db.FiscalYears.SingleAsync(y => y.Id == fixture.FiscalYear.Id)).ClosingJournalEntryId;
-
-        var second = await fixture.GlService.CloseFiscalYearAsync(new YearEndCloseRequestDto
-        {
-            FiscalYearId = fixture.FiscalYear.Id,
-            RetainedEarningsAccountId = fixture.RetainedEarnings.Id
-        });
-
-        second.Success.Should().BeFalse();
-        second.Message.Should().Contain("already closed");
-        (await fixture.Db.FiscalYears.SingleAsync(y => y.Id == fixture.FiscalYear.Id))
-            .ClosingJournalEntryId.Should().Be(closingJournalEntryId);
+        var f = await FixtureWithPostedActivityAsync();
+        f.FiscalYear.IsLocked = true; await f.Db.SaveChangesAsync();
+        await f.GlService.Invoking(x => x.CloseFiscalYearAsync(CloseRequest(f))).Should().ThrowAsync<InvalidOperationException>().WithMessage("*locked*");
+        f.FiscalYear.IsLocked = false; f.FiscalYear.IsClosed = true; await f.Db.SaveChangesAsync();
+        await f.GlService.Invoking(x => x.CloseFiscalYearAsync(CloseRequest(f))).Should().ThrowAsync<InvalidOperationException>().WithMessage("*legacy*");
+        f.FiscalYear.IsClosed.Should().BeTrue();
     }
 
     [Fact]
-    [Trait("Batch", "FinanceReviewHardening")]
-    [Trait("Category", "YearEndClose")]
-    public async Task ReopenFiscalYearAsync_ShouldReverseClosingEntryAndRestoreBalances()
+    public async Task Close_RejectsWrongBookCurrencyAndNonEquityRetainedEarnings()
     {
-        var fixture = await FixtureWithPostedActivityAsync();
-        await fixture.GlService.CloseFiscalYearAsync(new YearEndCloseRequestDto
-        {
-            FiscalYearId = fixture.FiscalYear.Id,
-            RetainedEarningsAccountId = fixture.RetainedEarnings.Id
-        });
+        var f = await FixtureWithPostedActivityAsync();
+        var request = CloseRequest(f); request.RetainedEarningsAccountId = f.Revenue.Id;
+        await f.GlService.Invoking(x => x.CloseFiscalYearAsync(request)).Should().ThrowAsync<InvalidOperationException>().WithMessage("*equity*");
+        // InMemory cannot roll back its transaction; use a fresh fixture for the currency denial.
+        f = await FixtureWithPostedActivityAsync();
+        var transaction = await f.Db.AccountTransactions.FirstAsync(x => x.AccountId == f.Revenue.Id);
+        transaction.FunctionalCurrencyCode = "USD"; await f.Db.SaveChangesAsync();
+        await f.GlService.Invoking(x => x.CloseFiscalYearAsync(CloseRequest(f))).Should().ThrowAsync<InvalidOperationException>().WithMessage("*currency*");
+        (await f.Db.FinancePostingEvents.CountAsync(x => x.SourceDocumentType == "YearEndClose")).Should().Be(0);
+    }
 
-        var result = await fixture.GlService.ReopenFiscalYearAsync(fixture.FiscalYear.Id, "Late supplier invoices for December");
+    [Fact]
+    public async Task DraftJournalInAnotherBook_DoesNotBlockBaseClose()
+    {
+        var f = await FixtureWithPostedActivityAsync();
+        var parallel = await AddBookActivityAsync(f, "USD_PARALLEL", AccountingBookType.ParallelFull, 200m, "USD");
+        f.Db.JournalEntries.Add(new JournalEntry { TenantId = f.FiscalYear.TenantId, AccountingBookId = parallel.Id,
+            FiscalPeriodId = f.Period.Id, JournalEntryNumber = "PAR-DRAFT", Description = "Parallel adjustment",
+            EntryDate = f.Period.EndDate, PostingStatus = "Draft" });
+        await f.Db.SaveChangesAsync();
+        (await f.GlService.CloseFiscalYearAsync(CloseRequest(f))).Success.Should().BeTrue();
+    }
 
+    [Fact]
+    public async Task UnpostedJournalInSelectedBook_BlocksClose()
+    {
+        var f = await FixtureWithPostedActivityAsync();
+        f.Db.JournalEntries.Add(new JournalEntry { TenantId = f.FiscalYear.TenantId, AccountingBookId = f.Book.Id,
+            FiscalPeriodId = f.Period.Id, JournalEntryNumber = "BASE-DRAFT", Description = "Base adjustment",
+            EntryDate = f.Period.EndDate, PostingStatus = "Draft" });
+        await f.Db.SaveChangesAsync();
+        (await f.GlService.CloseFiscalYearAsync(CloseRequest(f))).Message.Should().Contain("unposted journal");
+        (await f.Db.YearEndBookCloseCycles.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PostingEngine_RejectsForgedYearEndRouteAndUnboundCycle()
+    {
+        var f = await FixtureWithPostedActivityAsync();
+        var forged = ActivityRequest(f.FiscalYear.TenantId, "FORGED", new[] {
+            new FinancePostingLineDto { AccountId = f.Cash.Id, DebitAmount = 10m },
+            new FinancePostingLineDto { AccountId = f.Revenue.Id, CreditAmount = 10m } });
+        forged.SourceModule = "GL"; forged.SourceDocumentType = "YearEndClose"; forged.AllowPostingToClosedPeriod = true;
+        await f.Engine.Invoking(x => x.PostAsync(forged)).Should().ThrowAsync<InvalidOperationException>().WithMessage("*governed book-close cycle*");
+        await f.Engine.Invoking(x => x.PostYearEndAsync(forged, Guid.NewGuid())).Should().ThrowAsync<InvalidOperationException>().WithMessage("*durable*");
+    }
+
+    [Fact]
+    public async Task ClosedBookYear_BlocksOrdinaryPostEvenIfPeriodWasOpened()
+    {
+        var f = await FixtureWithPostedActivityAsync();
+        await f.GlService.CloseFiscalYearAsync(CloseRequest(f));
+        f.Period.IsClosed = false; f.Period.IsOpen = true; await f.Db.SaveChangesAsync();
+        var request = ActivityRequest(f.FiscalYear.TenantId, "LATE", new[] {
+            new FinancePostingLineDto { AccountId = f.Cash.Id, DebitAmount = 10m },
+            new FinancePostingLineDto { AccountId = f.Revenue.Id, CreditAmount = 10m } });
+        await f.Engine.Invoking(x => x.PostAsync(request)).Should().ThrowAsync<InvalidOperationException>().WithMessage("*closed for this fiscal year*");
+    }
+
+    [Fact]
+    public void FiscalYearEndpoints_PreserveDistinctCloseAndReopenPermissions()
+    {
+        var controller = typeof(ErpSystem.Api.Controllers.Finance.FiscalPeriodController);
+        var close = controller.GetMethod("CloseFiscalYear")!.GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AuthorizeAttribute), true)
+            .Cast<Microsoft.AspNetCore.Authorization.AuthorizeAttribute>().Select(x => x.Policy);
+        var reopen = controller.GetMethod("ReopenFiscalYear")!.GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AuthorizeAttribute), true)
+            .Cast<Microsoft.AspNetCore.Authorization.AuthorizeAttribute>().Select(x => x.Policy);
+        close.Should().Contain(FinancePermissions.CloseAccountingPeriods);
+        reopen.Should().Contain(FinancePermissions.ReopenAccountingPeriods);
+        close.Should().NotContain(FinancePermissions.ReopenAccountingPeriods);
+    }
+
+    [Fact]
+    public async Task OrdinaryPrimaryPosting_StillCreatesParallelReplica()
+    {
+        var f = await FixtureWithPostedActivityAsync();
+        var parallel = await AddBookActivityAsync(f, "USD_PARALLEL", AccountingBookType.ParallelFull, 200m, "USD");
+        f.Period.IsOpen = true; f.Period.IsClosed = false;
+        f.Db.ExchangeRates.Add(new ExchangeRate { TenantId = f.FiscalYear.TenantId, BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = "USD", Rate = 2m, InverseRate = 0.5m, EffectiveDate = new DateTime(2026, 1, 1),
+            RateType = ExchangeRateType.Daily, QuoteSide = ExchangeRateQuoteSide.Mid, RateSource = "Approved fixture",
+            ApprovalStatus = RateApprovalStatus.Approved, IsActive = true, CreatedByUserId = Guid.NewGuid() });
+        await f.Db.SaveChangesAsync();
+        var request = ActivityRequest(f.FiscalYear.TenantId, "NORMAL-REPLICA", new[] {
+            new FinancePostingLineDto { AccountId = f.Cash.Id, DebitAmount = 10m },
+            new FinancePostingLineDto { AccountId = f.Revenue.Id, CreditAmount = 10m } });
+        var posted = await f.Engine.PostAsync(request);
+        var replica = await f.Db.JournalEntries.SingleAsync(x => x.ReplicatedFromJournalEntryId == posted.JournalEntryId);
+        replica.AccountingBookId.Should().Be(parallel.Id);
+        replica.TotalDebitAmount.Should().Be(20m);
+        request.AccountingBookCode = parallel.Code;
+        request.FunctionalCurrencyCode = "USD";
+        await f.Engine.Invoking(x => x.PostAsync(request)).Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("PARALLEL_DIRECT_POSTING_FORBIDDEN*");
+    }
+
+    [Fact]
+    public void Migration_PreservesEvidenceAndDefinesConcurrencyAndTenantBookKeys()
+    {
+        var migration = new ErpSystem.Data.Migrations.YearEndBookCloseCycles();
+        var table = migration.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.CreateTableOperation>().Single();
+        table.Name.Should().Be("YearEndBookCloseCycles");
+        table.Columns.Single(x => x.Name == "RowVersion").IsRowVersion.Should().BeTrue();
+        table.ForeignKeys.Should().Contain(x => x.Columns.SequenceEqual(new[] { "TenantId", "FiscalYearId" }));
+        table.ForeignKeys.Should().Contain(x => x.Columns.SequenceEqual(new[] { "TenantId", "ClosingJournalEntryId", "AccountingBookId" }));
+        migration.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.CreateIndexOperation>()
+            .Should().Contain(x => x.IsUnique && x.Filter == "[Status] IN ('Closing', 'Closed')");
+        migration.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.SqlOperation>()
+            .Should().Contain(x => x.Sql.Contains("ImmutableEvidence") && x.Sql.Contains("cannot be deleted"));
+        migration.DownOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.SqlOperation>()
+            .Should().Contain(x => x.Sql.Contains("IF EXISTS") && x.Sql.Contains("retained book-year close evidence"));
+    }
+
+    [Fact]
+    public async Task RelationalYearEndLeaf_RejectsMissingSerializableTransactionWithoutOpeningDatabase()
+    {
+        var tenantId = Guid.NewGuid();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer("Server=invalid.example;Database=unused;Integrated Security=true;TrustServerCertificate=true").Options;
+        await using var db = new ApplicationDbContext(options);
+        var engine = new FinancePostingEngine(db, CreateCurrentUser(tenantId).Object, Mock.Of<ILogger<FinancePostingEngine>>());
+        await engine.Invoking(x => x.PostYearEndAsync(new FinancePostingRequestV2Dto(), Guid.NewGuid()))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*serializable transaction*");
+    }
+
+    [Fact]
+    public async Task NoNominalActivity_ClosesAndReopensWithoutInventingAJournal()
+    {
+        var f = await FixtureWithPostedActivityAsync();
+        var emptyBook = await AddBookActivityAsync(f, "EMPTY_DELTA", AccountingBookType.Delta, 0m, "GHS");
+        var request = CloseRequest(f); request.AccountingBookId = emptyBook.Id;
+        var result = await f.GlService.CloseFiscalYearAsync(request);
         result.Success.Should().BeTrue();
+        result.ClosingJournalEntryId.Should().BeNull();
+        result.NetIncomeTransferred.Should().Be(0m);
+        var reopened = await f.GlService.ReopenFiscalYearAsync(f.FiscalYear.Id, new FiscalYearReopenRequestDto
+        {
+            AccountingBookId = emptyBook.Id, BookCloseCycleId = result.BookCloseCycleId!.Value,
+            Reason = "Reopen the no-activity close for correction."
+        });
+        reopened.ReversalJournalEntryId.Should().BeNull();
+        (await f.Db.YearEndBookCloseCycles.SingleAsync()).Status.Should().Be("Reopened");
+        (await f.Db.FinancePostingEvents.CountAsync(x => x.AccountingBookId == emptyBook.Id)).Should().Be(0);
+    }
 
-        var year = await fixture.Db.FiscalYears.SingleAsync(y => y.Id == fixture.FiscalYear.Id);
-        year.IsClosed.Should().BeFalse();
-        year.Status.Should().Be("Open");
-        year.ClosingJournalEntryId.Should().BeNull();
-        year.RetainedEarningsTransferComplete.Should().BeFalse();
-        year.YearEndClosingNotes.Should().Contain("Late supplier invoices for December");
+    private static YearEndCloseRequestDto CloseRequest(Fixture f, string key = "cycle-1") => new()
+    { FiscalYearId = f.FiscalYear.Id, AccountingBookId = f.Book.Id, RetainedEarningsAccountId = f.RetainedEarnings.Id, IdempotencyKey = key };
 
-        var reversalEvent = await fixture.Db.FinancePostingEvents
-            .SingleAsync(e => e.SourceDocumentType == "YearEndCloseReversal" && e.SourceDocumentId == fixture.FiscalYear.Id);
-        reversalEvent.JournalEntryId.Should().NotBeNull();
+    private static Task<decimal> IncomeAsync(Fixture f, Guid bookId) => f.Db.AccountTransactions
+        .Where(x => x.AccountingBookId == bookId && (x.AccountId == f.Revenue.Id || x.AccountId == f.Expense.Id))
+        .SumAsync(x => x.CreditAmount - x.DebitAmount);
 
-        (await fixture.Db.AccountBalances.Where(x => x.AccountId == fixture.Revenue.Id).SumAsync(x => x.PeriodDebits - x.PeriodCredits)).Should().Be(-1000m);
-        (await fixture.Db.AccountBalances.Where(x => x.AccountId == fixture.Expense.Id).SumAsync(x => x.PeriodDebits - x.PeriodCredits)).Should().Be(400m);
-        (await fixture.Db.AccountBalances.Where(x => x.AccountId == fixture.RetainedEarnings.Id).SumAsync(x => x.PeriodDebits - x.PeriodCredits)).Should().Be(0m);
+    private static async Task<AccountingBook> AddBookActivityAsync(Fixture f, string code, AccountingBookType type, decimal income, string currency)
+    {
+        var book = new AccountingBook { TenantId = f.FiscalYear.TenantId, Code = code, Name = code, BookType = type,
+            BaseAccountingBookId = f.Book.Id, FunctionalCurrencyCode = type == AccountingBookType.Delta ? null : currency,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, IsActive = true, AllowsPosting = true,
+            ReplicationStartDate = type == AccountingBookType.ParallelFull ? f.FiscalYear.StartDate : null,
+            ParallelOpeningMode = type == AccountingBookType.ParallelFull ? ParallelBookOpeningMode.ZeroOpening : null };
+        f.Db.AccountingBooks.Add(book);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(f.Db, f.FiscalYear.TenantId, f.Period, code);
+        var authority = f.Db.AccountingBookPeriods.Local.Single(x => x.AccountingBookId == book.Id);
+        authority.PeriodStatus = AccountingBookPeriodStatus.Closed;
+        authority.RequestedByUserId = Guid.NewGuid(); authority.DecidedByUserId = Guid.NewGuid(); authority.DecidedAtUtc = DateTime.UtcNow;
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(f.Db, f.FiscalYear.TenantId, book, f.Cash, f.Revenue, f.Expense, f.RetainedEarnings);
+        var journal = new JournalEntry { TenantId = f.FiscalYear.TenantId, AccountingBookId = book.Id, BookClassification = code,
+            FiscalPeriodId = f.Period.Id, JournalEntryNumber = code + "-ACTIVITY", Description = "Existing book activity",
+            EntryDate = new DateTime(2026, 6, 15), PostingStatus = "Posted", TotalDebitAmount = income, TotalCreditAmount = income };
+        journal.Transactions = new List<AccountTransaction> {
+            new() { TenantId = f.FiscalYear.TenantId, AccountingBookId = book.Id, BookClassification = code,
+                AccountId = f.Cash.Id, FiscalPeriodId = f.Period.Id, TransactionDate = journal.EntryDate, DebitAmount = income,
+                FunctionalCurrencyCode = currency, TransactionCurrency = currency, PostingStatus = "Posted", LineNumber = 1 },
+            new() { TenantId = f.FiscalYear.TenantId, AccountingBookId = book.Id, BookClassification = code,
+                AccountId = f.Revenue.Id, FiscalPeriodId = f.Period.Id, TransactionDate = journal.EntryDate, CreditAmount = income,
+                FunctionalCurrencyCode = currency, TransactionCurrency = currency, PostingStatus = "Posted", LineNumber = 2 }
+        };
+        f.Db.JournalEntries.Add(journal);
+        await f.Db.SaveChangesAsync();
+        return book;
     }
 
     private sealed record Fixture(
@@ -227,7 +328,11 @@ public sealed class FiscalYearCloseTests
         FiscalYear FiscalYear,
         Account Revenue,
         Account Expense,
-        Account RetainedEarnings);
+        Account RetainedEarnings,
+        Account Cash,
+        AccountingBook Book,
+        FiscalPeriod Period,
+        FinancePostingEngine Engine);
 
     private static async Task<Fixture> FixtureWithPostedActivityAsync(bool closePeriod = true)
     {
@@ -244,7 +349,7 @@ public sealed class FiscalYearCloseTests
         });
         var book = new AccountingBook
         {
-            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "BASE", Name = "Base Primary",
             Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
             LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
             IsDefault = true, IsActive = true, AllowsPosting = true
@@ -297,16 +402,16 @@ public sealed class FiscalYearCloseTests
         var currentUser = CreateCurrentUser(tenantId);
         var engine = new FinancePostingEngine(db, currentUser.Object, Mock.Of<ILogger<FinancePostingEngine>>());
 
-        // Post real activity through the engine: revenue 1000, expense 400 (net income 600).
+        // Post real activity through the engine: revenue 140, expense 40 (net income 100).
         await engine.PostAsync(ActivityRequest(tenantId, "REV-1", new[]
         {
-            new FinancePostingLineDto { AccountId = cash.Id, Description = "Cash in", DebitAmount = 1000m },
-            new FinancePostingLineDto { AccountId = revenue.Id, Description = "Sales", CreditAmount = 1000m }
+            new FinancePostingLineDto { AccountId = cash.Id, Description = "Cash in", DebitAmount = 140m },
+            new FinancePostingLineDto { AccountId = revenue.Id, Description = "Sales", CreditAmount = 140m }
         }));
         await engine.PostAsync(ActivityRequest(tenantId, "EXP-1", new[]
         {
-            new FinancePostingLineDto { AccountId = expense.Id, Description = "Rent", DebitAmount = 400m },
-            new FinancePostingLineDto { AccountId = cash.Id, Description = "Cash out", CreditAmount = 400m }
+            new FinancePostingLineDto { AccountId = expense.Id, Description = "Rent", DebitAmount = 40m },
+            new FinancePostingLineDto { AccountId = cash.Id, Description = "Cash out", CreditAmount = 40m }
         }));
 
         if (closePeriod)
@@ -314,6 +419,11 @@ public sealed class FiscalYearCloseTests
             period.IsOpen = false;
             period.IsClosed = true;
             period.PeriodStatus = "Closed";
+            var authority = db.AccountingBookPeriods.Local.Single();
+            authority.PeriodStatus = AccountingBookPeriodStatus.Closed;
+            authority.RequestedByUserId = Guid.NewGuid();
+            authority.DecidedByUserId = Guid.NewGuid();
+            authority.DecidedAtUtc = DateTime.UtcNow;
             await db.SaveChangesAsync();
         }
 
@@ -334,7 +444,7 @@ public sealed class FiscalYearCloseTests
             Mock.Of<IAccountingBookService>(),
             engine);
 
-        return new Fixture(db, glService, fiscalYear, revenue, expense, retainedEarnings);
+        return new Fixture(db, glService, fiscalYear, revenue, expense, retainedEarnings, cash, book, period, engine);
     }
 
     private static FinancePostingRequestV2Dto ActivityRequest(Guid tenantId, string reference, FinancePostingLineDto[] lines)
@@ -350,7 +460,7 @@ public sealed class FiscalYearCloseTests
             Description = $"Activity {reference}",
             PostingDate = new DateTime(2026, 6, 15),
             JournalType = "System Generated",
-            AccountingBookCode = "IFRS",
+            AccountingBookCode = "BASE",
             FunctionalCurrencyCode = "GHS",
             Lines = lines
         };

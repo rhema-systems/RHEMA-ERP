@@ -8,6 +8,7 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -55,6 +56,57 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         FinancePostingProducerContext producerContext,
         CancellationToken cancellationToken = default) =>
         await PostCoreAsync(request, request.AccountingBookCode, producerContext ?? throw new ArgumentNullException(nameof(producerContext)), allowHistoricalMappingException: false, cancellationToken);
+
+    public async Task<FinancePostingResultDto> PostYearEndAsync(
+        FinancePostingRequestV2Dto request, Guid bookCloseCycleId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = _currentUserService.GetRequiredFinanceTenantId();
+        var actor = GetCurrentUserGuid() ?? throw new UnauthorizedAccessException("An authenticated Finance user is required.");
+        if (_context.Database.IsRelational() && (_context.Database.CurrentTransaction is null
+            || _context.Database.CurrentTransaction.GetDbTransaction().IsolationLevel != System.Data.IsolationLevel.Serializable))
+            throw new InvalidOperationException("Year-end posting requires the caller's serializable transaction.");
+        var cycle = _context.YearEndBookCloseCycles.Local.SingleOrDefault(item =>
+            item.Id == bookCloseCycleId && item.TenantId == tenantId && !item.IsDeleted);
+        var stored = await _context.YearEndBookCloseCycles.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.Id == bookCloseCycleId && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+        if (cycle == null || stored == null || cycle.AccountingBookId != stored.AccountingBookId
+            || cycle.AccountingBookCode != stored.AccountingBookCode || cycle.FunctionalCurrencyCode != stored.FunctionalCurrencyCode
+            || cycle.FiscalYearId != stored.FiscalYearId || cycle.Status != stored.Status
+            || cycle.ClosingJournalEntryId != stored.ClosingJournalEntryId
+            || cycle.RetainedEarningsAccountId != stored.RetainedEarningsAccountId || cycle.IdempotencyKey != stored.IdempotencyKey
+            || cycle.ClosedByUserId != stored.ClosedByUserId || cycle.ClosedAtUtc != stored.ClosedAtUtc
+            || cycle.PeriodAuthoritySnapshotJson != stored.PeriodAuthoritySnapshotJson)
+            throw new InvalidOperationException("Year-end posting requires its durable, unchanged book-close cycle authority.");
+        var reverse = request.SourceDocumentType == "YearEndCloseReversal";
+        if (request.SourceModule != "GL" || request.SourceDocumentTenantId != tenantId || request.SourceDocumentId != cycle.Id
+            || request.AccountingBookCode != cycle.AccountingBookCode || request.FunctionalCurrencyCode != cycle.FunctionalCurrencyCode
+            || request.ExistingJournalEntryId != null || !request.AllowPostingToClosedPeriod
+            || (reverse
+                ? cycle.Status != "Closed" || cycle.ClosingJournalEntryId == null
+                    || request.ReversalOfJournalEntryId != cycle.ClosingJournalEntryId || request.PostingAction != "Reverse"
+                : request.SourceDocumentType != "YearEndClose" || cycle.Status != "Closing"
+                    || cycle.ClosedByUserId != actor || request.ReversalOfJournalEntryId != null || request.PostingAction != "Post")
+            || request.IdempotencyKey != $"GL:{(reverse ? "YearEndCloseReversal" : "YearEndClose")}:{tenantId:N}:{cycle.AccountingBookId:N}:{cycle.Id:N}")
+            throw new InvalidOperationException("The year-end request does not match its exact book-close cycle.");
+        var period = await _context.FiscalPeriods.Include(item => item.FiscalYear).SingleOrDefaultAsync(item =>
+            item.Id == request.FiscalPeriodId && item.TenantId == tenantId && item.FiscalYearId == cycle.FiscalYearId
+            && !item.IsDeleted, cancellationToken);
+        if (period == null || period.FiscalYear.IsLocked || period.FiscalYear.IsClosed
+            || request.PostingDate.Date != period.FiscalYear.EndDate.Date || period.IsLocked)
+            throw new InvalidOperationException("Year-end posting date and fiscal-year authority do not match.");
+        var bookPeriod = await _context.AccountingBookPeriods.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.AccountingBookId == cycle.AccountingBookId
+            && item.FiscalPeriodId == period.Id && !item.IsDeleted, cancellationToken);
+        if (bookPeriod == null || bookPeriod.PeriodStatus != AccountingBookPeriodStatus.Closed || bookPeriod.PendingStatus != null
+            || bookPeriod.RequestedByUserId == null || bookPeriod.DecidedByUserId == null
+            || bookPeriod.RequestedByUserId == bookPeriod.DecidedByUserId || bookPeriod.DecidedAtUtc == null)
+            throw new InvalidOperationException("Year-end posting requires independently approved closed accounting-book period authority.");
+        var validation = await ValidatePostingRequestAsync(tenantId, request, cycle.AccountingBookCode,
+            producerContext: null, allowHistoricalMappingException: reverse, cancellationToken, cycle);
+        if (validation.AccountingBookId != cycle.AccountingBookId)
+            throw new InvalidOperationException("The resolved accounting book differs from the frozen close cycle.");
+        return await ExecutePostingAsync(tenantId, validation, request, accountingEventContext: null, cancellationToken, cycle);
+    }
 
     private async Task<FinancePostingResultDto> PostCoreAsync(
         FinancePostingCommandDto request,
@@ -123,10 +175,13 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         ValidatedPosting validation,
         FinancePostingCommandDto request,
         AccountingEventPostingAuthority? accountingEventContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        YearEndBookCloseCycle? yearEndCycle = null)
     {
         await EnsureNoParallelBookPostingAsync(tenantId, validation, acquireLock: true,
             accountingEventContext, cancellationToken);
+        if (yearEndCycle == null)
+            await EnsureBookYearIsOpenAsync(tenantId, validation.AccountingBookId, validation.FiscalPeriod.FiscalYearId, cancellationToken);
         var duplicateInsideTransaction = await FindExistingPostingAsync(tenantId, validation, accountingEventContext, cancellationToken);
         if (duplicateInsideTransaction != null)
         {
@@ -153,7 +208,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         // Resolve every active foreign-currency representation before any ledger row is
         // committed. Missing rates, mappings, or rounding authority therefore roll the
         // Primary posting back instead of creating an inconsistent Parallel ledger.
-        var parallelReplicas = await BuildParallelReplicasAsync(
+        var parallelReplicas = yearEndCycle != null ? Array.Empty<ParallelReplica>() : await BuildParallelReplicasAsync(
             tenantId, validation, journalEntry, now, postedByUserId, cancellationToken);
 
         if (validation.BudgetReservationIds.Count > 0)
@@ -924,6 +979,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         var replicas = new List<ParallelReplica>(books.Count);
         foreach (var book in books)
         {
+            await EnsureBookYearIsOpenAsync(tenantId, book.Id, validation.FiscalPeriod.FiscalYearId, cancellationToken);
             if (string.IsNullOrWhiteSpace(book.FunctionalCurrencyCode)
                 || string.Equals(book.FunctionalCurrencyCode, validation.FunctionalCurrencyCode, StringComparison.Ordinal))
                 throw new InvalidOperationException($"PARALLEL_CURRENCY_INVALID: Parallel book {book.Code} must use a foreign currency.");
@@ -1289,7 +1345,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         string accountingBookCode,
         FinancePostingProducerContext? producerContext,
         bool allowHistoricalMappingException,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        YearEndBookCloseCycle? yearEndCycle = null)
     {
         if (!await _context.Tenants.AnyAsync(t => t.Id == tenantId && !t.IsDeleted, cancellationToken))
         {
@@ -1306,6 +1363,9 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             sourceModule,
             request.OriginModuleCode);
         var sourceDocumentType = NormalizeRequired(request.SourceDocumentType, "Source document type", 100);
+        if (yearEndCycle == null && (string.Equals(sourceDocumentType, "YearEndClose", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sourceDocumentType, "YearEndCloseReversal", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("Year-end postings must use the governed book-close cycle workflow.");
         var route = producerContext?.Definition
             ?? FinanceDimensionRouteCatalog.MatchLegacyPosting(sourceModule, sourceDocumentType);
         if (producerContext is not null
@@ -1341,7 +1401,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 tenantId, request, normalizedAccountingBookCode, "BOOK_NOT_POSTABLE", cancellationToken);
             throw new InvalidOperationException("Accounting book is unavailable for posting.");
         }
-        if (accountingBook.BookType == AccountingBookType.ParallelFull)
+        if (accountingBook.BookType == AccountingBookType.ParallelFull && yearEndCycle == null)
             throw new InvalidOperationException("PARALLEL_DIRECT_POSTING_FORBIDDEN: Parallel books accept only immutable system-generated replicas of Primary postings.");
         if (accountingBook.BookType == AccountingBookType.PrimaryFull
             && (accountingBook.EffectiveFromUtc.HasValue || accountingBook.EffectiveToUtc.HasValue))
@@ -1420,11 +1480,14 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         var fiscalPeriod = await ResolveFiscalPeriodAsync(tenantId, postingDate, request.FiscalPeriodId, cancellationToken);
         // Year-end closing may target the closed final period, but an explicit period lock is
         // still authoritative and must be lifted through the controlled reopen process first.
-        var isYearEndClosePosting = request.AllowPostingToClosedPeriod
+        var isYearEndClosePosting = yearEndCycle != null && request.AllowPostingToClosedPeriod
             && !fiscalPeriod.IsLocked
             && string.Equals(sourceModule, "GL", StringComparison.OrdinalIgnoreCase)
             && (string.Equals(sourceDocumentType, "YearEndClose", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(sourceDocumentType, "YearEndCloseReversal", StringComparison.OrdinalIgnoreCase));
+
+        if (yearEndCycle == null)
+            await EnsureBookYearIsOpenAsync(tenantId, accountingBook.Id, fiscalPeriod.FiscalYearId, cancellationToken);
 
         if ((!fiscalPeriod.IsOpen || fiscalPeriod.IsClosed || fiscalPeriod.IsLocked) && !isYearEndClosePosting)
         {
@@ -1712,6 +1775,11 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         foreach (var line in normalizedLines)
         {
             var account = accounts[line.AccountId];
+            // Parallel year-end transfers close that book's functional balances; they do not
+            // introduce a new foreign transaction into the primary account's native ledger.
+            if (yearEndCycle != null && accountingBook.BookType == AccountingBookType.ParallelFull
+                && string.Equals(line.TransactionCurrency, functionalCurrency, StringComparison.Ordinal))
+                continue;
             var accountCurrency = NormalizeCurrency(account.CurrencyCode, "Account currency", functionalCurrency);
             if (!account.IsMultiCurrency
                 && !string.Equals(accountCurrency, line.TransactionCurrency, StringComparison.OrdinalIgnoreCase))
@@ -1841,6 +1909,13 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 cancellationToken);
 
         return period ?? throw new InvalidOperationException("No fiscal period covers the posting date for this tenant.");
+    }
+
+    private async Task EnsureBookYearIsOpenAsync(Guid tenantId, Guid bookId, Guid fiscalYearId, CancellationToken ct)
+    {
+        if (await _context.YearEndBookCloseCycles.AsNoTracking().AnyAsync(item => item.TenantId == tenantId
+            && item.AccountingBookId == bookId && item.FiscalYearId == fiscalYearId && item.Status != "Reopened", ct))
+            throw new InvalidOperationException("The accounting book is closed for this fiscal year. Reopen its year-end close cycle first.");
     }
 
     private async Task EnsureOriginModuleCanPostAsync(

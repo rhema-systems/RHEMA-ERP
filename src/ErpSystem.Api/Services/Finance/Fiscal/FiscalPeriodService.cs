@@ -292,6 +292,11 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
         {
             var dependencies = new List<string>();
 
+            if (await _unitOfWork.Repository<YearEndBookCloseCycle>()
+                .GetQueryable(cycle => cycle.TenantId == TenantId && cycle.FiscalYearId == fiscalYearId)
+                .AnyAsync(cancellationToken))
+                dependencies.Add("retained accounting-book year-end close cycles");
+
             if (await _unitOfWork.Repository<FiscalYear>()
                 .GetQueryable(fy => fy.TenantId == TenantId && fy.NextFiscalYearId == fiscalYearId)
                 .AnyAsync(cancellationToken))

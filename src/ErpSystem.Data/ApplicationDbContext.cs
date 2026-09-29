@@ -125,6 +125,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<AccountingBook> AccountingBooks { get; set; }
     public DbSet<AccountingBookPrimaryDesignation> AccountingBookPrimaryDesignations { get; set; }
     public DbSet<AccountingBookPeriod> AccountingBookPeriods { get; set; }
+    public DbSet<YearEndBookCloseCycle> YearEndBookCloseCycles { get; set; }
     public DbSet<AccountingBookInitialization> AccountingBookInitializations { get; set; }
     public DbSet<AccountingBookInitializationLine> AccountingBookInitializationLines { get; set; }
     public DbSet<AccountingBookApplicabilityPolicy> AccountingBookApplicabilityPolicies { get; set; }
@@ -3552,6 +3553,39 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(item => item.FiscalPeriod).WithMany()
                 .HasForeignKey(item => new { item.TenantId, item.FiscalPeriodId })
                 .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<YearEndBookCloseCycle>(entity =>
+        {
+            entity.ToTable("YearEndBookCloseCycles", table =>
+            {
+                table.HasTrigger("TR_YearEndBookCloseCycles_ImmutableEvidence");
+                table.HasCheckConstraint("CK_YearEndBookCloseCycles_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_YearEndBookCloseCycles_Status", "[Status] IN ('Closing', 'Closed', 'Reopened')");
+                table.HasCheckConstraint("CK_YearEndBookCloseCycles_Cycle", "[CycleNumber] > 0");
+                table.HasCheckConstraint("CK_YearEndBookCloseCycles_Reopen", "([Status] <> 'Reopened' AND [ReopenedAtUtc] IS NULL AND [ReopenedByUserId] IS NULL AND [ReopenReason] IS NULL AND [ReversalJournalEntryId] IS NULL) OR ([Status] = 'Reopened' AND [ReopenedAtUtc] IS NOT NULL AND [ReopenedByUserId] IS NOT NULL AND [ReopenReason] IS NOT NULL AND ([ClosingJournalEntryId] IS NULL OR [ReversalJournalEntryId] IS NOT NULL))");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.FiscalYearId, item.AccountingBookId, item.CycleNumber }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.FiscalYearId, item.AccountingBookId })
+                .IsUnique().HasFilter("[Status] IN ('Closing', 'Closed')");
+            entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasOne(item => item.AccountingBook).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId, item.AccountingBookCode })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id, item.Code }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.FiscalYear).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.FiscalYearId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.RetainedEarningsAccount).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.RetainedEarningsAccountId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ClosingJournalEntry).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.ClosingJournalEntryId, item.AccountingBookId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id, item.AccountingBookId }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ReversalJournalEntry).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.ReversalJournalEntryId, item.AccountingBookId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id, item.AccountingBookId }).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
