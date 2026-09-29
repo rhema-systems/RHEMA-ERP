@@ -4,6 +4,8 @@ param(
     [string]$Environment = 'Test',
 
     [switch]$DryRun,
+    [switch]$DeployOnly,
+    [string]$ArtifactDirectory,
     [switch]$ReuseVerifiedArtifacts,
     [ValidatePattern('^[0-9a-fA-F]{7,40}$')]
     [string]$ReuseApiOutputFromCommit,
@@ -70,6 +72,17 @@ function Reset-GeneratedDirectory {
         Remove-Item -LiteralPath $Path -Recurse -Force
     }
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
+}
+
+function Clear-NextOutputPreservingCache {
+    param([string]$Path)
+    Assert-SafeChildPath $Path (Join-Path $RepositoryRoot 'frontend')
+    if (-not (Test-Path -LiteralPath $Path)) {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+        return
+    }
+    Get-ChildItem -LiteralPath $Path -Force | Where-Object Name -ne 'cache' |
+        Remove-Item -Recurse -Force
 }
 
 function Invoke-Step {
@@ -440,7 +453,14 @@ function Test-ReleaseManifest {
     try {
         $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
         if ($manifest.commit -ne $script:Commit) { return $null }
+        if ($DeployOnly -and $manifest.schemaVersion -ne 2) { return $null }
+        if ($DeployOnly -and $manifest.environment -ne $Environment) { return $null }
         if ($manifest.publicBaseUrl -ne $PublicBaseUrl) { return $null }
+        if ($DeployOnly -and $manifest.nextPublicApiUrl -ne "$($PublicBaseUrl.TrimEnd('/'))/api") {
+            return $null
+        }
+        if ($DeployOnly -and ([string]::IsNullOrWhiteSpace([string]$manifest.releaseId) -or
+            [string]$manifest.releaseId -notmatch '^[a-zA-Z0-9-]+$')) { return $null }
         if ([string]::IsNullOrWhiteSpace([string]$manifest.buildId) -or
             [string]::IsNullOrWhiteSpace([string]$manifest.cacheVersion)) {
             return $null
@@ -598,15 +618,18 @@ function New-ReleaseArtifacts {
             -ForegroundColor Green
     }
     else {
-        if (Test-Path -LiteralPath $nextOutput) {
-            Assert-True ([System.IO.Path]::GetFullPath($nextOutput) -eq `
-                    [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'frontend\.next'))) `
-                'Unexpected frontend build-output path.'
-            Remove-Item -LiteralPath $nextOutput -Recurse -Force
-        }
+        Assert-True ([System.IO.Path]::GetFullPath($nextOutput) -eq `
+                [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'frontend\.next'))) `
+            'Unexpected frontend build-output path.'
+        Clear-NextOutputPreservingCache $nextOutput
+        $availableMemory = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1KB
+        $configuredHeapMb = if ($env:NEXT_BUILD_MAX_OLD_SPACE_SIZE_MB) {
+            $env:NEXT_BUILD_MAX_OLD_SPACE_SIZE_MB
+        } else { '12288' }
+        Write-Host "LEGACY_BUILD_MEMORY|HEAP_MB=$configuredHeapMb|AVAILABLE_BYTES=$availableMemory" `
+            -ForegroundColor DarkGray
         $previousEnvironment = Set-TemporaryEnvironment @{
             NODE_ENV = 'production'
-            NODE_OPTIONS = '--max-old-space-size=8192'
             NEXT_PUBLIC_API_URL = "$PublicBaseUrl/api"
             API_URL = "$PublicBaseUrl/api"
             NEXTAUTH_URL = $PublicBaseUrl
@@ -918,6 +941,8 @@ function Write-RunResult {
         commit = $script:Commit
         startedUtc = $RunStartedUtc.ToString('o')
         completedUtc = [DateTime]::UtcNow.ToString('o')
+        totalDurationSeconds = [Math]::Round(
+            ([DateTime]::UtcNow - $RunStartedUtc).TotalSeconds, 2)
         publicBaseUrl = $PublicBaseUrl
         release = $ReleaseManifest
         migrations = $MigrationState
@@ -934,9 +959,18 @@ function Write-RunResult {
 
 Push-Location $RepositoryRoot
 $freshApplyAttempted = $false
+$applicationApplyCompleted = $false
 $priorOperationalPassword = [Environment]::GetEnvironmentVariable('UatBootstrap__SharedPassword', 'Process')
 $operationalPasswordPrompted = $false
 try {
+    Assert-True (-not ($DeployOnly -and $DryRun)) `
+        'DeployOnly applies a verified artifact and cannot be combined with DryRun.'
+    Assert-True (-not ($DeployOnly -and $ReuseVerifiedArtifacts)) `
+        'DeployOnly already consumes verified artifacts and cannot use ReuseVerifiedArtifacts.'
+    Assert-True (-not ($DeployOnly -and ($ReuseApiOutputFromCommit -or $ReuseFrontendBuildFromCommit))) `
+        'DeployOnly cannot use build-output reuse parameters.'
+    Assert-True ($DeployOnly -eq (-not [string]::IsNullOrWhiteSpace($ArtifactDirectory))) `
+        'Specify both DeployOnly and ArtifactDirectory, or neither.'
     Assert-True ([string]::IsNullOrWhiteSpace($FreshDatabaseName) -or $LocalVps) `
         'Fresh database cutover must run directly on the VPS with -LocalVps.'
     $requiredCommands = @('git', 'curl.exe', 'node')
@@ -974,15 +1008,28 @@ try {
     }
 
     $script:DeploymentStamp = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')
-    $deploymentId = "$($script:ShortCommit)-$($script:DeploymentStamp)"
-    $releaseDirectory = Join-Path $ReleaseRoot $script:ShortCommit
-    New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
     $releaseManifest = $null
+    if ($DeployOnly) {
+        $releaseDirectory = [IO.Path]::GetFullPath($ArtifactDirectory)
+        $releaseManifest = Test-ReleaseManifest (Join-Path $releaseDirectory 'release-manifest.json')
+        Assert-True ($null -ne $releaseManifest) `
+            'Deploy-only artifact validation failed: commit, environment, public URL, files, or hashes do not match.'
+        $deploymentId = "$($releaseManifest.releaseId)-$($script:DeploymentStamp)"
+        $runDirectory = Join-Path $ReleaseRoot "deployments\$deploymentId"
+        Assert-SafeChildPath $runDirectory $ReleaseRoot
+        New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
+    }
+    else {
+        $deploymentId = "$($script:ShortCommit)-$($script:DeploymentStamp)"
+        $releaseDirectory = Join-Path $ReleaseRoot $script:ShortCommit
+        $runDirectory = $releaseDirectory
+        New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
+    }
     $migrationState = $null
     # Embed reviewed read-only probes so the content-addressed remote helper is
     # self-contained. CRLF-normalized source hashes invalidate stale reviews.
     $RemoteHelperLocalPath = New-RhemaVpsPreflightHelper -RepositoryRoot $RepositoryRoot `
-        -OutputPath (Join-Path $releaseDirectory 'Invoke-RhemaVpsRemote.ps1')
+        -OutputPath (Join-Path $runDirectory 'Invoke-RhemaVpsRemote.ps1')
     $remoteHelperHash = (Get-FileHash $RemoteHelperLocalPath -Algorithm SHA256).Hash
     $remoteHelperName = "Invoke-RhemaVpsRemote-$($remoteHelperHash.Substring(0,12)).ps1"
     $remoteHelperPath = Join-Path $RemotePackagesRoot $remoteHelperName
@@ -1052,11 +1099,23 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
         Assert-True ([bool]$LocalVps) 'Set protected UatBootstrap__SharedPassword on the VPS or run with -LocalVps for the secure account-password prompt.'
     }
 
-    Assert-CommandExists 'dotnet'
-    Assert-CommandExists 'npm.cmd'
-    Assert-CommandExists 'robocopy.exe'
+    if (-not $DeployOnly) {
+        Assert-CommandExists 'dotnet'
+        Assert-CommandExists 'npm.cmd'
+        Assert-CommandExists 'robocopy.exe'
+    }
     $manifestPath = Join-Path $releaseDirectory 'release-manifest.json'
-    if ($ReuseVerifiedArtifacts) {
+    if ($DeployOnly) {
+        Write-Host "Using prebuilt release $($releaseManifest.releaseId); no build or dependency command will run on the VPS." `
+            -ForegroundColor Green
+        $StepResults.Add([ordered]@{
+            name = 'Consume prebuilt immutable release artifacts'
+            status = 'Verified'
+            startedUtc = [DateTime]::UtcNow.ToString('o')
+            durationSeconds = 0
+        })
+    }
+    elseif ($ReuseVerifiedArtifacts) {
         $releaseManifest = Test-ReleaseManifest $manifestPath
     }
     if ($null -eq $releaseManifest) {
@@ -1103,7 +1162,7 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
         }
     }
 
-    Invoke-Step 'Apply API, migrations, and frontend' {
+    $applyOutput = @(Invoke-Step 'Apply API, migrations, and frontend' {
         if ($FreshDatabaseName) { $script:freshApplyAttempted = $true }
         Invoke-RemoteHelper $remoteHelperPath 'Apply' @{
             FreshDatabaseName = $FreshDatabaseName
@@ -1111,13 +1170,28 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
             ExpectedCommit = $script:Commit
             ExpectedBuildId = $releaseManifest.buildId
             ExpectedCacheVersion = $releaseManifest.cacheVersion
+            ReleaseId = $(if ($releaseManifest.releaseId) { $releaseManifest.releaseId } else { $deploymentId })
             ApiPackageName = $releaseManifest.api.file
             FrontendPackageName = $releaseManifest.frontend.file
             ApiSha256 = $releaseManifest.api.sha256
             FrontendSha256 = $releaseManifest.frontend.sha256
             ApiReadyTimeoutSeconds = $ApiReadyTimeoutSeconds
         }
-    } | Out-Host
+    })
+    $applyOutput | Out-Host
+    foreach ($timingLine in @($applyOutput | Where-Object { $_ -like 'PERFORMANCE|*' })) {
+        $parts = $timingLine -split '\|'
+        if ($parts.Count -eq 3) {
+            $StepResults.Add([ordered]@{
+                name = $parts[1]
+                status = 'Passed'
+                startedUtc = $null
+                durationSeconds = [double]::Parse(
+                    $parts[2], [Globalization.CultureInfo]::InvariantCulture)
+            })
+        }
+    }
+    $applicationApplyCompleted = $true
 
     if (-not $FreshDatabaseName) {
         Invoke-Step 'Seed and verify Procurement, Inventory and QS baseline' {
@@ -1143,7 +1217,7 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
         } | Out-Host
     }
 
-    $resultPath = Write-RunResult 'Passed' $deploymentId $releaseDirectory `
+    $resultPath = Write-RunResult 'Passed' $deploymentId $runDirectory `
         $releaseManifest $migrationState $null
     Invoke-Step 'Publish deployment evidence to VPS' {
         Copy-ToVps @($resultPath) $RemoteLogsRoot
@@ -1161,6 +1235,18 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
     Write-Host "`nDEPLOYMENT PASSED: $resultPath" -ForegroundColor Green
 }
 catch {
+    $deploymentFailure = $_
+    if ($applicationApplyCompleted -and -not $FreshDatabaseName) {
+        try {
+            Invoke-Step 'Rollback application release after failed verification' {
+                Invoke-RemoteHelper $remoteHelperPath 'RollbackRelease' @{
+                    DeploymentId = $deploymentId
+                }
+            } | Out-Host
+        } catch {
+            Write-Warning "Automatic application rollback failed. The database was not restored. $($_.Exception.Message)"
+        }
+    }
     if ($freshApplyAttempted) {
         try {
             Invoke-Step 'Restore original application and database connection' {
@@ -1173,19 +1259,19 @@ catch {
         }
     }
     if ($null -ne $script:Commit) {
-        $safeReleaseDirectory = if ($null -ne $releaseDirectory) {
+        $safeReleaseDirectory = if ($null -ne $runDirectory) {
+            $runDirectory
+        } elseif ($null -ne $releaseDirectory) {
             $releaseDirectory
-        } else {
-            Join-Path $ReleaseRoot $script:Commit.Substring(0, 8)
-        }
+        } else { Join-Path $ReleaseRoot $script:Commit.Substring(0, 8) }
         $failureId = if ($null -ne $deploymentId) { $deploymentId } else {
             "$($script:Commit.Substring(0,8))-failed-$([DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))"
         }
         $failurePath = Write-RunResult 'Failed' $failureId $safeReleaseDirectory `
-            $releaseManifest $migrationState $_.Exception.Message
+            $releaseManifest $migrationState $deploymentFailure.Exception.Message
         Write-Host "Deployment evidence: $failurePath" -ForegroundColor Yellow
     }
-    throw
+    throw $deploymentFailure
 }
 finally {
     if ($operationalPasswordPrompted) {

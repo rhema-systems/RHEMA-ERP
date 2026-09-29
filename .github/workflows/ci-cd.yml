@@ -285,6 +285,14 @@ jobs:
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
+    - name: ♻️ Restore Next.js build cache
+      uses: actions/cache@v4
+      with:
+        path: frontend/.next-production/cache
+        key: next-build-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-${{ github.sha }}
+        restore-keys: |
+          next-build-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-
+
     - name: 📦 Install dependencies
       run: |
         cd frontend
@@ -316,7 +324,10 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: frontend-artifacts
-        path: frontend/.next/
+        path: |
+          frontend/.next-production/
+          !frontend/.next-production/cache/**
+        if-no-files-found: error
         retention-days: 7
 
   # Job 4: Integration Tests
@@ -373,7 +384,7 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: frontend-artifacts
-        path: frontend/.next/
+        path: frontend/.next-production/
 
     - name: ⏳ Wait for SQL Server to be ready
       run: |
