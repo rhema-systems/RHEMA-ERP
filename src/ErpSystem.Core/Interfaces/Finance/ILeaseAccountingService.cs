@@ -27,11 +27,11 @@ public interface ILeaseAccountingService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Post a single period's journal: DR Interest Expense + DR Lease Liability, CR Cash/Payable
+    /// Prepare the canonical AP draft for a single period. Normal AP maker/checker approval owns
+    /// the only recognition journal and normal AP settlement owns payment.
     /// </summary>
-    Task<LeaseContractDetailDto> PostPeriodJournalAsync(
+    Task<LeaseContractDetailDto> PreparePeriodPayableAsync(
         Guid leaseId,
         Guid scheduleLineId,
-        PostLeasePeriodDto? dto = null,
         CancellationToken cancellationToken = default);
 }

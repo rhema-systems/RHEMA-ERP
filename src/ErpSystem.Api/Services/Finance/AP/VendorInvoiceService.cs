@@ -316,6 +316,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             CancellationToken cancellationToken,
             bool deferSupplierWithholdingDecision = false)
         {
+            ValidateLeaseCreate(dto);
             if (dto.EstateAcquisitionId.HasValue && !_unitOfWork.HasActiveTransaction)
             {
                 var attempted = false;
@@ -354,11 +355,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 dto.PurchaseOrderId,
                 acceptedSupply?.Kind,
                 dto.LineItems,
-                dto.AutoInvoiceRequestId.HasValue || dto.EstateAcquisitionId.HasValue ||
+                dto.AutoInvoiceRequestId.HasValue || dto.EstateAcquisitionId.HasValue || HasLeaseSource(dto) ||
                 dto.LineItems.Any(line => line.LandedCostItemId.HasValue));
             var currencyOverrideReason = ResolveCurrencyOverrideReason(
                 dto.CurrencyCode, supplier.Currency, dto.PurchaseOrderId, dto.CurrencyOverrideReason,
-                dto.AutoInvoiceRequestId.HasValue || dto.EstateAcquisitionId.HasValue ||
+                dto.AutoInvoiceRequestId.HasValue || dto.EstateAcquisitionId.HasValue || HasLeaseSource(dto) ||
                 dto.LineItems.Any(line => line.LandedCostItemId.HasValue) || acceptedSupply?.Kind == ProcurementAcceptedSupplyKind.WorksPaymentCertificate);
 
             var capturedPartnerDefaults = await ApplyBusinessPartnerCreateDefaultsAsync(dto, supplier, cancellationToken);
@@ -411,6 +412,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
                 InvoiceNumber = invoiceNumber,
+                LeaseScheduleLineId = dto.LeaseScheduleLineId,
+                ReplacesLeaseVendorInvoiceId = dto.ReplacesLeaseVendorInvoiceId,
+                LeaseAccountingBookId = dto.LeaseAccountingBookId,
+                LeaseAccountingBookCode = dto.LeaseAccountingBookCode,
+                LeaseFunctionalCurrencyCode = dto.LeaseFunctionalCurrencyCode,
                 AutoInvoiceRequestId = dto.AutoInvoiceRequestId, AutoInvoiceRequestHash = dto.AutoInvoiceRequestHash,
                 EstateAcquisitionId = dto.EstateAcquisitionId, EstatePayableKind = dto.EstatePayableKind,
                 SupplierInvoiceNumber = dto.SupplierInvoiceNumber,
@@ -486,6 +492,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         : Guid.NewGuid(),
                     TenantId = TenantId,
                     VendorInvoiceId = invoice.Id,
+                    LeaseComponent = lineDto.LeaseComponent,
                     LandedCostItemId = lineDto.LandedCostItemId,
                     LineItemType = lineDto.LineItemType,
                     GLAccountId = lineDto.GLAccountId,
@@ -600,6 +607,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             await ValidateEstateSourceAsync(invoice, cancellationToken);
             ValidateLandedCostInvoiceUpdate(invoice, dto);
             ValidateAutoInvoiceUpdate(invoice, dto);
+            ValidateLeaseInvoiceUpdate(invoice, dto);
+            await ValidateLeaseSourceAsync(invoice, cancellationToken);
 
             var previousBudgetKey = BuildVendorInvoiceBudgetMutationKey(invoice);
             var previouslyBudgetRelevant = invoice.LineItems.Any(line =>
@@ -640,11 +649,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 dto.PurchaseOrderId,
                 acceptedSupply?.Kind,
                 dto.LineItems,
-                invoice.AutoInvoiceRequestId.HasValue || invoice.EstateAcquisitionId.HasValue ||
+                invoice.AutoInvoiceRequestId.HasValue || invoice.EstateAcquisitionId.HasValue || invoice.LeaseScheduleLineId.HasValue ||
                 invoice.LineItems.Any(line => !line.IsDeleted && line.LandedCostItemId.HasValue));
             var currencyOverrideReason = ResolveCurrencyOverrideReason(
                 dto.CurrencyCode, supplier.Currency, dto.PurchaseOrderId, dto.CurrencyOverrideReason,
-                invoice.AutoInvoiceRequestId.HasValue || invoice.EstateAcquisitionId.HasValue ||
+                invoice.AutoInvoiceRequestId.HasValue || invoice.EstateAcquisitionId.HasValue || invoice.LeaseScheduleLineId.HasValue ||
                 invoice.LineItems.Any(line => !line.IsDeleted && line.LandedCostItemId.HasValue) ||
                 acceptedSupply?.Kind == ProcurementAcceptedSupplyKind.WorksPaymentCertificate);
 
@@ -782,6 +791,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 invoice.SubTotal * (invoice.WithholdingTaxRate / 100m),
                 2,
                 MidpointRounding.AwayFromZero);
+            await ValidateLeaseSourceAsync(invoice, cancellationToken);
 
             if (invoice.EarlyPaymentDiscountPercentage > 0)
                 invoice.EarlyPaymentDiscountAmount = invoice.TotalAmount * (invoice.EarlyPaymentDiscountPercentage / 100);
@@ -845,6 +855,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 throw new InvalidOperationException("Only draft invoices can be deleted.");
 
             if (await DeleteLandedCostInvoiceDraftAsync(invoice, cancellationToken)) return;
+            if (await DeleteLeaseInvoiceDraftAsync(invoice, cancellationToken)) return;
 
             await _unitOfWork.Repository<VendorInvoice>().DeleteAsync(invoice);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -941,6 +952,8 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             await ValidateEstateSourceAsync(invoice, cancellationToken);
             EnsureLandedCostTaxReviewed(invoice);
+            await ValidateLeaseSourceAsync(invoice, cancellationToken);
+            EnsureLeaseTaxReviewed(invoice);
 
             if (invoice.IsOpeningBalance || invoice.AutoInvoiceRequestId.HasValue)
                 await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
@@ -953,6 +966,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice = await LoadInvoiceForPostingAsync(invoice.Id, cancellationToken);
             await ValidateEstateSourceAsync(invoice, cancellationToken);
             EnsureLandedCostTaxReviewed(invoice);
+            await ValidateLeaseSourceAsync(invoice, cancellationToken);
+            EnsureLeaseTaxReviewed(invoice);
             var budgetRequest = await BuildVendorInvoiceBudgetRequestAsync(
                 invoice, "Submit", useSourceDimensions: producer is not null, cancellationToken);
             if (producer is not null)
@@ -1119,6 +1134,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             await AcquireReceiptInvoiceLocksAsync(invoice, cancellationToken);
             await ValidateEstateSourceAsync(invoice, cancellationToken);
             EnsureLandedCostTaxReviewed(invoice);
+            await ValidateLeaseSourceAsync(invoice, cancellationToken);
+            EnsureLeaseTaxReviewed(invoice);
 
             if (invoice.IsOpeningBalance || invoice.AutoInvoiceRequestId.HasValue)
                 await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
@@ -1232,9 +1249,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 return await PostInCurrentTransactionAsync(id, producer, cancellationToken);
             var scope = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(i =>
                 i.Id == id && i.TenantId == TenantId && !i.IsDeleted).AsNoTracking()
-                .Select(i => new { i.PurchaseOrderId, i.AutoInvoiceRequestId, i.AcceptedSupplyKind, i.EstateAcquisitionId, Landed = i.LineItems.Any(l => !l.IsDeleted && l.LandedCostItemId.HasValue) })
+                .Select(i => new { i.PurchaseOrderId, i.AutoInvoiceRequestId, i.AcceptedSupplyKind, i.EstateAcquisitionId, i.LeaseScheduleLineId, Landed = i.LineItems.Any(l => !l.IsDeleted && l.LandedCostItemId.HasValue) })
                 .SingleOrDefaultAsync(cancellationToken) ?? throw new KeyNotFoundException("Invoice not found.");
-            if (!scope.PurchaseOrderId.HasValue && !scope.AutoInvoiceRequestId.HasValue && !scope.AcceptedSupplyKind.HasValue && !scope.EstateAcquisitionId.HasValue && !scope.Landed)
+            if (!scope.PurchaseOrderId.HasValue && !scope.AutoInvoiceRequestId.HasValue && !scope.AcceptedSupplyKind.HasValue && !scope.EstateAcquisitionId.HasValue && !scope.LeaseScheduleLineId.HasValue && !scope.Landed)
                 return await PostInCurrentTransactionAsync(id, producer, cancellationToken);
             return await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
@@ -1273,6 +1290,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             try
             {
                 await AcquireReceiptInvoiceLocksAsync(invoice, cancellationToken);
+                await ValidateLeaseSourceAsync(invoice, cancellationToken);
+                EnsureLeaseTaxReviewed(invoice);
                 if (invoice.AutoInvoiceRequestId.HasValue && !invoice.JournalEntryId.HasValue)
                     await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
                 if (!invoice.JournalEntryId.HasValue && RequiresProcurementMatch(invoice))
@@ -1335,6 +1354,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     invoice.UpdatedBy = UserName;
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
                 }
+                await ApplyLeaseAccountingStatusAsync(invoice, posted: true, cancellationToken);
 
                 if (hasDirectApFixedAssetLines)
                 {
@@ -1624,12 +1644,22 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .FirstOrDefaultAsync(cancellationToken)
                     ?? throw new KeyNotFoundException($"Vendor invoice with Id '{id}' not found.");
                 await AcquireReceiptInvoiceLocksAsync(invoice, cancellationToken);
+                await ValidateLeaseSourceAsync(invoice, cancellationToken);
                 if (await _unitOfWork.Repository<InventorySupplierReturnAllocation>().GetQueryable(x => x.TenantId == TenantId &&
                     x.OriginalVendorInvoiceId == invoice.Id && !x.IsDeleted).AnyAsync(cancellationToken))
                     throw new InvalidOperationException("This invoice retains a dispatched supplier return. Complete its governed return credit lifecycle; voiding the original invoice cannot release its receipt claims.");
 
                 if (invoice.Status == VendorInvoiceStatus.Voided)
+                {
+                    if (invoice.LeaseScheduleLineId.HasValue && Math.Abs(RoundMoney(invoice.PaymentAllocations.Sum(
+                            allocation => allocation.AllocatedAmount + allocation.DiscountAmount +
+                                          allocation.WithholdingTaxAmount))) > 0.01m)
+                        throw new InvalidOperationException(
+                            "A voided lease invoice retains active settlement evidence. Finance must reconcile it before the instalment status can be reopened.");
+                    // A repeated void is idempotent. In particular, an older retained predecessor
+                    // must never reopen a schedule already posted by its governed replacement.
                     return await GetByIdAsync(invoice.Id, cancellationToken) ?? MapToDto(invoice);
+                }
 
                 if (invoice.JournalEntryId.HasValue && _financePostingEngine == null)
                     throw new InvalidOperationException(
@@ -1827,6 +1857,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         reason: reason.Trim(),
                         comment: "AP invoice state and its balanced Finance reversal were committed atomically.",
                         cancellationToken: cancellationToken);
+                    await ApplyLeaseAccountingStatusAsync(invoice, posted: false, cancellationToken);
                 }
 
                 if (ownsTransaction)
@@ -2794,6 +2825,14 @@ namespace ErpSystem.Api.Services.Finance.AP
             var candidateLines = new List<(VendorInvoiceLineItem Line, Account Account)>();
             foreach (var line in activeLines)
             {
+                if (invoice.LeaseScheduleLineId.HasValue &&
+                    line.LeaseComponent == LeaseInvoiceComponent.Principal)
+                {
+                    if (line.BudgetEntryId.HasValue)
+                        throw new InvalidOperationException(
+                            "A lease principal reduction cannot select an expense budget cell.");
+                    continue;
+                }
                 var directExpense = !IsFixedAssetLine(line)
                     && !string.Equals(line.LineItemType, "Inventory", StringComparison.OrdinalIgnoreCase)
                     && !string.Equals(line.LineItemType, "Product", StringComparison.OrdinalIgnoreCase);
@@ -3033,6 +3072,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var accounts = await ResolveLandedCostClearingAccountsAsync(invoice, cancellationToken);
                 return lines.Select(line => new FinanceSourceDocumentLineContext(line.Id, accounts[line.Id])).ToArray();
             }
+            if (invoice.LeaseScheduleLineId.HasValue)
+            {
+                // Draft dimension presentation must remain available while Finance completes the
+                // mandatory tax/WHT review. Posting performs the stricter tax gate separately.
+                await ValidateLeaseSourceAsync(invoice, cancellationToken);
+                return lines.Select(line => new FinanceSourceDocumentLineContext(
+                    line.Id,
+                    line.GLAccountId ?? throw new InvalidOperationException("Lease instalment lines require a frozen posting account.")))
+                    .ToArray();
+            }
             var settings = await GetFinanceSettingsAsync(cancellationToken);
             var accountCache = new Dictionary<Guid, Account>();
             Guid? commonAccountId = null;
@@ -3085,6 +3134,8 @@ namespace ErpSystem.Api.Services.Finance.AP
         {
             await ValidateEstateSourceAsync(invoice, cancellationToken);
             EnsureLandedCostTaxReviewed(invoice);
+            await ValidateLeaseSourceAsync(invoice, cancellationToken);
+            EnsureLeaseTaxReviewed(invoice);
             var tenantId = TenantId;
             if (invoice.TenantId != tenantId)
                 throw new InvalidOperationException("Vendor invoice belongs to another tenant.");
@@ -3151,7 +3202,9 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var supplier = await ResolveInvoiceSupplierForPostingAsync(invoice, cancellationToken);
             var settings = await GetFinanceSettingsAsync(cancellationToken);
-            var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+            var functionalCurrency = invoice.LeaseScheduleLineId.HasValue
+                ? NormalizeCurrency(invoice.LeaseFunctionalCurrencyCode, settings.BaseCurrency)
+                : NormalizeCurrency(settings.BaseCurrency, "GHS");
             var invoiceCurrency = NormalizeCurrency(invoice.CurrencyCode, functionalCurrency);
             var exchangeRate = NormalizeExchangeRate(invoice.ExchangeRate);
             var accountCache = new Dictionary<Guid, Account>();
@@ -3184,6 +3237,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             var landedCostAccounts = IsLandedCostInvoice(invoice)
                 ? await ResolveLandedCostClearingAccountsAsync(invoice, cancellationToken)
                 : null;
+            var leaseAccounts = invoice.LeaseScheduleLineId.HasValue
+                ? await ResolveLeasePostingAccountsAsync(invoice, cancellationToken)
+                : null;
             var clearsGrv = clearsFinanceGrv || clearsProcurementGrv;
             Guid? grvAccrualAccountId = null;
             if (clearsFinanceGrv)
@@ -3199,6 +3255,21 @@ namespace ErpSystem.Api.Services.Finance.AP
             foreach (var line in activeLines)
             {
                 var grossAmount = RoundMoney(line.Quantity * line.UnitPrice);
+                if (leaseAccounts != null)
+                {
+                    var leaseAccount = leaseAccounts[line.Id];
+                    var principal = line.LeaseComponent == LeaseInvoiceComponent.Principal;
+                    await ResolvePostingAccountAsync(leaseAccount.AccountId,
+                        principal ? "lease liability account" : "lease interest expense account",
+                        accountCache, allowControlAccount: principal, requireDirectPosting: !principal, cancellationToken);
+                    var leasePosting = BuildPostingLine(leaseAccount.AccountId,
+                        $"Lease instalment {invoice.InvoiceNumber} - {line.Description}", grossAmount, 0m,
+                        invoiceCurrency, functionalCurrency, exchangeRate, invoice.InvoiceDate,
+                        invoice.InvoiceNumber, lineNumber++, leaseAccount.Tag);
+                    ApplySourceDimensions(leasePosting, line, sourceLineDimensions);
+                    postingLines.Add(leasePosting);
+                    continue;
+                }
                 var lineCosts = receiptCostPlans.Where(x => x.Cost.VendorInvoiceLineItemId == line.Id).ToArray();
                 if (lineCosts.Length > 0)
                 {
@@ -3419,7 +3490,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Description = $"Vendor invoice {invoice.InvoiceNumber} - {invoice.SupplierName}",
                 PostingDate = invoice.InvoiceDate,
                 JournalType = "AP Invoice",
-                AccountingBookCode = "IFRS",
+                AccountingBookCode = invoice.LeaseScheduleLineId.HasValue
+                    ? invoice.LeaseAccountingBookCode!
+                    : "IFRS",
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"AP:VendorInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
@@ -4733,6 +4806,11 @@ namespace ErpSystem.Api.Services.Finance.AP
             return new VendorInvoiceDto
             {
                 IsProcurementAutoInvoice = invoice.AutoInvoiceRequestId.HasValue,
+                LeaseScheduleLineId = invoice.LeaseScheduleLineId,
+                ReplacesLeaseVendorInvoiceId = invoice.ReplacesLeaseVendorInvoiceId,
+                LeaseAccountingBookId = invoice.LeaseAccountingBookId,
+                LeaseAccountingBookCode = invoice.LeaseAccountingBookCode,
+                LeaseFunctionalCurrencyCode = invoice.LeaseFunctionalCurrencyCode,
                 EstateAcquisitionId = invoice.EstateAcquisitionId, EstatePayableKind = invoice.EstatePayableKind,
                 Id = invoice.Id,
                 InvoiceNumber = invoice.InvoiceNumber,
@@ -4804,6 +4882,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 LineItems = invoice.LineItems.Select(li => new VendorInvoiceLineItemDto
                 {
                     Id = li.Id,
+                    LeaseComponent = li.LeaseComponent,
                     VendorInvoiceId = li.VendorInvoiceId,
                     LineItemType = li.LineItemType,
                     LandedCostItemId = li.LandedCostItemId,

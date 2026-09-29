@@ -1,4 +1,5 @@
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Entities.Finance;
 
 namespace ErpSystem.Core.DTOs.Finance
 {
@@ -54,6 +55,14 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal PrincipalReduction { get; set; }
         public decimal RemainingLiability { get; set; }
         public bool IsPosted { get; set; }
+        public Guid? VendorInvoiceId { get; set; }
+        public string? VendorInvoiceNumber { get; set; }
+        public VendorInvoiceStatus? VendorInvoiceStatus { get; set; }
+        public string? VendorInvoiceApprovalStatus { get; set; }
+        public Guid? VendorInvoiceJournalEntryId { get; set; }
+        public decimal? VendorInvoicePaidAmount { get; set; }
+        public decimal? VendorInvoiceBalanceAmount { get; set; }
+        public bool CanPreparePayable { get; set; }
         public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
     }
 
@@ -62,8 +71,4 @@ namespace ErpSystem.Core.DTOs.Finance
         public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
     }
 
-    public sealed class PostLeasePeriodDto
-    {
-        public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
-    }
 }

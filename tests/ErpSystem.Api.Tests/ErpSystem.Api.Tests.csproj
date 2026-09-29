@@ -264,6 +264,7 @@
     <Compile Include="Services\Finance\ArReceiptPostingMigrationTests.PartnerDefaults.cs" />
     <Compile Include="Services\Finance\CustomerPostingSettingsFixture.cs" />
     <Compile Include="Services\Finance\CanonicalVendorInvoiceBusinessPartnerTests.cs" />
+    <Compile Include="Services\Finance\LeaseInstallmentApOpenItemTests.cs" />
     <Compile Include="Services\Finance\CanonicalCustomerProfileReadTests.cs" />
     <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentOptionalApprovalTests.cs" />

@@ -2261,10 +2261,46 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<LeaseContract>(entity =>
+        {
+            entity.HasOne(item => item.AccountingBook).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId })
+                .HasPrincipalKey(book => new { book.TenantId, book.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId });
+            entity.HasOne<FinancePostingEvent>().WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.RecognitionPostingEventId, item.AccountingBookId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id, item.AccountingBookId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>().WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.RecognitionJournalEntryId, item.AccountingBookId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id, item.AccountingBookId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany()
+                .HasForeignKey(item => item.RouAssetAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany()
+                .HasForeignKey(item => item.LeaseLiabilityAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany()
+                .HasForeignKey(item => item.InterestExpenseAccountId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         // â”€â”€â”€ Accounts Payable FK Configurations â”€â”€â”€
 
         builder.Entity<VendorInvoice>(entity =>
         {
+            entity.HasAlternateKey(invoice => new { invoice.TenantId, invoice.Id });
+            entity.HasIndex(invoice => new { invoice.TenantId, invoice.LeaseScheduleLineId })
+                .IsUnique().HasFilter("[LeaseScheduleLineId] IS NOT NULL AND [IsDeleted] = 0 AND [Status] <> 7");
+            entity.HasOne(invoice => invoice.LeaseScheduleLine).WithMany(line => line.VendorInvoices)
+                .HasForeignKey(invoice => new { invoice.TenantId, invoice.LeaseScheduleLineId })
+                .HasPrincipalKey(line => new { line.TenantId, line.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(invoice => new { invoice.TenantId, invoice.ReplacesLeaseVendorInvoiceId })
+                .IsUnique().HasFilter("[ReplacesLeaseVendorInvoiceId] IS NOT NULL AND [IsDeleted] = 0");
+            entity.HasOne(invoice => invoice.ReplacesLeaseVendorInvoice)
+                .WithMany(invoice => invoice.LeaseReplacementInvoices)
+                .HasForeignKey(invoice => new { invoice.TenantId, invoice.ReplacesLeaseVendorInvoiceId })
+                .HasPrincipalKey(invoice => new { invoice.TenantId, invoice.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(invoice => new { invoice.TenantId, invoice.EstateAcquisitionId, invoice.EstatePayableKind })
                 .IsUnique().HasFilter("[EstateAcquisitionId] IS NOT NULL");
             entity.HasOne<LandAcquisition>().WithMany()
@@ -2279,6 +2315,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 table.HasTrigger("TR_VendorInvoice_AcceptedSupplyProtected");
                 table.HasTrigger("TR_VendorInvoice_ReceiptSource");
                 table.HasTrigger("TR_VendorInvoice_EstateSource");
+                table.HasCheckConstraint("CK_VendorInvoice_LeaseSourceCoherent",
+                    "([LeaseScheduleLineId] IS NULL AND [ReplacesLeaseVendorInvoiceId] IS NULL AND [LeaseAccountingBookId] IS NULL AND [LeaseAccountingBookCode] IS NULL AND [LeaseFunctionalCurrencyCode] IS NULL) OR ([LeaseScheduleLineId] IS NOT NULL AND [LeaseAccountingBookId] IS NOT NULL AND LEN([LeaseAccountingBookCode]) BETWEEN 1 AND 20 AND LEN([LeaseFunctionalCurrencyCode]) = 3 AND [IsOpeningBalance] = 0 AND [PurchaseOrderId] IS NULL AND [AcceptedSupplyKind] IS NULL AND [AutoInvoiceRequestId] IS NULL AND [EstateAcquisitionId] IS NULL)");
                 table.HasCheckConstraint("CK_VendorInvoice_EstateSource",
                     "([EstateAcquisitionId] IS NULL AND [EstatePayableKind] IS NULL) OR ([EstateAcquisitionId] IS NOT NULL AND [EstatePayableKind] IS NOT NULL AND [EstatePayableKind] BETWEEN 1 AND 4 AND [IsOpeningBalance] = 0 AND [PurchaseOrderId] IS NULL AND [AcceptedSupplyKind] IS NULL AND [AutoInvoiceRequestId] IS NULL)");
                 table.HasCheckConstraint(
@@ -2321,6 +2359,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.ExchangeRateRecord)
                 .WithMany()
                 .HasForeignKey(e => e.ExchangeRateId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<AccountingBook>()
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.LeaseAccountingBookId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.ExpenseAccount)
                 .WithMany()
@@ -2398,6 +2441,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<VendorInvoiceLineItem>(entity =>
         {
+            entity.ToTable("VendorInvoiceLineItem", table => table.HasCheckConstraint(
+                "CK_VendorInvoiceLineItem_LeaseComponent", "[LeaseComponent] IS NULL OR [LeaseComponent] BETWEEN 1 AND 2"));
             entity.ToTable("VendorInvoiceLineItem", table => table.HasTrigger("TR_VendorInvoiceLineItem_ReceiptSource"));
             entity.HasOne<LandedCostItem>().WithMany().HasForeignKey(e => e.LandedCostItemId)
                 .OnDelete(DeleteBehavior.Restrict);
@@ -3908,6 +3953,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<FinancePostingEvent>(entity =>
         {
             entity.ToTable("FinancePostingEvents");
+            entity.HasAlternateKey(e => new { e.TenantId, e.Id, e.AccountingBookId });
             entity.HasIndex(e => e.TenantId);
             entity.HasIndex(e => new { e.TenantId, e.AccountingBookId, e.SourceModule, e.SourceDocumentType, e.SourceDocumentId, e.PostingAction })
                 .IsUnique()

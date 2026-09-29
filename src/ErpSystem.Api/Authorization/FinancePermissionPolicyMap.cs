@@ -511,7 +511,7 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> LeaseAccountingPolicy(string action, IReadOnlyCollection<string> methods)
         => action switch
         {
-            "PostPeriodJournal" => One(FinancePermissions.PostJournalEntries),
+            "PreparePeriodPayable" => One(FinancePermissions.CreateApInvoices),
             _ => IsRead(action, methods) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.ManageFixedAssets)
         };
 

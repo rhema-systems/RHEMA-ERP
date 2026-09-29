@@ -15,6 +15,9 @@ namespace ErpSystem.Core.Entities.Finance;
 /// <summary>Server-owned land acquisition payable source.</summary>
 public enum EstatePayableKind { SurveyorFee = 1, VendorConsideration = 2, StampDuty = 3, OtherAcquisitionCosts = 4 }
 
+/// <summary>Server-owned component of an IFRS 16 lease instalment AP draft.</summary>
+public enum LeaseInvoiceComponent { Principal = 1, Interest = 2 }
+
 /// <summary>
 /// Status of a vendor/supplier invoice through its lifecycle.
 /// </summary>
@@ -112,6 +115,16 @@ public enum PaymentBatchStatus
 /// </summary>
 public class VendorInvoice : TenantEntity
 {
+    /// <summary>Server-owned IFRS 16 schedule source. Generic AP clients cannot assign it.</summary>
+    public Guid? LeaseScheduleLineId { get; set; }
+    public virtual LeaseScheduleLine? LeaseScheduleLine { get; set; }
+    /// <summary>Retained voided lease invoice replaced by this governed successor.</summary>
+    public Guid? ReplacesLeaseVendorInvoiceId { get; set; }
+    public virtual VendorInvoice? ReplacesLeaseVendorInvoice { get; set; }
+    public virtual ICollection<VendorInvoice> LeaseReplacementInvoices { get; set; } = new List<VendorInvoice>();
+    public Guid? LeaseAccountingBookId { get; set; }
+    [MaxLength(20)] public string? LeaseAccountingBookCode { get; set; }
+    [MaxLength(3)] public string? LeaseFunctionalCurrencyCode { get; set; }
     public Guid? EstateAcquisitionId { get; set; }
     public EstatePayableKind? EstatePayableKind { get; set; }
     /// <summary>Reviewed Procurement distribution overrides; applied by the shared posting builder.</summary>
@@ -386,6 +399,8 @@ public class VendorInvoice : TenantEntity
 /// </summary>
 public class VendorInvoiceLineItem : TenantEntity
 {
+    /// <summary>Server-owned immutable lease component; null for ordinary AP lines.</summary>
+    public LeaseInvoiceComponent? LeaseComponent { get; set; }
     /// <summary>Posted landed-cost charge cleared by this AP line; assigned only by the AP handoff.</summary>
     public Guid? LandedCostItemId { get; set; }
 

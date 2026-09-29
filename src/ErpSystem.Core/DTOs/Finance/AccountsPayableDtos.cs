@@ -14,6 +14,11 @@ namespace ErpSystem.Core.DTOs.Finance;
 
 public class VendorInvoiceDto
 {
+    public Guid? LeaseScheduleLineId { get; set; }
+    public Guid? ReplacesLeaseVendorInvoiceId { get; set; }
+    public Guid? LeaseAccountingBookId { get; set; }
+    public string? LeaseAccountingBookCode { get; set; }
+    public string? LeaseFunctionalCurrencyCode { get; set; }
     public Guid? EstateAcquisitionId { get; set; }
     public EstatePayableKind? EstatePayableKind { get; set; }
     public bool IsProcurementAutoInvoice { get; set; }
@@ -113,6 +118,12 @@ public class VendorInvoiceDto
 
 public class VendorInvoiceCreateDto
 {
+    // Set only by the Finance lease adapter after tenant/source/authority validation.
+    [System.Text.Json.Serialization.JsonIgnore] public Guid? LeaseScheduleLineId { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public Guid? ReplacesLeaseVendorInvoiceId { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public Guid? LeaseAccountingBookId { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public string? LeaseAccountingBookCode { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public string? LeaseFunctionalCurrencyCode { get; set; }
     // Set only by the Estate controller after its source and stage authorization checks.
     [System.Text.Json.Serialization.JsonIgnore] public Guid? EstateAcquisitionId { get; set; }
     [System.Text.Json.Serialization.JsonIgnore] public EstatePayableKind? EstatePayableKind { get; set; }
@@ -265,6 +276,7 @@ public class VendorInvoiceQueryDto
 
 public class VendorInvoiceLineItemDto
 {
+    public LeaseInvoiceComponent? LeaseComponent { get; set; }
     public Guid? LandedCostItemId { get; set; }
     public Guid Id { get; set; }
     public Guid VendorInvoiceId { get; set; }
@@ -296,6 +308,9 @@ public class VendorInvoiceLineItemDto
 
 public class VendorInvoiceLineItemCreateDto
 {
+    // Never accept lease source classifications from a generic invoice request.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public LeaseInvoiceComponent? LeaseComponent { get; set; }
     // Never accept source links from a generic invoice request.
     [System.Text.Json.Serialization.JsonIgnore]
     public Guid? LandedCostItemId { get; set; }

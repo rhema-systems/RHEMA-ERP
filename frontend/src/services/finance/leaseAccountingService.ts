@@ -9,6 +9,7 @@ import type { FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInpu
 
 export type LeaseStatus = 'Draft' | 'Active' | 'Terminated' | 'Completed';
 export type PaymentFrequency = 'Monthly' | 'Quarterly' | 'SemiAnnually' | 'Annually';
+export type VendorInvoiceStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'PartiallyPaid' | 'Paid' | 'Overdue' | 'Voided' | 'Rejected' | 'OnHold';
 
 export interface LeaseContractList {
   id: string;
@@ -33,6 +34,14 @@ export interface LeaseScheduleLine {
   principalReduction: number;
   remainingLiability: number;
   isPosted: boolean;
+  vendorInvoiceId?: string;
+  vendorInvoiceNumber?: string;
+  vendorInvoiceStatus?: VendorInvoiceStatus;
+  vendorInvoiceApprovalStatus?: string;
+  vendorInvoiceJournalEntryId?: string;
+  vendorInvoicePaidAmount?: number;
+  vendorInvoiceBalanceAmount?: number;
+  canPreparePayable: boolean;
   financeDimensions?: FinanceSourceDocumentDimension;
 }
 
@@ -82,8 +91,8 @@ class LeaseAccountingService {
     return apiService.post<LeaseContractDetail>(`/finance/leases/${id}/activate`, { financeDimensions });
   }
 
-  async postPeriodJournal(id: string, lineId: string, financeDimensions?: FinanceSourceDocumentDimensionInput): Promise<LeaseContractDetail> {
-    return apiService.post<LeaseContractDetail>(`/finance/leases/${id}/schedule-lines/${lineId}/post`, { financeDimensions });
+  async preparePeriodPayable(id: string, lineId: string): Promise<LeaseContractDetail> {
+    return apiService.post<LeaseContractDetail>(`/finance/leases/${id}/schedule-lines/${lineId}/prepare-payable`, {});
   }
 }
 
