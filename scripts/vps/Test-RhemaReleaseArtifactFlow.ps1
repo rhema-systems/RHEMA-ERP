@@ -69,6 +69,8 @@ foreach ($contract in @('ArtifactSourceCommit', 'FrontendBuildCommit',
     Assert-Test $recovery.Contains($contract) `
         "Compressed release recovery is missing contract: $contract"
 }
+Assert-Test $recovery.Contains('$priorManifest.packagingRecovered -eq $true') `
+    'Packaging recovery cannot re-certify an already recovered release after a script-only fix.'
 
 $deploy = Get-Content $deployPath -Raw
 foreach ($contract in @('DeployOnly', 'ArtifactDirectory',

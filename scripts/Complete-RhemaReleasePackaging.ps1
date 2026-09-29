@@ -100,8 +100,17 @@ try {
         "Release artifact root does not exist: $releaseRoot"
     $prefix = $artifactCommit.Substring(0, 8) + '-'
     $candidate = @(Get-ChildItem -LiteralPath $releaseRoot -Directory | Where-Object {
+        $manifestPath = Join-Path $_.FullName 'release-manifest.json'
+        $recoverableManifest = -not (Test-Path -LiteralPath $manifestPath)
+        if (-not $recoverableManifest) {
+            try {
+                $priorManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+                $recoverableManifest = $priorManifest.packagingRecovered -eq $true -and
+                    $priorManifest.artifactSourceCommit -eq $artifactCommit
+            } catch { $recoverableManifest = $false }
+        }
         $_.Name.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -and
-        -not (Test-Path -LiteralPath (Join-Path $_.FullName 'release-manifest.json')) -and
+        $recoverableManifest -and
         (Test-Path -LiteralPath (Join-Path $_.FullName 'api.zip')) -and
         (Test-Path -LiteralPath (Join-Path $_.FullName 'frontend.zip'))
     } | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1)
