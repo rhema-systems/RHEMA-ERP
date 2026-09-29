@@ -153,6 +153,24 @@
           ]
         }
       ]
+    },
+    {
+      "sqlFile": "HrPerformanceClosureMigrationPreflight.sql",
+      "migrations": [
+        {
+          "id": "20260928231446_PerformanceClosureBatch1",
+          "sourceSha256": "39F2049CB5DBFCD3378211F2DC47C3311C3F81D6166A8DCAA3FC8B6D2293D21D"
+        }
+      ]
+    },
+    {
+      "sqlFile": "JournalBatchMigrationPreflight.sql",
+      "migrations": [
+        {
+          "id": "20260929102006_JournalBatchStableAccountingBook",
+          "sourceSha256": "B9C42A2C9F335D766ABB7DAC0E41E40061B99B4B2F07910237EFE499AC69E5B3"
+        }
+      ]
     }
   ]
 }

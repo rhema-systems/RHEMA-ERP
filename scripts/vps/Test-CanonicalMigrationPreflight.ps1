@@ -31,7 +31,7 @@ try {
     }
     $result = @(Invoke-CanonicalMigrationPreflight)
     $coverage = @($result | Where-Object { $_ -like 'GUARD_COVERAGE|*' })
-    if ($script:probeCalls -ne 5 -or $coverage.Count -ne 23 -or @($coverage | Select-Object -Unique).Count -ne 23) {
+    if ($script:probeCalls -ne 7 -or $coverage.Count -ne 25 -or @($coverage | Select-Object -Unique).Count -ne 25) {
         throw 'Successful preflight did not execute all probes and report exact coverage.'
     }
     $script:probeCalls=0; $script:blockProbe=$true; $blocked=$false
@@ -39,7 +39,7 @@ try {
         if ($_.Exception.Message -notlike '*Test retained transaction=3*') { throw }
         $blocked=$true
     }
-    if (-not $blocked -or $script:probeCalls -ne 5) { throw 'Retained data did not fail closed after all probes.' }
+    if (-not $blocked -or $script:probeCalls -ne 7) { throw 'Retained data did not fail closed after all probes.' }
 
     # Verify a changed migration cannot inherit a previously reviewed coverage ID.
     $fixture = Join-Path $testRoot 'fixture'
@@ -74,7 +74,7 @@ try {
         $blocked=$true
     }
     if (-not $blocked) { throw 'Changed helper guard was not rejected.' }
-    Write-Host 'PASS: packaged PowerShell helper, all 23 coverage IDs, retained-data rejection, and migration/helper stale-review rejection.'
+    Write-Host 'PASS: packaged PowerShell helper, all 25 coverage IDs, retained-data rejection, and migration/helper stale-review rejection.'
 
     if ($SqlServer) {
         if (-not $CanonicalDatabase -or -not $LegacyDatabase) { throw 'Both test database names are required.' }
