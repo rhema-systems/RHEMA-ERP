@@ -36,6 +36,7 @@
     <Compile Include="Controllers\Inventory\PhysicalCountReviewTests.cs" />
     <Compile Include="Services\Finance\ProcurementAutoInvoiceTests.cs" />
     <Compile Include="Services\Finance\CustomerBalanceAdjustmentPostingTests.cs" />
+    <Compile Include="Services\Finance\CapitalProjectPostingTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementSupplierInvoiceBoundaryTests.cs" />
     <Compile Include="Controllers\Procurement\EstateSupplierInvoiceLineageTests.cs" />
     <Compile Include="Services\Workflow\OptionalApprovalConfigurationTests.cs" />

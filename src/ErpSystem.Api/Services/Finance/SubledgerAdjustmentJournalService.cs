@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
@@ -161,6 +162,9 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
             cancellationToken);
         var originalAdjustment = originalAdjustmentId.HasValue
             ? await LoadAdjustmentAsync(originalAdjustmentId.Value, false, cancellationToken) : null;
+        var accountingBookCode = originalAdjustment is null
+            ? await ResolvePrimaryAccountingBookCodeAsync(tenantId, cancellationToken)
+            : await ResolveOriginalAccountingBookCodeAsync(originalAdjustment, tenantId, cancellationToken);
 
         var settings = await _context.FinanceSettings
             .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
@@ -252,6 +256,7 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
             contraAccount.Id,
             counterparty.Name,
             baseCurrencyCode,
+            accountingBookCode,
             cancellationToken);
         adjustment.JournalEntryId = postingResult.JournalEntryId;
         adjustment.UpdatedAt = DateTime.UtcNow;
@@ -277,6 +282,7 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
         Guid contraAccountId,
         string counterpartyName,
         string functionalCurrencyCode,
+        string accountingBookCode,
         CancellationToken cancellationToken)
     {
         var isDebit = string.Equals(adjustment.AdjustmentType, SubledgerAdjustmentTypes.Debit, StringComparison.OrdinalIgnoreCase);
@@ -305,6 +311,7 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
             Description = description,
             PostingDate = adjustment.AdjustmentDate,
             JournalType = $"{adjustment.Module} Adjustment",
+            AccountingBookCode = accountingBookCode,
             FunctionalCurrencyCode = functionalCurrencyCode,
             IdempotencyKey = $"SubledgerAdjustmentJournal:{adjustment.TenantId:N}:{adjustment.Id:N}:Post",
             ReturnExistingOnDuplicate = true,
@@ -314,6 +321,70 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
                 BuildPostingLine(contraAccountId, adjustment.Reason, contraLineType, adjustment, 2)
             }
         }, cancellationToken);
+    }
+
+    private async Task<string> ResolvePrimaryAccountingBookCodeAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var books = await _context.AccountingBooks
+            .AsNoTracking()
+            .Where(book => book.TenantId == tenantId && book.IsDefault && book.IsActive &&
+                book.AllowsPosting && !book.IsDeleted &&
+                book.BookType == AccountingBookType.PrimaryFull &&
+                book.LifecycleStatus == AccountingBookLifecycleStatus.Active)
+            .Take(2)
+            .Select(book => new { book.Id, book.Code })
+            .ToListAsync(cancellationToken);
+        if (books.Count != 1 || books[0].Id == Guid.Empty || !IsCanonicalExactBookCode(books[0].Code))
+        {
+            throw new InvalidOperationException(
+                "PRIMARY_BOOK_AUTHORITY_AMBIGUOUS: Exactly one active default posting book with a canonical exact code is required.");
+        }
+
+        return books[0].Code;
+    }
+
+    private async Task<string> ResolveOriginalAccountingBookCodeAsync(
+        SubledgerAdjustmentJournal original,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        if (!original.JournalEntryId.HasValue || original.JournalEntry is null ||
+            original.JournalEntry.TenantId != tenantId || original.JournalEntry.AccountingBookId == Guid.Empty ||
+            !IsCanonicalExactBookCode(original.JournalEntry.BookClassification))
+        {
+            throw new InvalidOperationException(
+                "The original adjustment is missing valid tenant-owned exact-book journal evidence.");
+        }
+
+        var book = await _context.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(candidate =>
+            candidate.TenantId == tenantId &&
+            candidate.Id == original.JournalEntry.AccountingBookId &&
+            candidate.IsActive && candidate.AllowsPosting && !candidate.IsDeleted &&
+            candidate.BookType == AccountingBookType.PrimaryFull &&
+            candidate.LifecycleStatus == AccountingBookLifecycleStatus.Active,
+            cancellationToken);
+        if (book is null || !IsCanonicalExactBookCode(book.Code) ||
+            !string.Equals(book.Code, original.JournalEntry.BookClassification, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The original adjustment journal's accounting-book evidence is stale or inconsistent.");
+        }
+
+        return book.Code;
+    }
+
+    private static bool IsCanonicalExactBookCode(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 20 ||
+            !string.Equals(value, value.Trim().ToUpperInvariant(), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return value.All(character => character is >= 'A' and <= 'Z' or >= '0' and <= '9' or '_') &&
+            value is not "ALL" and not "ALL_ACTIVE_BOOKS" and not "ALL_CLASSIFIED_BOOKS" and not "ALLCLASSIFIEDBOOKS";
     }
 
     private static FinancePostingLineDto BuildPostingLine(

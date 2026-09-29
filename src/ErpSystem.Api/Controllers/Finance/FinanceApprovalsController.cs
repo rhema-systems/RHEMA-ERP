@@ -3076,6 +3076,7 @@ public class FinanceApprovalsController : ControllerBase
             or "FIXEDASSETDEPRECIATIONRUN"
             or "ASSETDEPRECIATIONSCHEDULE"
             or "ASSETVALUATION"
+            or "CAPITALPROJECT"
             or "RECURRINGJOURNALTEMPLATE"
             or "RECURRINGJOURNALOCCURRENCE"
             or "RECURRINGJOURNALOCCURRENCEWAIVER";
