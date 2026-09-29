@@ -17,12 +17,13 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Configuration;
 using Moq;
 using Xunit;
 
 namespace ErpSystem.Core.Tests.Services.Inventory;
 
-public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
+public sealed partial class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
 {
     private readonly Guid _tenantId = Guid.NewGuid();
     private readonly Guid _initiatorId = Guid.NewGuid();
@@ -111,7 +112,9 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
             _adjustments.Object,
             events.Object,
             NullLogger<PhysicalCountService>.Instance,
-            _warehouseDefaults);
+            _warehouseDefaults,
+            counterNotificationConfiguration: new ConfigurationBuilder().AddInMemoryCollection(
+                new Dictionary<string, string?> { ["FrontendUrl"] = "https://erp.example.test" }).Build());
     }
 
     public async Task InitializeAsync()
@@ -544,6 +547,7 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
         {
             WarehouseId = _warehouseId, CountType = CountType.FullCount
         }, _initiatorId);
+        await SetRowVersionsAsync(created.Id);
         _currentUser.Switch(_counterId, "cycle.counter");
         await _counts.StartCountAsync(created.Id, _counterId);
         var before = (await LoadCountAsync(created.Id)).Items.Select(x => new
@@ -554,11 +558,11 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
         var import = () => _counts.ImportCountSheetAsync(created.Id, new[]
         {
             // Even a valid first row must not be applied before discovering the ambiguous SKU.
-            new ImportCountItemDto { ItemCode = "ABC-B-001", CountedQuantity = 2m },
-            new ImportCountItemDto { ItemCode = "ABC-A-001", CountedQuantity = 8m }
+            new ImportCountItemDto { ItemCode = "ABC-B-001", CountedQuantity = 2m, RowVersion = Convert.ToBase64String(_lineRowVersion), IdempotencyKey = "import-valid" },
+            new ImportCountItemDto { ItemCode = "ABC-A-001", CountedQuantity = 8m, RowVersion = Convert.ToBase64String(_lineRowVersion), IdempotencyKey = "import-ambiguous" }
         }, _counterId);
 
-        await import.Should().ThrowAsync<InvalidOperationException>().WithMessage("*upload*");
+        await import.Should().ThrowAsync<InvalidOperationException>().WithMessage("*does not identify one saved line*");
         var saved = await LoadCountAsync(created.Id);
         saved.Items.Select(x => new
         {
@@ -1246,7 +1250,7 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
 
     [Fact]
     [Trait("Batch", "E2E-012")]
-    public async Task Investigation_retires_the_adjustment_blocks_posting_and_returns_to_original_counter()
+    public async Task Investigation_retires_adjustment_and_recovers_legacy_committee_into_retained_child_recount()
     {
         var created = await _counts.CreateAsync(new CreatePhysicalCountDto { WarehouseId = _warehouseId, LocationId = _locationId, CountType = CountType.CycleCount, ABCClass = "A" }, _initiatorId);
         await SetRowVersionsAsync(created.Id);
@@ -1275,10 +1279,7 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
         _currentUser.Switch(_counterId, "cycle.counter");
         var correction = () => SaveQuantityAsync(line.Id, 8, "locked");
         await correction.Should().ThrowAsync<InvalidOperationException>().WithMessage("*locked*");
-        var resume = Mutation("resume"); resume.Comment = "Found one omitted unit in the count sheet.";
-        await _counts.ReviewCountAsync(created.Id, _counterId, resume);
-        await SaveQuantityAsync(line.Id, 8, "correct");
-        (await LoadCountAsync(created.Id)).Status.Should().Be("UnderReview");
+        await RecoverLegacyRecountAndAssertAsync(created.Id, line.Id);
     }
 
     [Fact]
@@ -1379,10 +1380,22 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
     private void ConfigureAdjustmentOwner()
     {
         _adjustments.Setup(service => service.CreateAsync(It.IsAny<CreateStockAdjustmentDto>(), It.IsAny<Guid>()))
-            .ReturnsAsync((CreateStockAdjustmentDto request, Guid _) =>
+            .Returns(async (CreateStockAdjustmentDto request, Guid actor) =>
             {
                 _createdAdjustment = request;
                 _adjustment = Adjustment("Draft");
+                await _context.AddAsync(new StockAdjustment {
+                    Id = _adjustment.Id, TenantId = _tenantId, WarehouseId = request.WarehouseId,
+                    AdjustmentNumber = _adjustment.AdjustmentNumber, ReasonCode = request.ReasonCode,
+                    Reference = request.Reference ?? string.Empty, RequestedById = actor, IdempotencyKey = request.IdempotencyKey,
+                    Items = request.Items.Select(item => new StockAdjustmentItem {
+                        Id = Guid.NewGuid(), TenantId = _tenantId, AdjustmentId = _adjustment.Id,
+                        InventoryItemId = item.InventoryItemId, LocationId = item.LocationId,
+                        AdjustmentQuantity = item.AdjustmentQuantity, UnitCost = item.UnitCost ?? 0m,
+                        LotNumber = item.LotNumber, SerialNumber = item.SerialNumber
+                    }).ToList()
+                });
+                await _context.SaveChangesAsync();
                 return _adjustment;
             });
         _adjustments.Setup(service => service.GetByIdAsync(It.IsAny<Guid>()))
@@ -1502,7 +1515,7 @@ public sealed class E2E012CycleCountFinanceLifecycleTests : IAsyncLifetime
             active = false;
             return Task.CompletedTask;
         });
-        var service = new PhysicalCountService(Mock.Of<IPhysicalCountRepository>(), Mock.Of<IPhysicalCountItemRepository>(),
+        var service = new PhysicalCountService(new PhysicalCountRepository(_context), Mock.Of<IPhysicalCountItemRepository>(),
             Mock.Of<IInventoryItemRepository>(), Mock.Of<IWarehouseRepository>(), Mock.Of<IWarehouseQuantityRepository>(),
             unit.Object, _currentUser, _access.Object, _adjustments.Object, Mock.Of<IProcurementControlEventService>(),
             NullLogger<PhysicalCountService>.Instance, _warehouseDefaults);

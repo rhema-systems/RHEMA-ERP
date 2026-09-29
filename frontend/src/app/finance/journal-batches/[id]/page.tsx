@@ -10,6 +10,8 @@ import {
     Download,
     FileCheck2,
     Loader2,
+    Paperclip,
+    Pencil,
     Plus,
     RefreshCw,
     RotateCcw,
@@ -19,6 +21,8 @@ import {
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { EligibleDraftJournalCombobox } from '@/components/finance/journal-batches/eligible-draft-journal-combobox';
+import { ManualJournalAccountCombobox } from '@/components/finance/journal-entries/manual-journal-account-combobox';
+import { ManualJournalDimensionCell, ManualJournalDimensionDefaults } from '@/components/finance/journal-entries/manual-journal-dimension-editor';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
@@ -33,8 +37,10 @@ import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
 import { financeDataService } from '@/services/finance/finance-data.service';
+import { fileUploadService } from '@/services/file-upload.service';
 import { journalBatchDataService } from '@/services/finance/journal-batch-data.service';
-import type { Account, CreateAccountTransactionDto } from '@/types/finance';
+import type { Account, AccountingBook, CreateAccountTransactionDto, FinanceDimensionAccountRule, FinanceDimensionDefinition, FiscalPeriod } from '@/types/finance';
+import { getMissingRequiredManualDimension, resolveManualDimensionValues } from '@/lib/finance/manual-journal-dimensions';
 import type {
     JournalBatchDetail,
     JournalBatchItem,
@@ -48,6 +54,7 @@ type EntryLine = {
     accountId: string;
     transactionType: 'Debit' | 'Credit';
     amount: string;
+    dimensions: Record<string, string>;
 };
 
 const newLine = (transactionType: 'Debit' | 'Credit'): EntryLine => ({
@@ -55,6 +62,7 @@ const newLine = (transactionType: 'Debit' | 'Credit'): EntryLine => ({
     accountId: '',
     transactionType,
     amount: '',
+    dimensions: {},
 });
 
 const money = (value: number, currency: string) =>
@@ -77,8 +85,20 @@ export default function JournalBatchDetailPage() {
     const [confirmation, setConfirmation] = useState<'submit' | 'post' | 'reverse' | null>(null);
     const [reversalReason, setReversalReason] = useState('');
     const [reversalDate, setReversalDate] = useState(today());
+    const canCreate = hasPermission('Finance.JournalBatches.Create');
+    const canEditPermission = hasPermission('Finance.JournalBatches.Edit');
+    const canDelete = hasPermission('Finance.JournalBatches.Delete');
+    const canSubmitPermission = hasPermission('Finance.JournalBatches.SubmitForApproval');
+    const canReverse = hasPermission('Finance.JournalBatches.Reverse');
+    const canExport = hasPermission('Finance.JournalBatches.Export');
+    const canCopy = hasPermission('Finance.JournalBatches.Copy');
     const [batch, setBatch] = useState<JournalBatchDetail | null>(null);
     const [accounts, setAccounts] = useState<Account[]>([]);
+    const [accountsError, setAccountsError] = useState<string>();
+    const [financeDimensions, setFinanceDimensions] = useState<FinanceDimensionDefinition[]>([]);
+    const [dimensionRules, setDimensionRules] = useState<FinanceDimensionAccountRule[]>([]);
+    const [dimensionsLoading, setDimensionsLoading] = useState(true);
+    const [defaultDimensions, setDefaultDimensions] = useState<Record<string, string>>({});
     const [validation, setValidation] = useState<JournalBatchValidation | null>(null);
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState<string | null>(null);
@@ -94,6 +114,14 @@ export default function JournalBatchDetailPage() {
     const [eligibleDraftsOpen, setEligibleDraftsOpen] = useState(false);
     const eligibleDraftRequest = useRef(0);
     const [editingJournalId, setEditingJournalId] = useState<string | null>(null);
+    const [editingBatch, setEditingBatch] = useState(false);
+    const [batchForm, setBatchForm] = useState({ description: '', expectedDebitTotal: '', expectedJournalCount: '', notes: '' });
+    const [showCopyForm, setShowCopyForm] = useState<'all' | 'rejected' | null>(null);
+    const [copyDate, setCopyDate] = useState('');
+    const [copyPeriodId, setCopyPeriodId] = useState('');
+    const [copyPeriods, setCopyPeriods] = useState<FiscalPeriod[]>([]);
+    const [copyAttachments, setCopyAttachments] = useState(false);
+    const [uploadingAttachment, setUploadingAttachment] = useState(false);
     const [entry, setEntry] = useState({
         transactionDate: today(),
         description: '',
@@ -106,6 +134,20 @@ export default function JournalBatchDetailPage() {
             setLoading(true);
             const result = await journalBatchDataService.getBatch(id);
             setBatch(result);
+            setBatchForm({
+                description: result.description,
+                expectedDebitTotal: String(result.expectedDebitTotal),
+                expectedJournalCount: result.expectedJournalCount ? String(result.expectedJournalCount) : '',
+                notes: result.notes || '',
+            });
+            setEntry((current) => {
+                if (editingJournalId) return current;
+                const currentDate = current.transactionDate;
+                const start = result.fiscalPeriodStartDate?.slice(0, 10);
+                const end = result.fiscalPeriodEndDate?.slice(0, 10);
+                const valid = start && end && currentDate >= start && currentDate <= end;
+                return { ...current, transactionDate: valid ? currentDate : start || currentDate };
+            });
             setPostSelection((selected) => selected.filter((itemId) => result.items.some((item) => item.id === itemId && item.postingStatus === 'Ready')));
             setReviewDecisions((current) => {
                 const next = { ...current };
@@ -117,14 +159,28 @@ export default function JournalBatchDetailPage() {
         } finally {
             setLoading(false);
         }
-    }, [id, toast]);
+    }, [editingJournalId, id, toast]);
 
     useEffect(() => { load(); }, [load]);
     useEffect(() => {
-        financeDataService.getAccounts({ status: 'Active', take: 500 })
-            .then((result) => setAccounts(result.filter((account) => account.allowDirectPosting && !account.isControlAccount)))
-            .catch(() => undefined);
-    }, []);
+        financeDataService.getAccounts()
+            .then((result) => setAccounts(result.filter((account) => account.status === 'Active' && ((account as any).isPostingAllowed ?? account.allowDirectPosting) && !account.isControlAccount)))
+            .catch((error) => setAccountsError(error.message || 'Chart of accounts could not be loaded.'));
+        Promise.all([financeDataService.getFinanceDimensions(), financeDataService.getFinanceDimensionRules()])
+            .then(([definitions, rules]) => {
+                setFinanceDimensions(definitions.filter((item) => item.isActive));
+                setDimensionRules(rules);
+            })
+            .catch((error) => toast({ title: 'Coding dimensions unavailable', description: error.message, variant: 'destructive' }))
+            .finally(() => setDimensionsLoading(false));
+    }, [toast]);
+
+    useEffect(() => {
+        if (!showCopyForm) return;
+        financeDataService.getFiscalPeriods()
+            .then((periods) => setCopyPeriods(periods.filter((period) => period.periodStatus === 'Open' || period.status === 'Open' || period.isOpen)))
+            .catch((error) => toast({ title: 'Fiscal periods unavailable', description: error.message, variant: 'destructive' }));
+    }, [showCopyForm, toast]);
 
     const loadEligibleDrafts = useCallback(async (search: string) => {
         const requestId = ++eligibleDraftRequest.current;
@@ -144,10 +200,10 @@ export default function JournalBatchDetailPage() {
     }, [id]);
 
     useEffect(() => {
-        if (!batch?.canEdit) return;
+        if (!batch?.canEdit || (!canCreate && !canEditPermission)) return;
         const timeout = window.setTimeout(() => loadEligibleDrafts(eligibleDraftSearch), 250);
         return () => window.clearTimeout(timeout);
-    }, [batch?.canEdit, eligibleDraftSearch, loadEligibleDrafts]);
+    }, [batch?.canEdit, canCreate, canEditPermission, eligibleDraftSearch, loadEligibleDrafts]);
 
     const readyItems = useMemo(() => batch?.items.filter((item) =>
         item.reviewStatus === (batch.approvalRequired === false ? 'NotRequired' : 'Approved') && item.postingStatus === 'Ready') ?? [], [batch]);
@@ -157,11 +213,30 @@ export default function JournalBatchDetailPage() {
     const canPost = batch?.canPostAny && hasPermission('Finance.JournalBatches.Post');
     const lineDebit = lines.filter((line) => line.transactionType === 'Debit').reduce((sum, line) => sum + Number(line.amount || 0), 0);
     const lineCredit = lines.filter((line) => line.transactionType === 'Credit').reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    const targetAccountingBooks: AccountingBook[] = useMemo(() => batch ? [{
+        id: batch.accountingBookId,
+        tenantId: '',
+        code: batch.bookClassification,
+        name: batch.accountingBookName,
+        purpose: '',
+        bookType: batch.accountingBookType,
+        lifecycleStatus: 'Active',
+        functionalCurrencyCode: batch.controlCurrencyCode,
+        isActive: true,
+        isDefault: false,
+        allowsPosting: true,
+        isSystemDefined: false,
+        sortOrder: 0,
+    }] : [], [batch]);
 
     const resetEntry = () => {
         setEditingJournalId(null);
-        setEntry({ transactionDate: today(), description: '', reference: '' });
+        const candidate = today();
+        const start = batch?.fiscalPeriodStartDate?.slice(0, 10);
+        const end = batch?.fiscalPeriodEndDate?.slice(0, 10);
+        setEntry({ transactionDate: start && end && (candidate < start || candidate > end) ? start : candidate, description: '', reference: '' });
         setLines([newLine('Debit'), newLine('Credit')]);
+        setDefaultDimensions({});
     };
 
     const run = async (name: string, action: () => Promise<unknown>, success: string, reload = true) => {
@@ -207,12 +282,29 @@ export default function JournalBatchDetailPage() {
 
     const saveEntry = async () => {
         if (!batch) return;
+        if ((editingJournalId && !canEditPermission) || (!editingJournalId && !canCreate)) {
+            toast({ title: 'Permission required', description: 'You do not have permission for this journal-batch change.', variant: 'destructive' });
+            return;
+        }
         if (!entry.description.trim() || !entry.reference.trim() || lines.length < 2 || lines.some((line) => !line.accountId || Number(line.amount) <= 0)) {
             toast({ title: 'Incomplete journal', description: 'Description, reference, and valid account lines are required.', variant: 'destructive' });
             return;
         }
         if (Math.abs(lineDebit - lineCredit) > 0.005) {
             toast({ title: 'Journal is not balanced', description: `Debit ${lineDebit.toFixed(2)} does not equal credit ${lineCredit.toFixed(2)}.`, variant: 'destructive' });
+            return;
+        }
+        if (batch.fiscalPeriodStartDate && batch.fiscalPeriodEndDate &&
+            (entry.transactionDate < batch.fiscalPeriodStartDate.slice(0, 10) || entry.transactionDate > batch.fiscalPeriodEndDate.slice(0, 10))) {
+            toast({ title: 'Date outside batch period', description: 'The journal date must fall inside the batch fiscal period.', variant: 'destructive' });
+            return;
+        }
+        const missingDimension = lines.map((line, index) => {
+            const rule = getMissingRequiredManualDimension(dimensionRules, line.accountId, entry.transactionDate, line.dimensions);
+            return rule ? `Line ${index + 1} requires ${rule.dimensionName}.` : null;
+        }).find((message): message is string => Boolean(message));
+        if (missingDimension) {
+            toast({ title: 'Coding dimension required', description: missingDimension, variant: 'destructive' });
             return;
         }
         const transactions: CreateAccountTransactionDto[] = lines.map((line, index) => ({
@@ -223,8 +315,11 @@ export default function JournalBatchDetailPage() {
             reference: entry.reference,
             currencyCode: batch.controlCurrencyCode,
             lineNumber: index + 1,
+            dimensions: Object.entries(line.dimensions)
+                .filter(([, valueCode]) => Boolean(valueCode))
+                .map(([dimensionCode, valueCode]) => ({ dimensionCode, valueCode })),
         }));
-        await run(
+        const saved = await run(
             'save-entry',
             () => editingJournalId
                 ? journalBatchDataService.updateJournal(id, editingJournalId, {
@@ -246,7 +341,7 @@ export default function JournalBatchDetailPage() {
                 }),
             editingJournalId ? 'Journal updated' : 'Journal added',
         );
-        resetEntry();
+        if (saved) resetEntry();
     };
 
     const editItem = async (item: JournalBatchItem) => {
@@ -264,6 +359,7 @@ export default function JournalBatchDetailPage() {
                 accountId: line.accountId,
                 transactionType: line.transactionType,
                 amount: String(line.amount),
+                dimensions: Object.fromEntries((line.dimensions || []).map((dimension) => [dimension.dimensionCode, dimension.valueCode])),
             })));
             window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
         } catch (error: any) {
@@ -321,13 +417,63 @@ export default function JournalBatchDetailPage() {
     const copyBatch = async (rejectedOnly: boolean) => {
         try {
             setBusy(rejectedOnly ? 'copy-rejected' : 'copy');
-            const copied = await journalBatchDataService.copy(id, rejectedOnly);
+            const copied = await journalBatchDataService.copy(id, rejectedOnly, {
+                entryDate: copyDate || undefined,
+                fiscalPeriodId: copyPeriodId || undefined,
+                includeAttachments: copyAttachments,
+            });
             router.push(`/finance/journal-batches/${copied.id}`);
         } catch (error: any) {
             toast({ title: 'Copy failed', description: error.message, variant: 'destructive' });
         } finally {
             setBusy(null);
         }
+    };
+
+    const saveBatch = async () => {
+        if (!batch || !batchForm.description.trim() || Number(batchForm.expectedDebitTotal) <= 0) return;
+        const saved = await run('save-batch', () => journalBatchDataService.updateBatch(id, {
+            description: batchForm.description.trim(),
+            expectedDebitTotal: Number(batchForm.expectedDebitTotal),
+            expectedJournalCount: batchForm.expectedJournalCount ? Number(batchForm.expectedJournalCount) : undefined,
+            notes: batchForm.notes || undefined,
+            rowVersion: batch.rowVersion,
+        }), 'Batch updated');
+        if (saved) setEditingBatch(false);
+    };
+
+    const deleteBatch = async () => {
+        if (!batch || !window.confirm(`Delete empty draft batch ${batch.batchNumber}?`)) return;
+        const deleted = await run('delete-batch', () => journalBatchDataService.deleteBatch(id), 'Batch deleted', false);
+        if (deleted) router.push('/finance/journal-batches');
+    };
+
+    const uploadAttachment = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        try {
+            setUploadingAttachment(true);
+            const uploaded = await fileUploadService.uploadSingleFile(file, 'finance-journal-batch-attachments');
+            await journalBatchDataService.linkAttachment(id, uploaded.fileId);
+            toast({ title: 'Attachment added' });
+            await load();
+        } catch (error: any) {
+            toast({ title: 'Attachment upload failed', description: error.message, variant: 'destructive' });
+        } finally {
+            setUploadingAttachment(false);
+            event.target.value = '';
+        }
+    };
+
+    const canEditBatch = Boolean(batch?.canEdit && canEditPermission);
+    const canAddToBatch = Boolean(batch?.canEdit && canCreate);
+    const applyDimensionsToAllLines = (values: Record<string, string>) => {
+        setLines((current) => current.map((line) => ({
+            ...line,
+            dimensions: line.accountId
+                ? resolveManualDimensionValues(financeDimensions, dimensionRules, line.accountId, entry.transactionDate, values)
+                : { ...values },
+        })));
     };
 
     if (loading && !batch) return <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin" /></div>;
@@ -339,12 +485,15 @@ export default function JournalBatchDetailPage() {
                 <div>
                     <div className="flex items-center gap-2"><h1 className="font-mono text-3xl font-bold">{batch.batchNumber}</h1><Badge variant="outline">{batch.displayStatus}</Badge>{batch.batchType === 'Reversal' && <Badge>Reversal</Badge>}</div>
                     <p className="text-muted-foreground">{batch.description}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{batch.fiscalPeriodName} · {batch.bookClassification} — {batch.accountingBookName} ({batch.accountingBookType}) · {batch.controlCurrencyCode}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" onClick={() => journalBatchDataService.exportBatch(id, batch.batchNumber)}><Download className="mr-2 h-4 w-4" />Export</Button>
-                    <Button variant="outline" onClick={() => copyBatch(false)} disabled={busy !== null}><Copy className="mr-2 h-4 w-4" />Copy</Button>
-                    {batch.rejectedEntryCount > 0 && <Button variant="outline" onClick={() => copyBatch(true)} disabled={busy !== null}>Copy rejected</Button>}
-                    {batch.canReverseBatch && hasPermission('Finance.JournalBatches.Reverse') && <Button variant="destructive" onClick={() => setConfirmation('reverse')} disabled={busy !== null}><RotateCcw className="mr-2 h-4 w-4" />Reverse entire batch</Button>}
+                    {canEditBatch && <Button variant="outline" onClick={() => setEditingBatch((current) => !current)}><Pencil className="mr-2 h-4 w-4" />Edit controls</Button>}
+                    {canDelete && batch.canEdit && batch.entryCount === 0 && <Button variant="destructive" onClick={deleteBatch} disabled={busy !== null}><Trash2 className="mr-2 h-4 w-4" />Delete</Button>}
+                    {canExport && <Button variant="outline" onClick={() => journalBatchDataService.exportBatch(id, batch.batchNumber)}><Download className="mr-2 h-4 w-4" />Export</Button>}
+                    {canCopy && <Button variant="outline" onClick={() => setShowCopyForm('all')} disabled={busy !== null}><Copy className="mr-2 h-4 w-4" />Copy</Button>}
+                    {canCopy && batch.rejectedEntryCount > 0 && <Button variant="outline" onClick={() => setShowCopyForm('rejected')} disabled={busy !== null}>Copy rejected</Button>}
+                    {canReverse && batch.canReverseBatch && <Button variant="destructive" onClick={() => setConfirmation('reverse')} disabled={busy !== null}><RotateCcw className="mr-2 h-4 w-4" />Reverse entire batch</Button>}
                 </div>
             </div>
 
@@ -355,6 +504,32 @@ export default function JournalBatchDetailPage() {
                     <BreadcrumbItem><BreadcrumbPage>{batch.batchNumber}</BreadcrumbPage></BreadcrumbItem>
                 </BreadcrumbList>
             </Breadcrumb>
+
+            {editingBatch && canEditBatch && (
+                <Card>
+                    <CardHeader><CardTitle>Edit batch controls</CardTitle><CardDescription>The period, accounting book, and control currency are immutable after creation.</CardDescription></CardHeader>
+                    <CardContent className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2 md:col-span-2"><Label>Description</Label><Input value={batchForm.description} onChange={(event) => setBatchForm({ ...batchForm, description: event.target.value })} /></div>
+                        <div className="space-y-2"><Label>Expected debit total</Label><Input type="number" min="0.01" step="0.01" value={batchForm.expectedDebitTotal} onChange={(event) => setBatchForm({ ...batchForm, expectedDebitTotal: event.target.value })} /></div>
+                        <div className="space-y-2"><Label>Expected journal count</Label><Input type="number" min="1" value={batchForm.expectedJournalCount} onChange={(event) => setBatchForm({ ...batchForm, expectedJournalCount: event.target.value })} /></div>
+                        <div className="space-y-2 md:col-span-2"><Label>Notes</Label><Textarea value={batchForm.notes} onChange={(event) => setBatchForm({ ...batchForm, notes: event.target.value })} /></div>
+                        <div className="flex justify-end gap-2 md:col-span-2"><Button variant="outline" onClick={() => setEditingBatch(false)}>Cancel</Button><Button onClick={saveBatch} disabled={busy !== null}><Save className="mr-2 h-4 w-4" />Save controls</Button></div>
+                    </CardContent>
+                </Card>
+            )}
+
+            {showCopyForm && canCopy && (
+                <Card>
+                    <CardHeader><CardTitle>{showCopyForm === 'rejected' ? 'Copy rejected journals' : 'Copy batch'}</CardTitle><CardDescription>Leave the date and period blank to retain the source values.</CardDescription></CardHeader>
+                    <CardContent className="grid gap-4 md:grid-cols-3">
+                        <div className="space-y-2"><Label>New journal date (optional)</Label><Input type="date" value={copyDate} onChange={(event) => setCopyDate(event.target.value)} /></div>
+                        <div className="space-y-2"><Label>Target fiscal period</Label><Select value={copyPeriodId || 'source'} onValueChange={(value) => setCopyPeriodId(value === 'source' ? '' : value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="source">Keep source period</SelectItem>{copyPeriods.map((period) => <SelectItem key={period.id} value={period.id}>{period.periodName}</SelectItem>)}</SelectContent></Select></div>
+                        <label className="flex items-center gap-2 self-end pb-2 text-sm"><Checkbox checked={copyAttachments} onCheckedChange={(value) => setCopyAttachments(value === true)} />Include attachments</label>
+                        {copyPeriodId && !copyDate && <p className="text-sm text-destructive md:col-span-3">Choose a journal date inside the target fiscal period.</p>}
+                        <div className="flex justify-end gap-2 md:col-span-3"><Button variant="outline" onClick={() => setShowCopyForm(null)}>Cancel</Button><Button onClick={() => copyBatch(showCopyForm === 'rejected')} disabled={busy !== null || Boolean(copyPeriodId && !copyDate)}><Copy className="mr-2 h-4 w-4" />Create copy</Button></div>
+                    </CardContent>
+                </Card>
+            )}
 
             <div className="grid gap-4 md:grid-cols-4">
                 <Card><CardHeader className="pb-2"><CardDescription>Expected total</CardDescription><CardTitle>{money(batch.expectedDebitTotal, batch.controlCurrencyCode)}</CardTitle></CardHeader></Card>
@@ -367,8 +542,8 @@ export default function JournalBatchDetailPage() {
                 <CardHeader><CardTitle>Control actions</CardTitle><CardDescription>Validation is read-only. Submission freezes a content fingerprint for every entry.</CardDescription></CardHeader>
                 <CardContent className="flex flex-wrap gap-2">
                     <Button variant="outline" onClick={validate} disabled={busy !== null}>{busy === 'validate' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileCheck2 className="mr-2 h-4 w-4" />}Validate</Button>
-                    {batch.canSubmit && hasPermission('Finance.JournalBatches.SubmitForApproval') && <Button onClick={() => setConfirmation('submit')} disabled={busy !== null || !workflow.visibility.known}><Send className="mr-2 h-4 w-4" />{workflow.visibility.direct ? 'Prepare to post' : 'Submit for approval'}</Button>}
-                    {batch.approvalStatus === 'PendingApproval' && hasPermission('Finance.JournalBatches.SubmitForApproval') && <Button variant="outline" onClick={() => run('withdraw', () => journalBatchDataService.withdraw(id), batch.batchType === 'Reversal' ? 'Reversal cancelled' : 'Batch withdrawn')} disabled={busy !== null}>{batch.batchType === 'Reversal' ? 'Cancel reversal' : 'Withdraw'}</Button>}
+                    {canSubmitPermission && batch.canSubmit && <Button onClick={() => setConfirmation('submit')} disabled={busy !== null || !workflow.visibility.known}><Send className="mr-2 h-4 w-4" />{workflow.visibility.direct ? 'Prepare to post' : 'Submit for approval'}</Button>}
+                    {canSubmitPermission && batch.approvalStatus === 'PendingApproval' && <Button variant="outline" onClick={() => run('withdraw', () => journalBatchDataService.withdraw(id), batch.batchType === 'Reversal' ? 'Reversal cancelled' : 'Batch withdrawn')} disabled={busy !== null}>{batch.batchType === 'Reversal' ? 'Cancel reversal' : 'Withdraw'}</Button>}
                     <Button variant="ghost" onClick={load}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
                 </CardContent>
             </Card>
@@ -408,8 +583,8 @@ export default function JournalBatchDetailPage() {
                                         </td>}
                                         <td className="p-3"><Badge variant="outline">{item.postingStatus}</Badge></td>
                                         <td className="p-3 text-right">
-                                            {batch.canEdit && <Button size="sm" variant="ghost" onClick={() => editItem(item)}>Edit</Button>}
-                                            {batch.canEdit && <Button size="sm" variant="ghost" onClick={() => run(`remove-${item.id}`, () => journalBatchDataService.removeJournal(id, item.journalEntryId), 'Journal removed')}><Trash2 className="h-4 w-4 text-destructive" /></Button>}
+                                            {canEditBatch && <Button size="sm" variant="ghost" onClick={() => editItem(item)}>Edit</Button>}
+                                            {canEditBatch && <Button size="sm" variant="ghost" onClick={() => run(`remove-${item.id}`, () => journalBatchDataService.removeJournal(id, item.journalEntryId), 'Journal removed')}><Trash2 className="h-4 w-4 text-destructive" /></Button>}
                                         </td>
                                     </tr>
                                 ))}
@@ -434,22 +609,25 @@ export default function JournalBatchDetailPage() {
                 </CardContent>
             </Card>
 
-            {batch.canEdit && (
+            {(canAddToBatch || (editingJournalId && canEditBatch)) && (
                 <Card>
-                    <CardHeader><CardTitle>{editingJournalId ? 'Edit journal entry' : 'Add journal entry'}</CardTitle><CardDescription>Enter at least one debit and one credit line. The journal must balance before it can be saved.</CardDescription></CardHeader>
+                    <CardHeader><CardTitle>{editingJournalId ? 'Edit journal entry' : 'Add journal entry'}</CardTitle><CardDescription>Enter a base-currency journal here, or create a fully governed foreign-currency draft in Manual Journals and attach it below. The journal must balance before it can be saved.</CardDescription></CardHeader>
                     <CardContent className="space-y-5">
                         <div className="grid gap-3 md:grid-cols-3">
                             <div className="space-y-2"><Label>Date</Label><Input type="date" value={entry.transactionDate} onChange={(event) => setEntry({ ...entry, transactionDate: event.target.value })} /></div>
                             <div className="space-y-2"><Label>Description</Label><Input value={entry.description} onChange={(event) => setEntry({ ...entry, description: event.target.value })} /></div>
                             <div className="space-y-2"><Label>Reference</Label><Input value={entry.reference} onChange={(event) => setEntry({ ...entry, reference: event.target.value })} /></div>
                         </div>
+                        <ManualJournalDimensionDefaults definitions={financeDimensions} effectiveDate={entry.transactionDate} values={defaultDimensions} onChange={setDefaultDimensions} onApplyToAll={() => applyDimensionsToAllLines(defaultDimensions)} disabled={dimensionsLoading} />
+                        {accountsError && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertTitle>Accounts unavailable</AlertTitle><AlertDescription>{accountsError}</AlertDescription></Alert>}
                         <div className="overflow-x-auto rounded-md border">
                             <table className="w-full text-sm">
-                                <thead className="bg-muted/50"><tr><th className="p-3 text-left">Account</th><th className="p-3 text-left">Side</th><th className="p-3 text-right">Amount</th><th className="p-3"></th></tr></thead>
+                                <thead className="bg-muted/50"><tr><th className="p-3 text-left">Account</th><th className="p-3 text-left">Side</th><th className="p-3 text-right">Amount</th><th className="p-3 text-left">Coding</th><th className="p-3"></th></tr></thead>
                                 <tbody>{lines.map((line, index) => <tr className="border-t" key={line.key}>
-                                    <td className="min-w-72 p-3"><Select value={line.accountId} onValueChange={(value) => setLines(lines.map((item, itemIndex) => itemIndex === index ? { ...item, accountId: value } : item))}><SelectTrigger><SelectValue placeholder="Select posting account" /></SelectTrigger><SelectContent>{accounts.map((account) => <SelectItem key={account.id} value={account.id}>{account.accountNumber} — {account.accountName}</SelectItem>)}</SelectContent></Select></td>
+                                    <td className="min-w-72 p-3"><ManualJournalAccountCombobox accounts={accounts} selectedAccountId={line.accountId} lineNumber={index + 1} targetAccountingBooks={targetAccountingBooks} fallbackBookCode={batch.bookClassification} targetBookLabel={`${batch.bookClassification} — ${batch.accountingBookName}`} onSelect={(accountId) => setLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, accountId, dimensions: resolveManualDimensionValues(financeDimensions, dimensionRules, accountId, entry.transactionDate, defaultDimensions) } : item))} onClear={() => setLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, accountId: '', dimensions: {} } : item))} /></td>
                                     <td className="w-44 p-3"><Select value={line.transactionType} onValueChange={(value: 'Debit' | 'Credit') => setLines(lines.map((item, itemIndex) => itemIndex === index ? { ...item, transactionType: value } : item))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Debit">Debit</SelectItem><SelectItem value="Credit">Credit</SelectItem></SelectContent></Select></td>
                                     <td className="w-48 p-3"><Input className="text-right" type="number" min="0.01" step="0.01" value={line.amount} onChange={(event) => setLines(lines.map((item, itemIndex) => itemIndex === index ? { ...item, amount: event.target.value } : item))} /></td>
+                                    <td className="min-w-52 p-3"><ManualJournalDimensionCell definitions={financeDimensions} rules={dimensionRules} effectiveDate={entry.transactionDate} lineNumber={index + 1} accountId={line.accountId} accountLabel={accounts.find((account) => account.id === line.accountId)?.accountName} values={line.dimensions} defaults={defaultDimensions} previousValues={index > 0 ? lines[index - 1].dimensions : undefined} loading={dimensionsLoading} onChange={(dimensions) => setLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, dimensions } : item))} onApplyToAll={applyDimensionsToAllLines} /></td>
                                     <td className="p-3"><Button variant="ghost" size="icon" disabled={lines.length <= 2} onClick={() => setLines(lines.filter((_, itemIndex) => itemIndex !== index))}><Trash2 className="h-4 w-4" /></Button></td>
                                 </tr>)}</tbody>
                                 <tfoot><tr className="border-t font-medium"><td className="p-3" colSpan={2}>Debit {money(lineDebit, batch.controlCurrencyCode)} / Credit {money(lineCredit, batch.controlCurrencyCode)}</td><td className="p-3 text-right" colSpan={2}>{Math.abs(lineDebit - lineCredit) < 0.005 ? <span className="text-emerald-600">Balanced</span> : <span className="text-destructive">Out by {money(Math.abs(lineDebit - lineCredit), batch.controlCurrencyCode)}</span>}</td></tr></tfoot>
@@ -459,7 +637,7 @@ export default function JournalBatchDetailPage() {
                             <Button variant="outline" onClick={() => setLines([...lines, newLine('Debit')])}><Plus className="mr-2 h-4 w-4" />Add line</Button>
                             <div className="flex gap-2">{editingJournalId && <Button variant="outline" onClick={resetEntry}>Cancel edit</Button>}<Button onClick={saveEntry} disabled={busy !== null}><Save className="mr-2 h-4 w-4" />{editingJournalId ? 'Update journal' : 'Add journal'}</Button></div>
                         </div>
-                        <div className="grid gap-3 border-t pt-4 md:grid-cols-[1fr_auto]">
+                        {canAddToBatch && <div className="grid gap-3 border-t pt-4 md:grid-cols-[1fr_auto]">
                             <div className="space-y-2">
                                 <Label>Attach an existing draft journal</Label>
                                 <EligibleDraftJournalCombobox
@@ -494,10 +672,21 @@ export default function JournalBatchDetailPage() {
                             <Button className="self-end" variant="outline" onClick={attachExistingJournal} disabled={!selectedDraftJournal || busy !== null}>
                                 {busy === 'attach' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Attach
                             </Button>
-                        </div>
+                        </div>}
                     </CardContent>
                 </Card>
             )}
+
+            <Card>
+                <CardHeader><CardTitle className="flex items-center gap-2"><Paperclip className="h-5 w-5" />Attachments</CardTitle><CardDescription>Evidence remains linked to the batch and is included in the batch audit trail.</CardDescription></CardHeader>
+                <CardContent className="space-y-3">
+                    {canAddToBatch && <div><Label htmlFor="journal-batch-attachment" className="inline-flex cursor-pointer items-center rounded-md border px-3 py-2 text-sm"><Paperclip className="mr-2 h-4 w-4" />{uploadingAttachment ? 'Uploading…' : 'Upload attachment'}</Label><Input id="journal-batch-attachment" type="file" className="sr-only" disabled={uploadingAttachment} onChange={uploadAttachment} /></div>}
+                    <div className="space-y-2">
+                        {batch.attachments.map((attachment) => <div key={attachment.fileUploadRecordId} className="flex items-center justify-between rounded-md border p-3"><div><a className="font-medium text-primary hover:underline" href={attachment.fileUrl} target="_blank" rel="noreferrer">{attachment.fileName}</a><div className="text-xs text-muted-foreground">{attachment.contentType || 'File'} · {(attachment.fileSize / 1024).toFixed(1)} KB · {new Date(attachment.uploadedAt).toLocaleString()}</div></div><div className="flex gap-1"><Button asChild variant="ghost" size="icon"><a href={attachment.fileUrl} target="_blank" rel="noreferrer" aria-label={`Open ${attachment.fileName}`}><Download className="h-4 w-4" /></a></Button>{canEditBatch && <Button variant="ghost" size="icon" aria-label={`Remove ${attachment.fileName}`} onClick={() => run(`unlink-${attachment.fileUploadRecordId}`, () => journalBatchDataService.unlinkAttachment(id, attachment.fileUploadRecordId), 'Attachment removed')}><Trash2 className="h-4 w-4 text-destructive" /></Button>}</div></div>)}
+                        {batch.attachments.length === 0 && <p className="text-sm text-muted-foreground">No attachments.</p>}
+                    </div>
+                </CardContent>
+            </Card>
 
             {batch.postingRuns.length > 0 && (
                 <Card>

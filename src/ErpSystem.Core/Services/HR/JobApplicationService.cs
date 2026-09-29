@@ -492,6 +492,17 @@ public class JobApplicationService : IJobApplicationService
         await _pipelineService.CloseCurrentStageForExitAsync(
             entity.Id, JobApplicationStageExitReason.Withdrawn, updatedByUserId, cancellationToken);
 
+        // The candidate is told, whoever withdrew it — HR on their behalf, or an employee applicant
+        // through their own door, which comes through here (round 4, lane N-b). The confirmation's only
+        // sender was a token-link withdrawal nothing ever called, so no withdrawal confirmed itself.
+        var candidate = await _candidateRepository.GetByIdAsync(entity.JobCandidateId);
+        var vacancy = await GetOwnedVacancyAsync(entity.JobVacancyId);
+        await SendWithdrawalConfirmationEmailAsync(
+            candidate?.Email ?? string.Empty,
+            candidate?.FullName ?? "Candidate",
+            entity.ApplicationNumber,
+            string.IsNullOrWhiteSpace(vacancy.JobTitle) ? "the position" : vacancy.JobTitle);
+
         return true;
     }
 
@@ -530,15 +541,10 @@ public class JobApplicationService : IJobApplicationService
 
         _logger.LogInformation("Application {ApplicationNumber} moved to stage {StageId}", entity.ApplicationNumber, dto.PipelineStageId);
 
-        // Email #6 — Under Review
-        var candUr = await _candidateRepository.GetByIdAsync(entity.JobCandidateId);
-        var vacUr  = await GetOwnedVacancyAsync(entity.JobVacancyId);
-        await SendUnderReviewEmailAsync(
-            candUr?.Email ?? string.Empty,
-            candUr?.FullName ?? "Candidate",
-            entity.ApplicationNumber,
-            vacUr?.JobTitle ?? "the position");
-
+        // ⚠ No email of its own any more (round 4, lane N-b). This door sent "Under Review" after EVERY
+        // move — into an interview, an offer, beside Assessment Pending — while the board's door never
+        // sent it. The pipeline service, which both doors go through, now sends it once, on the first
+        // move into a review stage, so the two doors send the same emails.
         return true;
     }
 
@@ -652,6 +658,15 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<ApplicationAutoScoreDto> EvaluateLoadedApplicationScoreAsync(JobApplication application, CancellationToken cancellationToken = default)
     {
+        // Round 4, lane Q: an "Education level" criterion compares ranks on the tenant's ladder,
+        // read here once per application — or once per batch, by EvaluateAllScoresForVacancyAsync.
+        var ladder = await QualificationLadder.LoadAsync(_unitOfWork, GetTenantId(), cancellationToken);
+        return await EvaluateLoadedApplicationScoreAsync(application, ladder, cancellationToken);
+    }
+
+    private async Task<ApplicationAutoScoreDto> EvaluateLoadedApplicationScoreAsync(
+        JobApplication application, QualificationLadder ladder, CancellationToken cancellationToken)
+    {
         if (application.TenantId != GetTenantId())
             throw new ArgumentException($"Job application '{application.Id}' not found.");
 
@@ -664,6 +679,7 @@ public class JobApplicationService : IJobApplicationService
         // Fall back to the live candidate entity for legacy rows that predate the
         // snapshot feature.  The log line makes this visible in diagnostics.
         ScoringCandidateView scoringView;
+        var backfillQualificationLevels = false;
         if (!string.IsNullOrEmpty(application.ProfileSnapshotJson))
         {
             try
@@ -673,6 +689,7 @@ public class JobApplicationService : IJobApplicationService
                 if (snap is not null)
                 {
                     scoringView = ScoringCandidateView.FromSnapshot(snap);
+                    backfillQualificationLevels = !snap.QualificationLevelsRecorded;
                 }
                 else
                 {
@@ -723,27 +740,38 @@ public class JobApplicationService : IJobApplicationService
             };
         }
 
-        var breakdown = new List<CriterionScoreResult>();
-        decimal totalWeight = 0m;
-        decimal earnedScore = 0m;
-        bool allMandatoryPassed = true;
+        // Round 4, lane A. The Location criterion tests tree CONTAINMENT, which needs the
+        // candidate's ancestor path. A snapshot written before round 4 carries neither id nor path;
+        // one written since carries the id and — if the read that built it Included the navigation
+        // — the path. Resolve the gap here, once per application, so EvaluateCriterion can stay
+        // pure and synchronous.
+        //
+        // ⚠ Deliberately resolved from the LIVE tree. If the area has since been re-parented, the
+        // live answer is the one a recruiter looking at the map today would give, and the frozen
+        // path is preferred when present precisely so that a re-score of an old application is
+        // stable. Both positions are defensible; the split is which question is being asked.
+        if (scoringView.GeoAreaPath is null && scoringView.GeoAreaId is { } candidateAreaId)
+            scoringView.GeoAreaPath = await ResolveGeoAreaPathAsync(candidateAreaId, cancellationToken);
 
-        // Evaluate ALL criteria regardless of mandatory failures so the stored breakdown
-        // is complete — required for recruiter review and algorithmic-decision audit trails
-        foreach (var criterion in liveCriteria)
-        {
-            var result = EvaluateCriterion(criterion, scoringView);
-            breakdown.Add(result);
+        // Round 4, lane Q. A snapshot written before qualification levels existed carries none, so
+        // they are read from the candidate's live profile: the answer a recruiter looking at the
+        // record today would give, and the choice GeoAreaPath makes above. A snapshot that DID
+        // record levels is scored exactly as frozen: a qualification it holds with no level sat on
+        // no rung when the candidate applied.
+        if (backfillQualificationLevels && candidate is not null)
+            scoringView.QualificationLevelIds.UnionWith(ScoringCandidateView.LevelsOf(candidate.Qualifications));
 
-            if (criterion.IsMandatory && !result.Passed)
-                allMandatoryPassed = false;
-
-            // A criterion the engine does not score (Other) is left out of the total: it neither
-            // lifts nor lowers anybody. It used to pass everyone with full marks.
-            if (!result.AutoEvaluated) continue;
-            totalWeight += criterion.Weight;
-            earnedScore += result.WeightedScore;
-        }
+        // ── The shared engine ─────────────────────────────────────────────────
+        //
+        // Round 4, lane B. Evaluating every criterion regardless of a mandatory miss, scoring that
+        // miss as zero, and answering "nothing could be measured" with NO SCORE rather than full
+        // marks are three rules the talent-pool screen has to follow too — over a candidate who has
+        // no application at all. They moved into ShortlistingEvaluator whole, comments and lane A
+        // repairs included, so there is one copy rather than two that agree until they do not.
+        var scored = ShortlistingEvaluator.Score(liveCriteria, scoringView, ladder);
+        var breakdown = scored.Breakdown;
+        var allMandatoryPassed = scored.AllMandatoryPassed;
+        var totalWeight = scored.TotalWeight;
 
         // Disqualify after the full loop so the breakdown covers every criterion
         if (!allMandatoryPassed)
@@ -771,10 +799,49 @@ public class JobApplicationService : IJobApplicationService
             };
         }
 
-        // Normalise criterion score to 0–100
-        decimal criterionScore = totalWeight > 0
-            ? Math.Round(earnedScore / totalWeight * 100m, 2)
-            : 100m;
+        // ⚠ Round 4, lane A. Nothing measurable ⇒ NO SCORE, not full marks.
+        //
+        // This used to fall through to 100 whenever `totalWeight` came out zero — the same
+        // inflation round 3 lane K removed from the branch above, reached one level down. There it
+        // was "the vacancy states no criteria"; here it is "every criterion the vacancy states
+        // turned out to be unevaluable", and the old code answered the two questions differently.
+        //
+        // It mattered little while `Other` was the only way to get here. It matters now: lane A
+        // added three more exclusion paths — an empty criterion, an unanswerable numeric bound, and
+        // a Location criterion listing areas against a candidate who has none — and the last is
+        // ordinary. A vacancy screening on Greater Accra, scored against candidates who applied
+        // through the public form and have no area on file, would have handed EVERY ONE OF THEM
+        // 100 and put them at the top of the shortlist.
+        //
+        // A null score is never auto-shortlisted, which is the whole point: the recruiter is told
+        // nothing could be measured rather than being shown a number that means the opposite.
+        if (scored.Score is not { } measuredScore)
+        {
+            application.AutoScore = null;
+            application.AutoScoreBreakdown = JsonSerializer.Serialize(breakdown);
+            application.ScoredAt = DateTime.UtcNow;
+            application.ScoreIsStale = false;
+            await _applicationRepository.UpdateAsync(application);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation(
+                "Application {AppId} has {Count} criteria but none could be evaluated — no score written.",
+                applicationId, breakdown.Count);
+
+            return new ApplicationAutoScoreDto
+            {
+                ApplicationId = applicationId,
+                AutoScore = null,
+                HasCriteria = true,
+                ScoredAt = application.ScoredAt.Value,
+                AllMandatoryPassed = allMandatoryPassed,
+                TotalWeight = 0m,
+                MaxPossibleScore = 100m,
+                Breakdown = breakdown,
+            };
+        }
+
+        decimal criterionScore = measuredScore;
 
         // ── Test score integration ────────────────────────────────────────────
         decimal finalScore = criterionScore;
@@ -834,358 +901,39 @@ public class JobApplicationService : IJobApplicationService
                      && a.Status != ApplicationStatus.Rejected)
             .ToList();
 
+        // The ladder once for the batch, not once per application (round 4, lane Q).
+        var ladder = await QualificationLadder.LoadAsync(_unitOfWork, tenantId, cancellationToken);
+
         var results = new List<ApplicationAutoScoreDto>(scoreable.Count);
         foreach (var app in scoreable)
         {
-            var result = await EvaluateLoadedApplicationScoreAsync(app, cancellationToken);
+            var result = await EvaluateLoadedApplicationScoreAsync(app, ladder, cancellationToken);
             results.Add(result);
         }
 
         return results;
     }
 
-    // ── Private scoring helpers ───────────────────────────────────────────────
-
     /// <summary>
-    /// Thin adapter that presents candidate data to <see cref="EvaluateCriterion"/> in a
-    /// uniform shape regardless of whether the data came from a live <see cref="JobCandidate"/>
-    /// entity or a deserialized <see cref="ApplicationCandidateSnapshot"/>.
-    ///
-    /// All string collections are pre-normalised to lower-case so criterion comparisons
-    /// are O(1) hash-set lookups rather than repeated ToLowerInvariant() allocations.
+    /// The ancestor path of one area, read from the live tree — the back-fill for applications
+    /// whose snapshot predates round 4.
     /// </summary>
-    private sealed class ScoringCandidateView
+    /// <remarks>
+    /// Returns null for an area this tenant cannot see or that has been hard-removed, which the
+    /// caller reads as "no area" and falls back to the typed city for. A soft-deleted area still
+    /// answers: the candidate genuinely lived there, and the criterion that named it is what the
+    /// <c>ShortlistingCriteriaGeoAreaConsumer</c> probe protects.
+    /// </remarks>
+    private async Task<string?> ResolveGeoAreaPathAsync(Guid geoAreaId, CancellationToken cancellationToken)
     {
-        // ── Scalars ───────────────────────────────────────────────────────────
-        public decimal  YearsOfExperience    { get; init; }
-        public DateTime DateOfBirth          { get; init; }
-        public Gender   Gender               { get; init; }
-        public string   City                 { get; init; } = string.Empty;
+        var tenantId = GetTenantId();
+        var path = await _unitOfWork.Repository<ErpSystem.Core.Entities.Reference.GeoArea>()
+            .GetQueryable()
+            .Where(a => a.Id == geoAreaId && a.TenantId == tenantId)
+            .Select(a => a.Path)
+            .FirstOrDefaultAsync(cancellationToken);
 
-        // ── Pre-normalised sets for O(1) lookups ──────────────────────────────
-        public HashSet<string> SkillNames          { get; init; } = new();
-        public HashSet<Guid>   SkillIds            { get; init; } = new();
-        public HashSet<string> CertificationNames  { get; init; } = new();
-        public HashSet<string> QualificationNames  { get; init; } = new();
-        public HashSet<Guid>   QualificationIds    { get; init; } = new();
-        public HashSet<string> LanguageNames       { get; init; } = new();
-        public HashSet<Guid>   LanguageIds         { get; init; } = new();
-
-        // ── Factory: from live entity ─────────────────────────────────────────
-        public static ScoringCandidateView FromEntity(JobCandidate c, JobApplication app) =>
-            new()
-            {
-                YearsOfExperience   = app.YearsOfExperience ?? c.TotalYearsExperience ?? 0,
-                DateOfBirth         = c.DateOfBirth,
-                Gender              = c.Gender,
-                City                = c.City?.ToLowerInvariant() ?? string.Empty,
-                SkillNames          = c.Skills
-                                        .Select(s => s.SkillName.ToLowerInvariant())
-                                        .ToHashSet(),
-                SkillIds            = c.Skills
-                                        .Where(s => s.SkillId.HasValue)
-                                        .Select(s => s.SkillId!.Value)
-                                        .ToHashSet(),
-                CertificationNames  = c.Skills
-                                        .Where(s => s.IsCertified && !string.IsNullOrEmpty(s.CertificationName))
-                                        .Select(s => s.CertificationName!.ToLowerInvariant())
-                                        .ToHashSet(),
-                QualificationNames  = c.Qualifications
-                                        .Select(q => (q.Qualification?.Name ?? q.QualificationFreeText ?? string.Empty)
-                                                     .ToLowerInvariant())
-                                        .Where(n => n.Length > 0)
-                                        .ToHashSet(),
-                QualificationIds    = c.Qualifications
-                                        .Where(q => q.QualificationId.HasValue)
-                                        .Select(q => q.QualificationId!.Value)
-                                        .ToHashSet(),
-                LanguageNames       = c.Languages
-                                        .Select(l => l.LanguageName.ToLowerInvariant())
-                                        .ToHashSet(),
-                LanguageIds         = c.Languages
-                                        .Where(l => l.LanguageId.HasValue)
-                                        .Select(l => l.LanguageId!.Value)
-                                        .ToHashSet(),
-            };
-
-        // ── Factory: from snapshot ────────────────────────────────────────────
-        public static ScoringCandidateView FromSnapshot(ApplicationCandidateSnapshot snap) =>
-            new()
-            {
-                YearsOfExperience   = snap.YearsOfExperience ?? snap.TotalYearsExperience ?? 0,
-                DateOfBirth         = snap.DateOfBirth,
-                Gender              = snap.Gender,
-                City                = snap.City?.ToLowerInvariant() ?? string.Empty,
-                SkillNames          = snap.Skills
-                                        .Select(s => s.SkillName.ToLowerInvariant())
-                                        .ToHashSet(),
-                SkillIds            = snap.Skills
-                                        .Where(s => s.SkillId.HasValue)
-                                        .Select(s => s.SkillId!.Value)
-                                        .ToHashSet(),
-                CertificationNames  = snap.Skills
-                                        .Where(s => s.IsCertified && !string.IsNullOrEmpty(s.CertificationName))
-                                        .Select(s => s.CertificationName!.ToLowerInvariant())
-                                        .ToHashSet(),
-                QualificationNames  = snap.Qualifications
-                                        .Select(q => q.NormalisedName)
-                                        .Where(n => n.Length > 0)
-                                        .ToHashSet(),
-                QualificationIds    = snap.Qualifications
-                                        .Where(q => q.QualificationId.HasValue)
-                                        .Select(q => q.QualificationId!.Value)
-                                        .ToHashSet(),
-                LanguageNames       = snap.Languages
-                                        .Select(l => l.NormalisedName)
-                                        .ToHashSet(),
-                LanguageIds         = snap.Languages
-                                        .Where(l => l.LanguageId.HasValue)
-                                        .Select(l => l.LanguageId!.Value)
-                                        .ToHashSet(),
-            };
-    }
-
-    private static CriterionScoreResult EvaluateCriterion(
-        JobShortlistingCriteria criterion,
-        ScoringCandidateView    view)
-    {
-        bool passed;
-        decimal rawScore;
-        string? notes = null;
-        bool autoEvaluated = true;
-
-        switch (criterion.Type)
-        {
-            case JobShortlistingCriteriaType.YearsOfExperience:
-            {
-                (passed, rawScore, notes) = EvaluateNumericCriterion(criterion, view.YearsOfExperience, "year(s) of experience");
-                break;
-            }
-
-            case JobShortlistingCriteriaType.Qualification:
-            case JobShortlistingCriteriaType.EducationLevel:
-            {
-                // ID-first: the legacy single catalogue FK still passes immediately when the candidate holds it.
-                if (criterion.RequiredQualificationId.HasValue && view.QualificationIds.Contains(criterion.RequiredQualificationId.Value))
-                {
-                    passed   = true;
-                    rawScore = 1m;
-                    notes    = $"Qualification matched by catalogue ID ({criterion.RequiredQualificationId.Value}).";
-                    break;
-                }
-                (passed, rawScore, notes) = EvaluateListCriterion(criterion, view.QualificationIds, view.QualificationNames, "qualification");
-                notes += $" Candidate qualifications: {string.Join(", ", view.QualificationNames)}.";
-                break;
-            }
-
-            case JobShortlistingCriteriaType.Skill:
-            {
-                if (criterion.RequiredSkillId.HasValue && view.SkillIds.Contains(criterion.RequiredSkillId.Value))
-                {
-                    passed   = true;
-                    rawScore = 1m;
-                    notes    = $"Skill matched by catalogue ID ({criterion.RequiredSkillId.Value}).";
-                    break;
-                }
-                (passed, rawScore, notes) = EvaluateListCriterion(criterion, view.SkillIds, view.SkillNames, "skill");
-                break;
-            }
-
-            case JobShortlistingCriteriaType.Certification:
-            {
-                // A candidate's certificate carries a name, not a catalogue id (lane C1 added the
-                // number, body and expiry; the id is a follow-on), so a catalogue-picked value
-                // matches on the mirrored catalogue name — which is exactly why the label is mirrored.
-                (passed, rawScore, notes) = EvaluateListCriterion(criterion, new HashSet<Guid>(), view.CertificationNames, "certification");
-                break;
-            }
-
-            case JobShortlistingCriteriaType.Age:
-            {
-                decimal ageYears = (decimal)((DateTime.UtcNow - view.DateOfBirth).TotalDays / 365.25);
-                (passed, rawScore, notes) = EvaluateNumericCriterion(criterion, ageYears, "years old");
-                break;
-            }
-
-            case JobShortlistingCriteriaType.Gender:
-            {
-                // The accepted genders are enum members (or "Any"); the candidate's is compared as a
-                // member name, never through the text strategies (R-5 fix 6).
-                var accepted = RequiredLabels(criterion);
-                var mine = view.Gender.ToString().ToLowerInvariant();
-                if (accepted.Count == 0)
-                {
-                    passed = true;
-                    rawScore = 1m;
-                    notes = "No gender specified; every candidate passes.";
-                }
-                else
-                {
-                    passed = accepted.Contains("any") || accepted.Contains(mine);
-                    rawScore = passed ? 1m : 0m;
-                    notes = $"Accepted: {string.Join(", ", accepted)}; candidate: {mine}. Informs the score only — never mandatory (D-7).";
-                }
-                break;
-            }
-
-            case JobShortlistingCriteriaType.Language:
-            {
-                (passed, rawScore, notes) = EvaluateListCriterion(criterion, view.LanguageIds, view.LanguageNames, "language");
-                notes += $" Candidate languages: {string.Join(", ", view.LanguageNames)}.";
-                break;
-            }
-
-            case JobShortlistingCriteriaType.Location:
-            {
-                var accepted = RequiredLabels(criterion);
-                if (accepted.Count == 0)
-                {
-                    passed = true;
-                    rawScore = 1m;
-                    notes = "No required location specified; defaulting to pass.";
-                }
-                else
-                {
-                    var op = criterion.ComparisonOperator ?? ShortlistingComparisonOperator.Contains;
-                    passed = op == ShortlistingComparisonOperator.Equals
-                        ? accepted.Contains(view.City)
-                        : accepted.Any(a => view.City.Contains(a, StringComparison.Ordinal));
-                    rawScore = passed ? 1m : 0m;
-                    notes = $"Required location: '{string.Join(", ", accepted)}'; Candidate city: '{view.City}'.";
-                }
-                break;
-            }
-
-            default:
-            {
-                // Other, or a legacy row with no type. Not auto-evaluated: it passes (a person
-                // judges it), contributes NOTHING, and its weight is left out of the total. It used
-                // to pass with full marks — a mandatory Other could disqualify nobody (R-5 fix 1;
-                // § 3 defect 8).
-                passed = true;
-                rawScore = 0m;
-                autoEvaluated = false;
-                notes = "Not auto-evaluated; judged by a person off-system. Contributes nothing to the score.";
-                break;
-            }
-        }
-
-        decimal weightedScore = autoEvaluated ? rawScore * criterion.Weight : 0m;
-
-        return new CriterionScoreResult
-        {
-            CriteriaId = criterion.Id,
-            CriteriaName = criterion.CriteriaName,
-            IsMandatory = criterion.IsMandatory,
-            Type = criterion.Type,
-            Weight = criterion.Weight,
-            Passed = passed,
-            RawScore = Math.Round(rawScore, 4),
-            WeightedScore = Math.Round(weightedScore, 4),
-            Notes = notes,
-            AutoEvaluated = autoEvaluated,
-        };
-    }
-
-    /// <summary>
-    /// The accepted items of a list criterion, ids first and labels second (round 3, lane K; register
-    /// row R-8). The value rows are the truth; the legacy comma-separated text is read for rows
-    /// written before the lane. A row with a catalogue id matches the candidate's catalogue link
-    /// exactly, or its mirrored label under the strategy — so a candidate who typed the same name
-    /// still matches. Duplicates collapse.
-    /// </summary>
-    private static (bool passed, decimal rawScore, string notes) EvaluateListCriterion(
-        JobShortlistingCriteria criterion, HashSet<Guid> candidateIds, HashSet<string> candidateNames, string noun)
-    {
-        var items = new List<(Guid? Id, string Label)>();
-        foreach (var v in criterion.Values.Where(v => !v.IsDeleted).OrderBy(v => v.SortOrder))
-        {
-            var label = v.Label.Trim().ToLowerInvariant();
-            if (items.Any(i => (v.ReferenceId.HasValue && i.Id == v.ReferenceId) || (label.Length > 0 && i.Label == label))) continue;
-            items.Add((v.ReferenceId, label));
-        }
-        foreach (var label in SplitValues(criterion.RequiredValue))
-        {
-            if (items.Any(i => i.Label == label)) continue;
-            items.Add((null, label));
-        }
-
-        if (items.Count == 0)
-            return (true, 1m, $"No required {noun} specified; defaulting to pass.");
-
-        int matched = items.Count(i =>
-            (i.Id is Guid id && candidateIds.Contains(id))
-            || (i.Label.Length > 0 && candidateNames.Any(c => MatchesValue(c, i.Label, criterion.MatchStrategy))));
-        bool passed = criterion.MatchMode == MandatoryMatchMode.AllRequired
-            ? matched == items.Count
-            : matched > 0;
-        decimal rawScore = (decimal)matched / items.Count;
-        string notes = $"{matched}/{items.Count} required {noun}(s) matched "
-                     + $"[{(criterion.MatchMode == MandatoryMatchMode.AllRequired ? "all required" : "any sufficient")}, {criterion.MatchStrategy}; ids first, names second].";
-        return (passed, rawScore, notes);
-    }
-
-    /// <summary>The accepted labels of a criterion, lower-cased: value rows first, legacy text second.</summary>
-    private static List<string> RequiredLabels(JobShortlistingCriteria criterion)
-    {
-        var labels = criterion.Values.Where(v => !v.IsDeleted).OrderBy(v => v.SortOrder)
-            .Select(v => v.Label.Trim().ToLowerInvariant()).Where(l => l.Length > 0).ToList();
-        foreach (var label in SplitValues(criterion.RequiredValue))
-            if (!labels.Contains(label)) labels.Add(label);
-        return labels;
-    }
-
-    private static (bool passed, decimal rawScore, string notes) EvaluateNumericCriterion(
-        JobShortlistingCriteria criterion,
-        decimal candidateValue,
-        string unit)
-    {
-        decimal min = criterion.MinValue ?? 0;
-        decimal max = criterion.MaxValue ?? decimal.MaxValue;
-        var op = criterion.ComparisonOperator ?? ShortlistingComparisonOperator.Between;
-
-        bool passed = op switch
-        {
-            ShortlistingComparisonOperator.GreaterThan => candidateValue > min,
-            ShortlistingComparisonOperator.GreaterThanOrEqual => candidateValue >= min,
-            ShortlistingComparisonOperator.LessThan => candidateValue < max,
-            ShortlistingComparisonOperator.LessThanOrEqual => candidateValue <= max,
-            ShortlistingComparisonOperator.Equals => candidateValue == min,
-            _ => candidateValue >= min && (criterion.MaxValue == null || candidateValue <= max),
-        };
-
-        // Partial credit for a near miss, on EITHER side (round 3, lane K; R-5 fix 7). It used to be
-        // asymmetric: too little experience scored a fraction, too much scored nothing at all.
-        decimal rawScore;
-        if (passed)
-        {
-            rawScore = 1m;
-        }
-        else if (op is ShortlistingComparisonOperator.Equals)
-        {
-            rawScore = 0m;
-        }
-        else if (candidateValue < min)
-        {
-            rawScore = min > 0 ? Math.Min(candidateValue / min, 0.8m) : 0m;
-        }
-        else
-        {
-            // Above the ceiling: the closer to it, the more of the 0.8 cap.
-            rawScore = criterion.MaxValue.HasValue && candidateValue > 0 ? Math.Min(max / candidateValue, 0.8m) : 0m;
-        }
-
-        string label = op switch
-        {
-            ShortlistingComparisonOperator.GreaterThan => $"> {min}",
-            ShortlistingComparisonOperator.GreaterThanOrEqual => $">= {min}",
-            ShortlistingComparisonOperator.LessThan => $"< {max}",
-            ShortlistingComparisonOperator.LessThanOrEqual => $"<= {max}",
-            ShortlistingComparisonOperator.Equals => $"= {min}",
-            _ => criterion.MaxValue.HasValue ? $"{min}–{max}" : $">= {min}",
-        };
-        string notes = $"Candidate: {candidateValue:F1} {unit}; required {label}.";
-        return (passed, rawScore, notes);
+        return string.IsNullOrWhiteSpace(path) ? null : path;
     }
 
     // ── Public CV upload tickets ─────────────────────────────────────────────
@@ -1399,73 +1147,6 @@ public class JobApplicationService : IJobApplicationService
         }
     }
 
-    private static List<string> SplitValues(string? raw) =>
-        string.IsNullOrWhiteSpace(raw)
-            ? new List<string>()
-            : raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                 .Select(v => v.ToLowerInvariant())
-                 .ToList();
-
-    // ── Value match strategy helpers ──────────────────────────────────────────
-
-    /// <summary>
-    /// Returns true when <paramref name="candidateValue"/> satisfies the match for
-    /// <paramref name="requiredTerm"/> under the given <paramref name="strategy"/>.
-    /// Both inputs are expected to be already lower-cased.
-    /// </summary>
-    private static bool MatchesValue(string candidateValue, string requiredTerm, ValueMatchStrategy strategy)
-        => strategy switch
-        {
-            ValueMatchStrategy.Contains => candidateValue.Contains(requiredTerm, StringComparison.Ordinal)
-                                        || requiredTerm.Contains(candidateValue, StringComparison.Ordinal),
-            ValueMatchStrategy.Fuzzy    => FuzzyMatches(candidateValue, requiredTerm),
-            _                           => candidateValue == requiredTerm,  // Exact (default)
-        };
-
-    /// <summary>
-    /// Fuzzy match: passes when token overlap score ≥ 0.5, or when Levenshtein
-    /// edit-distance ≤ 2 for short strings (≤ 20 chars each).
-    /// </summary>
-    private static bool FuzzyMatches(string a, string b)
-    {
-        var tokensA = TokeniseForFuzzy(a);
-        var tokensB = TokeniseForFuzzy(b);
-        if (tokensA.Count > 0 && tokensB.Count > 0)
-        {
-            int shared = tokensA.Count(t => tokensB.Contains(t));
-            double overlapScore = (double)shared / Math.Max(tokensA.Count, tokensB.Count);
-            if (overlapScore >= 0.5) return true;
-        }
-        // Levenshtein fallback for short strings
-        if (a.Length <= 20 && b.Length <= 20 && EditDistance(a, b) <= 2) return true;
-        return false;
-    }
-
-    private static HashSet<string> TokeniseForFuzzy(string s)
-        => s.Split([' ', '-', '_', '/', '(', ')'], StringSplitOptions.RemoveEmptyEntries)
-            .Where(t => t.Length >= 2)
-            .ToHashSet(StringComparer.Ordinal);
-
-    /// <summary>Iterative Levenshtein distance, O(min(n,m)) space.</summary>
-    private static int EditDistance(string s, string t)
-    {
-        int n = s.Length, m = t.Length;
-        if (n == 0) return m;
-        if (m == 0) return n;
-        var prev = new int[m + 1];
-        var curr = new int[m + 1];
-        for (int j = 0; j <= m; j++) prev[j] = j;
-        for (int i = 1; i <= n; i++)
-        {
-            curr[0] = i;
-            for (int j = 1; j <= m; j++)
-                curr[j] = s[i - 1] == t[j - 1]
-                    ? prev[j - 1]
-                    : 1 + Math.Min(prev[j - 1], Math.Min(prev[j], curr[j - 1]));
-            (prev, curr) = (curr, prev);
-        }
-        return prev[m];
-    }
 
     // ── Decision log + communication helpers ─────────────────────────────────
 
@@ -3037,6 +2718,7 @@ public class JobApplicationService : IJobApplicationService
                 JobCandidateId         = candidate.Id,
                 QualificationType      = q.QualificationType,
                 QualificationId        = null,          // external — no catalogue link yet
+                QualificationLevelId   = q.QualificationLevelId,   // round 4, lane Q
                 QualificationFreeText  = q.QualificationName.Trim(),
                 Institution            = q.Institution.Trim(),
                 DateAwarded            = q.DateAwarded,
@@ -3124,6 +2806,9 @@ public class JobApplicationService : IJobApplicationService
                     DisplayName     = display,
                     Institution     = q.Institution.Trim(),
                     QualificationId = q.QualificationId,
+                    // Round 4, lane Q. What the form stated; this path links no catalogue entry,
+                    // so there is no catalogue level to fall back on.
+                    QualificationLevelId = q.QualificationLevelId,
                 };
             }).Where(q => q.NormalisedName.Length > 0).ToList();
 
@@ -3150,7 +2835,22 @@ public class JobApplicationService : IJobApplicationService
                 DateOfBirth          = dto.DateOfBirth,
                 Gender               = dto.Gender,
                 City                 = dto.City?.Trim(),
+                // Round 4, lane A. ⚠ This is the THIRD snapshot writer and the only one that does
+                // not go through IApplicationSnapshotService — it builds from the public form's DTO
+                // rather than from the candidate graph. Anything added to the snapshot has to be
+                // added here too, or this path alone writes it null forever.
+                //
+                // The area comes from the CANDIDATE, not the DTO: the anonymous apply form collects
+                // a free-text city and no cascade (most applicants are in a country with no scheme,
+                // and the form is deliberately short). A returning applicant whose profile already
+                // carries an area therefore keeps it; a brand-new one has none, and the Location
+                // criterion falls back to the city below.
+                GeoAreaId            = candidate.GeoAreaId,
+                GeoAreaPath          = string.IsNullOrWhiteSpace(candidate.GeoArea?.Path)
+                                           ? null
+                                           : candidate.GeoArea!.Path,
                 TotalYearsExperience = null,   // not collected on the external form
+                QualificationLevelsRecorded = true,   // round 4, lane Q
                 Skills               = snapshotSkills.AsReadOnly(),
                 Qualifications       = snapshotQuals.AsReadOnly(),
                 Languages            = snapshotLangs.AsReadOnly(),
@@ -3372,22 +3072,6 @@ public class JobApplicationService : IJobApplicationService
 
         await SendBestEffortAsync(
             RecruitmentEmailCatalog.Events.ApplicationWithdrawn, toEmail, tokens, "withdrawal confirmation");
-    }
-
-    private async Task SendUnderReviewEmailAsync(
-        string toEmail, string candidateName, string applicationNumber, string jobTitle)
-    {
-        if (string.IsNullOrWhiteSpace(toEmail)) return;
-
-        var tokens = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["CandidateName"]     = candidateName,
-            ["JobTitle"]          = jobTitle,
-            ["ApplicationNumber"] = applicationNumber,
-        };
-
-        await SendBestEffortAsync(
-            RecruitmentEmailCatalog.Events.ApplicationUnderReview, toEmail, tokens, "application under review");
     }
 
     private async Task SendShortlistedEmailAsync(

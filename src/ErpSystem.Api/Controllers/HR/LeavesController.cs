@@ -5,6 +5,7 @@ using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.DocumentManagement;
@@ -32,6 +33,7 @@ namespace ErpSystem.Api.Controllers.HR
         private readonly ICurrentUserService _currentUserService;
         private readonly IWorkflowIntegrationService _workflowIntegrationService;
         private readonly IAuthorizationService _authorization;
+        private readonly ILeaveYearContext _leaveYear;
         private readonly ILogger<LeavesController> _logger;
 
         public LeavesController(
@@ -44,6 +46,7 @@ namespace ErpSystem.Api.Controllers.HR
             ICurrentUserService currentUserService,
             IWorkflowIntegrationService workflowIntegrationService,
             IAuthorizationService authorization,
+            ILeaveYearContext leaveYear,
             ILogger<LeavesController> logger)
         {
             _leaveService = leaveService;
@@ -55,6 +58,7 @@ namespace ErpSystem.Api.Controllers.HR
             _currentUserService = currentUserService;
             _workflowIntegrationService = workflowIntegrationService;
             _authorization = authorization;
+            _leaveYear = leaveYear;
             _logger = logger;
         }
 
@@ -93,6 +97,23 @@ namespace ErpSystem.Api.Controllers.HR
         }
 
         /// <summary>
+        /// Self-or-read-tier resolved through the balance's owner (round 5, lane C2): the employee reads
+        /// their own balance's accrual statement, the leave read tier anybody's.
+        /// </summary>
+        private async Task<bool> CanReadBalanceAsync(Guid balanceId)
+        {
+            if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty &&
+                _currentUserService.TenantId is Guid tenantId)
+            {
+                var mine = await _db.Set<Core.Entities.HR.StaffLeave.LeaveBalance>()
+                    .AsNoTracking()
+                    .AnyAsync(b => b.Id == balanceId && b.TenantId == tenantId && b.EmployeeId == me);
+                if (mine) return true;
+            }
+            return await HoldsLeavePolicyAsync(HrPermissions.LeaveReadPolicy);
+        }
+
+        /// <summary>
         /// Self-or-permission, OR the person the workflow engine is currently asking to decide.
         /// </summary>
         /// <remarks>
@@ -119,11 +140,36 @@ namespace ErpSystem.Api.Controllers.HR
             if (await CanActOnRequestAsync(leaveRequestId, HrPermissions.LeaveReadPolicy))
                 return true;
 
+            // Round 5, lane D: the employee's supervisor or head of department may now recall them
+            // and confirm their return, so they must be able to open the leave they act on. The same
+            // line authority the Team calendar already reads down, for their own people only.
+            if (await IsLineAuthorityForRequestAsync(leaveRequestId))
+                return true;
+
             if (!Guid.TryParse(_currentUserService.UserId, out var userId) || userId == Guid.Empty)
                 return false;
 
             return await _workflowIntegrationService.CanUserApproveAsync(
                 "LeaveRequest", leaveRequestId, userId);
+        }
+
+        /// <summary>
+        /// Whether the caller is the request's employee's supervisor or head of department (round 5,
+        /// B1/B3). The rule lives in <c>ILeaveService.IsLineAuthorityAsync</c>.
+        /// </summary>
+        private async Task<bool> IsLineAuthorityForRequestAsync(Guid leaveRequestId)
+        {
+            if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty ||
+                _currentUserService.TenantId is not Guid tenantId)
+                return false;
+
+            var subject = await _db.Set<Core.Entities.HR.StaffLeave.LeaveRequest>()
+                .AsNoTracking()
+                .Where(r => r.Id == leaveRequestId && r.TenantId == tenantId)
+                .Select(r => (Guid?)r.EmployeeId)
+                .FirstOrDefaultAsync();
+
+            return subject is Guid employeeId && await _leaveService.IsLineAuthorityAsync(employeeId, me);
         }
 
         /// <summary>
@@ -159,6 +205,40 @@ namespace ErpSystem.Api.Controllers.HR
             {
                 _logger.LogError(ex, "Error creating leave request");
                 return StatusCode(500, "An error occurred while creating leave request");
+            }
+        }
+
+        /// <summary>
+        /// What a request for these dates would cost its leave type, and whether the days beyond
+        /// the type's limit could be charged to annual leave (round 5, lane H). Saves nothing.
+        /// </summary>
+        [HttpGet("excess-preview")]
+        [ProducesResponseType(typeof(LeaveExcessPreviewDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<LeaveExcessPreviewDto>> PreviewExcess(
+            [FromQuery] Guid employeeId,
+            [FromQuery] Guid leaveTypeId,
+            [FromQuery] DateOnly startDate,
+            [FromQuery] DateOnly endDate,
+            [FromQuery] Guid? leaveSubTypeId = null)
+        {
+            // The same door as the balances it reads: one's own, or the leave read tier.
+            if (!await CanActForEmployeeAsync(employeeId, HrPermissions.LeaveReadPolicy))
+                return Forbid();
+
+            try
+            {
+                return Ok(await _leaveService.PreviewExcessAsync(
+                    employeeId, leaveTypeId, leaveSubTypeId, startDate, endDate));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
             }
         }
 
@@ -215,6 +295,10 @@ namespace ErpSystem.Api.Controllers.HR
             try
             {
                 var application = await _leaveService.GetLeaveRequestByIdAsync(id);
+                // Round 5, lane D: what this viewer may do, decided here because two of the rules turn
+                // on who they are to the employee and on today's date.
+                application.ViewerActions = await _leaveService.GetViewerActionsAsync(
+                    application, await HoldsLeavePolicyAsync(HrPermissions.LeaveWritePolicy));
                 return Ok(application);
             }
             catch (ArgumentException ex)
@@ -279,7 +363,7 @@ namespace ErpSystem.Api.Controllers.HR
 
             if (year == 0)
             {
-                year = DateTime.Today.Year;
+                year = await _leaveYear.CurrentYearAsync();
             }
 
             var result = await _leaveService.GetEmployeeLeaveHistoryAsync(employeeId, year, pageNumber, pageSize, status);
@@ -298,15 +382,65 @@ namespace ErpSystem.Api.Controllers.HR
         [ProducesResponseType(typeof(IEnumerable<LeaveBalanceDto>), StatusCodes.Status200OK)]
         public async Task<ActionResult<IEnumerable<LeaveBalanceDto>>> GetEmployeeLeaveBalances(
             Guid employeeId,
-            [FromQuery] int year = 0)
+            [FromQuery] int year = 0,
+            [FromQuery] bool includeLiveAnnual = false)
         {
             // W3: own balances, or the leave read tier.
             if (!await CanActForEmployeeAsync(employeeId, HrPermissions.LeaveReadPolicy))
                 return Forbid();
 
-            if (year == 0) year = DateTime.Today.Year;
-            var balances = await _leaveService.GetEmployeeLeaveBalancesAsync(employeeId, year);
+            if (year == 0) year = await _leaveYear.CurrentYearAsync();
+            // Round 5, lane J: the portal and the request forms ask for annual leave worked out live
+            // when no record exists yet; every other caller gets the records alone, as before.
+            var balances = await _leaveService.GetEmployeeLeaveBalancesAsync(employeeId, year, includeLiveAnnual);
             return Ok(balances);
+        }
+
+        /// <summary>
+        /// Annual leave for every employee still serving (round 5, lane J): the stored balance where
+        /// there is one, the figures worked out live where there is none. Leavers are left out, and
+        /// nothing is created.
+        /// </summary>
+        [HttpGet("balances/annual")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
+        [ProducesResponseType(typeof(IReadOnlyList<LeaveBalanceDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<ActionResult<IReadOnlyList<LeaveBalanceDto>>> GetAnnualBalances(
+            [FromQuery] int year = 0,
+            [FromQuery] Guid? employeeId = null,
+            [FromQuery] Guid? organizationUnitId = null,
+            CancellationToken ct = default)
+        {
+            if (year == 0) year = await _leaveYear.CurrentYearAsync();
+            try
+            {
+                return Ok(await _leaveService.GetAnnualBalancesAsync(year, employeeId, organizationUnitId, ct));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>The annual view as a CSV: the same rows (round 5, lane J).</summary>
+        [HttpGet("balances/annual/export")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
+        public async Task<IActionResult> ExportAnnualBalances(
+            [FromQuery] int year = 0,
+            [FromQuery] Guid? employeeId = null,
+            [FromQuery] Guid? organizationUnitId = null,
+            CancellationToken ct = default)
+        {
+            if (year == 0) year = await _leaveYear.CurrentYearAsync();
+            try
+            {
+                var csv = await _leaveService.ExportAnnualBalancesCsvAsync(year, employeeId, organizationUnitId, ct);
+                return File(csv, "text/csv", $"annual-leave-{year}.csv");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
         }
 
         /// <summary>
@@ -320,7 +454,7 @@ namespace ErpSystem.Api.Controllers.HR
             [FromQuery] Guid? employeeId = null,
             [FromQuery] Guid? leaveTypeId = null)
         {
-            if (year == 0) year = DateTime.Today.Year;
+            if (year == 0) year = await _leaveYear.CurrentYearAsync();
             var balances = await _leaveService.GetAllLeaveBalancesAsync(year, employeeId, leaveTypeId);
             return Ok(balances);
         }
@@ -335,7 +469,7 @@ namespace ErpSystem.Api.Controllers.HR
         public async Task<ActionResult<IEnumerable<MandatoryLeaveComplianceDto>>> GetMandatoryCompliance(
             [FromQuery] int year = 0)
         {
-            if (year == 0) year = DateTime.Today.Year;
+            if (year == 0) year = await _leaveYear.CurrentYearAsync();
             var rows = await _leaveService.GetMandatoryLeaveComplianceAsync(year);
             return Ok(rows);
         }
@@ -353,6 +487,108 @@ namespace ErpSystem.Api.Controllers.HR
             if (detail == null)
                 return NotFound(new { message = "Leave balance not found." });
             return Ok(detail);
+        }
+
+        /// <summary>
+        /// How a balance's accrual is worked out as at a date: the accrual statement (round 5, lane C2)
+        /// </summary>
+        /// <remarks>
+        /// <para>The rule, the entitlement and where it came from, the rate, and one line per completed
+        /// period with a running total. <c>asOf</c> defaults to today; a later date shows what will
+        /// have built up by then, and a date past the year end stops at the year end. This is the
+        /// answer to "a utility that accrues leave up to a date": accrual is worked out whenever it
+        /// is asked for, so there is nothing to run — only something to show.</para>
+        ///
+        /// <para>Self-or-read-tier, like the employee's balances read: the employee sees their own
+        /// statement on the portal, HR anybody's.</para>
+        /// </remarks>
+        /// <response code="200">The statement</response>
+        /// <response code="403">Not the caller's balance, and no leave read tier</response>
+        /// <response code="404">No such balance</response>
+        [HttpGet("balances/{id:guid}/accrual-statement")]
+        [ProducesResponseType(typeof(LeaveAccrualStatementDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<LeaveAccrualStatementDto>> GetAccrualStatement(
+            Guid id, [FromQuery] DateOnly? asOf = null, CancellationToken ct = default)
+        {
+            if (!await CanReadBalanceAsync(id))
+                return Forbid();
+
+            var statement = await _leaveService.GetAccrualStatementAsync(id, asOf, ct);
+            if (statement == null)
+                return NotFound(new { message = "Leave balance not found." });
+            return Ok(statement);
+        }
+
+        /// <summary>
+        /// Annual leave owed as at a date, per employee: the "leave owed" report (round 5, lane C6)
+        /// </summary>
+        /// <remarks>
+        /// Days only — built up and not yet taken, for every employee on the books at the date. Finance
+        /// puts the money on them. <c>asOf</c> defaults to today. The rules are on
+        /// <c>LeaveService.GetLeaveOwedAsync</c>.
+        /// </remarks>
+        /// <response code="200">The report</response>
+        /// <response code="400">The tenant has no annual leave type</response>
+        [HttpGet("balances/owed")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
+        [ProducesResponseType(typeof(LeaveOwedReportDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<ActionResult<LeaveOwedReportDto>> GetLeaveOwed(
+            [FromQuery] DateOnly? asOf = null, CancellationToken ct = default)
+        {
+            try
+            {
+                return Ok(await _leaveService.GetLeaveOwedAsync(asOf, ct));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>The "leave owed" report as a CSV, one row per employee.</summary>
+        [HttpGet("balances/owed/export")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> ExportLeaveOwed(
+            [FromQuery] DateOnly? asOf = null, CancellationToken ct = default)
+        {
+            try
+            {
+                var csv = await _leaveService.ExportLeaveOwedCsvAsync(asOf, ct);
+                var date = asOf ?? DateOnly.FromDateTime(DateTime.UtcNow);
+                return File(csv, "text/csv", $"leave-owed-{date:yyyy-MM-dd}.csv");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// The tenant's current leave year (round 5, lane C4)
+        /// </summary>
+        /// <remarks>
+        /// So a screen can open on the leave year we are in rather than on the calendar year. The two
+        /// differ from the start of the calendar year to the month the leave year starts, whenever it
+        /// does not start in January.
+        /// </remarks>
+        [HttpGet("leave-year")]
+        [ProducesResponseType(typeof(LeaveYearInfoDto), StatusCodes.Status200OK)]
+        public async Task<ActionResult<LeaveYearInfoDto>> GetLeaveYear(CancellationToken ct = default)
+        {
+            var startMonth = await _leaveYear.StartMonthAsync(ct);
+            var year = await _leaveYear.CurrentYearAsync(ct);
+            return Ok(new LeaveYearInfoDto
+            {
+                StartMonth = startMonth,
+                CurrentYear = year,
+                StartDate = Core.Services.HR.LeaveYear.StartOf(year, startMonth),
+                EndDate = Core.Services.HR.LeaveYear.EndOf(year, startMonth),
+            });
         }
 
         /// <summary>
@@ -425,7 +661,7 @@ namespace ErpSystem.Api.Controllers.HR
             [FromQuery] Guid? leaveTypeId = null,
             [FromQuery] string? search = null)
         {
-            if (year == 0) year = DateTime.Today.Year;
+            if (year == 0) year = await _leaveYear.CurrentYearAsync();
             var adjustments = await _leaveService.GetAllAdjustmentsAsync(year, employeeId, leaveTypeId, search);
             return Ok(adjustments);
         }
@@ -788,7 +1024,7 @@ namespace ErpSystem.Api.Controllers.HR
             [FromQuery] Guid? leaveTypeId,
             CancellationToken ct = default)
         {
-            if (year == 0) year = DateTime.Today.Year;
+            if (year == 0) year = await _leaveYear.CurrentYearAsync();
             var csv = await _leaveService.ExportBalancesCsvAsync(year, employeeId, leaveTypeId, ct);
             return File(csv, "text/csv", $"leave-balances-{year}.csv");
         }
@@ -799,7 +1035,7 @@ namespace ErpSystem.Api.Controllers.HR
         public async Task<IActionResult> ExportCompliance(
             [FromQuery] int year, CancellationToken ct = default)
         {
-            if (year == 0) year = DateTime.Today.Year;
+            if (year == 0) year = await _leaveYear.CurrentYearAsync();
             var csv = await _leaveService.ExportComplianceCsvAsync(year, ct);
             return File(csv, "text/csv", $"leave-compliance-{year}.csv");
         }
@@ -822,6 +1058,10 @@ namespace ErpSystem.Api.Controllers.HR
         /// <item><c>Organisation</c> — everybody. The leave READ tier, like every other org-wide
         /// leave surface.</item>
         /// </list>
+        /// <para>Round 5 lane F: <c>employeeId</c> shows one person's leave. It narrows the scope
+        /// and never widens it: in <c>Team</c> it is one of the caller's reports or nobody, so it
+        /// is not a way round the scope's own rule. <c>organizationUnitId</c> (Organisation only)
+        /// takes the unit and every unit beneath it.</para>
         /// </remarks>
         /// <response code="200">The calendar for the range</response>
         /// <response code="400">The range is backwards or longer than 400 days</response>
@@ -836,6 +1076,7 @@ namespace ErpSystem.Api.Controllers.HR
             [FromQuery] LeaveCalendarScope scope = LeaveCalendarScope.Mine,
             [FromQuery] Guid? leaveTypeId = null,
             [FromQuery] Guid? organizationUnitId = null,
+            [FromQuery] Guid? employeeId = null,
             CancellationToken ct = default)
         {
             try
@@ -858,7 +1099,7 @@ namespace ErpSystem.Api.Controllers.HR
                 }
 
                 return Ok(await _leaveService.GetCalendarAsync(
-                    from, to, scope, subject, leaveTypeId, organizationUnitId, ct));
+                    from, to, scope, subject, leaveTypeId, organizationUnitId, employeeId, ct));
             }
             catch (InvalidOperationException ex)
             {
@@ -1019,15 +1260,18 @@ namespace ErpSystem.Api.Controllers.HR
         /// <para>⚠ <c>effectiveDate</c> is <b>the first day the employee is back at work</b>, not
         /// the last day of their leave.</para>
         ///
-        /// <para>⚠ <b>Gated on the write policy outright, not self-or-HR</b>, unlike reschedule
-        /// beside it. A recall is the employer's act: an employee may ask to move their own leave,
-        /// but may not call themselves back and hand themselves the days. The service refuses the
-        /// subject a second time, so this holds even for an HR user recalling themselves.</para>
+        /// <para>⚠ <b>The employer's act, never self-or-HR</b>, unlike reschedule beside it: an
+        /// employee may ask to move their own leave, but may not call themselves back and hand
+        /// themselves the days. The service refuses the subject a second time, so this holds even for
+        /// an HR user recalling themselves.</para>
+        ///
+        /// <para>Round 5, decision B1: the employer is the leave write tier <b>or the employee's line
+        /// authority</b>, their supervisor or the head of their department. Recall is for urgent
+        /// necessity (Labour Act s.25), and the manager who needs them back is who knows it.</para>
         /// </remarks>
         /// <response code="200">The truncated request</response>
         /// <response code="400">Not approved, already closed, no reason, or a date that gives nothing back</response>
         [HttpPut("{id}/recall")]
-        [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
         [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -1035,6 +1279,10 @@ namespace ErpSystem.Api.Controllers.HR
         public async Task<ActionResult<LeaveRequestDto>> Recall(
             Guid id, [FromBody] RecallLeaveRequestDto dto)
         {
+            if (!await HoldsLeavePolicyAsync(HrPermissions.LeaveWritePolicy)
+                && !await IsLineAuthorityForRequestAsync(id))
+                return Forbid();
+
             try
             {
                 return Ok(await _leaveService.RecallAsync(id, dto));
@@ -1162,15 +1410,19 @@ namespace ErpSystem.Api.Controllers.HR
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> CancelLeave(Guid id, [FromBody] string cancellationReason)
+        public async Task<IActionResult> CancelLeave(
+            Guid id,
+            [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] string? cancellationReason)
         {
-            // W3: the request's owner, or the HR desk.
+            // W3: the request's owner, or the HR desk. What each may cancel is the service's rule
+            // (round 5, lane D1): the owner until approval, the desk up to the first day, with a reason.
             if (!await CanActOnRequestAsync(id, HrPermissions.LeaveWritePolicy))
                 return Forbid();
 
             try
             {
-                await _leaveService.CancelLeaveRequestAsync(id, cancellationReason);
+                var actingAsDesk = await HoldsLeavePolicyAsync(HrPermissions.LeaveWritePolicy);
+                await _leaveService.CancelLeaveRequestAsync(id, cancellationReason, actingAsDesk);
                 return Ok(new { message = "Leave application cancelled successfully" });
             }
             catch (ArgumentException ex)
@@ -1189,24 +1441,32 @@ namespace ErpSystem.Api.Controllers.HR
         }
 
         /// <summary>
-        /// Close a completed leave application
+        /// Confirm the employee's return, which closes the leave
         /// </summary>
-        /// <param name="id">Leave application ID</param>
-        /// <param name="dto">Closure details</param>
-        /// <returns>Updated leave application</returns>
+        /// <remarks>
+        /// Round 5, decision B3. The leave write tier or the employee's line authority (supervisor or
+        /// head of department) confirms. An early return, on the employee's own report, cuts the leave
+        /// short; a late one records the working days overstayed. The service refuses the employee
+        /// confirming their own return.
+        /// </remarks>
         /// <response code="200">Leave closed successfully</response>
         /// <response code="400">Invalid request or business rule violation</response>
         /// <response code="404">Leave application not found</response>
         [HttpPut("{id}/close")]
-        [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
         [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<ActionResult<LeaveRequestDto>> CloseLeave(Guid id, [FromBody] CloseLeaveDto dto)
+        public async Task<ActionResult<LeaveRequestDto>> CloseLeave(
+            Guid id, [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] CloseLeaveDto? dto)
         {
+            if (!await HoldsLeavePolicyAsync(HrPermissions.LeaveWritePolicy)
+                && !await IsLineAuthorityForRequestAsync(id))
+                return Forbid();
+
             try
             {
-                var application = await _leaveService.CloseLeaveRequestAsync(id, dto);
+                var application = await _leaveService.CloseLeaveRequestAsync(id, dto ?? new CloseLeaveDto());
                 return Ok(application);
             }
             catch (ArgumentException ex)
@@ -1222,6 +1482,59 @@ namespace ErpSystem.Api.Controllers.HR
                 _logger.LogError(ex, "Error closing leave request {LeaveRequestId}", id);
                 return StatusCode(500, "An error occurred while closing the leave request");
             }
+        }
+
+        /// <summary>
+        /// "I'm back at work": the employee reports the day they returned
+        /// </summary>
+        /// <remarks>
+        /// Round 5, decision B3. The employee's own act, and only theirs; their line authority or HR
+        /// confirms it (<c>close</c>). An empty body reports today.
+        /// </remarks>
+        [HttpPut("{id}/report-resumption")]
+        [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<LeaveRequestDto>> ReportResumption(
+            Guid id, [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] ReportResumptionDto? dto)
+        {
+            // Owner only: CanActOnRequestAsync with a policy nobody is meant to pass on their own.
+            if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty ||
+                _currentUserService.TenantId is not Guid tenantId ||
+                !await _db.Set<Core.Entities.HR.StaffLeave.LeaveRequest>().AsNoTracking()
+                    .AnyAsync(r => r.Id == id && r.TenantId == tenantId && r.EmployeeId == me))
+                return Forbid();
+
+            try
+            {
+                return Ok(await _leaveService.ReportResumptionAsync(id, dto ?? new ReportResumptionDto()));
+            }
+            catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+            catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reporting the return from leave request {LeaveRequestId}", id);
+                return StatusCode(500, "An error occurred while reporting the return from leave");
+            }
+        }
+
+        /// <summary>
+        /// Returns from leave waiting for the caller to confirm, as their line authority
+        /// </summary>
+        /// <remarks>
+        /// Round 5, decision B3: the people the caller supervises or heads a department over, whose
+        /// return has been reported and not yet confirmed. HR works the register instead.
+        /// </remarks>
+        [HttpGet("resumptions-to-confirm")]
+        [ProducesResponseType(typeof(IReadOnlyList<LeaveRequestDto>), StatusCodes.Status200OK)]
+        public async Task<ActionResult<IReadOnlyList<LeaveRequestDto>>> GetResumptionsToConfirm(
+            CancellationToken ct = default)
+        {
+            if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty)
+                return Ok(Array.Empty<LeaveRequestDto>());
+
+            return Ok(await _leaveService.GetResumptionsToConfirmAsync(me, ct));
         }
         /// <summary>
         /// Recalculate leave balance(s) from source data (admin operation).
@@ -1505,6 +1818,11 @@ namespace ErpSystem.Api.Controllers.HR
                 if (!await CanActOnRequestAsync(attachment.LeaveRequestId, HrPermissions.LeaveWritePolicy))
                     return Forbid();
 
+                // ⚠ Leave settings audit 2, L-77: submitted medical evidence is locked. Asked BEFORE the
+                // stored file is touched — the service refuses too, but only after this removal, which
+                // would have destroyed the document of a record that stays.
+                await _leaveService.EnsureAttachmentRemovableAsync(attachmentId);
+
                 // Controlled uploads and their DMS records are removed through the shared
                 // boundary, which soft-deletes and schedules the physical delete. Only
                 // pre-migration rows still carry a raw storage path to remove directly.
@@ -1539,6 +1857,7 @@ namespace ErpSystem.Api.Controllers.HR
                 await _leaveService.DeleteAttachmentAsync(attachmentId);
                 return Ok(new { message = "Attachment deleted" });
             }
+            catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error deleting attachment {AttachmentId}", attachmentId);

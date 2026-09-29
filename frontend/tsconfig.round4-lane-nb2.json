@@ -1,0 +1,12 @@
+{
+  "//": "Round 4, lane N-b2 — company-schedule reminders that send themselves. Scoped because `npm run type-check` over the whole tree does not complete on this branch; see the hr-coverage README.",
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/**/*.ts",
+    "src/services/hr/**/*.ts",
+    "src/components/hr/company-schedule/**/*.tsx",
+    "src/app/hr/company-schedule/**/*.tsx",
+    "src/app/administration/hr/settings/**/*.tsx"
+  ]
+}

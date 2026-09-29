@@ -52,6 +52,8 @@ public class DeliveryService : IDeliveryService
         {
             var so = await _salesOrderRepo.GetByIdAsync(dto.SalesOrderId, s => s.Lines, s => s.BusinessPartner)
                 ?? throw new InvalidOperationException($"Sales Order {dto.SalesOrderId} not found");
+            if (so.TenantId != _currentUserProvider.TenantId || so.IsDeleted)
+                throw new UnauthorizedAccessException("The Sales order is outside the current tenant.");
 
             if (so.OrderStatus != SalesOrderStatus.Confirmed &&
                 so.OrderStatus != SalesOrderStatus.PartiallyDelivered)
@@ -87,6 +89,12 @@ public class DeliveryService : IDeliveryService
             {
                 var soLine = so.Lines.FirstOrDefault(l => l.Id == lineDto.SalesOrderLineId)
                     ?? throw new InvalidOperationException($"Sales Order Line {lineDto.SalesOrderLineId} not found");
+                if (so.InvoiceId.HasValue && ((lineDto.InventoryItemId.HasValue && lineDto.InventoryItemId != soLine.InventoryItemId) ||
+                    (lineDto.WarehouseId.HasValue && lineDto.WarehouseId != (soLine.WarehouseId ?? so.WarehouseId)) ||
+                    (lineDto.LocationId.HasValue && lineDto.LocationId != soLine.LocationId) ||
+                    (lineDto.SerialNumber != null && lineDto.SerialNumber != soLine.SerialNumber) ||
+                    (lineDto.LotNumber != null && lineDto.LotNumber != soLine.LotNumber)))
+                    throw new InvalidOperationException("Delivery tracking must match the stock source retained by the Sales invoice.");
 
                 if (lineDto.DispatchedQuantity > soLine.RemainingQuantity)
                     throw new InvalidOperationException(
@@ -269,6 +277,13 @@ public class DeliveryService : IDeliveryService
             var dn = await _deliveryRepo.GetByIdAsync(id, d => d.Lines)
                 ?? throw new InvalidOperationException($"Delivery Note {id} not found");
 
+            if (dn.TenantId != _currentUserProvider.TenantId || dn.IsDeleted)
+                throw new UnauthorizedAccessException("The delivery is outside the current tenant.");
+            var invoiceOwnsStock = await _salesOrderRepo.GetQueryable(x => x.Id == dn.SalesOrderId &&
+                x.TenantId == dn.TenantId && !x.IsDeleted && x.InvoiceId.HasValue && x.Invoice != null &&
+                x.Invoice.TenantId == dn.TenantId && x.Invoice.JournalEntryId.HasValue && !x.Invoice.IsDeleted &&
+                x.Invoice.Status != ErpSystem.Core.Entities.Finance.InvoiceStatus.Cancelled).AnyAsync();
+
             if (dn.DeliveryStatus != DeliveryNoteStatus.Shipped &&
                 dn.DeliveryStatus != DeliveryNoteStatus.Packed &&
                 dn.DeliveryStatus != DeliveryNoteStatus.Draft)
@@ -293,7 +308,7 @@ public class DeliveryService : IDeliveryService
                     line.DeliveredQuantity = lineConfirmation.DeliveredQuantity;
                     line.DamagedQuantity = lineConfirmation.DamagedQuantity ?? 0;
                     line.DamageNotes = lineConfirmation.DamageNotes;
-                    line.IsStockDeducted = true;
+                    line.IsStockDeducted = invoiceOwnsStock;
 
                     await _lineRepo.UpdateAsync(line);
 
@@ -314,7 +329,7 @@ public class DeliveryService : IDeliveryService
                 foreach (var line in dn.Lines)
                 {
                     line.DeliveredQuantity = line.DispatchedQuantity;
-                    line.IsStockDeducted = true;
+                    line.IsStockDeducted = invoiceOwnsStock;
                     await _lineRepo.UpdateAsync(line);
 
                     var soLine = await _soLineRepo.GetByIdAsync(line.SalesOrderLineId);
@@ -352,7 +367,7 @@ public class DeliveryService : IDeliveryService
                 });
             }
 
-            // TODO: Deduct stock from inventory via Inventory service
+            // Canonical Sales invoice posting owns the sole inventory issue. Delivery records fulfillment only.
 
             await _unitOfWork.SaveChangesAsync();
 

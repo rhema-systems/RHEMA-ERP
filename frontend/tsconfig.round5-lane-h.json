@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/leave.ts",
+    "src/types/hr/leave-request.ts",
+    "src/services/hr/leave.service.ts",
+    "src/components/hr/leave/ExcessToAnnualOffer.tsx",
+    "src/components/hr/leave/SplitAbsencePanel.tsx",
+    "src/components/hr/leave/LeaveRequestForm.tsx",
+    "src/components/me/leave/MyLeaveRequestForm.tsx",
+    "src/components/hr/leave/LeaveTypeForm.tsx",
+    "src/app/hr/leave/requests/[id]/page.tsx",
+    "src/app/hr/leave/requests/[id]/edit/page.tsx",
+    "src/app/me/leave/[id]/page.tsx",
+    "src/app/me/leave/[id]/edit/page.tsx",
+    "src/app/hr/leave/approvals/page.tsx",
+    "src/app/administration/hr/leave-types/[id]/page.tsx",
+    "src/app/administration/hr/leave-types/[id]/edit/page.tsx",
+    "src/app/administration/hr/leave-types/new/page.tsx"
+  ]
+}

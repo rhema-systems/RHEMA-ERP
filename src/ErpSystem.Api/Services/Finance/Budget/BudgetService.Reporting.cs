@@ -9,7 +9,6 @@ public partial class BudgetService
 {
     private const string PostedStatus = "Posted";
     private const string ReservedStatus = "Reserved";
-    private const string ReportingBook = "IFRS";
 
     public async Task<BudgetScenarioDto> AdoptScenarioAsync(
         Guid id,
@@ -229,6 +228,7 @@ public partial class BudgetService
                 group => group.Key,
                 group => group.Sum(reservation => reservation.ReservedAmount));
 
+        var primaryBook = await BudgetPrimaryBookResolver.ResolveAsync(_context, tenantId);
         var actualRows = await _context.AccountTransactions
             .AsNoTracking()
             .Where(transaction =>
@@ -237,7 +237,7 @@ public partial class BudgetService
                 && transaction.PostingStatus == PostedStatus
                 && transaction.JournalEntry.PostingStatus == PostedStatus
                 && !transaction.JournalEntry.IsDeleted
-                && transaction.BookClassification == ReportingBook
+                && transaction.AccountingBookId == primaryBook.Id
                 && transaction.FiscalPeriod.FiscalYearId == scenario.FiscalYearId
                 && (transaction.Account.AccountType == AccountType.Revenue
                     || transaction.Account.AccountType == AccountType.Expense))
@@ -482,7 +482,7 @@ public partial class BudgetService
             IsOfficial = scenario.IsActive,
             ApprovedOnly = approvedOnly,
             CurrencyCode = scenario.BaseCurrencyCode,
-            BookClassification = ReportingBook,
+            BookClassification = primaryBook.Code,
             TotalReturnCount = returns.Count,
             IncludedReturnCount = includedReturnIds.Length,
             ApprovedReturnCount = returns.Count(item => item.Status == ApprovedStatus),

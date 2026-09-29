@@ -121,9 +121,10 @@ export default function MyAppraisalDetailPage() {
   const requiresNomination =
     settings?.requirePeerReviews === true && settings.peerNominationMode === 'Employee';
 
-  // The appraisee sees their own outcome only once HR has finalised. Before that the HR review
-  // read still answers, but with an in-progress picture that is not theirs to act on.
-  const outcomeReady = hrReview?.isFinalized === true;
+  // The appraisee sees their own outcome only once it is released to them (performance closure
+  // P2) — HR has finalised, and any calibration the cycle requires is done. Before that the server
+  // sends their copy of the HR review without the manager's evaluation, the scores or the grade.
+  const outcomeReady = hrReview?.isFinalized === true && hrReview?.outcomeReleased !== false;
   const canAcknowledge =
     outcomeReady &&
     settings?.requireEmployeeAcknowledgment === true &&

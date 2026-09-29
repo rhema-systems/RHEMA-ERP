@@ -7,6 +7,7 @@ using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
@@ -14,6 +15,7 @@ using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Inventory;
 using ErpSystem.Data.Migrations;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -278,6 +280,35 @@ public sealed class PurchaseReturnLifecycleTests
         f.Movements.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Source_selector_exposes_reserved_return_capacity_and_only_posted_invoice_quantity()
+    {
+        var f = new Fixture();
+        f.LinkAuthoritativeSource("valid");
+        var receipt = await f.Unit.Object.Repository<PurchaseOrderReceipt>().GetQueryable().SingleAsync();
+        var receiptLine = receipt.Items.Single();
+        var invoice = new VendorInvoice { Id = Guid.NewGuid(), TenantId = f.Return.TenantId, InvoiceNumber = "VI-SOURCE", JournalEntryId = Guid.NewGuid() };
+        f.QueryRepo(new[] { new VendorInvoiceReceiptAllocation { TenantId = f.Return.TenantId, GoodsReceiptNoteItemId = f.Source.Id,
+            VendorInvoiceId = invoice.Id, VendorInvoice = invoice, PurchaseOrderReceiptItemId = receiptLine.Id,
+            PurchaseOrderReceiptItem = receiptLine, Quantity = 6 } });
+        f.QueryRepo(new[] { new JournalEntry { Id = invoice.JournalEntryId.Value, TenantId = invoice.TenantId,
+            SourceDocumentType = "VendorInvoice", SourceDocumentId = invoice.Id, PostingStatus = "Posted" } });
+        var source = (await f.Service.GetSourceGrnsAsync()).Single();
+        var context = source.ReturnSource!.Lines.Single();
+        context.ReservedReturnQuantity.Should().Be(1);
+        context.PreviouslyReturnedQuantity.Should().Be(0);
+        context.RemainingReturnableQuantity.Should().Be(9);
+        context.InvoicedQuantity.Should().Be(6);
+        context.Invoices.Should().ContainSingle().Which.InvoiceNumber.Should().Be("VI-SOURCE");
+        f.QueryRepo(Array.Empty<JournalEntry>());
+        context = (await f.Service.GetSourceGrnsAsync()).Single().ReturnSource!.Lines.Single();
+        context.InvoicedQuantity.Should().Be(0);
+        context.ReservedInvoiceQuantity.Should().Be(6);
+        context.RemainingReturnableQuantity.Should().Be(3);
+        context.Invoices.Should().ContainSingle().Which.Posted.Should().BeFalse();
+        f.Movements.Should().BeEmpty();
+    }
+
     private static WorkflowIntegrationResult Result(bool required) => new(new WorkflowExecutionResult
     {
         Success = true, WorkflowInstanceId = required ? Guid.NewGuid() : null,
@@ -326,6 +357,9 @@ public sealed class PurchaseReturnLifecycleTests
             var locations = new Mock<IInventoryLocationRepository>(); locations.Setup(x => x.GetByLocationAndItemAsync(Bin.Id, Item.Id)).ReturnsAsync(() => BinStock);
             var movements = new Mock<IStockMovementRepository>(); movements.Setup(x => x.AddAsync(It.IsAny<StockMovement>())).ReturnsAsync((StockMovement value) => { Movements.Add(value); return value; });
             QueryRepo(new[] { Bin }); QueryRepo(Return.Items);
+            QueryRepo(Array.Empty<ProcurementReceiptCostBasis>());
+            QueryRepo(Array.Empty<VendorInvoiceReceiptAllocation>());
+            QueryRepo(Array.Empty<JournalEntry>());
             QueryRepo(new[] { new Warehouse { Id = warehouseId, TenantId = tenant, IsActive = true } });
             var active = false;
             Unit.SetupGet(x => x.HasActiveTransaction).Returns(() => active);
@@ -395,7 +429,7 @@ public sealed class PurchaseReturnLifecycleTests
             QueryRepo(new[] { receipt }); QueryRepo(new[] { inspection }); QueryRepo(sourceMovements);
         }
 
-        private void QueryRepo<T>(IEnumerable<T> values) where T : BaseEntity
+        public void QueryRepo<T>(IEnumerable<T> values) where T : BaseEntity
         {
             var repository = new Mock<IGenericRepository<T>>();
             repository.Setup(x => x.GetQueryable()).Returns(() => new AsyncQuery<T>(values));

@@ -72,7 +72,7 @@ export function PhysicalCountReviewActions({ count, unsaved, saving = false, onS
         else if (count.status === 'PendingAuditAttestation') await service.attestPhysicalCountAudit(count.id, choice);
       }
       await onChanged();
-      toast.success(kind === 'review' ? 'Review the variance and correct any entry mistakes.' : kind === 'submit' ? 'Count submitted. Stock is unchanged until Post.' : investigate ? 'Sent for investigation. Posting is blocked.' : 'Decision saved.');
+      toast.success(kind === 'review' ? (count.observationSubmittedAtUtc ? 'Original quantities remain retained. Review passed items and the linked recount sheets.' : 'Review the variance and correct any entry mistakes.') : kind === 'submit' ? 'Count submitted. Stock is unchanged until Post.' : investigate ? 'Sent for investigation. Posting is blocked.' : 'Decision saved.');
       return true;
     } catch (error) { toast.error(countReviewError(error)); return false; }
     finally { setBusy(false); }
@@ -83,11 +83,11 @@ export function PhysicalCountReviewActions({ count, unsaved, saving = false, onS
     {count.canReview && (reviewable || count.status === 'UnderReview') && <>
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex shrink-0 flex-nowrap items-center gap-2" role="group" aria-label="Count actions">
-          {['InProgress', 'UnderReview'].includes(count.status) && <Button disabled={busy || saving || !unsaved} onClick={onSaveCounts}>{saving ? 'Saving...' : 'Save Counts'}</Button>}
+          {!count.observationSubmittedAtUtc && ['InProgress', 'UnderReview'].includes(count.status) && <Button disabled={busy || saving || !unsaved} onClick={onSaveCounts}>{saving ? 'Saving...' : 'Save Counts'}</Button>}
           {reviewable && <Button disabled={busy || saving || unsaved || !complete || (count.status === 'UnderInvestigation' && !notes.trim())} onClick={() => void run('review')}>{count.status === 'UnderInvestigation' ? 'Resume review' : 'Review variance'}</Button>}
           {count.status === 'UnderReview' && <Button variant="destructive" disabled={busy || saving || unsaved || !complete || !evidenceReady || !approval.visibility.known} onClick={() => setConfirm(true)}>{submitLabel}</Button>}
         </div>
-        {count.status === 'UnderReview' && !evidenceReady && <Button variant="outline" disabled={busy || saving || unsaved} onClick={onUploadSheet}>Upload count sheet</Button>}
+        {!count.observationSubmittedAtUtc && count.status === 'UnderReview' && !evidenceReady && <Button variant="outline" disabled={busy || saving || unsaved} onClick={onUploadSheet}>Upload count sheet</Button>}
         {['InProgress', 'UnderReview'].includes(count.status) && <span className="text-xs text-muted-foreground" role="status">{unsaved ? 'Unsaved quantity changes.' : 'Quantities saved.'}</span>}
       </div>
       {count.status === 'UnderReview' && !evidenceReady && <p className="text-xs text-amber-700">Attach supporting evidence in Details or upload a count sheet before submitting.</p>}

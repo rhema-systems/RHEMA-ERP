@@ -114,6 +114,8 @@ export interface ConsultantClient extends AuditFields {
   clientCode: string;
   industry?: string | null;
   description?: string | null;
+  /** The Finance (Sales) customer this client is billed as; null = invoices stay HR-side (lane 8, slice 6). */
+  financeCustomerId?: string | null;
 
   primaryContactName?: string | null;
   primaryContactEmail?: string | null;
@@ -149,6 +151,8 @@ export interface CreateConsultantClient {
   clientCode: string;
   industry?: string | null;
   description?: string | null;
+  /** The Finance (Sales) customer this client is billed as; null = invoices stay HR-side (lane 8, slice 6). */
+  financeCustomerId?: string | null;
   primaryContactName?: string | null;
   primaryContactEmail?: string | null;
   primaryContactPhone?: string | null;
@@ -503,4 +507,13 @@ export interface ClientPortalDashboard {
   contactName?: string | null;
   pendingConfirmationCount: number;
   clients: ClientPortalClientSection[];
+}
+
+/** A Finance customer as HR's read door (`api/hr/customers`) offers it to the client picker. */
+export interface HrCustomerOption {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  currencyCode: string;
 }

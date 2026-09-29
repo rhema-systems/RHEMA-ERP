@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -50,6 +51,47 @@ public sealed class BankAccountTenantIsolationTests
         var account = await service.GetByIdAsync(otherTenantAccount.Id);
 
         account.Should().BeNull();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CashScope")]
+    [Trait("Category", "CashBank")]
+    public async Task GetAllAsync_ShouldOnlyReturnBankAccountsPermittedByFinanceScope()
+    {
+        var tenantId = Guid.NewGuid();
+        var permitted = CreateBankAccount(tenantId, "BANK-001", "Permitted Account");
+        var restricted = CreateBankAccount(tenantId, "BANK-002", "Restricted Account");
+        await using var db = CreateContext();
+        db.BankAccounts.AddRange(permitted, restricted);
+        await db.SaveChangesAsync();
+
+        var scope = new Mock<IFinanceAccessScopeService>();
+        scope.Setup(service => service.GetPermittedBankAccountIdsAsync(
+                FinanceAccessLevel.Read,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { permitted.Id });
+
+        var accounts = (await CreateService(db, tenantId, scope.Object).GetAllAsync()).ToList();
+
+        accounts.Should().ContainSingle().Which.Id.Should().Be(permitted.Id);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CashScope")]
+    [Trait("Category", "CashBank")]
+    public async Task UpdateBalanceAsync_ShouldRejectDirectSnapshotMutation()
+    {
+        var tenantId = Guid.NewGuid();
+        var bank = CreateBankAccount(tenantId, "BANK-001", "Operating Account");
+        await using var db = CreateContext();
+        db.BankAccounts.Add(bank);
+        await db.SaveChangesAsync();
+
+        var action = () => CreateService(db, tenantId).UpdateBalanceAsync(bank.Id, 50m, isDebit: false);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Direct bank-balance mutation is disabled*");
+        (await db.BankAccounts.SingleAsync()).CurrentBalance.Should().Be(0m);
     }
 
     [Fact]
@@ -376,7 +418,10 @@ public sealed class BankAccountTenantIsolationTests
         return new ApplicationDbContext(options);
     }
 
-    private static BankAccountService CreateService(ApplicationDbContext db, Guid tenantId)
+    private static BankAccountService CreateService(
+        ApplicationDbContext db,
+        Guid tenantId,
+        IFinanceAccessScopeService? financeAccessScopeService = null)
     {
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
@@ -389,7 +434,8 @@ public sealed class BankAccountTenantIsolationTests
         return new BankAccountService(
             db,
             tenantSettings.Object,
-            currentUser.Object);
+            currentUser.Object,
+            financeAccessScopeService);
     }
 
     private static BankAccount CreateBankAccount(Guid tenantId, string number, string name)

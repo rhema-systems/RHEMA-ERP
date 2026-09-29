@@ -17,6 +17,7 @@ public class AppraisalConversationService : IAppraisalConversationService
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IAppraisalNotificationService _notifications;
+    private readonly IAppraisalLifecycleService _lifecycle;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<AppraisalConversationService> _logger;
 
@@ -25,6 +26,7 @@ public class AppraisalConversationService : IAppraisalConversationService
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
         ICurrentUserProvider currentUserProvider,
         IAppraisalNotificationService notifications,
+        IAppraisalLifecycleService lifecycle,
         IUnitOfWork unitOfWork,
         ILogger<AppraisalConversationService> logger)
     {
@@ -32,6 +34,7 @@ public class AppraisalConversationService : IAppraisalConversationService
         _appraisalRepository = appraisalRepository;
         _currentUserProvider = currentUserProvider;
         _notifications = notifications;
+        _lifecycle = lifecycle;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -249,6 +252,11 @@ public class AppraisalConversationService : IAppraisalConversationService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Appraisal conversation {Id} completed", conversationId);
+
+        // A held conversation can be the step that completes the appraisal — the final review, with
+        // no acknowledgment after it — which left it in Governance for good. The gates decide now,
+        // and completion settles (B1). A kick-off held on a Draft appraisal does not open it.
+        await _lifecycle.SyncAsync(entity.AppraisalId, cancellationToken: cancellationToken);
 
         var result = await GetByIdAsync(conversationId, cancellationToken);
 

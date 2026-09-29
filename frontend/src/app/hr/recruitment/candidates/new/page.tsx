@@ -15,7 +15,7 @@ import {
 } from '@/components/hr/recruitment/CandidateFormFields';
 import { useToast } from '@/hooks/use-toast';
 import { jobCandidateService } from '@/services/hr/recruitment-pipeline.service';
-import type { Gender } from '@/types/hr/recruitment-pipeline';
+import type { Gender, PreferredWorkArrangement } from '@/types/hr/recruitment-pipeline';
 
 export default function NewCandidatePage() {
   const router = useRouter();
@@ -37,12 +37,25 @@ export default function NewCandidatePage() {
         digitalAddress: values.digitalAddress || null,
         // '' does not bind to a Guid? — it is a 400 before the service ever runs.
         countryId: values.countryId || null,
+        // Same rule, and the cascade emits '' for "nothing chosen at this tier".
+        geoAreaId: values.geoAreaId || null,
+        city: values.city?.trim() || null,
         linkedInProfile: values.linkedInProfile || null,
         portfolioUrl: values.portfolioUrl || null,
         gitHubUrl: values.gitHubUrl || null,
         nationalIdTypeId: values.nationalIdTypeId || null,
         nationalIdNumber: values.nationalIdNumber?.trim() || null,
         nationalIdExpiryDate: values.nationalIdExpiryDate || null,
+        // Round 4, lane B. '' becomes null, not 0: "not asked" and "none" are different answers,
+        // and the pool rubric treats them differently on purpose.
+        headline: values.headline?.trim() || null,
+        professionalSummary: values.professionalSummary?.trim() || null,
+        currentJobTitle: values.currentJobTitle?.trim() || null,
+        currentEmployer: values.currentEmployer?.trim() || null,
+        totalYearsExperience: values.totalYearsExperience ? Number(values.totalYearsExperience) : null,
+        noticePeriodDays: values.noticePeriodDays ? Number(values.noticePeriodDays) : null,
+        availableFrom: values.availableFrom || null,
+        preferredWorkArrangement: (values.preferredWorkArrangement || 'Any') as PreferredWorkArrangement,
       }),
     onSuccess: (created) => {
       toast({ title: 'Candidate created', description: created.candidateNumber });

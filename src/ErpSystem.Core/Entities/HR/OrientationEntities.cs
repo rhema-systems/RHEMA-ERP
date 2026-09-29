@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Linq.Expressions;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.HR.Orientation;
@@ -17,6 +18,151 @@ public static class OrientationEnrollmentStatuses
         OrientationEnrollmentStatus.Confirmed,
         OrientationEnrollmentStatus.Active,
         OrientationEnrollmentStatus.Completed,
+    };
+}
+
+/// <summary>
+/// The one definition of "this programme takes enrolments" (round 4, lane L): Active, and inside its
+/// effective dates — the same two conditions the automatic triggers have required since lane I-b.
+/// </summary>
+/// <remarks>
+/// Manual enrolment checked neither, while the programme page told HR that a retired programme
+/// "enrols nobody new" — and the enrolment dialog offered all 111 programmes on UAT, 87 of them
+/// retired and 12 drafts.
+/// </remarks>
+public static class OrientationProgramEnrolment
+{
+    /// <summary>Why the programme cannot take an enrolment today, in words — or null when it can.</summary>
+    public static string? WhyNotTaking(
+        OrientationProgramStatus status, DateTime? effectiveFrom, DateTime? effectiveTo, DateOnly today)
+    {
+        if (status != OrientationProgramStatus.Active)
+            return status switch
+            {
+                OrientationProgramStatus.Draft => "it is still a draft",
+                OrientationProgramStatus.PendingApproval => "it is awaiting approval",
+                OrientationProgramStatus.Suspended => "it is suspended",
+                OrientationProgramStatus.Retired => "it has been retired",
+                OrientationProgramStatus.Archived => "it is archived",
+                _ => $"it is {status}",
+            };
+        if (effectiveFrom is { } starts && DateOnly.FromDateTime(starts) > today)
+            return $"it is not in effect until {DateOnly.FromDateTime(starts):d MMM yyyy}";
+        if (effectiveTo is { } ends && DateOnly.FromDateTime(ends) < today)
+            return $"its effective period ended on {DateOnly.FromDateTime(ends):d MMM yyyy}";
+        return null;
+    }
+}
+
+/// <summary>
+/// The one definition of "this session can take an enrolment now" (round 4, lane L): its status is
+/// EnrollmentOpen and its enrolment deadline, if it has one, has not passed.
+/// </summary>
+/// <remarks>
+/// The "open for enrolment" list has always applied this — but the enrol path did not, so HR could
+/// enrol somebody onto a cancelled session, a completed one, or a session of ANOTHER programme, and
+/// the dialog's dropdown listed every session with nothing to say which were closed. The list query,
+/// the enrol check and the dropdown's flag now all read this class.
+/// </remarks>
+public static class OrientationSessionEnrolment
+{
+    /// <summary>For queries.</summary>
+    public static Expression<Func<OrientationSession, bool>> IsOpen(DateTime now) =>
+        s => s.Status == OrientationSessionStatus.EnrollmentOpen
+             && (s.EnrollmentDeadlineAt == null || s.EnrollmentDeadlineAt >= now);
+
+    /// <summary>Why a session cannot take an enrolment now, in words — or null when it can.</summary>
+    public static string? WhyNotOpen(OrientationSessionStatus status, DateTime? enrollmentDeadlineAt, DateTime now) => status switch
+    {
+        OrientationSessionStatus.EnrollmentOpen when enrollmentDeadlineAt is { } deadline && deadline < now
+            => $"its enrolment closed on {deadline:d MMM yyyy}",
+        OrientationSessionStatus.EnrollmentOpen => null,
+        OrientationSessionStatus.Draft => "it is still a draft",
+        OrientationSessionStatus.Published => "it is published but its enrolment has not opened",
+        OrientationSessionStatus.EnrollmentClosed => "its enrolment is closed",
+        OrientationSessionStatus.InProgress => "it is already under way",
+        OrientationSessionStatus.Completed => "it has finished",
+        OrientationSessionStatus.Cancelled => "it was cancelled",
+        OrientationSessionStatus.Postponed => "it has been postponed",
+        _ => $"it is {status}",
+    };
+}
+
+/// <summary>
+/// Round 4, lane R: the two things completion needs that only the programme can say. The first is
+/// whether it is completed by attendance. The second is the declaration each enrolment signs.
+/// </summary>
+/// <remarks>
+/// <para>P2c found that no enrolment made through the product could reach Completed on any seeded
+/// programme. There were two causes:</para>
+/// <list type="bullet">
+///   <item>A declaration was a row per enrolment, and the only thing that could create one was an HR
+///   endpoint that no screen called.</item>
+///   <item>A programme with no content and no quiz gave its participant nothing to track and nothing
+///   to submit, and only tracking, submitting and signing ever evaluated completion.</item>
+/// </list>
+/// <para>Decisions R-D1..R-D3, the user's (2026-09-24):</para>
+/// <list type="bullet">
+///   <item>The text lives on the programme, and each enrolment gets its own copy when it is
+///   created.</item>
+///   <item>A programme that is only its live session completes when HR marks the session Completed,
+///   for the people its register shows attending.</item>
+///   <item>HR's "Mark completed" is offered on those programmes only.</item>
+/// </list>
+/// </remarks>
+public static class OrientationCompletionRules
+{
+    /// <summary>The register marks that count as having been there.</summary>
+    public static readonly OrientationAttendanceStatus[] Attended =
+    {
+        OrientationAttendanceStatus.Present,
+        OrientationAttendanceStatus.Late,
+        OrientationAttendanceStatus.Partial,
+    };
+
+    /// <summary>Somebody is present at a time and place, or on a link: in person, virtual, blended.</summary>
+    public static bool IsLiveDelivery(OrientationDeliveryMode mode) =>
+        mode is OrientationDeliveryMode.InPerson or OrientationDeliveryMode.VirtualInstructor or OrientationDeliveryMode.Blended;
+
+    /// <summary>
+    /// A programme that is only its live session: nothing to work through, no assessment to pass, and
+    /// delivered live. For such a programme the content gate is "attendance confirmed".
+    /// </summary>
+    /// <remarks>
+    /// A self-paced programme with no content — a declaration and nothing else — is not one of these.
+    /// Signing completes it, as it did before.
+    /// </remarks>
+    public static bool CompletesByAttendance(int liveContentItems, bool requiresAssessment, OrientationDeliveryMode deliveryMode) =>
+        liveContentItems == 0 && !requiresAssessment && IsLiveDelivery(deliveryMode);
+
+    /// <summary>The declaration's heading: the programme's, or one made from its title.</summary>
+    public static string DeclarationTitle(string? title, string programTitle)
+    {
+        var heading = string.IsNullOrWhiteSpace(title) ? $"{programTitle} — declaration" : title.Trim();
+        return heading.Length <= 300 ? heading : heading[..300];
+    }
+
+    /// <summary>The declaration's words: the programme's, or a plain undertaking naming it.</summary>
+    public static string DeclarationText(string? text, string programTitle) =>
+        string.IsNullOrWhiteSpace(text)
+            ? $"I confirm that I have completed {programTitle}, that I understand what it sets out, and that I will abide by it."
+            : text.Trim();
+
+    /// <summary>
+    /// The declaration an enrolment will sign, copied from its programme now. Staged with the
+    /// enrolment, in the same save, by every door that creates one: HR's single and bulk enrol, the
+    /// trigger sweep and the renewals.
+    /// </summary>
+    public static OrientationAcknowledgement NewDeclaration(
+        EmployeeOrientation enrollment, string? title, string? text, string programTitle, DateTime now, string? createdBy) => new()
+    {
+        TenantId = enrollment.TenantId,
+        EmployeeOrientationId = enrollment.Id,
+        Title = DeclarationTitle(title, programTitle),
+        AcknowledgementText = DeclarationText(text, programTitle),
+        Status = OrientationAcknowledgementStatus.Presented,
+        PresentedAt = now,
+        CreatedBy = createdBy,
     };
 }
 
@@ -96,6 +242,21 @@ public class OrientationProgram : TenantEntity
     public decimal? PassingScorePercent { get; set; }
 
     public bool RequiresAcknowledgement { get; set; }
+
+    // ── The declaration participants sign (round 4, lane R) ──────────────────
+    // Before this the programme carried only the switch: nothing held the words, nothing created a
+    // declaration for an enrolment, and every enrolment on a programme that required one stopped at
+    // PendingAcknowledgement for ever. Each enrolment now gets its own copy of these at the moment it
+    // is created (OrientationCompletionRules.NewDeclaration), so editing them later never rewrites
+    // what somebody has already signed.
+
+    /// <summary>Heading of the declaration. Blank means a default built from the programme's title.</summary>
+    [MaxLength(300)]
+    public string? AcknowledgementTitle { get; set; }
+
+    /// <summary>The words the participant signs. Blank means a default built from the programme's title.</summary>
+    [MaxLength(4000)]
+    public string? AcknowledgementText { get; set; }
 
     /// <summary>Days after enrollment (or trigger) within which to complete.</summary>
     public int? CompletionDeadlineDays { get; set; }
@@ -254,6 +415,11 @@ public class OrientationPrerequisite : TenantEntity
 /// A rule defining who should be enrolled in a program and what triggers it
 /// (e.g. all new hires in a department, on hire date + N days).
 /// </summary>
+/// <remarks>
+/// <para><b>These rules fire since round 4, lane I.</b> Before it they were stored and read by
+/// nothing — <c>OrientationEnrollmentTriggerService</c> is the evaluator, and its remarks carry the
+/// full semantics (windows, exclusions, prerequisites, de-duplication).</para>
+/// </remarks>
 public class OrientationAudienceRule : TenantEntity
 {
     public Guid ProgramId { get; set; }
@@ -265,20 +431,38 @@ public class OrientationAudienceRule : TenantEntity
     [MaxLength(1000)]
     public string? Description { get; set; }
 
-    public OrientationAudienceScope TargetType { get; set; }
+    /// <summary>
+    /// Where the people this rule reaches sit — the shared HR audience axis, expanded by
+    /// <c>IHrAudienceResolver</c> (an organisation unit includes every unit beneath it).
+    /// </summary>
+    /// <remarks>
+    /// Was <see cref="OrientationAudienceScope"/> until round 4 lane I; the migration
+    /// <c>AddOrientationTriggers</c> mapped the stored values across.
+    /// </remarks>
+    public HrAudienceTargetType TargetType { get; set; } = HrAudienceTargetType.AllEmployees;
 
     /// <summary>
-    /// Id of the target entity (OrganizationUnitId, JobGradeId, LocationId, EmployeeId, …)
-    /// referenced by <see cref="TargetType"/>. Null = applies to all employees.
+    /// The unit, level, position, location or employee <see cref="TargetType"/> names. Null only
+    /// for <see cref="HrAudienceTargetType.AllEmployees"/>.
     /// </summary>
     public Guid? TargetEntityId { get; set; }
 
+    /// <summary>Which of the people at the target the rule means — intersected with it.</summary>
+    public OrientationAudiencePopulation Population { get; set; } = OrientationAudiencePopulation.Anyone;
+
     public OrientationEnrollmentTrigger Trigger { get; set; }
 
-    /// <summary>How many days after the trigger the enrollment should be created.</summary>
+    /// <summary>
+    /// How many days after the trigger's date the enrollment should be created. Applies to the
+    /// DATED triggers — hire, transfer, promotion; a publish, a scheduled sweep or HR's "enrol now"
+    /// has no date to count from, so it enrols immediately.
+    /// </summary>
     public int EnrollmentDelayDays { get; set; }
 
-    /// <summary>True = include this audience, false = exclude it.</summary>
+    /// <summary>
+    /// True = include this audience, false = exclude it. An exclusion applies to EVERY trigger of
+    /// its programme — "never auto-enrol the board" should not need repeating per trigger.
+    /// </summary>
     public bool IsInclusive { get; set; } = true;
 
     public bool IsActive { get; set; } = true;
@@ -359,6 +543,18 @@ public class OrientationSession : TenantEntity
 /// have multiple facilitators; internal facilitators reference an employee, external
 /// ones are captured by name/email.
 /// </summary>
+/// <remarks>
+/// <para><b>An external facilitator can come from the training vendor register</b> (round 4, lane M;
+/// decision D-8 — orientation and training buy from the same market). Then
+/// <see cref="ExternalFacilitatorVendorId"/> — and, when the person is known,
+/// <see cref="ExternalFacilitatorTrainerProfileId"/> — point into the register, and the three
+/// <c>ExternalFacilitator…</c> text columns are a <b>snapshot</b> taken from it when the pick is made
+/// or changed: renaming or blacklisting the vendor later does not rewrite what a session says. The
+/// same reference-plus-snapshot shape as <c>PreEmploymentCheckItem.ServiceProviderName</c>.</para>
+///
+/// <para>Without a register pick the text columns are typed, as they always were — for the one-off
+/// speaker nobody has put on file.</para>
+/// </remarks>
 public class OrientationSessionFacilitator : TenantEntity
 {
     public Guid SessionId { get; set; }
@@ -366,14 +562,29 @@ public class OrientationSessionFacilitator : TenantEntity
     /// <summary>Employee acting as facilitator. Null if external.</summary>
     public Guid? EmployeeId { get; set; }
 
+    /// <summary>The person — a snapshot of the trainer's name when one is picked from the register.</summary>
     [MaxLength(200)]
     public string? ExternalFacilitatorName { get; set; }
 
+    /// <summary>A snapshot when picked from the register: the trainer's own address, else the vendor's contact.</summary>
     [MaxLength(200)]
     public string? ExternalFacilitatorEmail { get; set; }
 
+    /// <summary>A snapshot of the vendor's name when picked from the register.</summary>
     [MaxLength(200)]
     public string? ExternalFacilitatorOrganization { get; set; }
+
+    /// <summary>The training vendor providing the facilitator, when picked from the register.</summary>
+    public Guid? ExternalFacilitatorVendorId { get; set; }
+
+    [ForeignKey(nameof(ExternalFacilitatorVendorId))]
+    public virtual ErpSystem.Core.Entities.HR.Training.TrainingVendor? ExternalFacilitatorVendor { get; set; }
+
+    /// <summary>The vendor's trainer, when the person is known — null while the vendor has yet to name one.</summary>
+    public Guid? ExternalFacilitatorTrainerProfileId { get; set; }
+
+    [ForeignKey(nameof(ExternalFacilitatorTrainerProfileId))]
+    public virtual ErpSystem.Core.Entities.HR.Training.TrainerProfile? ExternalFacilitatorTrainerProfile { get; set; }
 
     public OrientationFacilitatorRole Role { get; set; }
 
@@ -443,6 +654,22 @@ public class EmployeeOrientation : TenantEntity
     public DateTime EnrolledAt { get; set; } = DateTime.UtcNow;
     public Guid? EnrolledByEmployeeId { get; set; }
 
+    // ── Why an automatic enrollment exists (round 4, lane I) ─────────────────
+    // Written only when EnrollmentSource is AutoRule. Without them an automatic enrollment is a
+    // row nobody can account for: "why am I on this?" had no answer but reading code.
+
+    /// <summary>The audience rule that enrolled this person. No FK: a rule may be deleted later
+    /// and the enrollment must keep saying what created it.</summary>
+    public Guid? AudienceRuleId { get; set; }
+
+    /// <summary>What fired — hire, transfer, promotion, publish, the scheduled sweep, or HR's
+    /// "enrol the audience now" (<see cref="OrientationEnrollmentTrigger.Manual"/>).</summary>
+    public OrientationEnrollmentTrigger? TriggerEvent { get; set; }
+
+    /// <summary>The date the trigger counted from — the hire date, or the movement's effective
+    /// date. Null for the undated triggers.</summary>
+    public DateOnly? TriggerDate { get; set; }
+
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public DateTime? LastActivityAt { get; set; }
@@ -460,6 +687,24 @@ public class EmployeeOrientation : TenantEntity
 
     // Acknowledgement summary
     public bool AcknowledgementSigned { get; set; }
+
+    // ── Attendance confirmed (round 4, lane R) ───────────────────────────────
+    // A programme that is only its live session has nothing to track and nothing to submit, so no
+    // act ever evaluated its completion. For such a programme the content gate is this confirmation
+    // instead, made by one of two doors: the session marked Completed, for the people its register
+    // shows there, or HR's "Mark completed" on the enrolment, with a note. See
+    // OrientationCompletionRules.CompletesByAttendance.
+
+    /// <summary>When attendance was confirmed. Null until it is.</summary>
+    public DateTime? AttendanceConfirmedAt { get; set; }
+
+    /// <summary>The officer who confirmed it: who marked the session completed, or who marked this
+    /// enrolment completed. No FK, like <see cref="EnrolledByEmployeeId"/>.</summary>
+    public Guid? AttendanceConfirmedByEmployeeId { get; set; }
+
+    /// <summary>How it was confirmed: the session and its register, or HR's own note.</summary>
+    [MaxLength(1000)]
+    public string? AttendanceConfirmationNote { get; set; }
 
     // Certificate summary
     public bool CertificateIssued { get; set; }
@@ -725,6 +970,15 @@ public class OrientationCertificate : TenantEntity
 /// A lifecycle notification sent for an orientation (enrollment, reminder, overdue,
 /// completion, certificate). Instance record — not a template.
 /// </summary>
+/// <remarks>
+/// <para><b>Also the email outbox (round 4, lane K-b).</b> The row IS the in-app delivery, written in
+/// the same save as the event it reports. Its email is sent afterwards by a dispatcher, never inside
+/// the request: publishing a programme can enrol hundreds of people in one save, and sending their
+/// emails there would hold the request for minutes. <see cref="EmailStatus"/> says what happened —
+/// null for a row that was never meant to be emailed (a manual notice, anything written before this),
+/// <c>Queued</c> until the dispatcher settles it, then <c>Sent</c>, <c>Failed</c>, <c>TimedOut</c>,
+/// <c>NoAddress</c>, <c>NoMailServer</c> or <c>Stale</c>.</para>
+/// </remarks>
 public class OrientationNotification : TenantEntity
 {
     public Guid? ProgramId { get; set; }
@@ -748,6 +1002,23 @@ public class OrientationNotification : TenantEntity
     public DateTime? ReadAt { get; set; }
 
     public DateTime SentAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>The Orientation &amp; Onboarding catalogue event the email renders. Also says which
+    /// lifecycle event the row reports, more finely than <see cref="Type"/>.</summary>
+    [MaxLength(100)]
+    public string? EmailEventKey { get; set; }
+
+    /// <summary>The email's tokens as they stood at the event, as JSON — a reschedule notice must say
+    /// where the session moved FROM, which the session no longer knows by the time the email goes.</summary>
+    public string? EmailTokens { get; set; }
+
+    /// <summary>What the email did; see the remarks.</summary>
+    [MaxLength(20)]
+    public string? EmailStatus { get; set; }
+
+    public int EmailAttempts { get; set; }
+
+    public DateTime? EmailLastAttemptAt { get; set; }
 
     // Navigation
     [ForeignKey(nameof(ProgramId))]

@@ -16,11 +16,13 @@ public class TrainingBudgetsController : ControllerBase
 {
     private readonly ITrainingBudgetService _service;
     private readonly ICurrentUserService _currentUser;
+    private readonly IHrFinanceActualsService _financeActuals;
 
-    public TrainingBudgetsController(ITrainingBudgetService service, ICurrentUserService currentUser)
+    public TrainingBudgetsController(ITrainingBudgetService service, ICurrentUserService currentUser, IHrFinanceActualsService financeActuals)
     {
         _service = service;
         _currentUser = currentUser;
+        _financeActuals = financeActuals;
     }
 
     // =========================================================================
@@ -145,6 +147,12 @@ public class TrainingBudgetsController : ControllerBase
         dto.BudgetId = id;
         return Ok(await _service.RecordTransactionAsync(dto, tenantId.Value, employeeId.Value, ct));
     }
+
+    /// <summary>What Finance says was spent on the budget's GL account (else the unit's account) over the budget's year or quarter (lane 8, slice 6). A read; HR writes nothing.</summary>
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
+    [HttpGet("{id:guid}/finance-actuals")]
+    public async Task<ActionResult<HrBudgetFinanceActualsDto>> GetFinanceActuals(Guid id, CancellationToken cancellationToken)
+        => Ok(await _financeActuals.GetTrainingBudgetActualsAsync(id, cancellationToken));
 
     [HttpGet("{id:guid}/transactions")]
     [Authorize(Policy = HrPermissions.TrainingReadPolicy)]

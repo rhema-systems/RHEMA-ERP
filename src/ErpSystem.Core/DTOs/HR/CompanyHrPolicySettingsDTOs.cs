@@ -38,6 +38,9 @@ public class CompanyHrPolicySettingsDto : BaseDto
     public int ContractExpiryLeadDays { get; set; }
     public int ProbationEndLeadDays { get; set; }
 
+    /// <summary>How long an offer stays open when HR sets no expiry (round 4, D-10).</summary>
+    public int OfferValidityDays { get; set; }
+
     /// <summary>
     /// How many days ahead of its due date a team task reminds its assignee (round 2, lane F2).
     /// </summary>
@@ -105,12 +108,26 @@ public class CompanyHrPolicySettingsDto : BaseDto
     public int QueryResponseWindowHours { get; set; }
     public int InvestigationDays { get; set; }
     public int DisciplineBacklogHorizonDays { get; set; }
-    public int SettlementDaysPerYear { get; set; }
+
+    /// <summary>The most days of annual leave a leaver's settlement pays for; null = no cap (lane L2b).</summary>
+    public int? SettlementLeaveDaysCap { get; set; }
+
+    /// <summary>Deciding members present at a medical board's deciding sitting (lane K-II-a).</summary>
+    public int MedicalBoardQuorum { get; set; }
+
+    /// <summary>PNDCL 187 s.5 — months' earnings for permanent total incapacity; null = not worked out (K-II-b).</summary>
+    public int? PermanentTotalIncapacityMonths { get; set; }
+
+    /// <summary>PNDCL 187 s.7(2)(c) — the longest temporary incapacity is paid for, in months (K-II-b).</summary>
+    public int TemporaryIncapacityMaxMonths { get; set; }
+
+    /// <summary>PNDCL 187 s.36 — the most of a year's earnings compensation is worked on; null = unknown (K-II-b).</summary>
+    public decimal? CompensationEarningsCeiling { get; set; }
+
     public bool AttendanceRateIncludesApprovedLeave { get; set; }
 
     // Leave encashment and the reminder cadence (residue plan G2).
     public bool AllowInServiceEncashment { get; set; }
-    public int EncashmentWorkingDaysPerMonth { get; set; }
     public int LeaveStartingReminderDays { get; set; }
     public int LeaveClosureGraceDays { get; set; }
     public int LeaveUndecidedChaseDays { get; set; }
@@ -119,6 +136,15 @@ public class CompanyHrPolicySettingsDto : BaseDto
 
     /// <summary>⚠ The month the LEAVE year begins. 1 = January. Change-once-at-setup (D-9).</summary>
     public int LeaveYearStartMonth { get; set; }
+
+    // Orientation & onboarding reminder windows (round 4, lane K).
+    public int OnboardingTaskDueLeadDays { get; set; }
+    public int OrientationDueLeadDays { get; set; }
+    public int OrientationCertificateExpiryLeadDays { get; set; }
+    public int OrientationChaseAfterDays { get; set; }
+
+    // Company schedule reminders (round 4, lane N-b2).
+    public int CompanyEventRsvpChaseLeadDays { get; set; }
 }
 
 /// <summary>
@@ -150,6 +176,10 @@ public class UpdateCompanyHrPolicySettingsDto
     [Range(0, 3650)] public int ReviewDueLeadDays { get; set; } = 30;
     [Range(0, 3650)] public int ContractExpiryLeadDays { get; set; } = 60;
     [Range(0, 3650)] public int ProbationEndLeadDays { get; set; } = 30;
+
+    // Round 4, D-10. Range starts at 1, not 0: zero would mean an offer expires the day it is
+    // raised, which is never what anybody means by "how long is this open for".
+    [Range(1, 3650)] public int OfferValidityDays { get; set; } = 14;
 
     // Round 2, lane F2. Range matches the entity's — a task cannot usefully remind more than a
     // year ahead, and 0 means "only once it is due".
@@ -203,10 +233,33 @@ public class UpdateCompanyHrPolicySettingsDto
     [Range(1, 3650)] public int DisciplineBacklogHorizonDays { get; set; } = 90;
 
     /// <summary>
-    /// ⚠ Moves money: 365 calendar, 360 for thirty-day months, 264 for a 22-day working month —
-    /// a 38% spread on the same facts. See the entity.
+    /// The most days of annual leave a leaver's settlement pays for (FR-HR-152); empty = no cap.
     /// </summary>
-    [Range(1, 366)] public int SettlementDaysPerYear { get; set; } = 365;
+    /// <remarks>
+    /// ⚠ Left out of a save, it keeps this default, 56, like every field here; only an explicit
+    /// <c>null</c> removes the cap. See the entity.
+    /// </remarks>
+    [Range(1, 366)] public int? SettlementLeaveDaysCap { get; set; } = 56;
+
+    /// <summary>
+    /// Deciding members (chair or member) present at the sitting where a medical board decides a case
+    /// (round 5, lane K-II-a). Default 1.
+    /// </summary>
+    [Range(1, 20)] public int MedicalBoardQuorum { get; set; } = 1;
+
+    /// <summary>
+    /// PNDCL 187 s.5 (round 5, lane K-II-b). ⚠ Default 96, so a save that omits it keeps 96 — only an
+    /// explicit empty stops the figure being worked out, the convention <c>SettlementLeaveDaysCap</c> set.
+    /// </summary>
+    [Range(1, 600)] public int? PermanentTotalIncapacityMonths { get; set; } = 96;
+
+    /// <summary>PNDCL 187 s.7(2)(c). Default 24.</summary>
+    [Range(1, 120)] public int TemporaryIncapacityMaxMonths { get; set; } = 24;
+
+    /// <summary>
+    /// PNDCL 187 s.36. ⚠ No default: a save that omits it CLEARS it — the page always sends it.
+    /// </summary>
+    [Range(0.01, 1_000_000_000)] public decimal? CompensationEarningsCeiling { get; set; }
 
     public bool AttendanceRateIncludesApprovedLeave { get; set; } = true;
 
@@ -217,12 +270,6 @@ public class UpdateCompanyHrPolicySettingsDto
     /// </summary>
     public bool AllowInServiceEncashment { get; set; } = false;
 
-    /// <summary>
-    /// ⚠ Read beside <see cref="SettlementDaysPerYear"/> and expect them to differ — roughly 38% on
-    /// the same salary at the defaults. They are different money events and deliberately not merged.
-    /// </summary>
-    [Range(1, 31)] public int EncashmentWorkingDaysPerMonth { get; set; } = 22;
-
     [Range(0, 180)] public int LeaveStartingReminderDays { get; set; } = 7;
     [Range(0, 180)] public int LeaveClosureGraceDays { get; set; } = 2;
     [Range(0, 180)] public int LeaveUndecidedChaseDays { get; set; } = 5;
@@ -231,4 +278,13 @@ public class UpdateCompanyHrPolicySettingsDto
 
     /// <summary>⚠ The month the LEAVE year begins. Refused once the tenant holds leave data (D-9).</summary>
     [Range(1, 12)] public int LeaveYearStartMonth { get; set; } = 1;
+
+    // Orientation & onboarding reminder windows (round 4, lane K).
+    [Range(0, 90)]  public int OnboardingTaskDueLeadDays { get; set; } = 3;
+    [Range(0, 90)]  public int OrientationDueLeadDays { get; set; } = 7;
+    [Range(0, 365)] public int OrientationCertificateExpiryLeadDays { get; set; } = 30;
+    [Range(1, 90)]  public int OrientationChaseAfterDays { get; set; } = 3;
+
+    // Company schedule reminders (round 4, lane N-b2).
+    [Range(0, 60)]  public int CompanyEventRsvpChaseLeadDays { get; set; } = 2;
 }

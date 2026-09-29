@@ -107,7 +107,8 @@ public sealed class StoreIssueVoucherDocumentBuilder : IDocumentBuilder
                 column.Item().PaddingTop(5).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(10).Row(row =>
                 {
                     row.RelativeItem().Element(cell => Meta(cell, "Requested by", Name(voucher.RequestedBy)));
-                    row.RelativeItem().Element(cell => Meta(cell, "Approved by", Name(voucher.ApprovedBy)));
+                    row.RelativeItem().Element(cell => Meta(cell, "Approved by",
+                        voucher.ApprovedById.HasValue ? Name(voucher.ApprovedBy) : "Not required"));
                     row.RelativeItem().Element(cell => Meta(cell, "Issued by", Name(voucher.IssuedBy)));
                     row.RelativeItem().Element(cell => Meta(cell, "Receiver", Name(voucher.ReceiverUser)));
                 });
@@ -176,6 +177,6 @@ public sealed class StoreIssueVoucherDocumentBuilder : IDocumentBuilder
     });
     private static IContainer HeaderCell(IContainer container) => container.Background(Colors.Blue.Darken3).Padding(5).DefaultTextStyle(style => style.FontColor(Colors.White).SemiBold().FontSize(8));
     private static IContainer BodyCell(IContainer container) => container.BorderBottom(1).BorderColor(Colors.Grey.Lighten2).Padding(5);
-    private static string Name(ApplicationUser user) => string.IsNullOrWhiteSpace((user.FirstName + " " + user.LastName).Trim()) ? user.UserName ?? user.Email ?? "-" : (user.FirstName + " " + user.LastName).Trim();
+    private static string Name(ApplicationUser? user) => user == null ? "-" : string.IsNullOrWhiteSpace((user.FirstName + " " + user.LastName).Trim()) ? user.UserName ?? user.Email ?? "-" : (user.FirstName + " " + user.LastName).Trim();
     private static string Safe(string value) => string.Concat(value.Select(character => Path.GetInvalidFileNameChars().Contains(character) ? '-' : character));
 }

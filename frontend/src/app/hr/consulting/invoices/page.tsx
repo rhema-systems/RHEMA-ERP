@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Receipt, Loader2, Send, BadgeDollarSign, Ban } from 'lucide-react';
+import { Receipt, Loader2, Send, BadgeDollarSign, Ban, Landmark } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -32,10 +32,12 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { FinancePostingCard, FinancePostingInlineStatus } from '@/components/hr/common/FinancePostingCard';
 import { timesheetInvoiceService } from '@/services/hr/consultant.service';
 import { formatDate, formatHours, formatMoney, today } from '@/lib/hr/attendance-format';
 import { INVOICE_STATUS_OPTIONS } from '@/types/hr/consultant';
@@ -62,6 +64,9 @@ export default function TimesheetInvoicesPage() {
     null,
   );
   const [busy, setBusy] = useState(false);
+  // The invoice's Finance posting rows (the AR hand-off): this page has no detail screen, so the
+  // register card — with its Refresh, which is how the desk pulls Finance's receipt — opens here.
+  const [financeRow, setFinanceRow] = useState<TimesheetInvoiceSummary | null>(null);
   const [paidDate, setPaidDate] = useState(today());
   const [paidAmount, setPaidAmount] = useState('');
   const [voidReason, setVoidReason] = useState('');
@@ -198,6 +203,8 @@ export default function TimesheetInvoicesPage() {
                   <TableHead className="text-right">Total</TableHead>
                   <TableHead>Due</TableHead>
                   <TableHead>Status</TableHead>
+                  {/* Lane 8, slice 6: what Finance holds for this invoice — the AR row, once raised. */}
+                  <TableHead>Finance</TableHead>
                   <TableHead className="w-[60px]" />
                 </TableRow>
               </TableHeader>
@@ -205,7 +212,7 @@ export default function TimesheetInvoicesPage() {
                 {isLoading ? (
                   [...Array(5)].map((_, i) => (
                     <TableRow key={i}>
-                      {[...Array(9)].map((__, j) => (
+                      {[...Array(10)].map((__, j) => (
                         <TableCell key={j}>
                           <Skeleton className="h-4 w-[70px]" />
                         </TableCell>
@@ -214,7 +221,7 @@ export default function TimesheetInvoicesPage() {
                   ))
                 ) : rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9}>
+                    <TableCell colSpan={10}>
                       <EmptyState
                         icon={Receipt}
                         title="No invoices"
@@ -240,6 +247,9 @@ export default function TimesheetInvoicesPage() {
                         <StatusBadge status={inv.status} />
                       </TableCell>
                       <TableCell>
+                        <FinancePostingInlineStatus sourceDocumentId={inv.id} />
+                      </TableCell>
+                      <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -262,6 +272,9 @@ export default function TimesheetInvoicesPage() {
                               onClick={() => openAction('markPaid', inv)}
                             >
                               <BadgeDollarSign className="mr-2 h-4 w-4" /> Record payment
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setFinanceRow(inv)}>
+                              <Landmark className="mr-2 h-4 w-4" /> Finance posting
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
@@ -331,6 +344,20 @@ export default function TimesheetInvoicesPage() {
           </div>
         )}
       </ConfirmationDialog>
+
+      <Dialog open={financeRow !== null} onOpenChange={(open) => { if (!open) setFinanceRow(null); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Finance posting · {financeRow?.invoiceNumber}</DialogTitle>
+            <DialogDescription>
+              The AR invoice Finance holds for this consulting invoice. Refresh pulls Finance's status and, once paid, the receipt onto the invoice.
+            </DialogDescription>
+          </DialogHeader>
+          {financeRow && (
+            <FinancePostingCard sourceDocumentId={financeRow.id} invalidateKeys={[['hr', 'timesheet-invoices']]} />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

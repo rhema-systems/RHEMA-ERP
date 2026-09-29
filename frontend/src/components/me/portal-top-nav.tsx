@@ -50,6 +50,7 @@ import {
 import { useAuth } from '@/hooks/use-auth';
 import { hasDeskAccess } from '@/lib/auth-routing';
 import { mePortalService } from '@/services/hr/me-portal.service';
+import { useEncashmentAvailability } from '@/components/me/leave/use-encashment-availability';
 import { cn } from '@/lib/utils';
 
 interface NavLink {
@@ -113,6 +114,8 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'My Mentoring', href: '/me/mentoring' },
       // Slice 7: orientation lives in the portal.
       { label: 'My Orientations', href: '/me/orientation' },
+      // Round 4, lane K-b2: onboarding too — the new hire's plan, and tasks given to anybody.
+      { label: 'My Onboarding', href: '/me/onboarding' },
     ],
   },
   {
@@ -215,6 +218,14 @@ export function PortalTopNav() {
     (counts?.pendingApprovals ?? 0) + (counts?.pendingTasks ?? 0) + (counts?.actionItems ?? 0);
   const unreadCount = counts?.unreadNotifications ?? 0;
 
+  // Round 5, lane L1: "My Encashments" only where leave may be cashed in while employed. Off (TDC's
+  // setting), unused leave is paid in the final settlement and the screen would only refuse.
+  const { allowed: encashmentAllowed } = useEncashmentAvailability();
+  const navGroups = NAV_GROUPS.map((group) => ({
+    ...group,
+    links: group.links.filter((l) => encashmentAllowed || l.href !== '/me/leave/encashments'),
+  }));
+
   const groupActive = (group: NavGroup) => group.links.some((l) => pathname?.startsWith(l.href));
 
   return (
@@ -239,7 +250,7 @@ export function PortalTopNav() {
               <Home className="mr-1 h-4 w-4" /> Home
             </Link>
           </Button>
-          {NAV_GROUPS.map((group) => (
+          {navGroups.map((group) => (
             <DropdownMenu key={group.label}>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -378,7 +389,7 @@ export function PortalTopNav() {
                 >
                   <LayoutDashboard className="h-4 w-4" /> Home
                 </Link>
-                {NAV_GROUPS.map((group) => (
+                {navGroups.map((group) => (
                   <div key={group.label}>
                     <div className="flex items-center gap-2 px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                       <group.icon className="h-3.5 w-3.5" /> {group.label}

@@ -12,6 +12,9 @@ import {
   UserMinus,
   X,
   AlertTriangle,
+  RotateCcw,
+  Award,
+  CheckCircle2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -51,6 +54,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/components/ui/use-toast';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
@@ -62,6 +66,7 @@ import { orientationSessionService } from '@/services/hr/orientation-session.ser
 import {
   ORIENTATION_COMPLETION_STATUS_OPTIONS,
   ORIENTATION_ENROLLMENT_SOURCE_OPTIONS,
+  SELF_PACED_DELIVERY_MODES,
   OCCUPYING_ENROLLMENT_STATUSES,
 } from '@/types/hr/orientation';
 import type {
@@ -110,20 +115,79 @@ export default function OrientationEnrollmentsPage() {
   const [withdrawReason, setWithdrawReason] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Round 4, lane I-b: HR may re-enrol somebody whose enrolment HR ended, and may open the next
+  // cycle of a recurring programme early. The automation still does neither by itself.
+  const [againTarget, setAgainTarget] = useState<{
+    row: EmployeeOrientationSummary;
+    kind: 'reenrol' | 'nextCycle';
+  } | null>(null);
+
+  // Round 4, lane K-b: a certificated programme now issues its certificate at completion; HR issues
+  // one here for somebody who completed before that, and reissues. There was no button at all.
+  const [certifyTarget, setCertifyTarget] = useState<EmployeeOrientationSummary | null>(null);
+
+  // Round 4, lane R (R-D3): a programme that is only its live session is completed by attending it.
+  // The session marked Completed does that for the people its register shows there; HR marks the rest
+  // here, one enrolment at a time, with a note saying why.
+  const [completeTarget, setCompleteTarget] = useState<EmployeeOrientationSummary | null>(null);
+  const [completeNote, setCompleteNote] = useState('');
+
   const { data: programs = [] } = useQuery({
     queryKey: ['hr', 'orientation-programs'],
     queryFn: () => orientationProgramService.getAll(),
   });
+  const recurringProgramIds = useMemo(
+    () => new Set(programs.filter((p) => p.isRecurring && p.recurrenceFrequency).map((p) => p.id)),
+    [programs],
+  );
+  const certificatedProgramIds = useMemo(
+    () => new Set(programs.filter((p) => p.isCertificateIssued).map((p) => p.id)),
+    [programs],
+  );
+  const attendanceProgramIds = useMemo(
+    () => new Set(programs.filter((p) => p.completesByAttendance).map((p) => p.id)),
+    [programs],
+  );
 
   // Sessions for the programme being enrolled onto. A session is optional — a self-paced programme
-  // has none — so this stays empty rather than blocking the dialog.
-  const { data: sessions = [] } = useQuery({
+  // has none — so an empty list never blocks the dialog.
+  // ⚠ Round 4, lane L: the loading / error / permission state is KEPT. `const { data: sessions = [] }`
+  //   alone drew a refused request (403) exactly like "no sessions" — the demo's "empty dropdown".
+  const {
+    data: sessions = [],
+    isLoading: sessionsLoading,
+    isError: sessionsFailed,
+    error: sessionsError,
+  } = useQuery({
     queryKey: ['hr', 'orientation-sessions', 'program', enrolProgramId],
     queryFn: () => orientationSessionService.getByProgram(enrolProgramId),
     enabled: !!enrolProgramId,
+    retry: false,
   });
 
+  // Round 4, lane L — only programmes that take enrolments are offered (Active and in their dates,
+  // the server's own definition), matching the sessions screen; and what the session dropdown says.
+  const enrollablePrograms = useMemo(
+    () => programs.filter((p) => p.acceptsEnrolment !== false),
+    [programs],
+  );
+  const hiddenProgramCount = programs.length - enrollablePrograms.length;
+  const enrolProgram = programs.find((p) => p.id === enrolProgramId);
+  const enrolSelfPaced =
+    !!enrolProgram && SELF_PACED_DELIVERY_MODES.includes(enrolProgram.defaultDeliveryMode);
+  const sortedSessions = useMemo(
+    () =>
+      [...sessions].sort(
+        (a, b) =>
+          Number(b.acceptsEnrolment !== false) - Number(a.acceptsEnrolment !== false) ||
+          String(a.scheduledStartAt ?? '').localeCompare(String(b.scheduledStartAt ?? '')),
+      ),
+    [sessions],
+  );
+  const openSessionCount = sessions.filter((x) => x.acceptsEnrolment !== false).length;
+
   const listKey = ['hr', 'orientation-enrollments', scope, programId, completionStatus];
+  const ENDED_BY_HR: string[] = ['Withdrawn', 'Cancelled', 'NoShow'];
   const { data: enrollments = [], isLoading } = useQuery({
     queryKey: listKey,
     queryFn: () => {
@@ -216,14 +280,16 @@ export default function OrientationEnrollmentsPage() {
         title: `${created.length} of ${picked.length} enrolled`,
         description:
           skipped > 0
-            ? `${skipped} were already enrolled on this programme and were skipped.`
+            ? `${skipped} were skipped — already on the programme's current cycle, or they have completed a programme that does not recur.`
             : 'Everyone selected was enrolled.',
       });
 
       if (skipped > 0 || waitlisted > 0) {
         setSkippedNote(
           [
-            skipped > 0 ? `${skipped} already enrolled and skipped.` : null,
+            skipped > 0
+              ? `${skipped} skipped — already on the current cycle, or completed a programme that does not recur.`
+              : null,
             waitlisted > 0
               ? `${waitlisted} placed on the waitlist — the session is full.`
               : null,
@@ -246,6 +312,121 @@ export default function OrientationEnrollmentsPage() {
       });
     } finally {
       setEnrolling(false);
+    }
+  };
+
+  // The server decides by each person's LATEST enrolment on a programme, so the actions are offered
+  // on that row only — an old withdrawn row beside a newer enrolment would only be refused.
+  const latestRowIds = useMemo(() => {
+    const latest = new Map<string, EmployeeOrientationSummary>();
+    for (const e of enrollments) {
+      const key = `${e.employeeId}|${e.programId}`;
+      const seen = latest.get(key);
+      if (!seen || String(e.enrolledAt) > String(seen.enrolledAt)) latest.set(key, e);
+    }
+    return new Set(Array.from(latest.values()).map((e) => e.id));
+  }, [enrollments]);
+
+  const runAgain = async () => {
+    if (!againTarget) return false;
+    setBusy(true);
+    try {
+      await employeeOrientationService.enroll({
+        programId: againTarget.row.programId,
+        employeeId: againTarget.row.employeeId,
+        sessionId: null,
+        enrollmentSource: 'HrAssigned',
+      });
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'orientation-enrollments'] });
+      toast({
+        title: againTarget.kind === 'reenrol' ? 'Re-enrolled' : 'Next cycle opened',
+        description: 'The earlier enrolment stays on the record.',
+      });
+      setAgainTarget(null);
+      return true;
+    } catch (error: any) {
+      toast({
+        title: 'Could not enrol',
+        description: error?.message || 'Failed to enrol.',
+        variant: 'destructive',
+      });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runCertify = async () => {
+    if (!certifyTarget) return false;
+    setBusy(true);
+    try {
+      const issued = await employeeOrientationService.issueCertificate(certifyTarget.id, {
+        employeeOrientationId: certifyTarget.id,
+        reissue: !!certifyTarget.certificateIssued,
+      });
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'orientation-enrollments'] });
+      toast({
+        title: certifyTarget.certificateIssued ? 'Certificate reissued' : 'Certificate issued',
+        description: `${issued.certificateNumber} — ${certifyTarget.employeeName ?? 'the participant'} has been told.`,
+      });
+      setCertifyTarget(null);
+      return true;
+    } catch (error: any) {
+      toast({
+        title: 'Could not issue the certificate',
+        description: error?.message || 'Failed to issue.',
+        variant: 'destructive',
+      });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const closeMarkCompleted = () => {
+    setCompleteTarget(null);
+    setCompleteNote('');
+  };
+
+  const runMarkCompleted = async () => {
+    if (!completeTarget) return;
+    if (!completeNote.trim()) {
+      toast({
+        title: 'A note is required',
+        description: 'Say why: the session they attended, or where.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setBusy(true);
+    try {
+      const updated = await employeeOrientationService.confirmAttendance(completeTarget.id, {
+        employeeOrientationId: completeTarget.id,
+        note: completeNote.trim(),
+      });
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'orientation-enrollments'] });
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'orientation-programs'] });
+      // The completion rule still ran: a programme that requires a declaration waits for it.
+      toast(
+        updated.completionStatus === 'Completed'
+          ? {
+              title: 'Marked completed',
+              description: `${completeTarget.employeeName ?? 'The participant'} has completed ${completeTarget.programTitle ?? 'the programme'}, and has been told.`,
+            }
+          : {
+              title: 'Attendance confirmed',
+              description: 'It completes once the declaration is signed.',
+            },
+      );
+      closeMarkCompleted();
+    } catch (error: any) {
+      toast({
+        title: 'Could not mark it completed',
+        description: error?.message || 'Failed to mark it completed.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -462,6 +643,42 @@ export default function OrientationEnrollmentsPage() {
                             <DropdownMenuItem asChild>
                               <Link href={`/me/orientation/${e.id}`}>View progress</Link>
                             </DropdownMenuItem>
+                            {latestRowIds.has(e.id) && ENDED_BY_HR.includes(e.enrollmentStatus) && (
+                              <DropdownMenuItem
+                                onClick={() => setAgainTarget({ row: e, kind: 'reenrol' })}
+                              >
+                                <RotateCcw className="mr-2 h-4 w-4" />
+                                Re-enrol
+                              </DropdownMenuItem>
+                            )}
+                            {latestRowIds.has(e.id) &&
+                              e.completionStatus === 'Completed' &&
+                              !ENDED_BY_HR.includes(e.enrollmentStatus) &&
+                              recurringProgramIds.has(e.programId) && (
+                                <DropdownMenuItem
+                                  onClick={() => setAgainTarget({ row: e, kind: 'nextCycle' })}
+                                >
+                                  <RotateCcw className="mr-2 h-4 w-4" />
+                                  Open the next cycle now
+                                </DropdownMenuItem>
+                              )}
+                            {e.completionStatus === 'Completed' &&
+                              certificatedProgramIds.has(e.programId) && (
+                                <DropdownMenuItem onClick={() => setCertifyTarget(e)}>
+                                  <Award className="mr-2 h-4 w-4" />
+                                  {e.certificateIssued ? 'Reissue certificate' : 'Issue certificate'}
+                                </DropdownMenuItem>
+                              )}
+                            {attendanceProgramIds.has(e.programId) &&
+                              !ENDED_BY_HR.includes(e.enrollmentStatus) &&
+                              e.completionStatus !== 'Completed' &&
+                              e.completionStatus !== 'Exempted' &&
+                              e.completionStatus !== 'PendingAcknowledgement' && (
+                                <DropdownMenuItem onClick={() => setCompleteTarget(e)}>
+                                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                                  Mark completed
+                                </DropdownMenuItem>
+                              )}
                             {e.enrollmentStatus !== 'Withdrawn' &&
                               e.enrollmentStatus !== 'Cancelled' && (
                                 <DropdownMenuItem
@@ -495,8 +712,10 @@ export default function OrientationEnrollmentsPage() {
           <DialogHeader>
             <DialogTitle>Enrol participants</DialogTitle>
             <DialogDescription>
-              Anyone already enrolled on the programme is skipped. If the chosen session is full and
-              allows a waitlist, they are queued rather than confirmed.
+              Anyone already on the programme and not finished is skipped, as is anyone who has
+              completed a programme that does not recur. Someone HR withdrew can be enrolled again,
+              and on a recurring programme a completed person starts their next cycle. If the chosen
+              session is full and allows a waitlist, they are queued rather than confirmed.
             </DialogDescription>
           </DialogHeader>
 
@@ -514,13 +733,21 @@ export default function OrientationEnrollmentsPage() {
                   <SelectValue placeholder="Choose a programme…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {programs.map((p) => (
+                  {enrollablePrograms.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.programCode} — {p.title}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {hiddenProgramCount > 0 && (
+                <p className="text-muted-foreground text-xs">
+                  {hiddenProgramCount} programme{hiddenProgramCount === 1 ? '' : 's'} that{' '}
+                  {hiddenProgramCount === 1 ? 'is' : 'are'} a draft, retired or outside{' '}
+                  {hiddenProgramCount === 1 ? 'its' : 'their'} effective dates{' '}
+                  {hiddenProgramCount === 1 ? 'is' : 'are'} not offered — they take no enrolments.
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -534,17 +761,57 @@ export default function OrientationEnrollmentsPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={ALL}>No session — self-paced</SelectItem>
-                  {sessions.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.title}
-                      {s.maxParticipants
-                        ? ` (${Math.max(0, s.maxParticipants - s.enrolledCount)} seats left)`
-                        : ' (uncapped)'}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value={ALL}>
+                    {enrolSelfPaced ? 'Self-paced — no session' : 'No session (enrol without one)'}
+                  </SelectItem>
+                  {sortedSessions.map((s) => {
+                    const open = s.acceptsEnrolment !== false;
+                    return (
+                      <SelectItem key={s.id} value={s.id} disabled={!open}>
+                        {s.title}
+                        {s.scheduledStartAt
+                          ? ` · ${new Date(s.scheduledStartAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`
+                          : ''}
+                        {open
+                          ? s.maxParticipants
+                            ? ` (${Math.max(0, s.maxParticipants - s.enrolledCount)} seats left)`
+                            : ' (uncapped)'
+                          : ` — not open: ${s.closedBecause ?? s.status}`}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
+              {enrolProgramId && (
+                <p className="text-muted-foreground text-xs">
+                  {sessionsLoading ? (
+                    'Loading this programme’s sessions…'
+                  ) : sessionsFailed ? (
+                    (sessionsError as { status?: number } | null)?.status === 403 ? (
+                      'You do not have permission to see this programme’s sessions. People can still be enrolled without one.'
+                    ) : (
+                      `Its sessions could not be loaded (${(sessionsError as Error | null)?.message ?? 'an error'}). People can still be enrolled without one.`
+                    )
+                  ) : sessions.length === 0 ? (
+                    enrolSelfPaced ? (
+                      'This programme is self-paced, so it has no sessions — people work through it on their own.'
+                    ) : (
+                      <>
+                        No sessions are scheduled for this programme yet.{' '}
+                        <Link
+                          href={`/hr/orientation/sessions?schedule=${enrolProgramId}`}
+                          className="underline underline-offset-2"
+                        >
+                          Schedule one
+                        </Link>
+                        , or enrol without a session.
+                      </>
+                    )
+                  ) : openSessionCount === 0 ? (
+                    'None of its sessions is open for enrolment — the closed ones are listed for reference. Enrol without a session, or open one from the sessions screen.'
+                  ) : null}
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -607,6 +874,42 @@ export default function OrientationEnrollmentsPage() {
         </DialogContent>
       </Dialog>
 
+      <ConfirmationDialog
+        open={certifyTarget !== null}
+        onOpenChange={(o) => !o && setCertifyTarget(null)}
+        title={
+          certifyTarget?.certificateIssued
+            ? `Reissue ${certifyTarget.employeeName ?? 'this person'}'s certificate?`
+            : `Issue ${certifyTarget?.employeeName ?? 'this person'} a certificate?`
+        }
+        description={
+          certifyTarget?.certificateIssued
+            ? `A new certificate for ${certifyTarget.programTitle ?? 'the programme'} replaces ${certifyTarget.certificateSerialNumber ?? 'the current one'}, which is marked reissued. They are told, in-app and by email.`
+            : `A certificate for ${certifyTarget?.programTitle ?? 'the programme'}, with the next serial and the programme's validity. They are told, in-app and by email.`
+        }
+        confirmText={certifyTarget?.certificateIssued ? 'Reissue' : 'Issue certificate'}
+        isLoading={busy}
+        onConfirm={runCertify}
+      />
+
+      <ConfirmationDialog
+        open={againTarget !== null}
+        onOpenChange={(o) => !o && setAgainTarget(null)}
+        title={
+          againTarget?.kind === 'nextCycle'
+            ? `Open the next cycle for ${againTarget.row.employeeName ?? 'this person'} now?`
+            : `Re-enrol ${againTarget?.row.employeeName ?? 'this person'}?`
+        }
+        description={
+          againTarget?.kind === 'nextCycle'
+            ? `A new cycle of ${againTarget.row.programTitle ?? 'the programme'} starts today instead of waiting for the nightly renewal. The completed cycle stays on the record.`
+            : `A new, self-paced enrolment on ${againTarget?.row.programTitle ?? 'the programme'}. The ${(againTarget?.row.enrollmentStatus ?? 'ended').toLowerCase()} enrolment stays on the record — and no rule would ever have done this by itself.`
+        }
+        confirmText={againTarget?.kind === 'nextCycle' ? 'Open the next cycle' : 'Re-enrol'}
+        isLoading={busy}
+        onConfirm={runAgain}
+      />
+
       <Dialog
         open={withdrawTarget !== null}
         onOpenChange={(o) => {
@@ -646,6 +949,44 @@ export default function OrientationEnrollmentsPage() {
             <Button variant="destructive" onClick={runWithdraw} disabled={busy}>
               {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Withdraw
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={completeTarget !== null}
+        onOpenChange={(o) => {
+          if (!o) closeMarkCompleted();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Mark completed</DialogTitle>
+            <DialogDescription>
+              {completeTarget
+                ? `${completeTarget.programTitle ?? 'This programme'} is its live session, so attending it is what completes it. Record that ${completeTarget.employeeName ?? 'this participant'} attended — somebody enrolled without a session, or whom the register does not show. Completing it issues any certificate and tells them.`
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label htmlFor="complete-note">Note</Label>
+            <Textarea
+              id="complete-note"
+              rows={3}
+              maxLength={1000}
+              value={completeNote}
+              onChange={(e) => setCompleteNote(e.target.value)}
+              placeholder="Which session they attended, or where."
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeMarkCompleted} disabled={busy}>
+              Cancel
+            </Button>
+            <Button onClick={runMarkCompleted} disabled={busy}>
+              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Mark completed
             </Button>
           </DialogFooter>
         </DialogContent>

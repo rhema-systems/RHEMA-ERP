@@ -45,6 +45,8 @@ namespace ErpSystem.Api.Controllers
         private readonly IEmployeeLinkResolutionService _employeeLinkResolution;
         private readonly IHrIdentityAccessService _hrIdentityAccessService;
         private readonly ApplicationDbContext _context;
+        private readonly ErpSystem.Core.Models.CandidatePortalOptions _candidatePortalOptions;
+        private readonly ErpSystem.Core.Interfaces.Common.ITemplatedEmailService _templatedEmail;
         private readonly IConfiguration _configuration;
         private readonly ILogger<AuthController> _logger;
 
@@ -71,9 +73,13 @@ namespace ErpSystem.Api.Controllers
             IEmployeeLinkResolutionService employeeLinkResolution,
             IHrIdentityAccessService hrIdentityAccessService,
             ApplicationDbContext context,
+            Microsoft.Extensions.Options.IOptions<ErpSystem.Core.Models.CandidatePortalOptions> candidatePortalOptions,
+            ErpSystem.Core.Interfaces.Common.ITemplatedEmailService templatedEmail,
             IConfiguration configuration,
             ILogger<AuthController> logger)
         {
+            _candidatePortalOptions = candidatePortalOptions.Value;
+            _templatedEmail = templatedEmail;
             _userManager = userManager;
             _signInManager = signInManager;
             _tokenService = tokenService;
@@ -1873,10 +1879,38 @@ namespace ErpSystem.Api.Controllers
                     _logger.LogWarning(ex, "Failed to send phone verification OTP for candidate {Username}", request.Username);
                 }
 
+                // ⚠ AND an email-confirmation link, as a SECOND way in — round 4.
+                //
+                // The SMS OTP above is best-effort "so registration does not fail if SMS fails",
+                // which is right. But it was the ONLY route to IsActive = true, so on any
+                // deployment without an SMS provider the outcome was: registration returns
+                // success, the code never arrives, the account stays inactive, login answers
+                // IDENTITY_USER_INACTIVE — and the candidate is locked out permanently with no
+                // way back. Measured on ErpSystemDB_UAT 2026-09-21: every self-registered
+                // candidate account was IsActive = 0, and the log read "Twilio SMS is not
+                // enabled / GhanaGateway SMS is not enabled / All fallback SMS providers failed".
+                //
+                // Email confirmation was NOT a way in either: api/candidate/confirm-email sits
+                // behind [Authorize(Policy = "CandidateOnly")], so it needed the login the
+                // inactive account could not obtain, and it set EmailConfirmed without ever
+                // touching IsActive. A closed loop.
+                //
+                // Either proof now activates. A mailbox is at least as good a proof as a handset
+                // for a careers account — it is the address the candidate applies with and the
+                // one every later notification goes to.
+                try
+                {
+                    await SendCandidateActivationEmailAsync(user, registrationTenant, HttpContext.RequestAborted);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to send activation email for candidate {Username}", request.Username);
+                }
+
                 return Ok(new RegisterResponse
                 {
                     Success = true,
-                    Message = "Registration successful. Please verify your phone number.",
+                    Message = "Registration successful. Confirm your email address, or verify your phone number, to activate your account.",
                     PhoneNumber = request.PhoneNumber,
                     RequiresOtpVerification = true
                 });
@@ -1886,6 +1920,191 @@ namespace ErpSystem.Api.Controllers
                 _logger.LogError(ex, "Error during candidate registration for user: {Username}", request.Username);
                 return StatusCode(500, new { message = "An error occurred during registration" });
             }
+        }
+
+        /// <summary>
+        /// Emails a candidate the link that activates their careers account.
+        /// </summary>
+        /// <remarks>
+        /// The link carries the account id and an ASP.NET Identity email-confirmation token, and
+        /// lands on the careers site's verify-email page, which posts both back to
+        /// <c>candidate/activate</c>. Best-effort at registration, like the SMS OTP beside it: a
+        /// mail server that is down must not lose the registration.
+        /// </remarks>
+        private async Task SendCandidateActivationEmailAsync(
+            ApplicationUser user, Tenant tenant, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(user.Email)) return;
+
+            var portalUrl = (_candidatePortalOptions.PortalUrl ?? string.Empty).TrimEnd('/');
+            if (string.IsNullOrWhiteSpace(portalUrl))
+            {
+                _logger.LogWarning(
+                    "No candidate portal URL is configured, so the activation link for {UserId} could not be built. "
+                    + "The account can only be activated by SMS OTP.", user.Id);
+                return;
+            }
+
+            var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
+            var link = $"{portalUrl}/careers/verify-email"
+                     + $"?uid={user.Id}&token={Uri.EscapeDataString(token)}";
+
+            // ⚠ Rendered from the HR-editable template, NOT from HTML written here.
+            //
+            // The first cut of this hardcoded a four-line body in this method. That is precisely
+            // the mistake AssetTermsLetterService records reversing: wording built in C# is wording
+            // "nobody but a developer could change", and it arrives with no letterhead, because the
+            // company profile is not in scope at the point it is written.
+            //
+            // Going through the catalogue gets the branded shell, the company name and the merge
+            // tokens for free, and puts the text where HR can rewrite it — which matters more here
+            // than anywhere else in recruitment, because this is the FIRST message the organisation
+            // ever sends a candidate and the one that decides whether they can sign in at all.
+            // By tenant (round 4, lane N): registration is anonymous, so there is no signed-in user to
+            // say whose wording to use — and the tenant's own edit of this template must still apply.
+            var sent = await _templatedEmail.SendForTenantAsync(
+                tenant.Id,
+                ErpSystem.Core.Services.HR.Recruitment.RecruitmentEmailCatalog.Module,
+                ErpSystem.Core.Services.HR.Recruitment.RecruitmentEmailCatalog.Events.CandidateAccountActivation,
+                user.Email,
+                new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["CandidateName"]  = $"{user.FirstName} {user.LastName}".Trim(),
+                    // No CompanyName: the sender now fills it from THIS tenant's company profile — the
+                    // legal name the catalogue promises. Passing tenant.Name here overrode that with the
+                    // tenant record's label, and a candidate's first email read "Activate your Default
+                    // Tenant careers account" (round 4, lane N).
+                    ["ActivationLink"] = link,
+                    ["ExpiryHours"]    = "24",
+                    // Left null rather than invented: the template's {{#if}} drops the whole
+                    // sentence when no support address is configured, which is better than
+                    // printing a mailbox nobody reads.
+                    ["SupportEmail"]   = _configuration["Recruitment:SupportEmail"],
+                },
+                ct);
+
+            if (!sent)
+                _logger.LogWarning("Activation email could not be sent to candidate {UserId}", user.Id);
+        }
+
+        /// <summary>
+        /// Activates a self-registered careers account from the emailed confirmation link.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>⚠ Anonymous on purpose, and this is the whole point of the endpoint.</b> The
+        /// existing <c>api/candidate/confirm-email</c> sits behind
+        /// <c>[Authorize(Policy = "CandidateOnly")]</c>, so it required the very login an inactive
+        /// account cannot obtain — and it set <c>EmailConfirmed</c> without ever touching
+        /// <c>IsActive</c>. Between that and an SMS OTP that never arrives where no SMS provider is
+        /// configured, a registered candidate had no route to an active account at all.</para>
+        ///
+        /// <para><b>Anonymous is not unguarded.</b> The Identity token is single-use, expires, and
+        /// is bound to this user and this purpose; it can only have come from the mailbox on the
+        /// account. The endpoint additionally refuses any account that is not in the Candidate
+        /// role, so it can never be turned on an employee or an administrator, and it is rate
+        /// limited with the rest of the sensitive surface.</para>
+        ///
+        /// <para>Returns the same message whether or not the account exists — an activation
+        /// endpoint that distinguishes them is an account-enumeration oracle.</para>
+        /// </remarks>
+        [HttpPost("candidate/activate")]
+        [AllowAnonymous]
+        [EnableRateLimiting("SensitivePolicy")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> ActivateCandidate([FromBody] ActivateCandidateRequest request)
+        {
+            if (request is null || string.IsNullOrWhiteSpace(request.Token) || request.UserId == Guid.Empty)
+                return BadRequest(new { message = "The activation link is incomplete. Request a new one." });
+
+            const string failure = "The activation link is invalid or has expired. Request a new one.";
+
+            var user = await _userManager.FindByIdAsync(request.UserId.ToString());
+            if (user is null) return BadRequest(new { message = failure });
+
+            // Candidates only. This endpoint is anonymous, so it must never be able to activate
+            // an employee or administrator account, whatever token it is handed.
+            var roles = await _userManager.GetRolesAsync(user);
+            if (!roles.Any(r => string.Equals(r, Constants.Roles.Candidate, StringComparison.OrdinalIgnoreCase)))
+            {
+                _logger.LogWarning("candidate/activate refused for non-candidate account {UserId}", user.Id);
+                return BadRequest(new { message = failure });
+            }
+
+            if (user.EmailConfirmed && user.IsActive)
+                return Ok(new { message = "Your account is already active. You can sign in." });
+
+            // ⚠ Confirm the email even when the account is somehow already active, so the two
+            // facts cannot drift apart — and activate even when the email was already confirmed,
+            // which is exactly the state the old confirm-email endpoint could leave behind.
+            if (!user.EmailConfirmed)
+            {
+                var result = await _userManager.ConfirmEmailAsync(user, request.Token);
+                if (!result.Succeeded) return BadRequest(new { message = failure });
+            }
+
+            user.IsActive = true;
+            user.UpdatedAt = DateTime.UtcNow;
+            user.UpdatedBy = "Careers-EmailActivation";
+
+            var update = await _userManager.UpdateAsync(user);
+            if (!update.Succeeded)
+            {
+                _logger.LogError("Failed to activate candidate {UserId} after email confirmation", user.Id);
+                return StatusCode(500, new { message = "Your email was confirmed but the account could not be activated." });
+            }
+
+            await _securityLogService.CreateSecurityLogAsync(new SecurityLog
+            {
+                Action = "CandidateAccountActivated",
+                Success = true,
+                IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                Username = user.UserName ?? string.Empty,
+                UserId = user.Id,
+                Details = "Careers account activated by confirming the email address",
+                UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                TenantId = user.TenantId,
+            });
+
+            _logger.LogInformation("Candidate {UserId} activated their account by email confirmation", user.Id);
+            return Ok(new { message = "Your email address is confirmed and your account is active. You can sign in." });
+        }
+
+        /// <summary>Resends the activation link to a self-registered careers account.</summary>
+        /// <remarks>
+        /// Anonymous, because the person who needs it cannot sign in — that is the situation. The
+        /// response never says whether the address is on file, for the same enumeration reason as
+        /// above, and the work is skipped silently when it is not.
+        /// </remarks>
+        [HttpPost("candidate/activate/resend")]
+        [AllowAnonymous]
+        [EnableRateLimiting("SensitivePolicy")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<IActionResult> ResendCandidateActivation([FromBody] ResendCandidateActivationRequest request)
+        {
+            const string always = "If that address has a careers account awaiting activation, a new link is on its way.";
+            if (request is null || string.IsNullOrWhiteSpace(request.Email)) return Ok(new { message = always });
+
+            var user = await _userManager.FindByEmailAsync(request.Email.Trim());
+            if (user is null || user.IsActive) return Ok(new { message = always });
+
+            var roles = await _userManager.GetRolesAsync(user);
+            if (!roles.Any(r => string.Equals(r, Constants.Roles.Candidate, StringComparison.OrdinalIgnoreCase)))
+                return Ok(new { message = always });
+
+            var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Id == user.TenantId, HttpContext.RequestAborted);
+            if (tenant is null) return Ok(new { message = always });
+
+            try
+            {
+                await SendCandidateActivationEmailAsync(user, tenant, HttpContext.RequestAborted);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to resend the activation email for candidate {UserId}", user.Id);
+            }
+
+            return Ok(new { message = always });
         }
 
         [HttpPost("verify-otp")]

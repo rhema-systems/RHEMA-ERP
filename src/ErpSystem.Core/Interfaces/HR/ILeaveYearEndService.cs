@@ -37,6 +37,15 @@ public class LeaveYearEndResult
     public bool IsDryRun { get; set; }
     public decimal TotalDaysCarriedOver { get; set; }
     public decimal TotalDaysForfeited { get; set; }
+
+    /// <summary>
+    /// Carried-over days that lapsed because they were not taken before the leave type's carry-over
+    /// expiry (round 5, lane G). Counted apart from forfeiture: a different rule, and a different
+    /// answer to "where did my days go".
+    /// </summary>
+    public decimal TotalDaysExpired { get; set; }
+
+    /// <summary>The first note is the run's summary in words; the rest are per balance.</summary>
     public List<string> Notes { get; set; } = new();
 }
 
@@ -53,14 +62,21 @@ public interface ILeaveYearEndService
     /// Only applies to leave types with <c>AllowCarryOver</c>. Idempotent: re-running recomputes
     /// the carried-over figure rather than stacking it.
     /// </summary>
+    /// <remarks>
+    /// Since round 5, lane G: refused for a year that has not ended, unless <paramref name="dryRun"/>;
+    /// one pot per leave type, carried into the next year's type-level balance; and the closing
+    /// year's own carried days count only as far as they were still usable, so days that had lapsed
+    /// never travel again.
+    /// </remarks>
     /// <param name="dryRun">⚠ Compute and report, write nothing.</param>
     Task<LeaveYearEndResult> ProcessCarryOverAsync(int fromYear, Guid? employeeId = null, bool dryRun = false, CancellationToken ct = default);
 
     /// <summary>
     /// For leave types configured with <c>ForfeitUnusedAfterMonths</c>, once the cut-off date
     /// (year start + that many months) has passed, forfeits the unused accrued balance by posting
-    /// a negative "Forfeiture" adjustment. Also zeroes carried-over days whose
-    /// <c>CarryOverExpiryMonths</c> window has elapsed. Idempotent per balance.
+    /// a negative "Forfeiture" adjustment. Also expires the carried-over days not taken before their
+    /// <c>CarryOverExpiryMonths</c> window closed — only those; the ones taken in time stay (round 5,
+    /// lane G). Idempotent per balance.
     /// </summary>
     /// <param name="dryRun">⚠ Compute and report, write nothing.</param>
     Task<LeaveYearEndResult> ProcessForfeitureAsync(int year, DateOnly? asOf = null, Guid? employeeId = null, bool dryRun = false, CancellationToken ct = default);

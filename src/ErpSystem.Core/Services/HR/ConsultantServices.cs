@@ -5,7 +5,9 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffAttendance;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Services.HR.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR;
@@ -29,6 +31,7 @@ public class ConsultantClientService : IConsultantClientService
     private readonly IClientEngagementRepository _engagementRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICustomerService _customers;
     private readonly ILogger<ConsultantClientService> _logger;
 
     public ConsultantClientService(
@@ -36,8 +39,10 @@ public class ConsultantClientService : IConsultantClientService
         IClientEngagementRepository engagementRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        ICustomerService customers,
         ILogger<ConsultantClientService> logger)
     {
+        _customers = customers;
         _repository = repository;
         _engagementRepository = engagementRepository;
         _currentUserProvider = currentUserProvider;
@@ -158,6 +163,7 @@ public class ConsultantClientService : IConsultantClientService
         if (codeExists)
             throw new InvalidOperationException($"A client with code '{dto.ClientCode}' already exists.");
 
+        await RequireFinanceCustomerAsync(dto.FinanceCustomerId, resolvedTenantId, ct);
         var entity = dto.ToEntity(resolvedTenantId, userId);
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
@@ -170,10 +176,26 @@ public class ConsultantClientService : IConsultantClientService
     {
         var entity = await GetOwnedClientAsync(dto.Id);
 
+        await RequireFinanceCustomerAsync(dto.FinanceCustomerId, entity.TenantId, ct);
         entity.UpdateEntity(dto, userId);
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
         return entity.ToDto();
+    }
+
+    /// <summary>
+    /// The Finance customer a client is billed as must exist for this tenant and be active (lane 8,
+    /// slice 6). Read through Finance's own customer service — ⚠ a Finance "customer" is a
+    /// <c>BusinessPartner</c> row, not the Sales <c>Customer</c> entity; the first live run looked
+    /// in the wrong table — which scopes the tenant the way AR does.
+    /// </summary>
+    private async Task RequireFinanceCustomerAsync(Guid? customerId, Guid tenantId, CancellationToken ct)
+    {
+        if (customerId is null || customerId == Guid.Empty) return;
+        var customer = await _customers.GetByIdAsync(customerId.Value, ct)
+            ?? throw new InvalidOperationException("The Finance customer does not exist in this tenant.");
+        if (!customer.IsActive)
+            throw new InvalidOperationException($"Finance customer {customer.CustomerName} is inactive; choose an active customer.");
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
@@ -1532,6 +1554,7 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
     private readonly IConsultantTimesheetRepository _timesheetRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IHrFinancePostingAdapter _financePosting;
     private readonly ILogger<TimesheetInvoiceService> _logger;
 
     public TimesheetInvoiceService(
@@ -1540,8 +1563,10 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
         IConsultantTimesheetRepository timesheetRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IHrFinancePostingAdapter financePosting,
         ILogger<TimesheetInvoiceService> logger)
     {
+        _financePosting = financePosting;
         _repository = repository;
         _linkRepository = linkRepository;
         _timesheetRepository = timesheetRepository;
@@ -1741,13 +1766,24 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
         if (entity.Status != TimesheetInvoiceStatus.Draft)
             throw new InvalidOperationException("Only draft invoices can be sent.");
 
-        entity.Status = TimesheetInvoiceStatus.Sent;
-        entity.IssuedDate = DateOnly.FromDateTime(DateTime.UtcNow);
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
+        // Sending the invoice is the event that hands it to Finance's receivables (lane 8, slice 6):
+        // the issue and the AR invoice commit together. A client not linked to a Finance customer
+        // is recorded Skipped and the invoice stays HR-side.
+        var client = await _unitOfWork.Repository<ConsultantClient>().GetQueryable().AsNoTracking()
+            .Where(c => c.Id == entity.ClientId && c.TenantId == entity.TenantId)
+            .Select(c => new { c.ClientName, c.FinanceCustomerId })
+            .FirstOrDefaultAsync(ct);
+        await _financePosting.RunAsync(async token =>
+        {
+            entity.Status = TimesheetInvoiceStatus.Sent;
+            entity.IssuedDate = DateOnly.FromDateTime(DateTime.UtcNow);
+            entity.UpdatedAt = DateTime.UtcNow;
+            entity.UpdatedBy = userId.ToString();
 
-        await _repository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(ct);
+            await _repository.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(token);
+            return HrFinancePostingCommandFactory.TimesheetInvoiceSent(entity, client?.FinanceCustomerId, client?.ClientName ?? "the client");
+        }, userId, ct);
 
         _logger.LogInformation("Invoice {Number} sent by {UserId}", entity.InvoiceNumber, userId);
         return entity.ToDto();
@@ -1759,6 +1795,10 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
 
         if (entity.Status != TimesheetInvoiceStatus.Sent && entity.Status != TimesheetInvoiceStatus.Overdue)
             throw new InvalidOperationException("Only sent or overdue invoices can be marked as paid.");
+        // Once Finance holds the receivable, the receipt is Finance's fact: the register's refresh
+        // writes it here. Marking it paid by hand would say money arrived that Finance never saw.
+        await _financePosting.EnsureNotPostedAsync(HrFinancePostingEventCatalog.SourceTimesheetInvoice, entity.Id,
+            "mark paid by hand (Finance holds this invoice; use Refresh on its posting row to pull the receipt)", ct);
 
         entity.Status = TimesheetInvoiceStatus.Paid;
         entity.PaidDate = paidDate;
@@ -1780,6 +1820,8 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
 
         if (entity.Status == TimesheetInvoiceStatus.Paid)
             throw new InvalidOperationException("A paid invoice cannot be voided.");
+        await _financePosting.EnsureNotPostedAsync(HrFinancePostingEventCatalog.SourceTimesheetInvoice, entity.Id,
+            "void (Finance holds this invoice; ask Accounts Receivable to cancel it, then Refresh its posting row)", ct);
 
         entity.Status = TimesheetInvoiceStatus.Voided;
         entity.Notes = reason;

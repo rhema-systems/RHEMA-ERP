@@ -2,6 +2,7 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { InventoryReturnCreditNote } from '@/services/inventoryReturnCreditService';
+import type { SupplierReturnAccountingGroup } from '@/services/supplierReturnService';
 
 const mocks = vi.hoisted(() => ({ read: true, manage: true, notes: vi.fn(), sources: vi.fn(), create: vi.fn(), toast: vi.fn() }));
 vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ hasPermission: (permission: string) => permission === 'Finance.Read' ? mocks.read : mocks.manage }) }));
@@ -15,6 +16,10 @@ const note = (extra: Partial<InventoryReturnCreditNote> = {}): InventoryReturnCr
 const posted = () => note({ status: 'Posted', statusName: 'Posted', journalEntryId: 'credit-journal', postingEventId: 'credit-event',
   returnDispatchJournalEntryId: 'dispatch-journal', returnDispatchPostingEventId: 'dispatch-event', directInvoiceAppliedAmount: 700, directInvoiceAppliedAt: '2026-09-12T18:00:00Z' });
 const props = { returnId: 'return-1', returnNumber: 'SRT-001', reason: 'Excess' };
+const group = (extra: Partial<SupplierReturnAccountingGroup> = {}): SupplierReturnAccountingGroup => ({
+  id: 'group-1', originalVendorInvoiceId: 'invoice-1', originalInvoiceNumber: 'VI-001', baseQuantity: 10,
+  carryingAmount: 700, originalAccrualAmount: 0, functionalCurrency: 'GHS', financeResolutionCompleted: false, ...extra,
+});
 
 beforeEach(() => {
   vi.clearAllMocks(); mocks.read = true; mocks.manage = true;
@@ -31,6 +36,47 @@ async function openDraft() {
 }
 
 describe('Supplier return credit', () => {
+  it('keeps the return pending until every original invoice group is settled', async () => {
+    mocks.notes.mockResolvedValue([{ ...posted(), inventorySupplierReturnAccountingGroupId: 'group-1' }]);
+    const resolved = vi.fn();
+    render(<SupplierReturnCreditPanel {...props} onResolved={resolved} accountingGroups={[
+      group({ supplierDebitNoteId: 'credit-1' }),
+      group({ id: 'group-2', originalVendorInvoiceId: 'invoice-2', originalInvoiceNumber: 'VI-002' }),
+    ]} />);
+    expect(await screen.findByRole('button', { name: 'Create credit for VI-002' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Completed accounting groups' })).toHaveTextContent('VI-001');
+    expect(screen.getByRole('region', { name: 'Pending accounting groups' })).toHaveTextContent('VI-002');
+    await waitFor(() => expect(resolved).toHaveBeenCalledWith('return-1', false));
+    expect(resolved).not.toHaveBeenCalledWith('return-1', true);
+  });
+
+  it('creates the remaining invoice group without losing the first credit link', async () => {
+    mocks.notes.mockResolvedValue([{ ...posted(), inventorySupplierReturnAccountingGroupId: 'group-1' }]);
+    mocks.sources.mockResolvedValue([{ invoiceId: 'invoice-2', invoiceNumber: 'VI-002', currencyCode: 'GHS', outstandingAmount: 200 }]);
+    mocks.create.mockResolvedValue(note({ id: 'credit-2', debitNoteNumber: 'SDN-002', inventorySupplierReturnAccountingGroupId: 'group-2' }));
+    render(<SupplierReturnCreditPanel {...props} accountingGroups={[
+      group({ supplierDebitNoteId: 'credit-1' }),
+      group({ id: 'group-2', originalVendorInvoiceId: 'invoice-2', originalInvoiceNumber: 'VI-002' }),
+    ]} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Create credit for VI-002' }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Original invoice' })).toHaveTextContent('VI-002'));
+    fireEvent.change(screen.getByLabelText('Supplier credit reference'), { target: { value: 'SCN-002' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+    expect(await screen.findByRole('link', { name: 'Open SDN-002' })).toHaveAttribute('href', '/finance/ap/supplier-debit-notes/credit-2');
+    expect(screen.getByRole('link', { name: 'Open SDN-001' })).toHaveAttribute('href', '/finance/ap/supplier-debit-notes/credit-1');
+    expect(mocks.create.mock.calls[0][1].originalVendorInvoiceId).toBe('invoice-2');
+  });
+
+  it('shows cleared uninvoiced goods without asking for an AP credit', async () => {
+    const resolved = vi.fn();
+    render(<SupplierReturnCreditPanel {...props} onResolved={resolved} accountingGroups={[
+      group({ originalVendorInvoiceId: null, originalInvoiceNumber: null, originalAccrualAmount: 400, financeResolutionCompleted: true }),
+    ]} />);
+    expect(await screen.findByText('Receipt accrual cleared')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Create credit/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(resolved).toHaveBeenCalledWith('return-1', true));
+  });
+
   it('does not fetch financial data or offer credit creation without Finance access', () => {
     mocks.read = false;
     render(<SupplierReturnCreditPanel {...props} />);

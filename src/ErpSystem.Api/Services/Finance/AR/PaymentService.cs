@@ -399,20 +399,23 @@ namespace ErpSystem.Api.Services.Finance.AR
             CancellationToken cancellationToken,
             bool executionStrategyScope)
         {
+            if (dto.IsCreditNote)
+            {
+                // Keep this invariant outside the execution-strategy callback. Besides failing
+                // fast before any database work, this prevents alternate IUnitOfWork
+                // implementations (and composed callers) from swallowing the guard by not
+                // invoking a retry delegate. CustomerPayment.IsCreditNote exists for historical
+                // compatibility only; all new credits belong to the governed Sales CreditNote
+                // workflow.
+                throw new InvalidOperationException(
+                    "The legacy AR payment credit-note path is retired. Create the credit through the Sales credit-note workflow.");
+            }
+
             if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
             {
                 return await _unitOfWork.ExecuteInStrategyAsync(
                     () => CreateAsync(dto, producer, cancellationToken, executionStrategyScope: true),
                     cancellationToken);
-            }
-
-            if (dto.IsCreditNote)
-            {
-                // FIN-LIM-0013: CustomerPayment.IsCreditNote is retained only so historical rows
-                // remain readable. New customer credits must use the primary Sales CreditNote
-                // workflow, which owns approval, posting, application, and immutable correction.
-                throw new InvalidOperationException(
-                    "The legacy AR payment credit-note path is retired. Create the credit through the Sales credit-note workflow.");
             }
 
             CustomerPayment? payment = null;
@@ -1589,6 +1592,11 @@ namespace ErpSystem.Api.Services.Finance.AR
 
                 if (requestedDiscountAmount > 0m)
                 {
+                    ArDiscountGovernancePolicy.RequireTaxAdjustmentForEarlyPaymentDiscount(
+                        invoice.TaxAmount,
+                        requestedDiscountAmount,
+                        invoice.InvoiceNumber);
+
                     if (invoice.EarlyPaymentDiscountPercentage <= 0m ||
                         !invoice.EarlyPaymentDiscountDueDate.HasValue ||
                         payment.PaymentDate.Date > invoice.EarlyPaymentDiscountDueDate.Value.Date)
@@ -2664,9 +2672,11 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             return invoices.Select(i =>
             {
-                var discountAvailable = i.EarlyPaymentDiscountPercentage > 0
+                var discountWithinTerms = i.EarlyPaymentDiscountPercentage > 0
                     && i.EarlyPaymentDiscountDueDate.HasValue
                     && i.EarlyPaymentDiscountDueDate.Value.Date >= now.Date;
+                var requiresTaxAdjustment = discountWithinTerms && i.TaxAmount > 0m;
+                var discountAvailable = discountWithinTerms && !requiresTaxAdjustment;
                 var discountAmount = discountAvailable
                     ? Math.Round(i.BalanceAmount * (i.EarlyPaymentDiscountPercentage / 100m), 2, MidpointRounding.AwayFromZero)
                     : 0m;
@@ -2687,6 +2697,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     EarlyPaymentDiscountPercentage = i.EarlyPaymentDiscountPercentage,
                     EarlyPaymentDiscountDueDate = i.EarlyPaymentDiscountDueDate,
                     IsDiscountAvailable = discountAvailable,
+                    RequiresTaxAdjustmentForDiscount = requiresTaxAdjustment,
                     DiscountAmount = discountAmount
                 };
             }).ToList();
@@ -2887,6 +2898,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                 if (allocation.AllocatedAmount < 0m || allocation.DiscountAmount < 0m ||
                     allocation.WithholdingTaxAmount < 0m || allocation.VatWithholdingAmount < 0m)
                     throw new InvalidOperationException("AR receipt allocation amounts cannot be negative.");
+
+                ArDiscountGovernancePolicy.RequireTaxAdjustmentForEarlyPaymentDiscount(
+                    allocation.Invoice.TaxAmount,
+                    allocation.DiscountAmount,
+                    allocation.Invoice.InvoiceNumber);
 
                 if (!allocation.Invoice.JournalEntryId.HasValue)
                     throw new InvalidOperationException($"AR receipt cannot settle unposted invoice '{allocation.Invoice.InvoiceNumber}'.");
@@ -3129,6 +3145,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 var originalAccounts = await CustomerPostingAccountHistory.LoadAsync(
                     _unitOfWork, tenantId, payment.JournalEntryId, "CustomerPayment", payment.Id, cancellationToken);
                 var discountAccountId = originalAccounts?.Account("AR-Discount")
+                    ?? customer.CustomerTermsDiscountsTakenAccountId
                     ?? settings.DiscountAllowedAccountId
                     ?? throw new InvalidOperationException("Sales discounts allowed account is not configured for this tenant.");
                 await ResolveReceiptPostingAccountAsync(discountAccountId, "sales discount allowed account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);

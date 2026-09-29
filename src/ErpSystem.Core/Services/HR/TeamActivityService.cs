@@ -819,6 +819,25 @@ public class TeamActivityService : ITeamActivityService
                       + "Send it for approval first."
                     : "This objective is awaiting approval. It becomes active when the approver signs it off.");
 
+        // ⚠ …and the other half of that door (2026-09-28). The checks above stop a lead SETTING the
+        // approval states by hand, but not LEAVING them: Draft or PendingApproval could still be
+        // moved straight to Completed, OnHold or Cancelled. That completed objectives nobody had
+        // approved (the screen offered "Complete" on both), and from PendingApproval it changed the
+        // status while the engine's instance stayed open — the approver still had the request in
+        // their inbox. An objective awaiting approval leaves that state only through the engine:
+        // approve, reject, or recall ("Withdraw"). A draft was never approved, so the only thing
+        // that may be done to it by hand is to abandon it.
+        if (entity.Status == TeamObjectiveStatus.PendingApproval)
+            throw new InvalidOperationException(
+                "This objective is awaiting approval. Withdraw it first, or let the approver decide — "
+                + "changing its status by hand would leave the approval request open.");
+
+        if (entity.Status == TeamObjectiveStatus.Draft && status != TeamObjectiveStatus.Cancelled)
+            throw new InvalidOperationException(
+                "A draft objective has not been approved, so it cannot be "
+                + (status == TeamObjectiveStatus.OnHold ? "put on hold" : $"marked {status.ToString().ToLowerInvariant()}")
+                + ". Send it for approval first, or cancel it if the team has dropped it.");
+
         switch (status)
         {
             case TeamObjectiveStatus.Completed:

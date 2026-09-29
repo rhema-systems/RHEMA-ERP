@@ -30,6 +30,8 @@ sweep closed; coverage queue 3 real endpoints from empty.
 | **7** | Org-authority model | ✅ built · 4 residues | — | — |
 | **8** | HR ↔ Finance GL posting sweep | 7 prerequisites + the adapters | 5+ slices | lane 2, Finance owner, Payroll owner |
 | **9** | Hand-offs — real, but not HR's to fix | 3 | file and acknowledge | other owners |
+| **10** | Reminders that reach people — eleven HR sweeps log and tell nobody | 11 sweeps | 2–3 slices | — (unblocked; the delivery path exists since round 4 lane K-a) |
+| **11** | Probation is not absence — ~1,800 long-serving staff imported onto probation; two code sites that shut probationers out | 5 | 1 slice + a data repair | ✅ **code BUILT 2026-09-26** (60 assertions ×2); ⚠ the data repair on UAT waits on the user's go-ahead — § Lane 11 |
 
 **Buildable by this team: roughly 9–10 slices.** Unblocked today: **3b, 3a-ii, lane 6** (and lane 4). Lanes 0, 1, 7, 2a, 3a, 3c, 5a, 5b and 3d’s schema-free rows are done.
 
@@ -38,6 +40,22 @@ sweep closed; coverage queue 3 real endpoints from empty.
 **Where to start next (as of 2026-09-01, end of the section-E stretch).** Done: lanes 0, 1, 7, lane
 2a's six settings, lane 3's 3a / 3c / 3d-buildable rows, and **all of lane 5** that is not blocked on
 D-13 (47 of 49 fields). The coverage queue reads **0 BUILD**.
+
+▶ **Performance final closure (added 2026-09-28) has its own plan:**
+`docs/HR/areas/performance/HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md` — sixteen lanes (A → P → B1 → L
+→ B → C → D → E → F → G → H → I → J → M → N → S → K), nine decisions taken first and nineteen more
+settled the same day, two migration batches, about ten weeks. It absorbs P-1…P-70 (41 live),
+the settings audit, S-1…S-17 (none done yet), the three audits of 2026-09-28 and a same-day review
+of the plan. It owns this plan's lane 9 rows #9.3, #9.4 and #9.26 and lane 5b's score-adjustment
+question (its D-11); its F1 waits on lane 9's admin-door decision (its D-18). Performance has **no**
+reminder sweep today — it is not one of lane 10's eleven — and its lane H builds one.
+**Nothing built yet.**
+
+▶ **Lane 11 (added 2026-09-25): probation is not absence.** About 1,800 long-serving staff on the
+demo database are on probation, because the employee import has no confirmation date. Two code sites
+also shut probationers out. The user asked for it as a fix separate from round 5, **not to be
+forgotten**. ✅ **The code was built on 2026-09-26**; ⚠ **the data repair on UAT (1,830 staff) has
+not been run** — it waits on the user's go-ahead. See § Lane 11, *Built*.
 
 ▶ **Demo feedback round 2 (2026-09-08) has its own plan:** `docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md`
 § 5 — six lanes A–F. **Lane A DONE 2026-09-09** (88 assertions ×2; lane 3a and 3c re-run green).
@@ -1244,8 +1262,14 @@ than income twice). **Slice 5 BUILT 2026-09-20**: the third-party payees — rec
 become an AP vendor invoice on HR's approval (the R8 hand-off, rule shipped OFF until Finance
 confirms), premiums paid, insurer / NHIS / incident-insurance proceeds; training budget
 transactions deliberately not posted (memo of a Finance document). 25 events, 15 account roles,
-35 gate tests. Still to do in this lane: the manpower and training budget actuals read, consulting
-AR, and the back-fill rows — design section 7.
+35 gate tests. **Slice 6 BUILT 2026-09-21**: HR's one revenue — a consulting invoice sent to a client
+linked to a Finance customer becomes an AR customer invoice (rule OFF until Finance confirms, like
+AP); the manpower and training budget actuals **read** from Finance's book balances on the budget's
+account (nothing written back — D-9); compensation recorded as payroll's; succession development
+cost recorded as not posted. 26 events, 16 account roles, 37 gate tests. What the lane still owes
+is not code: the budget-commitment conversation (8a), FIN-INT-011 via the payroll owner (hand-off
+`HANDOFF-PAYROLL-FIN-INT-011.md`), and Finance's answers to the two hand-offs, each of which lands as
+a toggle or a one-line change.
 
 Register: [`HR-FINANCE-INTEGRATION-BACKLOG.md`](../integration/HR-FINANCE-INTEGRATION-BACKLOG.md) · entity map:
 [`HR-FINANCE-ENTITY-SWEEP.md`](../integration/HR-FINANCE-ENTITY-SWEEP.md) · mechanism:
@@ -1257,9 +1281,9 @@ Register: [`HR-FINANCE-INTEGRATION-BACKLOG.md`](../integration/HR-FINANCE-INTEGR
       Medical, SHE. ⚠ **Medical is the priority**: it has a live claim → approve → **pay** path, so
       it is the closest analogue to travel 12.1 and the two must post the same way. Without this
       the sweep is a re-survey.
-- [ ] **Raise FIN-INT-011** ("SH Fund, PF, ESB and fuel allocation") with the Finance owner — the
-      one catalogue entry that is HR/payroll-shaped and has **no assigned owner**. Coordination is
-      required before anyone designs against it.
+- [x] **Raise FIN-INT-011** ("SH Fund, PF, ESB and fuel allocation") — raised 2026-09-21 as
+      [`HANDOFF-PAYROLL-FIN-INT-011.md`](../integration/handoffs/HANDOFF-PAYROLL-FIN-INT-011.md): payroll-shaped, so it is
+      the payroll owner's to design against with the Finance owner; HR holds no field it would post.
 - [ ] **Open the budget-commitment conversation.** No contract exists for HR's four budget surfaces
       (`ManpowerBudget`, `TrainingBudget`, `AwardBudget`, `StaffTravelBudget`), which today each
       track `BudgetAmount`/`SpentAmount` themselves with no reserve → consume → release. FIN-INT-015
@@ -1267,7 +1291,8 @@ Register: [`HR-FINANCE-INTEGRATION-BACKLOG.md`](../integration/HR-FINANCE-INTEGR
       conversation**, not something HR wires up unilaterally.
 - [ ] Settle the **three-way training double-count**: area 7's training budget, succession
       development activities, and `ManpowerBudget.TrainingBudget`.
-- [ ] Decide who writes `ManpowerBudget.ActualSpent` and `.Variance` — nothing does today.
+- [x] Decide who writes `ManpowerBudget.ActualSpent` and `.Variance` — **nobody** (2026-09-21, D-9): they are
+      read from Finance's book balances on the unit's account (`budgets/{id}/finance-actuals`), not written.
 - [ ] Decide whether a manpower budget carries a currency at all, and if so which.
 - [ ] Decide whether an approved asset surcharge is an employee receivable, a payroll deduction, or
       both in sequence.
@@ -1310,10 +1335,14 @@ declared finished without pretending these are closed.
       bare `[Authorize]` behind the external-user allowlist, with procurement exposed *today*;
       **#9** Projects' maintenance follow-through throws for every tenant; **#10** maintenance
       numbers collide within one second behind unique indexes.
-- [ ] **The EF migration chain cannot build the database from scratch** — no migration ever CREATEs
+- [x] **The EF migration chain cannot build the database from scratch** — no migration ever CREATEs
       `Employees`, so a fresh environment cannot be deployed with `dotnet ef database update`.
       `rebuild-db` works around it. A squashed baseline generated from the current model is separate
       platform work, and it is not HR-caused.
+      ⚠ **RESOLVED by master (verified at merge #11, 2026-09-27):** the disposable baseline
+      `20260916132000` builds from empty, and the whole chain now applies to an empty database
+      (89 of 89). The workaround became the hazard: `rebuild-db` omits 500 guard triggers the chain
+      creates, so UAT is now built through the chain. Defects doc § 31.
 - [ ] **A full-project `tsc --noEmit` crashes** (TypeScript 5.9.2, "Debug Failure. No error for last
       overload signature") on a clean tree, so **every frontend type error in every module is
       invisible**. Slices are checked against scoped tsconfigs meanwhile. Nobody has found the
@@ -1388,6 +1417,177 @@ supplied one — the register rule from lane 3b working as designed; fixtures mu
 **Recorded, not fixed:** `Employee.Salary` is read as *monthly* by `EmolumentService` and by this
 lane's payroll basis, but the salary-confirmation letter prints it as `AnnualSalary`. One of the two
 is wrong; the letter is the likelier. Decide with TDC which unit the flat figure holds.
+
+---
+
+## Lane 10 — Reminders that reach people · 2–3 slices · unblocked · added 2026-09-23
+
+> **2026-09-26: leave is done — round 5, lane I.** Leave was the one sweep that told somebody (the
+> HR role, in the app only). Its reminders now reach the people who can act on them, in the app and
+> by email, through the platform's notification topics — one topic per kind and audience, with one
+> message per supervisor and one summary to HR per run, and HR told, with the reason, about anyone
+> who cannot be reached. Not K-a's store; the general platform notification, as this lane proposed.
+> See `docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-5-LEAVE-PLAN.md` § 8, lane I. ⚠ A sweep's first
+> SCHEDULED run is the real test: leave's died for want of a signed-in user while every manual run
+> passed. The other ten sweeps are as described below.
+
+**Found building round 4, lane K-a, and verified before it was written down:** eleven HR reminder
+sweeps — asset, certification expiry, discipline, identification expiry, leave, probation,
+separation, SHE, staff movement, staff travel, team — run nightly, claim their items in a dispatch
+log, and **tell nobody**. Each service was searched for any call to a notification or email service
+(none), and every reader of their dispatch logs was listed (only their own admin log screens — there
+is no outbox). The run tables say "N reminders queued"; no person ever received one.
+
+**What now exists to build on** (round 4, lane K-a — `OnboardingOrientationReminderService`):
+
+- one message **per person per run**, listing their items — the only shape that survives a
+  coordinator with hundreds of open items (measured on the demo database: one person coordinated
+  every onboarding plan);
+- the in-app row written in the **same save** as the claims, and the email sent after the commit
+  with its outcome recorded per item (`Sent`, `Failed`, `TimedOut`, `NoAddress`, `NoMailServer`,
+  `NotRouted`) — so "no mail server configured" reads as that, not as success;
+- a harness pattern that proves delivery end to end: a local SMTP sink, a temporary mail-settings
+  row, and the recipient's own notification feed.
+
+**What each sweep still needs:** a store the recipient sees. Orientation had its own
+(`OrientationNotification`, merged into My Notifications). The others would write the general
+platform notification (by USER — so an employee without a login gets email only), which the header
+bell and My Notifications both read. The recipient is already on most dispatch rows
+(`RoutedToEmployeeId` or equivalent); where it is not, routing is the first job, as it was for
+probation's confirming authority.
+
+⚠ **The plan that found this said to file it in `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`.** That
+document is for other teams' modules; these sweeps are HR's own, so the debt is recorded here.
+
+---
+
+## Lane 11 — Probation is not absence · 1 slice + a data repair · ✅ code built 2026-09-26 · data repair awaits go-ahead
+
+**Found building round 5, lane E, and recorded at the user's request, as a fix separate from
+round 5.** TDC ruled on 2026-09-23 (round 4, lane O) that **probation is a contract status, not an
+availability**: someone on probation is at work. Lane E applied that ruling to leave relievers on
+plans and requests (`LeaveService.CanCover`). This lane covers the rest.
+
+**The root is data, not code.** Measured on `ErpSystemDB_UAT`, where the demo is shown, on
+2026-09-25:
+
+- 2,191 of 2,399 employees are on Probation, and 177 are Active.
+- Of those 2,191, **1,454 were hired 5+ years ago**, 339 were hired 1–5 years ago, and 271 have no
+  hire date. Only 129 were hired in the last 12 months.
+- **1,795 probation records are live with their end date already passed**, so the probation module
+  shows about 1,800 overdue confirmations.
+- Only 94 employees carry a confirmation date.
+
+The mechanism is a gap between the hire path and the import:
+- The hire path opens a probation for every Permanent hire without a `ConfirmationDate`
+  (`EmployeeService.OpenInitialContractAsync`). It deliberately skips "anybody arriving already
+  confirmed".
+- The employee import has **no confirmation-date column** (`EmployeeImportWorkbookReader` sets
+  `StaffStatus.Active` and nothing more).
+
+So every imported long-serving employee arrived unconfirmed and was put on probation from their hire
+date.
+
+**What to build:**
+
+1. **The import.** Add a *Confirmation date* column to the template and the reader. When it is
+   blank, apply the decision below to staff whose probation term ended before they were entered.
+2. **The data repair**, on UAT and on any tenant imported the same way. Confirm the long-serving
+   staff: `StaffStatus` Active, `ConfirmationDate` set, and their probation record closed as
+   Completed. Measure the reach in SQL first, as a dry-run count.
+3. **`SheKpiComputationService.ComputePpeComplianceAsync`** measures PPE compliance over Active staff
+   only. New hires, the people most likely to lack PPE, are outside the KPI. Use *at work*: Active
+   or Probation, and `IsActive`.
+4. **`PerformanceAppraisalService.AssignHRReviewerAsync`**: both the configured default HR reviewer
+   and the fallback pool must be Active. An HR officer on probation is never assigned, and an HR
+   department that is all on probation yields no reviewer at all.
+5. **The leave request's last-resort reliever** (`LeaveService.SuggestRelieverAsync`, the line
+   manager) is never checked for being at work. Use `LeaveService.CanCover`.
+
+**Checked and NOT defects**, so nobody "fixes" them:
+- `EmployeeService.GetActiveEmployeeCountAsync` counts `StaffStatus == Active` on purpose. The HR
+  home splits the headcount into Active, On probation and Terminated from the by-status grouping,
+  and no screen calls `stats/active`.
+- The organogram's badge labels a non-Active status and leaves nobody out.
+- `EmployeeBenefitEnrollmentService` withholding a benefit during probation is a per-policy setting
+  (`AvailableDuringProbation`). It is correct, but it bites the ~1,800 wrongly-on-probation staff
+  until item 2 lands.
+
+**✅ Decided 2026-09-25 (the user): derive and mark.** This covers staff with no confirmation date
+whose probation term ended before they were entered:
+- their `ConfirmationDate` is **hire date plus their probation term**, recorded as *derived* so it
+  can be told apart from a date someone supplied;
+- their probation record is closed as Completed, and they become Active;
+- TDC is asked to name the exceptions (people genuinely still on probation, or with an extended
+  probation), which are then corrected by hand. The question is in `HR-OPEN-QUESTIONS-FOR-TDC.md`,
+  § *Staff confirmed years ago but shown as on probation*.
+
+That is what an import carrying the date would have produced. The same rule applies at import time
+when the new column is blank. Staff with **no hire date** (271 on UAT) cannot be derived and stay as
+they are until TDC supplies the date.
+
+### ✅ Built 2026-09-26
+
+**The rule, once.** `ConfirmationDerivation` (Core): a term in months is the probation days ÷ 30,
+at least one (the hire path's own arithmetic, now calling it); the derived date is the day the term
+ended, **only if that was before the employee was entered** — otherwise null, because somebody whose
+term is running is on probation, and somebody whose term ended after entry is due for the ordinary
+confirmation, against an authority and a letter. The import and the repair both call it.
+
+**The mark.** `Employees.ConfirmationSource` (nullable; migration `AddEmployeeConfirmationSource`,
+guarded, **no data written**): `Probation` (the confirm action), `Imported` (supplied in the file),
+`Derived` (worked out). Null on every date that predates the lane — nobody recorded how those
+arrived. On the detail read and the employee page: *"2012-09-15 — worked out from the hire date and
+the probation term"*.
+
+**The five items:**
+1. **The import** — an optional *Confirmation Date* column after *Date Employed*, with a note on the
+   Read Me sheet. Supplied: refused before Date Employed or in the future, marked `Imported`, no
+   probation opened. Blank: derived when the post's term has ended, marked `Derived`, no probation
+   opened; otherwise the probation opens as before. An update row ignores it, with a warning (an
+   existing employee is confirmed through their probation record). A template without the column
+   still loads: a missing column is a warning and reads as blank.
+2. **The repair** — `POST api/probations/repair-imported-confirmations?dryRun=&employeeId=`,
+   `HR.Probation.Admin`, and **Confirm imported staff** on `/hr/probation` for administrators, which
+   opens on a dry run and writes nothing until pressed. For each employee on probation with no
+   confirmation date: no hire date → left; the term (the open probation record's end, else the
+   employee's days) not ended before entry → left on probation; somebody has acted on the probation
+   (submitted for confirmation, approved, extended, reviewed, or more than one open record) → **held
+   back and named**; otherwise the record is closed Completed with a sentence saying why, and the
+   employee becomes Active, confirmed on the day the term ended, marked `Derived`. No letter, no
+   notification, no workflow — nobody is being confirmed today. The five counts always add up.
+3. **`ComputePpeComplianceAsync`** — at work (Active or Probation, and `IsActive`).
+4. **`AssignHRReviewerAsync`** — at work, for both the configured reviewer and the pool.
+5. **`SuggestRelieverAsync`** — the manager is asked `CanCover`; a suspended manager is no longer
+   put down as the reliever.
+
+**Checked before writing 1,830 rows:** every reader of `StaffStatus.Probation` either treats it as
+at work already or is probation-specific (benefits withheld during probation, the oath screen); the
+identity reconciliation counts Probation and Active as equally eligible, so no login changes.
+
+**Proved:** `dev-harness/hr-probation/run-finish-lane11.mjs` — **60 assertions, green twice** (the
+first run failed one: the suite read `GET employees/{id}`, the summary, which carries no
+confirmation date; the page reads `/details`). On minted fixtures only: the gate (HR and an employee
+403, a tenant administrator 200); a tenant-wide **dry run whose five counts equal the same rule in
+SQL**, and which wrote nothing; per fixture — confirmed with the exact date and sentence, idempotent,
+still on probation, no hire date, and the three hold-backs, each naming why; the import — supplied,
+derived (exact date), recent (probation opened), and the two refusals in their exact words; the
+reliever fallback in all three positions (suspended → none; on probation → the manager; active → the
+manager). Neighbours: hr-probation `run-d1` 79/79; hr-leave lane E 119, slice 1 72/75 (the same three
+environmental failures), slice 3 33. API log: 42 errors, each the payroll-profile foreign key on an
+employee the suite minted (cross-module defect #23); no request answered 500.
+
+**Read, not run** (each needs a record the demo shows, or a whole workflow): the PPE figure (only a
+SHE performance snapshot computes it), the appraisal HR reviewer (an appraisal at its HR stage), and
+the ordinary confirmation marking its date `Probation` (UAT publishes a probation workflow, so the
+direct confirm is refused by design). Not run on UAT: hr-probation `run-lane3d` (takes the tenant's
+first employees — real staff), slice 8b (publishes and retires a probation workflow — it could retire
+UAT's own), and the direct-confirm slices (refused by UAT's workflow).
+
+**⚠ Not yet done: the repair itself on UAT.** The dry run on 2026-09-26, after the suite's runs:
+*Would confirm 1,842 of 2,263 … 280 with no hire date, 132 whose term had not ended, 9 held back* —
+the held back are the suite's own fixtures; the rest over the 1,830 measured before the lane are
+fixtures and actors it minted. It waits on the user's go-ahead.
 
 ---
 

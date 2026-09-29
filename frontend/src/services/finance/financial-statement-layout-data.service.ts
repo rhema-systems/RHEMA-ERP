@@ -3,11 +3,14 @@ import type {
     CreateFinancialStatementLayoutVersionDto,
     CloneFinancialStatementLayoutDto,
     FinancialStatementLayoutAuditEventDto,
+    FinancialStatementLayoutApprovalQueueItemDto,
     FinancialStatementLayoutDto,
     FinancialStatementLayoutExecutionDto,
     FinancialStatementLayoutImportDefinitionDto,
     FinancialStatementLayoutImportPreviewDto,
     FinancialStatementLayoutImportResultDto,
+    FinancialStatementLayoutInitializationResultDto,
+    FinancialStatementLayoutReadinessDto,
     FinancialStatementLayoutSummaryDto,
     FinancialStatementLayoutValidationResultDto,
     FinancialStatementRowInputDto,
@@ -61,6 +64,29 @@ class FinancialStatementLayoutDataService {
         return apiService.post<FinancialStatementLayoutDto>(`${root}/${layoutId}/clone`, request);
     }
 
+    getInitializationReadiness(accountingBookId?: string) {
+        const suffix = accountingBookId
+            ? `?accountingBookId=${encodeURIComponent(accountingBookId)}`
+            : '';
+        return apiService.get<FinancialStatementLayoutReadinessDto>(
+            `${root}/initialization-readiness${suffix}`,
+        );
+    }
+
+    initializeFromStandards(accountingBookId?: string) {
+        return apiService.post<FinancialStatementLayoutInitializationResultDto>(
+            `${root}/initialize-from-standards`,
+            { accountingBookId },
+        );
+    }
+
+    discardUnusedDraft(layoutId: string, expectedRevision: number, reason: string) {
+        return apiService.delete<void>(`${root}/${layoutId}/unused-draft`, {
+            expectedRevision,
+            reason,
+        });
+    }
+
     replaceDraftRows(versionId: string, expectedVersionRevision: number, rows: FinancialStatementRowInputDto[]) {
         return apiService.put<FinancialStatementLayoutDto['versions'][number]>(
             `${root}/versions/${versionId}/rows`,
@@ -79,6 +105,29 @@ class FinancialStatementLayoutDataService {
         return apiService.post<FinancialStatementLayoutDto['versions'][number]>(
             `${root}/versions/${versionId}/publish`,
             request,
+        );
+    }
+
+    submitVersion(versionId: string, expectedVersionRevision: number) {
+        return apiService.post<FinancialStatementLayoutDto['versions'][number]>(
+            `${root}/versions/${versionId}/submit`,
+            { expectedVersionRevision },
+        );
+    }
+
+    getPendingApprovals() {
+        return apiService.get<FinancialStatementLayoutApprovalQueueItemDto[]>(`${root}/approval-queue`);
+    }
+
+    decideVersion(
+        versionId: string,
+        expectedVersionRevision: number,
+        decision: 'Approve' | 'Reject',
+        reason?: string,
+    ) {
+        return apiService.post<FinancialStatementLayoutDto['versions'][number]>(
+            `${root}/versions/${versionId}/decision`,
+            { expectedVersionRevision, decision, reason },
         );
     }
 

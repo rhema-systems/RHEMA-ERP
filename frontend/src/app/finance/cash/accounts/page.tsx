@@ -8,8 +8,13 @@ import { cashManagementDataService } from '@/services/finance/cash-management-da
 import type { BankAccount, CashPositionSummary } from '@/types/cash-management';
 import { Building2, Plus, TrendingUp, TrendingDown, DollarSign, CreditCard } from 'lucide-react';
 import Link from 'next/link';
+import { useAuth } from '@/hooks/use-auth';
 
 export default function BankAccountsPage() {
+    const { hasPermission } = useAuth();
+    const canManageBankAccounts = hasPermission('Finance.BankAccounts.Manage');
+    const canRecordCashBankTransactions = hasPermission('Finance.CashBank.Transactions.Record');
+    const canPerformReconciliation = hasPermission('Finance.BankReconciliation.Perform');
     const [accounts, setAccounts] = useState<BankAccount[]>([]);
     const [cashPosition, setCashPosition] = useState<CashPositionSummary | null>(null);
     const [loading, setLoading] = useState(true);
@@ -96,12 +101,12 @@ export default function BankAccountsPage() {
                     <Link href="/finance/cash/transactions">
                         <Button variant="outline">View Transactions</Button>
                     </Link>
-                    <Link href="/finance/cash/accounts/new">
+                    {canManageBankAccounts && <Link href="/finance/cash/accounts/new">
                         <Button>
                             <Plus className="mr-2 h-4 w-4" />
                             Add Bank Account
                         </Button>
-                    </Link>
+                    </Link>}
                 </div>
             </div>
 
@@ -223,11 +228,11 @@ export default function BankAccountsPage() {
                                                     View Details
                                                 </Button>
                                             </Link>
-                                            <Link href={`/finance/cash/reconciliation?account=${account.id}`} className="flex-1">
+                                            {canPerformReconciliation && <Link href={`/finance/cash/reconciliation?account=${account.id}`} className="flex-1">
                                                 <Button variant="outline" size="sm" className="w-full">
                                                     Reconcile
                                                 </Button>
-                                            </Link>
+                                            </Link>}
                                         </div>
                                     </CardContent>
                                 </Card>
@@ -239,7 +244,7 @@ export default function BankAccountsPage() {
 
             {/* Quick Links */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Link href="/finance/cash/transactions/receipts">
+                {canRecordCashBankTransactions && <Link href="/finance/cash/transactions/receipts">
                     <Card className="hover:bg-accent cursor-pointer transition-colors">
                         <CardContent className="p-6">
                             <div className="flex items-center gap-3">
@@ -253,8 +258,8 @@ export default function BankAccountsPage() {
                             </div>
                         </CardContent>
                     </Card>
-                </Link>
-                <Link href="/finance/cash/transactions/payments">
+                </Link>}
+                {canRecordCashBankTransactions && <Link href="/finance/cash/transactions/payments">
                     <Card className="hover:bg-accent cursor-pointer transition-colors">
                         <CardContent className="p-6">
                             <div className="flex items-center gap-3">
@@ -268,7 +273,7 @@ export default function BankAccountsPage() {
                             </div>
                         </CardContent>
                     </Card>
-                </Link>
+                </Link>}
                 <Link href="/finance/cash/reports/cash-position">
                     <Card className="hover:bg-accent cursor-pointer transition-colors">
                         <CardContent className="p-6">

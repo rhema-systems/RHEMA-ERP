@@ -132,6 +132,13 @@ public class EmployeeDetailDto : EmployeeDto
     public DateOnly? ExpectedConfirmationDate { get; set; }
 
     public DateOnly? ConfirmationDate { get; set; }
+
+    /// <summary>
+    /// Where <see cref="ConfirmationDate"/> came from — the probation record, the import file, or
+    /// worked out from the hire date and the term (lane 11). Null before lane 11.
+    /// </summary>
+    public ConfirmationSource? ConfirmationSource { get; set; }
+
     public DateOnly? RetirementDate { get; set; }
     public string? TaxNumber { get; set; }
     public string? SocialSecurityNumber { get; set; }
@@ -156,6 +163,16 @@ public class EmployeeDetailDto : EmployeeDto
 
     public string? BadgeNumber { get; set; }
     public string? Notes { get; set; }
+
+    // ── Maintenance (round 4, lane O) ─────────────────────────────────────────
+    /// <summary>How <c>CanBeAssignedToMaintenance</c> is decided: by the position, or by HR for this person.</summary>
+    public MaintenanceAssignmentMode MaintenanceAssignment { get; set; }
+    /// <summary>The position's own flag, so a screen can say what "follow the position" answers today.</summary>
+    public bool PositionIsTechnicianRole { get; set; }
+    public string? Specialization { get; set; }
+    public string? CertificationLevel { get; set; }
+    public string? ExperienceLevel { get; set; }
+
     public DateTime? LastPromotionDate { get; set; }
     public DateTime? LastReviewDate { get; set; }
     public DateTime? NextReviewDate { get; set; }
@@ -363,6 +380,25 @@ public class CreateEmployeeDto
     public string? Notes { get; set; }
 
     public bool IsExpatriate { get; set; }
+
+    // ── Maintenance (round 4, lane O) ─────────────────────────────────────────
+    /// <summary>
+    /// Whether the new employee is available to Maintenance by their position (null, or
+    /// FollowPosition) or by HR's say-so (Include / Exclude).
+    /// </summary>
+    public MaintenanceAssignmentMode? MaintenanceAssignment { get; set; }
+
+    /// <summary>The trade, e.g. "Electrical installation".</summary>
+    [MaxLength(100)]
+    public string? Specialization { get; set; }
+
+    /// <summary>E.g. "Level 2".</summary>
+    [MaxLength(50)]
+    public string? CertificationLevel { get; set; }
+
+    /// <summary>Junior, Intermediate, Senior or Expert — the vocabulary Maintenance filters on.</summary>
+    [MaxLength(50)]
+    public string? ExperienceLevel { get; set; }
 }
 
 /// <summary>
@@ -477,6 +513,28 @@ public class UpdateEmployeeDto
     public string? TerminationReason { get; set; }
     public string? TerminationNotes { get; set; }
     public bool? IsActive { get; set; }
+
+    // ── Maintenance (round 4, lane O) ─────────────────────────────────────────
+    /// <summary>
+    /// Null leaves it as it is. FollowPosition hands the answer back to the post; Include / Exclude
+    /// set it for this person, and the position then no longer decides.
+    /// </summary>
+    public MaintenanceAssignmentMode? MaintenanceAssignment { get; set; }
+
+    /// <summary>
+    /// ⚠ Null = not supplied; blank = clear. Unlike most strings here, where a blank arrives as null
+    /// and so can never empty the field.
+    /// </summary>
+    [MaxLength(100)]
+    public string? Specialization { get; set; }
+
+    /// <summary>Null = not supplied; blank = clear.</summary>
+    [MaxLength(50)]
+    public string? CertificationLevel { get; set; }
+
+    /// <summary>Junior, Intermediate, Senior or Expert. Null = not supplied; blank = clear.</summary>
+    [MaxLength(50)]
+    public string? ExperienceLevel { get; set; }
 }
 
 /// <summary>
@@ -3027,6 +3085,13 @@ public class EmployeePositionDto
     public string? RequiredGuarantorCurrencyCode { get; set; }
     public bool RequiresLicense { get; set; }
 
+    /// <summary>A technician role: its holders are available to Maintenance (round 4, lane O).</summary>
+    public bool IsTechnicianRole { get; set; }
+
+    /// <summary>The pre-employment check set an offer for this post starts from (round 4, H1).</summary>
+    public Guid? PreEmploymentCheckTemplateId { get; set; }
+    public string? PreEmploymentCheckTemplateName { get; set; }
+
     public bool IsActive { get; set; }
 
     public int EmployeeCount { get; set; }
@@ -3102,6 +3167,12 @@ public class CreateEmployeePositionDto : IValidatableObject
     [MaxLength(3)]
     public string? RequiredGuarantorCurrencyCode { get; set; }
     public bool RequiresLicense { get; set; } = false;
+
+    /// <summary>A technician role: its holders are available to Maintenance (round 4, lane O).</summary>
+    public bool IsTechnicianRole { get; set; } = false;
+
+    /// <summary>The pre-employment check set an offer for this post starts from (round 4, H1).</summary>
+    public Guid? PreEmploymentCheckTemplateId { get; set; }
 
     public ICollection<CreatePositionSkillRequirementDto> SkillRequirements { get; set; } = new List<CreatePositionSkillRequirementDto>();
     public ICollection<CreateEmployeePositionBenefitDto> PositionBenefits { get; set; } = new List<CreateEmployeePositionBenefitDto>();
@@ -3189,6 +3260,21 @@ public class UpdateEmployeePositionDto : IValidatableObject
     [MaxLength(3)]
     public string? RequiredGuarantorCurrencyCode { get; set; }
     public bool RequiresLicense { get; set; } = false;
+
+    /// <summary>
+    /// A technician role: its holders are available to Maintenance (round 4, lane O). Null leaves
+    /// the flag as it is.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Nullable on purpose, unlike the switches around it. Turning the flag off takes every holder
+    /// not set by hand out of Maintenance's pool in the same save, so a caller that predates the
+    /// flag and sends a partial payload — demo scenario 006 does — must not be able to do that by
+    /// omission.
+    /// </remarks>
+    public bool? IsTechnicianRole { get; set; }
+
+    /// <summary>The pre-employment check set an offer for this post starts from (round 4, H1).</summary>
+    public Guid? PreEmploymentCheckTemplateId { get; set; }
     public bool IsActive { get; set; } = true;
 
     public ICollection<CreatePositionSkillRequirementDto> SkillRequirements { get; set; } = new List<CreatePositionSkillRequirementDto>();
@@ -3401,6 +3487,20 @@ public class QualificationCatalogueDto
     public int? QualificationLevelRank { get; set; }
 }
 
+/// <summary>
+/// One rung of the qualification ladder as a picker offers it — round 4, lane Q. The candidate
+/// qualification forms and the criteria panel's "Education level" choose from these.
+/// </summary>
+public class QualificationLevelOptionDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Code { get; set; }
+
+    /// <summary>Higher is more advanced; rungs ranked alike are equivalents.</summary>
+    public int Rank { get; set; }
+}
+
 public class CreateQualificationCatalogueDto
 {
     [Required]
@@ -3526,21 +3626,58 @@ public class WorkStationDto
 /// <summary>
 /// DTO specifically for maintenance technician selection
 /// </summary>
+/// <remarks>
+/// HR's door for Maintenance (<c>api/hr/employees/technicians*</c>), also read in-process by
+/// Maintenance's <c>TechnicianSchedulingService</c> and <c>MaintenanceScheduleService</c>.
+/// ⚠ Round 4, lane O: it carries what HR KNOWS and nothing it would have to guess. The three
+/// Maintenance figures are null — "not supplied" — where they were a hardcoded 0, and a 0 reads as
+/// "this technician is free".
+/// </remarks>
 public class MaintenanceTechnicianDto
 {
     public Guid Id { get; set; }
     public string EmployeeNumber { get; set; } = string.Empty;
+    public string FirstName { get; set; } = string.Empty;
+    public string LastName { get; set; } = string.Empty;
     public string FullName { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string? EmailAddress { get; set; }
     public string? MobileNumber { get; set; }
+    public Guid PositionId { get; set; }
     public string PositionTitle { get; set; } = string.Empty;
+
+    /// <summary>Whether the position is a technician role (round 4, lane O).</summary>
+    public bool IsTechnicianRole { get; set; }
+
+    /// <summary>Why this person is in the pool: by position, or included by hand.</summary>
+    public MaintenanceAssignmentMode MaintenanceAssignment { get; set; }
+
+    /// <summary>The department the person works in — HR's organisation unit.</summary>
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
+
+    /// <summary>Where the person is stationed. Maintenance's gates match it against the asset's location.</summary>
+    public Guid? LocationId { get; set; }
+    public string? LocationName { get; set; }
+
+    public string? Specialization { get; set; }
+    public string? CertificationLevel { get; set; }
+    public string? ExperienceLevel { get; set; }
+
+    public StaffStatus StaffStatus { get; set; }
     public bool IsActive { get; set; }
     public bool IsAvailable { get; set; }
     public List<UserTechnicianSkillDto> Skills { get; set; } = new();
-    public int CurrentWorkOrders { get; set; }
-    public decimal WorkloadScore { get; set; }
+
+    /// <summary>⚠ Not supplied by HR (null): work orders are Maintenance's to count.</summary>
+    public int? CurrentWorkOrders { get; set; }
+
+    /// <summary>⚠ Not supplied by HR (null): Maintenance computes utilisation from its work orders.</summary>
+    public decimal? WorkloadScore { get; set; }
+
     public string? BadgeNumber { get; set; }
+
+    /// <summary>⚠ Not supplied (null).</summary>
     public string? ShiftName { get; set; }
 }
 
@@ -3556,8 +3693,12 @@ public class TechnicianAvailabilityDto
     public DateTime? AvailableFrom { get; set; }
     public DateTime? AvailableUntil { get; set; }
     public string? UnavailabilityReason { get; set; }
-    public int CurrentWorkOrders { get; set; }
-    public decimal WorkloadPercentage { get; set; }
+
+    /// <summary>⚠ Not supplied by HR (null) — see <see cref="MaintenanceTechnicianDto.CurrentWorkOrders"/>.</summary>
+    public int? CurrentWorkOrders { get; set; }
+
+    /// <summary>⚠ Not supplied by HR (null) — see <see cref="MaintenanceTechnicianDto.WorkloadScore"/>.</summary>
+    public decimal? WorkloadPercentage { get; set; }
 }
 
 #endregion

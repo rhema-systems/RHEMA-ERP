@@ -44,12 +44,13 @@ const empty: FormValues = {
   positionId: '',
 };
 
-const describe = (e: LeaveTypeEligibility) =>
-  e.gender ||
-  e.organizationLevelName ||
-  e.organizationUnitName ||
-  e.positionName ||
-  '—';
+// A unit, level or position rule may also carry a gender, which narrows THAT rule (round 5,
+// lane N2 — the server always read it; the tab could not set it).
+const describe = (e: LeaveTypeEligibility) => {
+  const scope = e.organizationLevelName || e.organizationUnitName || e.positionName;
+  if (!scope) return e.gender || '—';
+  return e.gender ? `${scope} · ${e.gender} only` : scope;
+};
 
 /**
  * Who may take this leave type. Rules are add/remove only — the backend has no update
@@ -74,15 +75,18 @@ export function LeaveEligibilityTab({ leaveTypeId }: { leaveTypeId: string }) {
       singular="eligibility rule"
       queryKey={['hr', 'leave-types', leaveTypeId, 'eligibility']}
       invalidateKeys={[['hr', 'leave-types', leaveTypeId, 'detail']]}
-      dialogHint="Restrict who may take this leave type."
-      emptyDescription="With no rules, the leave type is available to everyone."
+      // ⚠ Round 5, lane N2: rules are OR'd — anyone matching ANY rule may take the leave, so each
+      // rule added lets more people in. The hint said "Restrict", which is the opposite.
+      dialogHint="Anyone matching any one rule may take this leave, so each rule you add lets more people in. On a unit, level or position rule, a gender narrows that rule."
+      emptyDescription="With no rules, everyone may take this leave. With rules, anyone matching any one of them may."
       getId={(e) => e.id}
       list={leaveTypeService.getEligibilityRules.bind(leaveTypeService)}
       create={(id, v) =>
         leaveTypeService.createEligibilityRule({
           leaveTypeId: id,
           eligibilityType: v.eligibilityType,
-          gender: v.eligibilityType === 'Gender' ? v.gender || null : null,
+          // A gender rule is the gender; any other rule may carry one as a qualifier.
+          gender: v.gender || null,
           organizationLevelId:
             v.eligibilityType === 'OrganizationLevel' ? v.organizationLevelId || null : null,
           organizationUnitId:
@@ -153,6 +157,17 @@ export function LeaveEligibilityTab({ leaveTypeId }: { leaveTypeId: string }) {
                 label="Position"
                 required
                 options={(positions ?? []).map((p) => ({ value: p.id, label: p.title }))}
+              />
+            )}
+            {kind !== 'Gender' && (
+              <SelectField
+                form={form}
+                name="gender"
+                label="And only this gender"
+                options={GENDER_OPTIONS}
+                allowEmpty
+                emptyLabel="Any gender"
+                description="Narrows this rule alone. Other rules still let their own people in."
               />
             )}
           </>

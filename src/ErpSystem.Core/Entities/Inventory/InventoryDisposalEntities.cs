@@ -54,6 +54,8 @@ public sealed class InventoryDisposalCase : TenantEntity
     public InventoryDisposalStatus Status { get; set; } = InventoryDisposalStatus.Identified;
     public bool ApprovalRequired { get; set; } = true;
     public InventoryDisposalMethod Method { get; set; }
+    // Zero preserves the original grouped proceeds authority for historical cases.
+    public int AccountingVersion { get; set; }
     [Required, MaxLength(1000)] public string Reason { get; set; } = string.Empty;
     [Required, MaxLength(2000)] public string IdentificationDetails { get; set; } = string.Empty;
     public Guid RequestedById { get; set; }
@@ -73,6 +75,7 @@ public sealed class InventoryDisposalCase : TenantEntity
     public DateTime? RejectedAtUtc { get; set; }
     [MaxLength(1000)] public string? RejectionReason { get; set; }
     public Guid? StockAdjustmentId { get; set; }
+    public Guid? PreparedStockAdjustmentId { get; set; }
     public Guid? ProceedsAccountId { get; set; }
     [Column(TypeName = "decimal(18,2)")] public decimal ProceedsAmount { get; set; }
     [MaxLength(200)] public string? BuyerOrRecipient { get; set; }

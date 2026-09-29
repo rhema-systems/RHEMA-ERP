@@ -10,7 +10,7 @@ public partial class PhysicalCountService
 {
     public static void EnsureCounterCanEdit(PhysicalCount count, Guid userId)
     {
-        if (count.CountedById != userId) throw new InvalidOperationException("Only the assigned counter may correct or submit this count.");
+        if (!IsAssignedCounter(count, userId)) throw new InvalidOperationException("Only the assigned counter may correct or submit this count.");
         if (count.Status is not ("InProgress" or "UnderReview"))
             throw new InvalidOperationException("Quantities are locked after submission. Resume review after an investigation decision to make corrections.");
     }
@@ -22,7 +22,9 @@ public partial class PhysicalCountService
             _unitOfWork.ClearTrackedChanges();
             await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
             try {
-                await _unitOfWork.AcquireTransactionLockAsync($"physical-count:{RequiredTenantId():N}:{countId:N}");
+                var rootId = await _countRepository.GetQueryable(x => x.Id == countId && x.TenantId == RequiredTenantId() && !x.IsDeleted)
+                    .Select(x => x.RootPhysicalCountId ?? x.Id).SingleOrDefaultAsync();
+                await _unitOfWork.AcquireTransactionLockAsync($"physical-count:{RequiredTenantId():N}:{(rootId == Guid.Empty ? countId : rootId):N}");
                 var result = await operation();
                 await _unitOfWork.CommitAsync();
                 return result;
@@ -42,7 +44,8 @@ public partial class PhysicalCountService
             EnsureActor(userId);
             var count = await LoadControlledCountAsync(countId) ?? throw new ArgumentException("Count not found.");
             await EnsureAccessAsync(count, "procurement.inventory.count");
-            if (count.CountedById != userId) throw new InvalidOperationException("Only the assigned counter may review this count.");
+            if (!IsAssignedCounter(count, userId)) throw new InvalidOperationException("Only the assigned counter may review this count.");
+            await EnsureCurrentCounterIdentityAsync(count, userId);
             if (await ReplayCountActionAsync(countId, PhysicalCountActionType.ReviewStarted, request.IdempotencyKey,
                     userId, "Counter", request.Comment, new { ReviewRevision = request.RowVersion })) return true;
             EnsureRowVersion(count.RowVersion, request.RowVersion, "The count changed. Refresh before reviewing.");
@@ -56,7 +59,7 @@ public partial class PhysicalCountService
                 Required(request.Comment, "Record the investigation findings before resuming review.", 2000);
             var previousStatus = count.Status;
             count.Status = "UnderReview";
-            foreach (var item in count.Items) { item.RequiresRecount = false; await _countItemRepository.UpdateAsync(item); }
+            // Recount selections belong to their retained child sheets and must not be reset during review.
             await AddCountActionAsync(count, PhysicalCountActionType.ReviewStarted, userId, request.IdempotencyKey,
                 request.Comment, new { ReviewRevision = request.RowVersion, PreviousStatus = previousStatus }, "Counter", request.CorrelationId);
             await _countRepository.UpdateAsync(count);

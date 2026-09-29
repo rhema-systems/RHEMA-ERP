@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   ListChecks,
   FileStack,
+  Zap,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -42,6 +43,12 @@ export default function OrientationHomePage() {
               description: 'Who is on which programme, how far through, and what is overdue.',
               href: '/hr/orientation/enrollments',
               icon: Users,
+            },
+            {
+              title: 'Enrollment Triggers',
+              description: 'Why a rule did — or did not — enrol someone, and which onboarding template they get.',
+              href: '/hr/orientation/triggers',
+              icon: Zap,
             },
             // Area 25 slice 7: "My Orientation" re-homed to the portal (/me/orientation).
           ]}

@@ -109,6 +109,25 @@ public class CompanyHrPolicySettings : TenantEntity
     public int ProbationEndLeadDays { get; set; } = 30;
 
     /// <summary>
+    /// How long a job offer stays open, in days, when HR does not set an expiry by hand
+    /// (round 4, decision D-10). Default 14.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>This is a default, not a cap.</b> It seeds <c>ExpiryDate</c> on the offer
+    /// defaults endpoint so the form arrives with a sensible date already in it; HR may change it,
+    /// and a longer or shorter one is accepted. What it fixes is that an offer previously arrived
+    /// with <b>no</b> expiry at all unless somebody remembered to type one, and an offer with no
+    /// expiry never lapses — it sits Issued indefinitely while the candidate takes another job.</para>
+    ///
+    /// <para>Non-nullable with a real default, like <c>CertificationExpiryLeadDays</c>: it is in the
+    /// HasData seed and the migration adds it with a DEFAULT, so no tenant's row is left at zero.
+    /// ⚠ Zero here would mean "expires the day it is raised", which is the recurring trap in this
+    /// module — a scaffolded value type defaults to zero and zero is almost never the real default.</para>
+    /// </remarks>
+    [Range(1, 3650)]
+    public int OfferValidityDays { get; set; } = 14;
+
+    /// <summary>
     /// How far ahead of a credential's expiry the certification sweep warns, when the catalogue
     /// row sets no lead time of its own (round 2, lane C2).
     /// </summary>
@@ -355,22 +374,68 @@ public class CompanyHrPolicySettings : TenantEntity
     [Range(1, 3650)]
     public int DisciplineBacklogHorizonDays { get; set; } = 90;
 
+    // ⚠ SettlementDaysPerYear — the divisor HR used to turn a monthly salary into a daily rate for
+    // notice pay and leave owed on exit — was removed in leave settings audit 2 (L-74). Pay is
+    // Finance's: HR records the days on a settlement's pay lines and Finance values them
+    // (HR.Pay.Value), so HR holds no rate. The open question "how is a daily rate worked out for
+    // exit pay?" (2026-08-20) is answered by that: Finance works it out.
+
     /// <summary>
-    /// Days per year used to turn a monthly salary into a daily rate in a final settlement
-    /// (FR-HR-184). Calendar days by default: monthly × 12 ÷ 365.
+    /// The most days of annual leave a leaver's final settlement pays for (FR-HR-152). Empty means
+    /// no cap (round 5, lane L2b).
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>This one moves money and TDC has not answered it.</b> The four bases TDC was asked
-    /// about are all expressible here — 365 calendar, 360 for thirty-day months, 264 for a 22-day
-    /// working month — and they differ by <b>38% on the same facts</b> (GHS 3,156.16 against
-    /// GHS 4,363.64 on the worked example in the open-questions document).
-    /// <para>The settlement writes the basis onto every computed line <i>in words</i>, derived from
-    /// this number, so a settlement computed under one basis still says which one it used after the
-    /// setting changes. That makes an early settlement auditable — <b>it does not make it right.</b>
-    /// Do not run real final settlements until TDC has answered, or expect a correction exercise.</para>
+    /// <para>Was a constant, 56, in <c>SeparationService</c> — visible on no screen and changeable
+    /// only by a release. FR-HR-152 is TDC's own requirement, so the default is its figure.</para>
+    ///
+    /// <para>⚠ <b>Empty is a real answer, not a missing one.</b> A client with no cap clears it. So a
+    /// save that leaves the field out keeps the update DTO's own default, 56, as every other field on
+    /// that DTO does, and only an explicit empty value removes the cap.</para>
+    ///
+    /// <para>After round 5 lane L2 the settlement pays only this leave year's share plus carried days
+    /// not yet lapsed, so for TDC (at most 30 + 5 = 35 days) the cap rarely binds. The point is that
+    /// it is visible and changeable, not that anybody is paid differently.</para>
     /// </remarks>
     [Range(1, 366)]
-    public int SettlementDaysPerYear { get; set; } = 365;
+    public int? SettlementLeaveDaysCap { get; set; } = 56;
+
+    /// <summary>
+    /// How many DECIDING members (chair or member — not secretary or observer) must be present at
+    /// the sitting where a medical board decides a case (round 5, lane K-II-a).
+    /// </summary>
+    /// <remarks>
+    /// Default 1 — the rule until K-II-a was "somebody on the board". The statutory boards of the
+    /// Workmen's Compensation Act are three practitioners; a client whose own board must be quorate
+    /// raises it. R5-Q5 asks TDC for its number.
+    /// </remarks>
+    [Range(1, 20)]
+    public int MedicalBoardQuorum { get; set; } = 1;
+
+    /// <summary>
+    /// Months' earnings paid for permanent total incapacity — PNDCL 187 s.5, <b>96</b> (round 5, lane
+    /// K-II-b). A partial incapacity is its percentage of this.
+    /// </summary>
+    /// <remarks>Empty means no indicative figure is worked out: the case says so instead.</remarks>
+    [Range(1, 600)]
+    public int? PermanentTotalIncapacityMonths { get; set; } = 96;
+
+    /// <summary>
+    /// The longest temporary incapacity is paid for — PNDCL 187 s.7(2)(c), <b>24</b> months (six more
+    /// where the chief labour officer directs). Shown on a temporary case beside the date it runs to.
+    /// </summary>
+    [Range(1, 120)]
+    public int TemporaryIncapacityMaxMonths { get; set; } = 24;
+
+    /// <summary>
+    /// The most of a year's earnings compensation is calculated on — PNDCL 187 s.36.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>No default, on purpose.</b> The Act's 25,000 cedis predates the 2007 redenomination (GH₵2.50)
+    /// and no revising legislative instrument was found (R5-Q5). Empty means the figure is worked out
+    /// without a ceiling and says so; a number here caps the monthly earnings at a twelfth of it.
+    /// </remarks>
+    [Range(0.01, 1_000_000_000)]
+    public decimal? CompensationEarningsCeiling { get; set; }
 
     /// <summary>
     /// Whether approved leave counts as an expected working day in the attendance rate.
@@ -406,35 +471,17 @@ public class CompanyHrPolicySettings : TenantEntity
     /// per-type flag still decides <i>which</i> leave may be converted; this decides whether the
     /// in-service route exists at all. Off here means off for every type, whatever they say.</para>
     ///
-    /// <para>⚠ The TDC demo tenant is seeded with this ON, because stakeholders have already been
-    /// shown the encashment screen. Turning it off by default without that seed line would make a
-    /// demonstrated feature vanish.</para>
+    /// <para>⚠ <b>Round 5, decision A3 (2026-09-25): OFF for TDC too.</b> The demo tenant was seeded
+    /// ON because stakeholders had been shown the encashment screen; the Labour Act (s.31: an
+    /// agreement to forgo annual leave is void) and public-service practice (cash only at the end of
+    /// service) settled it the other way, and lane L1 switched the seed off. Off, the portal hides
+    /// its encashment screen and the leaver's settlement is the only route to cash.</para>
     /// </remarks>
     public bool AllowInServiceEncashment { get; set; } = false;
 
-    /// <summary>
-    /// Working days in a month, used to turn monthly emoluments into a daily encashment rate when a
-    /// leave type does not set its own divisor.
-    /// </summary>
-    /// <remarks>
-    /// <para>Was a private const in <c>EmolumentService</c> — the last genuinely hardcoded piece of
-    /// the encashment rate, and the fallback every leave type lands on until somebody edits it.</para>
-    ///
-    /// <para>⚠ <b>Read this beside <see cref="SettlementDaysPerYear"/>, and expect them to
-    /// disagree.</b> Encashment computes <c>(basic + linked allowances) ÷ this</c>; a settlement
-    /// computes <c>monthly × 12 ÷ SettlementDaysPerYear</c>. At the defaults — 22 working days a
-    /// month against 365 calendar days a year — that is roughly a <b>38% spread on the same
-    /// salary</b>.</para>
-    ///
-    /// <para><b>That is not necessarily wrong, and the two are deliberately not merged.</b>
-    /// Encashing five unused days while employed is not the same money event as a final settlement
-    /// on exit, and plenty of clients will want different bases for each. What was wrong is that
-    /// they sat on different screens at different scopes, so nobody could see the gap. They are now
-    /// presented together with a worked example, and leave stamps its basis onto the payout the way
-    /// the settlement already did.</para>
-    /// </remarks>
-    [Range(1, 31)]
-    public int EncashmentWorkingDaysPerMonth { get; set; } = 22;
+    // ⚠ EncashmentWorkingDaysPerMonth — the tenant fallback divisor for leave cashed in — was removed
+    // in leave settings audit 2 (L-75). No screen could set it after round 5 lane N1, it was read
+    // only when a leave type's own figure was 0, and since the audit Finance values leave anyway.
 
     // ── Leave reminder windows (residue plan G2) ─────────────────────────────────────────────
     //
@@ -446,30 +493,53 @@ public class CompanyHrPolicySettings : TenantEntity
     // ⚠ NOT moved: the reminder engine's 90-day backlog horizon. That one stops the first run on an
     // established database queueing years of history at once (area 9 queued 275, of which 242 were
     // history). It protects the system from itself; it is not a policy anybody should be choosing.
+    //
+    // Who each reminder reaches is what the summaries below say since round 5, lane I — in the app
+    // and by email. Before that, every one of them went to the HR role alone, in the app only,
+    // whatever these comments claimed. Wherever the person named cannot be told (no login, nobody
+    // asked), the reminder goes to HR, saying why.
 
-    /// <summary>Days before a start date that approved leave is announced to employee and manager.</summary>
+    /// <summary>
+    /// Days before a start date that the employee is asked whether approved leave is still going
+    /// ahead, until somebody answers.
+    /// </summary>
     [Range(0, 180)]
     public int LeaveStartingReminderDays { get; set; } = 7;
 
-    /// <summary>Days after an end date before leave nobody has closed is chased.</summary>
+    /// <summary>
+    /// Days after an end date before leave nobody has closed is chased: the line manager (the
+    /// supervisor, or failing one the nearest head of unit) once the return is reported, HR before.
+    /// </summary>
     [Range(0, 180)]
     public int LeaveClosureGraceDays { get; set; } = 2;
 
-    /// <summary>Days a request may sit undecided before its approver is chased.</summary>
+    /// <summary>
+    /// Days a request may sit undecided before whoever its current approval step is asking is
+    /// chased — or the employee, when the approver has sent it back with other dates.
+    /// </summary>
     [Range(0, 180)]
     public int LeaveUndecidedChaseDays { get; set; } = 5;
 
     /// <summary>
-    /// Month of the year from which outstanding mandatory leave starts being chased (9 = September).
+    /// Month of the LEAVE year from which annual leave not yet planned or taken is chased (9 = the
+    /// ninth month: September when the leave year starts in January) — once a leave year, to the
+    /// employee, to their supervisor in one message naming all their people, and to HR in one summary.
     /// </summary>
     /// <remarks>
     /// Late enough that the chase is not noise, early enough that there is still time to take the
-    /// leave. Chasing in January says nothing; chasing in December is too late to act on.
+    /// leave. Chasing in the first month says nothing; chasing in the last is too late to act on.
+    /// ⚠ Counted from <see cref="LeaveYearStartMonth"/> since round 5, lane C4 — it was compared with
+    /// the calendar month, which agrees only for a January start. Everybody serving who has passed
+    /// annual leave's qualifying period is chased, with or without a balance record (lane I); the
+    /// name is older than the rule, which is decision B6's single chase.
     /// </remarks>
     [Range(1, 12)]
     public int MandatoryLeaveChaseFromMonth { get; set; } = 9;
 
-    /// <summary>Days before carry-over expires that the employee is warned.</summary>
+    /// <summary>
+    /// Days before carried-over leave lapses that the employee is warned of the days not covered by
+    /// leave taken or booked in time.
+    /// </summary>
     [Range(0, 365)]
     public int LeaveCarryOverExpiryReminderDays { get; set; } = 30;
 
@@ -496,4 +566,49 @@ public class CompanyHrPolicySettings : TenantEntity
     /// refused rather than half-corrected.</para>
     /// </remarks>
     public int LeaveYearStartMonth { get; set; } = 1;
+
+    // ── Orientation & onboarding reminder windows (round 4, lane K) ──────────────────────────
+    //
+    // Read by OnboardingOrientationReminderService, the first HR sweep that DELIVERS — an in-app
+    // notification and an email — rather than only logging what it would have said. ⚠ Every one is
+    // non-nullable with a real DEFAULT in the migration; at zero the windows would close and the
+    // sweep would quietly remind nobody.
+    //
+    // ⚠ NOT a setting: the 90-day backlog horizon for overdue items. Like the leave engine's, it
+    // stops the first run on an established database announcing years of history at once — it
+    // protects the system from itself and is not a policy anybody should be choosing.
+
+    /// <summary>Days before an onboarding task's due date that its owner is reminded.</summary>
+    [Range(0, 90)]
+    public int OnboardingTaskDueLeadDays { get; set; } = 3;
+
+    /// <summary>Days before an orientation's completion date that the participant is reminded.</summary>
+    [Range(0, 90)]
+    public int OrientationDueLeadDays { get; set; } = 7;
+
+    /// <summary>Days before an orientation certificate expires that its holder is warned.</summary>
+    [Range(0, 365)]
+    public int OrientationCertificateExpiryLeadDays { get; set; } = 30;
+
+    /// <summary>
+    /// Days something may wait on a person before they are chased: a completed onboarding task
+    /// awaiting sign-off, an assessment not yet attempted, an acknowledgement not yet signed.
+    /// </summary>
+    [Range(1, 90)]
+    public int OrientationChaseAfterDays { get; set; } = 3;
+
+    // ── Company schedule reminders (round 4, lane N-b2) ──────────────────────────────────────
+
+    /// <summary>
+    /// Days before an event's RSVP deadline that everybody who has not answered is chased, once, by
+    /// the company-schedule reminder sweep.
+    /// </summary>
+    /// <remarks>
+    /// A tenant setting rather than a field on each event: the event form already asks for an RSVP
+    /// deadline, and a second date to reason about per event is one more thing an organiser gets wrong.
+    /// ⚠ Non-nullable with a real DEFAULT in the migration — at zero the chase would fall on the
+    /// deadline itself, when answering is already too late to plan by.
+    /// </remarks>
+    [Range(0, 60)]
+    public int CompanyEventRsvpChaseLeadDays { get; set; } = 2;
 }

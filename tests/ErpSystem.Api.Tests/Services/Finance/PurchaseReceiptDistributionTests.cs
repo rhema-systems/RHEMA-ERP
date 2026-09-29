@@ -269,6 +269,43 @@ public sealed class PurchaseReceiptDistributionTests
         view.Lines.Should().Contain(line => line.AccountId == variance.Id && line.Debit == 16m);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Foreign_draft_preview_requires_approved_rate_and_converts_purchase_value(bool approved)
+    {
+        await using var db = Context();
+        var (receipt, item, inventory, accrued) = await SeedAsync(db, movement: false);
+        receipt.PurchaseOrder.Currency = "USD";
+        receipt.Status = "Accepted";
+        var poItem = new PurchaseOrderItem { TenantId = receipt.TenantId, PurchaseOrderId = receipt.PurchaseOrderId,
+            InventoryItemId = item.Id, UnitPrice = 12m, OrderedQuantity = 10m, LineType = ItemType.StockItem };
+        db.PurchaseOrderItems.Add(poItem);
+        db.PurchaseOrderReceiptItems.Add(new PurchaseOrderReceiptItem { TenantId = receipt.TenantId, ReceiptId = receipt.Id,
+            PurchaseOrderItemId = poItem.Id, ReceivedQuantity = 10m, AcceptedQuantity = 8m, RejectedQuantity = 2m });
+        db.ExchangeRates.Add(new ExchangeRate { TenantId = receipt.TenantId, BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = "USD", Rate = 0.5m, InverseRate = 2m, IsActive = true,
+            EffectiveDate = receipt.ReceiptDate.Date, RateType = ExchangeRateType.Daily,
+            QuoteSide = ExchangeRateQuoteSide.Mid,
+            ApprovalStatus = approved ? RateApprovalStatus.Approved : RateApprovalStatus.Pending });
+        await db.SaveChangesAsync();
+        var service = new ProcurementReceiptDistributionService(db);
+        if (!approved)
+        {
+            Func<Task> preview = () => service.GetAsync(receipt.TenantId, receipt.Id);
+            await preview.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("RCV_APPROVED_EXCHANGE_RATE_REQUIRED:*");
+            return;
+        }
+        var view = await service.GetAsync(receipt.TenantId, receipt.Id);
+        view.Currency.Should().Be("GHS");
+        view.TotalDebit.Should().Be(192m);
+        view.TotalCredit.Should().Be(192m);
+        view.Lines.Should().Contain(line => line.AccountId == inventory.Id && line.Debit == 192m);
+        view.Lines.Should().Contain(line => line.AccountId == accrued.Id && line.Credit == 192m);
+        (await db.InventoryMovements.CountAsync()).Should().Be(0);
+    }
+
     private static async Task<(PurchaseOrderReceipt, InventoryItem, Account, Account)> SeedAsync(ApplicationDbContext db, bool movement = true)
     {
         var tenant = Guid.NewGuid();
@@ -277,7 +314,8 @@ public sealed class PurchaseReceiptDistributionTests
         var partner = new BusinessPartner { TenantId = tenant, PartnerName = "Supplier", PartnerCode = "SUP",
             DefaultAccruedPurchasesAccountId = accrued.Id };
         db.BusinessPartners.Add(partner);
-        var po = new PurchaseOrder { TenantId = tenant, OrderNumber = "PO-TEST", BusinessPartner = partner,
+        // These amounts are functional-currency amounts; do not inherit the PO entity's USD default.
+        var po = new PurchaseOrder { TenantId = tenant, OrderNumber = "PO-TEST", Currency = "GHS", BusinessPartner = partner,
             BusinessPartnerId = partner.Id, SupplierDefaultsSnapshotJson = BusinessPartnerPostingDefaults.SerializeSnapshot(partner) };
         db.PurchaseOrders.Add(po);
         var receipt = new PurchaseOrderReceipt { TenantId = tenant, PurchaseOrderId = po.Id, PurchaseOrder = po, ReceiptNumber = "REC-TEST" };

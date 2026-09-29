@@ -145,6 +145,10 @@ export default function NewEmployeePositionPage() {
           : null,
         requiredGuarantorCurrencyCode: values.requiredGuarantorCurrencyCode || null,
         requiresLicense: values.requiresLicense,
+        isTechnicianRole: values.isTechnicianRole,
+        // ⚠ Round 4, lane O found this missing from both pages since lane H1: the form offered the
+        // picker and the page never sent it, so a choice made here was silently dropped.
+        preEmploymentCheckTemplateId: values.preEmploymentCheckTemplateId,
         skillRequirements: values.skillRequirements.map((r) => ({
           skillId: r.skillId,
           requiredLevel: r.requiredLevel,

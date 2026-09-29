@@ -56,4 +56,14 @@ public sealed class QualificationCatalogueRepository : GenericRepository<Qualifi
         return await _context.Set<Qualification>()
             .AnyAsync(q => !q.IsDeleted && q.Name == name);
     }
+
+    /// <summary>
+    /// The tenant's active ladder rungs, lowest first — round 4, lane Q. Tenant-explicit for the
+    /// public careers portal, which has no tenant claim to resolve.
+    /// </summary>
+    public async Task<IEnumerable<QualificationLevel>> GetActiveLevelsAsync(Guid tenantId)
+        => await _context.Set<QualificationLevel>()
+            .Where(l => l.TenantId == tenantId && !l.IsDeleted && l.IsActive)
+            .OrderBy(l => l.Rank).ThenBy(l => l.Name)
+            .ToListAsync();
 }

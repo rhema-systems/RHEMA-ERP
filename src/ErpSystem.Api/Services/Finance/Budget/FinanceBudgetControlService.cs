@@ -690,8 +690,11 @@ public sealed class FinanceBudgetControlService : IFinanceBudgetControlService
         Guid tenantId,
         CancellationToken cancellationToken)
     {
+        var primaryBook = await BudgetPrimaryBookResolver.ResolveAsync(
+            _db, tenantId, cancellationToken);
         var query = _db.AccountTransactions.AsNoTracking()
             .Where(x => x.TenantId == tenantId && !x.IsDeleted
+                && x.AccountingBookId == primaryBook.Id
                 && x.AccountId == entry.AccountId && x.FiscalPeriodId == entry.FiscalPeriodId
                 && x.JournalEntry.PostingStatus == "Posted" && !x.JournalEntry.IsDeleted);
         if (entry.FinanceDimensionSet is not null)

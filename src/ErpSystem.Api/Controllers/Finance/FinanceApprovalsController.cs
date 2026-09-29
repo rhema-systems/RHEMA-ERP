@@ -10,6 +10,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Workflow;
@@ -44,6 +45,9 @@ public class FinanceApprovalsController : ControllerBase
     private static readonly HashSet<string> FinanceWorkflowEntityKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         Normalize("JournalEntry"),
+        Normalize("RecurringJournalTemplate"),
+        Normalize("RecurringJournalOccurrence"),
+        Normalize("RecurringJournalOccurrenceWaiver"),
         Normalize("FinancePurchaseOrder"),
         Normalize("FinancePurchaseOrderReceipt"),
         Normalize("VendorInvoice"),
@@ -395,6 +399,27 @@ public class FinanceApprovalsController : ControllerBase
                         ["Version"] = initialization.Version.ToString(System.Globalization.CultureInfo.InvariantCulture)
                     }
                 });
+                continue;
+            }
+
+            if (IsBusinessPartner(entityType))
+            {
+                // Business Partner identity approval is shared Procurement/Finance master-data
+                // governance. Surface assigned items in the Finance inbox, but keep the decision
+                // on the partner endpoint so its status adapter activates the canonical identity.
+                // The submitter is excluded even if a broad administrative role was assigned.
+                if (instance.InitiatedById == currentUserId.Value)
+                    continue;
+
+                var partnerApproval = await MapApprovalAsync(
+                    approval,
+                    canApprove: false,
+                    canReject: false,
+                    approveDisabledReason: "Open the Business Partner record to approve it.",
+                    rejectDisabledReason: "Open the Business Partner record to reject it.",
+                    cancellationToken);
+                partnerApproval.DecisionOnDetailPage = true;
+                results.Add(partnerApproval);
                 continue;
             }
 
@@ -1115,6 +1140,35 @@ public class FinanceApprovalsController : ControllerBase
             return item == null ? FinanceApprovalFacts.Empty : new(item.JournalEntryNumber, item.Description, item.PostingStatus, item.EntryDate, item.TotalDebitAmount, item.PrimaryCurrency ?? "GHS");
         }
 
+        if (key == Normalize("RecurringJournalTemplate"))
+        {
+            var item = await _db.RecurringJournalTemplates.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId && !x.IsDeleted, cancellationToken);
+            return item == null ? FinanceApprovalFacts.Empty : new FinanceApprovalFacts(
+                item.TemplateNumber, item.Name, item.Status.ToString(), item.SubmittedAt,
+                null, item.CurrencyCode);
+        }
+
+        if (key == Normalize("RecurringJournalOccurrence"))
+        {
+            var item = await _db.RecurringJournalOccurrences.AsNoTracking().Include(x => x.Template)
+                .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId && !x.IsDeleted, cancellationToken);
+            return item == null ? FinanceApprovalFacts.Empty : new FinanceApprovalFacts(
+                $"{item.Template.TemplateNumber}-{item.SequenceNumber:D4}",
+                $"{item.Template.Name} - {item.EffectiveDate:yyyy-MM-dd}", item.Status.ToString(), item.GeneratedAt,
+                null, item.Template.CurrencyCode);
+        }
+
+        if (key == Normalize("RecurringJournalOccurrenceWaiver"))
+        {
+            var item = await _db.RecurringJournalOccurrences.AsNoTracking().Include(x => x.Template)
+                .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId && !x.IsDeleted, cancellationToken);
+            return item == null ? FinanceApprovalFacts.Empty : new FinanceApprovalFacts(
+                $"{item.Template.TemplateNumber}-{item.SequenceNumber:D4}",
+                $"Waiver: {item.Template.Name} - {item.EffectiveDate:yyyy-MM-dd}", item.Status.ToString(), item.UpdatedAt,
+                null, item.Template.CurrencyCode);
+        }
+
         if (key == Normalize("FinancePurchaseOrder"))
         {
             var item = await _db.FinancePurchaseOrders.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
@@ -1383,6 +1437,88 @@ public class FinanceApprovalsController : ControllerBase
         if (key == Normalize("JournalEntry"))
         {
             await _journalEntryService.UpdateApprovalStatusAsync(entityId, "Approved", "Approved", userId, cancellationToken: cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("RecurringJournalTemplate"))
+        {
+            var template = await _db.RecurringJournalTemplates.Include(item => item.Lines)
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && item.Id == entityId && !item.IsDeleted,
+                    cancellationToken);
+            if (template != null && template.Status == RecurringJournalStatus.PendingApproval)
+            {
+                template.Status = RecurringJournalStatus.Active;
+                template.ReviewedAt = now;
+                template.ReviewedByUserId = userId;
+                template.ReviewComment = comments;
+                template.ActivatedAt = now;
+                template.ActivatedByUserId = userId;
+                template.NextDueDate = RecurringJournalRecurrenceCalculator.NextScheduledDate(
+                    template, template.EffectiveFrom.AddDays(-1));
+                if (!template.NextDueDate.HasValue)
+                    throw new InvalidOperationException("The approved recurrence rule does not produce an occurrence within its configured limits.");
+                template.UpdatedAt = now;
+                template.UpdatedBy = _currentUserService.UserName;
+                template.LastModifiedById = userId;
+                if (template.SupersedesTemplateId.HasValue)
+                {
+                    var superseded = await _db.RecurringJournalTemplates.FirstOrDefaultAsync(item =>
+                        item.TenantId == tenantId && item.Id == template.SupersedesTemplateId.Value && !item.IsDeleted,
+                        cancellationToken);
+                    if (superseded != null && superseded.Status is RecurringJournalStatus.Active or RecurringJournalStatus.Paused)
+                    {
+                        superseded.Status = RecurringJournalStatus.Completed;
+                        superseded.NextDueDate = null;
+                        superseded.UpdatedAt = now;
+                        superseded.UpdatedBy = _currentUserService.UserName;
+                        superseded.LastModifiedById = userId;
+                    }
+                }
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+            return;
+        }
+
+        if (key == Normalize("RecurringJournalOccurrence"))
+        {
+            var occurrence = await _db.RecurringJournalOccurrences.FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId && item.Id == entityId && !item.IsDeleted, cancellationToken);
+            if (occurrence != null && occurrence.Status == RecurringJournalOccurrenceStatus.PendingApproval)
+            {
+                occurrence.Status = RecurringJournalOccurrenceStatus.Approved;
+                occurrence.ReviewedAt = now;
+                occurrence.ReviewedByUserId = userId;
+                occurrence.ReviewComment = comments;
+                occurrence.ErrorMessage = null;
+                if (occurrence.ReversalDueDate.HasValue)
+                {
+                    occurrence.ReversalStatus = RecurringJournalReversalStatus.Scheduled;
+                    occurrence.ReversalAuthorizedAt = now;
+                    occurrence.ReversalAuthorizedByUserId = userId;
+                    occurrence.ReversalError = null;
+                }
+                occurrence.UpdatedAt = now;
+                occurrence.UpdatedBy = _currentUserService.UserName;
+                occurrence.LastModifiedById = userId;
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+            return;
+        }
+
+        if (key == Normalize("RecurringJournalOccurrenceWaiver"))
+        {
+            var occurrence = await _db.RecurringJournalOccurrences.FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId && item.Id == entityId && !item.IsDeleted, cancellationToken);
+            if (occurrence != null && occurrence.Status == RecurringJournalOccurrenceStatus.WaiverPending)
+            {
+                occurrence.Status = RecurringJournalOccurrenceStatus.Waived;
+                occurrence.WaivedAt = now;
+                occurrence.WaivedByUserId = userId;
+                occurrence.UpdatedAt = now;
+                occurrence.UpdatedBy = _currentUserService.UserName;
+                occurrence.LastModifiedById = userId;
+                await _db.SaveChangesAsync(cancellationToken);
+            }
             return;
         }
 
@@ -1997,6 +2133,59 @@ public class FinanceApprovalsController : ControllerBase
         if (key == Normalize("JournalEntry"))
         {
             await _journalEntryService.UpdateApprovalStatusAsync(entityId, "Rejected", "Rejected", rejectionReason: reason, cancellationToken: cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("RecurringJournalTemplate"))
+        {
+            await UpdateIfFoundAsync(_db.RecurringJournalTemplates, tenantId, entityId, item =>
+            {
+                item.Status = RecurringJournalStatus.Rejected;
+                item.ReviewedAt = now;
+                item.ReviewedByUserId = userId;
+                item.ReviewComment = reason;
+                item.LastFailure = reason;
+                item.UpdatedAt = now;
+                item.UpdatedBy = _currentUserService.UserName;
+                item.LastModifiedById = userId;
+            }, cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("RecurringJournalOccurrence"))
+        {
+            await UpdateIfFoundAsync(_db.RecurringJournalOccurrences, tenantId, entityId, item =>
+            {
+                item.Status = RecurringJournalOccurrenceStatus.Failed;
+                item.ReviewedAt = now;
+                item.ReviewedByUserId = userId;
+                item.ReviewComment = reason;
+                item.ErrorMessage = reason;
+                item.UpdatedAt = now;
+                item.UpdatedBy = _currentUserService.UserName;
+                item.LastModifiedById = userId;
+            }, cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("RecurringJournalOccurrenceWaiver"))
+        {
+            await UpdateIfFoundAsync(_db.RecurringJournalOccurrences, tenantId, entityId, item =>
+            {
+                // Preserve the occurrence's original accounting-review evidence.
+                // A waiver decision is a separate workflow and must not replace
+                // who approved or rejected the accounting event itself.
+                item.Status = !item.ReviewedAt.HasValue || !item.ReviewedByUserId.HasValue
+                    ? RecurringJournalOccurrenceStatus.Failed
+                    : string.IsNullOrWhiteSpace(item.ErrorMessage)
+                        ? RecurringJournalOccurrenceStatus.Approved
+                        : string.Equals(item.ErrorMessage, item.ReviewComment, StringComparison.Ordinal)
+                            ? RecurringJournalOccurrenceStatus.Failed
+                            : RecurringJournalOccurrenceStatus.SubmissionFailed;
+                item.UpdatedAt = now;
+                item.UpdatedBy = _currentUserService.UserName;
+                item.LastModifiedById = userId;
+            }, cancellationToken);
             return;
         }
 
@@ -2842,7 +3031,11 @@ public class FinanceApprovalsController : ControllerBase
 
     internal static bool IsFinanceQueueEntity(string? entityType)
         => IsFinanceEntity(entityType) || IsAccountingBookLifecycle(entityType) ||
-           IsAccountingBookPeriodLifecycle(entityType) || IsAccountingBookInitialization(entityType);
+           IsAccountingBookPeriodLifecycle(entityType) || IsAccountingBookInitialization(entityType) ||
+           IsBusinessPartner(entityType);
+
+    private static bool IsBusinessPartner(string? entityType)
+        => Normalize(entityType) == "BUSINESSPARTNER";
 
     private static bool IsAccountingBookLifecycle(string? entityType)
         => Normalize(entityType) == "ACCOUNTINGBOOKLIFECYCLE";
@@ -2860,9 +3053,15 @@ public class FinanceApprovalsController : ControllerBase
             return displayUrl;
         }
 
-        return Normalize(entityType) == "OPENINGBALANCEBATCH"
-            ? $"/finance/opening-balances?batchId={entityId:D}"
-            : "/finance/approvals";
+        return Normalize(entityType) switch
+        {
+            "OPENINGBALANCEBATCH" => $"/finance/opening-balances?batchId={entityId:D}",
+            "BUSINESSPARTNER" => $"/procurement/business-partners/{entityId:D}",
+            "RECURRINGJOURNALTEMPLATE" => $"/finance/recurring-journals/{entityId:D}",
+            "RECURRINGJOURNALOCCURRENCE" or "RECURRINGJOURNALOCCURRENCEWAIVER" =>
+                "/finance/recurring-journals",
+            _ => "/finance/approvals"
+        };
     }
 
     private static bool RequiresSubmitterApproverSeparation(string? entityType)
@@ -2876,7 +3075,10 @@ public class FinanceApprovalsController : ControllerBase
             or "FIXEDASSET"
             or "FIXEDASSETDEPRECIATIONRUN"
             or "ASSETDEPRECIATIONSCHEDULE"
-            or "ASSETVALUATION";
+            or "ASSETVALUATION"
+            or "RECURRINGJOURNALTEMPLATE"
+            or "RECURRINGJOURNALOCCURRENCE"
+            or "RECURRINGJOURNALOCCURRENCEWAIVER";
     }
 
     private static string? GetActionDisabledReason(
@@ -2968,6 +3170,11 @@ public class FinanceApprovalsController : ControllerBase
             return "Foreign Exchange";
         }
 
+        if (key == "BUSINESSPARTNER")
+        {
+            return "Procurement / Finance Master Data";
+        }
+
         if (key.StartsWith("ASSET", StringComparison.OrdinalIgnoreCase) || key is "FIXEDASSET" or "FIXEDASSETDEPRECIATIONRUN" or "CAPITALPROJECT" or "LEASECONTRACT")
         {
             return "Fixed Assets";
@@ -3008,9 +3215,13 @@ public class FinanceApprovalsController : ControllerBase
             "ASSETVALUATION" => "Asset Valuation",
             "ASSETTRANSFER" => "Asset Transfer",
             "ASSETDISPOSAL" => "Asset Disposal",
+            "BUSINESSPARTNER" => "Business Partner",
             "ASSETVERIFICATIONSESSION" => "Asset Verification",
             "CAPITALPROJECT" => "Capital Project",
             "LEASECONTRACT" => "Lease Contract",
+            "RECURRINGJOURNALTEMPLATE" => "Recurring Journal Template",
+            "RECURRINGJOURNALOCCURRENCE" => "Recurring Journal Occurrence",
+            "RECURRINGJOURNALOCCURRENCEWAIVER" => "Recurring Journal Waiver",
             _ => entityType
         };
 

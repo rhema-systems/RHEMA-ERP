@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Check, Dices, HelpCircle, Loader2, Save } from 'lucide-react';
+import Link from 'next/link';
+import { AlertTriangle, Check, Dices, FileText, Files, HelpCircle, Loader2, Printer, Save } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -92,6 +93,30 @@ export function InterviewQuestionsPanel({
 
   return (
     <div className="space-y-4">
+      {/* ⚠ Outside the `canManage` block on purpose. Printing is gated on *read* access, not on HR
+          — the panelist who needs the sheet is not the person who manages the session, and a panel
+          that cannot print its own scoring sheets is the gap this replaced. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" size="sm" asChild>
+          <Link href={`/hr/recruitment/interviews/${interview.id}/paper?variant=ScoreSheet`}>
+            <Printer className="mr-1.5 h-4 w-4" />
+            Print scoring sheets
+          </Link>
+        </Button>
+        <Button variant="ghost" size="sm" asChild>
+          <Link href={`/hr/recruitment/interviews/${interview.id}/paper?variant=Questions`}>
+            <FileText className="mr-1.5 h-4 w-4" />
+            Question list
+          </Link>
+        </Button>
+        <Button variant="ghost" size="sm" asChild>
+          <Link href={`/hr/recruitment/interviews/${interview.id}/paper?variant=Pack`}>
+            <Files className="mr-1.5 h-4 w-4" />
+            Full pack
+          </Link>
+        </Button>
+      </div>
+
       {canManage && (
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" disabled={runPreview.isPending} onClick={() => runPreview.mutate()}>

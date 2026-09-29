@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import {
   recurringJournalDataService,
   type RecurringJournalTemplate,
@@ -18,6 +19,8 @@ const money = (amount: number, currency: string) =>
 
 export default function RecurringJournalsPage() {
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('Finance.JournalEntries.Create');
   const [rows, setRows] = useState<RecurringJournalTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
@@ -68,10 +71,10 @@ export default function RecurringJournalsPage() {
         <p className="text-muted-foreground">Versioned standing instructions with controlled occurrence approval and Finance posting.</p>
       </div>
       <div className="flex gap-2">
-        <Button variant="outline" onClick={processDue} disabled={processing}>
+        {canCreate && <Button variant="outline" onClick={processDue} disabled={processing}>
           {processing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}Process due schedules
-        </Button>
-        <Button asChild><Link href="/finance/recurring-journals/new"><Plus className="mr-2 h-4 w-4" />New recurring journal</Link></Button>
+        </Button>}
+        {canCreate && <Button asChild><Link href="/finance/recurring-journals/new"><Plus className="mr-2 h-4 w-4" />New recurring journal</Link></Button>}
       </div>
     </div>
 

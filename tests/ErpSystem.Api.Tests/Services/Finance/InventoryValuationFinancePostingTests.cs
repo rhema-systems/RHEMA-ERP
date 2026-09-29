@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Api.Mapping;
 using AutoMapper;
 using ErpSystem.Core.DTOs.Inventory;
@@ -15,6 +16,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Moq;
 using Xunit;
+using static ErpSystem.Api.Services.Finance.InventoryIssueFinanceAssetPostingService;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
@@ -291,4 +293,125 @@ public sealed class InventoryValuationFinancePostingTests
             .ConfigureWarnings(value => value.Ignore(InMemoryEventId.TransactionIgnoredWarning)).Options;
         return new ApplicationDbContext(options);
     }
+
+    [Fact]
+    public async Task Inventory_return_retains_original_book_and_currency_when_defaults_change()
+    {
+        await using var context = Context();
+        var tenant = Guid.NewGuid();
+        var sourceId = Guid.NewGuid();
+        var original = new AccountingBook { TenantId = tenant, Code = "ORIGINAL", Name = "Original book", FunctionalCurrencyCode = "USD" };
+        context.AccountingBooks.AddRange(original,
+            new AccountingBook { TenantId = tenant, Code = "BASE", Name = "New default", IsDefault = true, FunctionalCurrencyCode = "EUR" });
+        context.FinanceSettings.Add(new FinanceSettings { TenantId = tenant, BaseCurrency = "GHS" });
+        var journal = new JournalEntry { TenantId = tenant, AccountingBookId = original.Id,
+            BookClassification = original.Code, PostingStatus = "Posted" };
+        context.JournalEntries.Add(journal);
+        var postingEvent = OriginalEvent(tenant, journal, sourceId, "USD");
+        context.FinancePostingEvents.Add(postingEvent);
+        await context.SaveChangesAsync();
+        var authority = await ResolveOriginalBookAuthorityAsync(context, tenant,
+            [new(journal.Id, postingEvent.Id, sourceId)], "InventoryIssueVoucher", "PostInventoryIssue");
+        authority.AccountingBookCode.Should().Be("ORIGINAL");
+        authority.FunctionalCurrencyCode.Should().Be("USD");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Inventory_primary_book_authority_uses_configured_code_and_rejects_ambiguity(bool ambiguous)
+    {
+        await using var context = Context();
+        var tenant = Guid.NewGuid();
+        context.AccountingBooks.Add(new AccountingBook { TenantId = tenant, Code = "BASE", Name = "Primary",
+            IsDefault = true, IsActive = true, AllowsPosting = true });
+        if (ambiguous)
+            context.AccountingBooks.Add(new AccountingBook { TenantId = tenant, Code = "OTHER", Name = "Conflicting primary",
+                IsDefault = true, IsActive = true, AllowsPosting = true });
+        context.FinanceSettings.Add(new FinanceSettings { TenantId = tenant, BaseCurrency = "GHS" });
+        await context.SaveChangesAsync();
+        var action = () => PrimaryBookCompatibilityAuthorityResolver.ResolveAsync(new UnitOfWork(context), tenant, default);
+        if (ambiguous)
+            await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*PRIMARY_BOOK_AUTHORITY_AMBIGUOUS*");
+        else
+        {
+            var authority = await action();
+            authority.AccountingBookCode.Should().Be("BASE");
+            authority.FunctionalCurrencyCode.Should().Be("GHS");
+        }
+    }
+
+    [Theory]
+    [InlineData("foreign")]
+    [InlineData("deleted")]
+    [InlineData("draft")]
+    [InlineData("wrong-code")]
+    [InlineData("missing-book")]
+    [InlineData("reversed")]
+    [InlineData("reversal-link")]
+    [InlineData("event-foreign")]
+    [InlineData("event-journal")]
+    [InlineData("event-book")]
+    [InlineData("event-source")]
+    [InlineData("event-action")]
+    [InlineData("event-missing")]
+    [InlineData("currency-mismatch")]
+    [InlineData("currency-invalid")]
+    [InlineData("book-currency-missing")]
+    public async Task Inventory_return_rejects_unproven_book_lineage(string defect)
+    {
+        await using var context = Context();
+        var tenant = Guid.NewGuid();
+        var sourceId = Guid.NewGuid();
+        var book = new AccountingBook { TenantId = tenant, Code = "BASE", Name = "Primary",
+            FunctionalCurrencyCode = defect == "book-currency-missing" ? null : "USD" };
+        context.AccountingBooks.Add(book);
+        var journal = new JournalEntry { TenantId = defect == "foreign" ? Guid.NewGuid() : tenant,
+            AccountingBookId = defect == "missing-book" ? Guid.NewGuid() : book.Id,
+            BookClassification = defect == "wrong-code" ? "IFRS" : "BASE",
+            IsReversed = defect == "reversed", ReversalJournalEntryId = defect == "reversal-link" ? Guid.NewGuid() : null,
+            IsDeleted = defect == "deleted", PostingStatus = defect == "draft" ? "Draft" : "Posted" };
+        context.JournalEntries.Add(journal);
+        var postingEvent = OriginalEvent(tenant, journal, sourceId,
+            defect == "currency-mismatch" ? "GHS" : defect == "currency-invalid" ? "usd" : "USD");
+        if (defect == "event-foreign") postingEvent.TenantId = Guid.NewGuid();
+        if (defect == "event-journal") postingEvent.JournalEntryId = Guid.NewGuid();
+        if (defect == "event-book") postingEvent.AccountingBookId = Guid.NewGuid();
+        if (defect == "event-source") postingEvent.SourceDocumentId = Guid.NewGuid();
+        if (defect == "event-action") postingEvent.PostingAction = "Other";
+        if (defect != "event-missing") context.FinancePostingEvents.Add(postingEvent);
+        await context.SaveChangesAsync();
+        var action = () => ResolveOriginalBookAuthorityAsync(context, tenant,
+            [new(journal.Id, postingEvent.Id, sourceId)], "InventoryIssueVoucher", "PostInventoryIssue");
+        await action.Should().ThrowAsync<Exception>().WithMessage("*original*");
+    }
+
+    [Fact]
+    public async Task Inventory_return_reversal_retains_original_return_currency()
+    {
+        await using var context = Context();
+        var tenant = Guid.NewGuid();
+        var sourceId = Guid.NewGuid();
+        var book = new AccountingBook { TenantId = tenant, Code = "ORIGINAL", Name = "Original", FunctionalCurrencyCode = "USD" };
+        context.AccountingBooks.Add(book);
+        context.FinanceSettings.Add(new FinanceSettings { TenantId = tenant, BaseCurrency = "EUR" });
+        var journal = new JournalEntry { TenantId = tenant, AccountingBookId = book.Id,
+            BookClassification = book.Code, PostingStatus = "Posted" };
+        context.JournalEntries.Add(journal);
+        var postingEvent = OriginalEvent(tenant, journal, sourceId, "USD");
+        postingEvent.SourceDocumentType = "InventoryReturnVoucher";
+        postingEvent.PostingAction = "PostInventoryReturn";
+        context.FinancePostingEvents.Add(postingEvent);
+        await context.SaveChangesAsync();
+        var authority = await ResolveOriginalBookAuthorityAsync(context, tenant,
+            [new(journal.Id, postingEvent.Id, sourceId)], "InventoryReturnVoucher", "PostInventoryReturn");
+        authority.Should().Be(("ORIGINAL", "USD"));
+    }
+
+    private static FinancePostingEvent OriginalEvent(Guid tenant, JournalEntry journal, Guid sourceId, string currency) => new()
+    {
+        TenantId = tenant, JournalEntryId = journal.Id, AccountingBookId = journal.AccountingBookId,
+        SourceModule = "Inventory", SourceDocumentType = "InventoryIssueVoucher", SourceDocumentId = sourceId,
+        PostingAction = "PostInventoryIssue", PostingStatus = "Posted", FunctionalCurrencyCode = currency
+    };
 }

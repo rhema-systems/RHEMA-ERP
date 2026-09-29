@@ -2,6 +2,15 @@
   "schemaVersion": 1,
   "probes": [
     {
+      "sqlFile": "HrMedicalBoardMigrationPreflight.sql",
+      "migrations": [
+        {
+          "id": "20260926143546_AddMedicalBoardCases",
+          "sourceSha256": "50FDDCC9B58480C00FA8582EF78685DDB3D00D5D4E2F9D21949BB9632E6A5689"
+        }
+      ]
+    },
+    {
       "sqlFile": "FinanceCanonicalMigrationPreflight.sql",
       "migrations": [
         {
@@ -93,6 +102,55 @@
         {
           "id": "20260925210000_ReconcileAccountingBookPeriodInitializationSchema",
           "sourceSha256": "09AC36D49E7231CFB30FE8299FA3B376534944FAA0230387741F9D330DDA347E"
+        }
+      ]
+    },
+    {
+      "sqlFile": "InventoryControlledMigrationPreflight.sql",
+      "migrations": [
+        {
+          "id": "20260927141036_InventoryControlledWorkflowsAndAccounting",
+          "sourceSha256": "8492BE5C9A538182B7C6042B6123C21F205F617F8304F73670C3C642E24DD060",
+          "guardSources": [
+            {
+              "file": "InventoryTransferAllocationGuards.cs",
+              "sourceSha256": "ED00006634FF59A10D5A28BBF7FCCB8FBE138FBE50D30994A3DAF2A90E99557B"
+            },
+            {
+              "file": "PhysicalCountCommitteeGuards.cs",
+              "sourceSha256": "5DF627D061CD7618412813B7639A8F9BA2EDAFC5AD96EEE5FC2233D57CB43A4B"
+            },
+            {
+              "file": "PhysicalCountRecountGuards.cs",
+              "sourceSha256": "6CED507FE7B6A76A800F6C6AEF69505D138A49C52425741D183DF63E6025BD49"
+            },
+            {
+              "file": "InventorySupplierInvoiceCostGuards.cs",
+              "sourceSha256": "05DBD5417FE2BCE4C6AAB8CEB3DF82CBAD37913CEF3B50408622A3106CCFBE1F"
+            },
+            {
+              "file": "InventorySupplierReturnAllocationGuards.cs",
+              "sourceSha256": "CA494B0D6260E39AC79B81E5ADD2847967B2C1E466E5D13CF42CBE2C96392DC5"
+            },
+            {
+              "file": "InventoryDisposalAccountingGuards.cs",
+              "sourceSha256": "0AD40A4A37DA3F78EF2B8C3BEAB214EB4437705F76B190565641E15D08F44FC8"
+            },
+            {
+              "file": "SalesOrderInvoiceGuards.cs",
+              "sourceSha256": "B556F14FE8FBF0144E1769AB3FB3FF086DB67503CC0CC4DBAA588F81068C7E92"
+            }
+          ]
+        },
+        {
+          "id": "20260927211546_InventoryIssueOptionalWorkflowApproval",
+          "sourceSha256": "70DDD864C4331C40F68E58A0DB81F97F76B5E2B478E4379FFE9C134CB318C462",
+          "guardSources": [
+            {
+              "file": "InventoryIssueOptionalApprovalGuards.cs",
+              "sourceSha256": "8D4311D82D095F7ED864707560E25B02B3367D0662A1703B1689C9369E51A445"
+            }
+          ]
         }
       ]
     }

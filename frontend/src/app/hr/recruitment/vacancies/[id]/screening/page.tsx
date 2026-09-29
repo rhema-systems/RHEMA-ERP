@@ -24,6 +24,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { GatedPhoto } from '@/components/hr/common/PhotoDialog';
 import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
@@ -31,7 +32,7 @@ import { ShortlistApprovalCard } from '@/components/hr/recruitment/ShortlistAppr
 import { useToast } from '@/hooks/use-toast';
 import { formatDate } from '@/lib/hr/attendance-format';
 import { jobVacancyService } from '@/services/hr/recruitment.service';
-import { jobApplicationService } from '@/services/hr/recruitment-pipeline.service';
+import { jobApplicationService, jobCandidateService } from '@/services/hr/recruitment-pipeline.service';
 import type { BulkOperationResult, EeoStage } from '@/types/hr/recruitment-pipeline';
 
 function EeoRow({ label, stage }: { label: string; stage: EeoStage }) {
@@ -358,13 +359,24 @@ export default function VacancyScreeningPage() {
                               />
                             </TableCell>
                             <TableCell>
-                              <Link
-                                href={`/hr/recruitment/applications/${r.id}`}
-                                className="font-medium hover:underline"
-                              >
-                                {r.candidateName || r.applicationNumber}
-                              </Link>
-                              <div className="text-xs text-muted-foreground">{r.candidateEmail}</div>
+                              {/* Round 4, lane B5 — a face on the screening list too. */}
+                              <div className="flex items-center gap-3">
+                                <GatedPhoto
+                                  endpoint={jobCandidateService.photoUrl(r.jobCandidateId)}
+                                  enabled={r.candidateHasPhoto}
+                                  alt={r.candidateName}
+                                  className="h-8 w-8"
+                                />
+                                <div>
+                                  <Link
+                                    href={`/hr/recruitment/applications/${r.id}`}
+                                    className="font-medium hover:underline"
+                                  >
+                                    {r.candidateName || r.applicationNumber}
+                                  </Link>
+                                  <div className="text-xs text-muted-foreground">{r.candidateEmail}</div>
+                                </div>
+                              </div>
                             </TableCell>
                             <TableCell className="text-sm text-muted-foreground">
                               {formatDate(r.applicationDate)}

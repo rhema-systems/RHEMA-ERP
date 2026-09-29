@@ -10,6 +10,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Enums;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -111,6 +112,20 @@ namespace ErpSystem.Tests.Services.Finance
 
             // Assert
             result.Should().BeNull();
+        }
+
+        [Fact]
+        public async Task GetBalancesAsync_ShouldRejectAccountOwnedByAnotherTenant()
+        {
+            var otherTenantAccount = CreateAccount("U-OTHER", "Other tenant");
+            otherTenantAccount.TenantId = Guid.NewGuid();
+            SetupAccountQueryable(new List<UnitAccount> { otherTenantAccount });
+            SetupBalanceQueryable(new List<UnitAccountBalance>());
+
+            var action = () => _service.GetBalancesAsync(otherTenantAccount.Id);
+
+            await action.Should().ThrowAsync<ArgumentException>()
+                .WithMessage("*not found*");
         }
 
         #endregion
@@ -322,6 +337,42 @@ namespace ErpSystem.Tests.Services.Finance
 
             // Assert
             account.IsActive.Should().BeFalse();
+        }
+
+        [Fact]
+        public async Task RecalculateBalancesAsync_ShouldAggregatePostingDescendants_ForSummaryAccount()
+        {
+            var parent = CreateAccount("U-1000", "Summary");
+            parent.IsPostingAccount = false;
+            var child = CreateAccount("U-1001", "Posting child");
+            child.ParentAccountId = parent.Id;
+            var entry = new UnitJournalEntry
+            {
+                Id = Guid.NewGuid(),
+                TenantId = _tenantId,
+                Status = UnitJournalEntryStatus.Posted
+            };
+            var line = new UnitJournalEntryLine
+            {
+                Id = Guid.NewGuid(),
+                TenantId = _tenantId,
+                UnitAccountId = child.Id,
+                UnitJournalEntryId = entry.Id,
+                UnitJournalEntry = entry,
+                Quantity = 25m
+            };
+
+            _mockAccountRepository
+                .Setup(r => r.FirstOrDefaultAsync(It.IsAny<Expression<Func<UnitAccount, bool>>>() ))
+                .ReturnsAsync(parent);
+            SetupAccountQueryable(new List<UnitAccount> { parent, child });
+            SetupJournalLineQueryable(new List<UnitJournalEntryLine> { line });
+            _mockAccountRepository.Setup(r => r.UpdateAsync(It.IsAny<UnitAccount>())).Returns(Task.CompletedTask);
+            _mockUnitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+
+            await _service.RecalculateBalancesAsync(parent.Id);
+
+            parent.CurrentBalance.Should().Be(25m);
         }
 
         #endregion

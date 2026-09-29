@@ -606,9 +606,14 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             throw new InventoryIssueControlException("INV_ISSUE_APPROVED_SOURCE_REQUIRED",
                 "Only an approved or partially issued requisition can be issued.");
 
-        if (!requisition.RequestedById.HasValue || !requisition.ApprovedById.HasValue)
+        // Match submission's optional-workflow policy. A retained active instance must
+        // still finish even if its definition has subsequently been retired.
+        var approvalRequired = requisition.ApprovedById.HasValue ||
+            await _workflowIntegrationService.HasActiveApprovalInstanceAsync(WorkflowEntityType, id) ||
+            await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(WorkflowEntityType);
+        if (!requisition.RequestedById.HasValue || (approvalRequired && !requisition.ApprovedById.HasValue))
             throw new InventoryIssueControlException("INV_ISSUE_APPROVAL_LINEAGE_REQUIRED",
-                "The requisition must retain both requester and completed-workflow approver lineage.");
+                "The requisition must retain its requester and complete the configured approval workflow before issue.");
         if (requisition.RequestedById == requisition.ApprovedById)
             throw new InventoryIssueControlException("INV_ISSUE_REQUEST_APPROVAL_SOD",
                 "The requester and approver must be different users.");
@@ -652,6 +657,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             requisition.LocationId,
             requisition.RequestedById,
             requisition.ApprovedById,
+            ApprovalRequired = approvalRequired,
             dto.MovementReasonCode,
             ApprovedEstimates = requisition.Items.Select(line => new
             {
@@ -673,7 +679,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             ProjectId = requisition.ProjectId,
             ProjectCode = NormalizeOptional(requisition.ProjectCode, 100),
             RequestedById = requisition.RequestedById.Value,
-            ApprovedById = requisition.ApprovedById.Value,
+            ApprovedById = requisition.ApprovedById,
             IssuedById = _currentUserProvider.UserId,
             ReceiverUserId = receiverId,
             IssuedAtUtc = issuedAt,

@@ -1942,6 +1942,10 @@ public static class AttendanceMappingExtensions
             ObservanceType = entity.ObservanceType,
             AttractsHolidayPay = entity.AttractsHolidayPay,
             IsActive = entity.IsActive,
+            Description = entity.Description,
+            SubstitutionDate = entity.SubstitutionDate,
+            HolidayPayMultiplier = entity.HolidayPayMultiplier,
+            IsRecurringAnnually = entity.IsRecurringAnnually,
         };
     }
 
@@ -2325,6 +2329,7 @@ public static class AttendanceMappingExtensions
             Region = entity.Region,
             PostalCode = entity.PostalCode,
             CountryId = entity.CountryId,
+            FinanceCustomerId = entity.FinanceCustomerId,
             CountryName = entity.Country?.Name,
             BillingContactName = entity.BillingContactName,
             BillingContactEmail = entity.BillingContactEmail,
@@ -2377,6 +2382,7 @@ public static class AttendanceMappingExtensions
             Region = dto.Region,
             PostalCode = dto.PostalCode,
             CountryId = dto.CountryId,
+            FinanceCustomerId = dto.FinanceCustomerId,
             BillingContactName = dto.BillingContactName,
             BillingContactEmail = dto.BillingContactEmail,
             BillingContactPhone = dto.BillingContactPhone,
@@ -2403,6 +2409,7 @@ public static class AttendanceMappingExtensions
         entity.Region = dto.Region;
         entity.PostalCode = dto.PostalCode;
         entity.CountryId = dto.CountryId;
+        entity.FinanceCustomerId = dto.FinanceCustomerId;
         entity.BillingContactName = dto.BillingContactName;
         entity.BillingContactEmail = dto.BillingContactEmail;
         entity.BillingContactPhone = dto.BillingContactPhone;

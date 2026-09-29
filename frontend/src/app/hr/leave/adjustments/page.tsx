@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
+import { useLeaveYear } from '@/components/hr/leave/use-leave-year';
 import { leaveService } from '@/services/hr/leave.service';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
 import { reasonCodeService } from '@/services/hr/lookup.service';
@@ -29,8 +30,6 @@ import {
 } from '@/components/hr/employee/tabs/fields';
 
 const ALL = '__all__';
-const currentYear = new Date().getFullYear();
-const years = [currentYear + 1, currentYear, currentYear - 1, currentYear - 2];
 
 const schema = z.object({
   employeeId: z.string().min(1, 'Employee is required'),
@@ -133,7 +132,12 @@ function BalancePreview({
 export default function LeaveAdjustmentsPage() {
   const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [leaveTypeId, setLeaveTypeId] = useState<string>(ALL);
-  const [year, setYear] = useState<string>(String(currentYear));
+  // ⚠ Leave settings audit 2, L-95: the current leave year, not the calendar year; the choice is
+  // kept apart so a late answer moves the default and never overrides it (see useLeaveYear).
+  const { currentYear } = useLeaveYear();
+  const years = [currentYear + 1, currentYear, currentYear - 1, currentYear - 2];
+  const [chosenYear, setYear] = useState<string | null>(null);
+  const year = chosenYear ?? String(currentYear);
   const [search, setSearch] = useState('');
 
   const { data: leaveTypes } = useQuery({

@@ -15,7 +15,7 @@ namespace ErpSystem.Api.Tests.Services.Estate;
 public sealed class FacilitiesProviderOptionsControllerTests
 {
     [Fact]
-    public async Task InvoicesIncludeDirectApInvoicesOnlyThroughCurrentTenantLink()
+    public async Task InvoicesIncludeDirectApInvoicesOnlyForCurrentTenantBusinessPartner()
     {
         var tenantId = Guid.NewGuid();
         await using var db = new ApplicationDbContext(
@@ -24,19 +24,14 @@ public sealed class FacilitiesProviderOptionsControllerTests
             tenantId);
         var provider = Partner(tenantId, "Approved");
         var otherProvider = Partner(Guid.NewGuid(), "Approved");
-        var supplier = new Supplier { TenantId = tenantId, SupplierCode = "AP-1", Name = "AP supplier" };
-        var unlinkedSupplier = new Supplier { TenantId = tenantId, SupplierCode = "AP-2", Name = "AP supplier" };
-        db.BusinessPartners.AddRange(provider, otherProvider);
-        db.Suppliers.AddRange(supplier, unlinkedSupplier);
-        db.ApSupplierIdentityLinks.Add(new ApSupplierIdentityLink
-        {
-            TenantId = tenantId, BusinessPartnerId = provider.Id, SupplierId = supplier.Id,
-            MappingSource = "VerifiedManual"
-        });
+        var sameNameProvider = Partner(tenantId, "Approved");
+        db.BusinessPartners.AddRange(provider, otherProvider, sameNameProvider);
+        var deleted = Invoice(tenantId, provider.Id, "DELETED", null);
+        deleted.IsDeleted = true;
         db.VendorInvoices.AddRange(
-            Invoice(tenantId, supplier.Id, "DIRECT", null),
-            Invoice(tenantId, unlinkedSupplier.Id, "SAME-NAME-UNLINKED", null),
-            Invoice(Guid.NewGuid(), supplier.Id, "OTHER-TENANT", null));
+            Invoice(tenantId, provider.Id, "DIRECT", null),
+            Invoice(tenantId, sameNameProvider.Id, "SAME-NAME-OTHER-PARTNER", null),
+            Invoice(Guid.NewGuid(), provider.Id, "OTHER-TENANT", null), deleted);
         await db.SaveChangesAsync();
         var user = new Mock<ICurrentUserService>();
         user.SetupGet(item => item.TenantId).Returns(tenantId);
@@ -146,9 +141,9 @@ public sealed class FacilitiesProviderOptionsControllerTests
         EndDate = endDate
     };
 
-    private static VendorInvoice Invoice(Guid tenantId, Guid supplierId, string number, Guid? purchaseOrderId) => new()
+    private static VendorInvoice Invoice(Guid tenantId, Guid partnerId, string number, Guid? purchaseOrderId) => new()
     {
-        TenantId = tenantId, SupplierId = supplierId, SupplierName = "AP supplier",
+        TenantId = tenantId, BusinessPartnerId = partnerId, SupplierName = "AP supplier",
         InvoiceNumber = number, InvoiceDate = DateTime.UtcNow,
         PurchaseOrderId = purchaseOrderId, TotalAmount = 100, CurrencyCode = "GHS"
     };

@@ -1,13 +1,51 @@
 # HR — Configuration Register
 
 **Started 2026-09-17** (leave residue plan, slices G2/G3), extended 2026-09-18 (G6), extended again
-2026-09-18 (entitlement plan W1c).
+2026-09-18 (entitlement plan W1c), and 2026-09-23 (round 4 lane K-a — § 2.5; lane K-b1 — § 2.6;
+lane N — § 2.7, the 44 letter and email templates; lane N-b2 — § 2.8, company-schedule reminders;
+lane O — § 2.9, the technician-role flag and the person's exception).
 
-**Surveyed: all of `CompanyHrPolicySettings` (46 + 1 added 2026-09-18), all of `LeaveType` (26 + 2), and
-all four of leave's CHILD tables (38).** Three ghosts found, all in the first — **and one setting that is none of the
+**Surveyed: all of `CompanyHrPolicySettings` (46 + 1 added 2026-09-18 + 4 added 2026-09-23, all four enforced — § 2.5), all of `LeaveType` (26 + 2, and `AllowOffsetAgainstAnnual` added 2026-09-26), and
+all four of leave's CHILD tables (38)** — plus, not as a full survey, the three `OrientationProgram` notice and
+certificate switches lane K-b1 made real (§ 2.6: two were ghosts). Three ghosts found, all in the first — **and one setting that is none of the
 four statuses**, which is why there are now five. The per-module settings for attendance, travel,
 appraisal, company schedule and the rest are still to do — see § 4, which now says what each one is
 expected to cost.
+
+### ⚠ Corrected 2026-09-25 — every leave-type setting audited (round 5)
+
+The 2026-09-18 surveys counted **references**. This audit read what each consumer actually **does**,
+and it found settings this register had marked Enforced or clean that are not. **§ 3.2's "zero
+ghosts" is wrong.** Until the round 5 lanes land, this table overrides the rows below it. Evidence:
+the round 5 plan's *What exploration found* (repo copy to come:
+`docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-5-LEAVE-PLAN.md`); plain terms:
+`docs/HR/areas/leave/HR-LEAVE-ROUND-5-WHAT-CHANGES.md` § 15.
+
+| Setting | This register said | Actually | Round 5 fix |
+|---|---|---|---|
+| `LeaveType.IsPaid` | clean (§ 3.2) | **Ghost** in HR — display only; what unpaid leave deducts is payroll's (L-D6) | N1: **done** — relabelled as a label for readers; payroll decides the deduction |
+| `EncashmentWorkingDaysPerMonth` (tenant) | Enforced (§ 1) | **Unreachable** — the leave type's own divisor always wins, and the form's minimum is 1 (default 22). Slice 6 proved it only by POSTing a type divisor of 0, which no form can send | N1: **done** — off the policy page. **Leave settings audit 2 (L-75): dropped, 2026-09-27** |
+| `LeaveAccrualPolicy.IsActive` | enforced (§ 3.2b) | **Unreachable** — no DTO field, mapping or update writes it; always true | N1: **done** — the *In force* switch; the one-in-force rule follows it |
+| `LeaveAccrualPolicy.ProRateOnJoin` | Unreachable (§ 0, § 3.2b) | **Enforced** — fixed by entitlement plan B1; both positions work | — |
+| `MaxDaysPerYear` | clean | **Misleading** — only ever lowers the entitlement. Default 0 with Max 90 means the type can never be booked (UNPAID and INJ on the demo) | N2, N4: **done** — binds on annual leave only, as the highest allocation allowed; UNPAID 90 and INJ 180 |
+| `LeaveAccrualPolicy.Frequency` | enforced | **Misleading** — every frequency falls one period short within the year (monthly 11/12); incremental `Annual` accrues 0 all year; `PerPayPeriod` behaves as Monthly | N2: **done** for incremental *Annual* (refused anew; *PerPayPeriod* already was). C1: **done 2026-09-25** — a period counts on its last day, so monthly, quarterly and half-yearly reach the whole entitlement on the year's last day; asserted at exact figures on both days of every boundary (`run-round5-c.mjs` [1]–[3]). **Leave settings audit 2 (L-92): *None* refused** — it accrued nothing and, in force, blocked a real policy; a row carrying it stays editable (`run-audit2-c.mjs` [4]) |
+| `CarryOverExpiryMonths` | clean | **Misleading** — also wipes carried days already used; sweep 5's skip rule assumes it does not | G: **done 2026-09-25** — the expiry keeps the carried days taken before the deadline and removes the rest; sweep 5 warns about exactly those; carry-over leaves lapsed days behind. Executed for real in both positions of the deadline (`run-round5-g.mjs` [4], [5]) |
+| `MaxCarryOverDays`, `YearEndBasis` | Enforced | Proved by previews only (slice 12) | G: **executed for real** 2026-09-25 — the cap raised and lowered with the carried figure following it, and both bases carrying different days (`run-round5-g.mjs` [2], [3]) |
+| `ForfeitUnusedAfterMonths` | clean | **Misleading** — a closed year cannot be booked, so it affects no leave-taking; it only closes a window for cashing that year's leftover in | N2: **done** — help text says what it does; off for TDC (B7), UAT and seeder. **Leave settings audit 2 (L-90): waits for the year end** — an open year's unused days are not forfeited, the preview neither; carried-day expiry still runs mid-year (`run-audit2-c.mjs` [2]) |
+| `MandatoryAnnualLeave` | clean | Advisory (compliance list + sweep 4). Its doc comment's "used by the forfeiture routine" is false | A: **done 2026-09-25** — retired into the Annual kind (`Category`, § 3) and the column dropped |
+| `LeaveTypeEligibility` rules, `Gender` | enforced; "`Gender` ANDs onto an org-scoped rule" | Rules are **OR'd**, under a tab that says "restrict"; the gender qualifier on an organisation rule **cannot be set from the tab** | N2: **done** — the tab says rules are OR'd, and a unit, level or position rule takes a gender. **Leave settings audit 2:** a unit rule admits the units beneath it (L-93); every rule validated on save, refused with the reason (L-94) (`run-audit2-c.mjs` [5], [6]) |
+| `HasSubTypes` | clean | Only blocks creating a sub-type; hides nothing | N2: **done** — derived from active sub-types; the checkbox is gone |
+| `LeaveSubType.MaxDaysAllowed` | enforced | Skipped when a draft is edited; **also replaces the type's whole entitlement** for a request carrying the sub-type | N2, N3: **done** — limits the sub-type inside its type's pot; a draft edit checks it |
+| `LeaveSubType.IsActive` | "refused by the service" | Create ignores it; editing a draft validates no sub-type | N3: **done** — create honours it; a draft edit checks it |
+| `LeaveCategoryAllocation.LeaveSubTypeId` | enforced | Almost never applies — balances resolve at type level | N2: **done** — always the whole type; the picker is gone |
+| `LeaveAccrualPolicy.ProRateOnExit` | enforced | Binds in the engine only; no payout reads it | L2: **done 2026-09-26** — the leaver's settlement asks for the build-up at the leave year's END with the last day on the subject, so on stops it at the last day and off credits the whole year; `run-round5-l.mjs` [3c], both positions on the same leaver (10.5 against 21 days). Its hint said otherwise until leave settings audit 2 (L-87) |
+| `MinDaysNotice`, `RequiresReliever` | clean | **Bypassable** — skipped for drafts and never re-checked at submit | N3: **done** — submit re-runs both |
+| `MedicalBoardThresholdDays` | Enforced (§ 3) | **Bypassable** — Pending requests are not counted; reschedule, suggested dates and the counter-proposal skip the gate | N3: **done** — Pending counts; a lengthening move re-runs the gate. K6: **done** (2026-09-26) — and any concluded board about the employee no longer satisfies it: only one asked about an absence (extended sick leave, injury on duty, other) that reported during the leave year counted. Counted in **chargeable** days, as both labels now say (L-88) |
+| `ProRateFirstYearEntitlement` | Enforced (§ 3) | Correct only for a January leave year (counts calendar months to December) | C4: **done 2026-09-25** — months of the leave year; an April-start joiner hired in February gets 2/12, both start months asserted (`run-round5-c.mjs` [9]) |
+| `LeaveYearStartMonth` | Enforced (§ 1.5) | Two readers ignore it: first-year pro-rating and sweep 4's month | C4: **done 2026-09-25** — both follow it, and eleven controller defaults (a call naming no year) now give the current leave year, not the calendar year; `GET api/Leaves/leave-year` lets screens open on it. **Leave settings audit 2 (L-95):** the six desk screens that still opened on the calendar year open on it; the change guard holds for a tenant with no settings row (against the default) and counts plans (`run-audit2-c.mjs` [7]) |
+| The five reminder windows | Enforced (§ 2) | The windows bind, but every reminder goes to the **HR role only**, in-app — the entity comments naming the employee, manager or approver are false; sweep 4 compares the calendar month | C4: **done** for sweep 4's month — `MandatoryLeaveChaseFromMonth` is a month **of the leave year**, asserted in both positions under a July start. I: **done 2026-09-26** — each reminder reaches the people who can act on it, in the app and by email, and HR when nobody else can be told; the entity comments now say who (§ 2, `run-round5-i.mjs`) |
+| `AllowCashConversion` and the four encashment-rate settings | Enforced | Enforced **in service only**. The exit settlement ignores all of them — it sums every type and year (`SeparationService.cs:2234-2249`) — so with `AllowInServiceEncashment` off (the default) none can fire | L2: **done 2026-09-26** — the settlement pays ANNUAL leave only, the leave year the person leaves in, owed at the last day (the leave owed report's own working) less requests awaiting a decision; none on summary dismissal (a stated zero, Act 651 s.30(3)). The rate settings still apply in service only, which stays off |
+| The exit settlement's **56-day cap** on leave paid out | not listed | **A constant in code** (`SeparationService.cs:2232`, FR-HR-152): enforced, but visible on no screen and changeable only by a release | L2b: **done 2026-09-26** — `SettlementLeaveDaysCap`, row below |
 
 ---
 
@@ -88,8 +126,9 @@ the survivors rather than counting them.
 
 | Setting | Default | Status | Enforced where | Proof |
 |---|---|---|---|---|
-| `AllowInServiceEncashment` | **`false`** | **Enforced** | `LeaveEncashmentService.RequestEncashmentAsync` — asked **before** the leave type, so the refusal names the real reason | slice 6 [1] — refused off, accepted on, same request |
-| `EncashmentWorkingDaysPerMonth` | `22` | **Enforced** | `EmolumentService.GetEncashmentDailyRateAsync` | slice 6 [2] — 6,600 ÷ 22 vs ÷ 30, exact figures |
+| `AllowInServiceEncashment` | **`false`** — and the demo tenant's seed is **off too** since round 5 lane L1 (UAT switched through the API, 2026-09-26) | **Enforced** | `LeaveEncashmentService.RequestEncashmentAsync` — asked **before** the leave type, so the refusal names the real reason; `GET leave-encashments/availability` lets the portal hide its screen when off. On, it takes only annual leave, the current leave year, up to *can take now* less requests awaiting a decision (lane L3) | slice 6 [1] — refused off, accepted on, same request; `run-round5-l.mjs` [1] off, [4] the three L3 limits on |
+| `SettlementLeaveDaysCap` *(round 5 lane L2b)* | **`56`** (FR-HR-152); empty = no cap. A save that omits it keeps 56 — only an explicit empty clears it | **Enforced** | `SeparationService.AddLeaveEncashmentLineAsync` — the most days of annual leave a leaver's settlement pays; the line says when it capped and from what. On the HR policy page beside the settlement's days per year. Migration `AddSettlementLeaveDaysCap` wrote 56 on every existing tenant row | `run-round5-l.mjs` [2] (56, empty on purpose, 56 back when omitted) and [3e] (cap 2 pays 2; no cap pays the full 10.5, same leaver) |
+| ~~`EncashmentWorkingDaysPerMonth`~~ | — | **Removed** *(leave settings audit 2, 2026-09-27, L-75 — was unreachable, corrected 2026-09-25)* | `EmolumentService.GetEncashmentDailyRateAsync` — only when the leave type's own divisor is 0, which the form cannot send | slice 6 [2] — 6,600 ÷ 22 vs ÷ 30, exact figures, **via an API-only type divisor of 0** |
 
 **⚠ `AllowInServiceEncashment` settles a requirements conflict, not a preference.** FR-HR-046 says
 leave is encashed *"only on exit, no other route"*, and the module ships an in-service path with
@@ -101,7 +140,15 @@ it on deliberately rather than inheriting it by accident.
 screen has already been demonstrated to stakeholders, and defaulting it off without that seed line
 would make a shown feature vanish.
 
-### The two daily-rate bases — and why they are NOT merged
+### The two daily-rate bases — ⚠ both removed (leave settings audit 2, 2026-09-27)
+
+> **Pay is Finance's.** HR records the days — a leaver's notice paid in lieu and annual leave owed,
+> leave cashed in while employed — and Finance values them in its own step, *Pay to value*
+> (`HR.Pay.Value`). Both divisors went (`EncashmentWorkingDaysPerMonth` on the tenant and the leave
+> type, `SettlementDaysPerYear`), with the leave type's rate basis and rate per day and the
+> `LeaveTypeAllowances` links (L-73 to L-75). A settlement prepared since carries no daily rate; an
+> encashment's `RateBasis` is Finance's sentence. **What follows is the record of how the two bases
+> stood**, kept because released statements and paid encashments still carry them.
 
 | | Divisor setting | Formula |
 |---|---|---|
@@ -170,6 +217,23 @@ is exactly what one client wants weekly and another fortnightly, and changing it
 | `MandatoryLeaveChaseFromMonth` | `9` | **Enforced** | [6] an outstanding mandatory balance: raised chasing from month 1, silent chasing from next month |
 | `LeaveCarryOverExpiryReminderDays` | `30` | **Enforced** | [7] 5 carried days lapsing 31 Dec: silent at a window short of it, warned at one that reaches it |
 
+**Who each one reaches** *(round 5, lane I, 2026-09-26)* — the entity's comments say the same, and
+the settings card lists it. Every reminder goes in the app **and by email**, through its own
+notification topic per audience (`LeaveReminder.{Kind}.{Audience}`), and anybody who cannot be told
+directly is passed to HR with the reason:
+
+| Setting | Chases | Told |
+|---|---|---|
+| `LeaveStartingReminderDays` | approved leave about to start, until somebody says it is still going | the employee |
+| `LeaveClosureGraceDays` | leave ended and not closed | the line manager once the return is reported (supervisor, else the nearest head of unit); HR before |
+| `LeaveUndecidedChaseDays` | a request waiting | whoever its current approval step is asking, never the requester; the employee when sent back with other dates |
+| `MandatoryLeaveChaseFromMonth` | annual leave not yet planned or taken — everybody serving past the qualifying period, with or without a record, once a leave year | the employee; the supervisor, one message naming their people; HR, one summary per run |
+| `LeaveCarryOverExpiryReminderDays` | carried days about to lapse | the employee |
+
+Proved in both positions by `dev-harness/hr-leave/run-round5-i.mjs`. The chase's kind is now
+`AnnualLeaveOutstanding` (was `MandatoryLeaveOutstanding`); slice 6 and lane C's suite look for the
+new name — with the old one, slice 6's *"silent from next month"* half would pass for ever.
+
 **All five now carry the two-position test.** For a time the last three were marked *Enforced
 (wiring)* — read from the same `policy` object in the same method as the two that were proved, but
 with no fixture of their own, so the sweep produced nothing for them and flipping the setting could
@@ -184,7 +248,7 @@ The fixtures they needed:
 | Setting | What the sweep required |
 |---|---|
 | `LeaveClosureGraceDays` | leave whose end date has passed and is still open — made by **recalling** leave that started today, since creating a backdated request is refused |
-| `MandatoryLeaveChaseFromMonth` | a balance on a `MandatoryAnnualLeave` type with days outstanding — **planted directly**, as a year's accrual is not what the assertion is about |
+| `MandatoryLeaveChaseFromMonth` | a balance on the tenant's **Annual** type with days outstanding — **planted directly**, as a year's accrual is not what the assertion is about. Since round 5 lane A it is planted on the tenant's own Annual type for the one fixture employee and removed by id; before, it was a `MandatoryAnnualLeave` type of the slice's own. Since lane I the chase reads everybody past the qualifying period, record or none, so the planted row fixes the figure rather than making the employee a candidate |
 | `LeaveCarryOverExpiryReminderDays` | a balance with carried days on a type with an expiry month — planted, with `CarryOverExpiryMonths = 12` so the lapse date is 31 December and the test works from any day of the year |
 
 ⚠ **One half of the mandatory assertion cannot run in December** — it needs a month the year has not
@@ -194,6 +258,225 @@ meaning with the calendar is worse than one that admits it cannot run today.
 **Not moved, deliberately:** the engine's 90-day backlog horizon stays a constant. It stops the first
 run on an established database queueing years of history at once (area 9 queued 275 items, 242 of
 them history). It protects the system from itself; it is not a policy anybody should be choosing.
+
+---
+
+## 2.5 Orientation & onboarding — reminder windows `CompanyHrPolicySettings` — added 2026-09-23
+
+Round 4, lane K-a. Read by `OnboardingOrientationReminderService` — **the first HR sweep that
+delivers** (one in-app notification per person per run, and the same by email) rather than only
+logging. Born as settings, not constants, and each proved in both positions before being marked
+enforced. Migration `AddOnboardingOrientationReminders` adds them `NOT NULL` with their real
+`DEFAULT`s, so every tenant's row — not only the seeded one — starts at the value below.
+
+| Setting | Default | Status | Proof — `hr-orientation/run-round4-k.mjs` block B, both positions |
+|---|---|---|---|
+| `OnboardingTaskDueLeadDays` | `3` | **Enforced** | [B1] a task due in 5 days: silent at 3, reminded at 10 |
+| `OrientationDueLeadDays` | `7` | **Enforced** | [B2] an orientation due in 3 days: silent at 2, reminded at 7 |
+| `OrientationCertificateExpiryLeadDays` | `30` | **Enforced** | [B3] a certificate expiring in 10 days: silent at 5, warned at 30 |
+| `OrientationChaseAfterDays` | `3` | **Enforced** | [B4] an assessment unattempted, and a task awaiting sign-off, both waiting 5 days: neither chased at 10, both chased at 3 |
+
+**Not a setting, deliberately:** the 90-day backlog horizon for overdue items, for the reason given
+under § 2 — measured here as well: the demo database held 6,583 open onboarding tasks more than 90
+days overdue on the day the engine was built.
+
+---
+
+## 2.6 Orientation — per programme: notices and certificates `OrientationProgram` — added 2026-09-23
+
+Round 4, lane K-b1. Two switches on the programme form that said what they did and did nothing —
+**both ghosts until this lane**, found by its survey before anything was built. The first is also a
+defect in lane K-a: the daily sweep shipped reminding people on programmes where "Send reminders"
+was off.
+
+| Setting (the form's label) | Default | Status | Proof — `hr-orientation/run-round4-kb.mjs`, both positions |
+|---|---|---|---|
+| `EnableReminders` ("Send reminders") | on for a new programme | **Enforced** — was a ghost | [A13/A15] the same audience rule on two programmes enrols both pairs, tells them only where it is on; [F1] an HR enrolment: told on one, not the other; [F2] the daily sweep: due-soon reminded on one, silent on the other. Governs what its description says — enrolment notices and the sweep's reminders; session changes, completions and certificates are sent either way |
+| `IsCertificateIssued` ("Issues a certificate") | off | **Enforced** — was a ghost | [C1–C3] a certificated programme issues its certificate at the moment of completion; [C9] an uncertificated one issues none; [D3] and HR's Issue certificate is refused for it. Before this nothing issued one, and HR's endpoint (which no screen called) never asked |
+| `CertificateValidityMonths` | none — never expires | **Enforced** | [C3] 12 months, and [D8] 24 months, become the certificate's expiry. HR's issue path already read it; the completion path does too |
+
+---
+
+## 2.7 HR letters and emails — the wording of every template `EmailTemplate` — added 2026-09-23
+
+Round 4, lane N. Every email and printed document the HR modules produce is rendered from a
+template whose shipped wording is declared in one of **eight catalogues** (`IEmailEventCatalog`) —
+**44 templates**. Since this lane a tenant can reword any of them at **Administration → HR Settings →
+Letter & Email Templates** (`api/hr/letter-templates`: reading on HR Company Read, saving, resetting
+and a test send on Write, which the HR role holds). The shipped wording stays in code; a tenant's own
+is a row in `EmailTemplates`, written only when HR saves one and set aside by **Reset**.
+
+⚠ **This table is checked against the screen in both directions** by
+`hr-templates/run-lane-n.mjs` [A6–A8]. A template added to a catalogue and not entered here fails that
+suite, and so does a row here for a template that no longer exists.
+
+**Not on the screen, and not configurable:** the in-app notifications — the orientation notices'
+headline and message, every `NotificationTemplate` — are written in code. The screen says so.
+
+### Whose wording goes out — one resolver, three roads
+
+Every production render goes through `TemplatedEmailService`. The survey on 2026-09-23 found 21 call
+sites, and none bypasses it. The service uses **the sending tenant's own row** if that tenant has
+chosen one, and the shipped wording otherwise. The roads differ only in how the sender's tenant is
+known.
+
+| Road | The tenant comes from | Templates | Proof in both positions (`run-lane-n.mjs`) |
+|---|---|---|---|
+| **Signed in**: HR, an employee or a candidate, inside a request | the caller's own token | 18 emails and 12 documents | [E1–E4] a letter HR previews: shipped wording, then HR's, then shipped again after a reset. [K2–K3] a candidate's application email arrives in HR's wording |
+| **Background**: a job with nobody signed in | the sender names it (`SendForTenantAsync`) | the 13 orientation and onboarding emails, sent through the outbox and the daily digest | [F4] shipped. [H5–H7] HR's. [I3] shipped after a reset. [I6] HR's again after a revive |
+| **Anonymous**: a careers registration, or a candidate answering an offer by its emailed link | the sender names it: the registration's tenant, or the offer's | `CandidateAccountActivation`; `OfferAccepted` when the acceptance comes by the link (lane N-b1) | [J2–J3b] shipped. [J6–J7] HR's. [J8] shipped after a reset. `run-lane-nb1.mjs` [F2–F3]: an acceptance by the link arrives in the tenant's own wording |
+
+⚠ **"Enforced" below is proved per road, not per template.** The resolver is one method, every call
+site reaches it, and the harness changes one template on each road and sees the other wording
+arrive. A caller that stopped using `ITemplatedEmailService` would silently stop being Enforced, so
+the 21-call-site count is the thing to re-survey.
+
+⚠ **Raw placement is a catalogue fact, not a save-time guess.** `{{{Token}}}` is not escaped, so a
+save accepts it only for tokens marked `IsHtml`: the ready-made HTML the system builds (tables and
+lists). Twelve tokens across six templates carry the mark; the table below names them. The first
+cut of the rule allowed raw placement only where the shipped default already had it. That refused
+HR the offer letter's `ConditionsList` and the score sheet's `PanelTable`, both supplied as HTML on
+every render, and the escaped form would have printed their markup as text.
+
+| Template | Name | Kind | Goes out, or is rendered, when | Road | Status |
+|---|---|---|---|---|---|
+| `Recruitment/CandidateAccountActivation` | Careers Account Activation | email | a candidate registers on the careers site, or asks for the link again | anonymous | **Enforced**. It now carries the tenant's legal name: the controller had overridden the name with the tenant record's label, so the email read "Activate your Default Tenant careers account" |
+| `Recruitment/ApplicationReceived` | Application Received | email | a candidate submits an application on the careers portal | signed in | **Enforced**. ⚠ Until lane N it greeted the candidate by their email address, because the portal passed the address as `CandidateName` [K3]. The older external-apply path that also sends it has no caller |
+| `Recruitment/ApplicationWithdrawn` | Application Withdrawn | email | an application is withdrawn: by HR on the candidate's behalf, by an employee applicant through their own door, or by the candidate on the careers portal | signed in | **Enforced**. It was **Unreachable** until lane N-b1: its only sender was a token-link withdrawal nothing called, and the three live withdrawals sent nothing (`run-lane-nb1.mjs` [D1–D6]) |
+| `Recruitment/ApplicationUnderReview` | Application Under Review | email | **once per application**: the first time a person moves it into a review stage (application review, screening, hiring-manager review), through either stage-move door. A submission placed automatically in the pipeline's first stage does not count | signed in | **Enforced**. Until lane N-b1 the older door sent it after **every** move, into an interview or beside Assessment Pending, and the board's door never sent it (`run-lane-nb1.mjs` [B1–C3]) |
+| `Recruitment/ApplicationShortlisted` | Application Shortlisted | email | HR sends the shortlist notifications | signed in | **Enforced** |
+| `Recruitment/ApplicationRejected` | Application Unsuccessful | email | HR sends the rejection notifications | signed in | **Enforced** |
+| `Recruitment/AssessmentPending` | Assessment Invitation | email | an application moves into an assessment stage | signed in | **Enforced** |
+| `Recruitment/InterviewInvitation` | Interview Invitation | email + calendar file | HR sends the interview invitations | signed in | **Enforced** |
+| `Recruitment/InterviewRescheduled` | Interview Rescheduled | email + calendar file | HR moves an interview | signed in | **Enforced** |
+| `Recruitment/InterviewPanelistAssignment` | Interview Panel Assignment | email + calendar file | HR notifies the panel | signed in | **Enforced** |
+| `Recruitment/OfferIssued` | Offer Issued | email, with the offer letter attached as a PDF | HR issues an offer | signed in | **Enforced**. Since lane N-b1 it carries the offer letter as a PDF, and `{{#if LetterAttached}}` says so only when the attachment really went. A letter that cannot be converted costs the attachment, never the email (`run-lane-nb1.mjs` [E1–E8]) |
+| `Recruitment/OfferAccepted` | Offer Accepted | email | a candidate's acceptance, however it arrives: HR recording it, the candidate's emailed link, or the careers portal. A decline sends nothing | signed in, or anonymous by the link | **Enforced**. Until lane N-b1 only HR's recording sent it. The link is anonymous, so the send names the offer's tenant (`run-lane-nb1.mjs` [F1–F7]) |
+| `Recruitment/OfferLetter` | Offer Letter (document) | document, also attached to Offer Issued | HR previews the offer, or the candidate opens it on the portal; and, since lane N-b1, rendered to PDF for the Offer Issued email | signed in | **Enforced**. Raw HTML: `BenefitsList`, `ConditionsList`, `DutiesList`, `PreEmploymentChecklist`, `SalaryBreakdownTable`. ⚠ The PDF engine (Syncfusion's HTML import) needs XHTML, and it drew `rem`-styled tables as empty boxes. `HtmlToPdfRenderer` normalises both, and the suite checks that the terms and salary tables' words are in the PDF [E4b–E4c] |
+| `Recruitment/TalentPoolInvitation` | Talent Pool Invitation | email | HR invites a talent-pool candidate to apply | signed in | **Enforced** |
+| `Recruitment/TestInvitation` | Test Invitation | email | HR invites candidates to a recruitment test | signed in | **Enforced** |
+| `Probation/ProbationConfirmationLetter` | Probation Confirmation Letter | document | HR generates a confirmation letter | signed in | **Enforced** |
+| `Assets/AssetResponsibilityTerms` | Asset Responsibility and Terms | document, also emailed | HR or the holder opens the terms, or HR emails them. The emailed copy is rendered first, then queued | signed in | **Enforced** |
+| `OnboardingOrientation/OrientationReminderDigest` | Orientation & Onboarding Reminder | email | the daily reminder sweep (lane K-a), one digest per person | background | **Enforced** |
+| `OnboardingOrientation/OrientationEnrolled` | Orientation Enrolment | email | an enrolment made by HR, in bulk, by a rule or by a renewal, on a programme that sends reminders | background | **Enforced**: [F4], [H5–H7], [I3], [I6] |
+| `OnboardingOrientation/OrientationSessionScheduled` | Orientation Session Scheduled | email | a person is placed on a session, or a facilitator is on a session going live or added to a live one | background | **Enforced** |
+| `OnboardingOrientation/OrientationSessionRescheduled` | Orientation Session Moved | email | a live session moves | background | **Enforced** |
+| `OnboardingOrientation/OrientationSessionPostponed` | Orientation Session Postponed | email | a live session is postponed | background | **Enforced** |
+| `OnboardingOrientation/OrientationSessionCancelled` | Orientation Session Cancelled | email | a live session is cancelled | background | **Enforced** |
+| `OnboardingOrientation/OrientationCompleted` | Orientation Completed | email | a person first completes an orientation | background | **Enforced** |
+| `OnboardingOrientation/OrientationCertificateIssued` | Orientation Certificate Issued | email | a certificate is issued or reissued | background | **Enforced** |
+| `OnboardingOrientation/OnboardingWelcome` | Onboarding Welcome | email | an onboarding plan is made for a new hire | background | **Enforced** |
+| `OnboardingOrientation/OnboardingCoordinatorAssigned` | Onboarding Coordinator Assigned | email | a plan is made, or passes to a new coordinator | background | **Enforced** |
+| `OnboardingOrientation/OnboardingBuddyAssigned` | Onboarding Buddy Assigned | email | a plan is made, or passes to a new buddy | background | **Enforced** |
+| `OnboardingOrientation/OnboardingTaskAssigned` | Onboarding Task Assigned | email | a task is added for somebody, or passed to somebody new | background | **Enforced** |
+| `OnboardingOrientation/OnboardingTaskDone` | Onboarding Task Waiting for Sign-off | email | a task needing sign-off is marked done | background | **Enforced** |
+| `CompanySchedule/EventInvitation` | Event Invitation | email | HR adds a participant to an event | signed in | **Enforced** |
+| `CompanySchedule/EventRsvpReminder` | RSVP Reminder | email | the hourly sweep chases unanswered invitations `CompanyEventRsvpChaseLeadDays` before the RSVP deadline, **once**; or HR presses **Chase unanswered now**, which counts as the chase. Until lane N-b2 the chase was an API endpoint that no screen called | signed in, or background (sweep) | **Enforced** (§ 2.8) |
+| `CompanySchedule/EventReminder` | Event Reminder | email | the hourly sweep sends it `ReminderDaysBefore` before a live event whose **Send reminders** is on, **once**, and again if the date moves; or HR presses **Send reminder now**, which counts as the send. Until lane N-b2 the form's switch and its days were read by nothing | signed in, or background (sweep) | **Enforced** (§ 2.8) |
+| `CompanySchedule/EventRescheduled` | Event Rescheduled | email | an event is moved | signed in | **Enforced** |
+| `CompanySchedule/EventCancelled` | Event Cancelled | email | an event is cancelled | signed in | **Enforced** |
+| `HrLetters/HrLetterEmploymentConfirmation` | Letter — employment confirmation | document | HR previews or issues an employee's letter request | signed in | **Enforced**: [E1–E4] |
+| `HrLetters/HrLetterIntroduction` | Letter — introduction | document | as above | signed in | **Enforced** |
+| `HrLetters/HrLetterServiceCertificate` | Letter — certificate of service | document | as above | signed in | **Enforced** |
+| `HrLetters/HrLetterSalaryConfirmation` | Letter — employment and salary confirmation | document | as above | signed in | **Enforced** |
+| `Interviews/InterviewScoreSheet` | Interview Scoring Sheet (printed) | document | HR prints an interview's paper | signed in | **Enforced**. Raw HTML: `CommentLines`, `PanelTable`, `QuestionTable`, `RecommendationBoxes` |
+| `Interviews/InterviewQuestionList` | Interview Question List (printed) | document | as above | signed in | **Enforced**. Raw HTML: `PanelTable`, `QuestionTable` |
+| `Interviews/InterviewPackCover` | Interview Pack Cover (printed) | document | as above | signed in | **Enforced**. Raw HTML: `PanelTable`, `TimetableTable` |
+| `RecruitmentTests/TestQuestionPaper` | Recruitment Test Paper (printed) | document | HR prints a test paper, blank or one per candidate | signed in | **Enforced**. Raw HTML: `QuestionBlock` |
+| `RecruitmentTests/TestMarkingKey` | Recruitment Test Marking Key (printed) | document | HR prints the marking key | signed in | **Enforced**. Raw HTML: `KeyBlock` |
+
+**Not a setting, deliberately:** the catalogue seeder (`EmailTemplateCatalogSeeder`). Lane N's plan
+proposed seeding a row per template on every tenant at startup, so that a fresh tenant would have
+rows to edit. The screen lists from the catalogues instead. A seeded row would freeze its day's
+wording, because the resolver prefers a stored row, and lane K-b alone rewrote twelve defaults in one
+day. The seeder stays deferred. The resolver also ignores an untouched seeded copy: `IsSystemDefault`
+with no `UpdatedBy` [G1–G3].
+
+---
+
+## 2.8 Company schedule — reminders that send themselves — added 2026-09-23
+
+Round 4, lane N-b2. Read by the company-schedule reminder sweep
+(`ICompanyEventService.SendDueRemindersAsync`). The sweep runs **hourly** (in
+`CompanyScheduleReminderBackgroundService`), and HR can run the same code now with
+`POST api/CompanySchedule/reminders/run`.
+
+It sweeps only **live** events: scheduled, confirmed or rescheduled, not cancelled, and approved where
+approval is required. Each send is stamped on the event (`ReminderSentDate`, `RsvpReminderSentDate`),
+so it goes **once**. A reschedule or an edit that moves a date clears the matching stamp. HR's
+**Send reminder now** and **Chase unanswered now**, on the event page's Reminders card, stamp the same
+dates. **Two of the three settings were ghosts**: the event form offered them, the database saved them,
+and nothing read them.
+
+| Setting (the form's label) | Where | Default | Status | Proof — `hr-templates/run-lane-nb2.mjs`, both positions |
+|---|---|---|---|---|
+| `SendReminders` ("Send reminders") | per event | off | **Enforced**. It was a ghost | [A2] on: an event two days away, 3 days before, reminded everybody who had not declined. [A4] off, the same date: nobody |
+| `ReminderDaysBefore` ("Days before") | per event | none | **Enforced**. It was a ghost | [A5] 3 days before an event in 5: not yet. [A10] the same event at 7: reminded |
+| `CompanyEventRsvpChaseLeadDays` ("Chase unanswered invitations this many days before the RSVP deadline") | `CompanyHrPolicySettings`, the policy page's **Company schedule reminders** card | **2**; migration `AddCompanyScheduleReminderSweep` adds it `NOT NULL DEFAULT (2)` | **Enforced**. New in N-b2 | [B3] a deadline four days away, at 2: not chased. [B6] the same deadline at 5: chased. [B7] restored |
+
+**Also proved:**
+- once [A8–A9];
+- never for a cancelled event, nor one still awaiting approval, and at once when approved [C1–C3];
+- HR's send counts as the send [D1–D4];
+- a moved date is reminded again, for both a reschedule and an edit of the RSVP deadline [E1–E4];
+- the tenant's own wording, under its legal name [F1–F2].
+
+**Not a setting, deliberately:** the hourly cadence. A reminder is day-granular, and the stamp makes
+cadence a matter of latency, never of duplicates.
+
+## 2.9 Maintenance technicians — the technician-role flag and the person's exception `EmployeePosition` · `Employee` — added 2026-09-23
+
+Round 4, lane O. **One answer** to "may Maintenance assign this person work?": the stored
+`Employee.CanBeAssignedToMaintenance`. HR's technician door (`api/hr/employees/technicians*`) reads
+it. So do Maintenance's work-order, labour, staff-schedule and QC gates. It follows the position's
+flag unless HR set it by hand, and `ApplicationDbContext.HrTechnicianRole.cs` re-establishes that on
+every save touching an employee or a position. ⚠ Before this lane the column had **no writer at
+all**: 0 of UAT's 2,089 employees held it, the door listed nobody, and every assignment would have
+been refused.
+
+| Setting (the form's label) | Where | Default | Status | Proof — `hr-jobarch/run-round4-o.mjs`, both positions |
+|---|---|---|---|---|
+| `IsTechnicianRole` ("Technician role") | per position, the position form | off; migration `AddTechnicianRoleFlag` adds `NOT NULL DEFAULT (0)`. TDC's `DV-BMS`, `DV-ART`, `MS-CT` are flagged by `TdcOrganogramSeeder` and demo scenario 007 | **Enforced**. New | [B2–B9] on: a holder is available and in the door, never ticked. [C1–C3] off: out, and the stored column cleared, in the same save. [C5] on again: back. [A6] an update that omits it leaves it |
+| `MaintenanceAssignment` ("Available to Maintenance": Follow the position / Include / Exclude) | per employee, the employee form's **Maintenance** section; stored as `MaintenanceAssignmentSetByHand` + the column | Follow the position | **Enforced**. New | [E1–E5] Include in a plain post: in, and it survives moving through a technician post. [E7–E10] Exclude in a technician post: out, and it survives the post switched off and on. [E11–E12] Follow the position hands it back |
+| `ExperienceLevel` ("Experience level") | per employee | none | **Enforced vocabulary** — Junior, Intermediate, Senior, Expert, the words Maintenance filters on | [G3] "senior" stored as "Senior". [G4] "Snr" refused, saying why |
+
+**Not settings, and recorded because they look like them:**
+
+| Column | Status | Why |
+|---|---|---|
+| `Employee.CurrentWorkload` | **Ghost, and worse** | Written by NOTHING, so it is always 0. Yet Maintenance's `TechnicianService` reads it for `IsAvailable = CurrentWorkload < MaxWorkload` and its utilisation figures, so that screen reports every technician free. HR neither surfaces nor reads it. HR's door returns work orders and workload as **null — not supplied** [G30–G31, G35], where it hardcoded 0. Real utilisation is Maintenance's (`TechnicianSchedulingService`). Cross-module defect #29 |
+| `Employee.MaxWorkload` | **Maintenance's** | Written only by `TechnicianService.Create/UpdateTechnicianAsync`, which no controller calls. Not surfaced by HR. Defect #29 |
+| `Employee.Specialization`, `.CertificationLevel` | Data, HR-written since lane O | The employee form writes them; HR's door and Maintenance's technician list read them [G1–G2, G25–G26] |
+
+**The "available" rule — a rule, not a setting, proved both ways:**
+- **In:** a technician on probation is available [B8, G29, G35b]. Every hire starts on probation,
+  and it was Active only, so a new artisan read "unavailable: Probation" in the pool that listed
+  them. TDC's call, 2026-09-23.
+- **Out:** a technician who is not at work is not available, and says so [M1–M2].
+
+Suspended, inactive and terminated staff stay out.
+
+## 2.10 The qualification ladder, as shortlisting reads it `QualificationLevel` · `Qualification` · `JobCandidateQualification` — added 2026-09-24
+
+Round 4, lane Q (the proper fix for recruitment guide R4-5.2). The ladder (*HR Setup → People
+Reference Data → Qualification Levels*) existed before this lane, with 11 rungs on UAT from scenario
+005, but **nothing read it**. Since lane Q, an *Education level* shortlisting criterion compares the
+RANK of a candidate's qualifications against its minimum rung. So the ladder, and where each
+qualification sits on it, are now settings with a consequence: they decide scores.
+
+| Setting (the form's label) | Where | Default | Status | Proof — `hr-recruitment/run-round4-q.mjs`, both positions |
+|---|---|---|---|---|
+| `QualificationLevel.Rank` ("Rank") | per rung, the Qualification Levels screen | scenario 005's ladder: BECE 10 … Doctorate 90, with HND and Bachelor's both at 50 | **Enforced**. Newly read | Q2: the required rung passes (100); a tie passes (HND meets "at least Bachelor's"); below fails, and disqualifies when mandatory (0); a higher rung beside a lower one is judged by the higher |
+| `QualificationLevel.IsActive` | per rung | active | **Enforced** | Q1: a retired rung cannot be newly chosen on a qualification, nor as a criterion's minimum (422). The server also lets a rung retired after use stay on its row; that direction is not exercised |
+| `Qualification.QualificationLevelId` ("Level" on the catalogue form) | per catalogue entry | none. Scenario 008 places the demo catalogue's Education entries, 59 of 64, and leaves five for HR | **Enforced**. Newly read | Q1: a catalogue pick with no level of its own inherits the entry's rung. Q2: it passes on that rung (100). Q5: the careers catalogue carries it (`levelId`), so the portal can pre-fill |
+| `JobCandidateQualification.QualificationLevelId` ("Level") | per candidate qualification, HR's Qualifications tab and the careers profile | none. The migration's one-off backfill filled 152 typed rows from their names | **Enforced**. New | Q1 / Q6: an Education row without one is refused at both doors (422 / 400), a licence needs none, and a stranger id is refused. Q2: none at all is a miss, **60 not 100** when non-mandatory. Q3: frozen into a careers application's snapshot, and back-filled only when the snapshot predates levels |
+
+**The rule's second position, recorded because it is easy to miss:** a tenant with **no active
+rung** cannot be asked for a level. Both doors then waive the Education requirement, and the forms
+hide the field. The waiver is in the code, and no suite proves it: the demo tenant has a ladder.
+
+**Not settings:** `Qualification.Type` (Education, Certification…) is a category and ranks nothing.
+It still decides where a Level is *required*: for Education only.
 
 ---
 
@@ -208,7 +491,7 @@ sick leave needs a certificate, annual leave does not, and every client has both
 |---|---|---|---|
 | `RequiresMedicalCertificate` | `false` | **Enforced** | [1] a 21-day absence submits freely with the flag off; [2] a 7-day one is refused with it on |
 | `SelfCertificationDays` | `3` | **Enforced** | [2] 3 days submits, 7 days refuses, and the message names both figures |
-| `MedicalBoardThresholdDays` | `90` (null on pre-existing rows) | **Enforced** | [3] two 6-day absences against a 10-day threshold: each passes alone, together they refuse stating 12 |
+| `MedicalBoardThresholdDays` | `90` (null on pre-existing rows) | **Enforced** | [3] two 6-day absences against a 10-day threshold: each passes alone, together they refuse stating 12. Which board satisfies it: `run-round5-k.mjs` [6] — refused, in exact words, for a case not decided, about fitness for duty or retirement, or decided on the last day of the previous leave year; accepted for the same case on the first day of this one, and for sick-leave, injury and other cases. ⚠ **Since lane K-II-a it is THIS employee's case on the linked board**: `run-round5-k2a.mjs` [5] — the board deciding somebody else's case at the same sitting is still refused, the employee's own decided case accepted, a withdrawn case refused at submission and at linking, a board with no case on the employee not linkable |
 
 ⚠ **The board threshold is counted across the YEAR.** Asserted with two absences that each pass the
 per-request test — a per-request rule would let both through, which is what splitting an absence
@@ -221,6 +504,37 @@ and the rules would be decorative.
 
 ⚠ **The gate is asserted on the auto-approving path too** (`RequiresApproval = false`), which is the
 branch where a miss approves sick leave with nobody asked.
+
+⚠ **On a maternity type, leave the board threshold blank** (round 5, lane A; guide § 23, L-58).
+Switching the certificate on arms the board rule too, and its default is 90 days a year: the
+statutory extension on top of 84 days makes 98, which would send a new mother to a medical board.
+TDC's *Maternity Leave* is certificate on, 0 self-certification days, no board — set through the API
+on UAT on 2026-09-25, and by the seeder for a fresh build. `run-round5-a.mjs` [2b] proves both
+positions on its own maternity type.
+
+### The medical board's quorum — `CompanyHrPolicySettings.MedicalBoardQuorum` (round 5, lane K-II-a) — added 2026-09-26
+
+A tenant setting, on the HR policy page (*Medical boards → Quorum — deciding members present*).
+
+| Setting | Default | Status | Enforced where | Proof — `run-round5-k2a.mjs` [3], both positions |
+|---|---|---|---|---|
+| `MedicalBoardQuorum` | **`1`** (1–20). A save that omits it resets it to **1** (the update DTO's default), so the page sends it on every save. Migration `AddMedicalBoardCases` wrote 1 on every existing tenant row — never the scaffold's 0, which would let a case be decided with nobody present | **Enforced** | `MedicalBoardService.ConcludeCaseAsync` — the chairs and members recorded present at the sitting a case is decided at (secretaries and observers do not count; a member removed after sitting still does) must be at least this. The refusal names the number and the sitting | at 2: a chair and a secretary (one deciding) refused in exact words, nothing decided; a chair and a member decide, both named. A removed chair still counts at 2. Omitted → 1; 0 and 21 refused (400); put back after |
+
+⚠ **Default 1 is today's rule, not a recommendation.** Public-service boards sit with three medical
+officers; how many must be present to decide is each organisation's own rule — R5-Q5 asks TDC for
+theirs.
+
+### Compensation — PNDCL 187's figures (round 5, lane K-II-b) — added 2026-09-26
+
+Three tenant settings beside the quorum, and one per-tenant table. Every figure is the Act's
+(`docs/HR/catalogues/HR-WORKMENS-COMPENSATION-SCHEDULES.md`), as a default.
+
+| Setting | Default | Status | Enforced where | Proof — `run-round5-k2b.mjs`, both positions |
+|---|---|---|---|---|
+| `PermanentTotalIncapacityMonths` (s.5) | **`96`**; empty = no figure worked out. A save that omits it keeps 96. Migration `AddIncapacityAssessment` wrote 96 on every existing tenant row, in the step that adds the column | **Enforced** | `MedicalBoardService.IndicativeFigureAsync` — percentage × this × monthly earnings | [3]: 96 → GHS 544,320.00, 60 → GHS 340,200.00, empty → *not worked out*, in exact words; a change after an assessment moves nothing |
+| `TemporaryIncapacityMaxMonths` (s.7(2)(c)) | **`24`** | **Enforced** (read) | the temporary working's sentence, and the case's *paid until* date from the incident | [2] the sentence names 24; [5] incident + 24 months |
+| `CompensationEarningsCeiling` (s.36) | **empty — no default in force** (the Act's 25,000 cedis predates redenomination; R5-Q5). A save that omits it CLEARS it, so the page always sends it | **Enforced** | caps the monthly earnings at a twelfth of it; the working says capped, within, or none | [3]: 36,000 caps GHS 6,000 at GHS 3,000 → GHS 272,160.00; 120,000 does not bite; empty says none is set |
+| `IncapacityScheduleItem` rows (per tenant) | **empty until loaded** — *Load the Act's schedules* adds the 54 rows (48 Third, 6 First Schedule; 22 arm or hand) a tenant lacks | **Enforced** | the assessment rates injuries from them; a row's percentage is copied onto the injury | [1]: 54 loaded by admin only, a second load adds nothing; [2] a row edited 12 → 50 leaves the assessed injury at 12; a retired row refused |
 
 ### The year-end basis and first-year pro-rating (entitlement plan B2/B3) — added 2026-09-18
 
@@ -247,6 +561,32 @@ than about accrual existing.
 undo, so a default that silently moved people's carried days on the next run would be worse than the
 inconsistency it corrects — the same reasoning that gave `AllowInServiceEncashment` its conservative
 default.
+
+### The kind — `Category` (round 5, lane A) — added 2026-09-25
+
+Replaces `MandatoryAnnualLeave`, which only ever meant "this is the annual leave". Migration
+`AddLeaveTypeCategory` chose one Annual type per tenant (`ANN` first) and made `MAT` Maternity, then
+dropped the flag.
+
+| Setting | Default | Status | Proof — `run-round5-a.mjs`, both positions |
+|---|---|---|---|
+| `Category` | `Other`. On save, null means Other on create and **unchanged** on update | **Enforced** | [1] a second ACTIVE Annual is refused at both doors (create; switching an Annual type on), a switched-off type may be Annual, and the Annual type's own save is allowed with its row unchanged; [2] Maternity takes leave at 5 days' notice where Other with the same 30 days refuses, and refuses send-back and move where Other accepts both; [3] plans refuse Other and Maternity and accept Annual; [4] in-service encashment refuses Other and Maternity, and Annual passes to the next check; [5] the compliance register holds Annual rows only |
+
+⚠ **Readers still to come**, in their lanes: the balances view (J), the reminders (I) and the
+leaver's settlement (L2). The casual-leave set-off (H) landed 2026-09-26: only an **Other** kind may
+charge its extra days to annual leave, and the charge always lands on the tenant's one active Annual
+type.
+
+### Beyond the limit — `AllowOffsetAgainstAnnual` (round 5, lane H) — added 2026-09-26
+
+Decision A5: days asked for beyond a leave type's limit may be charged to annual leave, the employee
+asking and HR deciding at the final approval, which splits the request (`LeaveRequest.SplitFromRequestId`
+on the annual part). Migration `AddLeaveRequestSplit` added it off for every existing type; UAT's
+`CAS` was switched on through the API, and the demo seeder sets it on `CAS`.
+
+| Setting | Default | Status | Proof — `run-round5-h.mjs`, both positions |
+|---|---|---|---|
+| `AllowOffsetAgainstAnnual` | off. On save, null means off on create and **unchanged** on update | **Enforced** | [1] off and on read back through both mappers; a save without it leaves it on; refused on an Annual or Maternity type and on a type that does not require approval, at both doors; [2] with it on, a request beyond the limit that asks is accepted and one that does not is told it could; with it off the plain refusal, and asking is refused; [3] the final approval splits 5 days into 3 + 2 on annual leave, the ledger exact on both types; [9] the split is re-checked at approval, refused when annual leave can no longer take the days; [10] annual leave's service gate applies to the extra days |
 
 ### The rest of `LeaveType`
 
@@ -289,6 +629,9 @@ enforced, is validated against it, and does nothing — so the pair reads as one
 
 ## 3.2 `LeaveType` — SURVEYED, and the guide's claim is now stale
 
+⚠ **Superseded 2026-09-25** — see the correction at the top: one ghost (`IsPaid`) and about ten
+settings that do something other than their label says. The paragraph below is the 2026-09-18 reading.
+
 **26 settings, zero ghosts.** Every one has a real consumer. ⚠ **That covers the leave type itself
 and not its child tables** — those are § 3.2b, added later, and one of them holds this register's
 first **Unreachable** entry.
@@ -323,9 +666,9 @@ done
 
 | Table | Settings | Result |
 |---|---|---|
-| `LeaveAccrualPolicy` | 9 | **8 enforced, 1 Unreachable** — `ProRateOnJoin`. `Frequency`, `Mode`, `AccrualRate`, `MinServiceMonths`, `ProRateOnExit` and `IsActive` all bind in `LeaveEntitlementService` |
+| `LeaveAccrualPolicy` | 9 | **8 enforced, 1 Unreachable** — `ProRateOnJoin`. `Frequency`, `Mode`, `AccrualRate`, `MinServiceMonths`, `ProRateOnExit` and `IsActive` all bind in `LeaveEntitlementService`. ⚠ **2026-09-25:** `ProRateOnJoin` has since been fixed; **`IsActive` is the Unreachable one** (nothing can set it false); incremental `Annual` frequency accrues 0; `ProRateOnExit` feeds no payout — see the top |
 | `LeaveSubType` | 10 | **enforced.** `MaxDaysAllowed` is the annual cap (`LeaveService`), `IsActive` filters the pickers **and** is refused by the service |
-| `LeaveCategoryAllocation` | 9 | **enforced.** `AllocationDays` with `EffectiveFrom`/`EffectiveTo` is step 2 of the entitlement engine's precedence |
+| `LeaveCategoryAllocation` | 9 | **enforced.** `AllocationDays` with `EffectiveFrom`/`EffectiveTo` is step 2 of the entitlement engine's precedence. ⚠ Since leave settings audit 2 (L-89) saving one re-works the type's balances for the current leave year and reports the count (`run-audit2-c.mjs` [1]); the dates choose leave years, not days |
 | `LeaveTypeEligibility` | 10 | **enforced.** `EligibilityType` drives the four-arm switch in `LeaveTypeService.MatchesRule`, and `Gender` ANDs onto an org-scoped rule |
 
 **One real ghost, and it is harmless:** `LeaveSubType.LeavePlans`, a navigation collection nothing
@@ -389,11 +732,11 @@ owed a pass, most cheaply as part of that module's own closure plan.
 | Recruitment, performance, medical, separation, discipline | not looked at |
 | The rest of `CompanyHrPolicySettings` | 35 fields predating this register — retirement ages, notice periods, the FR-HR-092 threshold, the alert lead times, the grievance clocks |
 
-⚠ **`SettlementDaysPerYear` is in that last group and it moves money.** It is enforced
-(`SeparationService.DailyRateAsync`) and it records its basis in words on every settlement line —
-but TDC has never chosen the basis, and the entity's own remark says not to run real final
-settlements until they do. That warning stands; making the value configurable did not answer the
-question, it only made the question answerable by each client rather than by a deploy.
+⚠ **`SettlementDaysPerYear` was in that last group and it moved money** — **removed** in leave
+settings audit 2 (2026-09-27, L-74). HR works out no daily rate: Finance values every pay line on a
+leaver's statement in *Pay to value*, and the statement cannot be finalised until it has. The TDC
+question it raised (which basis) is answered by that step; TDC is asked instead **who in Finance**
+values pay (`HR-OPEN-QUESTIONS-FOR-TDC.md`).
 
 ---
 

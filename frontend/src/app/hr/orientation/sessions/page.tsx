@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, Plus, Search } from 'lucide-react';
+import { CalendarClock, Plus, Repeat, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -35,6 +35,10 @@ import {
   toSessionRequest,
   type OrientationSessionFormValues,
 } from '@/components/hr/orientation/OrientationSessionForm';
+import {
+  RunSessionAgainDialog,
+  type SessionCopySource,
+} from '@/components/hr/orientation/CopyDialogs';
 import { orientationSessionService } from '@/services/hr/orientation-session.service';
 import { orientationProgramService } from '@/services/hr/orientation-program.service';
 import { ORIENTATION_DELIVERY_MODE_OPTIONS } from '@/types/hr/orientation';
@@ -70,8 +74,13 @@ export default function OrientationSessionsPage() {
   const { toast } = useToast();
   const [scope, setScope] = useState<Scope>('upcoming');
   const [search, setSearch] = useState('');
-  const [createOpen, setCreateOpen] = useState(false);
+  // Round 4, lane L: the enrolment dialog's "Schedule one" link lands here with ?schedule=<programme>,
+  // and the form opens with that programme already chosen.
+  const searchParams = useSearchParams();
+  const scheduleFor = searchParams?.get('schedule') ?? '';
+  const [createOpen, setCreateOpen] = useState(!!scheduleFor);
   const [creating, setCreating] = useState(false);
+  const [rerunning, setRerunning] = useState<SessionCopySource | null>(null);
 
   const { data: sessions = [], isLoading } = useQuery({
     queryKey: ['hr', 'orientation-sessions', scope],
@@ -194,6 +203,7 @@ export default function OrientationSessionsPage() {
                   <TableHead className="text-right">Enrolled</TableHead>
                   <TableHead className="text-right">Seats left</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="w-[1%]" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -233,6 +243,23 @@ export default function OrientationSessionsPage() {
                       <TableCell>
                         <StatusBadge status={s.status} />
                       </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="whitespace-nowrap"
+                          onClick={() =>
+                            setRerunning({
+                              id: s.id,
+                              title: s.title,
+                              scheduledStartAt: s.scheduledStartAt,
+                            })
+                          }
+                        >
+                          <Repeat className="mr-1.5 h-3.5 w-3.5" />
+                          Run again
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -254,7 +281,9 @@ export default function OrientationSessionsPage() {
           <OrientationSessionForm
             compact
             programs={programs}
-            defaultValues={emptyOrientationSession}
+            defaultValues={
+              scheduleFor ? { ...emptyOrientationSession, programId: scheduleFor } : emptyOrientationSession
+            }
             onSubmit={handleCreate}
             submitting={creating}
             submitLabel="Create session"
@@ -262,6 +291,8 @@ export default function OrientationSessionsPage() {
           />
         </DialogContent>
       </Dialog>
+
+      <RunSessionAgainDialog source={rerunning} onClose={() => setRerunning(null)} />
     </div>
   );
 }

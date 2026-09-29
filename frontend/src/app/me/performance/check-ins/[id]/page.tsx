@@ -34,7 +34,9 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { CheckInObjectivesPanel } from '@/components/hr/performance/CheckInObjectivesPanel';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { PerformanceAttachmentsPanel } from '@/components/hr/performance/PerformanceAttachmentsPanel';
+import { hasAnyPermissionAccess } from '@/lib/permissions';
 import { formatDate, formatDateTime, humanizeEnum } from '@/lib/hr/attendance-format';
 import { checkInService } from '@/services/hr/appraisal-run.service';
 import { employeeGoalService } from '@/services/hr/goals.service';
@@ -52,14 +54,17 @@ import {
  * A goal that is not live (draft, awaiting approval, locked, already complete) keeps its
  * status and only the note is kept.
  *
- * ⚠ **Private notes are the conductor's own record.** They come back on every read, including
- * the employee's, so they are shown here only to whoever is conducting the check-in.
+ * ⚠ **Private notes are the conductor's own record.** The server blanks them for everyone but
+ * the conductor and the HR desk — and always for the check-in's subject (performance closure
+ * P15) — and writes them only from the conductor (P6), so the field is offered to the conductor
+ * alone. Closing the meeting is the conductor's or HR's act, never the subject's.
  */
 export default function CheckInDetailPage() {
   const params = useParams<{ id: string }>();
   const checkInId = params.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const [completeOpen, setCompleteOpen] = useState(false);
   const [goalOpen, setGoalOpen] = useState(false);
@@ -204,6 +209,13 @@ export default function CheckInDetailPage() {
   const rows = goalUpdates ?? [];
   const availableGoals = goals ?? [];
 
+  // The server's rules, so the page offers only what it will accept (P6, P9).
+  const me = user?.employeeId ?? null;
+  const isConductor = !!me && me === checkIn.conductedById;
+  const isSubject = !!me && me === checkIn.employeeId;
+  const isDeskWriter = hasAnyPermissionAccess(user, ['HR.Performance.Write', 'HR.Performance.Admin']);
+  const canClose = isConductor || (!isSubject && isDeskWriter);
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -214,11 +226,13 @@ export default function CheckInDetailPage() {
           <div className="flex items-center gap-2">
             {held ? (
               <Badge variant="default">Held {formatDate(checkIn.conductedDate)}</Badge>
-            ) : (
+            ) : canClose ? (
               <Button onClick={() => setCompleteOpen(true)}>
                 <CheckCircle2 className="mr-2 h-4 w-4" />
                 Record as held
               </Button>
+            ) : (
+              <Badge variant="secondary">Not yet held</Badge>
             )}
           </div>
         }
@@ -342,8 +356,8 @@ export default function CheckInDetailPage() {
           <DialogHeader>
             <DialogTitle>Record this check-in as held</DialogTitle>
             <DialogDescription>
-              These three fields are replaced wholesale each time, not merged — paste back
-              anything you want to keep.
+              These fields are replaced wholesale each time, not merged — paste back anything
+              you want to keep.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -368,20 +382,23 @@ export default function CheckInDetailPage() {
                 onChange={(e) => setNotes((p) => ({ ...p, actionItems: e.target.value }))}
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="private">Private notes</Label>
-              <Textarea
-                id="private"
-                rows={3}
-                maxLength={4000}
-                value={notes.privateNotes}
-                onChange={(e) => setNotes((p) => ({ ...p, privateNotes: e.target.value }))}
-                placeholder="Your own record."
-              />
-              <p className="text-xs text-muted-foreground">
-                Kept out of the employee&apos;s view of this check-in.
-              </p>
-            </div>
+            {/* The conductor's own record — the server keeps anyone else's value out (P6). */}
+            {isConductor && (
+              <div className="space-y-2">
+                <Label htmlFor="private">Private notes</Label>
+                <Textarea
+                  id="private"
+                  rows={3}
+                  maxLength={4000}
+                  value={notes.privateNotes}
+                  onChange={(e) => setNotes((p) => ({ ...p, privateNotes: e.target.value }))}
+                  placeholder="Your own record."
+                />
+                <p className="text-xs text-muted-foreground">
+                  Kept out of the employee&apos;s view of this check-in.
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCompleteOpen(false)}>
@@ -514,7 +531,16 @@ export default function CheckInDetailPage() {
           </p>
         </CardHeader>
         <CardContent>
-          <PerformanceAttachmentsPanel basePath="/CheckIns" ownerId={checkInId} />
+          {/* P9: a file is removed by whoever attached it, or HR (never as the subject), and
+              only until the check-in is held — after that it is part of the record. */}
+          <PerformanceAttachmentsPanel
+            basePath="/CheckIns"
+            ownerId={checkInId}
+            canDelete={!held}
+            canDeleteItem={(a) =>
+              (!!me && a.uploadedById === me) || (isDeskWriter && !isSubject)
+            }
+          />
         </CardContent>
       </Card>
     </div>

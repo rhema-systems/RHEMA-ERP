@@ -12,6 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { inventoryReturnCreditService, type InventoryReturnCreditNote, type InventoryReturnCreditSource } from '@/services/inventoryReturnCreditService';
+import type { SupplierReturnAccountingGroup } from '@/services/supplierReturnService';
 
 const errorText = (error: unknown) => {
   const data = (error as { response?: { data?: { detail?: string; message?: string; error?: string; code?: string } } })?.response?.data;
@@ -24,7 +25,7 @@ export const isReturnCreditResolved = (note: InventoryReturnCreditNote) =>
   hasId(note.journalEntryId) && hasId(note.postingEventId) &&
   hasId(note.returnDispatchPostingEventId) && hasId(note.returnDispatchJournalEntryId);
 
-export function SupplierReturnCreditPanel({ returnId, returnNumber, reason, alreadyResolved = false, onResolved }: { returnId: string; returnNumber: string; reason: string; alreadyResolved?: boolean; onResolved?: (returnId: string, resolved: boolean) => void }) {
+export function SupplierReturnCreditPanel({ returnId, returnNumber, reason, accountingGroups, alreadyResolved = false, onResolved }: { returnId: string; returnNumber: string; reason: string; accountingGroups?: SupplierReturnAccountingGroup[]; alreadyResolved?: boolean; onResolved?: (returnId: string, resolved: boolean) => void }) {
   const { hasPermission } = useAuth();
   const { toast } = useToast();
   const canRead = hasPermission('Finance.Read');
@@ -38,16 +39,24 @@ export function SupplierReturnCreditPanel({ returnId, returnNumber, reason, alre
   const [sourceLoading, setSourceLoading] = useState(false);
   const [sourceError, setSourceError] = useState('');
   const [invoiceId, setInvoiceId] = useState('');
+  const [targetInvoiceId, setTargetInvoiceId] = useState('');
   const [reference, setReference] = useState('');
   const [creditDate, setCreditDate] = useState('');
   const [selectOpen, setSelectOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const inFlight = useRef(false);
   const selected = sources.find(source => source.invoiceId === invoiceId);
+  const grouped = !!accountingGroups?.length;
+  const groupNote = (group: SupplierReturnAccountingGroup) => notes.find(note =>
+    note.inventorySupplierReturnAccountingGroupId === group.id || note.id === group.supplierDebitNoteId);
+  const groupResolved = (group: SupplierReturnAccountingGroup) => group.originalVendorInvoiceId
+    ? !!groupNote(group) && isReturnCreditResolved(groupNote(group)!)
+    : group.financeResolutionCompleted;
+  const allResolved = grouped ? accountingGroups!.every(groupResolved) : notes.some(isReturnCreditResolved);
 
   useEffect(() => {
-    if (canRead && !loading && !error) onResolved?.(returnId, notes.some(isReturnCreditResolved));
-  }, [canRead, loading, error, notes, returnId, onResolved]);
+    if (canRead && !loading && !error) onResolved?.(returnId, allResolved);
+  }, [canRead, loading, error, allResolved, returnId, onResolved]);
 
   useEffect(() => {
     if (!canRead) { setLoading(false); return; }
@@ -70,14 +79,16 @@ export function SupplierReturnCreditPanel({ returnId, returnNumber, reason, alre
     setSourceLoading(true); setSourceError(''); setSources([]); setInvoiceId('');
     inventoryReturnCreditService.getSources(returnId).then(values => {
       if (!active) return;
-      setSources(values); if (values.length === 1) setInvoiceId(values[0].invoiceId);
+      const available = targetInvoiceId ? values.filter(value => value.invoiceId === targetInvoiceId) : values;
+      setSources(available); if (available.length === 1) setInvoiceId(available[0].invoiceId);
     }).catch(failure => { if (active) setSourceError(errorText(failure)); })
       .finally(() => { if (active) setSourceLoading(false); });
     return () => { active = false; };
-  }, [open, returnId]);
+  }, [open, returnId, targetInvoiceId]);
 
-  const begin = () => {
+  const begin = (originalInvoiceId = '') => {
     const today = new Date();
+    setTargetInvoiceId(originalInvoiceId);
     setReference(''); setCreditDate(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`);
     setOpen(true);
   };
@@ -89,7 +100,9 @@ export function SupplierReturnCreditPanel({ returnId, returnNumber, reason, alre
         originalVendorInvoiceId: selected.invoiceId, supplierCreditNoteReference: reference.trim(), creditDate, reason,
       });
       if (note.inventoryPurchaseReturnId?.toLowerCase() !== returnId.toLowerCase()) throw new Error('The saved credit does not belong to this return. Refresh before retrying.');
-      setNotes([note]); setOpen(false);
+      if (selected.accountingGroupId && note.inventorySupplierReturnAccountingGroupId?.toLowerCase() !== selected.accountingGroupId.toLowerCase())
+        throw new Error('The saved credit does not belong to the selected invoice group. Refresh before retrying.');
+      setNotes(current => [...current.filter(value => value.id !== note.id), note]); setOpen(false);
       toast({ title: 'Supplier credit draft ready', description: 'Open the credit to review and post it in Finance.' });
     } catch (failure) { setSourceError(errorText(failure)); }
     finally { inFlight.current = false; setSaving(false); }
@@ -99,12 +112,30 @@ export function SupplierReturnCreditPanel({ returnId, returnNumber, reason, alre
   return <div className="mt-3 border-t pt-3" aria-label="AP credit">
     <div className="flex items-center justify-between gap-2"><span className="font-medium">Supplier credit</span>
       <Button size="icon" variant="ghost" aria-label="Refresh supplier credit" title="Refresh" disabled={loading || saving} onClick={() => setRefresh(value => value + 1)}><RefreshCw className="h-4 w-4" /></Button></div>
-    {loading ? <p className="text-muted-foreground">Checking linked credit...</p> : error ? <p role="alert" className="text-red-700">{error}</p> : notes.length ?
+    {loading ? <p className="text-muted-foreground">Checking linked credit...</p> : error ? <p role="alert" className="text-red-700">{error}</p> : grouped ?
+      <div className="space-y-4">{[false, true].map(completed => {
+        const groups = accountingGroups!.filter(group => groupResolved(group) === completed);
+        return groups.length ? <section key={String(completed)} aria-label={completed ? 'Completed accounting groups' : 'Pending accounting groups'}>
+          <h4 className="mb-2 text-sm font-medium">{completed ? 'Completed' : 'Pending'}</h4>
+          <div className="space-y-2">{groups.map(group => {
+            const note = groupNote(group);
+            const creditId = note?.id || group.supplierDebitNoteId;
+            return <div key={group.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3">
+              <div className="space-y-1">
+                {group.originalVendorInvoiceId ? <Link className="font-medium text-primary underline-offset-4 hover:underline" href={`/procurement/supplier-invoices/${encodeURIComponent(group.originalVendorInvoiceId)}`}>{group.originalInvoiceNumber || 'Original supplier invoice'}</Link> : <p className="font-medium">Uninvoiced goods</p>}
+                <p className="text-sm text-muted-foreground">{group.baseQuantity.toLocaleString()} units · {group.functionalCurrency} {(group.originalVendorInvoiceId ? group.carryingAmount : group.originalAccrualAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                <p className={`text-sm ${completed ? 'text-emerald-700' : 'text-amber-700'}`}>{group.originalVendorInvoiceId ? (completed ? 'Credit posted and applied to original invoice' : creditId ? 'Credit saved · Finance resolution pending' : 'Supplier credit pending') : completed ? 'Receipt accrual cleared' : 'Receipt accrual resolution pending'}</p>
+              </div>
+              {creditId ? <Button asChild size="sm" variant="outline"><Link href={`/finance/ap/supplier-debit-notes/${encodeURIComponent(creditId)}`}>Open {note?.debitNoteNumber || group.supplierDebitNoteNumber || 'credit'}</Link></Button> : group.originalVendorInvoiceId && canManage ? <Button size="sm" onClick={() => begin(group.originalVendorInvoiceId!)}>Create credit for {group.originalInvoiceNumber || 'invoice'}</Button> : null}
+            </div>;
+          })}</div>
+        </section> : null;
+      })}</div> : notes.length ?
       notes.map(note => <div key={note.id} className="flex flex-wrap items-center justify-between gap-3">
         <div><p className={isReturnCreditResolved(note) ? 'font-medium text-emerald-700' : 'text-amber-700'}>{isReturnCreditResolved(note) ? 'Credit posted and applied to original invoice' : 'Credit saved · Finance resolution pending'}</p>
           <p className="text-muted-foreground">{note.debitNoteNumber} · {note.statusName || note.status} · {note.currencyCode} {note.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
         <Button asChild size="sm" variant="outline"><Link href={`/finance/ap/supplier-debit-notes/${encodeURIComponent(note.id)}`}>Open credit</Link></Button>
-      </div>) : canManage ? <Button size="sm" onClick={begin}>Create credit draft</Button> : <p className="text-muted-foreground">No linked AP credit. An AP officer can create it.</p>}
+      </div>) : canManage ? <Button size="sm" onClick={() => begin()}>Create credit draft</Button> : <p className="text-muted-foreground">No linked AP credit. An AP officer can create it.</p>}
 
     <Dialog open={open} onOpenChange={value => { if (!saving) setOpen(value); }}><DialogContent className="flex flex-col overflow-hidden" style={{ width: '560px', maxWidth: 'calc(100vw - 32px)', height: 'min(430px, calc(100vh - 48px))' }}>
       <DialogHeader><DialogTitle>Create supplier credit</DialogTitle><DialogDescription>{returnNumber} · Credit against the original goods invoice.</DialogDescription></DialogHeader>

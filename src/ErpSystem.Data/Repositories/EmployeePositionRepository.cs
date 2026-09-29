@@ -22,6 +22,7 @@ public class EmployeePositionRepository : GenericRepository<EmployeePosition>, I
         return await _context.Set<EmployeePosition>()
             .Where(p => !p.IsDeleted && p.IsActive)
             .Include(p => p.OrganizationUnit)
+            .Include(p => p.PreEmploymentCheckTemplate)
             .OrderBy(p => p.Title)
             .ToListAsync();
     }
@@ -34,6 +35,7 @@ public class EmployeePositionRepository : GenericRepository<EmployeePosition>, I
         return await _context.Set<EmployeePosition>()
             .Where(p => !p.IsDeleted && p.OrganizationUnitId == organizationUnitId)
             .Include(p => p.OrganizationUnit)
+            .Include(p => p.PreEmploymentCheckTemplate)
             .OrderBy(p => p.Title)
             .ToListAsync();
     }
@@ -44,6 +46,7 @@ public class EmployeePositionRepository : GenericRepository<EmployeePosition>, I
         return await _context.Set<EmployeePosition>()
             .Where(p => !p.IsDeleted && ids.Contains(p.OrganizationUnitId))
             .Include(p => p.OrganizationUnit)
+            .Include(p => p.PreEmploymentCheckTemplate)
             .OrderBy(p => p.OrganizationUnit!.Name).ThenBy(p => p.Title)
             .ToListAsync();
     }
@@ -77,6 +80,7 @@ public class EmployeePositionRepository : GenericRepository<EmployeePosition>, I
 
         return await query
             .Include(p => p.OrganizationUnit)
+            .Include(p => p.PreEmploymentCheckTemplate)
             .OrderBy(p => p.Title)
             .ToListAsync();
     }
@@ -88,6 +92,7 @@ public class EmployeePositionRepository : GenericRepository<EmployeePosition>, I
     {
         return await _context.Set<EmployeePosition>()
             .Include(p => p.OrganizationUnit)
+            .Include(p => p.PreEmploymentCheckTemplate)
             .FirstOrDefaultAsync(p => !p.IsDeleted && p.Code == code);
     }
 
@@ -98,6 +103,7 @@ public class EmployeePositionRepository : GenericRepository<EmployeePosition>, I
     {
         return await _context.Set<EmployeePosition>()
             .Include(p => p.OrganizationUnit)
+            .Include(p => p.PreEmploymentCheckTemplate)
             .Include(p => p.StaffLevel)
             .Include(p => p.SalaryGrade)
             .Include(p => p.ReportsToPosition)
@@ -116,6 +122,7 @@ public class EmployeePositionRepository : GenericRepository<EmployeePosition>, I
         return await _context.Set<EmployeePosition>()
             .Where(p => !p.IsDeleted && p.Level == level)
             .Include(p => p.OrganizationUnit)
+            .Include(p => p.PreEmploymentCheckTemplate)
             .OrderBy(p => p.Title)
             .ToListAsync();
     }

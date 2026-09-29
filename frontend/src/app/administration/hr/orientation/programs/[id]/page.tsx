@@ -1,11 +1,14 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { UseFormReturn } from 'react-hook-form';
 import { z } from 'zod';
-import { Loader2, AlertTriangle, Trash2 } from 'lucide-react';
+import { Loader2, AlertTriangle, Copy, Trash2, Users, UserPlus, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -40,15 +43,23 @@ import { ProgramModulesPanel } from '@/components/hr/orientation/ProgramModulesP
 import { ProgramQuestionsPanel } from '@/components/hr/orientation/ProgramQuestionsPanel';
 import { orientationProgramService } from '@/services/hr/orientation-program.service';
 import { orientationCategoryService } from '@/services/hr/orientation-lookup.service';
+import { AudienceTargetPicker } from '@/components/hr/orientation/AudienceTargetPicker';
+import { CopyOrientationProgramDialog } from '@/components/hr/orientation/CopyDialogs';
 import {
   ORIENTATION_PROGRAM_STATUS_OPTIONS,
-  ORIENTATION_AUDIENCE_SCOPE_OPTIONS,
   ORIENTATION_ENROLLMENT_TRIGGER_OPTIONS,
+  ORIENTATION_AUDIENCE_POPULATION_OPTIONS,
+  ORIENTATION_TRIGGER_HINTS,
+  ORIENTATION_RECURRENCE_FREQUENCY_OPTIONS,
+  DATED_TRIGGERS,
 } from '@/types/hr/orientation';
 import type {
   OrientationProgramStatus,
   OrientationPrerequisite,
   OrientationAudienceRule,
+  OrientationAudiencePopulation,
+  OrientationTriggerRunResult,
+  HrAudienceTargetType,
 } from '@/types/hr/orientation';
 
 const prerequisiteSchema = z.object({
@@ -63,50 +74,293 @@ const emptyPrerequisite: PrerequisiteForm = {
   notes: '',
 };
 
-const audienceRuleSchema = z.object({
-  ruleName: z.string().min(1, 'A name is required').max(200),
-  description: z.string().max(1000).optional().or(z.literal('')),
-  targetType: z.enum([
-    'AllEmployees',
-    'NewHires',
-    'OrganizationUnit',
-    'JobGrade',
-    'Location',
-    'Role',
-    'Management',
-    'Contractors',
-    'Custom',
-  ]),
-  targetEntityId: z.string().optional().or(z.literal('')),
-  trigger: z.enum([
-    'OnHire',
-    'OnTransfer',
-    'OnPromotion',
-    'OnProgramPublish',
-    'Scheduled',
-    'Manual',
-  ]),
-  enrollmentDelayDays: z.coerce.number().min(0).max(3650),
-  isInclusive: z.boolean(),
-  isActive: z.boolean(),
-});
+const audienceRuleSchema = z
+  .object({
+    ruleName: z.string().min(1, 'A name is required').max(200),
+    description: z.string().max(1000).optional().or(z.literal('')),
+    // Round 4, lane I1: the shared HR audience axis, narrowed by a population.
+    targetType: z.enum([
+      'AllEmployees',
+      'OrganizationUnit',
+      'OrganizationLevel',
+      'Position',
+      'Location',
+      'Employee',
+    ]),
+    targetEntityId: z.string().optional().or(z.literal('')),
+    /** Display only — the saved target's name, so the employee picker can show who is chosen. */
+    targetLabel: z.string().optional().or(z.literal('')),
+    population: z.enum(['Anyone', 'NewHires', 'Management', 'Contractors']),
+    trigger: z.enum([
+      'OnHire',
+      'OnTransfer',
+      'OnPromotion',
+      'OnProgramPublish',
+      'Scheduled',
+      'Manual',
+    ]),
+    enrollmentDelayDays: z.coerce.number().min(0).max(3650),
+    isInclusive: z.boolean(),
+    isActive: z.boolean(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.targetType !== 'AllEmployees' && !v.targetEntityId)
+      ctx.addIssue({ code: 'custom', path: ['targetEntityId'], message: 'Choose what this rule targets.' });
+    if (v.enrollmentDelayDays > 0 && !DATED_TRIGGERS.includes(v.trigger))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['enrollmentDelayDays'],
+        message: 'Only hire, transfer and promotion rules have a date to wait from. Set it to 0.',
+      });
+  });
 type AudienceRuleForm = z.infer<typeof audienceRuleSchema>;
 const emptyAudienceRule: AudienceRuleForm = {
   ruleName: '',
   description: '',
-  targetType: 'NewHires',
+  targetType: 'AllEmployees',
   targetEntityId: '',
+  targetLabel: '',
+  population: 'NewHires',
   trigger: 'OnHire',
   enrollmentDelayDays: 0,
   isInclusive: true,
   isActive: true,
 };
 
-const scopeLabel = (v: string) =>
-  ORIENTATION_AUDIENCE_SCOPE_OPTIONS.find((o) => o.value === v)?.label ?? v;
+const toRuleRequest = (values: AudienceRuleForm) => ({
+  ruleName: values.ruleName,
+  description: blank(values.description),
+  targetType: values.targetType,
+  targetEntityId: values.targetType === 'AllEmployees' ? null : blank(values.targetEntityId),
+  population: values.population,
+  trigger: values.trigger,
+  enrollmentDelayDays: DATED_TRIGGERS.includes(values.trigger) ? values.enrollmentDelayDays : 0,
+  isInclusive: values.isInclusive,
+  isActive: values.isActive,
+});
+
 const triggerLabel = (v: string) =>
   ORIENTATION_ENROLLMENT_TRIGGER_OPTIONS.find((o) => o.value === v)?.label ?? v;
+const populationLabel = (v: string) =>
+  ORIENTATION_AUDIENCE_POPULATION_OPTIONS.find((o) => o.value === v)?.label ?? v;
 const blank = (v?: string) => (v && v.length > 0 ? v : null);
+
+/**
+ * The rule's live reach while it is being written — "this rule reaches 412 people" — so a rule that
+ * reaches nobody, or everybody, is seen before it is saved rather than after it fires.
+ */
+function RuleReachPreview({
+  targetType,
+  targetEntityId,
+  population,
+}: {
+  targetType: HrAudienceTargetType;
+  targetEntityId?: string | null;
+  population: OrientationAudiencePopulation;
+}) {
+  const ready = targetType === 'AllEmployees' || !!targetEntityId;
+  const { data, isFetching, error } = useQuery({
+    queryKey: ['hr', 'orientation', 'rule-reach', targetType, targetEntityId ?? null, population],
+    queryFn: () =>
+      orientationProgramService.countReach({
+        targetType,
+        targetEntityId: targetType === 'AllEmployees' ? null : targetEntityId || null,
+        population,
+      }),
+    enabled: ready,
+    staleTime: 30_000,
+    retry: false,
+  });
+
+  if (!ready) return null;
+  return (
+    <div className="bg-muted/50 flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+      <Users className="text-muted-foreground h-4 w-4 shrink-0" />
+      {isFetching ? (
+        <span className="text-muted-foreground">Counting…</span>
+      ) : error ? (
+        <span className="text-destructive">{(error as Error).message}</span>
+      ) : data ? (
+        <span>
+          Reaches <strong className={data.count === 0 ? 'text-destructive' : undefined}>{data.count}</strong>{' '}
+          {data.count === 1 ? 'person' : 'people'} today — {data.description}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** The rule form's body: a typed target, a population, the trigger explained, the reach. */
+function AudienceRuleFields({ form }: { form: UseFormReturn<AudienceRuleForm> }) {
+  const targetType = form.watch('targetType');
+  const targetEntityId = form.watch('targetEntityId');
+  const population = form.watch('population');
+  const trigger = form.watch('trigger');
+  const dated = DATED_TRIGGERS.includes(trigger);
+  const targetError = form.formState.errors.targetEntityId?.message;
+
+  return (
+    <>
+      <TextField form={form} name="ruleName" label="Rule name" required />
+      <TextareaField form={form} name="description" label="Description" rows={2} />
+
+      <AudienceTargetPicker
+        targetType={targetType}
+        targetId={targetEntityId || null}
+        initialLabel={form.getValues('targetLabel') || null}
+        onTypeChange={(t) => form.setValue('targetType', t, { shouldValidate: false })}
+        onTargetChange={(id) => form.setValue('targetEntityId', id ?? '', { shouldValidate: true })}
+        idPrefix="rule-target"
+      />
+      {targetError && <p className="text-destructive text-sm">{String(targetError)}</p>}
+
+      <div className="space-y-1.5">
+        <SelectField
+          form={form}
+          name="population"
+          label="Who, of the people there"
+          required
+          options={ORIENTATION_AUDIENCE_POPULATION_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+        />
+        <p className="text-muted-foreground text-xs">
+          {ORIENTATION_AUDIENCE_POPULATION_OPTIONS.find((o) => o.value === population)?.hint}
+        </p>
+      </div>
+
+      <RuleReachPreview targetType={targetType} targetEntityId={targetEntityId} population={population} />
+
+      <div className="space-y-1.5">
+        <SelectField
+          form={form}
+          name="trigger"
+          label="Trigger"
+          required
+          options={ORIENTATION_ENROLLMENT_TRIGGER_OPTIONS}
+        />
+        <p className="text-muted-foreground text-xs">{ORIENTATION_TRIGGER_HINTS[trigger]}</p>
+      </div>
+
+      {dated && (
+        <NumberField
+          form={form}
+          name="enrollmentDelayDays"
+          label="Enrollment delay (days)"
+          description="Counted from the hire date or the movement's effective date. A rule fires for 30 days after its day comes, and never reaches further back."
+          required
+        />
+      )}
+      <FieldRow>
+        <SwitchField
+          form={form}
+          name="isInclusive"
+          label="Enrols"
+          description="Turn off to make this an exclusion — it keeps people out whatever the trigger."
+        />
+        <SwitchField form={form} name="isActive" label="Active" />
+      </FieldRow>
+    </>
+  );
+}
+
+/**
+ * HR's "Enrol audience now": previews first (nothing written), then enrols on confirmation. Runs the
+ * programme's rules that have no date to count from — manual, publish and scheduled.
+ */
+function EnrolAudiencePanel({
+  programId,
+  isActive,
+  recursEvery,
+}: {
+  programId: string;
+  isActive: boolean;
+  /** The recurrence frequency's label when the programme recurs (lane I-b). */
+  recursEvery?: string | null;
+}) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [preview, setPreview] = useState<OrientationTriggerRunResult | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const runPreview = async () => {
+    setBusy(true);
+    try {
+      setPreview(await orientationProgramService.enrolAudience(programId, true));
+    } catch (e) {
+      toast({ title: 'Could not preview', description: (e as Error).message, variant: 'destructive' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const enrol = async () => {
+    setBusy(true);
+    try {
+      const result = await orientationProgramService.enrolAudience(programId, false);
+      toast({
+        title: `${result.enrolled} enrolled`,
+        description: `${result.alreadyEnrolled} already on it, ${result.excluded} excluded, ${result.waitingOnPrerequisite} waiting on a prerequisite.`,
+      });
+      setPreview(null);
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'orientation-programs', programId] });
+    } catch (e) {
+      toast({ title: 'Could not enrol', description: (e as Error).message, variant: 'destructive' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="mb-4">
+      <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+        <div className="text-sm">
+          <div className="font-medium">Rules fire by themselves</div>
+          <div className="text-muted-foreground">
+            Hire, transfer and promotion rules fire on the event; scheduled rules every night. “Enrol
+            audience now” runs the manual, publish and scheduled rules immediately.{' '}
+            {recursEvery && (
+              <>
+                Recurs {recursEvery.toLowerCase()}: the nightly sweep opens each person’s next cycle one
+                period after they complete it, while a rule here still reaches them.{' '}
+              </>
+            )}
+            <Link href="/hr/orientation/triggers" className="underline underline-offset-2">
+              Why did — or didn’t — a rule reach someone?
+            </Link>
+          </div>
+        </div>
+        <Button variant="outline" onClick={runPreview} disabled={busy || !isActive}>
+          {busy && !preview ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
+          Enrol audience now
+        </Button>
+        {!isActive && (
+          <p className="text-muted-foreground w-full text-xs">Only an active programme enrols anyone.</p>
+        )}
+      </CardContent>
+
+      <ConfirmationDialog
+        open={preview !== null}
+        onOpenChange={(o) => !o && setPreview(null)}
+        title={preview ? `Enrol ${preview.enrolled} ${preview.enrolled === 1 ? 'person' : 'people'}?` : ''}
+        description={
+          preview
+            ? preview.rulesEvaluated === 0
+              ? 'This programme has no active manual, publish or scheduled rule to run.'
+              : `${preview.rulesEvaluated} rule(s). ${preview.alreadyEnrolled} already on the programme, ${preview.excluded} excluded, ${preview.waitingOnPrerequisite} waiting on a prerequisite.` +
+                (preview.enrolments.length > 0
+                  ? ` First: ${preview.enrolments
+                      .slice(0, 5)
+                      .map((e) => e.employeeName ?? e.employeeNumber ?? e.employeeId)
+                      .join(', ')}${preview.enrolled > 5 ? '…' : ''}`
+                  : '')
+            : ''
+        }
+        confirmText={preview && preview.enrolled > 0 ? 'Enrol them' : 'Close'}
+        isLoading={busy}
+        onConfirm={preview && preview.enrolled > 0 ? enrol : () => setPreview(null)}
+      />
+    </Card>
+  );
+}
 
 /**
  * One programme: its overview, the modules and content people work through, what has to be done
@@ -127,6 +381,7 @@ export default function OrientationProgramDetailPage() {
   const [savingOverview, setSavingOverview] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<OrientationProgramStatus | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const queryKey = ['hr', 'orientation-programs', id];
@@ -238,7 +493,9 @@ export default function OrientationProgramDetailPage() {
   }
 
   // Warnings that only matter once a programme is live. A draft is allowed to be incomplete.
-  const noModules = program.moduleCount === 0;
+  // Round 4, lane R: a programme that is only its live session has no modules by design — attendance
+  // completes it — so an empty module list is only a defect on a programme that is not one.
+  const noModules = program.moduleCount === 0 && !program.completesByAttendance;
   const assessmentWithoutQuestions =
     program.requiresAssessment && program.assessmentQuestions.length === 0;
   const isActive = program.status === 'Active';
@@ -271,6 +528,10 @@ export default function OrientationProgramDetailPage() {
                 ))}
               </SelectContent>
             </Select>
+            <Button variant="outline" onClick={() => setCopyOpen(true)}>
+              <Copy className="mr-2 h-4 w-4" />
+              Copy
+            </Button>
             <Button
               variant="outline"
               size="icon"
@@ -321,6 +582,18 @@ export default function OrientationProgramDetailPage() {
         </Alert>
       )}
 
+      {program.completesByAttendance && (
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertTitle>Completed by attendance</AlertTitle>
+          <AlertDescription>
+            This programme is its live session: nothing to work through and no assessment. A
+            participant completes it when HR marks their session Completed and the register shows them
+            there, or when HR marks the enrolment completed on the enrolments screen.
+          </AlertDescription>
+        </Alert>
+      )}
+
       <Tabs defaultValue="overview">
         <TabsList className="flex-wrap">
           <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -353,6 +626,8 @@ export default function OrientationProgramDetailPage() {
               requiresAssessment: program.requiresAssessment,
               passingScorePercent: program.passingScorePercent ?? undefined,
               requiresAcknowledgement: program.requiresAcknowledgement,
+              acknowledgementTitle: program.acknowledgementTitle ?? '',
+              acknowledgementText: program.acknowledgementText ?? '',
               completionDeadlineDays: program.completionDeadlineDays ?? undefined,
               isCertificateIssued: program.isCertificateIssued,
               certificateValidityMonths: program.certificateValidityMonths ?? undefined,
@@ -456,6 +731,16 @@ export default function OrientationProgramDetailPage() {
         </TabsContent>
 
         <TabsContent value="audience" className="pt-4">
+          <EnrolAudiencePanel
+            programId={id}
+            isActive={isActive}
+            recursEvery={
+              program.isRecurring && program.recurrenceFrequency
+                ? (ORIENTATION_RECURRENCE_FREQUENCY_OPTIONS.find((o) => o.value === program.recurrenceFrequency)?.label ??
+                  program.recurrenceFrequency)
+                : null
+            }
+          />
           <ResourceCollectionTab<OrientationAudienceRule, AudienceRuleForm>
             parentId={id}
             title="audience rules"
@@ -466,20 +751,10 @@ export default function OrientationProgramDetailPage() {
             emptyDescription="No rules — everyone on this programme is enrolled by hand."
             list={() => orientationProgramService.getAudienceRules(id)}
             create={(programId, values) =>
-              orientationProgramService.addAudienceRule(programId, {
-                programId,
-                ...values,
-                description: blank(values.description),
-                targetEntityId: blank(values.targetEntityId),
-              })
+              orientationProgramService.addAudienceRule(programId, { programId, ...toRuleRequest(values) })
             }
             update={(_p, ruleId, values) =>
-              orientationProgramService.updateAudienceRule(ruleId, {
-                id: ruleId,
-                ...values,
-                description: blank(values.description),
-                targetEntityId: blank(values.targetEntityId),
-              })
+              orientationProgramService.updateAudienceRule(ruleId, { id: ruleId, ...toRuleRequest(values) })
             }
             remove={(_p, ruleId) => orientationProgramService.removeAudienceRule(ruleId)}
             getId={(r) => r.id}
@@ -497,12 +772,35 @@ export default function OrientationProgramDetailPage() {
                   </div>
                 ),
               },
-              { header: 'Targets', cell: (r) => scopeLabel(r.targetType) },
+              {
+                header: 'Targets',
+                cell: (r) => (
+                  <div>
+                    <div>{r.targetEntityName ?? r.targetType}</div>
+                    {r.population !== 'Anyone' && (
+                      <div className="text-muted-foreground text-xs">
+                        {populationLabel(r.population)} only
+                      </div>
+                    )}
+                  </div>
+                ),
+              },
+              {
+                header: 'Reach today',
+                cell: (r) =>
+                  r.reachCount === null || r.reachCount === undefined ? (
+                    '—'
+                  ) : (
+                    <span className={r.reachCount === 0 ? 'text-destructive' : undefined}>
+                      {r.reachCount}
+                    </span>
+                  ),
+              },
               { header: 'Trigger', cell: (r) => triggerLabel(r.trigger) },
               {
                 header: 'Delay',
                 cell: (r) =>
-                  r.enrollmentDelayDays === 0
+                  !DATED_TRIGGERS.includes(r.trigger) || r.enrollmentDelayDays === 0
                     ? 'Immediately'
                     : `${r.enrollmentDelayDays} day${r.enrollmentDelayDays === 1 ? '' : 's'} after`,
               },
@@ -524,54 +822,14 @@ export default function OrientationProgramDetailPage() {
               description: r.description ?? '',
               targetType: r.targetType,
               targetEntityId: r.targetEntityId ?? '',
+              targetLabel: r.targetEntityName ?? '',
+              population: r.population ?? 'Anyone',
               trigger: r.trigger,
               enrollmentDelayDays: r.enrollmentDelayDays,
               isInclusive: r.isInclusive,
               isActive: r.isActive,
             })}
-            renderFields={(form) => (
-              <>
-                <TextField form={form} name="ruleName" label="Rule name" required />
-                <TextareaField form={form} name="description" label="Description" rows={2} />
-                <FieldRow>
-                  <SelectField
-                    form={form}
-                    name="targetType"
-                    label="Targets"
-                    required
-                    options={ORIENTATION_AUDIENCE_SCOPE_OPTIONS}
-                  />
-                  <SelectField
-                    form={form}
-                    name="trigger"
-                    label="Trigger"
-                    required
-                    options={ORIENTATION_ENROLLMENT_TRIGGER_OPTIONS}
-                  />
-                </FieldRow>
-                <TextField
-                  form={form}
-                  name="targetEntityId"
-                  label="Target id"
-                  placeholder="The unit, grade, location or role id this rule narrows to"
-                />
-                <NumberField
-                  form={form}
-                  name="enrollmentDelayDays"
-                  label="Enrollment delay (days)"
-                  required
-                />
-                <FieldRow>
-                  <SwitchField
-                    form={form}
-                    name="isInclusive"
-                    label="Enrols"
-                    description="Turn off to make this an exclusion instead."
-                  />
-                  <SwitchField form={form} name="isActive" label="Active" />
-                </FieldRow>
-              </>
-            )}
+            renderFields={(form) => <AudienceRuleFields form={form} />}
           />
         </TabsContent>
 
@@ -615,6 +873,15 @@ export default function OrientationProgramDetailPage() {
         variant="destructive"
         isLoading={busy}
         onConfirm={remove}
+      />
+
+      <CopyOrientationProgramDialog
+        source={
+          copyOpen
+            ? { id: program.id, title: program.title, programCode: program.programCode }
+            : null
+        }
+        onClose={() => setCopyOpen(false)}
       />
     </div>
   );

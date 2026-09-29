@@ -33,10 +33,15 @@ public class LeaveTypeDto
 
     /// <summary>⚠ Refused together with an incremental accrual policy — the two deduct for the same months.</summary>
     public bool ProRateFirstYearEntitlement { get; set; }
-    public bool MandatoryAnnualLeave { get; set; }
-    public EncashmentRateBasis EncashmentRateBasis { get; set; }
-    public decimal? EncashmentRatePerDay { get; set; }
-    public int EncashmentWorkingDaysPerMonth { get; set; }
+
+    /// <summary>Annual, Maternity or Other (round 5, A4). Replaces <c>MandatoryAnnualLeave</c>.</summary>
+    public LeaveTypeCategory Category { get; set; }
+
+    /// <summary>
+    /// Days asked for beyond this leave's limit may be charged to annual leave, HR deciding at the
+    /// final approval (round 5, decision A5). Other kinds only.
+    /// </summary>
+    public bool AllowOffsetAgainstAnnual { get; set; }
 
     /// <summary>Whether this leave type requires excuse duty (a medical certificate).</summary>
     public bool RequiresMedicalCertificate { get; set; }
@@ -79,10 +84,25 @@ public class CreateLeaveTypeDto
 
     /// <summary>⚠ Refused together with an incremental accrual policy — the two deduct for the same months.</summary>
     public bool ProRateFirstYearEntitlement { get; set; }
-    public bool MandatoryAnnualLeave { get; set; }
-    public EncashmentRateBasis EncashmentRateBasis { get; set; } = EncashmentRateBasis.DerivedFromEmoluments;
-    public decimal? EncashmentRatePerDay { get; set; }
-    public int EncashmentWorkingDaysPerMonth { get; set; } = 22;
+
+    /// <summary>
+    /// Annual, Maternity or Other (round 5, A4). ⚠ <b>Null means "not saying"</b>: Other on create,
+    /// and UNCHANGED on update.
+    /// </summary>
+    /// <remarks>
+    /// Nullable on purpose. The update is a whole-object PUT, and callers that read a leave type and
+    /// echo it back (the demo builder among them) predate the kind. A non-nullable field would quietly
+    /// turn the tenant's Annual Leave into Other on their next save: the L-13 shape, where an
+    /// unmentioned field means "clear it".
+    /// </remarks>
+    public LeaveTypeCategory? Category { get; set; }
+
+    /// <summary>
+    /// Days beyond the limit may be charged to annual leave (round 5, A5). ⚠ <b>Null means "not
+    /// saying"</b>, as for <see cref="Category"/>: off on create, UNCHANGED on update. Refused on an
+    /// Annual or Maternity type, and on a type that does not require approval.
+    /// </summary>
+    public bool? AllowOffsetAgainstAnnual { get; set; }
 
     /// <summary>
     /// Whether this leave type requires excuse duty — a medical certificate — once the
@@ -99,36 +119,26 @@ public class CreateLeaveTypeDto
     /// </summary>
     [Range(1, 365)] public int? MedicalBoardThresholdDays { get; set; } = 90;
 
-    /// <summary>Allowance pay-component IDs whose value feeds this leave type's derived encashment rate.</summary>
-    public List<Guid> AllowanceComponentIds { get; set; } = new();
+    // ⚠ The encashment rate fields (basis, rate per day, working days per month) and the
+    // allowance links left with leave settings audit 2 (L-73): Finance values leave, HR records days.
 }
 
 /// <summary>
 /// Updating a leave type. ⚠ <b>A PUT here is a REPLACE</b>, as the verb says: every field sent
-/// becomes the new value and every field omitted becomes its default.
+/// becomes the new value and every field omitted becomes its default — except the fields that say
+/// otherwise (<see cref="CreateLeaveTypeDto.Category"/>, <see cref="CreateLeaveTypeDto.AllowOffsetAgainstAnnual"/>).
 /// </summary>
 /// <remarks>
-/// <para>⚠ <b>That is dangerous for the allowance links, and finding L-13 is about exactly this.</b>
-/// <c>LeaveTypeAllowance</c> rows decide what a day of encashed leave is <b>worth</b> — they feed
-/// the derived rate — and a caller who sent a partial body used to have every one of them silently
-/// deleted, changing people's money with no trace of what was removed.</para>
-///
-/// <para><b>So this one property is nullable and the others are not.</b> <c>null</c> means "I am not
-/// touching the allowances" and an empty list means "remove them all". A PUT that omits the field
-/// now leaves the links alone; a caller who genuinely wants none sends <c>[]</c> and says so. The
-/// replace-set semantics stay for every other field, because that is what PUT means and the screens
-/// send the whole object — but a flag reset to false is visible on the next read, whereas a deleted
-/// link is not.</para>
+/// The allowance links, which were the first nullable exception here (finding L-13), left with the
+/// encashment rate in leave settings audit 2.
 /// </remarks>
 public class UpdateLeaveTypeDto : CreateLeaveTypeDto
 {
-    public bool IsActive { get; set; } = true;
-
     /// <summary>
-    /// ⚠ <c>null</c> = leave the allowance links untouched. <c>[]</c> = remove them all.
-    /// Shadows the non-nullable property on the create DTO, deliberately.
+    /// Retires or restores the type. ⚠ <c>null</c> leaves it as it is (leave settings audit 2, L-79): it
+    /// defaulted to <c>true</c>, so a save that left it out brought a retired type back.
     /// </summary>
-    public new List<Guid>? AllowanceComponentIds { get; set; }
+    public bool? IsActive { get; set; }
 }
 
 public class LeaveTypeDetailDto : LeaveTypeDto
@@ -137,7 +147,6 @@ public class LeaveTypeDetailDto : LeaveTypeDto
     public List<LeaveCategoryAllocationDto> Allocations { get; set; } = new();
     public List<LeaveTypeEligibilityDto> Eligibilities { get; set; } = new();
     public List<LeaveAccrualPolicyDto> AccrualPolicies { get; set; } = new();
-    public List<Guid> AllowanceComponentIds { get; set; } = new();
 }
 
 // ─── Leave Sub Type ───────────────────────────────────────────────────────────
@@ -159,7 +168,12 @@ public class CreateLeaveSubTypeDto
     public string SubTypeName { get; set; } = string.Empty;
     public string? Description { get; set; }
     public int? MaxDaysAllowed { get; set; }
-    public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// Active on create when left out; on update <c>null</c> leaves it as it is (leave settings audit 2,
+    /// L-79 — the same trap as the leave type's: an update that left it out revived a retired sub-type).
+    /// </summary>
+    public bool? IsActive { get; set; }
 }
 
 // ─── Leave Category Allocation ────────────────────────────────────────────────
@@ -169,19 +183,22 @@ public class LeaveCategoryAllocationDto
     public Guid Id { get; set; }
     public Guid LeaveTypeId { get; set; }
     public string LeaveTypeName { get; set; } = string.Empty;
-    public Guid? LeaveSubTypeId { get; set; }
-    public string? LeaveSubTypeName { get; set; }
     public Guid StaffLevelId { get; set; }
     public string StaffLevelName { get; set; } = string.Empty;
     public int AllocationDays { get; set; }
     public DateOnly EffectiveFrom { get; set; }
     public DateOnly? EffectiveTo { get; set; }
+
+    /// <summary>
+    /// On a save: how many of the current leave year's balances moved to match (leave settings audit
+    /// 2, L-89). Null when the allocation does not reach the current year, and on reads.
+    /// </summary>
+    public int? BalancesUpdated { get; set; }
 }
 
 public class CreateLeaveCategoryAllocationDto
 {
     public Guid LeaveTypeId { get; set; }
-    public Guid? LeaveSubTypeId { get; set; }
     public Guid StaffLevelId { get; set; }
     public int AllocationDays { get; set; }
     public DateOnly EffectiveFrom { get; set; }
@@ -240,6 +257,13 @@ public class CreateLeaveAccrualPolicyDto
     public int? MinServiceMonths { get; set; }
     public bool ProRateOnJoin { get; set; }
     public bool ProRateOnExit { get; set; }
+
+    /// <summary>
+    /// Whether the policy is in force (round 5, lane N1). It existed on the entity with nothing to
+    /// write it, so a policy could only be deleted. <c>null</c> means active on create and
+    /// unchanged on update, so an older caller cannot switch a policy off by leaving it out.
+    /// </summary>
+    public bool? IsActive { get; set; }
 }
 
 // ─── Leave Balance ────────────────────────────────────────────────────────────
@@ -247,16 +271,36 @@ public class CreateLeaveAccrualPolicyDto
 public class LeaveBalanceDto
 {
     public Guid Id { get; set; }
+
+    /// <summary>
+    /// False on a figure worked out live for somebody with no balance record for the year yet (round
+    /// 5, lane J): the annual view and the portal show everybody's annual leave before a request has
+    /// opened a record. Such a row has no <see cref="Id"/>, so there is nothing to open, adjust or
+    /// recalculate; its figures are exactly what the record will hold when it is created.
+    /// </summary>
+    public bool HasRecord { get; set; } = true;
     public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
+
+    /// <summary>The staff number, for finding a person in a long list.</summary>
+    public string? EmployeeNumber { get; set; }
     public string? OrganizationUnitName { get; set; }
     public Guid LeaveTypeId { get; set; }
     public string LeaveTypeName { get; set; } = string.Empty;
+
+    /// <summary>The leave type's kind (round 5, A4): Annual shows as a balance, Other as a limit.</summary>
+    public LeaveTypeCategory? LeaveTypeCategory { get; set; }
     public Guid? LeaveSubTypeId { get; set; }
     public string? LeaveSubTypeName { get; set; }
     public int Year { get; set; }
     public decimal EntitledDays { get; set; }
     public decimal AccruedToDateDays { get; set; }
+
+    /// <summary>
+    /// The date <see cref="AccruedToDateDays"/> is worked out to (round 5, lane C2) — today, the year
+    /// end, or a leaver's last day. <c>null</c> for a leave type that does not accrue.
+    /// </summary>
+    public DateOnly? AccruedAsOf { get; set; }
     public decimal UsedDays { get; set; }
     public decimal PendingDays { get; set; }
     public decimal CarriedOverDays { get; set; }
@@ -270,6 +314,12 @@ public class LeaveBalanceDto
     /// whatever has not accrued yet, and a screen showing only the first invites a refused request.
     /// </summary>
     public decimal AccruedAvailableDays { get; set; }
+
+    /// <summary>
+    /// While the employee has not yet served the leave type's qualifying period: the first day they
+    /// may take it (round 5, lane J). Null once they may, and for a type without one.
+    /// </summary>
+    public DateOnly? AccessibleFrom { get; set; }
 }
 
 // ─── Leave Adjustment ────────────────────────────────────────────────────────
@@ -352,6 +402,8 @@ public class LeaveBalanceDetailDto
     public int     Year                 { get; set; }
     public decimal EntitledDays         { get; set; }
     public decimal AccruedToDateDays    { get; set; }
+    /// <summary>The date <see cref="AccruedToDateDays"/> is worked out to (round 5, lane C2).</summary>
+    public DateOnly? AccruedAsOf        { get; set; }
     public decimal UsedDays             { get; set; }
     public decimal PendingDays          { get; set; }
     public decimal CarriedOverDays      { get; set; }
@@ -372,6 +424,189 @@ public class LeaveBalanceDetailDto
     public List<LeaveRequestDto>    Requests    { get; set; } = new();
     public List<LeaveEncashmentDto> Encashments { get; set; } = new();
     public List<LeaveAdjustmentDto> Adjustments { get; set; } = new();
+}
+
+// ─── Accrual statement (round 5, lane C2) ────────────────────────────────────
+
+/// <summary>
+/// How one balance's accrual is worked out as at a date: the rule, the entitlement and where it came
+/// from, the rate, and one line per completed period with a running total.
+/// </summary>
+/// <remarks>
+/// The answer to "HR might run a utility that accrues the leave days up to a date": nothing needs
+/// running, because accrual is worked out whenever it is asked for — this shows the working, for
+/// any date. Every figure comes from the same method the create check and the balance screens use.
+/// </remarks>
+public class LeaveAccrualStatementDto
+{
+    public Guid BalanceId { get; set; }
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public Guid LeaveTypeId { get; set; }
+    public string LeaveTypeName { get; set; } = string.Empty;
+    public LeaveTypeCategory? LeaveTypeCategory { get; set; }
+    public int Year { get; set; }
+    public DateOnly YearStart { get; set; }
+    public DateOnly YearEnd { get; set; }
+
+    /// <summary>The date asked for (today when none was given).</summary>
+    public DateOnly RequestedAsOf { get; set; }
+
+    /// <summary>The date it is worked out to: earlier than asked at the year end or a leaver's last day.</summary>
+    public DateOnly AsOf { get; set; }
+    public LeaveAccrualAsOfLimit AsOfLimit { get; set; }
+    public LeaveAccrualState State { get; set; }
+
+    // The entitlement — the cap, and for a derived rate its source.
+    public decimal AnnualEntitledDays { get; set; }
+    public LeaveEntitlementSource EntitlementSource { get; set; }
+    public decimal EntitlementBaseDays { get; set; }
+    public string? StaffLevelName { get; set; }
+    public DateOnly? AllocationEffectiveFrom { get; set; }
+    public decimal? CeilingDays { get; set; }
+    public int? FirstYearMonthsPresent { get; set; }
+
+    /// <summary>
+    /// The entitlement stored on the balance row. Accrual follows the rulebook, so when the two differ
+    /// the statement says so (Repair entitlements brings the row into line).
+    /// </summary>
+    public decimal StoredEntitledDays { get; set; }
+
+    // The policy.
+    public bool HasPolicy { get; set; }
+    public AccrualFrequency? Frequency { get; set; }
+    public AccrualMode? Mode { get; set; }
+    public int? MinServiceMonths { get; set; }
+    public bool ProRateOnJoin { get; set; }
+    public bool ProRateOnExit { get; set; }
+
+    // The working.
+    public DateOnly? HiredOn { get; set; }
+    public DateOnly? LeftOn { get; set; }
+    public DateOnly? EligibleFrom { get; set; }
+    public DateOnly? WindowStart { get; set; }
+    public int PeriodsPerYear { get; set; }
+    public decimal RatePerPeriod { get; set; }
+    public bool RateIsDerived { get; set; }
+    public List<LeaveAccrualStatementLineDto> Periods { get; set; } = new();
+    public DateOnly? NextPeriodStart { get; set; }
+    public DateOnly? NextPeriodEnd { get; set; }
+    public bool TailNotCredited { get; set; }
+
+    /// <summary>The days accrued as at <see cref="AsOf"/>: the last line's running total.</summary>
+    public decimal AccruedDays { get; set; }
+    public bool CapReached { get; set; }
+}
+
+/// <summary>One completed accrual period.</summary>
+public class LeaveAccrualStatementLineDto
+{
+    public DateOnly Start { get; set; }
+    public DateOnly End { get; set; }
+    public decimal Days { get; set; }
+    public decimal RunningTotal { get; set; }
+    public bool Capped { get; set; }
+}
+
+// ─── Leave owed as at a date (round 5, lane C6 — decision A7) ────────────────
+
+/// <summary>
+/// Annual leave built up and not yet taken, per employee on the books, as at a chosen date. Days
+/// only: Finance puts the money on them.
+/// </summary>
+public class LeaveOwedReportDto
+{
+    /// <summary>The date the report is worked out to.</summary>
+    public DateOnly AsOf { get; set; }
+
+    /// <summary>The leave year the date falls in, and its bounds.</summary>
+    public int Year { get; set; }
+    public DateOnly YearStart { get; set; }
+    public DateOnly YearEnd { get; set; }
+
+    /// <summary>The tenant's annual leave type — the one leave the report is about.</summary>
+    public Guid LeaveTypeId { get; set; }
+    public string LeaveTypeName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// When carried-in days stop being usable this year (the leave type's carry-over expiry), if they
+    /// ever do. On and after it, only carried days taken before it count.
+    /// </summary>
+    public DateOnly? CarryOverExpiresOn { get; set; }
+
+    public List<LeaveOwedRowDto> Rows { get; set; } = new();
+    public LeaveOwedTotalsDto Totals { get; set; } = new();
+}
+
+/// <summary>One employee's annual leave as at the report date.</summary>
+/// <remarks>
+/// <c>Owed = BuiltUp + CarriedIn + Adjustments − Taken − CashedIn</c>. Leave that is approved but not
+/// yet taken, and leave awaiting approval, is still owed: the person has not had it. The two are
+/// shown beside it so HR can see what is already spoken for.
+/// </remarks>
+public class LeaveOwedRowDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? StaffNumber { get; set; }
+    public string? OrganizationUnitName { get; set; }
+    public DateOnly? HiredOn { get; set; }
+
+    /// <summary>The last day of service of somebody who has left since the report date.</summary>
+    public DateOnly? LeftOn { get; set; }
+
+    /// <summary>The whole year's entitlement.</summary>
+    public decimal EntitledDays { get; set; }
+
+    /// <summary>Built up (accrued) to the report date — or the whole entitlement if the type does not accrue.</summary>
+    public decimal BuiltUpDays { get; set; }
+
+    /// <summary>Carried in from last year and still usable at the report date.</summary>
+    public decimal CarriedInDays { get; set; }
+
+    /// <summary>HR's adjustments to the year (opening balances, approved deferrals, forfeiture).</summary>
+    public decimal AdjustmentDays { get; set; }
+
+    /// <summary>Days of approved leave on or before the report date.</summary>
+    public decimal TakenDays { get; set; }
+
+    /// <summary>Days paid out instead of taken.</summary>
+    public decimal CashedInDays { get; set; }
+
+    public decimal OwedDays { get; set; }
+
+    /// <summary>Approved leave after the report date — owed, and already spoken for.</summary>
+    public decimal BookedDays { get; set; }
+
+    /// <summary>Leave awaiting approval — owed, and asked for.</summary>
+    public decimal AwaitingApprovalDays { get; set; }
+}
+
+/// <summary>The report's column totals.</summary>
+public class LeaveOwedTotalsDto
+{
+    public int Employees { get; set; }
+    public decimal EntitledDays { get; set; }
+    public decimal BuiltUpDays { get; set; }
+    public decimal CarriedInDays { get; set; }
+    public decimal AdjustmentDays { get; set; }
+    public decimal TakenDays { get; set; }
+    public decimal CashedInDays { get; set; }
+    public decimal OwedDays { get; set; }
+    public decimal BookedDays { get; set; }
+    public decimal AwaitingApprovalDays { get; set; }
+}
+
+/// <summary>
+/// The tenant's current leave year (round 5, lane C4), so screens can default to it rather than to
+/// the calendar year.
+/// </summary>
+public class LeaveYearInfoDto
+{
+    public int StartMonth { get; set; }
+    public int CurrentYear { get; set; }
+    public DateOnly StartDate { get; set; }
+    public DateOnly EndDate { get; set; }
 }
 
 // ─── Leave Plan ───────────────────────────────────────────────────────────────
@@ -423,6 +658,20 @@ public class LeavePlanDto
     public Guid? RaisedLeaveRequestId { get; set; }
     public string? RaisedLeaveRequestNumber { get; set; }
 
+    public DateTime? CancellationDate { get; set; }
+    public string? CancellationReason { get; set; }
+
+    /// <summary>
+    /// The employee's own reliever roster (active entries, by priority), so whoever opens the plan
+    /// can pick relievers from it. Filled on the single-plan read only.
+    /// </summary>
+    /// <remarks>
+    /// Round 5 lane E2/E3. The roster's own endpoint is self-or-HR, so the line manager deciding the
+    /// plan could not read it. Carrying it here opens exactly one employee's roster, to whoever may
+    /// open that plan — the same reach as the plan itself.
+    /// </remarks>
+    public List<LeavePlanRosterRelieverDto> RelieverRoster { get; set; } = new();
+
     /// <summary>
     /// Why the named reliever(s) may not actually be available over this plan's dates. Empty when
     /// nothing overlaps, or when no reliever is named. Advisory — a plan with clashes can still be
@@ -435,6 +684,32 @@ public class LeavePlanDto
     /// reliever — so a reliever who is away, or already covering for somebody else, shows up.
     /// </remarks>
     public List<LeaveRelieverClashDto> RelieverClashes { get; set; } = new();
+}
+
+/// <summary>One entry of an employee's reliever roster, as a plan offers it.</summary>
+public class LeavePlanRosterRelieverDto
+{
+    public Guid EmployeeId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? PositionName { get; set; }
+    /// <summary>1 = primary, 2 = backup, and so on.</summary>
+    public int Priority { get; set; }
+}
+
+/// <summary>
+/// The approver's one edit to a submitted plan: who covers (round 5 lane E3). Both slots are
+/// replaced — send the one to keep as well as the one to change; null empties a slot.
+/// </summary>
+public class UpdateLeavePlanRelieversDto
+{
+    public Guid? RelieverId { get; set; }
+    public Guid? SecondRelieverId { get; set; }
+}
+
+/// <summary>Cancelling a plan. The reason is required when HR cancels an approved one.</summary>
+public class CancelLeavePlanDto
+{
+    public string? Reason { get; set; }
 }
 
 /// <summary>One reason a reliever is not free over a leave plan's dates.</summary>
@@ -555,6 +830,42 @@ public class CreateLeaveRequestDto
     public string? HandoverNotes { get; set; }
     public Guid? LeavePlanId { get; set; }
     public bool SaveAsDraft { get; set; }
+
+    /// <summary>
+    /// Charge the days beyond this leave's limit to annual leave, HR deciding (round 5, decision
+    /// A5). Allowed only where the leave type says so; see <see cref="LeaveExcessPreviewDto"/>.
+    /// </summary>
+    public bool ChargeExcessToAnnual { get; set; }
+}
+
+/// <summary>
+/// What a request for these dates would ask of its leave type, and of annual leave beyond the type's
+/// limit (round 5, lane H). Read by the request forms before anything is saved.
+/// </summary>
+public class LeaveExcessPreviewDto
+{
+    /// <summary>The days the dates cost on this leave type, counted by its own rules.</summary>
+    public decimal RequestedDays { get; set; }
+
+    /// <summary>What the leave type has left that can be taken now.</summary>
+    public decimal AvailableDays { get; set; }
+
+    /// <summary>The days beyond what the type can take: 0 when the request fits.</summary>
+    public decimal ExcessDays { get; set; }
+
+    /// <summary>Whether the leave type lets those days be charged to annual leave.</summary>
+    public bool AllowsOffsetAgainstAnnual { get; set; }
+
+    public string? AnnualLeaveTypeName { get; set; }
+
+    /// <summary>The days annual leave would be charged, counted by annual leave's rules.</summary>
+    public decimal? AnnualDays { get; set; }
+
+    /// <summary>What annual leave has left that can be taken now.</summary>
+    public decimal? AnnualAvailableDays { get; set; }
+
+    /// <summary>Why the extra days cannot be charged to annual leave, when they cannot.</summary>
+    public string? Refusal { get; set; }
 }
 
 public class LeaveRequestDto
@@ -568,6 +879,9 @@ public class LeaveRequestDto
 
     public Guid LeaveTypeId { get; set; }
     public string LeaveTypeName { get; set; } = string.Empty;
+
+    /// <summary>The leave type's kind (round 5, A4). Maternity is confirmed, never moved.</summary>
+    public LeaveTypeCategory? LeaveTypeCategory { get; set; }
     public bool IsPaidLeave { get; set; }
 
     public Guid? LeaveSubTypeId { get; set; }
@@ -592,6 +906,45 @@ public class LeaveRequestDto
 
     /// <summary>The number of the plan this request was raised from, when it came from one.</summary>
     public string? LeavePlanReference { get; set; }
+
+    /// <summary>
+    /// True when the request was raised from an APPROVED plan and asks for exactly the plan's dates
+    /// (round 5, decision B4). Annual leave that was scheduled is applied for "as of right": it still
+    /// goes through both approvals, but the approver can see at a glance that the dates were agreed.
+    /// </summary>
+    public bool MatchesApprovedPlan { get; set; }
+
+    // ── Beyond the limit, charged to annual leave (round 5, lane H, decision A5) ───────────────
+    /// <summary>The employee asked for the days beyond this leave's limit to go to annual leave.</summary>
+    public bool ChargeExcessToAnnual { get; set; }
+
+    /// <summary>
+    /// While the request is undecided: the days that would be charged to annual leave if it were
+    /// approved now, and why they could not be, when they could not. Single read only.
+    /// </summary>
+    public decimal? ExcessToAnnualDays { get; set; }
+    public string? ExcessToAnnualRefusal { get; set; }
+
+    /// <summary>
+    /// On a request split at approval: the annual part that took the days beyond the limit. The
+    /// absence runs on to its end date. Single read only.
+    /// </summary>
+    public Guid? ChargedToAnnualRequestId { get; set; }
+    public string? ChargedToAnnualRequestNumber { get; set; }
+    public string? ChargedToAnnualLeaveTypeName { get; set; }
+    public decimal? ChargedToAnnualDays { get; set; }
+    public DateOnly? ChargedToAnnualEndDate { get; set; }
+    public LeaveStatus? ChargedToAnnualStatus { get; set; }
+
+    /// <summary>
+    /// On the annual part of a split: the request it was split from, where the absence began.
+    /// Number, type, start and status are filled on the single read only.
+    /// </summary>
+    public Guid? SplitFromRequestId { get; set; }
+    public string? SplitFromRequestNumber { get; set; }
+    public string? SplitFromLeaveTypeName { get; set; }
+    public DateOnly? SplitFromStartDate { get; set; }
+    public LeaveStatus? SplitFromStatus { get; set; }
 
     /// <summary>
     /// Who finally approved the request and when, and why it was refused if it was.
@@ -658,7 +1011,52 @@ public class LeaveRequestDto
     public DateTime? CancellationDate { get; set; }
     public string? CancellationReason { get; set; }
 
+    // Coming back (round 5, B3): what the employee reported, who confirmed it, and how it stood.
+    public DateOnly? ResumptionDate { get; set; }
+    public DateTime? ResumptionReportedDate { get; set; }
+    public Guid? ResumptionReportedById { get; set; }
+    public string? ResumptionReportedByName { get; set; }
+    public Guid? ClosureConfirmedById { get; set; }
+    public string? ClosureConfirmedByName { get; set; }
+    public int? OverstayDays { get; set; }
+
+    /// <summary>The first working day after the leave, when the employee is due back. Single read only.</summary>
+    public DateOnly? ExpectedReturnDate { get; set; }
+
+    /// <summary><c>Early</c>, <c>OnTime</c> or <c>Late</c> against <see cref="ExpectedReturnDate"/>; null with no resumption date.</summary>
+    public string? ResumptionTiming { get; set; }
+
+    /// <summary>What the caller may do with this request. Single read only, decided by the server.</summary>
+    public LeaveRequestViewerActionsDto? ViewerActions { get; set; }
+
     public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>
+/// The actions a request's screen may offer the person looking at it (round 5, lane D).
+/// </summary>
+/// <remarks>
+/// Decided on the server because two of the rules turn on facts the screen cannot know: whether
+/// the viewer is the employee's supervisor or head of department, and today's date against the
+/// leave's first day. The endpoints enforce the same rules; this only stops a button being offered
+/// that would be refused.
+/// </remarks>
+public class LeaveRequestViewerActionsDto
+{
+    public bool CanCancel { get; set; }
+
+    /// <summary>Cancelling approved leave takes back something granted, so it must say why.</summary>
+    public bool CancelNeedsReason { get; set; }
+
+    public bool CanRecall { get; set; }
+    public bool CanReportResumption { get; set; }
+    public bool CanConfirmResumption { get; set; }
+}
+
+/// <summary>"I'm back at work" (round 5, B3). The day defaults to today.</summary>
+public class ReportResumptionDto
+{
+    public DateOnly? ResumedOn { get; set; }
 }
 
 public class ApproveLeaveDto
@@ -669,9 +1067,9 @@ public class ApproveLeaveDto
 }
 
 /// <summary>
-/// One row of the mandatory-leave compliance report: for a leave type flagged
-/// <c>MandatoryAnnualLeave</c>, how much of an employee's entitlement they have actually taken
-/// (used), have scheduled (pending), and still owe within the year.
+/// One row of the annual-leave compliance report: for the tenant's Annual leave type (round 5,
+/// A4; it was a <c>MandatoryAnnualLeave</c> flag), how much of an employee's entitlement they have
+/// actually taken (used), have scheduled (pending), and still owe within the year.
 /// </summary>
 public class MandatoryLeaveComplianceDto
 {
@@ -709,9 +1107,18 @@ public class CancelLeaveDto
     public string CancellationReason { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Confirming the return, which is what closes the leave (round 5, B3).
+/// </summary>
 public class CloseLeaveDto
 {
     public string? ClosureNotes { get; set; }
+
+    /// <summary>
+    /// The first day back, when the confirmer knows better than the report, or there was no report.
+    /// Omitted, the employee's reported day stands; with no report either, the return is on time.
+    /// </summary>
+    public DateOnly? ResumptionDate { get; set; }
 }
 
 // ─── Leave Request Attachment ─────────────────────────────────────────────────
@@ -770,6 +1177,21 @@ public class LeaveEncashmentDto
     public string? RejectionReason { get; set; }
 }
 
+/// <summary>Whether leave may be cashed in while still employed (round 5, lane L1).</summary>
+public class LeaveEncashmentAvailabilityDto
+{
+    public bool InServiceAllowed { get; set; }
+
+    /// <summary>A sentence for the screen: where the cash comes from either way.</summary>
+    public string Explanation { get; set; } = string.Empty;
+}
+
+/// <summary>Asking to cash in leave while employed: DAYS only (leave settings audit 2, P4).</summary>
+/// <remarks>
+/// ⚠ There is no amount here any more. HR records the days; Finance puts the money on them when it
+/// marks the encashment paid (<see cref="ProcessLeaveEncashmentDto"/>). An older caller that still
+/// sends <c>amountPaid</c> is ignored by the serializer.
+/// </remarks>
 public class CreateLeaveEncashmentDto
 {
     public Guid LeaveRequestId { get; set; }
@@ -777,18 +1199,27 @@ public class CreateLeaveEncashmentDto
     public Guid LeaveTypeId { get; set; }
     public int Year { get; set; }
     public decimal DaysEncashed { get; set; }
-    public decimal AmountPaid { get; set; }
     public string? Notes { get; set; }
 }
 
 /// <summary>
-/// Marking an encashment paid. The actor is NOT taken from the body: <c>ProcessedByEmployeeId</c>
-/// is an <c>Employees</c> foreign key and is stamped from the caller's own employee id, the same
-/// house rule that adjustments and plans follow.
+/// Marking an encashment paid — Finance's step (<c>HR.Pay.Value</c>, leave settings audit 2, P4):
+/// the amount paid, where it came from, and the payment reference.
 /// </summary>
+/// <remarks>
+/// The actor is NOT taken from the body: <c>ProcessedByEmployeeId</c> is an <c>Employees</c>
+/// foreign key and is stamped from the caller's own employee id, the house rule adjustments and plans
+/// follow.
+/// </remarks>
 public class ProcessLeaveEncashmentDto
 {
     public string PaymentReference { get; set; } = string.Empty;
+
+    /// <summary>The amount Finance paid for the days. Required, above zero.</summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>How Finance worked it out, in words — optional, and stored with the payout.</summary>
+    public string? Basis { get; set; }
 }
 
 // ─── Leave Balance Recalculation ──────────────────────────────────────────────
@@ -830,6 +1261,13 @@ public class LeaveReminderPreviewItemDto
     public int EscalationTier { get; set; }
     public string DedupeKey { get; set; } = string.Empty;
     public bool AlreadySent { get; set; }
+
+    /// <summary>
+    /// Who it goes to (round 5, lane I): <c>Employee</c>, <c>Manager</c>, <c>Confirmer</c>,
+    /// <c>Approver</c>, <c>Hr</c> — the audience part of its topic key — and <c>HrDigest</c> when it
+    /// is counted into HR's one summary per run. <c>Hr</c> means nobody else could be told.
+    /// </summary>
+    public List<string> SentTo { get; set; } = new();
 }
 
 public class LeaveReminderRunDto

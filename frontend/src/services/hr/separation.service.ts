@@ -89,6 +89,17 @@ class SeparationService {
   }
 
   /** Draft → PendingApproval. Derives the last working day from the notice where it can. */
+  /**
+   * Names the medical board a medical retirement rests on, or clears it (round 5, lane K-II-a).
+   * Draft only; the board's case about this employee must be decided and recommend retirement.
+   *
+   * ⚠ Unlink passes `null`, which `apiService.put` drops — the endpoint binds with
+   * `EmptyBodyBehavior.Allow` so a PUT with no body means "no board", as on leave.
+   */
+  linkMedicalBoard(id: string, medicalBoardId: string | null) {
+    return apiService.put<SeparationDetail>(`${this.baseUrl}/${id}/medical-board`, medicalBoardId);
+  }
+
   submit(id: string, payload: SubmitSeparation = {}) {
     return apiService.post<SeparationDetail>(`${this.baseUrl}/${id}/submit`, payload);
   }

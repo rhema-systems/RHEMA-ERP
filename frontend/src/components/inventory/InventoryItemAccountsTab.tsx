@@ -8,6 +8,7 @@ import { inventoryManagementService, type InventoryItemPostingAccountsDto, type 
 
 export const inventoryPostingAccountFields: { key: keyof InventoryItemPostingAccountsDto; label: string; types: AccountType[] }[] = [
   { key: 'inventoryAccountId', label: 'Inventory', types: ['Asset'] },
+  { key: 'inventoryDisposalAccountId', label: 'Inventory Disposal', types: ['Expense', 'Revenue'] },
   { key: 'inventoryOffsetAccountId', label: 'Inventory Offset', types: ['Asset', 'Liability'] },
   { key: 'costOfGoodsSoldAccountId', label: 'Cost Of Goods Sold', types: ['Expense'] },
   { key: 'salesAccountId', label: 'Sales', types: ['Revenue'] },
@@ -42,7 +43,7 @@ export function InventoryItemAccountsTab({ value, onChange }: {
   }, []);
 
   return <div className="space-y-3">
-    <p className="text-sm text-muted-foreground">Leave unset to use Finance defaults. Changes apply to future postings; existing stock is not reclassified.</p>
+    <p className="text-sm text-muted-foreground">Unset accounts use Finance defaults, except Inventory Disposal, which must be selected before disposal. Existing stock is not reclassified.</p>
     {error && <p role="alert" className="text-sm text-destructive">GL accounts could not be loaded. Existing mappings are unchanged.</p>}
     <div className="grid grid-cols-1 gap-x-6 gap-y-2 md:grid-cols-2">
       {inventoryPostingAccountFields.map(field => <div key={field.key} className="grid min-w-0 grid-cols-[minmax(100px,150px)_minmax(0,1fr)] items-center gap-3">

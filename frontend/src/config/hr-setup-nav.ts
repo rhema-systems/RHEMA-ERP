@@ -37,6 +37,7 @@ import {
   ListChecks,
   ListOrdered,
   ListTree,
+  Mail,
   MapPin,
   Medal,
   Plane,
@@ -125,12 +126,29 @@ export const hrSetupGroups: HrSetupGroup[] = [
         description: 'Numbering rules per register, and the counter each one issues from.',
       },
       {
+        // Round 4 lane N: every email the HR modules send, reworded per tenant. Covers the
+        // EmailTemplate catalogues only — in-app notifications are a separate system.
+        title: 'Letter & Email Templates',
+        href: '/administration/hr/settings/letter-templates',
+        icon: Mail,
+        description: 'The wording of every email HR sends and document it prints, with a preview, a test send and reset.',
+      },
+      {
         // HR finish plan lane 8: which Finance accounts HR posts to, which money events post,
         // and the register of what reached the ledger.
         title: 'Finance Posting',
         href: '/administration/hr/settings/finance-posting',
         icon: Landmark,
         description: 'Account roles, the HR money events that post to Finance, and the posting register.',
+      },
+      {
+        // seed-hr-all / seed-hr-demo as three buttons, for developers on other modules. Refused in
+        // production, and beside real staff for the workforce and logins tiers.
+        title: 'Developer Test Data',
+        href: '/administration/hr/settings/test-data',
+        icon: Database,
+        description:
+          'Seed the HR organisation, a synthetic workforce and demo logins for development and test databases.',
       },
     ],
   },

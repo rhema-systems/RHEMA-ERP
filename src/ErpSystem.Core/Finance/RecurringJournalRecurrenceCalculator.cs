@@ -57,11 +57,12 @@ public static class RecurringJournalRecurrenceCalculator
         {
             RecurrenceFrequency.Daily => days % interval == 0,
             RecurrenceFrequency.Weekly => days >= 0 && (days / 7) % interval == 0 && (r.Weekdays?.Contains((int)d.DayOfWeek) ?? d.DayOfWeek == t.EffectiveFrom.DayOfWeek),
-            RecurrenceFrequency.SemiMonthly => (r.DaysOfMonth ?? [1, 15]).Select(x => Math.Min(x, DateTime.DaysInMonth(d.Year, d.Month))).Contains(d.Day),
+            RecurrenceFrequency.SemiMonthly => MonthDistance(t.EffectiveFrom, d) % interval == 0 &&
+                (r.DaysOfMonth ?? [1, 15]).Select(x => Math.Min(x, DateTime.DaysInMonth(d.Year, d.Month))).Contains(d.Day),
             RecurrenceFrequency.Monthly => MonthDistance(t.EffectiveFrom, d) % interval == 0 && MatchesMonthly(r, t.EffectiveFrom, d),
             RecurrenceFrequency.Quarterly => MonthDistance(t.EffectiveFrom, d) % (3 * interval) == 0 && MatchesMonthly(r, t.EffectiveFrom, d),
             RecurrenceFrequency.Annually => d.Year >= t.EffectiveFrom.Year && (d.Year - t.EffectiveFrom.Year) % interval == 0 && d.Month == t.EffectiveFrom.Month && MatchesMonthly(r, t.EffectiveFrom, d),
-            RecurrenceFrequency.Custom => MatchesCustom(r, d),
+            RecurrenceFrequency.Custom => MatchesCustom(r, t.EffectiveFrom, d, interval),
             _ => false
         };
     }
@@ -69,19 +70,33 @@ public static class RecurringJournalRecurrenceCalculator
     private static int MonthDistance(DateOnly from, DateOnly to) => (to.Year - from.Year) * 12 + to.Month - from.Month;
     private static bool MatchesMonthly(RecurrenceRule r, DateOnly start, DateOnly d) =>
         r.LastCalendarDay ? d.Day == DateTime.DaysInMonth(d.Year, d.Month) :
+        r.LastBusinessDay ? IsLastWeekdayOfMonth(d) :
         r.DaysOfMonth is { Length: > 0 } ? r.DaysOfMonth.Select(x => Math.Min(x, DateTime.DaysInMonth(d.Year, d.Month))).Contains(d.Day) :
         d.Day == Math.Min(start.Day, DateTime.DaysInMonth(d.Year, d.Month));
 
-    private static bool MatchesCustom(RecurrenceRule r, DateOnly d)
+    private static bool MatchesCustom(RecurrenceRule r, DateOnly start, DateOnly d, int interval)
     {
-        if (r.LastCalendarDay && d.Day == DateTime.DaysInMonth(d.Year, d.Month)) return true;
-        if (r.DaysOfMonth?.Contains(d.Day) == true) return true;
-        if (r.Weekdays?.Contains((int)d.DayOfWeek) == true && r.NthWeek is null) return true;
+        var monthAligned = MonthDistance(start, d) % interval == 0;
+        if (r.LastCalendarDay && monthAligned && d.Day == DateTime.DaysInMonth(d.Year, d.Month)) return true;
+        if (r.LastBusinessDay && monthAligned && IsLastWeekdayOfMonth(d)) return true;
+        if (monthAligned && r.DaysOfMonth?.Select(x => Math.Min(x, DateTime.DaysInMonth(d.Year, d.Month))).Contains(d.Day) == true) return true;
+        if (r.Weekdays?.Contains((int)d.DayOfWeek) == true && r.NthWeek is null &&
+            ((d.DayNumber - start.DayNumber) / 7) % interval == 0) return true;
         if (r.NthWeekday is { } weekday && r.NthWeek is { } nth && (int)d.DayOfWeek == weekday)
         {
+            if (!monthAligned) return false;
             if (nth == -1) return d.AddDays(7).Month != d.Month;
             return ((d.Day - 1) / 7) + 1 == nth;
         }
         return false;
+    }
+
+    private static bool IsLastWeekdayOfMonth(DateOnly date)
+    {
+        if (date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) return false;
+        var next = date.AddDays(1);
+        while (next.Month == date.Month && (next.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday))
+            next = next.AddDays(1);
+        return next.Month != date.Month;
     }
 }

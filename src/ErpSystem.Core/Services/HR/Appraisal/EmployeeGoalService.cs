@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -21,6 +22,7 @@ public class EmployeeGoalService : IEmployeeGoalService
     private readonly IGenericRepository<EmployeeGoalAppraisalAssessment> _assessmentRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IAppraisalGoalRowService _goalRows;
     private readonly ILogger<EmployeeGoalService> _logger;
 
     public EmployeeGoalService(
@@ -32,6 +34,7 @@ public class EmployeeGoalService : IEmployeeGoalService
         IGenericRepository<EmployeeGoalAppraisalAssessment> assessmentRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IAppraisalGoalRowService goalRows,
         ILogger<EmployeeGoalService> logger)
     {
         _goalRepository = goalRepository;
@@ -42,6 +45,7 @@ public class EmployeeGoalService : IEmployeeGoalService
         _assessmentRepository = assessmentRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+        _goalRows = goalRows;
         _logger = logger;
     }
 
@@ -218,16 +222,14 @@ public class EmployeeGoalService : IEmployeeGoalService
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
 
-        // Auto-link to the appraisal if one already exists for this employee + cycle.
-        if (entity.PerformanceAppraisalId == null)
-        {
-            var appraisal = await _appraisalRepository.FirstOrDefaultAsync(
-                a => a.TenantId == tenantId
-                  && a.EmployeeId == entity.EmployeeId
-                  && a.AppraisalCycleId == entity.AppraisalCycleId);
-            if (appraisal != null)
-                entity.PerformanceAppraisalId = appraisal.Id;
-        }
+        // The appraisal link is the server's: this employee's appraisal in this cycle, if one
+        // exists yet. It used to be taken from the payload whenever one was sent, so a goal could
+        // be linked to any appraisal — someone else's included (decision D-30).
+        var appraisal = await _appraisalRepository.FirstOrDefaultAsync(
+            a => a.TenantId == tenantId
+              && a.EmployeeId == entity.EmployeeId
+              && a.AppraisalCycleId == entity.AppraisalCycleId);
+        entity.PerformanceAppraisalId = appraisal?.Id;
 
         await _goalRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -240,8 +242,22 @@ public class EmployeeGoalService : IEmployeeGoalService
     {
         var entity = await GetOwnedGoalAsync(updateDto.Id, cancellationToken);
 
-        if (entity.IsLocked)
+        if (GoalSetRules.IsLocked(entity.IsLocked, entity.Status))
             throw new InvalidOperationException("This goal is locked and cannot be edited.");
+
+        // Decision D-30. A goal's owner and cycle are fixed when it is created — an edit could
+        // move a goal into a colleague's set — and its appraisal link is the server's, so the
+        // mapper no longer copies any of the three.
+        if (updateDto.EmployeeId != entity.EmployeeId || updateDto.AppraisalCycleId != entity.AppraisalCycleId)
+            throw new InvalidOperationException(
+                "A goal's owner and cycle cannot be changed. Create a new goal for the other employee or cycle.");
+
+        // Once the manager has agreed a goal, what it measures is part of the agreement: changing
+        // it would change the score without the manager. The manager sends it back instead.
+        if (GoalSetRules.IsAgreed(entity.Status) && ChangesWhatItMeasures(entity, updateDto))
+            throw new InvalidOperationException(
+                "This goal has been approved, so what it measures — title, measure, target, weight, period "
+                + "and success criteria — cannot be changed. Ask your manager to send it back to you for changes.");
 
         updateDto.UpdateEntity(entity);
         await _goalRepository.UpdateAsync(entity);
@@ -250,6 +266,28 @@ public class EmployeeGoalService : IEmployeeGoalService
         _logger.LogInformation("Employee goal updated: {Id}", entity.Id);
         return await GetByIdAsync(entity.Id, cancellationToken);
     }
+
+    /// <summary>
+    /// Decision D-30: whether an edit changes what the goal measures — the part of an agreed goal
+    /// only the manager can reopen. Description, priority, dates and alignment stay editable. Text is
+    /// compared trimmed, with a blank read as none, because the two edit forms send it differently.
+    /// </summary>
+    private static bool ChangesWhatItMeasures(EmployeeGoal goal, UpdateEmployeeGoalDto dto) =>
+           !SameText(goal.Title, dto.Title)
+        || goal.KpiDefinitionId != dto.KpiDefinitionId
+        || goal.MeasurementType != dto.MeasurementType
+        || goal.TargetValue != dto.TargetValue
+        || goal.MinValue != dto.MinValue
+        || goal.MaxValue != dto.MaxValue
+        || !SameText(goal.Unit, dto.Unit)
+        || goal.Weight != dto.Weight
+        || goal.Period != dto.Period
+        || !SameText(goal.SuccessCriteria, dto.SuccessCriteria);
+
+    private static bool SameText(string? a, string? b) => string.Equals(
+        string.IsNullOrWhiteSpace(a) ? null : a.Trim(),
+        string.IsNullOrWhiteSpace(b) ? null : b.Trim(),
+        StringComparison.Ordinal);
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -351,13 +389,18 @@ public class EmployeeGoalService : IEmployeeGoalService
     // was also how a goal could be self-approved. Closing that hole is what made the gap
     // visible; ApplyProgressToGoal is the legitimate channel it should always have had.)
 
-    /// <summary>Statuses a goal may receive progress entries in — approved and still running.</summary>
+    /// <summary>
+    /// Statuses a goal may receive progress entries in — approved and still running. The lock
+    /// flag does not stop a goal's year (decision D-29), and a goal the old lock left in the Locked
+    /// status reads as approved; its next entry gives it a running status again.
+    /// </summary>
     private static readonly HashSet<GoalStatus> LiveExecutionStatuses = new()
     {
         GoalStatus.Approved,
         GoalStatus.InProgress,
         GoalStatus.OnTrack,
         GoalStatus.AtRisk,
+        GoalStatus.Locked,
     };
 
     /// <summary>
@@ -445,7 +488,20 @@ public class EmployeeGoalService : IEmployeeGoalService
         return entities.ToDtoList();
     }
 
-    public async Task<GoalProgressEntryDto> UpdateProgressEntryAsync(Guid goalId, UpdateGoalProgressEntryDto dto, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Performance closure P8: a progress entry is a claim about what someone did, so it is
+    /// corrected or withdrawn by the person who recorded it — or by the HR desk when the desk is not
+    /// the goal's owner (the two-actor rule). Either party to the goal could rewrite or delete the
+    /// other's entries.
+    /// </summary>
+    private static void EnsureMayAmendProgressEntry(GoalProgressEntry entry, EmployeeGoal goal, Guid? actorEmployeeId, bool actorIsDesk)
+    {
+        if (actorEmployeeId is Guid me && me == entry.RecordedById) return;
+        if (actorIsDesk && !(actorEmployeeId is Guid owner && owner == goal.EmployeeId)) return;
+        throw new UnauthorizedAccessException("Only the person who recorded this progress entry, or HR, can change it.");
+    }
+
+    public async Task<GoalProgressEntryDto> UpdateProgressEntryAsync(Guid goalId, UpdateGoalProgressEntryDto dto, Guid? actorEmployeeId, bool actorIsDesk, CancellationToken cancellationToken = default)
     {
         var goal = await GetOwnedGoalAsync(goalId, cancellationToken);
         var tenantId = GetTenantId();
@@ -456,6 +512,7 @@ public class EmployeeGoalService : IEmployeeGoalService
         if (entity == null)
             throw new ArgumentException("Progress entry not found.");
 
+        EnsureMayAmendProgressEntry(entity, goal, actorEmployeeId, actorIsDesk);
         dto.UpdateEntity(entity);
         await _progressRepository.UpdateAsync(entity);
 
@@ -467,7 +524,8 @@ public class EmployeeGoalService : IEmployeeGoalService
             .OrderByDescending(p => p.EntryDate)
             .FirstOrDefaultAsync(cancellationToken);
 
-        if (latest != null && latest.Id == entity.Id && !goal.IsLocked)
+        // A locked goal moves too: the lock freezes what it is, not its year (D-29).
+        if (latest != null && latest.Id == entity.Id)
             ApplyProgressToGoal(goal, entity.ProgressPercent, entity.Status);
 
         await _goalRepository.UpdateAsync(goal);
@@ -477,15 +535,17 @@ public class EmployeeGoalService : IEmployeeGoalService
         return entity.ToDto();
     }
 
-    public async Task<bool> DeleteProgressEntryAsync(Guid goalId, Guid entryId, CancellationToken cancellationToken = default)
+    public async Task<bool> DeleteProgressEntryAsync(Guid goalId, Guid entryId, Guid? actorEmployeeId, bool actorIsDesk, CancellationToken cancellationToken = default)
     {
-        await GetOwnedGoalAsync(goalId, cancellationToken);
+        var goal = await GetOwnedGoalAsync(goalId, cancellationToken);
         var tenantId = GetTenantId();
         var entity = await _progressRepository.GetQueryable()
             .FirstOrDefaultAsync(p => p.Id == entryId && p.EmployeeGoalId == goalId && p.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException("Progress entry not found.");
+
+        EnsureMayAmendProgressEntry(entity, goal, actorEmployeeId, actorIsDesk);
 
         await _progressRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -513,10 +573,26 @@ public class EmployeeGoalService : IEmployeeGoalService
     {
         var entity = await GetOwnedGoalAsync(goalId, cancellationToken);
 
+        // Once the goal's row in the appraisal has been scored, what it measures is part of an
+        // evaluation (closure plan L2): unlocking it would let the goal change under the score.
+        if (await _goalRows.IsScoredAsync(goalId, cancellationToken))
+            throw new InvalidOperationException(
+                "This goal has been scored in its appraisal, so it cannot be unlocked.");
+
         entity.IsLocked = false;
         entity.LockedDate = null;
+
+        // The old lock also set the Locked status and this left it behind, so an unlocked goal
+        // still read as locked to the goal-setting gate and could not be locked again. It goes
+        // back to Approved — the status every lock was taken from reads as that (D-29).
+        if (entity.Status == GoalStatus.Locked)
+            entity.Status = GoalStatus.Approved;
+
         await _goalRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // The unlocked goal leaves the appraisal's goals section (L2).
+        await _goalRows.RebuildAsync(entity.EmployeeId, entity.AppraisalCycleId, cancellationToken);
 
         _logger.LogInformation("Goal {GoalId} unlocked", goalId);
         return true;

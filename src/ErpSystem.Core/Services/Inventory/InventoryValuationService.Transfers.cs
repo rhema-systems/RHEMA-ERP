@@ -18,34 +18,7 @@ public partial class InventoryValuationService
         var actionKey = TransferActionKey(action.Id);
         if (ledger.Any(value => value.Notes == actionKey && value.MovementType == InventoryMovementType.TransferOut))
             throw new InvalidOperationException("This transfer dispatch already has a carrying-value entry.");
-        var item = await _unitOfWork.Repository<InventoryItem>().GetQueryable(candidate =>
-            candidate.TenantId == _currentUserProvider.TenantId && candidate.Id == line.InventoryItemId && !candidate.IsDeleted).SingleAsync();
-        decimal value;
-        if (item.ValuationMethod == ValuationMethod.StandardCost)
-        {
-            // Moving an existing asset is not a revaluation at today's standard.
-            // Carry its retained source value; a standard-cost change has its own
-            // controlled revaluation owner and must not leak into a transfer.
-            value = await ProcessWACIssueAsync(item.Id, warehouseId, locationId, quantity);
-            var balance = await GetOrCreateBalanceAsync(item.Id, warehouseId, locationId);
-            balance.QuantityAvailable = balance.QuantityOnHand - balance.QuantityAllocated;
-            var entry = await CreateMovementAsync(item.Id, warehouseId, locationId, InventoryMovementType.TransferOut,
-                MovementDirection.Out, quantity, value / quantity, ReferenceType.Transfer,
-                line.InventoryTransfer.TransferNumber, line.Id, line.LotNumber, line.SerialNumber);
-            entry.RunningBalance = balance.QuantityOnHand;
-            entry.RunningValue = balance.TotalValue;
-        }
-        else
-        {
-            value = await ProcessIssueAsync(line.InventoryItemId, warehouseId, locationId, quantity,
-                InventoryMovementType.TransferOut, ReferenceType.Transfer, line.InventoryTransfer.TransferNumber,
-                line.Id, line.LotNumber, line.SerialNumber);
-        }
-        var movement = _transferMovementCache[line.Id].Last();
-        movement.Notes = actionKey;
-        // Match the amount that the existing decimal(18,2) ledger persists.
-        movement.TotalValue = decimal.Round(value, 2, MidpointRounding.AwayFromZero);
-        return movement.TotalValue;
+        return await CreateTransferSourceOutAsync(line, warehouseId, locationId, quantity, actionKey);
     }
 
     public async Task<decimal> ProcessTransferReceiptAsync(Guid transferItemId, Guid actionId,
@@ -74,35 +47,7 @@ public partial class InventoryValuationService
         var value = quantity == remainingQuantity ? remainingValue
             : decimal.Round(remainingValue * quantity / remainingQuantity, 2, MidpointRounding.AwayFromZero);
         if (value <= 0) throw new InvalidOperationException("The transfer receipt quantity is too small for the retained currency value.");
-        var item = await _unitOfWork.Repository<InventoryItem>().GetQueryable(candidate =>
-            candidate.TenantId == _currentUserProvider.TenantId && candidate.Id == line.InventoryItemId && !candidate.IsDeleted).SingleAsync();
-        if (item.ValuationMethod is not (ValuationMethod.FIFO or ValuationMethod.WeightedAverage or ValuationMethod.StandardCost))
-            throw new InvalidOperationException("This transfer valuation method is not supported.");
-        var unitCost = value / quantity;
-        Guid? layerId = null;
-        if (item.ValuationMethod == ValuationMethod.FIFO)
-        {
-            var layer = await CreateFIFOLayerAsync(item.Id, warehouseId, locationId, quantity, unitCost,
-                "Transfer", line.InventoryTransfer.TransferNumber, line.Id, line.LotNumber, line.ExpiryDate);
-            layer.RemainingValue = value;
-            // Unlike a count-derived item suffix this remains unique for multiple
-            // pending receipts of the same item before the transaction saves.
-            layer.LayerNumber = $"TR-{layer.Id:N}";
-            layerId = layer.Id;
-        }
-        var balance = await GetOrCreateBalanceAsync(item.Id, warehouseId, locationId);
-        balance.QuantityOnHand += quantity;
-        balance.TotalValue += value;
-        balance.QuantityAvailable = balance.QuantityOnHand - balance.QuantityAllocated;
-        balance.AverageUnitCost = balance.QuantityOnHand > 0 ? balance.TotalValue / balance.QuantityOnHand : 0;
-        balance.LastReceiptDate = balance.LastMovementDate = balance.LastRecalculatedAt = DateTime.UtcNow;
-        var movement = await CreateMovementAsync(item.Id, warehouseId, locationId, InventoryMovementType.TransferIn,
-            MovementDirection.In, quantity, unitCost, ReferenceType.Transfer, line.InventoryTransfer.TransferNumber,
-            line.Id, line.LotNumber, line.SerialNumber, line.ExpiryDate, TransferActionKey(action.Id));
-        movement.TotalValue = value;
-        movement.RunningBalance = balance.QuantityOnHand;
-        movement.RunningValue = balance.TotalValue;
-        movement.CostLayerId = layerId;
+        await CreateRetainedTransferInAsync(line, warehouseId, locationId, quantity, value, TransferActionKey(action.Id));
         return value;
     }
 
@@ -163,5 +108,73 @@ public partial class InventoryValuationService
         return result.Values.ToList();
     }
 
+
+    private async Task<decimal> CreateTransferSourceOutAsync(InventoryTransferItem line, Guid warehouseId,
+        Guid locationId, decimal quantity, string actionKey)
+    {
+        var item = await _unitOfWork.Repository<InventoryItem>().GetQueryable(candidate =>
+            candidate.TenantId == _currentUserProvider.TenantId && candidate.Id == line.InventoryItemId && !candidate.IsDeleted).SingleAsync();
+        decimal value;
+        if (item.ValuationMethod == ValuationMethod.StandardCost)
+        {
+            // Moving an existing asset is not a revaluation at today's standard.
+            // Carry its retained source value; a standard-cost change has its own
+            // controlled revaluation owner and must not leak into a transfer.
+            value = await ProcessWACIssueAsync(item.Id, warehouseId, locationId, quantity);
+            var balance = await GetOrCreateBalanceAsync(item.Id, warehouseId, locationId);
+            balance.QuantityAvailable = balance.QuantityOnHand - balance.QuantityAllocated;
+            var entry = await CreateMovementAsync(item.Id, warehouseId, locationId, InventoryMovementType.TransferOut,
+                MovementDirection.Out, quantity, value / quantity, ReferenceType.Transfer,
+                line.InventoryTransfer.TransferNumber, line.Id, line.LotNumber, line.SerialNumber);
+            entry.RunningBalance = balance.QuantityOnHand;
+            entry.RunningValue = balance.TotalValue;
+        }
+        else
+        {
+            value = await ProcessIssueAsync(line.InventoryItemId, warehouseId, locationId, quantity,
+                InventoryMovementType.TransferOut, ReferenceType.Transfer, line.InventoryTransfer.TransferNumber,
+                line.Id, line.LotNumber, line.SerialNumber);
+        }
+        var movement = _transferMovementCache[line.Id].Last();
+        movement.Notes = actionKey;
+        // Match the amount that the existing decimal(18,2) ledger persists.
+        movement.TotalValue = decimal.Round(value, 2, MidpointRounding.AwayFromZero);
+        return movement.TotalValue;
+    }
+
+    private async Task<InventoryMovement> CreateRetainedTransferInAsync(InventoryTransferItem line, Guid warehouseId,
+        Guid locationId, decimal quantity, decimal value, string actionKey, Guid? layerSourceId = null)
+    {
+        var item = await _unitOfWork.Repository<InventoryItem>().GetQueryable(candidate =>
+            candidate.TenantId == _currentUserProvider.TenantId && candidate.Id == line.InventoryItemId && !candidate.IsDeleted).SingleAsync();
+        if (item.ValuationMethod is not (ValuationMethod.FIFO or ValuationMethod.WeightedAverage or ValuationMethod.StandardCost))
+            throw new InvalidOperationException("This transfer valuation method is not supported.");
+        var unitCost = value / quantity;
+        Guid? layerId = null;
+        if (item.ValuationMethod == ValuationMethod.FIFO)
+        {
+            var layer = await CreateFIFOLayerAsync(item.Id, warehouseId, locationId, quantity, unitCost,
+                layerSourceId.HasValue ? "TransferTransit" : "Transfer", line.InventoryTransfer.TransferNumber, layerSourceId ?? line.Id, line.LotNumber, line.ExpiryDate);
+            layer.RemainingValue = value;
+            // Unlike a count-derived item suffix this remains unique for multiple
+            // pending receipts of the same item before the transaction saves.
+            layer.LayerNumber = $"TR-{layer.Id:N}";
+            layerId = layer.Id;
+        }
+        var balance = await GetOrCreateBalanceAsync(item.Id, warehouseId, locationId);
+        balance.QuantityOnHand += quantity;
+        balance.TotalValue += value;
+        balance.QuantityAvailable = balance.QuantityOnHand - balance.QuantityAllocated;
+        balance.AverageUnitCost = balance.QuantityOnHand > 0 ? balance.TotalValue / balance.QuantityOnHand : 0;
+        balance.LastReceiptDate = balance.LastMovementDate = balance.LastRecalculatedAt = DateTime.UtcNow;
+        var movement = await CreateMovementAsync(item.Id, warehouseId, locationId, InventoryMovementType.TransferIn,
+            MovementDirection.In, quantity, unitCost, ReferenceType.Transfer, line.InventoryTransfer.TransferNumber,
+            line.Id, line.LotNumber, line.SerialNumber, line.ExpiryDate, actionKey);
+        movement.TotalValue = value;
+        movement.RunningBalance = balance.QuantityOnHand;
+        movement.RunningValue = balance.TotalValue;
+        movement.CostLayerId = layerId;
+        return movement;
+    }
     private static string TransferActionKey(Guid actionId) => $"TransferAction:{actionId:N}";
 }

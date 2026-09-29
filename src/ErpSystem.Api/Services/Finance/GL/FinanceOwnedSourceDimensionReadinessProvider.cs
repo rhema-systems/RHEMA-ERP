@@ -27,6 +27,8 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
         if (routeId is not FinanceDimensionRouteId.FinanceApVendorInvoice
             and not FinanceDimensionRouteId.FinanceApSupplierDebitNote
             and not FinanceDimensionRouteId.FinanceArCustomerInvoice
+            and not FinanceDimensionRouteId.InventoryDisposalAuctionInvoice
+            and not FinanceDimensionRouteId.SalesOrderCustomerInvoice
             and not FinanceDimensionRouteId.FinanceBankDeposit
             and not FinanceDimensionRouteId.FinanceReturnedCheque)
             throw new ArgumentOutOfRangeException(nameof(routeId), routeId, "The route is not supported by the Finance source-dimension readiness adapter.");
@@ -48,7 +50,7 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
                 await LoadVendorInvoicesAsync(tenantId, cancellationToken),
             FinanceDimensionRouteId.FinanceApSupplierDebitNote =>
                 await LoadSupplierDebitNotesAsync(tenantId, cancellationToken),
-            FinanceDimensionRouteId.FinanceArCustomerInvoice =>
+            FinanceDimensionRouteId.FinanceArCustomerInvoice or FinanceDimensionRouteId.InventoryDisposalAuctionInvoice or FinanceDimensionRouteId.SalesOrderCustomerInvoice =>
                 await LoadCustomerInvoicesAsync(tenantId, cancellationToken),
             FinanceDimensionRouteId.FinanceBankDeposit =>
                 await LoadBankDepositsAsync(tenantId, cancellationToken),
@@ -329,6 +331,15 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
         var invoices = await _db.Invoices.AsNoTracking()
             .Include(item => item.LineItems.Where(line => !line.IsDeleted))
             .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                && ((RouteId == FinanceDimensionRouteId.SalesOrderCustomerInvoice &&
+                        _db.SalesOrders.Any(source => source.TenantId == tenantId && source.InvoiceId == item.Id))
+                    || (RouteId == FinanceDimensionRouteId.InventoryDisposalAuctionInvoice &&
+                        _db.Set<ErpSystem.Core.Entities.Inventory.InventoryDisposalAuctionInvoice>()
+                            .Any(link => link.TenantId == tenantId && link.InvoiceId == item.Id))
+                    || (RouteId == FinanceDimensionRouteId.FinanceArCustomerInvoice &&
+                        !_db.SalesOrders.Any(source => source.TenantId == tenantId && source.InvoiceId == item.Id) &&
+                        !_db.Set<ErpSystem.Core.Entities.Inventory.InventoryDisposalAuctionInvoice>()
+                            .Any(link => link.TenantId == tenantId && link.InvoiceId == item.Id)))
                 && (item.Status == InvoiceStatus.Draft
                     || item.Status == InvoiceStatus.Rejected
                     || item.Status == InvoiceStatus.PendingApproval

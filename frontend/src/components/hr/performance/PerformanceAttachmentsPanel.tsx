@@ -40,6 +40,8 @@ export interface PerformanceAttachment {
   attachmentTypeName?: string | null;
   uploadDate: string;
   fileSizeBytes?: number | null;
+  /** The employee who attached it — what {@link canDeleteItem} rules usually compare against. */
+  uploadedById?: string | null;
   uploadedByName?: string | null;
 }
 
@@ -68,6 +70,7 @@ export function PerformanceAttachmentsPanel({
   ownerId,
   canUpload = true,
   canDelete = true,
+  canDeleteItem,
   helpText = 'Evidence supporting this record. Scanned on upload; max 10 MB.',
   listPath,
   uploadPath,
@@ -82,6 +85,12 @@ export function PerformanceAttachmentsPanel({
   ownerId: string;
   canUpload?: boolean;
   canDelete?: boolean;
+  /**
+   * A per-row rule on top of {@link canDelete}. The appraisal and check-in families remove a file
+   * only for its uploader or HR, and only before the record is complete (performance closure
+   * P9) — the server refuses anyone else, so the button should not be offered to them.
+   */
+  canDeleteItem?: (attachment: PerformanceAttachment) => boolean;
   helpText?: string;
   /**
    * ⚠ Overrides for a family whose routes are not `{base}/{owner}/attachments/{id}`.
@@ -268,7 +277,7 @@ export function PerformanceAttachmentsPanel({
                             <Pencil className="h-4 w-4" />
                           </Button>
                         )}
-                        {canDelete && (
+                        {canDelete && (canDeleteItem?.(a) ?? true) && (
                           <Button
                             size="sm"
                             variant="ghost"

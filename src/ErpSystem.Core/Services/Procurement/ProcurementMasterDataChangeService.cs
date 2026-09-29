@@ -1350,6 +1350,10 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
                     throw new ProcurementMasterDataChangeValidationException("UOM_CODE_DUPLICATE", "Unit-of-measure code must be unique in the current tenant.");
                 break;
             case Warehouse warehouse:
+                if (InventoryTransitProtection.IsProtected(warehouse) ||
+                    await InventoryTransitProtection.IsProtectedScopeAsync(_unitOfWork, _currentUser.TenantId,
+                        warehouse.Id, null, cancellationToken))
+                    throw new ProcurementMasterDataChangeValidationException("INV_TRANSIT_SYSTEM_MANAGED", InventoryTransitProtection.Message);
                 if (await _unitOfWork.Repository<Warehouse>().GetQueryable(value => value.TenantId == _currentUser.TenantId && !value.IsDeleted &&
                         value.Id != warehouse.Id && value.Code == warehouse.Code).AnyAsync(cancellationToken))
                     throw new ProcurementMasterDataChangeValidationException("WAREHOUSE_CODE_DUPLICATE", "Warehouse code must be unique in the current tenant.");
@@ -1358,6 +1362,14 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
                     throw new ProcurementMasterDataChangeValidationException("WAREHOUSE_DEFAULT_DUPLICATE", "Only one current-tenant warehouse can be the default.");
                 break;
             case WarehouseLocation location:
+                if (InventoryTransitProtection.IsProtected(location) ||
+                    await InventoryTransitProtection.IsProtectedScopeAsync(_unitOfWork, _currentUser.TenantId,
+                        location.WarehouseId, location.Id, cancellationToken) ||
+                    (location.ParentLocationId.HasValue && await InventoryTransitProtection.IsProtectedScopeAsync(
+                        _unitOfWork, _currentUser.TenantId, location.WarehouseId, location.ParentLocationId, cancellationToken)) ||
+                    (location.ConsignmentWarehouseId.HasValue && await InventoryTransitProtection.IsProtectedScopeAsync(
+                        _unitOfWork, _currentUser.TenantId, location.ConsignmentWarehouseId.Value, null, cancellationToken)))
+                    throw new ProcurementMasterDataChangeValidationException("INV_TRANSIT_SYSTEM_MANAGED", InventoryTransitProtection.Message);
                 if (!await ExistsTenantAsync<Warehouse>(location.WarehouseId, cancellationToken))
                     throw new ProcurementMasterDataChangeValidationException("WAREHOUSE_NOT_FOUND", "WarehouseId must identify a current-tenant warehouse.");
                 var originalLocation = await _unitOfWork.Repository<WarehouseLocation>().GetQueryable(value => value.Id == location.Id &&

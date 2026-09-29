@@ -160,6 +160,32 @@ namespace ErpSystem.Api.Models
         public bool RequiresOtpVerification { get; set; }
     }
 
+    /// <summary>
+    /// The emailed activation link, posted back by the careers verify-email page — round 4.
+    /// </summary>
+    /// <remarks>
+    /// Both halves come from the link itself. The token is an ASP.NET Identity email-confirmation
+    /// token: single-use, expiring, and bound to this user — which is what lets the endpoint that
+    /// consumes it be anonymous, as it must be, since the account it activates cannot yet log in.
+    /// </remarks>
+    public class ActivateCandidateRequest
+    {
+        [Required]
+        public Guid UserId { get; set; }
+
+        [Required]
+        public required string Token { get; set; }
+    }
+
+    /// <summary>Asks for a fresh activation link when the first one expired or never arrived.</summary>
+    public class ResendCandidateActivationRequest
+    {
+        [Required]
+        [EmailAddress]
+        [StringLength(256)]
+        public required string Email { get; set; }
+    }
+
     public class VerifyOtpRequest
     {
         [Required]

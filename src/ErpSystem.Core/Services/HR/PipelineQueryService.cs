@@ -1,5 +1,6 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -269,6 +270,8 @@ public sealed class PipelineQueryService : IPipelineQueryService
             ApplicationNumber = a.ApplicationNumber,
             CandidateName     = a.JobCandidate?.FullName ?? string.Empty,
             CandidateEmail    = a.JobCandidate?.Email    ?? string.Empty,
+            // Round 4, lane B5 — a face beside the name on the board where the decisions are made.
+            CandidateHasPhoto = a.JobCandidate?.HasPhotoOnFile() ?? false,
             Status            = a.Status,
             Source            = a.Source,
             YearsOfExperience = a.YearsOfExperience,

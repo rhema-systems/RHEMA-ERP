@@ -625,6 +625,9 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (UserId == Guid.Empty)
                 throw new UnauthorizedAccessException("User not authenticated.");
 
+            if (batch.SubmittedBy.HasValue && batch.SubmittedBy.Value == UserId)
+                throw new InvalidOperationException("The user who submitted an allocation run cannot approve it.");
+
             if (!await _workflowService.CanUserApproveAsync(AllocationRunBatchWorkflowEntityType, id, UserId))
                 throw new UnauthorizedAccessException("Current user cannot approve this allocation run batch.");
 
@@ -671,6 +674,9 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
             if (UserId == Guid.Empty)
                 throw new UnauthorizedAccessException("User not authenticated.");
+
+            if (batch.SubmittedBy.HasValue && batch.SubmittedBy.Value == UserId)
+                throw new InvalidOperationException("The user who submitted an allocation run cannot reject it as approver.");
 
             if (!await _workflowService.CanUserApproveAsync(AllocationRunBatchWorkflowEntityType, id, UserId))
                 throw new UnauthorizedAccessException("Current user cannot reject this allocation run batch.");

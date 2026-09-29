@@ -148,7 +148,11 @@ export interface AppealListItem {
 
 export interface AppealedCriterionReview {
   appealItemId: string;
-  templateItemId: string;
+  /** Null on a goal row, which is named by its snapshot row. */
+  templateItemId: string | null;
+  criterionConfigId?: string | null;
+  /** The criterion's key — the template item, or a goal row's snapshot row. */
+  criterionKey: string;
   itemName: string;
   itemDescription: string;
   weight: number;
@@ -219,7 +223,9 @@ export interface AppealReview {
 }
 
 export interface CriterionScoreModification {
-  templateItemId: string;
+  /** The criterion restated: its template item, or — for a goal row, which has none — its snapshot row. */
+  templateItemId?: string | null;
+  criterionConfigId?: string | null;
   newScore: number;
   justification: string;
 }
@@ -241,7 +247,11 @@ export interface ResolveAppeal {
 // ── Post-remand ──────────────────────────────────────────────────────────────────
 
 export interface CriterionScoreComparison {
-  templateItemId: string;
+  /** Null on a goal row, which is named by its snapshot row. */
+  templateItemId: string | null;
+  criterionConfigId?: string | null;
+  /** The criterion's key — the template item, or a goal row's snapshot row. */
+  criterionKey: string;
   itemName: string;
   itemDescription: string;
   weight: number;
@@ -321,7 +331,11 @@ export interface PostRemandFinalDecision {
 // ── The appellant's outcome view ─────────────────────────────────────────────────
 
 export interface FinalCriterionScore {
-  templateItemId: string;
+  /** Null on a goal row, which is named by its snapshot row. */
+  templateItemId: string | null;
+  criterionConfigId?: string | null;
+  /** The criterion's key — the template item, or a goal row's snapshot row. */
+  criterionKey: string;
   itemName: string;
   itemDescription: string;
   finalScore?: number | null;
@@ -329,6 +343,8 @@ export interface FinalCriterionScore {
   weight: number;
   managerComments: string;
   wasAppealed: boolean;
+  /** A KPI whose achievement calibration or an appeal restated to `finalScore` percent. */
+  achievementOverridden?: boolean;
 }
 
 export interface FinalKpiScore {
@@ -367,6 +383,8 @@ export interface EmployeeAppealOutcome {
   outcomeMessage: string;
 
   finalOverallScore: number;
+  /** The overall the appeal was filed against; null on appeals filed before it was kept. */
+  originalOverallScore?: number | null;
   finalCriteriaScores: FinalCriterionScore[];
   finalKpiScores: FinalKpiScore[];
 

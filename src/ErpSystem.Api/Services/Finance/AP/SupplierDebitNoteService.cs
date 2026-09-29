@@ -41,6 +41,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
     private readonly ITaxCalculationEngine _taxEngine;
     private readonly ILogger<SupplierDebitNoteService> _logger;
     private readonly IFinanceSourceDimensionService? _sourceDimensions;
+    private readonly ErpSystem.Core.Interfaces.Procurement.IProcurementAcceptedSupplyService? _acceptedSupply;
 
     public SupplierDebitNoteService(
         ApplicationDbContext db,
@@ -52,7 +53,8 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         IFinanceAuditService audit,
         ITaxCalculationEngine taxEngine,
         ILogger<SupplierDebitNoteService> logger,
-        IFinanceSourceDimensionService? sourceDimensions = null)
+        IFinanceSourceDimensionService? sourceDimensions = null,
+        ErpSystem.Core.Interfaces.Procurement.IProcurementAcceptedSupplyService? acceptedSupply = null)
     {
         _db = db;
         _unitOfWork = unitOfWork;
@@ -64,6 +66,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         _taxEngine = taxEngine;
         _logger = logger;
         _sourceDimensions = sourceDimensions;
+        _acceptedSupply = acceptedSupply;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -174,7 +177,9 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
     private async Task<SupplierDebitNoteDto> CreateCoreAsync(
         CreateSupplierDebitNoteDto dto,
         FinancePostingProducerContext? producer,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? inventoryReturnId = null,
+        Guid? inventoryAccountingGroupId = null)
     {
         var tenantId = TenantId;
         var vendor = await GetVendorAsync(dto.VendorId, cancellationToken);
@@ -198,6 +203,8 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
+            InventoryPurchaseReturnId = inventoryReturnId,
+            InventorySupplierReturnAccountingGroupId = inventoryAccountingGroupId,
             DebitNoteNumber = await _numbering.GenerateAsync(
                 DocumentNumberingModules.Finance,
                 FinanceDocumentTypes.APSupplierDebitNote,
@@ -1236,10 +1243,13 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             .OrderBy(item => item.LineNumber).ThenBy(item => item.Id).ToList();
         if (baseTransactions.Count == 0)
             throw SourceLineageUnavailable(sourceLine, "no posted base transactions were found");
-        if (baseTransactions.Select(item => item.TransactionTag).Distinct().Count() != 1 ||
-            baseTransactions.Select(item => item.ExchangeRateId).Distinct().Count() != 1)
+        if ((baseTransactions.Select(item => item.TransactionTag).Distinct().Count() != 1 ||
+            baseTransactions.Select(item => item.ExchangeRateId).Distinct().Count() != 1) &&
+            !(note.InventorySupplierReturnAccountingGroupId.HasValue && baseTransactions.All(item => IsReceiptCostPurpose(item.TransactionTag))))
             throw SourceLineageUnavailable(sourceLine, "posted base splits do not share the same accounting purpose and exchange-rate evidence");
-        var originalTransaction = baseTransactions[0];
+        var originalTransaction = note.InventorySupplierReturnAccountingGroupId.HasValue
+            ? baseTransactions.FirstOrDefault(item => item.TransactionTag == "AP-GRV") ?? baseTransactions[0]
+            : baseTransactions[0];
         var ratio = sourceLine.Quantity <= 0m ? 0m : dto.Quantity / sourceLine.Quantity;
         var gross = Round(dto.Quantity * sourceLine.UnitPrice);
         var discount = Round(sourceLine.DiscountAmount * ratio);
@@ -1337,6 +1347,19 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
         var currency = NormalizeCurrency(note.CurrencyCode, functionalCurrency);
         var linkedInvoice = note.OriginalVendorInvoice;
+        var accountingBookCode = "IFRS";
+        if (note.InventorySupplierReturnAccountingGroupId.HasValue)
+        {
+            var originalJournal = await _db.JournalEntries.AsNoTracking().SingleOrDefaultAsync(j =>
+                j.Id == linkedInvoice!.JournalEntryId && j.TenantId == TenantId && !j.IsDeleted && !j.IsReversed && j.PostingStatus == "Posted", cancellationToken)
+                ?? throw new InvalidOperationException("RTV_ORIGINAL_BOOK_REQUIRED: original invoice posting is unavailable.");
+            var originalBook = await _db.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(book =>
+                book.Id == originalJournal.AccountingBookId && book.TenantId == TenantId && !book.IsDeleted, cancellationToken)
+                ?? throw new InvalidOperationException("RTV_ORIGINAL_BOOK_REQUIRED: original invoice accounting book is unavailable.");
+            if (!string.Equals(originalBook.Code, originalJournal.BookClassification, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("RTV_ORIGINAL_BOOK_CHANGED: original invoice accounting book identity no longer matches its retained code.");
+            accountingBookCode = originalBook.Code;
+        }
         var rate = linkedInvoice != null
             ? RequireLinkedInvoiceRate(note, linkedInvoice, currency, functionalCurrency)
             : await ValidatePersistedExchangeRateEvidenceAsync(
@@ -1393,6 +1416,10 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 .ToListAsync(cancellationToken)
             : [];
         var lines = new List<FinancePostingLineDto>();
+        var receiptCostLineIds = linkedInvoice == null ? new HashSet<Guid>() :
+            (await _db.Set<VendorInvoiceReceiptCostAllocation>().AsNoTracking().Where(x => x.TenantId == TenantId && !x.IsDeleted &&
+                x.VendorInvoiceId == linkedInvoice.Id && !x.ReversalJournalEntryId.HasValue).Select(x => x.VendorInvoiceLineItemId)
+                .Distinct().ToListAsync(cancellationToken)).ToHashSet();
         var lineNumber = 2;
         foreach (var line in note.LineItems.Where(item => !item.IsDeleted))
         {
@@ -1414,12 +1441,29 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 baseSplits = originalTransactions.Values.Where(item => item.JournalEntryId == linkedInvoice.JournalEntryId &&
                     item.SourceDocumentLineId == sourceLine.Id && item.DebitAmount > 0m && !IsTaxTransaction(item))
                     .OrderBy(item => item.LineNumber).ThenBy(item => item.Id).ToList();
-                if (baseSplits.Count == 0 || baseSplits.Any(item => item.TransactionTag != sourceTransaction.TransactionTag ||
+                var allocatedReturnCost = note.InventorySupplierReturnAccountingGroupId.HasValue && receiptCostLineIds.Contains(sourceLine.Id);
+                if (receiptCostLineIds.Contains(sourceLine.Id) && !allocatedReturnCost)
+                    throw SourceLineageUnavailable(sourceLine, "receipt-cost adjustments require the governed Inventory return or invoice reversal valuation owner");
+                if (baseSplits.Count == 0 || !allocatedReturnCost && baseSplits.Any(item => item.TransactionTag != sourceTransaction.TransactionTag ||
                     item.ExchangeRateId != sourceTransaction.ExchangeRateId))
                     throw SourceLineageUnavailable(sourceLine, "posted base splits no longer reconcile to the source line");
-                principalAmount = Round(baseSplits.Sum(SourceDebitAmount) * ratio);
+                if (allocatedReturnCost)
+                {
+                    // The dispatch owner has already issued stock at carrying value.
+                    // Produce a net commercial principal for its clearing adapter;
+                    // never replay the invoice's Inventory value adjustment here.
+                    var sourceCost = originalTransactions.Values.Where(item => item.SourceDocumentLineId == sourceLine.Id && IsReceiptCostPurpose(item.TransactionTag)).ToArray();
+                    var originalNet = Round(sourceCost.Sum(item => item.DebitAmount - item.CreditAmount));
+                    if (sourceCost.Length == 0 || originalNet <= 0m)
+                        throw SourceLineageUnavailable(sourceLine, "retained signed receipt-cost transactions are missing or nonpositive");
+                    principalAmount = Round(line.LineTotal - line.TaxAmount);
+                    if (Math.Abs(Round(originalNet * ratio) - Functional(principalAmount, currency, functionalCurrency, rate)) > 0.01m)
+                        throw SourceLineageUnavailable(sourceLine, "the commercial credit does not reconcile to original signed receipt-cost postings");
+                    baseSplits = null;
+                }
+                else principalAmount = Round(baseSplits.Sum(SourceDebitAmount) * ratio);
                 accountId = sourceTransaction.AccountId;
-                exchangeRateId = sourceTransaction.ExchangeRateId;
+                exchangeRateId = allocatedReturnCost ? originalApControl?.ExchangeRateId : sourceTransaction.ExchangeRateId;
             }
             else
             {
@@ -1576,7 +1620,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             Description = $"Supplier debit note {note.DebitNoteNumber} - {note.Vendor.PartnerName}",
             PostingDate = note.DebitNoteDate,
             JournalType = "AP Supplier Debit Note",
-            AccountingBookCode = "IFRS",
+            AccountingBookCode = accountingBookCode,
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = $"AP:SupplierDebitNote:{note.TenantId:N}:{note.Id:N}:Post",
             ReturnExistingOnDuplicate = true,
@@ -1806,6 +1850,8 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
 
     private static bool IsTaxTransaction(AccountTransaction item) =>
         item.TransactionTag?.StartsWith("AP-Tax-", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static bool IsReceiptCostPurpose(string? tag) => tag is "AP-GRV" or "AP-PRICE-VARIANCE" or "AP-INVENTORY-COST" or "AP-RECEIPT-FX";
 
     private static bool IsNetPostedSourceTransaction(AccountTransaction item) =>
         string.Equals(item.TransactionTag, "AP-FixedAsset", StringComparison.OrdinalIgnoreCase) ||
@@ -2076,6 +2122,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             Id = note.Id,
             DebitNoteNumber = note.DebitNoteNumber,
             InventoryPurchaseReturnId = note.InventoryPurchaseReturnId,
+            InventorySupplierReturnAccountingGroupId = note.InventorySupplierReturnAccountingGroupId,
             ReturnDispatchPostingEventId = note.ReturnDispatchPostingEventId,
             ReturnDispatchJournalEntryId = note.ReturnDispatchJournalEntryId,
             DirectInvoiceAppliedAmount = note.DirectInvoiceAppliedAmount,

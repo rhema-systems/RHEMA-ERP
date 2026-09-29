@@ -33,6 +33,9 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { HR_ADMIN_ROLES } from '@/components/hr/common/PermissionGate';
+import { ImportedConfirmationRepairDialog } from '@/components/hr/probation/ImportedConfirmationRepairDialog';
+import { useAuth } from '@/hooks/use-auth';
 import { probationService } from '@/services/hr/probation.service';
 import type { ProbationPeriodSummary, ProbationStatus } from '@/types/hr/probation';
 
@@ -76,6 +79,12 @@ export default function ProbationRegisterPage() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const pageSize = 25;
+  const [repairing, setRepairing] = useState(false);
+
+  // The repair is HR.Probation.Admin, like confirming one probation; the HR role holds Read and
+  // Write only. Hidden, not a boundary — the API refuses it regardless.
+  const { hasAnyPermission, hasAnyRole } = useAuth();
+  const canAdminister = hasAnyPermission(['HR.Probation.Admin']) || hasAnyRole(HR_ADMIN_ROLES);
 
   const { data, isLoading } = useQuery({
     queryKey: ['probations', status, search, page],
@@ -100,6 +109,13 @@ export default function ProbationRegisterPage() {
         backHref="/hr"
         actions={
           <div className="flex gap-2">
+            {/* HR finish plan lane 11: the imported workforce, put on probations that had ended. */}
+            {canAdminister && (
+              <Button variant="outline" onClick={() => setRepairing(true)}>
+                <UserCheck className="mr-2 h-4 w-4" />
+                Confirm imported staff
+              </Button>
+            )}
             <Button variant="outline" asChild>
               <Link href="/hr/probation/reviews">
                 <ClipboardCheck className="mr-2 h-4 w-4" />
@@ -257,6 +273,8 @@ export default function ProbationRegisterPage() {
           </div>
         </div>
       )}
+
+      <ImportedConfirmationRepairDialog open={repairing} onOpenChange={setRepairing} />
     </div>
   );
 }

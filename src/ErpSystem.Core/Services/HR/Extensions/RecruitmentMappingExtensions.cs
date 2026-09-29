@@ -276,8 +276,10 @@ public static class RecruitmentMappingExtensions
         entity.NumberOfInterviewRounds = dto.NumberOfInterviewRounds;
         entity.TargetStartDate = dto.TargetStartDate;
         entity.IsSalaryVisible = dto.IsSalaryVisible;
-        entity.EmploymentType = dto.EmploymentType;
-        entity.WorkMode = dto.WorkMode;
+        // ⚠ Only when supplied. Both are nullable on the transition payload precisely so that
+        // "not mentioned" stays distinguishable from "set to zero" — zero is outside both enums.
+        if (dto.EmploymentType.HasValue) entity.EmploymentType = dto.EmploymentType.Value;
+        if (dto.WorkMode.HasValue) entity.WorkMode = dto.WorkMode.Value;
         entity.SalaryRangeMin = dto.SalaryRangeMin;
         entity.SalaryRangeMax = dto.SalaryRangeMax;
         entity.SalaryCurrencyCode = dto.SalaryCurrencyCode;
@@ -840,6 +842,8 @@ public static class RecruitmentMappingExtensions
             PostalAddress = entity.PostalAddress,
             DigitalAddress = entity.DigitalAddress,
             City = entity.City,
+            Region = entity.Region,
+            GeoAreaId = entity.GeoAreaId,
             Nationality = entity.Nationality,
             CountryId = entity.CountryId,
             CountryName = entity.Country?.Name ?? string.Empty,
@@ -881,6 +885,7 @@ public static class RecruitmentMappingExtensions
             Email = entity.Email,
             Phone = entity.Phone,
             City = entity.City,
+            Region = entity.Region,
             CountryName = entity.Country?.Name ?? string.Empty,
             IsInTalentPool = entity.IsInTalentPool,
             HasPhoto = entity.HasPhotoOnFile(),
@@ -919,6 +924,8 @@ public static class RecruitmentMappingExtensions
             PostalAddress = entity.PostalAddress,
             DigitalAddress = entity.DigitalAddress,
             City = entity.City,
+            Region = entity.Region,
+            GeoAreaId = entity.GeoAreaId,
             Nationality = entity.Nationality,
             CountryId = entity.CountryId,
             CountryName = entity.Country?.Name ?? string.Empty,
@@ -975,7 +982,11 @@ public static class RecruitmentMappingExtensions
             AlternatePhone = dto.AlternatePhone,
             PostalAddress = dto.PostalAddress,
             DigitalAddress = dto.DigitalAddress,
-            City = dto.City,
+            // Round 4, lane A: City stopped being [Required] when the geography cascade arrived, so
+            // a payload that supplies an area legitimately carries no city. The service overwrites
+            // this from the tree straight afterwards; the empty string is what it writes over.
+            City = dto.City ?? string.Empty,
+            GeoAreaId = dto.GeoAreaId,
             // G-7.3: settable since 2026-09-15. Before that the demo seeder was its only writer.
             Nationality = string.IsNullOrWhiteSpace(dto.Nationality) ? null : dto.Nationality.Trim(),
             // Guid.Empty is read as "no country", not refused: a client written against the old
@@ -987,6 +998,17 @@ public static class RecruitmentMappingExtensions
             NationalIdTypeId = dto.NationalIdTypeId,
             NationalIdNumber = string.IsNullOrWhiteSpace(dto.NationalIdNumber) ? null : dto.NationalIdNumber.Trim(),
             NationalIdExpiryDate = dto.NationalIdExpiryDate,
+            // Round 4, lane B: HR can record what it knows about a pool member. Until now these
+            // were portal-only, so the pool's own rubric scored HR-entered candidates on three
+            // fields HR had no box for.
+            Headline = string.IsNullOrWhiteSpace(dto.Headline) ? null : dto.Headline.Trim(),
+            ProfessionalSummary = string.IsNullOrWhiteSpace(dto.ProfessionalSummary) ? null : dto.ProfessionalSummary.Trim(),
+            CurrentJobTitle = string.IsNullOrWhiteSpace(dto.CurrentJobTitle) ? null : dto.CurrentJobTitle.Trim(),
+            CurrentEmployer = string.IsNullOrWhiteSpace(dto.CurrentEmployer) ? null : dto.CurrentEmployer.Trim(),
+            TotalYearsExperience = dto.TotalYearsExperience,
+            NoticePeriodDays = dto.NoticePeriodDays,
+            AvailableFrom = dto.AvailableFrom,
+            PreferredWorkArrangement = dto.PreferredWorkArrangement,
             IsInTalentPool = dto.IsInTalentPool,
             TalentPoolAddedDate = dto.IsInTalentPool ? DateTime.UtcNow : null,
             CreatedBy = userId.ToString(),
@@ -1005,7 +1027,12 @@ public static class RecruitmentMappingExtensions
         entity.AlternatePhone = dto.AlternatePhone;
         entity.PostalAddress = dto.PostalAddress;
         entity.DigitalAddress = dto.DigitalAddress;
-        entity.City = dto.City;
+        // Round 4, lane A — see the create mapper for why City may legitimately arrive empty.
+        // ⚠ A null GeoAreaId here means "no area", not "leave it": this DTO replaces the address
+        // wholesale, which is why it needs no ClearGeoArea flag of the kind the employee's
+        // patch-style update carries.
+        entity.City = dto.City ?? string.Empty;
+        entity.GeoAreaId = dto.GeoAreaId;
         // G-7.3: settable since 2026-09-15. Before that the demo seeder was its only writer.
         entity.Nationality = string.IsNullOrWhiteSpace(dto.Nationality) ? null : dto.Nationality.Trim();
         entity.CountryId = dto.CountryId == Guid.Empty ? null : dto.CountryId;
@@ -1015,6 +1042,17 @@ public static class RecruitmentMappingExtensions
         entity.LinkedInProfile = dto.LinkedInProfile;
         entity.PortfolioUrl = dto.PortfolioUrl;
         entity.GitHubUrl = dto.GitHubUrl;
+        // Round 4, lane B - see the create mapper. This DTO replaces the record wholesale, so an
+        // omitted field CLEARS it; that is the contract the rest of this mapper already follows,
+        // and the candidate form sends all of them on every save.
+        entity.Headline = string.IsNullOrWhiteSpace(dto.Headline) ? null : dto.Headline.Trim();
+        entity.ProfessionalSummary = string.IsNullOrWhiteSpace(dto.ProfessionalSummary) ? null : dto.ProfessionalSummary.Trim();
+        entity.CurrentJobTitle = string.IsNullOrWhiteSpace(dto.CurrentJobTitle) ? null : dto.CurrentJobTitle.Trim();
+        entity.CurrentEmployer = string.IsNullOrWhiteSpace(dto.CurrentEmployer) ? null : dto.CurrentEmployer.Trim();
+        entity.TotalYearsExperience = dto.TotalYearsExperience;
+        entity.NoticePeriodDays = dto.NoticePeriodDays;
+        entity.AvailableFrom = dto.AvailableFrom;
+        entity.PreferredWorkArrangement = dto.PreferredWorkArrangement;
         if (dto.IsInTalentPool && !entity.IsInTalentPool)
             entity.TalentPoolAddedDate = DateTime.UtcNow;
         entity.IsInTalentPool = dto.IsInTalentPool;
@@ -1050,6 +1088,14 @@ public static class RecruitmentMappingExtensions
             Institution = entity.Institution,
             DateAwarded = entity.DateAwarded,
             Grade = entity.Grade,
+            // Round 4, lane Q. The id is the row's own; the effective pair is what the engine scores.
+            // ⚠ The name needs QualificationLevel (and Qualification.QualificationLevel) Included;
+            // the ids do not.
+            QualificationLevelId = entity.QualificationLevelId,
+            EffectiveQualificationLevelId = entity.QualificationLevelId ?? entity.Qualification?.QualificationLevelId,
+            EffectiveQualificationLevelName = entity.QualificationLevelId.HasValue
+                ? entity.QualificationLevel?.Name
+                : entity.Qualification?.QualificationLevel?.Name,
         };
     }
 
@@ -1061,6 +1107,7 @@ public static class RecruitmentMappingExtensions
             JobCandidateId = dto.JobCandidateId,
             QualificationType = dto.QualificationType,
             QualificationId = dto.QualificationId,
+            QualificationLevelId = dto.QualificationLevelId,
             Institution = dto.Institution,
             DateAwarded = dto.DateAwarded,
             Grade = dto.Grade,
@@ -1073,6 +1120,7 @@ public static class RecruitmentMappingExtensions
     {
         entity.QualificationType = dto.QualificationType;
         entity.QualificationId = dto.QualificationId;
+        entity.QualificationLevelId = dto.QualificationLevelId;
         entity.Institution = dto.Institution;
         entity.DateAwarded = dto.DateAwarded;
         entity.Grade = dto.Grade;
@@ -1441,6 +1489,8 @@ public static class RecruitmentMappingExtensions
             PostalAddress = entity.PostalAddress,
             DigitalAddress = entity.DigitalAddress,
             City = entity.City,
+            Region = entity.Region,
+            GeoAreaId = entity.GeoAreaId,
             Nationality = entity.Nationality,
             CountryId = entity.CountryId,
             CountryName = entity.Country?.Name ?? string.Empty,
@@ -1635,6 +1685,10 @@ public static class RecruitmentMappingExtensions
             CandidateName = entity.JobCandidate?.FullName ?? string.Empty,
             CandidateEmail = entity.JobCandidate?.Email ?? string.Empty,
             CandidatePhone = entity.JobCandidate?.Phone ?? string.Empty,
+            // Round 4, lane B5. False when the navigation was not loaded, which is the honest
+            // answer for a read that cannot see the candidate: the screen then shows initials
+            // rather than firing a request that would 404.
+            CandidateHasPhoto = entity.JobCandidate?.HasPhotoOnFile() ?? false,
             ApplicationDate = entity.ApplicationDate,
             Status = entity.Status,
             Source = entity.Source,
@@ -1690,6 +1744,7 @@ public static class RecruitmentMappingExtensions
             JobCandidateId = entity.JobCandidateId,
             CandidateName = entity.JobCandidate?.FullName ?? string.Empty,
             CandidateEmail = entity.JobCandidate?.Email ?? string.Empty,
+            CandidateHasPhoto = entity.JobCandidate?.HasPhotoOnFile() ?? false,
             ApplicationDate = entity.ApplicationDate,
             Status = entity.Status,
             Source = entity.Source,
@@ -1726,6 +1781,10 @@ public static class RecruitmentMappingExtensions
             CandidateName = entity.JobCandidate?.FullName ?? string.Empty,
             CandidateEmail = entity.JobCandidate?.Email ?? string.Empty,
             CandidatePhone = entity.JobCandidate?.Phone ?? string.Empty,
+            // Round 4, lane B5. False when the navigation was not loaded, which is the honest
+            // answer for a read that cannot see the candidate: the screen then shows initials
+            // rather than firing a request that would 404.
+            CandidateHasPhoto = entity.JobCandidate?.HasPhotoOnFile() ?? false,
             ApplicationDate = entity.ApplicationDate,
             Status = entity.Status,
             Source = entity.Source,
@@ -2018,6 +2077,7 @@ public static class RecruitmentMappingExtensions
             Weight = entity.Weight,
             MinScore = entity.MinScore,
             MaxScore = entity.MaxScore,
+            ScoringGuide = entity.ScoringGuide,
             QuestionTypeId = entity.QuestionTypeId,
             QuestionTypeName = entity.QuestionType?.TypeName ?? string.Empty,
             IsActive = entity.IsActive,
@@ -2033,6 +2093,7 @@ public static class RecruitmentMappingExtensions
             Weight = dto.Weight,
             MinScore = dto.MinScore,
             MaxScore = dto.MaxScore,
+            ScoringGuide = dto.ScoringGuide,
             QuestionTypeId = dto.QuestionTypeId,
             IsActive = dto.IsActive,
             CreatedBy = userId.ToString(),
@@ -2045,6 +2106,7 @@ public static class RecruitmentMappingExtensions
         entity.Weight = dto.Weight;
         entity.MinScore = dto.MinScore;
         entity.MaxScore = dto.MaxScore;
+        entity.ScoringGuide = dto.ScoringGuide;
         entity.QuestionTypeId = dto.QuestionTypeId;
         entity.IsActive = dto.IsActive;
         entity.UpdatedAt = DateTime.UtcNow;
@@ -2189,6 +2251,14 @@ public static class RecruitmentMappingExtensions
             IntervieweeCount = entity.Interviewees?.Count ?? 0,
             PanelistCount = (entity.Panelists?.Count ?? 0) + (entity.ExternalPanelists?.Count ?? 0),
             QuestionPresetId = entity.QuestionPresetId,
+            // Round 4, lane D. The room is only named where the read Included the booking; a null
+            // name beside a non-null id means "not loaded", not "no room".
+            RoomBookingId            = entity.RoomBookingId,
+            RoomName                 = entity.RoomBooking?.Room?.RoomName,
+            RoomBookingNumber        = entity.RoomBooking?.BookingNumber,
+            PanelClashOverrideReason = entity.PanelClashOverrideReason,
+            PanelClashOverrideDetail = entity.PanelClashOverrideDetail,
+            PanelClashOverriddenAt   = entity.PanelClashOverriddenAt,
         };
     }
 
@@ -2545,6 +2615,7 @@ public static class RecruitmentMappingExtensions
             Weight = entity.Question?.Weight ?? 0,
             MinScore = entity.Question?.MinScore ?? 0,
             MaxScore = entity.Question?.MaxScore ?? 0,
+            ScoringGuide = entity.Question?.ScoringGuide,
             DisplayOrder = entity.DisplayOrder,
         };
     }
@@ -2595,6 +2666,9 @@ public static class RecruitmentMappingExtensions
             EvaluationDate = entity.EvaluationDate,
             IsFinalized = entity.IsFinalized,
             FinalizedDate = entity.FinalizedDate,
+            ScoreSource = entity.ScoreSource,
+            FiledByHrOnBehalfOfEmployeeId = entity.FiledByHrOnBehalfOfEmployeeId,
+            FiledByHrOnBehalfOfName = entity.FiledByHrOnBehalfOf?.FullName,
         };
     }
 
@@ -2624,6 +2698,9 @@ public static class RecruitmentMappingExtensions
             EvaluationDate = entity.EvaluationDate,
             IsFinalized = entity.IsFinalized,
             FinalizedDate = entity.FinalizedDate,
+            ScoreSource = entity.ScoreSource,
+            FiledByHrOnBehalfOfEmployeeId = entity.FiledByHrOnBehalfOfEmployeeId,
+            FiledByHrOnBehalfOfName = entity.FiledByHrOnBehalfOf?.FullName,
             ScoreEntries = entity.ScoreEntries.Select(e => e.ToDto()).ToList(),
         };
     }
@@ -3526,6 +3603,7 @@ public static class RecruitmentMappingExtensions
             OnboardingCoordinatorId = entity.OnboardingCoordinatorId,
             OnboardingCoordinatorName = entity.OnboardingCoordinator?.FullName,
             Notes = entity.Notes,
+            TemplateSelectionReason = entity.TemplateSelectionReason,
             TotalTasks = entity.Tasks?.Count ?? 0,
             CompletedTasks = entity.Tasks?.Count(t => t.Status == OnboardingTaskStatus.Completed) ?? 0,
             OverdueTasks = entity.Tasks?.Count(t => t.Status != OnboardingTaskStatus.Completed && t.DueDate < DateOnly.FromDateTime(DateTime.UtcNow)) ?? 0,
@@ -3572,6 +3650,7 @@ public static class RecruitmentMappingExtensions
             OnboardingCoordinatorId = entity.OnboardingCoordinatorId,
             OnboardingCoordinatorName = entity.OnboardingCoordinator?.FullName,
             Notes = entity.Notes,
+            TemplateSelectionReason = entity.TemplateSelectionReason,
             TotalTasks = entity.Tasks?.Count ?? 0,
             CompletedTasks = entity.Tasks?.Count(t => t.Status == OnboardingTaskStatus.Completed) ?? 0,
             OverdueTasks = entity.Tasks?.Count(t => t.Status != OnboardingTaskStatus.Completed && t.DueDate < DateOnly.FromDateTime(DateTime.UtcNow)) ?? 0,

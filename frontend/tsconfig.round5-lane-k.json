@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/medical-board.ts",
+    "src/services/hr/medical-board.service.ts",
+    "src/app/hr/medical/boards/page.tsx",
+    "src/app/hr/medical/boards/[id]/page.tsx",
+    "src/components/hr/leave/MedicalBoardLinkPanel.tsx",
+    "src/components/hr/common/StatusBadge.tsx"
+  ]
+}

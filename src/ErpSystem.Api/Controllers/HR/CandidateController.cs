@@ -1,4 +1,4 @@
-using ErpSystem.Api.Services.HR;
+﻿using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR.Recruitment;
@@ -43,6 +43,7 @@ public class CandidateController : ControllerBase
     private readonly ICentralDocumentRepositoryFileService _centralDocuments;
     private readonly ApplicationDbContext _db;
     private readonly IJobOfferService _offerService;
+    private readonly IRecruitmentTestService _testService;
     private readonly IOfferLetterService _offerLetter;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly ICurrentUserService _currentUser;
@@ -57,6 +58,7 @@ public class CandidateController : ControllerBase
         ICentralDocumentRepositoryFileService centralDocuments,
         ApplicationDbContext db,
         IJobOfferService offerService,
+        IRecruitmentTestService testService,
         IOfferLetterService offerLetter,
         UserManager<ApplicationUser> userManager,
         ICurrentUserService currentUser,
@@ -74,6 +76,7 @@ public class CandidateController : ControllerBase
         _userManager   = userManager;
         _currentUser   = currentUser;
         _email         = email;
+        _testService   = testService;
         _portalOptions = portalOptions.Value;
         _logger        = logger;
     }
@@ -674,6 +677,98 @@ public class CandidateController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    // ── Assessments (round 4, lane E) ──────────────────────────────────────────
+    //
+    // ⚠ Everything here is served by the CANDIDATE projections: the question and option types the
+    // service returns have no IsCorrect, no ExpectedAnswer and no Explanation on them at all. The
+    // guard is the type, not a remembered omission.
+    //
+    // ⚠ These actions map the service's own exceptions themselves rather than borrowing
+    // [RecruitmentBusinessRules]: putting that filter on this controller would change the status
+    // code every OTHER candidate endpoint answers with, and the careers pages read those.
+
+    /// <summary>Every assessment the caller has been set, and whether they can start it.</summary>
+    [HttpGet("assessments")]
+    [ProducesResponseType(typeof(IEnumerable<CandidateAssessmentSummaryDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<CandidateAssessmentSummaryDto>>> GetAssessments(
+        CancellationToken ct)
+        => await RunAssessmentAsync(async user =>
+            await _testService.GetMyAssessmentsAsync(user.Id, GetTenantId(), ct));
+
+    /// <summary>
+    /// Opens an attempt — or hands back the one already running, which does not consume another.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The clock starts HERE and is stored; it is not restarted by reopening the page. The
+    /// response carries the session token that the save and submit calls must present.
+    /// </remarks>
+    [HttpPost("assessments/{assignmentId:guid}/start")]
+    [EnableRateLimiting("SensitivePolicy")]
+    [ProducesResponseType(typeof(CandidateSittingDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<CandidateSittingDto>> StartAssessment(
+        Guid assignmentId, CancellationToken ct)
+        => await RunAssessmentAsync(async user =>
+            await _testService.StartSittingAsync(user.Id, GetTenantId(), assignmentId, ct));
+
+    /// <summary>Resumes an attempt: the paper, the remaining time, and everything already answered.</summary>
+    [HttpGet("assessments/sittings/{sittingId:guid}")]
+    [ProducesResponseType(typeof(CandidateSittingDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<CandidateSittingDto>> GetSitting(Guid sittingId, CancellationToken ct)
+        => await RunAssessmentAsync(async user =>
+            await _testService.GetMySittingAsync(user.Id, GetTenantId(), sittingId, ct));
+
+    /// <summary>Stores what has been answered so far, unmarked.</summary>
+    [HttpPut("assessments/sittings/{sittingId:guid}/progress")]
+    [ProducesResponseType(typeof(CandidateSittingDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<CandidateSittingDto>> SaveProgress(
+        Guid sittingId, [FromBody] SubmitSittingDto dto, CancellationToken ct)
+    {
+        if (sittingId != dto.SittingId)
+            return BadRequest(new { message = "The route id and the payload id do not match." });
+
+        return await RunAssessmentAsync(async user =>
+            await _testService.SaveProgressAsync(user.Id, GetTenantId(), dto, ct));
+    }
+
+    /// <summary>Submits the attempt. One submit — it cannot be reopened afterwards.</summary>
+    [HttpPost("assessments/sittings/{sittingId:guid}/submit")]
+    [EnableRateLimiting("SensitivePolicy")]
+    [ProducesResponseType(typeof(CandidateSittingResultDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<CandidateSittingResultDto>> SubmitSitting(
+        Guid sittingId, [FromBody] SubmitSittingDto dto, CancellationToken ct)
+    {
+        if (sittingId != dto.SittingId)
+            return BadRequest(new { message = "The route id and the payload id do not match." });
+
+        return await RunAssessmentAsync(async user =>
+            await _testService.SubmitSittingAsync(user.Id, GetTenantId(), dto, ct));
+    }
+
+    /// <summary>
+    /// Runs an assessment call and answers the service's own rules the way the rest of recruitment
+    /// does: "not found" is 404, a refused rule is 422 carrying its own sentence.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ A sitting that belongs to somebody else is reported as MISSING, not forbidden — the service
+    /// raises the same "could not be found" for a wrong id and for another candidate's, so a guessed
+    /// id cannot be used to discover that it exists.
+    /// </remarks>
+    private async Task<ActionResult<T>> RunAssessmentAsync<T>(Func<ApplicationUser, Task<T>> work)
+    {
+        try
+        {
+            return Ok(await work(await GetAccountUserAsync()));
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return StatusCode(StatusCodes.Status422UnprocessableEntity, new { message = ex.Message });
         }
     }
 

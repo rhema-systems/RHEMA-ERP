@@ -203,15 +203,25 @@ public class AppraisalCycleTargetController : ControllerBase
 
     #region Exclusion Operations
 
-    /// <summary>Get all exclusions for a target</summary>
+    /// <summary>
+    /// Get all exclusions for a target — the HR desk's read (performance closure P16): each row
+    /// names an employee left out of a cycle and why, so it was open to every authenticated user.
+    /// </summary>
     [HttpGet("{targetId:guid}/exclusions")]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<AppraisalCycleTargetExclusionDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetExclusions(Guid targetId)
     {
         try
         {
             var response = await _targetService.GetExclusionsAsync(targetId);
             return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            // A missing (or another tenant's) target — it used to fall to the 500 below.
+            return NotFound(new { message = ex.Message });
         }
         catch (Exception ex)
         {

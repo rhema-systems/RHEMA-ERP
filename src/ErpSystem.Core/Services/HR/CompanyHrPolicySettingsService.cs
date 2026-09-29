@@ -111,20 +111,28 @@ public class CompanyHrPolicySettingsService : ICompanyHrPolicySettingsService
         Guid tenantId, CompanyHrPolicySettings? existing,
         UpdateCompanyHrPolicySettingsDto dto, CancellationToken ct)
     {
-        // Nothing stored yet, or nothing changing: there is no boundary to move.
-        if (existing is null || existing.LeaveYearStartMonth == dto.LeaveYearStartMonth) return;
+        // ⚠ Leave settings audit 2, L-95: a tenant with no settings row still HAS a leave year — the
+        // default — and its leave is labelled under it. This returned early for such a tenant, so its
+        // first save could move the boundary under records already written. Nothing changing is the
+        // only reason to stop here. The fallback is the same unsaved default CompanyHrPolicyProvider
+        // hands every leave reader when the row is missing.
+        var current = existing?.LeaveYearStartMonth ?? new CompanyHrPolicySettings().LeaveYearStartMonth;
+        if (current == dto.LeaveYearStartMonth) return;
 
         var requests = await _leaveRequests.GetQueryable()
             .CountAsync(r => r.TenantId == tenantId && !r.IsDeleted, ct);
         var balances = await _leaveBalances.GetQueryable()
             .CountAsync(b => b.TenantId == tenantId && !b.IsDeleted, ct);
+        // ⚠ L-95 too: a plan carries its leave year (LeavePlan.Year), and was not counted.
+        var plans = await _unitOfWork.Repository<LeavePlan>().GetQueryable()
+            .CountAsync(p => p.TenantId == tenantId && !p.IsDeleted, ct);
 
-        if (requests == 0 && balances == 0) return;
+        if (requests == 0 && balances == 0 && plans == 0) return;
 
         throw new InvalidOperationException(
             $"The leave year cannot be moved once leave data exists. This company already holds "
-            + $"{requests} leave request(s) and {balances} leave balance(s), all labelled under a "
-            + $"leave year starting in month {existing.LeaveYearStartMonth}. Moving the start month "
+            + $"{requests} leave request(s), {balances} leave balance(s) and {plans} leave plan(s), all labelled "
+            + $"under a leave year starting in month {current}. Moving the start month "
             + "would change which leave year some dates fall in while those records keep their "
             + "current labels, and a carry-over already run cannot be recomputed against the new "
             + "boundaries. Set it during setup, before any leave is recorded.");

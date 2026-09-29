@@ -2201,6 +2201,15 @@ public class PublicHolidaySummaryDto
     public string ObservanceTypeName => ObservanceType.ToString();
     public bool AttractsHolidayPay { get; set; }
     public bool IsActive { get; set; }
+
+    // ⚠ Round 5, lane N4: every field the update writes. The calendar screen's edit dialog is filled
+    // from this row, and without these four a rename blanked the description, the observed date (a
+    // weekend holiday's Monday) and the pay multiplier, and reset the recurring flag — the echo shape
+    // of finding L-13.
+    public string? Description { get; set; }
+    public DateOnly? SubstitutionDate { get; set; }
+    public decimal? HolidayPayMultiplier { get; set; }
+    public bool IsRecurringAnnually { get; set; }
 }
 
 public class CreatePublicHolidayDto : CreateDtoBase
@@ -2646,6 +2655,8 @@ public class ConsultantClientDto : BaseDto
     public string? Region { get; set; }
     public string? PostalCode { get; set; }
     public Guid? CountryId { get; set; }
+    /// <summary>The Finance customer this client is billed as; null = invoices stay HR-side (slice 6).</summary>
+    public Guid? FinanceCustomerId { get; set; }
     public string? CountryName { get; set; }
 
     // Billing Contact
@@ -2723,6 +2734,7 @@ public class CreateConsultantClientDto : CreateDtoBase
     public string? PostalCode { get; set; }
 
     public Guid? CountryId { get; set; }
+    public Guid? FinanceCustomerId { get; set; }
 
     [MaxLength(200)]
     public string? BillingContactName { get; set; }
@@ -2788,6 +2800,7 @@ public class UpdateConsultantClientDto : UpdateDtoBase
     public string? PostalCode { get; set; }
 
     public Guid? CountryId { get; set; }
+    public Guid? FinanceCustomerId { get; set; }
 
     [MaxLength(200)]
     public string? BillingContactName { get; set; }

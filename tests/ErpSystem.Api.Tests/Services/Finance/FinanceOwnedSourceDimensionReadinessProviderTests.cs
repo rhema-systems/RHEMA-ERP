@@ -16,6 +16,38 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class FinanceOwnedSourceDimensionReadinessProviderTests
 {
     [Fact]
+    public async Task Auction_readiness_uses_typed_disposal_source_and_does_not_pollute_manual_AR_route()
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"auction-route-readiness-{Guid.NewGuid():N}").Options);
+        var manual = new Invoice { TenantId = tenant, InvoiceNumber = "MANUAL", Status = InvoiceStatus.Draft,
+            InvoiceDate = new DateTime(2026, 9, 27), LineItems = [new InvoiceLineItem { TenantId = tenant, Quantity = 1, UnitPrice = 50 }] };
+        var auction = new Invoice { TenantId = tenant, InvoiceNumber = "AUCTION", Status = InvoiceStatus.Draft,
+            InvoiceDate = new DateTime(2026, 9, 27), LineItems = [new InvoiceLineItem { TenantId = tenant, Quantity = 1, UnitPrice = 70 }] };
+        foreach(var line in manual.LineItems) line.InvoiceId = manual.Id;
+        foreach(var line in auction.LineItems) line.InvoiceId = auction.Id;
+        var sales = new Invoice { TenantId = tenant, InvoiceNumber = "SALES", Status = InvoiceStatus.Draft,
+            InvoiceDate = new DateTime(2026, 9, 27), LineItems = [new InvoiceLineItem { TenantId = tenant, Quantity = 1, UnitPrice = 90 }] };
+        foreach (var line in sales.LineItems) line.InvoiceId = sales.Id;
+        db.Invoices.AddRange(manual, auction, sales);
+        db.Set<ErpSystem.Core.Entities.Sales.SalesOrder>().Add(new()
+            { TenantId = tenant, BusinessPartnerId = Guid.NewGuid(), InvoiceId = sales.Id });
+        db.Set<ErpSystem.Core.Entities.Inventory.InventoryDisposalAuctionInvoice>().Add(new()
+            { TenantId = tenant, InventoryDisposalCaseId = Guid.NewGuid(), InvoiceId = auction.Id });
+        await db.SaveChangesAsync();
+        var manualRoute = FinanceDimensionRouteCatalog.GetRequired(FinanceDimensionRouteId.FinanceArCustomerInvoice);
+        var auctionRoute = FinanceDimensionRouteCatalog.GetRequired(FinanceDimensionRouteId.InventoryDisposalAuctionInvoice);
+        var manualResult = await new FinanceOwnedSourceDimensionReadinessProvider(db, manualRoute.Id).EvaluateAsync(tenant, manualRoute);
+        var auctionResult = await new FinanceOwnedSourceDimensionReadinessProvider(db, auctionRoute.Id).EvaluateAsync(tenant, auctionRoute);
+        manualResult.Blockers.Select(value => value.DocumentId).Distinct().Should().Equal(manual.Id);
+        auctionResult.Blockers.Select(value => value.DocumentId).Distinct().Should().Equal(auction.Id);
+        var salesRoute = FinanceDimensionRouteCatalog.GetRequired(FinanceDimensionRouteId.SalesOrderCustomerInvoice);
+        var salesResult = await new FinanceOwnedSourceDimensionReadinessProvider(db, salesRoute.Id).EvaluateAsync(tenant, salesRoute);
+        salesResult.Blockers.Select(value => value.DocumentId).Distinct().Should().Equal(sales.Id);
+    }
+
+    [Fact]
     public async Task BankDepositRouteRequiresStableSourceAndAllocationEvidence()
     {
         var tenantId = Guid.NewGuid();
@@ -112,12 +144,12 @@ public sealed class FinanceOwnedSourceDimensionReadinessProviderTests
             new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseInMemoryDatabase($"finance-dimension-readiness-{Guid.NewGuid():N}").Options);
         var supplierId = Guid.NewGuid();
-        db.Suppliers.Add(new Supplier
+        db.BusinessPartners.Add(new BusinessPartner
         {
             Id = supplierId,
             TenantId = tenantId,
-            SupplierCode = "SUP-READINESS",
-            Name = "Readiness Supplier"
+            PartnerCode = "SUP-READINESS",
+            PartnerName = "Readiness Supplier"
         });
         db.VendorInvoices.Add(new VendorInvoice
         {

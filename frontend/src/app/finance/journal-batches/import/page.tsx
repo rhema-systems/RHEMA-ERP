@@ -11,20 +11,23 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { journalBatchDataService } from '@/services/finance/journal-batch-data.service';
 import type { JournalBatchImportPreview } from '@/types/journal-batches';
 
-const money = (value: number) => new Intl.NumberFormat('en-GH', { style: 'currency', currency: 'GHS' }).format(value);
+const money = (value: number, currency: string) => new Intl.NumberFormat('en-GH', { style: 'currency', currency }).format(value);
 
 export default function JournalBatchImportPage() {
     const router = useRouter();
     const { toast } = useToast();
+    const { hasPermission } = useAuth();
+    const canImport = hasPermission('Finance.JournalBatches.Import');
     const [file, setFile] = useState<File | null>(null);
     const [preview, setPreview] = useState<JournalBatchImportPreview | null>(null);
     const [busy, setBusy] = useState<'preview' | 'commit' | null>(null);
 
     const previewFile = async () => {
-        if (!file) return;
+        if (!file || !canImport) return;
         try {
             setBusy('preview');
             setPreview(await journalBatchDataService.previewImport(file));
@@ -36,7 +39,7 @@ export default function JournalBatchImportPage() {
     };
 
     const commit = async () => {
-        if (!preview?.isValid) return;
+        if (!preview?.isValid || !canImport) return;
         try {
             setBusy('commit');
             const batch = await journalBatchDataService.commitImport(preview.sessionId, preview.previewToken);
@@ -66,10 +69,10 @@ export default function JournalBatchImportPage() {
                 <CardHeader><CardTitle>Workbook</CardTitle><CardDescription>Use the protected .xlsx template so header and journal-line controls can be validated consistently.</CardDescription></CardHeader>
                 <CardContent className="space-y-4">
                     <div className="flex flex-wrap gap-2">
-                        <Button variant="outline" onClick={() => journalBatchDataService.downloadTemplate()}><Download className="mr-2 h-4 w-4" />Download template</Button>
+                        {canImport && <Button variant="outline" onClick={() => journalBatchDataService.downloadTemplate()}><Download className="mr-2 h-4 w-4" />Download template</Button>}
                         <Label className="sr-only" htmlFor="journal-batch-workbook">Journal batch workbook</Label>
                         <Input id="journal-batch-workbook" className="max-w-xl" type="file" accept=".xlsx" onChange={(event) => { setFile(event.target.files?.[0] ?? null); setPreview(null); }} />
-                        <Button onClick={previewFile} disabled={!file || busy !== null}>{busy === 'preview' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}Preview</Button>
+                        <Button onClick={previewFile} disabled={!file || busy !== null || !canImport}>{busy === 'preview' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}Preview</Button>
                     </div>
 
                     {preview && (
@@ -78,7 +81,7 @@ export default function JournalBatchImportPage() {
                                 {preview.isValid ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
                                 <AlertTitle>{preview.isValid ? 'Workbook is ready to import' : 'Workbook requires correction'}</AlertTitle>
                                 <AlertDescription>
-                                    {preview.journalCount} journals, {preview.lineCount} lines. Expected {money(preview.expectedDebitTotal)}; actual {money(preview.actualDebitTotal)}.
+                                    {preview.journalCount} journals, {preview.lineCount} lines. Expected {money(preview.expectedDebitTotal, preview.controlCurrencyCode)}; actual {money(preview.actualDebitTotal, preview.controlCurrencyCode)}.
                                 </AlertDescription>
                             </Alert>
 
@@ -92,8 +95,8 @@ export default function JournalBatchImportPage() {
                             )}
 
                             <div className="flex justify-end gap-2">
-                                {!preview.isValid && <Button variant="outline" onClick={() => journalBatchDataService.downloadImportErrors(preview.sessionId)}><Download className="mr-2 h-4 w-4" />Error workbook</Button>}
-                                <Button onClick={commit} disabled={!preview.isValid || busy !== null}>{busy === 'commit' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Commit import</Button>
+                                {!preview.isValid && canImport && <Button variant="outline" onClick={() => journalBatchDataService.downloadImportErrors(preview.sessionId)}><Download className="mr-2 h-4 w-4" />Error workbook</Button>}
+                                <Button onClick={commit} disabled={!preview.isValid || busy !== null || !canImport}>{busy === 'commit' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Commit import</Button>
                             </div>
                         </>
                     )}

@@ -7,6 +7,7 @@ import type {
   TrainingBudgetTransaction,
   TrainingBudgetTransactionCreateRequest,
 } from '@/types/hr/training';
+import type { HrBudgetFinanceActuals } from '@/types/hr/finance-posting';
 
 /**
  * CRUD + approve workflow for training budgets, plus their spend-transaction sub-resource.
@@ -21,6 +22,11 @@ class TrainingBudgetService {
 
   getById(id: string): Promise<TrainingBudget> {
     return apiService.get<TrainingBudget>(`${this.baseUrl}/${id}`);
+  }
+
+  /** What Finance says was spent on the budget's GL account (else its unit's account) over its year or quarter — a read of Finance's book balances (lane 8, slice 6). */
+  getFinanceActuals(id: string): Promise<HrBudgetFinanceActuals> {
+    return apiService.get<HrBudgetFinanceActuals>(`${this.baseUrl}/${id}/finance-actuals`);
   }
 
   getByBudgetCode(budgetCode: string): Promise<TrainingBudget | null> {

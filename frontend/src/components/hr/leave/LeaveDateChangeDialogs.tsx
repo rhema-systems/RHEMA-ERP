@@ -531,7 +531,7 @@ export function RecallDialog({
 
           <div className="space-y-2">
             <Label htmlFor="recall-reason">
-              Why they are being recalled <span className="text-red-500">*</span>
+              The urgent necessity <span className="text-red-500">*</span>
             </Label>
             <Textarea
               id="recall-reason"
@@ -541,7 +541,9 @@ export function RecallDialog({
               placeholder="e.g. the plant shutdown was brought forward and their sign-off is needed."
             />
             <p className="text-xs text-muted-foreground">
-              Required. A recall is the employer&apos;s act and the record has to carry its reason.
+              Required. The Labour Act (s.25) lets an employer recall someone from leave only for an
+              urgent necessity, and the record has to say what it was. The days not taken are returned;
+              recall expenses (s.26) are claimed in the ordinary way.
             </p>
           </div>
 

@@ -105,6 +105,13 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             var currencyCode = NormalizeCurrencyCode(dto.CurrencyCode, "Currency code");
             var shouldCreateInitialRate = dto.CreateInitialExchangeRate && !dto.IsBaseCurrency;
 
+            if (dto.IsBaseCurrency)
+            {
+                throw new InvalidOperationException(
+                    "Create the currency as a normal active currency, then select it as the functional currency through Finance Settings. " +
+                    "The currency register cannot bypass the governed functional-currency change control.");
+            }
+
             if (!await IsCodeUniqueAsync(currencyCode, null, cancellationToken))
                 throw new InvalidOperationException($"Currency with code '{currencyCode}' already exists.");
 
@@ -341,73 +348,120 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
         public async Task<bool> SetBaseCurrencyAsync(Guid id, CancellationToken cancellationToken = default)
         {
              var currency = await _unitOfWork.Repository<Currency>()
-                .FirstOrDefaultAsync(c => c.TenantId == TenantId && c.Id == id);
+                .FirstOrDefaultAsync(c => c.TenantId == TenantId && c.Id == id && !c.IsDeleted);
             
             if (currency == null) return false;
             if (currency.IsBaseCurrency) return true;
 
-            var oldBase = await _unitOfWork.Repository<Currency>()
-                .FirstOrDefaultAsync(c => c.TenantId == TenantId && c.IsBaseCurrency);
-            
-            if (oldBase != null)
-            {
-                oldBase.IsBaseCurrency = false;
-                await _unitOfWork.Repository<Currency>().UpdateAsync(oldBase);
-            }
-
-            currency.IsBaseCurrency = true;
-            await _unitOfWork.Repository<Currency>().UpdateAsync(currency);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            return true;
+            throw new InvalidOperationException(
+                "Functional currency can only be changed through Finance Settings, where accounting-history locks, " +
+                "currency activation and audit evidence are enforced.");
         }
 
         public async Task<bool> UpdateExchangeRateAsync(Guid id, decimal rate, CancellationToken cancellationToken = default)
         {
-            // Placeholder for simpler rate update if we aren't using a separate ExchangeRate entity/service
-            // Ideally we should use IExchangeRateService, but if Currency has a rate field or logic, put it here.
-            // Since Interface requires it, we'll confirm logic. 
-            // Looking at Currency entity, no direct 'CurrentRate' field? It relies on ExchangeRate table.
-            
-            // NOTE: This might need IExchangeRateService interaction. For now, returning true to satisfy build.
              var currency = await _unitOfWork.Repository<Currency>()
-                .FirstOrDefaultAsync(c => c.TenantId == TenantId && c.Id == id);
+                .FirstOrDefaultAsync(c => c.TenantId == TenantId && c.Id == id && !c.IsDeleted);
              if (currency == null) return false;
-             
-             // Update logic...
-             return true;
+
+             if (rate <= 0m)
+                 throw new InvalidOperationException("Exchange rate must be greater than zero.");
+
+             throw new InvalidOperationException(
+                 "The legacy currency quick-rate endpoint is retired because it cannot capture an effective date, quote side, source evidence or approval. " +
+                 "Create a governed exchange-rate submission in Finance > Multi-Currency > Exchange Rates.");
         }
 
         public async Task<decimal> ConvertAsync(decimal amount, string fromCode, string toCode, CancellationToken cancellationToken = default)
         {
-            var fromCurrency = fromCode.Trim().ToUpperInvariant();
-            var toCurrency = toCode.Trim().ToUpperInvariant();
+            var fromCurrency = NormalizeCurrencyCode(fromCode, "Source currency");
+            var toCurrency = NormalizeCurrencyCode(toCode, "Target currency");
+
+            var activeCurrencies = await _unitOfWork.Repository<Currency>()
+                .GetQueryable(currency => currency.TenantId == TenantId
+                    && !currency.IsDeleted
+                    && currency.IsActive
+                    && (currency.CurrencyCode == fromCurrency || currency.CurrencyCode == toCurrency))
+                .Select(currency => new { currency.CurrencyCode, currency.DecimalPlaces })
+                .ToListAsync(cancellationToken);
+            if (!activeCurrencies.Any(currency => string.Equals(currency.CurrencyCode, fromCurrency, StringComparison.OrdinalIgnoreCase))
+                || !activeCurrencies.Any(currency => string.Equals(currency.CurrencyCode, toCurrency, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException(
+                    $"Both {fromCurrency} and {toCurrency} must be active tenant currencies before conversion.");
+            }
             if (fromCurrency == toCurrency) return amount;
+            var targetDecimalPlaces = activeCurrencies.Single(currency =>
+                string.Equals(currency.CurrencyCode, toCurrency, StringComparison.OrdinalIgnoreCase)).DecimalPlaces;
 
             var date = DateTime.UtcNow.Date;
-            var rate = await _unitOfWork.Repository<ExchangeRate>()
-                .GetQueryable(r => r.TenantId == TenantId &&
-                                   r.IsActive &&
-                                   r.EffectiveDate <= date &&
-                                   (r.EndDate == null || r.EndDate >= date) &&
-                                   ((r.BaseCurrencyCode == toCurrency && r.TargetCurrencyCode == fromCurrency) ||
-                                    (r.BaseCurrencyCode == fromCurrency && r.TargetCurrencyCode == toCurrency)))
-                .OrderByDescending(r => r.EffectiveDate)
-                .ThenByDescending(r => r.CreatedAt)
-                .FirstOrDefaultAsync(cancellationToken);
 
-            if (rate == null || rate.Rate <= 0)
+            // The governed public contract is directional: one unit of BaseCurrencyCode
+            // equals Rate units of TargetCurrencyCode. Prefer that direct path, then its
+            // mathematical inverse, before triangulating through the functional currency.
+            var directQuote = await _exchangeRateService.GetCurrentRateAsync(
+                toCurrency,
+                fromCurrency,
+                date,
+                ExchangeRateType.Daily.ToString(),
+                ExchangeRateQuoteSide.Mid.ToString(),
+                cancellationToken);
+            if (directQuote is { Rate: > 0m })
             {
-                return amount;
+                return RoundConvertedAmount(amount * directQuote.Rate, targetDecimalPlaces);
             }
 
-            if (rate.BaseCurrencyCode == toCurrency && rate.TargetCurrencyCode == fromCurrency)
+            var inverseQuote = await _exchangeRateService.GetCurrentRateAsync(
+                fromCurrency,
+                toCurrency,
+                date,
+                ExchangeRateType.Daily.ToString(),
+                ExchangeRateQuoteSide.Mid.ToString(),
+                cancellationToken);
+            if (inverseQuote is { Rate: > 0m })
             {
-                var targetToBase = rate.InverseRate > 0 ? rate.InverseRate : 1 / rate.Rate;
-                return amount * targetToBase;
+                return RoundConvertedAmount(amount / inverseQuote.Rate, targetDecimalPlaces);
             }
 
-            return amount * rate.Rate;
+            var functionalCurrency = NormalizeCurrencyCode(
+                await _tenantSettingsService.GetBaseCurrencyAsync(),
+                "Functional currency");
+            if (fromCurrency == functionalCurrency || toCurrency == functionalCurrency)
+            {
+                throw MissingApprovedRate(fromCurrency, toCurrency, date);
+            }
+
+            var fromFunctionalQuote = await _exchangeRateService.GetCurrentRateAsync(
+                fromCurrency,
+                functionalCurrency,
+                date,
+                ExchangeRateType.Daily.ToString(),
+                ExchangeRateQuoteSide.Mid.ToString(),
+                cancellationToken);
+            var toFunctionalQuote = await _exchangeRateService.GetCurrentRateAsync(
+                toCurrency,
+                functionalCurrency,
+                date,
+                ExchangeRateType.Daily.ToString(),
+                ExchangeRateQuoteSide.Mid.ToString(),
+                cancellationToken);
+            if (fromFunctionalQuote is not { Rate: > 0m } || toFunctionalQuote is not { Rate: > 0m })
+            {
+                throw MissingApprovedRate(fromCurrency, toCurrency, date);
+            }
+
+            // Both legs are functional -> currency quotes. Convert the source amount back
+            // to functional currency, then out to the requested target currency.
+            return RoundConvertedAmount(
+                amount * toFunctionalQuote.Rate / fromFunctionalQuote.Rate,
+                targetDecimalPlaces);
         }
+
+        private static decimal RoundConvertedAmount(decimal amount, int decimalPlaces) =>
+            decimal.Round(amount, Math.Clamp(decimalPlaces, 0, 28), MidpointRounding.AwayFromZero);
+
+        private static InvalidOperationException MissingApprovedRate(string fromCurrency, string toCurrency, DateTime date) =>
+            new($"No active approved Daily/Mid exchange-rate path exists for {fromCurrency}/{toCurrency} on {date:yyyy-MM-dd}. Conversion was not performed.");
 
         public async Task<bool> IsCodeUniqueAsync(string code, Guid? excludeId = null, CancellationToken cancellationToken = default)
         {

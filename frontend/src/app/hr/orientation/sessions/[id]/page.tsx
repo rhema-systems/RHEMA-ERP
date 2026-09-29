@@ -4,8 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { z } from 'zod';
-import { Loader2, Users, Trash2, Video, MapPin } from 'lucide-react';
+import { Loader2, Users, Trash2, Video, MapPin, Repeat } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -33,20 +32,25 @@ import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
 import {
-  TextField,
-  TextareaField,
-  SelectField,
-  SwitchField,
-  FieldRow,
-} from '@/components/hr/employee/tabs/fields';
-import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerField';
-import {
   OrientationSessionForm,
   toSessionFormValues,
   toSessionRequest,
   type OrientationSessionFormValues,
 } from '@/components/hr/orientation/OrientationSessionForm';
 import { OrientationAttendanceRegister } from '@/components/hr/orientation/OrientationAttendanceRegister';
+import {
+  FacilitatorFields,
+  FacilitatorRegisterNote,
+  emptyFacilitator,
+  facilitatorAsItStands,
+  facilitatorName,
+  facilitatorRequest,
+  facilitatorSchema,
+  facilitatorSource,
+  facilitatorToForm,
+  type FacilitatorForm,
+} from '@/components/hr/orientation/FacilitatorFields';
+import { RunSessionAgainDialog } from '@/components/hr/orientation/CopyDialogs';
 import { orientationSessionService } from '@/services/hr/orientation-session.service';
 import { employeeOrientationService } from '@/services/hr/employee-orientation.service';
 import {
@@ -60,39 +64,10 @@ import type {
   OrientationSessionFacilitator,
 } from '@/types/hr/orientation';
 
-const facilitatorSchema = z
-  .object({
-    employeeId: z.string().optional().or(z.literal('')),
-    externalFacilitatorName: z.string().max(200).optional().or(z.literal('')),
-    externalFacilitatorEmail: z.string().max(200).optional().or(z.literal('')),
-    externalFacilitatorOrganization: z.string().max(200).optional().or(z.literal('')),
-    role: z.enum(['Lead', 'CoFacilitator', 'SubjectMatterExpert', 'Observer']),
-    hasConfirmed: z.boolean(),
-    notes: z.string().max(1000).optional().or(z.literal('')),
-  })
-  // The server refuses a facilitator that is neither an employee nor a named outsider with a 422;
-  // catching it here says which of the two is missing rather than that something is.
-  .refine((v) => !!v.employeeId || !!v.externalFacilitatorName, {
-    message: 'Pick an employee, or give the external facilitator’s name.',
-    path: ['externalFacilitatorName'],
-  });
-
-type FacilitatorForm = z.infer<typeof facilitatorSchema>;
-const emptyFacilitator: FacilitatorForm = {
-  employeeId: '',
-  externalFacilitatorName: '',
-  externalFacilitatorEmail: '',
-  externalFacilitatorOrganization: '',
-  role: 'Lead',
-  hasConfirmed: false,
-  notes: '',
-};
-
 const deliveryLabel = (v: string) =>
   ORIENTATION_DELIVERY_MODE_OPTIONS.find((o) => o.value === v)?.label ?? v;
 const roleLabel = (v: string) =>
   ORIENTATION_FACILITATOR_ROLE_OPTIONS.find((o) => o.value === v)?.label ?? v;
-const blank = (v?: string) => (v && v.length > 0 ? v : null);
 const fmtWhen = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 
@@ -113,6 +88,7 @@ export default function OrientationSessionDetailPage() {
   const [savingOverview, setSavingOverview] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<OrientationSessionStatus | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [rerunOpen, setRerunOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const queryKey = ['hr', 'orientation-sessions', id];
@@ -127,6 +103,37 @@ export default function OrientationSessionDetailPage() {
     queryFn: () => employeeOrientationService.getBySession(id),
     enabled: !!id,
   });
+
+  // Round 4, lane R: what closing the session will do to its participants, read when the Completed
+  // confirmation opens, so it can say so before it is pressed. On a programme that is only its
+  // session, the people the register shows attending complete; on any other it completes nobody.
+  const { data: completionPreview, isLoading: loadingPreview } = useQuery({
+    queryKey: ['hr', 'orientation-sessions', id, 'completion-preview'],
+    queryFn: () => employeeOrientationService.getSessionCompletionPreview(id),
+    enabled: !!id && pendingStatus === 'Completed',
+    staleTime: 0,
+    retry: false,
+  });
+
+  const completedDescription = (() => {
+    const stamp = 'The actual end time is stamped automatically if it has not been set.';
+    if (loadingPreview) return `${stamp} Checking the register…`;
+    if (!completionPreview) return stamp;
+    const programme = completionPreview.programTitle ?? 'the programme';
+    if (!completionPreview.completesByAttendance)
+      return `${stamp} It completes nobody: ${programme} is completed by its own content, assessment and declaration.`;
+    const n = completionPreview.willComplete;
+    const m = completionPreview.notShownAttending;
+    const people = (k: number) => `${k} participant${k === 1 ? '' : 's'}`;
+    const attended = completionPreview.requiresAcknowledgement
+      ? `${people(n)} the register shows attending will have their attendance confirmed; each completes ${programme} once their declaration is signed.`
+      : `${people(n)} the register shows attending will complete ${programme}.`;
+    const rest =
+      m > 0
+        ? ` ${people(m)} ${m === 1 ? 'is' : 'are'} not shown attending and stay open: mark the register first, or mark them completed from the enrolments screen.`
+        : '';
+    return `${stamp} ${attended}${rest}`;
+  })();
 
   const invalidate = () =>
     Promise.all([
@@ -164,6 +171,8 @@ export default function OrientationSessionDetailPage() {
     try {
       await orientationSessionService.changeStatus(id, { sessionId: id, newStatus: pendingStatus });
       await invalidate();
+      if (pendingStatus === 'Completed')
+        await queryClient.invalidateQueries({ queryKey: ['hr', 'orientation-enrollments'] });
       toast({ title: 'Status changed', description: `Now ${pendingStatus}.` });
       setPendingStatus(null);
       return true;
@@ -250,6 +259,10 @@ export default function OrientationSessionDetailPage() {
                 )}
               </SelectContent>
             </Select>
+            <Button variant="outline" onClick={() => setRerunOpen(true)}>
+              <Repeat className="mr-2 h-4 w-4" />
+              Run again
+            </Button>
             <Button
               variant="outline"
               size="icon"
@@ -339,31 +352,19 @@ export default function OrientationSessionDetailPage() {
             singular="facilitator"
             queryKey={['hr', 'orientation-sessions', id, 'facilitators']}
             invalidateKeys={[queryKey]}
-            dialogHint="An employee, or someone from outside the organisation."
+            dialogHint="An employee, a vendor or trainer from the training register, or someone else from outside."
             emptyDescription="Nobody is down to deliver this session yet."
             list={() => orientationSessionService.getFacilitators(id)}
             create={(sessionId, values) =>
               orientationSessionService.addFacilitator(sessionId, {
                 sessionId,
-                employeeId: blank(values.employeeId),
-                externalFacilitatorName: blank(values.externalFacilitatorName),
-                externalFacilitatorEmail: blank(values.externalFacilitatorEmail),
-                externalFacilitatorOrganization: blank(values.externalFacilitatorOrganization),
-                role: values.role,
-                hasConfirmed: values.hasConfirmed,
-                notes: blank(values.notes),
+                ...facilitatorRequest(values),
               })
             }
             update={(_s, facilitatorId, values) =>
               orientationSessionService.updateFacilitator(facilitatorId, {
                 id: facilitatorId,
-                employeeId: blank(values.employeeId),
-                externalFacilitatorName: blank(values.externalFacilitatorName),
-                externalFacilitatorEmail: blank(values.externalFacilitatorEmail),
-                externalFacilitatorOrganization: blank(values.externalFacilitatorOrganization),
-                role: values.role,
-                hasConfirmed: values.hasConfirmed,
-                notes: blank(values.notes),
+                ...facilitatorRequest(values),
               })
             }
             remove={(_s, facilitatorId) =>
@@ -373,16 +374,13 @@ export default function OrientationSessionDetailPage() {
             actions={[
               {
                 label: (f) => (f.hasConfirmed ? 'Mark unconfirmed' : 'Mark confirmed'),
+                // The whole facilitator as it stands, register pick included — the update writes every
+                // field, and a pick left out would turn it into a typed facilitator.
                 run: (f) =>
                   orientationSessionService.updateFacilitator(f.id, {
                     id: f.id,
-                    employeeId: f.employeeId ?? null,
-                    externalFacilitatorName: f.externalFacilitatorName ?? null,
-                    externalFacilitatorEmail: f.externalFacilitatorEmail ?? null,
-                    externalFacilitatorOrganization: f.externalFacilitatorOrganization ?? null,
-                    role: f.role,
+                    ...facilitatorAsItStands(f),
                     hasConfirmed: !f.hasConfirmed,
-                    notes: f.notes ?? null,
                   }),
               },
             ]}
@@ -391,16 +389,9 @@ export default function OrientationSessionDetailPage() {
                 header: 'Facilitator',
                 cell: (f) => (
                   <div>
-                    <span className="font-medium">
-                      {f.employeeName ?? f.externalFacilitatorName ?? '—'}
-                    </span>
-                    <div className="text-muted-foreground text-xs">
-                      {f.employeeId
-                        ? 'Employee'
-                        : [f.externalFacilitatorOrganization, f.externalFacilitatorEmail]
-                            .filter(Boolean)
-                            .join(' · ') || 'External'}
-                    </div>
+                    <span className="font-medium">{facilitatorName(f)}</span>
+                    <div className="text-muted-foreground text-xs">{facilitatorSource(f)}</div>
+                    <FacilitatorRegisterNote note={f.registerNote} />
                   </div>
                 ),
               },
@@ -418,47 +409,8 @@ export default function OrientationSessionDetailPage() {
             ]}
             schema={facilitatorSchema as any}
             emptyForm={emptyFacilitator}
-            toForm={(f) => ({
-              employeeId: f.employeeId ?? '',
-              externalFacilitatorName: f.externalFacilitatorName ?? '',
-              externalFacilitatorEmail: f.externalFacilitatorEmail ?? '',
-              externalFacilitatorOrganization: f.externalFacilitatorOrganization ?? '',
-              role: f.role,
-              hasConfirmed: f.hasConfirmed,
-              notes: f.notes ?? '',
-            })}
-            renderFields={(form) => (
-              <>
-                <EmployeePickerField form={form} name="employeeId" label="Employee" />
-                <p className="text-muted-foreground text-xs">
-                  Or leave that empty and name someone from outside the organisation:
-                </p>
-                <FieldRow>
-                  <TextField
-                    form={form}
-                    name="externalFacilitatorName"
-                    label="External facilitator"
-                  />
-                  <TextField
-                    form={form}
-                    name="externalFacilitatorOrganization"
-                    label="Organisation"
-                  />
-                </FieldRow>
-                <TextField form={form} name="externalFacilitatorEmail" label="Email" />
-                <FieldRow>
-                  <SelectField
-                    form={form}
-                    name="role"
-                    label="Role"
-                    required
-                    options={ORIENTATION_FACILITATOR_ROLE_OPTIONS}
-                  />
-                  <SwitchField form={form} name="hasConfirmed" label="Has confirmed" />
-                </FieldRow>
-                <TextareaField form={form} name="notes" label="Notes" rows={2} />
-              </>
-            )}
+            toForm={facilitatorToForm}
+            renderFields={(form) => <FacilitatorFields form={form} />}
           />
         </TabsContent>
 
@@ -532,11 +484,13 @@ export default function OrientationSessionDetailPage() {
         onOpenChange={(o) => !o && setPendingStatus(null)}
         title={`Change status to ${pendingStatus}?`}
         description={
-          pendingStatus === 'InProgress' || pendingStatus === 'Completed'
-            ? 'The actual start or end time is stamped automatically if it has not been set.'
-            : pendingStatus === 'Cancelled'
-              ? 'Participants keep their records, but this run will not go ahead.'
-              : 'This changes who can enrol on the session.'
+          pendingStatus === 'Completed'
+            ? completedDescription
+            : pendingStatus === 'InProgress'
+              ? 'The actual start time is stamped automatically if it has not been set.'
+              : pendingStatus === 'Cancelled'
+                ? 'Participants keep their records, but this run will not go ahead.'
+                : 'This changes who can enrol on the session.'
         }
         confirmText="Change status"
         isLoading={busy}
@@ -556,6 +510,20 @@ export default function OrientationSessionDetailPage() {
         variant="destructive"
         isLoading={busy}
         onConfirm={remove}
+      />
+
+      <RunSessionAgainDialog
+        source={
+          rerunOpen
+            ? {
+                id: session.id,
+                title: session.title,
+                scheduledStartAt: session.scheduledStartAt,
+                scheduledEndAt: session.scheduledEndAt,
+              }
+            : null
+        }
+        onClose={() => setRerunOpen(false)}
       />
     </div>
   );

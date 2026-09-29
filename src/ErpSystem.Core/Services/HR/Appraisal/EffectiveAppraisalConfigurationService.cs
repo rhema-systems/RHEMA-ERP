@@ -11,11 +11,11 @@ namespace ErpSystem.Core.Services.HR.Appraisal;
 
 /// <summary>
 /// Resolves the effective appraisal configuration (criteria, weights, grade bands) for
-/// an employee in a given cycle from the appraisal template, applying the employee's
-/// locked goal KPI targets where present.
+/// an employee in a given cycle from the appraisal template.
 ///
-/// KPI target resolution (most-specific-wins):
-///   Locked EmployeeGoal target > AppraisalTemplateItem default.
+/// A template KPI item's target is the template's, the same for everyone on it. A locked goal
+/// on the same KPI no longer replaces it (performance closure L0): goals are scored as their own
+/// rows under goal-driven scoring, and the override would count them twice.
 /// </summary>
 public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigurationService
 {
@@ -25,7 +25,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
     private readonly IGenericRepository<AppraisalTemplate> _templateRepository;
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly IGenericRepository<PerformanceAppraisalCriterionConfig> _criterionConfigRepository;
-    private readonly IGenericRepository<EmployeeGoal> _goalRepository;
+    private readonly IAppraisalGoalRowService _goalRows;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<EffectiveAppraisalConfigurationService> _logger;
@@ -37,7 +37,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
         IGenericRepository<AppraisalTemplate> templateRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
         IGenericRepository<PerformanceAppraisalCriterionConfig> criterionConfigRepository,
-        IGenericRepository<EmployeeGoal> goalRepository,
+        IAppraisalGoalRowService goalRows,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<EffectiveAppraisalConfigurationService> logger)
@@ -48,7 +48,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
         _templateRepository = templateRepository;
         _appraisalRepository = appraisalRepository;
         _criterionConfigRepository = criterionConfigRepository;
-        _goalRepository = goalRepository;
+        _goalRows = goalRows;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -102,17 +102,8 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
         // 3. Load the template with its full hierarchy
         var template = await LoadTemplateAsync(resolvedTemplate.AppraisalTemplateId, cancellationToken);
 
-        // 4. Load locked employee goals for KPI target resolution
-        var tenantId = GetTenantId();
-        var lockedGoals = await _goalRepository.GetQueryable()
-            .Where(g => g.TenantId == tenantId
-                     && g.EmployeeId == employeeId
-                     && g.AppraisalCycleId == cycleId
-                     && g.IsLocked)
-            .ToListAsync(cancellationToken);
-
-        // 5. Build the effective config
-        return BuildEffectiveConfig(employeeId, cycleId, template, lockedGoals);
+        // 4. Build the effective config
+        return BuildEffectiveConfig(employeeId, cycleId, template);
     }
 
     /// <inheritdoc/>
@@ -144,14 +135,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
 
         var template = await LoadTemplateAsync(effectiveTemplateId, cancellationToken);
 
-        var lockedGoals = await _goalRepository.GetQueryable()
-            .Where(g => g.TenantId == tenantId
-                     && g.EmployeeId == employeeId
-                     && g.AppraisalCycleId == cycleId
-                     && g.IsLocked)
-            .ToListAsync(cancellationToken);
-
-        var effectiveConfig = BuildEffectiveConfig(employeeId, cycleId, template, lockedGoals);
+        var effectiveConfig = BuildEffectiveConfig(employeeId, cycleId, template);
 
         foreach (var criterion in effectiveConfig.Criteria)
         {
@@ -166,6 +150,10 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
                 PerformanceAppraisalId = performanceAppraisalId,
                 TemplateItemId = criterion.TemplateItemId,
                 WeightUsed = criterion.Weight,
+                // Frozen with the item weight (performance closure A0): a section weight edited
+                // after generation must not re-score an appraisal already under way.
+                AppraisalTemplateSectionId = criterion.AppraisalTemplateSectionId,
+                SectionWeightUsed = criterion.SectionWeight,
                 KpiTargetValue = criterion.KpiTargetValue,
                 KpiMinValue = criterion.KpiMinValue,
                 KpiMaxValue = criterion.KpiMaxValue,
@@ -184,6 +172,10 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Criterion config snapshot created for appraisal {appraisalId}", performanceAppraisalId);
+
+        // A goal set locked before generation is scored too (closure plan L2): the template rows
+        // above cover the template's items, and the goals section gets one row per locked goal.
+        await _goalRows.RebuildAsync(employeeId, cycleId, cancellationToken);
     }
 
     // ── Private helpers ────────────────────────────────────────────────────
@@ -279,19 +271,23 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
     private static EffectiveAppraisalConfigDto BuildEffectiveConfig(
         Guid employeeId,
         Guid cycleId,
-        AppraisalTemplate template,
-        IReadOnlyList<EmployeeGoal> lockedGoals)
+        AppraisalTemplate template)
     {
         var allItems = template.Sections
-            .SelectMany(s => s.TemplateItems)
+            .SelectMany(s => s.TemplateItems.Select(item => (Section: s, Item: item)))
             .ToList();
 
         var criteria = new List<EffectiveAppraisalCriterionDto>();
 
-        foreach (var item in allItems)
+        foreach (var (section, item) in allItems)
         {
             // Skip items with no source (e.g. pure custom questions with no competency or KPI)
             if (item.CompetencyId == null && item.KpiDefinitionId == null) continue;
+
+            // A goals section's rows are the employee's goals (lane L). An item left in one from
+            // before it became a goals section would share its weight with them and count the
+            // section twice; the template service refuses new ones.
+            if (section.Kind == AppraisalSectionKind.EmployeeGoals) continue;
 
             var gradeRanges = item.GradeRanges.Select(g => new EffectiveGradeRangeDto
             {
@@ -307,21 +303,13 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
             decimal? kpiMaxValue = null;
             KpiTargetSource? kpiTargetSource = null;
 
+            // A template KPI item is the same KPI with the same target for everyone on the template
+            // (closure plan L0, D-15). A locked goal on the same KPI used to replace the target
+            // here ("Tier 1"); under goal-driven scoring that goal is scored as its own row, so it
+            // would count twice. Personal targets are goals.
             if (item.KpiDefinitionId.HasValue)
             {
-                // Tier 1: Locked EmployeeGoal for this KPI in this cycle
-                var lockedGoal = lockedGoals.FirstOrDefault(
-                    g => g.KpiDefinitionId == item.KpiDefinitionId);
-
-                if (lockedGoal != null)
-                {
-                    kpiTargetValue = lockedGoal.TargetValue;
-                    kpiMinValue = lockedGoal.MinValue;
-                    kpiMaxValue = lockedGoal.MaxValue;
-                    kpiTargetSource = KpiTargetSource.Goal;
-                }
-                // Tier 2: Template default
-                else if (item.KpiTargetValue != null)
+                if (item.KpiTargetValue != null)
                 {
                     kpiTargetValue = item.KpiTargetValue;
                     kpiMinValue = item.KpiMinValue;
@@ -337,6 +325,8 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
                 KpiDefinitionId = item.KpiDefinitionId,
                 ItemName = item.Competency?.CriteriaName ?? item.KpiDefinition?.KpiName ?? string.Empty,
                 Weight = item.Weight,
+                AppraisalTemplateSectionId = section.Id,
+                SectionWeight = section.Weight,
                 KpiTargetValue = kpiTargetValue,
                 KpiMinValue = kpiMinValue,
                 KpiMaxValue = kpiMaxValue,

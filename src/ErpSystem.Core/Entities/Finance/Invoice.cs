@@ -58,6 +58,9 @@ namespace ErpSystem.Core.Entities.Finance
         
         [Column(TypeName = "decimal(18,2)")]
         public decimal DiscountAmount { get; set; }
+
+        [MaxLength(500)]
+        public string? DiscountReason { get; set; }
         
         [Column(TypeName = "decimal(18,2)")]
         public decimal TotalAmount { get; set; }
@@ -87,6 +90,9 @@ namespace ErpSystem.Core.Entities.Finance
         [Required]
         [MaxLength(3)]
         public string CurrencyCode { get; set; } = "USD";
+
+        [MaxLength(500)]
+        public string? CurrencyOverrideReason { get; set; }
 
         [Column(TypeName = "decimal(18,6)")]
         public decimal ExchangeRate { get; set; } = 1.0m;

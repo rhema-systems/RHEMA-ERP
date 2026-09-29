@@ -25,6 +25,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -45,6 +46,7 @@ import {
   CalendarClock,
   CircleCheck,
   CornerUpLeft,
+  LogIn,
   Pencil,
   Send,
   Trash2,
@@ -64,6 +66,7 @@ import {
   RescheduleTrailPanel,
   RecallPanel,
 } from '@/components/hr/leave/LeaveDateChangeDialogs';
+import { SplitAbsencePanel } from '@/components/hr/leave/SplitAbsencePanel';
 
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
@@ -102,6 +105,9 @@ export default function MyLeaveRequestDetailPage({
   const [cancelOpen, setCancelOpen] = useState(false);
   const [dateDialog, setDateDialog] = useState<null | 'respond' | 'reschedule'>(null);
   const [cancelReason, setCancelReason] = useState('');
+  // "I'm back at work" (round 5, B3): the day defaults to today.
+  const [backOpen, setBackOpen] = useState(false);
+  const [backOn, setBackOn] = useState('');
   /*
    * ⚠ What the document IS, chosen before the file is picked. The evidence gate refuses a
    * submission until a document of the required kind is attached, and it cannot read a file name
@@ -210,6 +216,24 @@ export default function MyLeaveRequestDetailPage({
       }),
   });
 
+  const reportBackMutation = useMutation({
+    mutationFn: () => leaveService.reportResumption(id, { resumedOn: backOn || null }),
+    onSuccess: async () => {
+      setBackOpen(false);
+      toast({
+        title: 'Welcome back',
+        description: 'Your manager or HR will confirm your return, which closes this leave.',
+      });
+      await refresh();
+    },
+    onError: (e: any) =>
+      toast({
+        title: 'Could not record it',
+        description: e?.message || 'Your return could not be recorded.',
+        variant: 'destructive',
+      }),
+  });
+
   const confirmMutation = useMutation({
     mutationFn: () => leaveService.confirmObservance(id),
     onSuccess: async () => {
@@ -269,15 +293,30 @@ export default function MyLeaveRequestDetailPage({
   const isMine = user?.employeeId && request.employeeId === user.employeeId;
   const canEdit = isMine && request.status === 'Draft';
   const canSubmit = isMine && (request.status === 'Draft' || request.status === 'Pending');
-  const canCancel =
-    isMine && ['Draft', 'Pending', 'Approved', 'ChangesSuggested'].includes(request.status);
+  // Round 5, lane D: the server decides. The employee cancels only before anything is granted;
+  // approved leave is HR's to cancel, and reporting the return is the employee's act.
+  const canCancel = request.viewerActions?.canCancel ?? false;
+  const canReportBack = request.viewerActions?.canReportResumption ?? false;
+  const today = new Date().toISOString().slice(0, 10);
   const canAttach = isMine && !['Cancelled', 'Completed'].includes(request.status);
 
   // Your approver sent it back with dates of their own; accept them or counter (closure plan R-3).
   const canRespond = isMine && request.status === 'ChangesSuggested';
   // Move approved leave without cancelling and re-keying it (R-8), and say it is still going (R-7).
-  const canReschedule = isMine && request.status === 'Approved' && !request.closureDate;
-  const canConfirm = canReschedule && !request.observanceConfirmedDate;
+  // Not maternity: its dates follow the birth, so they are confirmed, never moved (round 5, A4).
+  // Round 5, lane H: the two parts of a split absence were approved as one and are not moved apart.
+  const running = (s?: string | null) => s === 'Approved' || s === 'InProgress';
+  const splitRunning =
+    (!!request.chargedToAnnualRequestId && running(request.chargedToAnnualStatus)) ||
+    (!!request.splitFromRequestId && running(request.splitFromStatus));
+  const canReschedule =
+    isMine &&
+    request.status === 'Approved' &&
+    !request.closureDate &&
+    request.leaveTypeCategory !== 'Maternity' &&
+    !splitRunning;
+  const canConfirm =
+    isMine && request.status === 'Approved' && !request.closureDate && !request.observanceConfirmedDate;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -343,6 +382,16 @@ export default function MyLeaveRequestDetailPage({
             Yes, still going
           </Button>
         )}
+        {canReportBack && (
+          <Button
+            onClick={() => {
+              setBackOn(today);
+              setBackOpen(true);
+            }}
+          >
+            <LogIn className="mr-2 h-4 w-4" /> I&apos;m back at work
+          </Button>
+        )}
         {canCancel && (
           <Button variant="outline" onClick={() => setCancelOpen(true)}>
             <Ban className="mr-2 h-4 w-4" /> Cancel request
@@ -355,6 +404,7 @@ export default function MyLeaveRequestDetailPage({
       {/* Read-only here. Recall is the employer's act, but the employee is the person it happens
           to, so their own copy of the record has to say it happened and why. */}
       <RecallPanel request={request} />
+      <SplitAbsencePanel request={request} hrefFor={(requestId) => `/me/leave/${requestId}`} />
 
       <Card>
         <CardHeader>
@@ -388,6 +438,26 @@ export default function MyLeaveRequestDetailPage({
                 value={request.cancellationDate ? fmtDateTime(request.cancellationDate) : '—'}
               />
               <Row label="Cancellation reason" value={request.cancellationReason} />
+            </>
+          )}
+          {(request.status === 'Approved' || request.status === 'InProgress' || request.status === 'Completed') && (
+            <>
+              <Row
+                label="Due back"
+                value={request.expectedReturnDate ? fmtDate(request.expectedReturnDate) : undefined}
+              />
+              <Row
+                label="Back at work"
+                value={
+                  request.closureDate
+                    ? request.resumptionDate
+                      ? `${fmtDate(request.resumptionDate)} · confirmed${request.closureConfirmedByName ? ` by ${request.closureConfirmedByName}` : ''}`
+                      : 'Leave closed'
+                    : request.resumptionReportedDate && request.resumptionDate
+                      ? `You reported ${fmtDate(request.resumptionDate)} · waiting for your manager or HR to confirm`
+                      : undefined
+                }
+              />
             </>
           )}
         </CardContent>
@@ -483,7 +553,10 @@ export default function MyLeaveRequestDetailPage({
                     >
                       <Download className="h-4 w-4" />
                     </Button>
-                    {canAttach && (
+                    {/* Submitted medical evidence is locked (leave settings audit 2, L-77). */}
+                    {canAttach
+                      && !(request.status !== 'Draft'
+                        && (a.evidenceKind === 'ExcuseDuty' || a.evidenceKind === 'MedicalBoardRecommendation')) && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -512,9 +585,8 @@ export default function MyLeaveRequestDetailPage({
           <DialogHeader>
             <DialogTitle>Cancel this leave request?</DialogTitle>
             <DialogDescription>
-              {request.status === 'Approved'
-                ? 'This request is already approved — cancelling gives the days back to your balance.'
-                : 'The request will be closed and will not be considered for approval.'}
+              The request will be closed and will not be considered for approval. (Once leave is
+              approved, only HR can cancel it.)
             </DialogDescription>
           </DialogHeader>
           <Textarea
@@ -538,6 +610,46 @@ export default function MyLeaveRequestDetailPage({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog open={backOpen} onOpenChange={setBackOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Back at work</DialogTitle>
+            <DialogDescription>
+              Tell us the first day you were back. Your manager or HR confirms it, and that closes this
+              leave. Back before your leave was due to end? The days you did not take are returned
+              once your return is confirmed.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="back-on">First day back at work</Label>
+            <Input
+              id="back-on"
+              type="date"
+              value={backOn}
+              max={today}
+              onChange={(e) => setBackOn(e.target.value)}
+            />
+            {request.expectedReturnDate && (
+              <p className="text-xs text-muted-foreground">
+                You are due back on {fmtDate(request.expectedReturnDate)}.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBackOpen(false)}>
+              Not yet
+            </Button>
+            <Button
+              disabled={!backOn || reportBackMutation.isPending}
+              onClick={() => reportBackMutation.mutate()}
+            >
+              {reportBackMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              I&apos;m back
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <RespondToSuggestionDialog
         request={request}
         open={dateDialog === 'respond'}

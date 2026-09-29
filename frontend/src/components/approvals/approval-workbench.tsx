@@ -86,6 +86,7 @@ interface ApprovalWorkbenchProps {
     definitions: ApprovalQueueDefinition[];
     breadcrumbs?: ApprovalBreadcrumb[];
     maxWidthClassName?: string;
+    headerActions?: React.ReactNode;
 }
 
 type ApprovalRow = ApprovalQueueItem & {
@@ -132,6 +133,7 @@ export function ApprovalWorkbench({
     definitions,
     breadcrumbs,
     maxWidthClassName = 'max-w-[1400px]',
+    headerActions,
 }: ApprovalWorkbenchProps) {
     const { toast } = useToast();
     const [queues, setQueues] = useState<Record<string, QueueState>>({});
@@ -337,10 +339,13 @@ export function ApprovalWorkbench({
                     <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
                     <p className="text-muted-foreground">{description}</p>
                 </div>
-                <Button variant="outline" onClick={loadAll} disabled={anyLoading}>
-                    {anyLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                    Refresh
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                    {headerActions}
+                    <Button variant="outline" onClick={loadAll} disabled={anyLoading}>
+                        {anyLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                        Refresh
+                    </Button>
+                </div>
             </div>
 
             {breadcrumbs && breadcrumbs.length > 0 && (

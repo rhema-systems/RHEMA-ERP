@@ -34,6 +34,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? SupplierAdvanceAccountId { get; set; }
         public Guid? CustomerAdvanceAccountId { get; set; }
         public Guid? ControlAccountInventoryId { get; set; }
+        public Guid? ControlAccountCOGSId { get; set; }
         public Guid? ControlAccountPayrollId { get; set; }
         public Guid? ControlAccountTaxId { get; set; }
         public Guid? ControlAccountGRVAccrualId { get; set; }

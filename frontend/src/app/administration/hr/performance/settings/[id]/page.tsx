@@ -66,7 +66,6 @@ const settingsSchema = z
 
     requireManagerEvaluation: z.boolean(),
     managerEvaluationWeight: z.coerce.number().min(0).max(1),
-    isManagerAuthoritative: z.boolean(),
 
     showSelfScoreToManager: z.boolean(),
     showPeerScoresToManager: z.boolean(),
@@ -102,7 +101,6 @@ const settingsSchema = z
     requireMidYearSelfAssessment: z.boolean(),
     requireGoalProgressUpdateAtReview: z.boolean(),
 
-    requireDevelopmentPlanUpdate: z.boolean(),
     autoLockOnDeadline: z.boolean(),
 
     defaultHRReviewerId: z.string().optional(),
@@ -156,7 +154,6 @@ const emptySettings: SettingsForm = {
   peerEvaluationOpenMode: 'WithSelfEval',
   requireManagerEvaluation: true,
   managerEvaluationWeight: 0.9,
-  isManagerAuthoritative: true,
   showSelfScoreToManager: true,
   showPeerScoresToManager: true,
   showScoreBreakdownToEmployee: true,
@@ -183,7 +180,6 @@ const emptySettings: SettingsForm = {
   interimReviewDepth: 'LightTouch',
   requireMidYearSelfAssessment: false,
   requireGoalProgressUpdateAtReview: true,
-  requireDevelopmentPlanUpdate: true,
   autoLockOnDeadline: false,
   defaultHRReviewerId: '',
   probationExtensionMonths: 3,
@@ -482,12 +478,6 @@ export default function AppraisalSettingsEditorPage() {
               />
               <div />
             </FieldRow>
-            <SwitchField
-              form={form}
-              name="isManagerAuthoritative"
-              label="The manager's score is authoritative"
-              description="The manager's number is the result; self and peer scores inform it rather than averaging into it."
-            />
           </Section>
 
           <Section
@@ -653,11 +643,6 @@ export default function AppraisalSettingsEditorPage() {
               form={form}
               name="requireGoalProgressUpdateAtReview"
               label="Require a goal progress update at each review"
-            />
-            <SwitchField
-              form={form}
-              name="requireDevelopmentPlanUpdate"
-              label="Require a development plan update"
             />
           </Section>
         </TabsContent>

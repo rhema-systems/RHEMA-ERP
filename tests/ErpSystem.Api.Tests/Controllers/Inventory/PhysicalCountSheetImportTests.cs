@@ -99,6 +99,40 @@ public class PhysicalCountSheetImportTests
         Assert.Equal(2, PhysicalCountSheetReader.Read(located, items).Count);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ImportsDefectiveQuantityAndNotesWithoutReducingPhysicalQuantity(bool located)
+    {
+        using var stream = Workbook(located, sheet => {
+            var quantityColumn = located ? 5 : 4;
+            sheet.Cell(1, quantityColumn + 1).Value = "Defective Qty";
+            sheet.Cell(1, quantityColumn + 2).Value = "Defective Notes";
+            sheet.Cell(2, quantityColumn).Value = 100;
+            sheet.Cell(2, quantityColumn + 1).Value = 5;
+            sheet.Cell(2, quantityColumn + 2).Value = "Damaged packaging";
+        });
+        var row = PhysicalCountSheetReader.Read(stream, Items())[0];
+        Assert.Equal(100, row.CountedQuantity);
+        Assert.Equal(5, row.DefectiveQuantity);
+        Assert.Equal("Damaged packaging", row.DefectiveNotes);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(101)]
+    [InlineData(0.00001)]
+    public void RejectsInvalidDefectiveQuantity(double quantity)
+    {
+        using var stream = Workbook(change: sheet => {
+            sheet.Cell(1, 5).Value = "Defective Qty";
+            sheet.Cell(1, 6).Value = "Defective Notes";
+            sheet.Cell(2, 4).Value = 100;
+            sheet.Cell(2, 5).Value = quantity;
+        });
+        Assert.Throws<InvalidOperationException>(() => PhysicalCountSheetReader.Read(stream, Items()));
+    }
+
     private static PhysicalCountAction Imported(int sequence, Guid version) => new() {
         Sequence = sequence, ActionType = PhysicalCountActionType.CountRecorded,
         SnapshotJson = JsonSerializer.Serialize(new { payload = new { countSheet = new PhysicalCountSheetBinding(version, "hash", 2, 0) } })

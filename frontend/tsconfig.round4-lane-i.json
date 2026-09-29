@@ -1,0 +1,13 @@
+{
+  "//": "Round 4, lane I — orientation triggers that fire. Scoped because `npm run type-check` over the whole tree does not complete on this branch; see the hr-coverage README.",
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/**/*.ts",
+    "src/services/hr/**/*.ts",
+    "src/components/hr/orientation/**/*.tsx",
+    "src/components/layout/sidebar.tsx",
+    "src/app/hr/orientation/**/*.tsx",
+    "src/app/administration/hr/orientation/**/*.tsx"
+  ]
+}

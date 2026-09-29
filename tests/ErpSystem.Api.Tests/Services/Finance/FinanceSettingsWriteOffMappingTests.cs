@@ -17,6 +17,36 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class FinanceSettingsWriteOffMappingTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Get_returns_persisted_tenant_COGS_mapping_in_the_read_contract_without_fallback_or_mutation(bool configured)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var expected = configured ? fixture.Expense.Id : (Guid?)null;
+        fixture.Settings.ControlAccountCOGSId = expected;
+        fixture.Context.FinanceSettings.Add(new FinanceSettings
+        {
+            TenantId = Guid.NewGuid(), BaseCurrency = "USD", ControlAccountCOGSId = Guid.NewGuid()
+        });
+        await fixture.Context.SaveChangesAsync();
+        var inventoryAccount = fixture.Settings.ControlAccountInventoryId;
+        fixture.Context.ChangeTracker.Clear();
+
+        var result = await fixture.Service.GetSettingsAsync();
+
+        result.TenantId.Should().Be(fixture.TenantId);
+        result.ControlAccountCOGSId.Should().Be(expected);
+        result.ControlAccountInventoryId.Should().Be(inventoryAccount);
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(result,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        var exposed = json.RootElement.GetProperty("controlAccountCOGSId");
+        if (configured) exposed.GetGuid().Should().Be(expected!.Value);
+        else exposed.ValueKind.Should().Be(JsonValueKind.Null);
+        fixture.Context.ChangeTracker.HasChanges().Should().BeFalse();
+        fixture.Audits.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Update_persists_both_write_off_mappings_and_Get_returns_them_without_changing_other_settings()
     {

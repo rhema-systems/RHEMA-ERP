@@ -43,6 +43,10 @@ const schema = z
     locationOrLink: z.string().max(500).optional(),
     instructions: z.string().max(2000).optional(),
     questionPresetId: z.string().optional(),
+    // Round 4, D3. Optional here and enforced by the SERVER, which is the only place that knows
+    // whether a hard clash exists. A client-side `required` would have to duplicate the clash rules
+    // and would be wrong the moment a source is added.
+    panelClashOverrideReason: z.string().max(1000).optional(),
   })
   .refine((v) => v.endTime > v.startTime, {
     message: 'The session must end after it starts',
@@ -70,6 +74,8 @@ export default function NewInterviewPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
+  // Revealed once the server refuses on a hard clash — see the create mutation's onError.
+  const [clashRefused, setClashRefused] = useState(false);
 
   const preselectedVacancy = searchParams.get('vacancyId') ?? '';
   const [selectedApplications, setSelectedApplications] = useState<string[]>([]);
@@ -130,6 +136,9 @@ export default function NewInterviewPage() {
         panelistEmployeeIds: panelEmployees.map((p) => p.id),
         externalPanelistAssociateIds: panelExternals.map((p) => p.id),
         questionPresetId: values.questionPresetId === NO_PRESET ? null : values.questionPresetId,
+        // Sent whatever is in the box: the server discards it when there is no clash to override,
+        // so there is nothing to guard against here.
+        panelClashOverrideReason: values.panelClashOverrideReason?.trim() || null,
       }),
     onSuccess: (interview) => {
       toast({
@@ -138,12 +147,19 @@ export default function NewInterviewPage() {
       });
       router.push(`/hr/recruitment/interviews/${interview.id}`);
     },
-    onError: (error: any) =>
+    onError: (error: any) => {
+      // ⚠ A clash refusal is not a generic failure. The server names who is committed and to what,
+      // and the way past it is a box that is already on this form — so say so, and reveal it.
+      const message: string = error?.message ?? '';
+      if (/already committed at that time/i.test(message)) setClashRefused(true);
       toast({
-        title: 'Could not schedule the interview',
-        description: error?.message ?? 'Please check the details and try again.',
+        title: /already committed at that time/i.test(message)
+          ? 'The panel is not free at that time'
+          : 'Could not schedule the interview',
+        description: message || 'Please check the details and try again.',
         variant: 'destructive',
-      }),
+      });
+    },
   });
 
   return (
@@ -246,6 +262,25 @@ export default function NewInterviewPage() {
                 <p className="text-sm text-red-500">{form.formState.errors.endTime.message}</p>
               )}
             </div>
+
+            {clashRefused && (
+              <div className="space-y-2 md:col-span-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+                <Label htmlFor="panelClashOverrideReason">
+                  Reason for scheduling over the clash
+                </Label>
+                <Textarea
+                  id="panelClashOverrideReason"
+                  rows={2}
+                  placeholder="e.g. Kofi has moved his 10:00 meeting to make room for this."
+                  {...form.register('panelClashOverrideReason')}
+                />
+                <p className="text-xs text-muted-foreground">
+                  A panelist is already committed at this time. Give a reason and the interview will
+                  be scheduled anyway — the reason, who gave it and what it overrode are recorded on
+                  the interview.
+                </p>
+              </div>
+            )}
 
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="locationOrLink">Location or meeting link</Label>

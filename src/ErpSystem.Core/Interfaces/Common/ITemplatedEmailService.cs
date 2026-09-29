@@ -42,6 +42,19 @@ public interface ITemplatedEmailService
         string subjectTemplate,
         string bodyTemplate,
         IReadOnlyDictionary<string, string?> tokens);
+
+    /// <summary>
+    /// <see cref="SendAsync"/> for a sender that knows its tenant but has no signed-in user — a
+    /// background dispatcher or sweep (round 4, lane N). Without it such a sender could only ever use
+    /// the shipped default, never the wording the tenant chose.
+    /// </summary>
+    Task<bool> SendForTenantAsync(
+        Guid tenantId,
+        string module,
+        string eventKey,
+        string to,
+        IReadOnlyDictionary<string, string?> tokens,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -68,6 +81,14 @@ public sealed class EmailTokenDescriptor
     public string Token { get; set; } = string.Empty;        // e.g. "CandidateName"
     public string Description { get; set; } = string.Empty;  // human-friendly explanation
     public string SampleValue { get; set; } = string.Empty;  // value used in preview / test-send
+
+    /// <summary>
+    /// Ready-made HTML the system builds itself — a table, a list, a block of questions — and so the
+    /// one kind of value a template may place raw, with <c>{{{Token}}}</c>. Everything else is typed by
+    /// somebody and is escaped (round 4, lane N: the HR template screen refuses a raw placement of
+    /// anything not marked here).
+    /// </summary>
+    public bool IsHtml { get; set; }
 
     public EmailTokenDescriptor() { }
     public EmailTokenDescriptor(string token, string description, string sampleValue)

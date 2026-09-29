@@ -10,6 +10,7 @@ using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Entities.HR.Requisition;
 using ErpSystem.Core.Entities.HR.Safety;
+using ErpSystem.Core.Entities.HR.StaffAttendance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -46,6 +47,7 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
     private readonly IFinancePostingEngine _engine;
     private readonly IVendorInvoiceService _vendorInvoices;
     private readonly IVendorPaymentService _vendorPayments;
+    private readonly IInvoiceService _customerInvoices;
     private readonly ICurrentUserProvider _currentUser;
     private readonly ILogger<HrFinancePostingAdminService> _logger;
 
@@ -56,6 +58,7 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
         IFinancePostingEngine engine,
         IVendorInvoiceService vendorInvoices,
         IVendorPaymentService vendorPayments,
+        IInvoiceService customerInvoices,
         ICurrentUserProvider currentUser,
         ILogger<HrFinancePostingAdminService> logger)
     {
@@ -65,6 +68,7 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
         _engine = engine;
         _vendorInvoices = vendorInvoices;
         _vendorPayments = vendorPayments;
+        _customerInvoices = customerInvoices;
         _currentUser = currentUser;
         _logger = logger;
     }
@@ -385,6 +389,8 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
         var definition = HrFinancePostingEventCatalog.GetRequired(record.EventCode);
         if (definition.Kind == HrFinancePostingKind.VendorInvoice)
             return await ReverseVendorInvoiceAsync(record, definition, reason, cancellationToken);
+        if (definition.Kind == HrFinancePostingKind.CustomerInvoice)
+            return await ReverseCustomerInvoiceAsync(record, reason, cancellationToken);
 
         if (record.Status != HrFinancePostingStatus.Posted || !record.PostingEventId.HasValue)
             throw new InvalidOperationException($"Only Posted rows can be reversed; this row is {record.Status}.");
@@ -458,11 +464,42 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
         return ToDto(await LoadRecordAsync(record.Id, track: false, cancellationToken));
     }
 
+    /// <summary>The receivables twin of <see cref="ReverseVendorInvoiceAsync"/>: HR deletes only a draft; a submitted AR invoice is Finance's to cancel.</summary>
+    private async Task<HrFinancePostingRecordDto> ReverseCustomerInvoiceAsync(HrFinancePostingRecord record, string reason, CancellationToken cancellationToken)
+    {
+        if (record.Status != HrFinancePostingStatus.Posted || !record.CustomerInvoiceId.HasValue)
+            throw new InvalidOperationException($"Only Posted rows can be reversed; this row is {record.Status}.");
+
+        var userId = _currentUser.UserId;
+        var invoice = await _customerInvoices.GetByIdAsync(record.CustomerInvoiceId.Value, cancellationToken);
+        var status = invoice?.Status ?? "Missing";
+        if (invoice is not null && status is not ("Draft" or "Rejected" or "Cancelled"))
+            throw new InvalidOperationException(
+                $"Finance holds invoice {invoice.InvoiceNumber} as {status}. HR cannot withdraw it from there — ask Accounts Receivable to reject or cancel it, then use Refresh on this row.");
+
+        if (invoice is { Status: "Draft" })
+            await _customerInvoices.DeleteAsync(invoice.Id, cancellationToken);
+
+        record.Status = HrFinancePostingStatus.Reversed;
+        record.ReversedAt = DateTime.UtcNow;
+        record.ReversalReason = reason.Length > 500 ? reason[..500] : reason;
+        record.ExternalStatus = status.Length > 50 ? status[..50] : status;
+        record.ExternalStatusAt = DateTime.UtcNow;
+        record.LastActedByUserId = userId;
+        record.UpdatedAt = DateTime.UtcNow;
+        record.UpdatedBy = userId.ToString();
+        await _unitOfWork.Repository<HrFinancePostingRecord>().UpdateAsync(record);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return ToDto(await LoadRecordAsync(record.Id, track: false, cancellationToken));
+    }
+
     /// <inheritdoc />
     public async Task<HrFinancePostingRecordDto> RefreshAsync(Guid recordId, CancellationToken cancellationToken = default)
     {
         var record = await LoadRecordAsync(recordId, track: true, cancellationToken);
         var definition = HrFinancePostingEventCatalog.GetRequired(record.EventCode);
+        if (definition.Kind == HrFinancePostingKind.CustomerInvoice && record.CustomerInvoiceId.HasValue)
+            return await RefreshCustomerInvoiceAsync(record, cancellationToken);
         if (definition.Kind != HrFinancePostingKind.VendorInvoice || !record.VendorInvoiceId.HasValue)
             return ToDto(record); // a journal row has nothing to pull: Finance's reversal comes through this register
 
@@ -512,6 +549,57 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
         await _unitOfWork.Repository<HrFinancePostingRecord>().UpdateAsync(record);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return ToDto(await LoadRecordAsync(recordId, track: false, cancellationToken));
+    }
+
+    /// <summary>
+    /// Pulls the AR invoice's status and receipt onto the row and the HR invoice: Finance's
+    /// PaidAmount becomes the consulting invoice's PaidAmount/PaidDate/status, which HR may no
+    /// longer type by hand once the receivable is Finance's.
+    /// </summary>
+    private async Task<HrFinancePostingRecordDto> RefreshCustomerInvoiceAsync(HrFinancePostingRecord record, CancellationToken cancellationToken)
+    {
+        var userId = _currentUser.UserId;
+        var invoice = await _customerInvoices.GetByIdAsync(record.CustomerInvoiceId!.Value, cancellationToken);
+        var now = DateTime.UtcNow;
+        var status = invoice?.Status ?? "Missing";
+        record.ExternalStatus = status.Length > 50 ? status[..50] : status;
+        record.ExternalStatusAt = now;
+
+        if (record.Status == HrFinancePostingStatus.Posted && (invoice is null || status is "Rejected" or "Cancelled"))
+        {
+            record.Status = HrFinancePostingStatus.Reversed;
+            record.ReversedAt = now;
+            record.ReversalReason = invoice is null ? "The customer invoice no longer exists in Finance." : $"Finance {status} the customer invoice.";
+        }
+
+        if (invoice is not null && invoice.PaidAmount > 0m)
+        {
+            var hrInvoice = await _unitOfWork.Repository<TimesheetInvoice>()
+                .GetQueryable(i => i.Id == record.SourceDocumentId && i.TenantId == record.TenantId && !i.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (hrInvoice is not null && hrInvoice.Status != TimesheetInvoiceStatus.Voided)
+            {
+                var fullyPaid = string.Equals(status, "Paid", StringComparison.OrdinalIgnoreCase) || invoice.BalanceAmount <= 0m;
+                var changed = hrInvoice.PaidAmount != invoice.PaidAmount
+                    || hrInvoice.Status != (fullyPaid ? TimesheetInvoiceStatus.Paid : TimesheetInvoiceStatus.PartiallyPaid);
+                if (changed)
+                {
+                    hrInvoice.PaidAmount = invoice.PaidAmount;
+                    hrInvoice.PaidDate = DateOnly.FromDateTime(now);
+                    hrInvoice.Status = fullyPaid ? TimesheetInvoiceStatus.Paid : TimesheetInvoiceStatus.PartiallyPaid;
+                    hrInvoice.UpdatedAt = now;
+                    hrInvoice.UpdatedBy = userId.ToString();
+                    await _unitOfWork.Repository<TimesheetInvoice>().UpdateAsync(hrInvoice);
+                }
+            }
+        }
+
+        record.LastActedByUserId = userId;
+        record.UpdatedAt = now;
+        record.UpdatedBy = userId.ToString();
+        await _unitOfWork.Repository<HrFinancePostingRecord>().UpdateAsync(record);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return ToDto(await LoadRecordAsync(record.Id, track: false, cancellationToken));
     }
 
     // ─────────────────────────────────────────────────────────────────────────────────────────
@@ -736,6 +824,18 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
                     ?? throw new InvalidOperationException($"Incident {record.SourceReference} no longer exists; nothing to post.");
                 return HrFinancePostingCommandFactory.SheInsuranceClaimReceived(incident);
             }
+            case HrFinancePostingEventCatalog.TimesheetInvoiceSent:
+            {
+                var invoice = await _unitOfWork.Repository<TimesheetInvoice>()
+                    .GetQueryable(x => x.TenantId == tenantId && x.Id == record.SourceDocumentId && !x.IsDeleted)
+                    .Include(x => x.Client).AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"Consulting invoice {record.SourceReference} no longer exists; nothing to raise.");
+                if (invoice.Status == TimesheetInvoiceStatus.Draft)
+                    throw new InvalidOperationException($"Consulting invoice {invoice.InvoiceNumber} has not been sent; it is raised in Finance when it is sent.");
+                if (invoice.Status == TimesheetInvoiceStatus.Voided)
+                    throw new InvalidOperationException($"Consulting invoice {invoice.InvoiceNumber} is voided.");
+                return HrFinancePostingCommandFactory.TimesheetInvoiceSent(invoice, invoice.Client?.FinanceCustomerId, invoice.Client?.ClientName ?? "the client");
+            }
             case HrFinancePostingEventCatalog.TrainingBondBreached:
             case HrFinancePostingEventCatalog.TrainingBondSettled:
             case HrFinancePostingEventCatalog.TrainingBondWaived:
@@ -819,6 +919,8 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
             Kind = definition?.Kind ?? HrFinancePostingKind.Journal,
             VendorInvoiceId = r.VendorInvoiceId,
             VendorInvoiceNumber = r.VendorInvoiceNumber,
+            CustomerInvoiceId = r.CustomerInvoiceId,
+            CustomerInvoiceNumber = r.CustomerInvoiceNumber,
             ExternalStatus = r.ExternalStatus,
             ExternalStatusAt = r.ExternalStatusAt,
             AttemptCount = r.AttemptCount,

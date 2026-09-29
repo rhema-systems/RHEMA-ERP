@@ -830,6 +830,10 @@ public sealed class GhanaStatutoryTaxEngineTests
         var taxReceivable = SeedAccount(db, tenantId, "1400", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
         var taxPayable = SeedAccount(db, tenantId, "2200", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
         var supplier = SeedSupplier(db, tenantId, apAccount.Id, expenseAccount.Id);
+        var supplierRole = db.BusinessPartnerRoles.Local.Single(role =>
+            role.BusinessPartnerId == supplier.Id && role.RoleType == BusinessPartnerRoleType.Supplier);
+        var supplierProfile = db.BusinessPartnerApProfileVersions.Local.Single(profile =>
+            profile.BusinessPartnerRoleId == supplierRole.Id);
 
         db.Set<FinanceSettings>().Add(new FinanceSettings
         {
@@ -847,6 +851,9 @@ public sealed class GhanaStatutoryTaxEngineTests
             InvoiceNumber = "VI-TAX-001",
             SupplierInvoiceNumber = "SUP-TAX-001",
             BusinessPartnerId = supplier.Id,
+            BusinessPartnerRoleId = supplierRole.Id,
+            BusinessPartnerApProfileVersionId = supplierProfile.Id,
+            BusinessPartnerCode = supplier.SupplierCode,
             SupplierName = supplier.Name,
             InvoiceDate = new DateTime(2026, 7, 6),
             ReceivedDate = new DateTime(2026, 7, 6),
@@ -862,6 +869,8 @@ public sealed class GhanaStatutoryTaxEngineTests
             ApprovedById = Guid.NewGuid(),
             ApprovedDate = DateTime.UtcNow,
             ApAccountId = apAccount.Id,
+            WithholdingContractReference = "CONTRACT-WHT-001",
+            WithholdingSupplyCategory = WhtSupplyCategory.Services,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
         };
@@ -896,6 +905,10 @@ public sealed class GhanaStatutoryTaxEngineTests
         var taxReceivable = SeedAccount(db, tenantId, "1400", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
         var taxPayable = SeedAccount(db, tenantId, "2200", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
         var customer = SeedCustomer(db, tenantId, arAccount.Id);
+        var customerRole = db.BusinessPartnerRoles.Local.Single(role =>
+            role.BusinessPartnerId == customer.Id && role.RoleType == BusinessPartnerRoleType.Customer);
+        var customerProfile = db.BusinessPartnerArProfileVersions.Local.Single(profile =>
+            profile.BusinessPartnerRoleId == customerRole.Id);
 
         db.Set<FinanceSettings>().Add(new FinanceSettings
         {
@@ -912,6 +925,8 @@ public sealed class GhanaStatutoryTaxEngineTests
             TenantId = tenantId,
             InvoiceNumber = "INV-TAX-001",
             BusinessPartnerId = customer.Id,
+            BusinessPartnerRoleId = customerRole.Id,
+            BusinessPartnerArProfileVersionId = customerProfile.Id,
             CustomerName = customer.PartnerName,
             CustomerAddress = customer.PhysicalAddress,
             InvoiceDate = new DateTime(2026, 7, 6),
@@ -959,6 +974,10 @@ public sealed class GhanaStatutoryTaxEngineTests
         var withholdingPayable = SeedAccount(db, tenantId, "2305", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
         var withholdingReceivable = SeedAccount(db, tenantId, "1455", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
         var supplier = SeedSupplier(db, tenantId, apAccount.Id, expenseAccount.Id);
+        var supplierRole = db.BusinessPartnerRoles.Local.Single(role =>
+            role.BusinessPartnerId == supplier.Id && role.RoleType == BusinessPartnerRoleType.Supplier);
+        var supplierProfile = db.BusinessPartnerApProfileVersions.Local.Single(profile =>
+            profile.BusinessPartnerRoleId == supplierRole.Id);
         var bankAccount = SeedBankAccount(db, tenantId, bankGlAccount.Id);
         var withholdingTax = SeedTax(db, tenantId, "AP-WHT", "AP Withholding Tax", 5m, TaxCategory.Withholding, withholdingReceivable.Id, withholdingPayable.Id, new DateTime(2026, 1, 1));
 
@@ -978,6 +997,10 @@ public sealed class GhanaStatutoryTaxEngineTests
             TenantId = tenantId,
             PaymentNumber = "VP-WHT-001",
             BusinessPartnerId = supplier.Id,
+            BusinessPartnerRoleId = supplierRole.Id,
+            BusinessPartnerApProfileVersionId = supplierProfile.Id,
+            BusinessPartnerCode = supplier.SupplierCode,
+            BusinessPartnerName = supplier.Name,
             PaymentDate = new DateTime(2026, 7, 6),
             TotalAmount = 95m,
             AllocatedAmount = 95m,
@@ -1029,6 +1052,10 @@ public sealed class GhanaStatutoryTaxEngineTests
         var vatWithholdingReceivable = SeedAccount(db, tenantId, "1475", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
         var withholdingPayable = SeedAccount(db, tenantId, "2355", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
         var customer = SeedCustomer(db, tenantId, arAccount.Id);
+        var customerRole = db.BusinessPartnerRoles.Local.Single(role =>
+            role.BusinessPartnerId == customer.Id && role.RoleType == BusinessPartnerRoleType.Customer);
+        var customerProfile = db.BusinessPartnerArProfileVersions.Local.Single(profile =>
+            profile.BusinessPartnerRoleId == customerRole.Id);
         var bankAccount = SeedBankAccount(db, tenantId, bankGlAccount.Id);
         var withholdingTax = SeedTax(db, tenantId, "AR-WHT", "AR Withholding Tax", 5m, TaxCategory.Withholding, withholdingReceivable.Id, withholdingPayable.Id, new DateTime(2026, 1, 1));
         var vatWithholdingTax = SeedTax(db, tenantId, "VAT-WHT", "VAT Withholding", 7m, TaxCategory.VatWithholding, vatWithholdingReceivable.Id, withholdingPayable.Id, new DateTime(2026, 1, 1));
@@ -1049,6 +1076,10 @@ public sealed class GhanaStatutoryTaxEngineTests
             TenantId = tenantId,
             PaymentNumber = "CP-WHT-001",
             BusinessPartnerId = customer.Id,
+            BusinessPartnerRoleId = customerRole.Id,
+            BusinessPartnerArProfileVersionId = customerProfile.Id,
+            BusinessPartnerCode = customer.PartnerCode,
+            BusinessPartnerName = customer.PartnerName,
             PaymentDate = new DateTime(2026, 7, 6),
             TotalAmount = 88m,
             AllocatedAmount = 100m,
@@ -1275,6 +1306,40 @@ public sealed class GhanaStatutoryTaxEngineTests
             CreatedBy = "seed"
         };
         db.Suppliers.Add(supplier);
+        var partner = new BusinessPartner
+        {
+            Id = supplier.Id,
+            TenantId = tenantId,
+            PartnerCode = supplier.SupplierCode,
+            PartnerName = supplier.Name,
+            LegalName = supplier.Name,
+            PartnerType = "Supplier",
+            RegistrationStatus = "Approved",
+            ApprovalStatus = "Approved",
+            IsActive = true,
+            Currency = "GHS",
+            DefaultApAccountId = apAccountId,
+            DefaultExpenseAccountId = expenseAccountId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        var role = new BusinessPartnerRole
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerId = partner.Id,
+            RoleType = BusinessPartnerRoleType.Supplier, Status = BusinessPartnerRoleStatus.Active,
+            ActiveFromUtc = new DateTime(2025, 1, 1), CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        };
+        var profile = new BusinessPartnerApProfileVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = role.Id,
+            VersionNumber = 1, Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2025, 1, 1), SubjectToWithholding = false,
+            ApprovedAtUtc = new DateTime(2025, 1, 1), ApprovedById = Guid.NewGuid(),
+            CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        };
+        db.BusinessPartners.Add(partner);
+        db.BusinessPartnerRoles.Add(role);
+        db.BusinessPartnerApProfileVersions.Add(profile);
         return supplier;
     }
 
@@ -1288,6 +1353,7 @@ public sealed class GhanaStatutoryTaxEngineTests
             PartnerName = "Tax Customer",
             PartnerType = "Customer",
             RegistrationStatus = "Approved",
+            ApprovalStatus = "Approved",
             IsActive = true,
             IsBlacklisted = false,
             DefaultArAccountId = arAccountId,
@@ -1296,6 +1362,22 @@ public sealed class GhanaStatutoryTaxEngineTests
             CreatedBy = "seed"
         };
         db.Set<BusinessPartner>().Add(customer);
+        var role = new BusinessPartnerRole
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerId = customer.Id,
+            RoleType = BusinessPartnerRoleType.Customer, Status = BusinessPartnerRoleStatus.Active,
+            ActiveFromUtc = new DateTime(2025, 1, 1), CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        };
+        var profile = new BusinessPartnerArProfileVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = role.Id,
+            VersionNumber = 1, Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2025, 1, 1),
+            ApprovedAtUtc = new DateTime(2025, 1, 1), ApprovedById = Guid.NewGuid(),
+            CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        };
+        db.BusinessPartnerRoles.Add(role);
+        db.BusinessPartnerArProfileVersions.Add(profile);
         return customer;
     }
 
@@ -1329,6 +1411,10 @@ public sealed class GhanaStatutoryTaxEngineTests
         decimal amount,
         Guid fiscalPeriodId)
     {
+        var supplierRole = db.BusinessPartnerRoles.Local.Single(role =>
+            role.BusinessPartnerId == supplier.Id && role.RoleType == BusinessPartnerRoleType.Supplier);
+        var supplierProfile = db.BusinessPartnerApProfileVersions.Local.Single(profile =>
+            profile.BusinessPartnerRoleId == supplierRole.Id);
         var invoice = new VendorInvoice
         {
             Id = Guid.NewGuid(),
@@ -1336,6 +1422,9 @@ public sealed class GhanaStatutoryTaxEngineTests
             InvoiceNumber = invoiceNumber,
             SupplierInvoiceNumber = invoiceNumber,
             BusinessPartnerId = supplier.Id,
+            BusinessPartnerRoleId = supplierRole.Id,
+            BusinessPartnerApProfileVersionId = supplierProfile.Id,
+            BusinessPartnerCode = supplier.SupplierCode,
             SupplierName = supplier.Name,
             InvoiceDate = invoiceDate,
             ReceivedDate = invoiceDate,
@@ -1350,6 +1439,8 @@ public sealed class GhanaStatutoryTaxEngineTests
             ApprovedById = Guid.NewGuid(),
             ApprovedDate = DateTime.UtcNow,
             ApAccountId = apAccount.Id,
+            WithholdingContractReference = "CONTRACT-WHT-001",
+            WithholdingSupplyCategory = WhtSupplyCategory.Services,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
         };
@@ -1379,12 +1470,18 @@ public sealed class GhanaStatutoryTaxEngineTests
         decimal amount,
         Guid fiscalPeriodId)
     {
+        var customerRole = db.BusinessPartnerRoles.Local.Single(role =>
+            role.BusinessPartnerId == customer.Id && role.RoleType == BusinessPartnerRoleType.Customer);
+        var customerProfile = db.BusinessPartnerArProfileVersions.Local.Single(profile =>
+            profile.BusinessPartnerRoleId == customerRole.Id);
         var invoice = new Invoice
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             InvoiceNumber = invoiceNumber,
             BusinessPartnerId = customer.Id,
+            BusinessPartnerRoleId = customerRole.Id,
+            BusinessPartnerArProfileVersionId = customerProfile.Id,
             CustomerName = customer.PartnerName,
             CustomerAddress = customer.PhysicalAddress,
             InvoiceDate = invoiceDate,

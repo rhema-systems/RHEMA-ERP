@@ -81,8 +81,8 @@ the same thing.
   | `AffectsGrossPay` | seeded once from `IncludeInGross`, then HR's |
   | `EffectiveFrom` / `EffectiveTo` | **payroll has no effective dating at all** |
 
-  The last row is the reason: `EmolumentService.ComputeEffectiveComponentsAsync` and the leave
-  encashment rate filter on the effective window, so a synthesised "today" would silently drop
+  The last row is the reason: `EmolumentService.ComputeEffectiveComponentsAsync` (and, until leave
+  settings audit 2 removed it on 2026-09-27, the leave encashment rate) filters on the effective window, so a synthesised "today" would silently drop
   components from historical calculations. New mirrors get **2000-01-01**, not the sync date.
 - **Mapping:** payroll has 5 component types, HR 3. `EmployeeContribution` → `Deduction`;
   `EmployerContribution` → **skipped with a warning** (employer cost, not money off the payslip).

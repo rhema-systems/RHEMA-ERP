@@ -262,6 +262,9 @@ export default function NewProjectPage() {
       }
     }
 
+    // A project may be initiated before its budget is prepared. Approval and
+    // procurement budget coverage are enforced later by their own workflows.
+    required.delete('EstimatedBudget');
     return required;
   }, [projectSettings?.mandatoryFieldsByTypeJson, selectedProjectType]);
 
@@ -615,7 +618,7 @@ export default function NewProjectPage() {
             <Input id="end-date" type="date" value={form.targetEndDate || ''} onChange={(e) => setForm((prev) => ({ ...prev, targetEndDate: e.target.value || undefined }))} />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="estimated-budget">{labelWithRequired('Estimated Budget', requiredFields.has('EstimatedBudget'))}</Label>
+            <Label htmlFor="estimated-budget">Estimated Budget (optional)</Label>
             <Input id="estimated-budget" type="number" value={form.estimatedBudget ?? ''} onChange={(e) => setForm((prev) => ({ ...prev, estimatedBudget: e.target.value ? Number(e.target.value) : undefined }))} />
           </div>
           <div className="grid gap-2">

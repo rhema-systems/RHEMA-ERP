@@ -60,7 +60,7 @@ public class WarehouseLocationsController : ControllerBase
             else
                 locations = await _locationRepository.GetAllAsync();
 
-            var dtos = locations.Select(MapToDto).ToList();
+            var dtos = locations.Where(x => !InventoryTransitProtection.IsProtected(x)).Select(MapToDto).ToList();
             return Ok(dtos);
         }
         catch (Exception ex)
@@ -114,7 +114,11 @@ public class WarehouseLocationsController : ControllerBase
                 return BadRequest($"Warehouse with ID {dto.WarehouseId} not found");
             if (dto.IsDefault && (dto.IsConsignmentBin || dto.ConsignmentWarehouseId.HasValue || !string.Equals(dto.LocationType, "Bin", StringComparison.OrdinalIgnoreCase)))
                 return BadRequest("The default must be a normal Bin, not a consignment location.");
-
+            if (InventoryTransitProtection.IsProtected(warehouse) || InventoryTransitProtection.IsTransitType(dto.LocationType) ||
+                await InventoryTransitProtection.IsProtectedScopeAsync(_unitOfWork, tenantId, dto.WarehouseId, dto.ParentLocationId) ||
+                (dto.ConsignmentWarehouseId.HasValue && await InventoryTransitProtection.IsProtectedScopeAsync(
+                    _unitOfWork, tenantId, dto.ConsignmentWarehouseId.Value, null)))
+                return BadRequest(InventoryTransitProtection.Message);
             if (dto.IsConsignmentBin)
             {
                 if (!dto.ConsignmentWarehouseId.HasValue || dto.ConsignmentWarehouseId.Value == Guid.Empty)
@@ -213,7 +217,12 @@ public class WarehouseLocationsController : ControllerBase
                 return BadRequest("Select another default bin for this warehouse before clearing, moving or deactivating the current default.");
             if (dto.IsDefault && (!dto.IsActive || dto.IsConsignmentBin || dto.ConsignmentWarehouseId.HasValue || !string.Equals(dto.LocationType, "Bin", StringComparison.OrdinalIgnoreCase)))
                 return BadRequest("The default must be an active normal Bin, not a consignment location.");
-
+            if (InventoryTransitProtection.IsProtected(location) || InventoryTransitProtection.IsProtected(warehouse) || InventoryTransitProtection.IsTransitType(dto.LocationType) ||
+                await InventoryTransitProtection.IsProtectedScopeAsync(_unitOfWork, _currentUserProvider.TenantId, location.WarehouseId, location.Id) ||
+                await InventoryTransitProtection.IsProtectedScopeAsync(_unitOfWork, _currentUserProvider.TenantId, dto.WarehouseId, dto.ParentLocationId) ||
+                (dto.ConsignmentWarehouseId.HasValue && await InventoryTransitProtection.IsProtectedScopeAsync(
+                    _unitOfWork, _currentUserProvider.TenantId, dto.ConsignmentWarehouseId.Value, null)))
+                return BadRequest(InventoryTransitProtection.Message);
             // Check for duplicate code (if changed)
             if (location.LocationCode != dto.LocationCode)
             {
@@ -310,7 +319,9 @@ public class WarehouseLocationsController : ControllerBase
                 return NotFound($"Warehouse location with ID {id} not found");
             if (location.IsDefault)
                 return BadRequest("Select another default bin for this warehouse before deleting the current default.");
-
+            if (InventoryTransitProtection.IsProtected(location) || await InventoryTransitProtection.IsProtectedScopeAsync(
+                _unitOfWork, _currentUserProvider.TenantId, location.WarehouseId, location.Id))
+                return BadRequest(InventoryTransitProtection.Message);
             await _unitOfWork.ExecuteInTransactionAsync(async ct =>
             {
                 await _unitOfWork.AcquireTransactionLockAsync($"warehouse-default:{_currentUserProvider.TenantId:N}:{location.WarehouseId:N}", ct);
@@ -352,10 +363,13 @@ public class WarehouseLocationsController : ControllerBase
             }
 
             var location = await _locationRepository.GetByIdAsync(id);
-            if (location == null || location.IsDeleted)
+            if (location == null || location.TenantId != tenantId || location.IsDeleted)
             {
                 return NotFound($"Warehouse location with ID {id} not found");
             }
+
+            if (await InventoryTransitProtection.IsProtectedScopeAsync(_unitOfWork, tenantId, location.WarehouseId, location.Id))
+                return BadRequest(InventoryTransitProtection.Message);
 
             if (!location.IsConsignmentBin)
             {
@@ -639,6 +653,10 @@ public class WarehouseLocationsController : ControllerBase
             IsActive = entity.IsActive,
             IsPickingLocation = entity.IsPickingLocation,
             IsReceivingLocation = entity.IsReceivingLocation,
+            IsInTransitLocation = entity.IsInTransitLocation,
+            IsQuarantineLocation = entity.IsQuarantineLocation,
+            IsInspectionLocation = entity.IsInspectionLocation,
+            IsDamageLocation = entity.IsDamageLocation,
             IsConsignmentBin = entity.IsConsignmentBin,
             ConsignmentWarehouseId = entity.ConsignmentWarehouseId,
             MaxWeight = entity.MaxWeight,

@@ -66,6 +66,12 @@ export interface DevelopmentPlan extends AuditFields {
   endDate?: string | null;
   planStatus: DevelopmentPlanStatus;
   overallNotes?: string | null;
+  /**
+   * The login that wrote the plan (performance closure P10); null for a plan older than the
+   * stamp. The employee may complete, cancel or delete only a plan they wrote themselves — the
+   * server refuses the rest with 403.
+   */
+  authorUserId?: string | null;
 
   /** Rollup over the plan's objectives, computed server-side so a list needs one call. */
   objectiveCount: number;
@@ -84,6 +90,11 @@ export interface CreateDevelopmentPlan {
   overallNotes?: string | null;
 }
 
+/**
+ * The edit form's body. The server ignores `employeeId` and `planStatus` on an update
+ * (performance closure P10): the plan stays with its employee, and its status moves only through
+ * `PATCH …/status`.
+ */
 export interface UpdateDevelopmentPlan extends CreateDevelopmentPlan {
   id: string;
   planStatus: DevelopmentPlanStatus;

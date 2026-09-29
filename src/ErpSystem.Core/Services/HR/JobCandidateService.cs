@@ -6,6 +6,8 @@ using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Recruitment;
+using ErpSystem.Core.Services.Reference;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -25,6 +27,7 @@ public class JobCandidateService : IJobCandidateService
     private readonly ICandidateSegmentMembershipRepository _segmentMembershipRepository;
     private readonly ICandidateTalentSegmentRepository _segmentRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IGeographyService _geography;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<JobCandidateService> _logger;
 
@@ -41,6 +44,7 @@ public class JobCandidateService : IJobCandidateService
         ICandidateSegmentMembershipRepository segmentMembershipRepository,
         ICandidateTalentSegmentRepository segmentRepository,
         ICurrentUserProvider currentUserProvider,
+        IGeographyService geography,
         IUnitOfWork unitOfWork,
         ILogger<JobCandidateService> logger)
     {
@@ -56,8 +60,42 @@ public class JobCandidateService : IJobCandidateService
         _segmentMembershipRepository = segmentMembershipRepository;
         _segmentRepository = segmentRepository;
         _currentUserProvider = currentUserProvider;
+        _geography = geography;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Writes the candidate's City and Region from their <c>GeoAreaId</c>, and reconciles the
+    /// country stated beside it — round 4, lane A.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ Called AFTER the DTO has been applied to the entity, never before. The tree wins over
+    /// whatever spelling the caller sent, and running it first would let the payload overwrite the
+    /// resolved names — which is the drift the shared helper exists to prevent.</para>
+    ///
+    /// <para>The same two rules HR's employee and its four sub-records already obey, through the
+    /// same helper, so a candidate who later becomes an employee does not change meaning on the
+    /// way through.</para>
+    /// </remarks>
+    private async Task ApplyGeoAreaSnapshotAsync(JobCandidate candidate, CancellationToken cancellationToken)
+    {
+        // ⚠ One deliberate departure from the employee's use of the same helper. The helper leaves
+        // everything alone for a null area — right there, because State and City are typed by hand
+        // and blanking them would destroy the only address a pre-tree row has. Region here is NOT
+        // typed by anyone: it has no input, no DTO field, and is only ever written from the tree.
+        // So an area that has been cleared must take its region with it, or the record goes on
+        // claiming a region it no longer has any basis for. City is safe — it comes from the
+        // payload on every save.
+        if (candidate.GeoAreaId is null) candidate.Region = null;
+
+        candidate.CountryId = await GeoAddressSnapshot.ReconcileCountryAsync(
+            _geography, candidate.GeoAreaId, candidate.CountryId, "candidate", cancellationToken);
+
+        await GeoAddressSnapshot.ApplyAsync(
+            _geography, _logger, candidate.GeoAreaId,
+            r => candidate.Region = r, c => candidate.City = c,
+            "candidate", candidate.Id, cancellationToken);
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -397,6 +435,7 @@ public class JobCandidateService : IJobCandidateService
         await RequireCountryAsync(createDto.CountryId);
         var entity = createDto.ToEntity(current, createdByUserId);
         entity.CandidateNumber = await _candidateRepository.GetNextCandidateNumberAsync(current);
+        await ApplyGeoAreaSnapshotAsync(entity, cancellationToken);
 
         await _candidateRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -435,6 +474,7 @@ public class JobCandidateService : IJobCandidateService
         await RequireIdentificationTypeAsync(updateDto.NationalIdTypeId);
         await RequireCountryAsync(updateDto.CountryId);
         entity.UpdateEntity(updateDto, updatedByUserId);
+        await ApplyGeoAreaSnapshotAsync(entity, cancellationToken);
         await _candidateRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -1090,10 +1130,44 @@ public class JobCandidateService : IJobCandidateService
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
         await GetOwnedCandidateAsync(createDto.JobCandidateId);
+        createDto.QualificationLevelId = await ResolveQualificationLevelAsync(
+            createDto.QualificationType, createDto.QualificationLevelId, createDto.QualificationId,
+            createDto.QualificationFreeText, currentLevelId: null, current, cancellationToken);
         var entity = createDto.ToEntity(current, createdByUserId);
         await _qualificationRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await ReadQualificationBackAsync(entity);
+    }
+
+    /// <summary>
+    /// The level a qualification may be stored with at HR's door (round 4, lane Q; decision Q-D1):
+    /// a live rung, and one at all for Education unless the catalogue entry picked sits on a rung.
+    /// </summary>
+    /// <remarks>The careers profile applies the same <see cref="QualificationLevelRules"/>.</remarks>
+    private async Task<Guid?> ResolveQualificationLevelAsync(
+        QualificationType type, Guid? statedLevelId, Guid? catalogueId, string? typedName,
+        Guid? currentLevelId, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var ladder = await QualificationLadder.LoadAsync(_unitOfWork, tenantId, cancellationToken);
+        var catalogue = catalogueId is { } cid
+            ? await _unitOfWork.Repository<Qualification>().GetQueryable()
+                .Where(q => q.Id == cid && q.TenantId == tenantId && !q.IsDeleted)
+                .Select(q => new { q.Name, q.QualificationLevelId })
+                .FirstOrDefaultAsync(cancellationToken)
+            : null;
+        return QualificationLevelRules.Resolve(
+            type, statedLevelId, catalogue?.QualificationLevelId, currentLevelId, ladder, catalogue?.Name ?? typedName);
+    }
+
+    /// <summary>
+    /// The saved row, re-read with its catalogue entry and rung. A row built by hand has neither
+    /// navigation loaded, so its DTO would name no level, and no catalogue entry either.
+    /// </summary>
+    private async Task<JobCandidateQualificationDto> ReadQualificationBackAsync(JobCandidateQualification entity)
+    {
+        var saved = (await _qualificationRepository.GetByCandidateIdAsync(entity.JobCandidateId))
+            .FirstOrDefault(q => q.Id == entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<JobCandidateQualificationDto>> GetQualificationsAsync(Guid candidateId, CancellationToken cancellationToken = default)
@@ -1106,11 +1180,14 @@ public class JobCandidateService : IJobCandidateService
     public async Task<JobCandidateQualificationDto> UpdateQualificationAsync(UpdateJobCandidateQualificationDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedQualificationAsync(updateDto.Id);
+        updateDto.QualificationLevelId = await ResolveQualificationLevelAsync(
+            updateDto.QualificationType, updateDto.QualificationLevelId, updateDto.QualificationId,
+            updateDto.QualificationFreeText, entity.QualificationLevelId, entity.TenantId, cancellationToken);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _qualificationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await ReadQualificationBackAsync(entity);
     }
 
     public async Task<bool> DeleteQualificationAsync(Guid qualificationId, CancellationToken cancellationToken = default)

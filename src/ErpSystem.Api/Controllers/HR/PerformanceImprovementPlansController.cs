@@ -100,6 +100,36 @@ public class PerformanceImprovementPlansController : ControllerBase
         => PipAccess.CanManageAsync(this, _db, _currentUserService, pipId, ct);
 
     /// <summary>
+    /// Whether the caller may open — or prepare — a plan about this employee (performance closure
+    /// P4): the employee's line manager, or the performance desk; never the employee themselves.
+    /// The author roles admitted any Manager for any employee, so a manager could raise a plan on
+    /// someone else's report and read that person's appraisal score through <c>prepare</c>.
+    /// </summary>
+    private async Task<bool> CanOpenPlanForAsync(Guid employeeId, CancellationToken ct = default)
+    {
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+        var me = _currentUserService.EmployeeId is Guid id && id != Guid.Empty ? id : (Guid?)null;
+        if (me == employeeId) return false;
+
+        if (me is Guid manager
+            && await _db.Set<Employee>().AsNoTracking()
+                .AnyAsync(e => e.Id == employeeId && e.TenantId == tenantId && e.ManagerId == manager, ct))
+            return true;
+
+        return await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy);
+    }
+
+    /// <summary>
+    /// The plans the caller may see in a list about <paramref name="employeeId"/>: all of them,
+    /// unless the caller is that employee — then only those in force (P4; a draft is not yet
+    /// theirs to see, whatever else they hold).
+    /// </summary>
+    private IEnumerable<PerformanceImprovementPlanDto> VisibleTo(Guid employeeId, IEnumerable<PerformanceImprovementPlanDto> plans)
+        => _currentUserService.EmployeeId == employeeId
+            ? plans.Where(p => PipAccess.IsInForceForSubject(p.Status)).ToList()
+            : plans;
+
+    /// <summary>
     /// Get all performance improvement plans
     /// </summary>
     [HttpGet]
@@ -189,7 +219,7 @@ public class PerformanceImprovementPlansController : ControllerBase
         try
         {
             var response = await _improvementPlanService.GetByEmployeeIdAsync(employeeId, ct);
-            return Ok(response);
+            return Ok(VisibleTo(employeeId, response));
         }
         catch (Exception ex)
         {
@@ -210,7 +240,7 @@ public class PerformanceImprovementPlansController : ControllerBase
 
         try
         {
-            return Ok(await _improvementPlanService.GetByEmployeeIdAsync(me, ct));
+            return Ok(VisibleTo(me, await _improvementPlanService.GetByEmployeeIdAsync(me, ct)));
         }
         catch (Exception ex)
         {
@@ -289,8 +319,37 @@ public class PerformanceImprovementPlansController : ControllerBase
     [ProducesResponseType(typeof(Guid), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public async Task<IActionResult> Create([FromBody] PipCreateRequest req)
+    public async Task<IActionResult> Create([FromBody] PipCreateRequest req, CancellationToken ct = default)
     {
+        if (_currentUserService.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        // P4: who the plan may be about, then who supervises and owns it.
+        if (!await CanOpenPlanForAsync(req.EmployeeId, ct)) return Forbid();
+
+        // The supervisor is the employee's line manager — an omitted one resolves to them — and
+        // only HR names someone else: a named supervisor reads and manages the plan.
+        var lineManagerId = await _db.Set<Employee>().AsNoTracking()
+            .Where(e => e.Id == req.EmployeeId && e.TenantId == tenantId)
+            .Select(e => e.ManagerId)
+            .FirstOrDefaultAsync(ct);
+        var supervisorId = req.SupervisorId == Guid.Empty ? lineManagerId ?? Guid.Empty : req.SupervisorId;
+        if (supervisorId != lineManagerId && !await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy))
+            return Forbid();
+        if (supervisorId == Guid.Empty)
+            return UnprocessableEntity(new { message = "This employee has no line manager on record, so HR has to name the plan's supervisor." });
+
+        // The HR owner reads and manages the plan too, so it has to be someone who already could.
+        var hrOwnerId = req.HROwnerId is Guid owner && owner != Guid.Empty ? owner : (Guid?)null;
+        if (hrOwnerId is Guid named && !await PipAccess.EmployeeHoldsDeskAsync(_db, tenantId, named, ct))
+            return UnprocessableEntity(new { message = "The HR owner has to be an HR officer with an active login." });
+
+        // A plan raised off an appraisal is raised off one of this employee's.
+        if (req.AppraisalId is Guid appraisalId && appraisalId != Guid.Empty
+            && !await _db.Set<PerformanceAppraisal>().AsNoTracking()
+                .AnyAsync(a => a.Id == appraisalId && a.TenantId == tenantId && a.EmployeeId == req.EmployeeId, ct))
+            return BadRequest(new { message = "That appraisal is not this employee's." });
+
         try
         {
             if (!ModelState.IsValid)
@@ -299,7 +358,7 @@ public class PerformanceImprovementPlansController : ControllerBase
             var createDto = new CreatePerformanceImprovementPlanDto
             {
                 EmployeeId        = req.EmployeeId,
-                AppraisalId       = req.AppraisalId,
+                AppraisalId       = req.AppraisalId == Guid.Empty ? null : req.AppraisalId,
                 StartDate         = req.StartDate,
                 EndDate           = req.EndDate,
                 PerformanceIssues = req.PerformanceIssues,
@@ -307,8 +366,8 @@ public class PerformanceImprovementPlansController : ControllerBase
                 ImprovementActions = req.ImprovementActions,
                 SupportProvided   = req.SupportProvided ?? string.Empty,
                 MeasurementCriteria = req.MeasurementCriteria ?? string.Empty,
-                SupervisorId      = req.SupervisorId,
-                HROwnerId         = req.HROwnerId,
+                SupervisorId      = supervisorId,
+                HROwnerId         = hrOwnerId,
                 ReviewSchedule    = req.ReviewSchedule,
             };
 
@@ -349,21 +408,19 @@ public class PerformanceImprovementPlansController : ControllerBase
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
+            // P5: the plan's content only. Who it is about, the appraisal it came from, its
+            // supervisor, HR owner and status are not the edit form's to change, so the request's
+            // values for them are not passed on at all.
             var updateDto = new UpdatePerformanceImprovementPlanDto
             {
                 Id                 = id,
-                EmployeeId         = req.EmployeeId,
-                AppraisalId        = req.AppraisalId,
                 StartDate          = req.StartDate,
                 EndDate            = req.EndDate,
-                Status             = req.Status,
                 PerformanceIssues  = req.PerformanceIssues,
                 ExpectedStandards  = req.ExpectedStandards,
                 ImprovementActions = req.ImprovementActions,
                 SupportProvided    = req.SupportProvided ?? string.Empty,
                 MeasurementCriteria = req.MeasurementCriteria ?? string.Empty,
-                SupervisorId       = req.SupervisorId,
-                HROwnerId          = req.HROwnerId,
                 ReviewSchedule     = req.ReviewSchedule,
             };
 
@@ -635,6 +692,9 @@ public class PerformanceImprovementPlansController : ControllerBase
     {
         if (_currentUserService.TenantId is not Guid tenantId)
             return Unauthorized("Tenant context could not be resolved");
+
+        // P4: the same people who may open the plan — it carries the source appraisal's score.
+        if (!await CanOpenPlanForAsync(employeeId)) return Forbid();
 
         try
         {
@@ -1196,10 +1256,12 @@ public class PerformanceImprovementPlansController : ControllerBase
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            // Whoever books the meeting is the one holding it unless they name someone else, and
-            // the client has no employee id of its own to send.
-            if (createDto.ConductedById == Guid.Empty && _currentUserService.EmployeeId is Guid me)
-                createDto.ConductedById = me;
+            // Whoever books the meeting is the one holding it (performance closure P13) — the body
+            // cannot name someone else, and the employee's reply is not this form's to write.
+            if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty)
+                return BadRequest(new { message = "Your account is not linked to an employee record, so it cannot hold a review meeting." });
+            createDto.ConductedById = me;
+            createDto.EmployeeComments = null;
 
             var response = await _improvementPlanService.AddReviewMeetingAsync(pipId, createDto);
             return Ok(response);

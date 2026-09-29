@@ -26,6 +26,15 @@ public interface IWorkflowService
         string entityType, Guid entityId, Guid workflowDefinitionId);
 
     /// <summary>
+    /// Starts an approval workflow for a record created by a trusted background
+    /// process. The supplied initiator must be a real tenant user (normally the
+    /// maker of the source template); this prevents workers from impersonating
+    /// whichever browser user happens to be active.
+    /// </summary>
+    Task<ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult> StartApprovalWorkflowAsAsync(
+        string entityType, Guid entityId, Guid initiatedByUserId, Guid tenantId);
+
+    /// <summary>
     /// Checks if a user can approve a specific workflow step.
     /// userId must be the ApplicationUser.Id from the authenticated user, not an Employee.Id.
     /// </summary>

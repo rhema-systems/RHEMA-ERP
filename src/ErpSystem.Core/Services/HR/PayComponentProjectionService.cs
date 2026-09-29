@@ -31,7 +31,8 @@ public class PayComponentProjectionService : IPayComponentProjectionService
     /// Provenance marker written into <see cref="PayComponent.Description"/> so the projection can
     /// tell its own rows apart from any component HR defined before this bridge existed. Only
     /// marked rows are ever updated or deactivated; anything else is left alone, which matters
-    /// because <c>LeaveTypeAllowance</c> and <c>BenefitPolicy</c> hold live foreign keys to them.
+    /// because <c>BenefitPolicy</c> holds live foreign keys to them (as <c>LeaveTypeAllowance</c> did
+    /// until leave settings audit 2 removed it).
     /// </summary>
     private const string ProjectionMarker = "Defined in Payroll";
 

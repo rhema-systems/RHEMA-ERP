@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Finance;
 
@@ -28,7 +29,12 @@ public class JournalBatchListItemDto
     public string Description { get; set; } = string.Empty;
     public Guid FiscalPeriodId { get; set; }
     public string? FiscalPeriodName { get; set; }
+    public DateTime? FiscalPeriodStartDate { get; set; }
+    public DateTime? FiscalPeriodEndDate { get; set; }
+    public Guid AccountingBookId { get; set; }
     public string BookClassification { get; set; } = string.Empty;
+    public string AccountingBookName { get; set; } = string.Empty;
+    public AccountingBookType AccountingBookType { get; set; }
     public string ControlCurrencyCode { get; set; } = string.Empty;
     public JournalBatchType BatchType { get; set; }
     public JournalBatchApprovalStatus ApprovalStatus { get; set; }
@@ -82,6 +88,17 @@ public sealed class JournalBatchDetailDto : JournalBatchListItemDto
     public IReadOnlyList<JournalBatchItemDto> Items { get; set; } = [];
     public IReadOnlyList<JournalBatchPostingRunDto> PostingRuns { get; set; } = [];
     public IReadOnlyList<Guid> AttachmentIds { get; set; } = [];
+    public IReadOnlyList<JournalBatchAttachmentDto> Attachments { get; set; } = [];
+}
+
+public sealed class JournalBatchAttachmentDto
+{
+    public Guid FileUploadRecordId { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string FileUrl { get; set; } = string.Empty;
+    public string? ContentType { get; set; }
+    public long FileSize { get; set; }
+    public DateTime UploadedAt { get; set; }
 }
 
 public sealed class JournalBatchItemDto
@@ -128,8 +145,8 @@ public sealed class CreateJournalBatchDto
     [Required]
     public Guid FiscalPeriodId { get; set; }
 
-    [Required, MaxLength(20)]
-    public string BookClassification { get; set; } = "IFRS";
+    [Required]
+    public Guid AccountingBookId { get; set; }
 
     [Required, MaxLength(3)]
     public string ControlCurrencyCode { get; set; } = "GHS";
@@ -142,6 +159,17 @@ public sealed class CreateJournalBatchDto
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
+}
+
+public sealed class EligibleJournalBatchBookDto
+{
+    public Guid Id { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Purpose { get; set; } = string.Empty;
+    public AccountingBookType BookType { get; set; }
+    public string? FunctionalCurrencyCode { get; set; }
+    public bool IsDefault { get; set; }
 }
 
 public sealed class UpdateJournalBatchDto
@@ -293,8 +321,9 @@ public sealed class JournalBatchImportPreviewDto
     public string PreviewToken { get; set; } = string.Empty;
     public DateTime ExpiresAt { get; set; }
     public bool IsValid { get; set; }
-    public string TemplateVersion { get; set; } = "1";
+    public string TemplateVersion { get; set; } = "2";
     public string FileName { get; set; } = string.Empty;
+    public string ControlCurrencyCode { get; set; } = string.Empty;
     public int JournalCount { get; set; }
     public int LineCount { get; set; }
     public decimal ExpectedDebitTotal { get; set; }

@@ -82,8 +82,8 @@ export default function DeadlineEnforcementPage() {
         reason: reason.trim(),
       }),
     onSuccess: (r) => {
-      // The endpoint answers 200 with success:false for a refused advance, so the flag decides
-      // the message rather than the HTTP status.
+      // A refusal is an error status (422 for a step the appraisal is not at, 400 for a finished
+      // one) and lands in onError with the server's message; the flag is kept as a guard.
       if (r.success) {
         toast({
           title: 'Appraisal advanced',
@@ -194,8 +194,10 @@ export default function DeadlineEnforcementPage() {
             Advance one appraisal
           </CardTitle>
           <CardDescription>
-            Works whether or not auto-lock is on. Leave the step blank to advance past whatever is
-            currently blocking.
+            Works whether or not auto-lock is on. An advance moves the appraisal past the step it is
+            at — leave the step on &ldquo;Whatever is blocking&rdquo;, or name that same step; any
+            other step is refused. Before the manager&apos;s evaluation, the advance is also the
+            recorded waiver of that step (a missing goal, peer or self-evaluation).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -243,7 +245,7 @@ export default function DeadlineEnforcementPage() {
           <div className="flex items-center justify-end gap-3">
             <p className="flex items-center gap-1 text-xs text-muted-foreground">
               <Info className="h-3 w-3" />
-              Refusals come back as a message, not an error.
+              A refusal names the step the appraisal is at.
             </p>
             <Button
               onClick={() => advance.mutate()}

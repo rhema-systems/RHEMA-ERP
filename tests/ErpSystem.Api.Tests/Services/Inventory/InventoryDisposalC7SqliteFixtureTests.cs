@@ -75,6 +75,7 @@ public sealed class InventoryDisposalC7SqliteFixtureTests
             Id = itemId, TenantId = fixture.TenantId, CategoryId = categoryId, Category = category,
             ItemCode = "C7-ITEM", Name = "C7 disposal item", UnitOfMeasure = "EA",
             ItemType = ItemType.StockItem, Status = ItemStatus.Active, ValuationMethod = ValuationMethod.WeightedAverage,
+            InventoryDisposalAccountId = expenseAccountId,
             AverageCost = 10m, StandardCost = 10m, CurrentStock = 5m, AvailableStock = 5m, RowVersion = [1]
         };
         var evidence = Evidence(fixture.TenantId, makerId, "C7-ROLLBACK", "c7-rollback.pdf");
@@ -91,6 +92,17 @@ public sealed class InventoryDisposalC7SqliteFixtureTests
         fixture.Db.Accounts.AddRange(
             Account(inventoryAccountId, fixture.TenantId, "141-C7", "Inventory control", AccountType.Asset),
             Account(expenseAccountId, fixture.TenantId, "611-C7", "Disposal expense", AccountType.Expense));
+        // The valuation owner now verifies the retained disposal and its configured item account.
+        fixture.Db.InventoryDisposalCases.Add(new InventoryDisposalCase
+        {
+            Id = disposalId, TenantId = fixture.TenantId, DisposalNumber = "C7-DONATION",
+            WarehouseId = warehouseId, RequestedById = makerId, RequestedAtUtc = postingDate,
+            Method = InventoryDisposalMethod.Donation, Status = InventoryDisposalStatus.Approved,
+            AccountingVersion = 1, ApprovedById = checkerId, ApprovedAtUtc = postingDate.AddHours(1),
+            Reason = "Donation", IdentificationDetails = "C7 rollback fixture", TotalQuantity = 2m,
+            TotalValue = 20m, IdempotencyKey = "C7-DONATION", CorrelationId = "C7-ROLLBACK",
+            PayloadHash = new string('A', 64), IntegrityHash = new string('B', 64), RowVersion = [1]
+        });
         AddEvidence(fixture.Db, evidence);
         await fixture.Db.SaveChangesAsync();
 
@@ -200,6 +212,10 @@ public sealed class InventoryDisposalC7SqliteFixtureTests
             connection.CreateFunction<string?, int>("DAY", _ => 1);
             connection.CreateFunction<string?, int>("MONTH", _ => 1);
             connection.CreateFunction<string?, int>("YEAR", _ => 2026);
+            connection.CreateFunction<int, int, int, string>("DATEFROMPARTS", (year, month, day) =>
+                new DateTime(year, month, day).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+            connection.CreateFunction<string?, string?>("EOMONTH", value => EndOfMonth(value, 0));
+            connection.CreateFunction<string?, int, string?>("EOMONTH", EndOfMonth);
             connection.CreateFunction<string?, int>("ISJSON", value =>
             {
                 if (string.IsNullOrWhiteSpace(value)) return 0;
@@ -225,6 +241,14 @@ public sealed class InventoryDisposalC7SqliteFixtureTests
             db.Tenants.Add(tenant);
             await db.SaveChangesAsync();
             return new Fixture(connection, db, tenant.Id);
+        }
+
+        private static string? EndOfMonth(string? value, int months)
+        {
+            if (value is null) return null;
+            var date = DateTime.Parse(value, System.Globalization.CultureInfo.InvariantCulture).AddMonths(months);
+            return new DateTime(date.Year, date.Month, DateTime.DaysInMonth(date.Year, date.Month))
+                .ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         public async ValueTask DisposeAsync()
@@ -263,12 +287,13 @@ public sealed class InventoryDisposalC7SqliteFixtureTests
                 typeof(FinanceSettings), typeof(Account), typeof(FileUploadRecord),
                 typeof(CentralDocumentRecord), typeof(CentralDocumentVersion), typeof(StockAdjustment),
                 typeof(StockAdjustmentItem), typeof(StockAdjustmentEvidence), typeof(StockAdjustmentAction),
-                typeof(AuditLog)
+                typeof(AuditLog), typeof(InventoryDisposalCase)
             };
             foreach (var entityType in modelBuilder.Model.GetEntityTypes().ToList())
                 if (!retained.Contains(entityType.ClrType)) modelBuilder.Ignore(entityType.ClrType);
             modelBuilder.Entity<InventoryItem>().Property(value => value.RowVersion).ValueGeneratedNever();
             modelBuilder.Entity<StockAdjustment>().Property(value => value.RowVersion).ValueGeneratedNever();
+            modelBuilder.Entity<InventoryDisposalCase>().Property(value => value.RowVersion).ValueGeneratedNever();
         }
     }
 

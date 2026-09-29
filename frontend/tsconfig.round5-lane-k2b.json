@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/medical-board.ts",
+    "src/types/hr/policy-settings.ts",
+    "src/services/hr/medical-board.service.ts",
+    "src/services/hr/safety-incident.service.ts",
+    "src/components/hr/medical/MedicalBoardCaseIncapacity.tsx",
+    "src/app/hr/medical/boards/page.tsx",
+    "src/app/hr/medical/boards/[id]/page.tsx",
+    "src/app/hr/medical/boards/incapacity-schedule/page.tsx",
+    "src/app/administration/hr/settings/policy/page.tsx",
+    "src/components/hr/common/StatusBadge.tsx"
+  ]
+}

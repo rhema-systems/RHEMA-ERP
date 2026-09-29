@@ -11,6 +11,7 @@ public sealed class InventoryTransferControlRootConfiguration : IEntityTypeConfi
         builder.ToTable("InventoryTransfers", table => table.HasTrigger("TR_InventoryTransfers_ControlledLifecycle"));
         builder.Property(x => x.RowVersion).IsRowVersion();
         builder.Property(x => x.ApprovalRequired).HasDefaultValue(true);
+        builder.HasOne(x => x.CarrierBusinessPartner).WithMany().HasForeignKey(x => x.CarrierBusinessPartnerId).OnDelete(DeleteBehavior.Restrict);
     }
 }
 

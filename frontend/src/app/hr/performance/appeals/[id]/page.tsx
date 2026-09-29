@@ -96,15 +96,18 @@ export default function AppealReviewPage() {
     onError: fail('Could not pick up the appeal'),
   });
 
+  // Keyed by criterion; a restatement names its row by both ids it has — a goal row has no
+  // template item, and was keyed under an empty one.
   const modifications = useMemo<CriterionScoreModification[]>(() => {
-    return Object.entries(scoreEdits)
-      .filter(([, value]) => value.trim() !== '')
-      .map(([templateItemId, value]) => ({
-        templateItemId,
-        newScore: Number(value),
-        justification: justifications[templateItemId]?.trim() || 'Adjusted on appeal',
+    return (review.data?.appealedCriteria ?? [])
+      .filter((c) => (scoreEdits[c.criterionKey] ?? '').trim() !== '')
+      .map((c) => ({
+        templateItemId: c.templateItemId ?? null,
+        criterionConfigId: c.criterionConfigId ?? null,
+        newScore: Number(scoreEdits[c.criterionKey]),
+        justification: justifications[c.criterionKey]?.trim() || 'Adjusted on appeal',
       }));
-  }, [scoreEdits, justifications]);
+  }, [review.data, scoreEdits, justifications]);
 
   const resolve = useMutation({
     // The decision is passed in rather than read off state, so the call cannot be made
@@ -302,7 +305,7 @@ export default function AppealReviewPage() {
                   </TableHeader>
                   <TableBody>
                     {postRemand.data.criteriaComparisons.map((c) => (
-                      <TableRow key={c.templateItemId}>
+                      <TableRow key={c.criterionKey}>
                         <TableCell>
                           <div className="font-medium">{c.itemName}</div>
                           {c.appealReason && (
@@ -422,23 +425,23 @@ export default function AppealReviewPage() {
                                 min={0}
                                 max={100}
                                 placeholder="Leave blank to keep"
-                                value={scoreEdits[c.templateItemId] ?? ''}
+                                value={scoreEdits[c.criterionKey] ?? ''}
                                 onChange={(e) =>
                                   setScoreEdits({
                                     ...scoreEdits,
-                                    [c.templateItemId]: e.target.value,
+                                    [c.criterionKey]: e.target.value,
                                   })
                                 }
                                 aria-label={`New score for ${c.itemName}`}
                               />
-                              {scoreEdits[c.templateItemId]?.trim() && (
+                              {scoreEdits[c.criterionKey]?.trim() && (
                                 <Input
                                   placeholder="Justification (required)"
-                                  value={justifications[c.templateItemId] ?? ''}
+                                  value={justifications[c.criterionKey] ?? ''}
                                   onChange={(e) =>
                                     setJustifications({
                                       ...justifications,
-                                      [c.templateItemId]: e.target.value,
+                                      [c.criterionKey]: e.target.value,
                                     })
                                   }
                                   aria-label={`Justification for ${c.itemName}`}

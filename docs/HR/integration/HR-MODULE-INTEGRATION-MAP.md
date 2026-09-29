@@ -43,6 +43,17 @@ roster) and **§13** (the reverse direction: which other modules depend on HR ma
 | §3 — "`docs/tdc-fleet-management-gap-implementation-tracker.md` … across HR, Maintenance, Inventory, Procurement, and Finance" | Confirmed; the row is wider. | INT-001 lists HR employees, licence data, Maintenance assets, work orders, Inventory parts, Procurement vendors, Fixed Assets, Workflow, Notifications, Reports. |
 | Whole document — modules omitted | **Workflow engine, Identity reconciliation, Payroll, DocumentManagement, Finance FixedAssets custodian FKs, Estate duty roster** all have real touchpoints and were not mentioned. | Added as §12 and rows 28–36. |
 
+## ⚠ Round 4, lane O, 2026-09-23 — the technician rows settled
+
+Measured, not read: `docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-4-PLAN.md` § 8, lane O.
+
+| Where | Verdict | Corrected fact |
+|---|---|---|
+| Rows 4–5 / §3 — "whether any sync code actually runs was **not** verified" | **It does not run, and never has.** 🔴 | `TechnicianRepository.GetFromHRModuleAsync` is `// TODO: Implement actual HR module integration` returning an empty list unconditionally, so `SyncTechniciansFromHRAsync` and `POST technical-skills/sync-from-hr` iterate nothing. `LastSyncDate` is never written (0 rows on UAT). The `Technicians` table has **0 rows** and no service reads it: `ITechnicianRepository` is `IGenericRepository<Employee>`. There is no cache to refresh. |
+| Row 4 — "✅ targets the real employee" | True, and incomplete. | **Who may be assigned** is a second question. Maintenance's work-order, labour, staff-schedule and QC gates refuse anyone whose `Employee.CanBeAssignedToMaintenance` is false. **Nothing wrote that column**, so on UAT (2,089 employees, 0 ticked) every assignment would have been refused, and HR's technician door listed nobody. Lane O makes it one maintained answer: it follows the position's new **Technician role** flag unless HR sets it by hand. |
+| Row 5 — the six "Maintenance-specific properties" | Three live, two dead, one Maintenance's. | `Specialization`, `CertificationLevel`, `ExperienceLevel`: written by HR's employee form since lane O, read by Maintenance's technician list. `CurrentWorkload`: **written by nothing, read by Maintenance**, so its technician list reports every technician free (`CurrentWorkload < MaxWorkload`). `MaxWorkload`: written only by `TechnicianService.Create/UpdateTechnicianAsync`, which no controller calls. `LastSyncDate`: never written. |
+| "Is this person a technician?" | Had **four** answers; HR's side now has one. | HR's door read `CanBeAssignedToMaintenance \|\| Department.Code == "MAINT"`. Maintenance's own list reads `OrganizationUnit.Name.Contains("Maintenance")` (nine sites). Its gates read the column. `TechnicianService.CreateTechnicianAsync` wrote it (unreachable). HR's door now reads only the column, the gates' own predicate. Maintenance's unit-name gate goes out as a hand-off: `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`. |
+
 ---
 
 ## 1. Executive summary
@@ -54,7 +65,7 @@ push). Everything else ranges from partial to a real duplicate-registry risk.**
 | Module | Overall verdict |
 |---|---|
 | **Identity** (+ LDAP) | ✅ **Working, bidirectional.** `ApplicationUser.EmployeeId` ↔ `Employee`, with a dedicated reconciliation service and an auto-link-on-LDAP-provision flow. The one integration in this document that needs no remedial work. |
-| **Maintenance** (incl. Fleet) | ⚠️ **Partial.** Asset linkage is built (read-only link + a working **send-for-maintenance push** that creates an `AssetAdmission`); the work-order leg is blocked by Maintenance's own empty lookup tables (defect #9). `Technician` is a linked cache (`EmployeeId` + `LastSyncDate`) whose sync has not been verified to run. Vehicles can exist as two unlinked records. A vehicle accident can produce two unlinked incident records (Fleet's and SHE's). Maintenance is also the heaviest *consumer* of HR master data in the system (~60 FKs to `Employee`, §13). |
+| **Maintenance** (incl. Fleet) | ⚠️ **Partial.** Asset linkage is built (read-only link + a working **send-for-maintenance push** that creates an `AssetAdmission`); the work-order leg is blocked by Maintenance's own empty lookup tables (defect #9). `Technician` is a linked cache (`EmployeeId` + `LastSyncDate`) whose sync **never runs** (round 4, lane O — measured). Who Maintenance may assign work to is now one answer HR maintains, from a position's **Technician role** flag (lane O). Vehicles can exist as two unlinked records. A vehicle accident can produce two unlinked incident records (Fleet's and SHE's). Maintenance is also the heaviest *consumer* of HR master data in the system (~60 FKs to `Employee`, §13). |
 | **Procurement** | 🟠 **Pattern exists, applied in one area only.** Six travel booking entities carry `VendorId → Supplier` (Procurement owns the vendor master). `TrainingVendor`, `HealthcareFacility`, `MedicalInsuranceProvider` and `SheContractor` do not use it. No hand-off from an HR asset requisition to Procurement's purchase pipeline. ⚠ Procurement's `SuppliersController` is itself dead (cross-module defect #1), so the travel FK cannot be exercised through the UI until that is fixed. |
 | **Inventory** | 🔴 **No integration found at all.** SHE's PPE stock tracking and HR's/SHE's physical-item registers (`CompanyAsset`, `SafetyEquipment`) each duplicate what Inventory's `InventoryItem` already does, with zero FK connection. |
 | **Projects** | ⚠️ **Partial, two real duplicate-tracking risks.** Consultant billing (HR) and project timesheets (Projects) are unlinked; percentage allocation (HR) and project staffing (Projects) are unlinked. Asset linkage is one-directional and working. Client/consultant modelling is confirmed cleanly separate from Projects' own customer concept — not a risk. |
@@ -90,8 +101,8 @@ Legend — **Verdict**: ✅ built & working · 🟡 one-directional/read-only ·
 | 1 | Identity | `Employee` | `ApplicationUser.EmployeeId` | ✅ | — |
 | 2 | Identity (LDAP) | `Employee` (email/number match) | LDAP-provisioned user | ✅ | — |
 | 3 | Maintenance | `CompanyAsset.MaintenanceAssetId` (read-only link) **+ `AssetMaintenance.MaintenanceAdmissionId`** via `SendForMaintenanceAsync` | `MaintenanceAsset`, `AssetAdmission` | ✅ link + admission push built; work-order leg blocked by defect #9 | 🟡 (outside HR) |
-| 4 | Maintenance | `Employee` (`WorkOrder`/`JobCard.AssignedTechnicianId` → HR `Employee`, fluent-configured) | `WorkOrder`/`JobCard` | ✅ targets the real employee | — |
-| 5 | Maintenance | `Employee.Specialization`/`.CertificationLevel`/`.CurrentWorkload`/`.MaxWorkload` | `Technician` (has `EmployeeId` FK + `LastSyncDate`, duplicates name/contact/skill columns) | 🟡 linked cache; **sync not verified to run** | 🟡 |
+| 4 | Maintenance | `Employee` (`WorkOrder`/`JobCard.AssignedTechnicianId` → HR `Employee`, fluent-configured) + **eligibility** `Employee.CanBeAssignedToMaintenance` (read by Maintenance's work-order, labour, schedule and QC gates) | `WorkOrder`/`JobCard` | ✅ targets the real employee; ✅ eligibility maintained by HR from the position's **Technician role** flag since round 4 lane O (it had no writer at all) | 🟡 Maintenance's own technician list still gates on a unit's *name* — hand-off |
+| 5 | Maintenance | `Employee.Specialization`/`.CertificationLevel`/`.ExperienceLevel` (HR-written since lane O); `.CurrentWorkload` (never written) / `.MaxWorkload` (Maintenance's, unreachable writer) | `Technician` (has `EmployeeId` FK + `LastSyncDate`, duplicates name/contact/skill columns) | 🔴 **the sync never runs** — `GetFromHRModuleAsync` returns an empty list; `Technicians` has 0 rows and no reader (lane O, measured) | 🔴 |
 | 6 | Maintenance (Fleet) | `CompanyAsset` (vehicle, `Source=HrCreated`) | `MaintenanceAsset` (`IsFleetAsset=true`) | 🔴 no auto-link | 🔴 |
 | 7 | Maintenance (Fleet) | — | `FleetTrip.DriverEmployeeId` → `Employee` | ✅ | — |
 | 8 | Maintenance (Fleet) | `StaffTravelGroundTransport.FleetTripId` (bare `Guid?`, no nav) — HR **creates** the trip via `IFleetTripService.CreateTripAsync` | `FleetTrip` | 🟡 service-level push, no FK, no conflict-detection | 🟡 |
@@ -148,6 +159,12 @@ is a real, working FK for company-vehicle travel legs.
   designed as a cache of the HR record. The open question is whether anything ever writes
   `LastSyncDate` (not verified). If nothing does, the drift risk is real; if something does, the
   fix is to make HR's copy the source and the cache read-only.
+  **⚠ Answered 2026-09-23 (round 4, lane O): nothing does.** The sync reads an HR stub that returns
+  an empty list, `LastSyncDate` is never written, and the `Technicians` table is empty and read by no
+  service. So there is no cache to make read-only. Maintenance reads HR's `Employee` directly, and
+  what it reads is now maintained: `CanBeAssignedToMaintenance` follows the position's **Technician
+  role** flag unless HR sets it by hand, and HR's form writes the trade and the two levels.
+  `CurrentWorkload`/`MaxWorkload` remain Maintenance's to compute (register § 2.9).
 - **A company vehicle can exist as two unrelated records.** Fleet vehicles are modelled as
   `MaintenanceAsset` rows with `IsFleetAsset=true` — but an HR-created `CompanyAsset` representing
   the same car has no field or process that creates (or checks for) the matching

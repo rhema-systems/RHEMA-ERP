@@ -455,6 +455,8 @@ public class BudgetRevisionLineInputDto
 {
     public Guid? SegmentValueId { get; set; }
 
+    public Guid? FinanceDimensionSetId { get; set; }
+
     [Required]
     public Guid AccountId { get; set; }
 
@@ -479,6 +481,10 @@ public class BudgetRevisionLineDto
     public Guid? SegmentValueId { get; set; }
     public string SegmentCode { get; set; } = string.Empty;
     public string SegmentName { get; set; } = "General";
+    public Guid? FinanceDimensionSetId { get; set; }
+    public string DimensionCombination { get; set; } = string.Empty;
+    public IReadOnlyList<BudgetDimensionAssignmentDto> DimensionAssignments { get; set; } =
+        Array.Empty<BudgetDimensionAssignmentDto>();
     public Guid AccountId { get; set; }
     public string AccountCode { get; set; } = string.Empty;
     public string AccountName { get; set; } = string.Empty;
@@ -518,4 +524,34 @@ public class BudgetRevisionDto
     public string RowVersion { get; set; } = string.Empty;
     public IReadOnlyList<BudgetRevisionLineDto> Lines { get; set; } =
         Array.Empty<BudgetRevisionLineDto>();
+}
+
+public sealed class FinanceBudgetReconciliationIssueDto
+{
+    public string Code { get; set; } = string.Empty;
+    public string Severity { get; set; } = "Error";
+    public Guid? ReservationId { get; set; }
+    public string? SourceDocumentType { get; set; }
+    public Guid? SourceDocumentId { get; set; }
+    public Guid? JournalEntryId { get; set; }
+    public Guid? PostingEventId { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public string RecommendedAction { get; set; } = string.Empty;
+}
+
+public sealed class FinanceBudgetReconciliationReportDto
+{
+    public DateTime GeneratedAtUtc { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid? PrimaryAccountingBookId { get; set; }
+    public string? PrimaryAccountingBookCode { get; set; }
+    public int ReservationCount { get; set; }
+    public int ActiveReservationCount { get; set; }
+    public int ConsumedReservationCount { get; set; }
+    public int ReleasedReservationCount { get; set; }
+    public int ErrorCount { get; set; }
+    public int WarningCount { get; set; }
+    public bool IsReconciled => ErrorCount == 0;
+    public IReadOnlyList<FinanceBudgetReconciliationIssueDto> Issues { get; set; } =
+        Array.Empty<FinanceBudgetReconciliationIssueDto>();
 }

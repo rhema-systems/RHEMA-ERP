@@ -197,7 +197,9 @@ export type AppraisalSubStatus =
   | 'AppealUnderReview'
   | 'AppealResolved'
   | 'Completed'
-  | 'Closed';
+  | 'Closed'
+  /** Taken out of the cycle (D-10) — not being appraised. */
+  | 'Withdrawn';
 
 /**
  * Result of the cycle-wide "advance overdue appraisals" sweep.

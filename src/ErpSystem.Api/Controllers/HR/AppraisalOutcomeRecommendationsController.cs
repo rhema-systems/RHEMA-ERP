@@ -91,16 +91,24 @@ public class AppraisalOutcomeRecommendationsController : ControllerBase
     /// appraisee: a proposed-but-undecided outcome ("PIP", "termination") is not theirs to see
     /// until HR decides it and it reaches them through its own module.
     /// </summary>
+    /// <remarks>
+    /// Not an HR officer who is the appraisee either (performance closure P2, the two-actor rule):
+    /// the policy test came first, so the desk read its own proposed outcomes.
+    /// </remarks>
     private async Task<bool> CanAccessAppraisalAsync(Guid appraisalId, CancellationToken ct)
     {
-        if (await HoldsPolicyAsync(HrPermissions.PerformanceReadPolicy)) return true;
-        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
+        var me = _currentUserService.EmployeeId is Guid id && id != Guid.Empty ? id : (Guid?)null;
 
-        return await _db.Set<PerformanceAppraisal>()
+        var parties = await _db.Set<PerformanceAppraisal>()
             .AsNoTracking()
             .Where(a => a.Id == appraisalId && a.TenantId == tenantId)
-            .AnyAsync(a => a.Employee.ManagerId == me, ct);
+            .Select(a => new { a.EmployeeId, a.Employee.ManagerId })
+            .FirstOrDefaultAsync(ct);
+
+        if (parties is not null && me is Guid subject && parties.EmployeeId == subject) return false;
+        if (await HoldsPolicyAsync(HrPermissions.PerformanceReadPolicy)) return true;
+        return parties is not null && me is Guid manager && parties.ManagerId == manager;
     }
 
     /// <summary>Get recommendations for an appraisal</summary>

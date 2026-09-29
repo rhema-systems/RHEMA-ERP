@@ -243,6 +243,7 @@ public static class AppraisalMappingExtensions
             IsCalibrated = entity.IsCalibrated,
             CalibrationSessionId = entity.CalibrationSessionId,
             PreCalibrationScore = entity.PreCalibrationScore,
+            CalibratedOverallScore = entity.CalibratedOverallScore,
             OverallGradeDefinitionId = entity.OverallGradeDefinitionId,
             EmployeeAcknowledged = entity.EmployeeAcknowledged,
             EmployeeAcknowledgedDate = entity.EmployeeAcknowledgedDate,
@@ -294,11 +295,12 @@ public static class AppraisalMappingExtensions
     /// caller sending the record back unchanged must not be rejected for including them. Ignoring
     /// them is the behaviour; the DTO shape is unchanged.</para>
     ///
-    /// <para>⚠ Not changed here, and recorded rather than assumed: this mapper also assigns
-    /// <c>OverallScore</c>, while <c>UpdateAppraisalHRReviewDto</c> carries an
-    /// <c>AdjustedOverallScore</c> WITH an <c>AdjustmentReason</c> — which looks like the intended
-    /// path for changing a computed score. That was not probed, so it is left alone; see the closure
-    /// ledger.</para>
+    /// <para><c>OverallScore</c> is ignored the same way (performance closure A6): the settle path
+    /// (<c>AppraisalScoreService</c>) is its only writer, and HR restates a score only through
+    /// calibration or an appeal (D-11). This mapper used to copy it from the body — and the HR
+    /// review's "Correct dates" (<c>appraisal-run.service.ts updateHeader</c>) sends no score at
+    /// all, so correcting an appraisal's dates set its final score to null, with no grade change,
+    /// no talent sync and no trace.</para>
     /// </remarks>
     public static void UpdateEntity(this UpdatePerformanceAppraisalDto dto, PerformanceAppraisal entity)
     {
@@ -309,7 +311,7 @@ public static class AppraisalMappingExtensions
         entity.StartDate = dto.StartDate;
         entity.EndDate = dto.EndDate;
         entity.PeerEvaluatorsCount = dto.PeerEvaluatorsCount;
-        entity.OverallScore = dto.OverallScore;
+        // entity.OverallScore     — NOT assigned. See the remarks above.
         entity.RankInPosition = dto.RankInPosition;
         entity.RankInUnit = dto.RankInUnit;
         entity.OverallComments = dto.OverallComments;
@@ -346,7 +348,6 @@ public static class AppraisalMappingExtensions
             EvaluatorName = entity.Evaluator.FullName,
             EvaluatorRole = entity.EvaluatorRole,
             EvaluatorWeight = entity.EvaluatorWeight,
-            IsAuthoritative = entity.IsAuthoritative,
             StartedDate = entity.StartedDate,
             SubmittedDate = entity.SubmittedDate,
             TotalScore = entity.TotalScore,
@@ -367,7 +368,6 @@ public static class AppraisalMappingExtensions
             EvaluatorId = dto.EvaluatorId,
             EvaluatorRole = dto.EvaluatorRole,
             EvaluatorWeight = dto.EvaluatorWeight,
-            IsAuthoritative = dto.IsAuthoritative,
             StartedDate = DateTime.UtcNow,
             OverallNotes = dto.OverallNotes,
             Recommendation = dto.Recommendation
@@ -380,7 +380,6 @@ public static class AppraisalMappingExtensions
         entity.EvaluatorId = dto.EvaluatorId;
         entity.EvaluatorRole = dto.EvaluatorRole;
         entity.EvaluatorWeight = dto.EvaluatorWeight;
-        entity.IsAuthoritative = dto.IsAuthoritative;
         entity.OverallNotes = dto.OverallNotes;
         entity.Recommendation = dto.Recommendation;
     }
@@ -606,24 +605,23 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <remarks>
+    /// Performance closure P5: the plan's content only. Who the plan is about (<c>EmployeeId</c>),
+    /// the appraisal it came from, its supervisor and HR owner are fixed at create — changing the
+    /// supervisor or HR owner silently handed that person read and manage rights through
+    /// <c>PipAccess</c>, and moving the plan to another employee skipped the one-live-plan rule.
+    /// Status, outcome and completion belong to submit/approve/complete, never to the edit form.
+    /// </remarks>
     public static void UpdateEntity(this UpdatePerformanceImprovementPlanDto dto, PerformanceImprovementPlan entity)
     {
-        entity.EmployeeId = dto.EmployeeId;
-        entity.AppraisalId = dto.AppraisalId;
         entity.StartDate = dto.StartDate;
         entity.EndDate = dto.EndDate;
-        entity.Status = dto.Status;
         entity.PerformanceIssues = dto.PerformanceIssues;
         entity.ExpectedStandards = dto.ExpectedStandards;
         entity.ImprovementActions = dto.ImprovementActions;
         entity.SupportProvided = dto.SupportProvided;
         entity.MeasurementCriteria = dto.MeasurementCriteria;
-        entity.SupervisorId = dto.SupervisorId;
-        entity.HROwnerId = dto.HROwnerId;
         entity.ReviewSchedule = dto.ReviewSchedule;
-        entity.CompletionDate = dto.CompletionDate;
-        entity.Outcome = dto.Outcome;
-        entity.OutcomeNotes = dto.OutcomeNotes;
     }
 
     public static List<PerformanceImprovementPlanDto> ToDtoList(this IEnumerable<PerformanceImprovementPlan> entities)
@@ -657,6 +655,11 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <remarks>
+    /// Performance closure P13: <c>EmployeeComments</c> is the employee's right of reply and is
+    /// written only through <c>SetEmployeeCommentsAsync</c>, by the plan's subject. The conductor
+    /// is set by the controller from the caller's token; the body's value is not trusted.
+    /// </remarks>
     public static PipReviewMeeting ToEntity(this CreatePipReviewMeetingDto dto)
     {
         return new PipReviewMeeting
@@ -667,21 +670,21 @@ public static class AppraisalMappingExtensions
             ProgressNotes = dto.ProgressNotes,
             IssuesDiscussed = dto.IssuesDiscussed,
             ActionsAgreed = dto.ActionsAgreed,
-            EmployeeComments = dto.EmployeeComments,
             ConductedById = dto.ConductedById
         };
     }
 
+    /// <remarks>
+    /// The supervisor's record of the meeting only (P13): not the plan it belongs to, not who
+    /// conducted it, and not the employee's reply.
+    /// </remarks>
     public static void UpdateEntity(this UpdatePipReviewMeetingDto dto, PipReviewMeeting entity)
     {
-        entity.PipId = dto.PipId;
         entity.MeetingDate = dto.MeetingDate;
         entity.EmployeeAttended = dto.EmployeeAttended;
         entity.ProgressNotes = dto.ProgressNotes;
         entity.IssuesDiscussed = dto.IssuesDiscussed;
         entity.ActionsAgreed = dto.ActionsAgreed;
-        entity.EmployeeComments = dto.EmployeeComments;
-        entity.ConductedById = dto.ConductedById;
     }
 
     public static List<PipReviewMeetingDto> ToDtoList(this IEnumerable<PipReviewMeeting> entities)
@@ -713,7 +716,6 @@ public static class AppraisalMappingExtensions
             PeerEvaluationOpenMode = entity.PeerEvaluationOpenMode,
             RequireManagerEvaluation = entity.RequireManagerEvaluation,
             ManagerEvaluationWeight = entity.ManagerEvaluationWeight,
-            IsManagerAuthoritative = entity.IsManagerAuthoritative,
             ShowSelfScoreToManager = entity.ShowSelfScoreToManager,
             ShowPeerScoresToManager = entity.ShowPeerScoresToManager,
             ShowScoreBreakdownToEmployee = entity.ShowScoreBreakdownToEmployee,
@@ -740,7 +742,6 @@ public static class AppraisalMappingExtensions
             InterimReviewDepth = entity.InterimReviewDepth,
             RequireMidYearSelfAssessment = entity.RequireMidYearSelfAssessment,
             RequireGoalProgressUpdateAtReview = entity.RequireGoalProgressUpdateAtReview,
-            RequireDevelopmentPlanUpdate = entity.RequireDevelopmentPlanUpdate,
             AutoLockOnDeadline = entity.AutoLockOnDeadline,
             DefaultHRReviewerId = entity.DefaultHRReviewerId,
             ProbationExtensionMonths = entity.ProbationExtensionMonths,
@@ -775,7 +776,6 @@ public static class AppraisalMappingExtensions
             PeerEvaluationOpenMode = dto.PeerEvaluationOpenMode,
             RequireManagerEvaluation = dto.RequireManagerEvaluation,
             ManagerEvaluationWeight = dto.ManagerEvaluationWeight,
-            IsManagerAuthoritative = dto.IsManagerAuthoritative,
             ShowSelfScoreToManager = dto.ShowSelfScoreToManager,
             ShowPeerScoresToManager = dto.ShowPeerScoresToManager,
             ShowScoreBreakdownToEmployee = dto.ShowScoreBreakdownToEmployee,
@@ -802,7 +802,6 @@ public static class AppraisalMappingExtensions
             InterimReviewDepth = dto.InterimReviewDepth,
             RequireMidYearSelfAssessment = dto.RequireMidYearSelfAssessment,
             RequireGoalProgressUpdateAtReview = dto.RequireGoalProgressUpdateAtReview,
-            RequireDevelopmentPlanUpdate = dto.RequireDevelopmentPlanUpdate,
             AutoLockOnDeadline = dto.AutoLockOnDeadline,
             DefaultHRReviewerId = dto.DefaultHRReviewerId,
             ProbationExtensionMonths = dto.ProbationExtensionMonths,
@@ -831,7 +830,6 @@ public static class AppraisalMappingExtensions
         entity.PeerEvaluationOpenMode = dto.PeerEvaluationOpenMode;
         entity.RequireManagerEvaluation = dto.RequireManagerEvaluation;
         entity.ManagerEvaluationWeight = dto.ManagerEvaluationWeight;
-        entity.IsManagerAuthoritative = dto.IsManagerAuthoritative;
         entity.ShowSelfScoreToManager = dto.ShowSelfScoreToManager;
         entity.ShowPeerScoresToManager = dto.ShowPeerScoresToManager;
         entity.ShowScoreBreakdownToEmployee = dto.ShowScoreBreakdownToEmployee;
@@ -858,7 +856,6 @@ public static class AppraisalMappingExtensions
         entity.InterimReviewDepth = dto.InterimReviewDepth;
         entity.RequireMidYearSelfAssessment = dto.RequireMidYearSelfAssessment;
         entity.RequireGoalProgressUpdateAtReview = dto.RequireGoalProgressUpdateAtReview;
-        entity.RequireDevelopmentPlanUpdate = dto.RequireDevelopmentPlanUpdate;
         entity.AutoLockOnDeadline = dto.AutoLockOnDeadline;
         entity.DefaultHRReviewerId = dto.DefaultHRReviewerId;
         entity.ProbationExtensionMonths = dto.ProbationExtensionMonths;
@@ -1261,6 +1258,7 @@ public static class AppraisalMappingExtensions
             Description = entity.Description,
             DisplayOrder = entity.DisplayOrder,
             Weight = entity.Weight,
+            Kind = entity.Kind,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -1276,7 +1274,8 @@ public static class AppraisalMappingExtensions
             SectionName = dto.SectionName,
             Description = dto.Description,
             DisplayOrder = dto.DisplayOrder,
-            Weight = dto.Weight
+            Weight = dto.Weight,
+            Kind = dto.Kind ?? AppraisalSectionKind.Fixed
         };
     }
 
@@ -1287,6 +1286,9 @@ public static class AppraisalMappingExtensions
         entity.Description = dto.Description;
         entity.DisplayOrder = dto.DisplayOrder;
         entity.Weight = dto.Weight;
+        // Omitted keeps the kind: the editor's section form predates it (lane L).
+        if (dto.Kind is AppraisalSectionKind kind)
+            entity.Kind = kind;
     }
 
     public static List<AppraisalTemplateSectionDto> ToDtoList(this IEnumerable<AppraisalTemplateSection> entities)
@@ -1815,9 +1817,10 @@ public static class AppraisalMappingExtensions
 
     public static void UpdateEntity(this UpdateEmployeeGoalDto dto, EmployeeGoal entity)
     {
-        entity.EmployeeId = dto.EmployeeId;
-        entity.AppraisalCycleId = dto.AppraisalCycleId;
-        entity.PerformanceAppraisalId = dto.PerformanceAppraisalId;
+        // EmployeeId, AppraisalCycleId and PerformanceAppraisalId are NOT copied (performance
+        // closure decision D-30): the owner and cycle are fixed at creation — an edit could move a
+        // goal into a colleague's set — and the appraisal link is the server's. Neither edit form
+        // sends the link, so copying it cleared the link on every edit made in the UI.
         entity.CompanyGoalId = dto.CompanyGoalId;
         entity.UnitGoalId = dto.UnitGoalId;
         entity.ParentGoalId = dto.ParentGoalId;
@@ -1897,15 +1900,18 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <remarks>
+    /// Never re-parents the entry (performance closure P8): the goal it records progress on is the
+    /// route's, and the review event it was logged at, fixed at create. The goal page's edit form
+    /// always sends <c>reviewEventId: null</c>, so copying it detached every event entry it touched.
+    /// </remarks>
     public static void UpdateEntity(this UpdateGoalProgressEntryDto dto, GoalProgressEntry entity)
     {
-        entity.EmployeeGoalId = dto.EmployeeGoalId;
         entity.ProgressPercent = dto.ProgressPercent;
         entity.ActualValue = dto.ActualValue;
         entity.Status = dto.Status;
         entity.Challenges = dto.Challenges;
         entity.Notes = dto.Notes;
-        entity.ReviewEventId = dto.ReviewEventId;
     }
 
     public static List<GoalProgressEntryDto> ToDtoList(this IEnumerable<GoalProgressEntry> entities)
@@ -1960,18 +1966,21 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <remarks>
+    /// Performance closure P6: who the check-in is about, who holds it and its cycle are fixed at
+    /// create — the private-note redaction trusts <c>ConductedById</c>, so a PUT that could change
+    /// it could make anyone the conductor. <c>PrivateNotes</c> is not mapped either: only the
+    /// conductor writes them, which the service decides (a non-conductor's PUT carries the
+    /// redacted null and wiped them).
+    /// </remarks>
     public static void UpdateEntity(this UpdateCheckInDto dto, CheckIn entity)
     {
-        entity.AppraisalCycleId = dto.AppraisalCycleId;
-        entity.EmployeeId = dto.EmployeeId;
-        entity.ConductedById = dto.ConductedById;
         entity.CheckInType = dto.CheckInType;
         entity.Title = dto.Title;
         entity.ScheduledDate = dto.ScheduledDate;
         entity.ConductedDate = dto.ConductedDate;
         entity.Agenda = dto.Agenda;
         entity.SharedNotes = dto.SharedNotes;
-        entity.PrivateNotes = dto.PrivateNotes;
         entity.ActionItems = dto.ActionItems;
         entity.FollowUpDate = dto.FollowUpDate;
         entity.EmployeeComments = dto.EmployeeComments;
@@ -2019,10 +2028,12 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <remarks>
+    /// Never re-parents the update (performance closure P7): moving it to another check-in or
+    /// another goal would carry its figures onto a goal the add-time ownership check never saw.
+    /// </remarks>
     public static void UpdateEntity(this UpdateCheckInGoalUpdateDto dto, CheckInGoalUpdate entity)
     {
-        entity.CheckInId = dto.CheckInId;
-        entity.EmployeeGoalId = dto.EmployeeGoalId;
         entity.UpdatedProgress = dto.UpdatedProgress;
         entity.UpdatedStatus = dto.UpdatedStatus;
         entity.FlaggedAtRisk = dto.FlaggedAtRisk;
@@ -2129,6 +2140,7 @@ public static class AppraisalMappingExtensions
             EndDate = entity.EndDate,
             PlanStatus = entity.PlanStatus,
             OverallNotes = entity.OverallNotes,
+            AuthorUserId = entity.CreatedById,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -2150,14 +2162,18 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <remarks>
+    /// Performance closure P10 (E10's PUT bullet, brought forward): the plan stays with its
+    /// employee — access is checked against the current owner, so moving it was unchecked — and
+    /// its status moves only through <c>UpdateStatusAsync</c>, which holds the transition and
+    /// authorship rules the PUT walked around.
+    /// </remarks>
     public static void UpdateEntity(this UpdateEmployeeDevelopmentPlanDto dto, EmployeeDevelopmentPlan entity)
     {
-        entity.EmployeeId = dto.EmployeeId;
         entity.AppraisalCycleId = dto.AppraisalCycleId;
         entity.Title = dto.Title;
         entity.StartDate = dto.StartDate;
         entity.EndDate = dto.EndDate;
-        entity.PlanStatus = dto.PlanStatus;
         entity.OverallNotes = dto.OverallNotes;
     }
 
@@ -2380,8 +2396,6 @@ public static class AppraisalMappingExtensions
             ReviewCompletedDate = entity.ReviewCompletedDate,
             IsApproved = entity.IsApproved,
             HRNotes = entity.HRNotes,
-            AdjustedOverallScore = entity.AdjustedOverallScore,
-            AdjustmentReason = entity.AdjustmentReason,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -2407,8 +2421,6 @@ public static class AppraisalMappingExtensions
         entity.ReviewCompletedDate = dto.ReviewCompletedDate;
         entity.IsApproved = dto.IsApproved;
         entity.HRNotes = dto.HRNotes;
-        entity.AdjustedOverallScore = dto.AdjustedOverallScore;
-        entity.AdjustmentReason = dto.AdjustmentReason;
     }
 
     public static List<AppraisalHRReviewDto> ToDtoList(this IEnumerable<AppraisalHRReview> entities)
@@ -2551,7 +2563,11 @@ public static class AppraisalMappingExtensions
             AppraisalNumber = entity.PerformanceAppraisal?.AppraisalNumber,
             EmployeeName = entity.PerformanceAppraisal?.Employee?.FullName,
             TemplateItemId = entity.TemplateItemId,
-            TemplateItemName = entity.TemplateItem?.Competency?.CriteriaName ?? entity.TemplateItem?.KpiDefinition?.KpiName,
+            CriterionConfigId = entity.CriterionConfigId,
+            IsOverall = entity.IsOverall,
+            TemplateItemName = entity.TemplateItem?.Competency?.CriteriaName
+                               ?? entity.TemplateItem?.KpiDefinition?.KpiName
+                               ?? entity.CriterionConfig?.ItemLabel,
             OriginalScore = entity.OriginalScore,
             AdjustedScore = entity.AdjustedScore,
             AdjustedById = entity.AdjustedById,
@@ -2572,6 +2588,10 @@ public static class AppraisalMappingExtensions
         {
             PerformanceAppraisalId = dto.PerformanceAppraisalId,
             TemplateItemId = dto.TemplateItemId,
+            CriterionConfigId = dto.CriterionConfigId,
+            // Neither key means the overall. A goal row has no template item (lane L3), so a null
+            // item alone no longer does; the service replaces both keys with the resolved ones.
+            IsOverall = !dto.TemplateItemId.HasValue && !dto.CriterionConfigId.HasValue,
             OriginalScore = dto.OriginalScore,
             AdjustedScore = dto.AdjustedScore,
             AdjustmentDate = DateTime.UtcNow,
@@ -2583,6 +2603,8 @@ public static class AppraisalMappingExtensions
     {
         entity.PerformanceAppraisalId = dto.PerformanceAppraisalId;
         entity.TemplateItemId = dto.TemplateItemId;
+        entity.CriterionConfigId = dto.CriterionConfigId;
+        entity.IsOverall = !dto.TemplateItemId.HasValue && !dto.CriterionConfigId.HasValue;
         entity.OriginalScore = dto.OriginalScore;
         entity.AdjustedScore = dto.AdjustedScore;
         entity.Rationale = dto.Rationale;

@@ -33,6 +33,8 @@ namespace ErpSystem.Web.Services
         Task SeedWithoutMigrationAsync();
         Task SeedBasicDataAsync();
         Task SeedWorkflowDefinitionsAsync();
+        /// <summary>HR's own approval workflows (HR and leave) and no other module's. Idempotent.</summary>
+        Task SeedHrWorkflowDefinitionsAsync();
         Task SeedFinanceWorkflowDefinitionsAsync();
         Task SeedEstateAcquisitionLandBankParcelsAsync();
         Task SeedTestUsersAsync();
@@ -100,6 +102,15 @@ namespace ErpSystem.Web.Services
                     "Financial Controller Review",
                     new[] { "Financial Controller" },
                     "Independent approval of accounting-book opening, period, or lifecycle evidence.")
+            };
+
+        private static readonly IReadOnlyList<WorkflowApprovalStageSeed> RecurringJournalApprovalStages =
+            new List<WorkflowApprovalStageSeed>
+            {
+                new(
+                    "Financial Controller Approval",
+                    new[] { "Financial Controller" },
+                    "Independent controller approval of the recurring standing instruction, generated occurrence, or requested waiver.")
             };
 
         private static readonly JsonSerializerOptions WorkflowSeedJsonOptions = CreateWorkflowSeedJsonOptions();
@@ -492,6 +503,17 @@ namespace ErpSystem.Web.Services
         /// re-activated or re-pointed; a tenant that has authored its own definition for a type is
         /// not overwritten. Payroll runs are excluded — payroll is another owner's module.</para>
         /// </remarks>
+        /// <summary>
+        /// The two HR steps of <see cref="SeedWorkflowDefinitionsAsync"/> on their own — what the
+        /// Developer Test Data screen's Foundation tier runs, so seeding HR does not also re-seed
+        /// every other module's definitions.
+        /// </summary>
+        public async Task SeedHrWorkflowDefinitionsAsync()
+        {
+            await EnsureHrWorkflowsSeededAsync();
+            await EnsureLeaveWorkflowsSeededAsync();
+        }
+
         private async Task EnsureHrWorkflowsSeededAsync()
         {
             try
@@ -1609,10 +1631,12 @@ namespace ErpSystem.Web.Services
                     await RetireAccountingBookApplicabilityWorkflowDefinitionsAsync(tenantId);
                     foreach (var spec in GetFinanceWorkflowSeedSpecs())
                     {
-                        var approvalStages = spec.EntityCode is
-                            "AccountingBookInitialization" or "AccountingBookPeriodLifecycle" or "AccountingBookLifecycle"
-                                or "DeltaAdjustmentJournal"
-                            ? AccountingBookApprovalStages
+                        var approvalStages = spec.EntityCode.StartsWith("RecurringJournal", StringComparison.Ordinal)
+                            ? RecurringJournalApprovalStages
+                            : spec.EntityCode is
+                                "AccountingBookInitialization" or "AccountingBookPeriodLifecycle" or "AccountingBookLifecycle"
+                                    or "DeltaAdjustmentJournal"
+                                ? AccountingBookApprovalStages
                             : spec.EntityCode is "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
                                 ? FinancePaymentApprovalStages
                                 : FinanceApprovalStages;
@@ -2037,6 +2061,16 @@ namespace ErpSystem.Web.Services
                     "Accounting Book Period Lifecycle Approval", "Independent approval of exact-book period opening and close transitions."),
                 new("AccountingBookLifecycle", "Accounting Book Lifecycle", typeof(AccountingBook).FullName,
                     "Accounting Book Lifecycle Approval", "Independent approval of governed accounting-book state transitions."),
+                new("RecurringJournalTemplate", "Recurring Journal Template", typeof(RecurringJournalTemplate).FullName,
+                    "Recurring Journal Template Approval",
+                    "Independent approval of a versioned standing journal instruction before schedule activation."),
+                new("RecurringJournalOccurrence", "Recurring Journal Occurrence", typeof(RecurringJournalOccurrence).FullName,
+                    "Recurring Journal Occurrence Approval",
+                    "Independent approval of each generated accounting occurrence before controlled posting."),
+                new("RecurringJournalOccurrenceWaiver", "Recurring Journal Occurrence Waiver", typeof(RecurringJournalOccurrence).FullName,
+                    "Recurring Journal Occurrence Waiver Approval",
+                    "Independent approval of an evidenced decision not to post a generated recurring occurrence."),
+
                 // Accounts Payable
                 new("FinancePurchaseOrder", "Finance Purchase Order", typeof(FinancePurchaseOrder).FullName, "Finance Purchase Order Approval",
                     "AP purchase order approval before supplier commitment, receiving, invoicing, or closure."),
@@ -2133,7 +2167,8 @@ namespace ErpSystem.Web.Services
                         entityClassName: typeof(BusinessPartner).FullName,
                         definitionName: "Business Partner Approval",
                         description: "Business partner onboarding workflow: Draft/PendingApproval -> PendingApproval -> Approved/Active.",
-                        approvalRoleNames: new[] { "Finance Manager", "Financial Controller", Constants.Roles.Manager, Constants.Roles.SuperAdmin });
+                        approvalRoleNames: new[] { "Finance Manager", "Financial Controller", Constants.Roles.Manager, Constants.Roles.SuperAdmin },
+                        preventInitiatorApproval: true);
                 }
             }
             catch (Exception ex)
@@ -5734,10 +5769,18 @@ namespace ErpSystem.Web.Services
             string? entityClassName,
             string definitionName,
             string description,
-            IReadOnlyCollection<string> approvalRoleNames)
+            IReadOnlyCollection<string> approvalRoleNames,
+            bool preventInitiatorApproval = false)
         {
             if (await HasExistingWorkflowConfigurationAsync(tenantId, entityCode, entityName, definitionName))
+            {
+                if (preventInitiatorApproval)
+                {
+                    await EnsureWorkflowInitiatorSeparationAsync(
+                        tenantId, definitionName, approvalRoleNames);
+                }
                 return;
+            }
             var entityTypeCandidates = await _context.WorkflowEntityTypes
                 .Where(et => !et.IsDeleted && et.TenantId == tenantId)
                 .ToListAsync();
@@ -5821,7 +5864,7 @@ namespace ErpSystem.Web.Services
                     changed = true;
                 }
 
-                if (EnsureApprovalStepConfigurations(existingDefinition.Steps, approvalRoleNames))
+                if (EnsureApprovalStepConfigurations(existingDefinition.Steps, approvalRoleNames, preventInitiatorApproval))
                 {
                     changed = true;
                 }
@@ -5860,7 +5903,7 @@ namespace ErpSystem.Web.Services
                 StepType = WorkflowStepType.Approval,
                 Order = 2,
                 IsRequired = true,
-                Configuration = BuildApprovalConfigurationJson(approvalRoleNames),
+                Configuration = BuildApprovalConfigurationJson(approvalRoleNames, preventInitiatorApproval),
                 CreatedAt = now,
                 CreatedBy = "System"
             };
@@ -5924,6 +5967,54 @@ namespace ErpSystem.Web.Services
                 });
 
             await _context.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Maker-checker is an identity-governance invariant for selected master-data workflows,
+        /// not a demo default. Preserve tenant-authored approver rules while repairing older
+        /// definitions that pre-date the explicit initiator-separation flags.
+        /// </summary>
+        private async Task EnsureWorkflowInitiatorSeparationAsync(
+            Guid tenantId,
+            string definitionName,
+            IReadOnlyCollection<string> fallbackApprovalRoleNames)
+        {
+            var definition = await _context.WorkflowDefinitions
+                .Include(item => item.Steps)
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                    && item.Name == definitionName)
+                .OrderByDescending(item => item.IsActive)
+                .ThenByDescending(item => item.Version)
+                .FirstOrDefaultAsync();
+            if (definition == null)
+                return;
+
+            var changed = false;
+            var now = DateTime.UtcNow;
+            foreach (var step in definition.Steps.Where(item =>
+                         !item.IsDeleted && item.StepType == WorkflowStepType.Approval))
+            {
+                var configuration = DeserializeWorkflowStepConfiguration(step.Configuration)
+                    ?? new WorkflowStepConfigurationDto();
+                configuration.ApprovalConfig ??= BuildApprovalConfig(fallbackApprovalRoleNames);
+                if (configuration.ApprovalConfig.PreventInitiatorApproval
+                    && configuration.ApprovalConfig.RequireDistinctApprovers)
+                    continue;
+
+                configuration.ApprovalConfig.PreventInitiatorApproval = true;
+                configuration.ApprovalConfig.RequireDistinctApprovers = true;
+                step.Configuration = JsonSerializer.Serialize(configuration, WorkflowSeedJsonOptions);
+                step.UpdatedAt = now;
+                step.UpdatedBy = "System (maker-checker repair)";
+                changed = true;
+            }
+
+            if (changed)
+            {
+                definition.UpdatedAt = now;
+                definition.UpdatedBy = "System (maker-checker repair)";
+                await _context.SaveChangesAsync();
+            }
         }
 
         private async Task EnsureSequentialWorkflowDefinitionSeededAsync(
@@ -6331,15 +6422,17 @@ namespace ErpSystem.Web.Services
 
         private static bool EnsureApprovalStepConfigurations(
             IEnumerable<WorkflowStep> steps,
-            IReadOnlyCollection<string> approvalRoleNames)
+            IReadOnlyCollection<string> approvalRoleNames,
+            bool preventInitiatorApproval = false)
         {
-            return EnsureApprovalStepConfigurations(steps, approvalRoleNames, DateTime.UtcNow);
+            return EnsureApprovalStepConfigurations(steps, approvalRoleNames, DateTime.UtcNow, preventInitiatorApproval);
         }
 
         private static bool EnsureApprovalStepConfigurations(
             IEnumerable<WorkflowStep> steps,
             IReadOnlyCollection<string> approvalRoleNames,
-            DateTime now)
+            DateTime now,
+            bool preventInitiatorApproval = false)
         {
             var approvalSteps = steps
                 .Where(s => s.StepType == WorkflowStepType.Approval && !s.IsDeleted)
@@ -6358,7 +6451,7 @@ namespace ErpSystem.Web.Services
             var changed = false;
             foreach (var step in targetSteps)
             {
-                if (EnsureApprovalStepConfiguration(step, approvalRoleNames, now))
+                if (EnsureApprovalStepConfiguration(step, approvalRoleNames, now, preventInitiatorApproval))
                 {
                     changed = true;
                 }
@@ -6370,15 +6463,16 @@ namespace ErpSystem.Web.Services
         private static bool EnsureApprovalStepConfiguration(
             WorkflowStep step,
             IReadOnlyCollection<string> approvalRoleNames,
-            DateTime now)
+            DateTime now,
+            bool preventInitiatorApproval = false)
         {
-            if (ApprovalRolesMatch(step.Configuration, approvalRoleNames))
+            if (ApprovalConfigurationMatches(step.Configuration, approvalRoleNames, preventInitiatorApproval))
             {
                 return false;
             }
 
             var configuration = DeserializeWorkflowStepConfiguration(step.Configuration) ?? new WorkflowStepConfigurationDto();
-            configuration.ApprovalConfig = BuildApprovalConfig(approvalRoleNames);
+            configuration.ApprovalConfig = BuildApprovalConfig(approvalRoleNames, preventInitiatorApproval);
 
             step.Configuration = JsonSerializer.Serialize(configuration, WorkflowSeedJsonOptions);
             step.UpdatedAt = now;
@@ -6410,17 +6504,25 @@ namespace ErpSystem.Web.Services
             return true;
         }
 
-        private static bool ApprovalRolesMatch(string? configurationJson, IReadOnlyCollection<string> approvalRoleNames)
+        private static bool ApprovalConfigurationMatches(
+            string? configurationJson,
+            IReadOnlyCollection<string> approvalRoleNames,
+            bool preventInitiatorApproval)
         {
             var expectedRoles = approvalRoleNames
                 .Where(role => !string.IsNullOrWhiteSpace(role))
                 .Select(role => role.Trim())
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            var actualRoles = GetApprovalRolesFromConfiguration(configurationJson)
+            var configuration = DeserializeWorkflowStepConfiguration(configurationJson)?.ApprovalConfig;
+            var actualRoles = (configuration?.ApproverRules ?? [])
+                .Where(rule => rule.AssignmentType == WorkflowAssignmentType.Role && !string.IsNullOrWhiteSpace(rule.Role))
+                .Select(rule => rule.Role!.Trim())
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            return expectedRoles.SetEquals(actualRoles);
+            return expectedRoles.SetEquals(actualRoles)
+                && (!preventInitiatorApproval || configuration is
+                    { PreventInitiatorApproval: true, RequireDistinctApprovers: true });
         }
 
         private static IReadOnlyList<string> GetApprovalRolesFromConfiguration(string? configurationJson)
@@ -6464,23 +6566,29 @@ namespace ErpSystem.Web.Services
                 .Select(char.ToUpperInvariant)
                 .ToArray());
 
-        private static string BuildApprovalConfigurationJson(IReadOnlyCollection<string> approvalRoleNames)
+        private static string BuildApprovalConfigurationJson(
+            IReadOnlyCollection<string> approvalRoleNames,
+            bool preventInitiatorApproval = false)
         {
             var configuration = new WorkflowStepConfigurationDto
             {
-                ApprovalConfig = BuildApprovalConfig(approvalRoleNames)
+                ApprovalConfig = BuildApprovalConfig(approvalRoleNames, preventInitiatorApproval)
             };
 
             return JsonSerializer.Serialize(configuration, WorkflowSeedJsonOptions);
         }
 
-        private static WorkflowApprovalConfigDto BuildApprovalConfig(IReadOnlyCollection<string> approvalRoleNames)
+        private static WorkflowApprovalConfigDto BuildApprovalConfig(
+            IReadOnlyCollection<string> approvalRoleNames,
+            bool preventInitiatorApproval = false)
         {
             return new WorkflowApprovalConfigDto
             {
                 ApprovalType = WorkflowApprovalType.Single,
                 MinApprovalsRequired = 1,
                 RejectionHandling = WorkflowRejectionHandling.StopWorkflow,
+                PreventInitiatorApproval = preventInitiatorApproval,
+                RequireDistinctApprovers = preventInitiatorApproval,
                 ApproverRules = approvalRoleNames
                     .Where(role => !string.IsNullOrWhiteSpace(role))
                     .Select(role => role.Trim())
@@ -10309,7 +10417,9 @@ namespace ErpSystem.Web.Services
                     "Finance.BudgetReturns.Assign",
                     "Finance.BudgetReturns.Edit",
                     "Finance.BudgetReturns.Submit"
-                },
+                }
+                    // HR side: valuing the pay HR records in days (leave settings audit 2, P2).
+                    .Concat(HrPermissions.GrantsFor("Senior Accountant")).ToArray(),
                 ["Finance Manager"] = new[]
                 {
                     "Finance.Read",
@@ -10388,7 +10498,13 @@ namespace ErpSystem.Web.Services
                     // Chief Accountants own period-end review and controlled financial-report
                     // distribution. Export remains separately permission-gated at the API/UI.
                     "Finance.Reports.Export"
-                },
+                }
+                    // HR side: valuing the pay HR records in days (leave settings audit 2, P2).
+                    .Concat(HrPermissions.GrantsFor("Chief Accountant")).ToArray(),
+                // Finance Officer had no entry here: its only grant from this map is the HR
+                // valuation step (leave settings audit 2, P2). The map ADDS what is missing, so
+                // whatever else the role holds is untouched.
+                ["Finance Officer"] = HrPermissions.GrantsFor("Finance Officer"),
                 // ⚠ "Managing Director" and Constants.Roles.ManagingDirector are the SAME string,
                 // and this initializer's [key] = value syntax silently overwrites duplicates. The
                 // Finance and HR grants for the MD therefore live in ONE entry here — a second

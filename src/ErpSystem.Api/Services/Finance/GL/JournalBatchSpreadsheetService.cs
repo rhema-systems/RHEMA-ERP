@@ -17,7 +17,7 @@ namespace ErpSystem.Api.Services.Finance.GL;
 
 public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetService
 {
-    private const string TemplateVersion = "1";
+    private const string TemplateVersion = "2";
     private const int MaximumFileBytes = 10 * 1024 * 1024;
     // Defensive parser ceilings. They are not a certified performance/SLA envelope.
     private const int MaximumJournalRows = 5_000;
@@ -25,6 +25,7 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
     private readonly IJournalBatchService _batches;
+    private readonly FinanceDimensionAdministrationService _financeDimensions;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -36,6 +37,7 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
         _context = context;
         _currentUser = currentUser;
         _batches = batches;
+        _financeDimensions = new FinanceDimensionAdministrationService(context, currentUser);
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -201,7 +203,7 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
             {
                 Description = payload.Batch.Description,
                 FiscalPeriodId = payload.Batch.FiscalPeriodId,
-                BookClassification = payload.Batch.BookClassification,
+                AccountingBookId = payload.Batch.AccountingBookId,
                 ControlCurrencyCode = payload.Batch.ControlCurrencyCode,
                 ExpectedDebitTotal = payload.Batch.ExpectedDebitTotal,
                 ExpectedJournalCount = payload.Batch.ExpectedJournalCount,
@@ -234,7 +236,9 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
                         Reference = x.Reference ?? journal.Reference ?? string.Empty,
                         CurrencyCode = x.CurrencyCode,
                         ForeignAmount = x.ForeignAmount,
+                        ExchangeRateId = x.ExchangeRateId,
                         ExchangeRate = x.ExchangeRate,
+                        Dimensions = x.Dimensions,
                         LineNumber = x.LineNumber
                     }).ToList()
                 }, cancellationToken);
@@ -317,6 +321,11 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
                     .ThenInclude(journal => journal.Transactions)
                         .ThenInclude(transaction => transaction.Account)
             .Include(x => x.Items.Where(item => !item.IsDeleted))
+                .ThenInclude(item => item.JournalEntry)
+                    .ThenInclude(journal => journal.Transactions)
+                        .ThenInclude(transaction => transaction.FinanceDimensionSet)
+                            .ThenInclude(set => set!.Items)
+            .Include(x => x.Items.Where(item => !item.IsDeleted))
                 .ThenInclude(item => item.Reviews.Where(review => !review.IsDeleted))
             .Include(x => x.PostingRuns.Where(run => !run.IsDeleted))
             .AsSplitQuery()
@@ -366,6 +375,14 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
                 SetCellValue(linesSheet, lineRow, 8, line.ExchangeRate);
                 SetCellValue(linesSheet, lineRow, 9, line.Description);
                 SetCellValue(linesSheet, lineRow, 10, line.SourceReferenceNumber);
+                SetCellValue(linesSheet, lineRow, 11, line.ExchangeRateId);
+                SetCellValue(linesSheet, lineRow, 12, line.FinanceDimensionSet == null
+                    ? null
+                    : JsonSerializer.Serialize(
+                        line.FinanceDimensionSet.Items
+                            .OrderBy(item => item.DimensionCodeSnapshot)
+                            .ToDictionary(item => item.DimensionCodeSnapshot, item => item.DimensionValueCodeSnapshot),
+                        JsonOptions));
                 lineRow++;
             }
         }
@@ -406,8 +423,11 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
             ("Rules", "Do not rename sheets or columns. Do not use formulas, macros, or external links."),
             ("ClientJournalKey", "A workbook-local key joining JournalEntries to JournalLines; it is not stored as the journal number."),
             ("Control total", "ExpectedDebitTotal must equal the sum of each journal's debit total."),
+            ("Accounting book", "BookClassification is the exact governed book code from Lookups. Only listed PrimaryFull and Delta books may be selected."),
             ("Dates", "Use ISO yyyy-mm-dd dates within the selected open fiscal period."),
-            ("Amounts", "Each line must be Debit or Credit with a positive amount; each journal must balance.")
+            ("Amounts", "Each line must be Debit or Credit with a positive amount; each journal must balance."),
+            ("Foreign currency", "Supply ForeignAmount, ExchangeRate and the approved ExchangeRateId from Lookups for every foreign-currency line."),
+            ("Coding dimensions", "DimensionsJson is a JSON object of dimension codes to value codes, for example {\"DEPARTMENT\":\"FINANCE\"}. Required and fixed rules are revalidated at preview and commit.")
         };
         for (var row = 0; row < rows.Length; row++)
         {
@@ -423,8 +443,6 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
         var sheet = workbook.Worksheets.Add("Batch");
         WriteHeaders(sheet, ["TemplateVersion", "Description", "FiscalPeriodId", "BookClassification", "ControlCurrencyCode", "ExpectedDebitTotal", "ExpectedJournalCount", "Notes"]);
         SetCellValue(sheet, 2, 1, TemplateVersion);
-        SetCellValue(sheet, 2, 4, "IFRS");
-        SetCellValue(sheet, 2, 5, "GHS");
         return sheet;
     }
 
@@ -438,14 +456,14 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
     private static IXLWorksheet AddLinesSheet(XLWorkbook workbook)
     {
         var sheet = workbook.Worksheets.Add("JournalLines");
-        WriteHeaders(sheet, ["ClientJournalKey", "LineNumber", "AccountNumber", "TransactionType", "Amount", "CurrencyCode", "ForeignAmount", "ExchangeRate", "Description", "Reference"]);
+        WriteHeaders(sheet, ["ClientJournalKey", "LineNumber", "AccountNumber", "TransactionType", "Amount", "CurrencyCode", "ForeignAmount", "ExchangeRate", "Description", "Reference", "ExchangeRateId", "DimensionsJson"]);
         return sheet;
     }
 
     private async Task AddLookupsSheetAsync(XLWorkbook workbook, CancellationToken cancellationToken)
     {
         var sheet = workbook.Worksheets.Add("Lookups");
-        WriteHeaders(sheet, ["AccountNumber", "AccountName", "AllowDirectPosting", "FiscalPeriodId", "FiscalPeriodName", "StartDate", "EndDate"]);
+        WriteHeaders(sheet, ["AccountNumber", "AccountName", "AllowDirectPosting", "FiscalPeriodId", "FiscalPeriodName", "StartDate", "EndDate", "BookCode", "BookName", "BookType", "BookFiscalPeriodId", "ExchangeRateId", "BaseCurrency", "TargetCurrency", "Rate", "EffectiveDate", "EndDate", "ApprovalStatus", "DimensionCode", "DimensionName", "ValueCode", "ValueName", "DimensionClassification"]);
         var accounts = await _context.Accounts.AsNoTracking()
             .Where(x => x.TenantId == TenantId && !x.IsDeleted && x.Status == AccountStatus.Active)
             .OrderBy(x => x.AccountNumber)
@@ -456,7 +474,63 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
             .OrderBy(x => x.StartDate)
             .Select(x => new { x.Id, x.PeriodName, x.StartDate, x.EndDate })
             .ToListAsync(cancellationToken);
-        var rows = Math.Max(accounts.Count, periods.Count);
+        var books = await _context.AccountingBookPeriods.AsNoTracking()
+            .Where(period => period.TenantId == TenantId && !period.IsDeleted &&
+                             period.PeriodStatus == AccountingBookPeriodStatus.Open &&
+                             period.PendingStatus != AccountingBookPeriodStatus.Closed &&
+                             period.PendingStatus != AccountingBookPeriodStatus.Locked &&
+                             period.AccountingBook.TenantId == TenantId &&
+                             !period.AccountingBook.IsDeleted &&
+                             period.AccountingBook.IsActive &&
+                             period.AccountingBook.AllowsPosting &&
+                             period.AccountingBook.LifecycleStatus == AccountingBookLifecycleStatus.Active &&
+                             (period.AccountingBook.BookType == AccountingBookType.PrimaryFull ||
+                              period.AccountingBook.BookType == AccountingBookType.Delta))
+            .OrderByDescending(period => period.AccountingBook.IsDefault)
+            .ThenBy(period => period.AccountingBook.SortOrder)
+            .Select(period => new
+            {
+                period.AccountingBook.Code,
+                period.AccountingBook.Name,
+                period.AccountingBook.BookType,
+                period.FiscalPeriodId
+            })
+            .ToListAsync(cancellationToken);
+        var rates = await _context.ExchangeRates.AsNoTracking()
+            .Where(rate => rate.TenantId == TenantId && !rate.IsDeleted && rate.IsActive &&
+                           (rate.ApprovalStatus == RateApprovalStatus.Approved ||
+                            rate.ApprovalStatus == RateApprovalStatus.AutoApproved))
+            .OrderBy(rate => rate.TargetCurrencyCode)
+            .ThenByDescending(rate => rate.EffectiveDate)
+            .Select(rate => new
+            {
+                rate.Id,
+                rate.BaseCurrencyCode,
+                rate.TargetCurrencyCode,
+                rate.Rate,
+                rate.EffectiveDate,
+                rate.EndDate,
+                rate.ApprovalStatus
+            })
+            .ToListAsync(cancellationToken);
+        var dimensionValues = await _context.FinanceDimensionDefinitions.AsNoTracking()
+            .Where(definition => definition.TenantId == TenantId && !definition.IsDeleted && definition.IsActive)
+            .SelectMany(definition => definition.Values
+                .Where(value => !value.IsDeleted && value.IsActive)
+                .Select(value => new
+                {
+                    DimensionCode = definition.Code,
+                    DimensionName = definition.Name,
+                    ValueCode = value.Code,
+                    ValueName = value.Name,
+                    definition.Classification,
+                    definition.DisplayOrder
+                }))
+            .OrderBy(item => item.DisplayOrder)
+            .ThenBy(item => item.DimensionCode)
+            .ThenBy(item => item.ValueCode)
+            .ToListAsync(cancellationToken);
+        var rows = new[] { accounts.Count, periods.Count, books.Count, rates.Count, dimensionValues.Count }.Max();
         for (var index = 0; index < rows; index++)
         {
             var row = index + 2;
@@ -473,6 +547,32 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
                 SetCellValue(sheet, row, 6, periods[index].StartDate);
                 SetCellValue(sheet, row, 7, periods[index].EndDate);
                 sheet.Range(row, 6, row, 7).Style.NumberFormat.Format = "yyyy-mm-dd";
+            }
+            if (index < books.Count)
+            {
+                SetCellValue(sheet, row, 8, books[index].Code);
+                SetCellValue(sheet, row, 9, books[index].Name);
+                SetCellValue(sheet, row, 10, books[index].BookType.ToString());
+                SetCellValue(sheet, row, 11, books[index].FiscalPeriodId);
+            }
+            if (index < rates.Count)
+            {
+                SetCellValue(sheet, row, 12, rates[index].Id);
+                SetCellValue(sheet, row, 13, rates[index].BaseCurrencyCode);
+                SetCellValue(sheet, row, 14, rates[index].TargetCurrencyCode);
+                SetCellValue(sheet, row, 15, rates[index].Rate);
+                SetCellValue(sheet, row, 16, rates[index].EffectiveDate);
+                SetCellValue(sheet, row, 17, rates[index].EndDate);
+                SetCellValue(sheet, row, 18, rates[index].ApprovalStatus.ToString());
+                sheet.Range(row, 16, row, 17).Style.NumberFormat.Format = "yyyy-mm-dd";
+            }
+            if (index < dimensionValues.Count)
+            {
+                SetCellValue(sheet, row, 19, dimensionValues[index].DimensionCode);
+                SetCellValue(sheet, row, 20, dimensionValues[index].DimensionName);
+                SetCellValue(sheet, row, 21, dimensionValues[index].ValueCode);
+                SetCellValue(sheet, row, 22, dimensionValues[index].ValueName);
+                SetCellValue(sheet, row, 23, dimensionValues[index].Classification);
             }
         }
         AdjustColumns(sheet, 12, 50);
@@ -609,6 +709,37 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
                 Reference = NullIfEmpty(Text(sheet, row, 10)),
                 SourceRow = row
             };
+            var dimensionsJson = Text(sheet, row, 12);
+            if (!string.IsNullOrWhiteSpace(dimensionsJson))
+            {
+                try
+                {
+                    var values = JsonSerializer.Deserialize<Dictionary<string, string>>(dimensionsJson, JsonOptions)
+                        ?? throw new JsonException("The value must be a JSON object.");
+                    if (values.Any(item => string.IsNullOrWhiteSpace(item.Key) || string.IsNullOrWhiteSpace(item.Value)))
+                        throw new JsonException("Dimension codes and values cannot be empty.");
+                    line.Dimensions = values
+                        .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+                        .Select(item => new FinancePostingDimensionValueDto
+                        {
+                            DimensionCode = item.Key.Trim(),
+                            ValueCode = item.Value.Trim()
+                        })
+                        .ToList();
+                }
+                catch (JsonException ex)
+                {
+                    issues.Add(ImportIssue(sheet.Name, row, "DimensionsJson", "INVALID_DIMENSIONS_JSON", $"DimensionsJson is invalid: {ex.Message}", dimensionsJson));
+                }
+            }
+            var exchangeRateIdText = Text(sheet, row, 11);
+            if (!string.IsNullOrWhiteSpace(exchangeRateIdText))
+            {
+                if (Guid.TryParse(exchangeRateIdText, out var exchangeRateId))
+                    line.ExchangeRateId = exchangeRateId;
+                else
+                    issues.Add(ImportIssue(sheet.Name, row, "ExchangeRateId", "INVALID_EXCHANGE_RATE_ID", "ExchangeRateId must be a valid identifier when provided.", exchangeRateIdText));
+            }
             if (!int.TryParse(Text(sheet, row, 2), out var lineNumber) || lineNumber <= 0)
                 issues.Add(ImportIssue(sheet.Name, row, "LineNumber", "INVALID_LINE_NUMBER", "LineNumber must be a positive whole number.", Text(sheet, row, 2)));
             else
@@ -661,6 +792,30 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
         else if (!period.IsOpen || period.IsClosed || period.IsLocked)
             issues.Add(ImportIssue("Batch", 2, "FiscalPeriodId", "PERIOD_NOT_OPEN", $"Fiscal period '{period.PeriodName}' is not open and unlocked."));
 
+        if (period != null && period.IsOpen && !period.IsClosed && !period.IsLocked &&
+            !string.IsNullOrWhiteSpace(payload.Batch.BookClassification))
+        {
+            var eligibleBooks = await _batches.GetEligibleBooksAsync(payload.Batch.FiscalPeriodId, cancellationToken)
+                ?? Array.Empty<EligibleJournalBatchBookDto>();
+            var book = eligibleBooks.SingleOrDefault(item =>
+                string.Equals(item.Code, payload.Batch.BookClassification.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (book == null)
+            {
+                issues.Add(ImportIssue(
+                    "Batch",
+                    2,
+                    "BookClassification",
+                    "BOOK_NOT_ELIGIBLE",
+                    "The book code is not an active direct-posting Primary or Delta book with an open exact-book period.",
+                    payload.Batch.BookClassification));
+            }
+            else
+            {
+                payload.Batch.AccountingBookId = book.Id;
+                payload.Batch.BookClassification = book.Code;
+            }
+        }
+
         if (payload.Journals.Count == 0)
             issues.Add(ImportIssue("JournalEntries", 0, null, "NO_JOURNALS", "At least one journal entry is required."));
         var duplicateKeys = payload.Journals
@@ -690,6 +845,25 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
             .Where(x => x.TenantId == TenantId && !x.IsDeleted && accountNumbers.Contains(x.AccountNumber))
             .ToDictionaryAsync(x => x.AccountNumber, StringComparer.OrdinalIgnoreCase, cancellationToken);
         var knownKeys = payload.Journals.Select(x => x.ClientJournalKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var accountIds = accounts.Values.Select(account => account.Id).ToList();
+        var bookMappings = payload.Batch.AccountingBookId == Guid.Empty
+            ? new Dictionary<Guid, AccountAccountingBook>()
+            : await _context.AccountAccountingBooks.AsNoTracking()
+                .Include(mapping => mapping.AccountClassification)
+                .Where(mapping => mapping.TenantId == TenantId &&
+                                  mapping.AccountingBookId == payload.Batch.AccountingBookId &&
+                                  accountIds.Contains(mapping.AccountId) &&
+                                  !mapping.IsDeleted)
+                .ToDictionaryAsync(mapping => mapping.AccountId, cancellationToken);
+        var exchangeRateIds = payload.Lines.Where(line => line.ExchangeRateId.HasValue)
+            .Select(line => line.ExchangeRateId!.Value).Distinct().ToList();
+        var exchangeRates = await _context.ExchangeRates.AsNoTracking()
+            .Where(rate => rate.TenantId == TenantId && exchangeRateIds.Contains(rate.Id) && !rate.IsDeleted)
+            .ToDictionaryAsync(rate => rate.Id, cancellationToken);
+        var journalDates = payload.Journals.ToDictionary(
+            journal => journal.ClientJournalKey,
+            journal => journal.TransactionDate.Date,
+            StringComparer.OrdinalIgnoreCase);
         foreach (var line in payload.Lines)
         {
             if (!knownKeys.Contains(line.ClientJournalKey))
@@ -701,10 +875,67 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
                 line.AccountId = account.Id;
                 if (account.Status != AccountStatus.Active || !account.AllowDirectPosting || account.IsControlAccount)
                     issues.Add(ImportIssue("JournalLines", line.SourceRow, "AccountNumber", "ACCOUNT_NOT_POSTABLE", "Account must be active, allow direct posting, and not be a control account.", line.AccountNumber));
+                if (payload.Batch.AccountingBookId != Guid.Empty &&
+                    (!bookMappings.TryGetValue(account.Id, out var mapping) || !mapping.IsEnabled ||
+                     (mapping.AccountClassification != null &&
+                      (mapping.AccountClassification.IsDeleted ||
+                       mapping.AccountClassification.Status != AccountClassificationStatus.Active ||
+                       !mapping.AccountClassification.IsPostingClassification ||
+                       mapping.AccountClassification.CoreAccountType != account.AccountType))))
+                {
+                    issues.Add(ImportIssue("JournalLines", line.SourceRow, "AccountNumber", "ACCOUNT_BOOK_MAPPING_INVALID", "Account is not enabled with a compatible posting classification for the selected accounting book.", line.AccountNumber));
+                }
             }
             if (!line.TransactionType.Equals("Debit", StringComparison.OrdinalIgnoreCase) &&
                 !line.TransactionType.Equals("Credit", StringComparison.OrdinalIgnoreCase))
                 issues.Add(ImportIssue("JournalLines", line.SourceRow, "TransactionType", "INVALID_TRANSACTION_TYPE", "TransactionType must be Debit or Credit.", line.TransactionType));
+
+            line.CurrencyCode = string.IsNullOrWhiteSpace(line.CurrencyCode)
+                ? baseCurrency?.Trim().ToUpperInvariant()
+                : line.CurrencyCode.Trim().ToUpperInvariant();
+            if (!string.IsNullOrWhiteSpace(baseCurrency) &&
+                !string.Equals(line.CurrencyCode, baseCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                var lineDate = journalDates.GetValueOrDefault(line.ClientJournalKey);
+                if (!line.ForeignAmount.HasValue || line.ForeignAmount <= 0 ||
+                    !line.ExchangeRate.HasValue || line.ExchangeRate <= 0 ||
+                    !line.ExchangeRateId.HasValue ||
+                    !exchangeRates.TryGetValue(line.ExchangeRateId.Value, out var rate) ||
+                    !rate.IsActive ||
+                    !string.Equals(rate.BaseCurrencyCode, baseCurrency, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(rate.TargetCurrencyCode, line.CurrencyCode, StringComparison.OrdinalIgnoreCase) ||
+                    (rate.ApprovalStatus != RateApprovalStatus.Approved && rate.ApprovalStatus != RateApprovalStatus.AutoApproved) ||
+                    rate.EffectiveDate.Date > lineDate ||
+                    (rate.EndDate.HasValue && rate.EndDate.Value.Date < lineDate) ||
+                    decimal.Round(rate.Rate, 8, MidpointRounding.AwayFromZero) != decimal.Round(line.ExchangeRate.Value, 8, MidpointRounding.AwayFromZero))
+                {
+                    issues.Add(ImportIssue("JournalLines", line.SourceRow, "ExchangeRateId", "FX_EVIDENCE_INVALID", "Foreign-currency lines require matching active approved exchange-rate evidence effective on the journal date.", line.ExchangeRateId?.ToString()));
+                }
+            }
+            if (account != null && journalDates.TryGetValue(line.ClientJournalKey, out var journalDate))
+            {
+                try
+                {
+                    await _financeDimensions.ResolveManualJournalLineAsync(
+                        account.Id,
+                        journalDate,
+                        line.Dimensions,
+                        cancellationToken);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or KeyNotFoundException)
+                {
+                    issues.Add(ImportIssue("JournalLines", line.SourceRow, "DimensionsJson", "DIMENSION_CONTROL_FAILED", ex.Message));
+                }
+                finally
+                {
+                    foreach (var trackedItem in _context.ChangeTracker.Entries<FinanceDimensionSetItem>()
+                                 .Where(entry => entry.State == EntityState.Added).ToList())
+                        trackedItem.State = EntityState.Detached;
+                    foreach (var trackedSet in _context.ChangeTracker.Entries<FinanceDimensionSet>()
+                                 .Where(entry => entry.State == EntityState.Added).ToList())
+                        trackedSet.State = EntityState.Detached;
+                }
+            }
         }
 
         decimal batchDebit = 0;
@@ -736,6 +967,7 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
                 templateVersion = NormalizeForHash(payload.Batch.TemplateVersion, upperCase: true),
                 description = NormalizeForHash(payload.Batch.Description),
                 payload.Batch.FiscalPeriodId,
+                payload.Batch.AccountingBookId,
                 bookClassification = NormalizeForHash(payload.Batch.BookClassification, upperCase: true),
                 controlCurrencyCode = NormalizeForHash(payload.Batch.ControlCurrencyCode, upperCase: true),
                 payload.Batch.ExpectedDebitTotal,
@@ -767,7 +999,18 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
                     line.Amount,
                     currencyCode = NormalizeOptionalForHash(line.CurrencyCode, upperCase: true),
                     line.ForeignAmount,
+                    line.ExchangeRateId,
                     line.ExchangeRate,
+                    dimensions = line.Dimensions
+                        .OrderBy(dimension => dimension.DimensionCode, StringComparer.OrdinalIgnoreCase)
+                        .Select(dimension => new
+                        {
+                            dimensionCode = NormalizeForHash(dimension.DimensionCode, upperCase: true),
+                            valueCode = NormalizeOptionalForHash(dimension.ValueCode, upperCase: true),
+                            dimension.SourceEntityType,
+                            dimension.SourceEntityId
+                        })
+                        .ToList(),
                     description = NormalizeOptionalForHash(line.Description),
                     reference = NormalizeOptionalForHash(line.Reference)
                 })
@@ -819,6 +1062,7 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
             IsValid = session.Status == JournalBatchImportStatus.Previewed,
             TemplateVersion = session.TemplateVersion,
             FileName = session.OriginalFileName,
+            ControlCurrencyCode = payload.Batch.ControlCurrencyCode,
             JournalCount = session.JournalCount,
             LineCount = session.LineCount,
             ExpectedDebitTotal = payload.Batch.ExpectedDebitTotal,
@@ -955,6 +1199,7 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
         public string TemplateVersion { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public Guid FiscalPeriodId { get; set; }
+        public Guid AccountingBookId { get; set; }
         public string BookClassification { get; set; } = string.Empty;
         public string ControlCurrencyCode { get; set; } = string.Empty;
         public decimal ExpectedDebitTotal { get; set; }
@@ -983,9 +1228,11 @@ public sealed class JournalBatchSpreadsheetService : IJournalBatchSpreadsheetSer
         public decimal Amount { get; set; }
         public string? CurrencyCode { get; set; }
         public decimal? ForeignAmount { get; set; }
+        public Guid? ExchangeRateId { get; set; }
         public decimal? ExchangeRate { get; set; }
         public string? Description { get; set; }
         public string? Reference { get; set; }
+        public IReadOnlyList<FinancePostingDimensionValueDto> Dimensions { get; set; } = [];
         public int SourceRow { get; set; }
     }
 }

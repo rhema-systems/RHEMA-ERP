@@ -15,6 +15,7 @@ import {
   SwitchField,
   FieldRow,
 } from '@/components/hr/employee/tabs/fields';
+import { FinanceCustomerPicker } from '@/components/hr/common/FinanceCustomerPicker';
 import { consultantClientService } from '@/services/hr/consultant.service';
 import { countryService } from '@/services/hr/country.service';
 import type { ConsultantClientSummary } from '@/types/hr/consultant';
@@ -34,12 +35,19 @@ const clientSchema = z.object({
   primaryContactEmail: z.string().email('Enter a valid email').max(100).optional().or(z.literal('')),
   primaryContactPhone: z.string().max(50).optional(),
   addressLine1: z.string().max(500).optional(),
+  // Carried, not edited here: the form has no inputs for these three yet, but a save used to send
+  // null for them and wipe whatever the record held (the D-09/D-12 shape). They round-trip now.
+  addressLine2: z.string().max(500).optional(),
   city: z.string().max(100).optional(),
   region: z.string().max(100).optional(),
+  postalCode: z.string().max(20).optional(),
   countryId: z.string().optional(),
   billingContactName: z.string().max(200).optional(),
   billingContactEmail: z.string().email('Enter a valid email').max(100).optional().or(z.literal('')),
+  billingContactPhone: z.string().max(50).optional(),
   taxIdentificationNumber: z.string().max(50).optional(),
+  /** Optional: the Finance (Sales) customer the client is billed as — empty keeps invoices HR-side. */
+  financeCustomerId: z.string().optional(),
   currency: z.string().length(3, 'Use a 3-letter currency code'),
   defaultPaymentTermsDays: z.coerce.number().min(0).max(365).optional(),
   isActive: z.boolean(),
@@ -57,12 +65,16 @@ const emptyClient: ClientForm = {
   primaryContactEmail: '',
   primaryContactPhone: '',
   addressLine1: '',
+  addressLine2: '',
   city: '',
   region: '',
+  postalCode: '',
   countryId: '',
   billingContactName: '',
   billingContactEmail: '',
+  billingContactPhone: '',
   taxIdentificationNumber: '',
+  financeCustomerId: '',
   currency: 'GHS',
   defaultPaymentTermsDays: 30,
   isActive: true,
@@ -91,15 +103,16 @@ export default function ConsultantClientsPage() {
       primaryContactEmail: blank(v.primaryContactEmail),
       primaryContactPhone: blank(v.primaryContactPhone),
       addressLine1: blank(v.addressLine1),
-      addressLine2: null,
+      addressLine2: blank(v.addressLine2),
       city: blank(v.city),
       region: blank(v.region),
-      postalCode: null,
+      postalCode: blank(v.postalCode),
       countryId: blank(v.countryId),
       billingContactName: blank(v.billingContactName),
       billingContactEmail: blank(v.billingContactEmail),
-      billingContactPhone: null,
+      billingContactPhone: blank(v.billingContactPhone),
       taxIdentificationNumber: blank(v.taxIdentificationNumber),
+      financeCustomerId: blank(v.financeCustomerId),
       currency: v.currency,
       defaultPaymentTermsDays: v.defaultPaymentTermsDays ?? null,
       isActive: v.isActive,
@@ -183,6 +196,38 @@ export default function ConsultantClientsPage() {
           currency: c.currency,
           isActive: c.isActive,
         })}
+        loadForEdit={async (c) => {
+          // ⚠ The list returns SUMMARIES. Everything the summary does not carry — the industry,
+          // the description, the address, the billing contacts, and now the Finance customer
+          // link — would be blanked by a save made from the row alone (the D-09/D-12 shape), so
+          // the full record is pulled once the dialog opens.
+          const full = await consultantClientService.getById(c.id);
+          return {
+            ...emptyClient,
+            clientName: full.clientName,
+            clientCode: full.clientCode,
+            industry: full.industry ?? '',
+            description: full.description ?? '',
+            primaryContactName: full.primaryContactName ?? '',
+            primaryContactEmail: full.primaryContactEmail ?? '',
+            primaryContactPhone: full.primaryContactPhone ?? '',
+            addressLine1: full.addressLine1 ?? '',
+            addressLine2: full.addressLine2 ?? '',
+            city: full.city ?? '',
+            region: full.region ?? '',
+            postalCode: full.postalCode ?? '',
+            countryId: full.countryId ?? '',
+            billingContactName: full.billingContactName ?? '',
+            billingContactEmail: full.billingContactEmail ?? '',
+            billingContactPhone: full.billingContactPhone ?? '',
+            taxIdentificationNumber: full.taxIdentificationNumber ?? '',
+            financeCustomerId: full.financeCustomerId ?? '',
+            currency: full.currency,
+            defaultPaymentTermsDays: full.defaultPaymentTermsDays ?? undefined,
+            isActive: full.isActive,
+            notes: full.notes ?? '',
+          };
+        }}
         renderFields={(form) => (
           <>
             <FieldRow>
@@ -229,6 +274,15 @@ export default function ConsultantClientsPage() {
                 label="Payment terms (days)"
               />
             </FieldRow>
+            {/* Lane 8, slice 6: linking the client to a Finance customer is what lets a timesheet
+                invoice be raised in Accounts Receivable instead of living only in HR. */}
+            <FinanceCustomerPicker
+              id="financeCustomerId"
+              value={(form.watch('financeCustomerId') as string | undefined) || null}
+              onChange={(customerId) =>
+                form.setValue('financeCustomerId', customerId ?? '', { shouldDirty: true })
+              }
+            />
 
             <SwitchField form={form} name="isActive" label="Active" />
             <TextareaField form={form} name="notes" label="Notes" rows={2} />

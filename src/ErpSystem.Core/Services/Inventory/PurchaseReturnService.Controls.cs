@@ -113,19 +113,48 @@ public sealed partial class PurchaseReturnService
             await _workflow.CanUserApproveAsync(WorkflowEntityType, value.Id, _currentUser.UserId);
         if (_financeHandoff is not null && value.Status is "Shipped" or "Acknowledged")
         {
-            var credit = await _unitOfWork.Repository<ErpSystem.Core.Entities.Finance.SupplierDebitNote>().GetQueryable(note =>
+            var credits = await _unitOfWork.Repository<ErpSystem.Core.Entities.Finance.SupplierDebitNote>().GetQueryable(note =>
                 note.TenantId == _currentUser.TenantId && !note.IsDeleted && note.InventoryPurchaseReturnId == value.Id)
                 .AsNoTracking().Select(note => new
                 {
                     note.Id,
+                    note.DebitNoteNumber,
+                    note.InventorySupplierReturnAccountingGroupId,
                     Completed = note.Status == ErpSystem.Core.Entities.Finance.SupplierDebitNoteStatus.Posted &&
                         note.JournalEntryId.HasValue && note.PostingEventId.HasValue &&
                         note.ReturnDispatchJournalEntryId.HasValue && note.ReturnDispatchPostingEventId.HasValue &&
                         note.OriginalVendorInvoiceId.HasValue && note.DirectInvoiceAppliedAt.HasValue &&
                         note.DirectInvoiceAppliedAmount > 0 && note.DirectInvoiceAppliedAmount == note.TotalAmount
-                }).SingleOrDefaultAsync();
-            dto.SupplierDebitNoteId = credit?.Id;
-            dto.FinanceResolutionCompleted = credit?.Completed ?? false;
+                }).ToListAsync();
+            dto.SupplierDebitNoteId = credits.Count == 1 ? credits[0].Id : null;
+            dto.FinanceResolutionCompleted = credits.Count == 1 && credits[0].Completed;
+            if (value.AccountingAllocationVersion == 1)
+            {
+                var groups = await _unitOfWork.Repository<ErpSystem.Core.Entities.Finance.InventorySupplierReturnAccountingGroup>()
+                    .GetQueryable(group => group.TenantId == value.TenantId && !group.IsDeleted && group.InventoryPurchaseReturnId == value.Id)
+                    .AsNoTracking().ToListAsync();
+                var allocations = await _unitOfWork.Repository<ErpSystem.Core.Entities.Finance.InventorySupplierReturnAllocation>()
+                    .GetQueryable(allocation => allocation.TenantId == value.TenantId && !allocation.IsDeleted && allocation.InventoryPurchaseReturnId == value.Id)
+                    .AsNoTracking().ToListAsync();
+                var invoiceIds = groups.Where(group => group.OriginalVendorInvoiceId.HasValue).Select(group => group.OriginalVendorInvoiceId!.Value).ToArray();
+                var invoiceNames = await _unitOfWork.Repository<ErpSystem.Core.Entities.Finance.VendorInvoice>()
+                    .GetQueryable(invoice => invoice.TenantId == value.TenantId && !invoice.IsDeleted && invoiceIds.Contains(invoice.Id))
+                    .AsNoTracking().ToDictionaryAsync(invoice => invoice.Id, invoice => invoice.InvoiceNumber);
+                foreach (var group in groups)
+                {
+                    var credit = credits.SingleOrDefault(note => note.InventorySupplierReturnAccountingGroupId == group.Id);
+                    dto.AccountingGroups.Add(new PurchaseReturnAccountingGroupDto { Id = group.Id,
+                        OriginalVendorInvoiceId = group.OriginalVendorInvoiceId,
+                        OriginalInvoiceNumber = group.OriginalVendorInvoiceId.HasValue ? invoiceNames.GetValueOrDefault(group.OriginalVendorInvoiceId.Value) : null,
+                        BaseQuantity = allocations.Where(allocation => allocation.AccountingGroupId == group.Id).Sum(allocation => allocation.BaseQuantity),
+                        CarryingAmount = group.CarryingAmount, OriginalAccrualAmount = group.OriginalAccrualAmount,
+                        FunctionalCurrency = group.FunctionalCurrency, DispatchJournalEntryId = group.DispatchJournalEntryId,
+                        SupplierDebitNoteId = credit?.Id, SupplierDebitNoteNumber = credit?.DebitNoteNumber,
+                        FinanceResolutionCompleted = group.DispatchPostingEventId.HasValue && group.DispatchJournalEntryId.HasValue &&
+                            (!group.OriginalVendorInvoiceId.HasValue || credit?.Completed == true) });
+                }
+                dto.FinanceResolutionCompleted = dto.AccountingGroups.Count > 0 && dto.AccountingGroups.All(group => group.FinanceResolutionCompleted);
+            }
         }
         return dto;
     }

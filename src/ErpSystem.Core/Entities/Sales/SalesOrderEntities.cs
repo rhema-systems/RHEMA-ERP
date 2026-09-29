@@ -117,6 +117,14 @@ public class SalesOrder : DocumentEntity
     public Guid? InvoiceId { get; set; }
     public virtual Invoice? Invoice { get; set; }
 
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+    [MaxLength(100)] public string? InvoiceGenerationKey { get; set; }
+    [MaxLength(64)] public string? InvoiceGenerationHash { get; set; }
+    public Guid? InvoiceGeneratedById { get; set; }
+    public string? InvoiceEconomicsJson { get; set; }
+    public string? InvoiceSourceJson { get; set; }
+
     public Guid? TaxGroupId { get; set; }
     [ForeignKey(nameof(TaxGroupId))]
     public virtual TaxGroup? TaxGroup { get; set; }

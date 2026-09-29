@@ -25,7 +25,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { formatDate } from '@/lib/hr/attendance-format';
 import { peerEvaluationService } from '@/services/hr/appraisal-run.service';
-import { isKpiItem, toItemScores, type EvaluationItem } from '@/types/hr/appraisal-run';
+import { toItemScores, type EvaluationItem } from '@/types/hr/appraisal-run';
 
 /**
  * Giving peer feedback on a colleague's appraisal.
@@ -63,7 +63,7 @@ export default function PeerEvaluationPage() {
     const seeded: ScoreValues = {};
     for (const section of data.sections) {
       for (const item of section.items) {
-        seeded[item.templateItemId] = {
+        seeded[item.criterionKey] = {
           numericScore: item.existingNumericScore ?? null,
           actualValue: item.existingActualValue ?? null,
           notes: item.existingNotes ?? null,
@@ -81,20 +81,39 @@ export default function PeerEvaluationPage() {
         sectionName: s.sectionName,
         sectionDescription: s.sectionDescription,
         sectionWeight: s.sectionWeight,
+        kind: s.kind,
         items: s.items,
       })),
     [data],
   );
 
-  /** Mirrors the server's own `IsScoreable`: KPI rows are locked unless the cycle allows them. */
-  const notScoreable = (item: EvaluationItem) =>
-    isKpiItem(item) && data?.allowPeerKpiEvaluation === false;
+  /**
+   * The server's own `isScoreable`: KPI rows and the employee's goal rows are locked unless the
+   * cycle lets peers score measured work. It used to be re-derived here from the KPI id, which no
+   * goal row carries.
+   */
+  const lockedKeys = useMemo(
+    () =>
+      new Set(
+        (data?.sections ?? [])
+          .flatMap((s) => s.items)
+          .filter((i) => i.isScoreable === false)
+          .map((i) => i.criterionKey),
+      ),
+    [data],
+  );
+  const notScoreable = (item: EvaluationItem) => lockedKeys.has(item.criterionKey);
+  // Only what this peer may score is sent: a goal row they may not score is refused outright.
+  const scoreableItems = useMemo(
+    () => sections.flatMap((s) => s.items).filter((i) => !lockedKeys.has(i.criterionKey)),
+    [sections, lockedKeys],
+  );
 
   const saveDraft = useMutation({
     mutationFn: () =>
       peerEvaluationService.saveDraft(evaluationId, {
         evaluationId,
-        itemScores: toItemScores(values),
+        itemScores: toItemScores(scoreableItems, values),
       }),
     onSuccess: () => {
       toast({ title: 'Draft saved', description: 'Your feedback has not been sent yet.' });
@@ -113,7 +132,7 @@ export default function PeerEvaluationPage() {
     mutationFn: async () => {
       await peerEvaluationService.saveDraft(evaluationId, {
         evaluationId,
-        itemScores: toItemScores(values),
+        itemScores: toItemScores(scoreableItems, values),
       });
       return peerEvaluationService.submit(evaluationId);
     },
@@ -212,8 +231,8 @@ export default function PeerEvaluationPage() {
 
       {!data.allowPeerKpiEvaluation && (
         <p className="text-sm text-muted-foreground">
-          This cycle does not ask peers to score KPI targets — those rows are shown for context
-          but cannot be scored.
+          This cycle does not ask peers to score KPI targets or the employee&apos;s goals — those rows
+          are shown for context but cannot be scored.
         </p>
       )}
 

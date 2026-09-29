@@ -64,7 +64,7 @@ public class WarehousesController : ControllerBase
         try
         {
             var warehouses = await _warehouseRepository.GetAllAsync();
-            var dtos = warehouses.Select(MapToDto).ToList();
+            var dtos = warehouses.Where(x => !InventoryTransitProtection.IsProtected(x)).Select(MapToDto).ToList();
             return Ok(dtos);
         }
         catch (Exception ex)
@@ -83,7 +83,7 @@ public class WarehousesController : ControllerBase
         try
         {
             var warehouses = await _warehouseRepository.GetActiveWarehousesAsync();
-            var dtos = warehouses.Select(MapToDto).ToList();
+            var dtos = warehouses.Where(x => !InventoryTransitProtection.IsProtected(x)).Select(MapToDto).ToList();
             return Ok(dtos);
         }
         catch (Exception ex)
@@ -130,6 +130,9 @@ public class WarehousesController : ControllerBase
             var tenantId = _currentUserProvider.TenantId;
             if (tenantId == Guid.Empty)
                 return Unauthorized("Tenant context is required");
+
+            if (InventoryTransitProtection.IsTransitType(dto.WarehouseType))
+                return BadRequest(InventoryTransitProtection.Message);
 
             // Check for duplicate code
             var existing = await _warehouseRepository.GetByCodeAsync(dto.Code);
@@ -191,6 +194,9 @@ public class WarehousesController : ControllerBase
             if (warehouse == null)
                 return NotFound($"Warehouse with ID {id} not found");
 
+            if (InventoryTransitProtection.IsProtected(warehouse) || InventoryTransitProtection.IsTransitType(dto.WarehouseType))
+                return BadRequest(InventoryTransitProtection.Message);
+
             // Check for duplicate code (if changed)
             if (warehouse.Code != dto.Code)
             {
@@ -243,6 +249,9 @@ public class WarehousesController : ControllerBase
             var warehouse = await _warehouseRepository.GetByIdAsync(id);
             if (warehouse == null)
                 return NotFound($"Warehouse with ID {id} not found");
+
+            if (InventoryTransitProtection.IsProtected(warehouse))
+                return BadRequest(InventoryTransitProtection.Message);
 
             warehouse.IsDeleted = true;
             warehouse.DeletedAt = DateTime.UtcNow;

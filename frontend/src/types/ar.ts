@@ -93,9 +93,11 @@ export interface Invoice {
     currencyCode: string;
     exchangeRate: number;
     exchangeRateId?: string;
+    currencyOverrideReason?: string | null;
     paymentTermsDays: number;
     paymentTermId?: string | null;
     discountAmount: number;
+    discountReason?: string | null;
     reference?: string;
     isOpeningBalance: boolean;
     earlyPaymentDiscountPercentage?: number;
@@ -118,9 +120,11 @@ export interface InvoiceCreateRequest {
     currencyCode: string;
     exchangeRate?: number;
     exchangeRateId?: string;
+    currencyOverrideReason?: string | null;
     paymentTermsDays?: number;
     paymentTermId?: string | null;
     discountAmount?: number;
+    discountReason?: string | null;
     taxGroupId?: string | null;
     isOpeningBalance?: boolean;
     notes?: string;

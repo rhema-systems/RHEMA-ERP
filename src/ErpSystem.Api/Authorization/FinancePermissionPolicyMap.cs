@@ -553,14 +553,18 @@ public static class FinancePermissionPolicyMap
             "ConfirmDeposit" => One(FinancePermissions.ConfirmBankDeposits),
             "CreateReturnedCheque" or "UpdateReturnedChequeDimensions" or "LinkReturnedChequeAttachment" or "SubmitReturnedCheque" =>
                 One(FinancePermissions.ManageReturnedCheques),
-            "ApproveReturnedCheque" or "RejectReturnedCheque" => One(FinancePermissions.ApproveBankDeposits),
+            // Returned-cheque review has its own permission surface. Requiring the unrelated
+            // bank-deposit approval permission here made the convention compose two policies
+            // (ManageReturnedCheques from the controller plus ApproveBankDeposits here), so a
+            // correctly provisioned returned-cheque reviewer was denied at runtime.
+            "ApproveReturnedCheque" or "RejectReturnedCheque" => One(FinancePermissions.ManageReturnedCheques),
             _ => One(FinancePermissions.ViewFinance)
         };
 
     private static IReadOnlyList<string> JournalBatchPolicy(string action)
         => action switch
         {
-            "CreateBatch" or "CreateJournal" or "AddExistingJournal" or "LinkAttachment"
+            "CreateBatch" or "CreateJournal" or "AddExistingJournal" or "LinkAttachment" or "GetEligibleBooks"
                 => One(FinancePermissions.CreateJournalBatches),
             "UpdateBatch" or "UpdateJournal" or "RemoveJournal" or "UnlinkAttachment"
                 => One(FinancePermissions.EditJournalBatches),
@@ -669,8 +673,10 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> FinancialStatementLayoutPolicy(string action)
         => action switch
         {
-            "PublishVersion" => One(FinancePermissions.PublishFinancialStatementLayouts),
+            "PublishVersion" or "GetApprovalQueue" or "DecideVersion" =>
+                One(FinancePermissions.PublishFinancialStatementLayouts),
             "CreateLayout" or "UpdateLayout" or "CreateDraftVersion" or "CloneProtectedStandard" or "ReplaceDraftRows"
+                or "InitializeFromStandards" or "DiscardUnusedDraft" or "SubmitVersion"
                 or "DownloadImportTemplate"
                 or "PreviewJsonImport" or "CommitJsonImport"
                 or "PreviewWorkbookImport" or "CommitWorkbookImport"

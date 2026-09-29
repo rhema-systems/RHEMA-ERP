@@ -57,6 +57,10 @@ export const APPLICATION_SOURCES = [
   'NewspaperAd',
   'Other',
   'InternalPortal',
+  // Round 4, lane B. Written by the server when HR invites a pooled candidate to apply; it is in
+  // the list so the "Record an application" and "Correct the source" dialogs can show what the
+  // server already stores, not so a recruiter picks it by hand.
+  'TalentPool',
 ] as const;
 export type ApplicationSource = (typeof APPLICATION_SOURCES)[number];
 
@@ -294,6 +298,8 @@ export interface JobCandidateSummary {
   email: string;
   phone: string;
   city: string;
+  /** Round 4, lane A — resolved from the area, so the list can print "Tema, Greater Accra". */
+  region?: string | null;
   countryName: string;
   isInTalentPool: boolean;
   /** A photograph is on file — fetch `GET /job-candidates/{id}/photo` only then (round 3, lane C2). */
@@ -323,7 +329,15 @@ export interface JobCandidate {
   alternatePhone?: string | null;
   postalAddress?: string | null;
   digitalAddress?: string | null;
+  /** ⚠ Round 4, lane A — a display snapshot the server rewrites from `geoAreaId` when one is set. */
   city: string;
+  /** ⚠ Round 4, lane A — display snapshot, as `city`. Never sent on a write; it is derived. */
+  region?: string | null;
+  /**
+   * The candidate's administrative area — the lowest tier they chose, from the shared geography
+   * tree. The edit form re-opens its cascade by asking the server for this area's ancestors.
+   */
+  geoAreaId?: string | null;
   nationality?: string | null;
   /** Optional since slice 13b: an internal candidate is a shadow record with no country on file. */
   countryId?: string | null;
@@ -390,7 +404,13 @@ export interface CreateJobCandidate {
   alternatePhone?: string | null;
   postalAddress?: string | null;
   digitalAddress?: string | null;
-  city: string;
+  /**
+   * ⚠ Round 4, lane A — optional now, and the server overwrites it from `geoAreaId` when one is
+   * sent. Send one or the other: a payload with neither is refused, by the form and by the server.
+   */
+  city?: string | null;
+  /** The chosen administrative area. Null clears it — this payload replaces the address wholesale. */
+  geoAreaId?: string | null;
   /**
    * The candidate's nationality, as free text.
    *
@@ -409,6 +429,24 @@ export interface CreateJobCandidate {
   nationalIdTypeId?: string | null;
   nationalIdNumber?: string | null;
   nationalIdExpiryDate?: string | null;
+  /**
+   * The professional profile and availability — round 4, lane B.
+   *
+   * ⚠ These were readable on the candidate DTO and writable ONLY through the candidate's own
+   * portal profile, while the talent pool's match rubric scores on three of them. So a candidate
+   * HR typed in — a career fair, a referral, an unsolicited CV — could never rank above the
+   * "nothing on file" tier, whatever HR knew, and there was no box to put it in.
+   *
+   * ⚠ Sent on EVERY save. The update replaces the record wholesale, so omitting one clears it.
+   */
+  headline?: string | null;
+  professionalSummary?: string | null;
+  currentJobTitle?: string | null;
+  currentEmployer?: string | null;
+  totalYearsExperience?: number | null;
+  noticePeriodDays?: number | null;
+  availableFrom?: string | null;
+  preferredWorkArrangement?: PreferredWorkArrangement;
   isInTalentPool: boolean;
 }
 
@@ -435,6 +473,11 @@ export interface CandidateQualification {
   institution: string;
   dateAwarded: string;
   grade?: string | null;
+  /** Round 4, lane Q: the rung the row itself states — what a form edits. */
+  qualificationLevelId?: string | null;
+  /** The rung the engine scores: the row's own, or else its catalogue entry's. */
+  effectiveQualificationLevelId?: string | null;
+  effectiveQualificationLevelName?: string | null;
 }
 
 /**
@@ -448,6 +491,11 @@ export interface CandidateQualificationForm {
   institution: string;
   dateAwarded: string;
   grade?: string | null;
+  /**
+   * Round 4, lane Q (decision Q-D1): the rung of the qualification ladder. The server refuses an
+   * Education row without one, unless the catalogue entry picked already sits on a rung.
+   */
+  qualificationLevelId?: string | null;
 }
 
 export interface CandidateWorkHistory {
@@ -590,6 +638,14 @@ export interface JobApplicationSummary {
   jobCandidateId: string;
   candidateName: string;
   candidateEmail: string;
+  /**
+   * Whether the candidate has a photograph on file (round 4, lane B5).
+   *
+   * ⚠ A flag, not the image. Feed it to `GatedPhoto`'s `enabled` so a list of thirty applications
+   * does not fire thirty requests that each come back 404 — the photograph itself streams through
+   * the gated `jobCandidateService.photoUrl(candidateId)`.
+   */
+  candidateHasPhoto: boolean;
   applicationDate: string;
   status: ApplicationStatus;
   statusName: string;
@@ -782,6 +838,15 @@ export interface CriterionScore {
   rawScore: number;
   weightedScore: number;
   notes?: string | null;
+  /**
+   * False for a criterion the engine did not score — `Other`, an empty one, an unanswerable
+   * numeric bound. Its weight is left out of the total, so it neither lifts nor lowers the
+   * candidate (round 3 lane K, extended by round 4 lane A).
+   *
+   * ⚠ Server-sent since lane A and simply absent from this type until lane B, so `passed: true`
+   * on such a row reads as a pass it never was. Check this before the tick.
+   */
+  autoEvaluated?: boolean;
 }
 
 export interface ApplicationAutoScore {
@@ -1023,6 +1088,8 @@ export interface PipelineApplicationListItem {
   applicationNumber: string;
   candidateName: string;
   candidateEmail: string;
+  /** @see JobApplicationSummary.candidateHasPhoto — a flag, not the image (round 4, lane B5). */
+  candidateHasPhoto: boolean;
   status: ApplicationStatus;
   statusName: string;
   source: ApplicationSource;

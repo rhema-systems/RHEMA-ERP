@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, Search } from 'lucide-react';
+import { Copy, Plus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -26,6 +26,10 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import {
+  CopyOrientationProgramDialog,
+  type ProgramCopySource,
+} from '@/components/hr/orientation/CopyDialogs';
 import { orientationProgramService } from '@/services/hr/orientation-program.service';
 import {
   ORIENTATION_PROGRAM_STATUS_OPTIONS,
@@ -59,6 +63,7 @@ export default function OrientationProgramsPage() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<string>(ALL);
   const [type, setType] = useState<string>(ALL);
+  const [copying, setCopying] = useState<ProgramCopySource | null>(null);
 
   const { data: programs = [], isLoading } = useQuery({
     queryKey: ['hr', 'orientation-programs'],
@@ -161,6 +166,7 @@ export default function OrientationProgramsPage() {
                   <TableHead className="text-right">Enrolled</TableHead>
                   <TableHead className="text-right">Completed</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="w-[1%]" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -209,6 +215,18 @@ export default function OrientationProgramsPage() {
                     <TableCell>
                       <StatusBadge status={p.status} />
                     </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          setCopying({ id: p.id, title: p.title, programCode: p.programCode })
+                        }
+                      >
+                        <Copy className="mr-1.5 h-3.5 w-3.5" />
+                        Copy
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -216,6 +234,8 @@ export default function OrientationProgramsPage() {
           )}
         </CardContent>
       </Card>
+
+      <CopyOrientationProgramDialog source={copying} onClose={() => setCopying(null)} />
     </div>
   );
 }

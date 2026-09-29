@@ -8,6 +8,8 @@ namespace ErpSystem.Core.Entities.Procurement;
 /// </summary>
 public class ProcurementSettings : TenantEntity
 {
+    [MaxLength(30)]
+    public string? PurchasePriceDifferenceHandling { get; set; }
     /// <summary>Actor separation for the procurement transaction chain. Other ERP modules retain their own controls.</summary>
     public bool EnforceSegregationOfDuties { get; set; } = true;
 

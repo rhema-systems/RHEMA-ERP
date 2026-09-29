@@ -45,6 +45,25 @@ public class PipMeetingController : ControllerBase
         => PipAccess.CanManageAsync(this, _db, _currentUserService, pipId, ct);
 
     /// <summary>
+    /// Performance closure P13: whoever records a meeting holds it. The body's
+    /// <c>conductedById</c> is not trusted — the forms post the loaded value back, and a caller
+    /// could name anyone.
+    /// </summary>
+    private bool TryGetConductor(out Guid conductorId, out IActionResult? problem)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty)
+        {
+            conductorId = me;
+            problem = null;
+            return true;
+        }
+
+        conductorId = Guid.Empty;
+        problem = BadRequest(new { message = "Your account is not linked to an employee record, so it cannot hold a review meeting." });
+        return false;
+    }
+
+    /// <summary>
     /// Load an existing meeting by ID (with PIP context).
     /// </summary>
     [HttpGet("{meetingId:guid}")]
@@ -104,6 +123,7 @@ public class PipMeetingController : ControllerBase
             {
                 PipId                  = pip.Id,
                 PipNumber              = pip.PipNumber,
+                EmployeeId             = pip.EmployeeId,
                 EmployeeName           = pip.EmployeeName,
                 PipStartDate           = pip.StartDate,
                 PipEndDate             = pip.EndDate,
@@ -145,16 +165,15 @@ public class PipMeetingController : ControllerBase
     public async Task<IActionResult> Schedule([FromBody] ScheduleMeetingRequest req)
     {
         if (!await CanManageAsync(req.PipId)) return Forbid();
+        if (!TryGetConductor(out var conductorId, out var problem)) return problem!;
 
         try
         {
             var createDto = new CreatePipReviewMeetingDto
             {
                 PipId         = req.PipId,
-                // Whoever books it holds it, unless they named someone else.
-                ConductedById = req.ConductedById == Guid.Empty
-                    ? _currentUserService.EmployeeId ?? Guid.Empty
-                    : req.ConductedById,
+                // Whoever books it holds it (P13).
+                ConductedById = conductorId,
                 MeetingDate   = req.MeetingDate,
                 ProgressNotes = string.Empty,
                 EmployeeAttended = true,
@@ -190,21 +209,20 @@ public class PipMeetingController : ControllerBase
         if (model.PipId == Guid.Empty)
             return BadRequest("PipId is required");
         if (!await CanManageAsync(model.PipId)) return Forbid();
+        if (!TryGetConductor(out var conductorId, out var problem)) return problem!;
 
         try
         {
+            // P13: the conductor is the caller, and the employee's reply is theirs to write.
             var createDto = new CreatePipReviewMeetingDto
             {
                 PipId            = model.PipId,
                 MeetingDate      = model.MeetingDate,
-                ConductedById    = model.ConductedById == Guid.Empty
-                    ? _currentUserService.EmployeeId ?? Guid.Empty
-                    : model.ConductedById,
+                ConductedById    = conductorId,
                 ProgressNotes    = model.ProgressNotes,
                 IssuesDiscussed  = model.IssuesDiscussed,
                 ActionsAgreed    = model.ActionsAgreed,
                 EmployeeAttended = model.EmployeeAttended,
-                EmployeeComments = model.EmployeeComments,
             };
 
             var meeting = await _pipService.AddReviewMeetingAsync(model.PipId, createDto);
@@ -238,17 +256,17 @@ public class PipMeetingController : ControllerBase
 
         try
         {
+            // P13: the supervisor's record only. The form posts back the stored conductor and the
+            // employee's reply; neither is taken from it.
             var updateDto = new UpdatePipReviewMeetingDto
             {
                 Id               = id,
                 PipId            = model.PipId,
                 MeetingDate      = model.MeetingDate,
-                ConductedById    = model.ConductedById,
                 ProgressNotes    = model.ProgressNotes,
                 IssuesDiscussed  = model.IssuesDiscussed,
                 ActionsAgreed    = model.ActionsAgreed,
                 EmployeeAttended = model.EmployeeAttended,
-                EmployeeComments = model.EmployeeComments,
             };
 
             await _pipService.UpdateReviewMeetingAsync(model.PipId, updateDto);
@@ -281,17 +299,17 @@ public class PipMeetingController : ControllerBase
 
         try
         {
+            // P13: the supervisor's record only. The form posts back the stored conductor and the
+            // employee's reply; neither is taken from it.
             var updateDto = new UpdatePipReviewMeetingDto
             {
                 Id               = id,
                 PipId            = model.PipId,
                 MeetingDate      = model.MeetingDate,
-                ConductedById    = model.ConductedById,
                 ProgressNotes    = model.ProgressNotes,
                 IssuesDiscussed  = model.IssuesDiscussed,
                 ActionsAgreed    = model.ActionsAgreed,
                 EmployeeAttended = model.EmployeeAttended,
-                EmployeeComments = model.EmployeeComments,
             };
 
             await _pipService.UpdateReviewMeetingAsync(model.PipId, updateDto);
@@ -371,27 +389,24 @@ public class PipMeetingController : ControllerBase
             if (meeting == null)
                 return NotFound("Meeting not found");
 
-            // The employee's right of reply is the one write they own on their plan — but it is
-            // theirs, so it is gated on the plan like everything else rather than being open to
-            // any authenticated caller.
+            // The employee's right of reply is the one write they own on their plan, and it is
+            // theirs alone (performance closure P13): not the supervisor's, not the HR owner's, not
+            // a performance-Read holder's "on their behalf". The service holds the rule.
             if (!await CanAccessAsync(meeting.PipId))
                 return Forbid();
+            if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty)
+                return Forbid();
 
-            var updateDto = new UpdatePipReviewMeetingDto
-            {
-                Id              = meetingId,
-                PipId           = meeting.PipId,
-                MeetingDate     = meeting.MeetingDate,
-                EmployeeAttended = meeting.EmployeeAttended,
-                ProgressNotes   = meeting.ProgressNotes,
-                IssuesDiscussed = meeting.IssuesDiscussed,
-                ActionsAgreed   = meeting.ActionsAgreed,
-                EmployeeComments = req.Comment,
-                ConductedById   = meeting.ConductedById,
-            };
-
-            await _pipService.UpdateReviewMeetingAsync(meeting.PipId, updateDto);
+            await _pipService.SetEmployeeCommentsAsync(meeting.PipId, meetingId, me, req.Comment);
             return Ok(true);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -434,6 +449,7 @@ public class PipMeetingController : ControllerBase
             MeetingId              = meeting.Id,
             PipId                  = meeting.PipId,
             PipNumber              = pip.PipNumber,
+            EmployeeId             = pip.EmployeeId,
             EmployeeName           = pip.EmployeeName,
             PipStartDate           = pip.StartDate,
             PipEndDate             = pip.EndDate,

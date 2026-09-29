@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, LockKeyhole } from 'lucide-react';
+import { LockKeyhole } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import {
@@ -24,6 +24,7 @@ export interface SourceDimensionEditableLine {
   additionalAccountIds?: string[];
   requiredDimensionCodes?: string[];
   accountLabel?: string;
+  accountResolution?: 'UserSelection' | 'SourceDocument';
 }
 
 export interface SourceDocumentDimensionPanelProps {
@@ -152,7 +153,11 @@ export function SourceDocumentDimensionPanel({
                 {line.accountLabel ? ` · ${line.accountLabel}` : ''}
               </span>
               {!line.accountId && (
-                <Badge variant="secondary">Server-resolved</Badge>
+                <Badge variant="secondary">
+                  {line.accountResolution === 'UserSelection'
+                    ? 'Select account first'
+                    : 'Source-controlled'}
+                </Badge>
               )}
             </div>
             {line.accountId ? (
@@ -177,21 +182,14 @@ export function SourceDocumentDimensionPanel({
             ) : (
               <p className="flex items-start gap-2 text-xs text-muted-foreground">
                 <LockKeyhole className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                The economic account and Fixed dimensions are resolved by the
-                server. Document defaults are applied to eligible dimensions.
+                {line.accountResolution === 'UserSelection'
+                  ? 'Select this line’s GL account above to make its coding dimensions available.'
+                  : 'Finance derives the posting account from the approved source document, then applies these defaults only where they are allowed.'}
               </p>
             )}
           </div>
         ))}
       </div>
-      {certificationState === 'CaptureOptional' && (
-        <p className="flex items-start gap-2 text-xs text-amber-700">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          Missing Required dimensions are readiness warnings during the
-          CaptureOptional rollout. Supplied, Fixed and Prohibited values are
-          still validated by Finance.
-        </p>
-      )}
     </div>
   );
 }

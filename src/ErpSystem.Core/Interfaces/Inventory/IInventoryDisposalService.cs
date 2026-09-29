@@ -18,6 +18,7 @@ public interface IInventoryDisposalService
     Task<InventoryDisposalDto> DecideAsync(Guid id, DecideInventoryDisposalRequest request, CancellationToken cancellationToken = default);
     Task<InventoryDisposalDto> StageExecutionAsync(Guid id, StageInventoryDisposalExecutionRequest request, CancellationToken cancellationToken = default);
     Task<InventoryDisposalDto> CompleteAsync(Guid id, CompleteInventoryDisposalRequest request, CancellationToken cancellationToken = default);
+    Task<InventoryDisposalDto> CreateAuctionInvoiceAsync(Guid id, CreateInventoryDisposalAuctionInvoiceRequest request, CancellationToken cancellationToken = default);
 }
 
 public interface IInventoryDisposalReportSource

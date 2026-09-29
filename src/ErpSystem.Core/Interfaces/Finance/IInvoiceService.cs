@@ -18,6 +18,7 @@ public interface IInvoiceService
     /// </summary>
     Task<InvoiceDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<InvoiceDto?> GetByIdAsync(Guid id, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
+    Task<InvoiceDistributionDto> GetDistributionPreviewAsync(Guid id, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Retrieves an invoice by invoice number.

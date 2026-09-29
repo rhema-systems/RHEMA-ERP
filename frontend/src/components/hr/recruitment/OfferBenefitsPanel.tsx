@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { CurrencyPicker } from '@/components/hr/common/CurrencyPicker';
 import { useToast } from '@/hooks/use-toast';
 import { formatMoney } from '@/lib/hr/attendance-format';
 import { jobOfferService } from '@/services/hr/offers.service';
@@ -313,12 +314,16 @@ export function OfferBenefitsPanel({
                   />
                 </div>
                 <div className="space-y-1.5">
+                  {/* ⚠ Round 4, lane G3. A benefit line carries its own currency and was the
+                      third free-text box on this path; AddBenefit and UpdateBenefit both
+                      validate it server-side now. */}
                   <Label htmlFor="benefitCurrency">Currency</Label>
-                  <Input
+                  <CurrencyPicker
                     id="benefitCurrency"
                     value={form.currencyCode ?? ''}
-                    onChange={(e) => setForm({ ...form, currencyCode: e.target.value.toUpperCase() })}
-                    maxLength={10}
+                    onChange={(code) => setForm({ ...form, currencyCode: code })}
+                    allowEmpty
+                    emptyLabel="Same as the offer"
                   />
                 </div>
               </div>

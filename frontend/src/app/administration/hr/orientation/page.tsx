@@ -1,6 +1,6 @@
 'use client';
 
-import { BookOpen, Tags, FileStack } from 'lucide-react';
+import { BookOpen, Tags, FileStack, BellRing } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
 
@@ -37,6 +37,13 @@ export default function OrientationAdministrationPage() {
               'Reusable task checklists, copied onto each new hire’s plan when it is created.',
             href: '/administration/hr/orientation/onboarding-templates',
             icon: FileStack,
+          },
+          {
+            title: 'Reminders & notices',
+            description:
+              'The daily sweep that tells people what is due, and every notice sent — enrolments, session changes, completions, certificates — with what its email did.',
+            href: '/administration/hr/orientation/reminders',
+            icon: BellRing,
           },
         ]}
       />

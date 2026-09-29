@@ -27,6 +27,16 @@ function New-RhemaVpsPreflightHelper {
             if ((Get-RhemaNormalizedSourceHash $path) -ne $migration.sourceSha256) {
                 throw "Migration $($migration.id) changed since its preflight review. Review its guard before deployment."
             }
+            foreach ($guard in @($migration.guardSources)) {
+                if ($null -eq $guard) { continue }
+                if ($guard.file -notmatch '^[A-Za-z][A-Za-z0-9]*\.cs$') {
+                    throw 'Invalid preflight guard source filename.'
+                }
+                $guardPath = Join-Path $RepositoryRoot "src\ErpSystem.Data\Migrations\$($guard.file)"
+                if ((Get-RhemaNormalizedSourceHash $guardPath) -ne $guard.sourceSha256) {
+                    throw "Migration $($migration.id) guard $($guard.file) changed since its preflight review. Review its guard before deployment."
+                }
+            }
             $seen[$migration.id] = $true
             $ids += $migration.id
         }

@@ -21,6 +21,10 @@ public sealed class InventoryDisposalDto
     public string CurrencyCode { get; set; } = "GHS";
     public decimal? PostedStockValue { get; set; }
     public InventoryDisposalMethod Method { get; set; }
+    public int AccountingVersion { get; set; }
+    public Guid? AuctionInvoiceId { get; set; }
+    public string? AuctionInvoiceNumber { get; set; }
+    public bool CanCreateAuctionInvoice { get; set; }
     public string Reason { get; set; } = string.Empty;
     public string IdentificationDetails { get; set; } = string.Empty;
     public Guid RequestedById { get; set; }
@@ -185,4 +189,23 @@ public sealed class StageInventoryDisposalExecutionRequest : InventoryDisposalMu
 public sealed class CompleteInventoryDisposalRequest : InventoryDisposalMutationRequest
 {
     public IReadOnlyDictionary<Guid, Guid> NegativeStockOverrideIds { get; set; } = new Dictionary<Guid, Guid>();
+}
+
+public sealed class CreateInventoryDisposalAuctionInvoiceRequest : InventoryDisposalMutationRequest
+{
+    public Guid BusinessPartnerId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
+    public DateTime InvoiceDate { get; set; }
+    public DateTime? DueDate { get; set; }
+    public Guid? PaymentTermId { get; set; }
+    public ErpSystem.Core.DTOs.Finance.FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
+    [MinLength(1)] public List<InventoryDisposalAuctionInvoiceLineRequest> Lines { get; set; } = [];
+}
+
+public sealed class InventoryDisposalAuctionInvoiceLineRequest
+{
+    public Guid DisposalLineId { get; set; }
+    [Range(typeof(decimal), "0.0001", "999999999999")] public decimal UnitPrice { get; set; }
+    public Guid? TaxGroupId { get; set; }
+    public ErpSystem.Core.Enums.TaxTreatment TaxTreatment { get; set; }
 }

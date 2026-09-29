@@ -1,24 +1,24 @@
 import * as XLSX from 'xlsx';
 import type { PhysicalCountItemDto, PhysicalCountItemExportDto } from '@/services/inventoryManagementService';
 
-export const COUNT_SHEET_HEADERS = ['Item Code', 'Item Name', 'UOM', 'Location', 'Counted Qty'];
-export const COUNT_SHEET_HEADERS_WITHOUT_LOCATION = ['Item Code', 'Item Name', 'UOM', 'Counted Qty'];
+export const COUNT_SHEET_HEADERS = ['Item Code', 'Item Name', 'UOM', 'Location', 'Counted Qty', 'Defective Qty', 'Defective Notes'];
+export const COUNT_SHEET_HEADERS_WITHOUT_LOCATION = ['Item Code', 'Item Name', 'UOM', 'Counted Qty', 'Defective Qty', 'Defective Notes'];
 export const hasCountSheetLocations = (items: { locationName?: string }[]) => items.some(item => item.locationName?.trim());
 
 export function createCountSheet(items: PhysicalCountItemExportDto[]) {
   const includeLocation = hasCountSheetLocations(items);
   // Deliberate allow-list: never put snapshots, saved counts or variances in a blind sheet.
   const sheet = XLSX.utils.aoa_to_sheet([includeLocation ? COUNT_SHEET_HEADERS : COUNT_SHEET_HEADERS_WITHOUT_LOCATION, ...items.map(item => [
-    item.itemCode, item.itemName, item.unitOfMeasure, ...(includeLocation ? [item.locationName || ''] : []), '',
+    item.itemCode, item.itemName, item.unitOfMeasure, ...(includeLocation ? [item.locationName || ''] : []), '', '', '',
   ])]);
-  sheet['!cols'] = [{ wch: 44 }, { wch: 44 }, { wch: 10 }, ...(includeLocation ? [{ wch: 24 }] : []), { wch: 16 }];
+  sheet['!cols'] = [{ wch: 44 }, { wch: 44 }, { wch: 10 }, ...(includeLocation ? [{ wch: 24 }] : []), { wch: 16 }, { wch: 16 }, { wch: 40 }];
   sheet['!autofilter'] = { ref: sheet['!ref']! };
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, sheet, 'Count Sheet');
   return workbook;
 }
 
-export type CountSheetRow = { item: PhysicalCountItemDto; quantity: number; row: number };
+export type CountSheetRow = { item: PhysicalCountItemDto; quantity: number; defectiveQuantity: number; defectiveNotes: string; row: number };
 const text = (value: unknown) => String(value ?? '').trim();
 const key = (value: unknown) => text(value).toLocaleLowerCase('en');
 
@@ -26,8 +26,8 @@ export function parseCountSheet(workbook: XLSX.WorkBook, items: PhysicalCountIte
   if (workbook.SheetNames.length !== 1) throw new Error('Use the downloaded count sheet with one worksheet.');
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
-  if (range.e.r > 10000 || ![3, 4].includes(range.e.c) || range.s.r !== 0 || range.s.c !== 0) {
-    throw new Error('Use the downloaded four or five columns only: Item Code, Item Name, UOM, Location (if included), Counted Qty.');
+  if (range.e.r > 10000 || ![3, 4, 5, 6].includes(range.e.c) || range.s.r !== 0 || range.s.c !== 0) {
+    throw new Error('Use the downloaded count-sheet columns.');
   }
   for (const [address, cell] of Object.entries(sheet)) {
     if (!address.startsWith('!') && (cell as XLSX.CellObject).f) {
@@ -35,8 +35,11 @@ export function parseCountSheet(workbook: XLSX.WorkBook, items: PhysicalCountIte
     }
   }
   const data = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: true, blankrows: true });
-  const includeLocation = range.e.c === 4;
-  const headers = includeLocation ? COUNT_SHEET_HEADERS : COUNT_SHEET_HEADERS_WITHOUT_LOCATION;
+  const includeLocation = range.e.c === 4 || range.e.c === 6;
+  const hasDefects = range.e.c >= 5;
+  const quantityColumn = includeLocation ? 4 : 3;
+  const currentHeaders = includeLocation ? COUNT_SHEET_HEADERS : COUNT_SHEET_HEADERS_WITHOUT_LOCATION;
+  const headers = hasDefects ? currentHeaders : currentHeaders.slice(0, -2);
   if (headers.some((header, index) => text(data[0]?.[index]) !== header)) {
     throw new Error('The column headings have changed. Download a new count sheet.');
   }
@@ -58,13 +61,23 @@ export function parseCountSheet(workbook: XLSX.WorkBook, items: PhysicalCountIte
     }
     if (seen.has(item.id)) throw new Error(`Row ${row}: this item and location appear more than once.`);
     seen.add(item.id);
-    const value = cells[includeLocation ? 4 : 3];
-    if (!text(value)) { blankCount++; continue; }
+    const value = cells[quantityColumn];
+    if (!text(value)) {
+      if (hasDefects && (text(cells[quantityColumn + 1]) || text(cells[quantityColumn + 2])))
+        throw new Error(`Row ${row}: enter Counted Qty before defective details.`);
+      blankCount++; continue;
+    }
     const quantity = typeof value === 'number' ? value : /^\d+(\.\d+)?$/.test(text(value)) ? Number(value) : NaN;
     if (!Number.isFinite(quantity) || quantity < 0 || quantity > 99999999999999.9999 || Math.abs(quantity * 10000 - Math.round(quantity * 10000)) > 0.00001) {
       throw new Error(`Row ${row}: Counted Qty must be zero or a positive number with at most four decimal places.`);
     }
-    rows.push({ item, quantity, row });
+    const rawDefective = hasDefects ? text(cells[quantityColumn + 1]) : String(item.defectiveQuantity ?? 0);
+    const defectiveQuantity = rawDefective === '' ? 0 : /^\d+(\.\d+)?$/.test(rawDefective) ? Number(rawDefective) : NaN;
+    const defectiveNotes = hasDefects ? text(cells[quantityColumn + 2]) : item.defectiveNotes ?? '';
+    if (!Number.isFinite(defectiveQuantity) || defectiveQuantity < 0 || defectiveQuantity > quantity || Math.abs(defectiveQuantity * 10000 - Math.round(defectiveQuantity * 10000)) > 0.00001)
+      throw new Error(`Row ${row}: Defective Qty must be non-negative, no greater than Counted Qty, and have at most four decimal places.`);
+    if (defectiveNotes.length > 2000) throw new Error(`Row ${row}: Defective Notes must be at most 2000 characters.`);
+    rows.push({ item, quantity, defectiveQuantity, defectiveNotes, row });
   }
   return { rows, blankCount };
 }

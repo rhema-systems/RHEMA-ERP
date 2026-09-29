@@ -28,7 +28,7 @@ public sealed class E2E013InventoryDisposalLifecycleTests
 {
     [Fact]
     [Trait("Batch", "E2E-013")]
-    public async Task Obsolete_stock_follows_independent_disposal_auction_stock_and_balanced_proceeds_posting()
+    public async Task Historical_auction_retains_independent_stock_and_balanced_direct_proceeds_posting()
     {
         var tenantId = Guid.NewGuid();
         var requesterId = Guid.NewGuid();
@@ -257,6 +257,13 @@ public sealed class E2E013InventoryDisposalLifecycleTests
         });
         identified.TotalQuantity.Should().Be(4m);
         identified.TotalValue.Should().Be(50m);
+
+        // This C8 regression retains the pre-upgrade direct-proceeds contract. New cases
+        // use linked AR invoices, covered by InventoryDisposalServiceTests. Restore the
+        // historical version before any verification, approval or accounting snapshot.
+        var historicalCase = await db.InventoryDisposalCases.SingleAsync(value => value.Id == identified.Id);
+        historicalCase.AccountingVersion = 0;
+        await db.SaveChangesAsync();
 
         current.UserId = auditorId;
         var verified = await service.VerifyAsync(identified.Id, new VerifyInventoryDisposalRequest

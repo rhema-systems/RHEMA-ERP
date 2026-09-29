@@ -36,6 +36,7 @@ public class SalesOrderSummaryDto
 /// </summary>
 public class SalesOrderDetailDto : SalesOrderSummaryDto
 {
+    public string RowVersion { get; set; } = string.Empty;
     public DateTime? DueDate { get; set; }
     public DateTime? PromisedDeliveryDate { get; set; }
     public DateTime? ActualDeliveryDate { get; set; }

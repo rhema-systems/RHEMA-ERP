@@ -86,7 +86,6 @@ public sealed class InventoryTransferOptionalApprovalTests : IDisposable
     [Theory]
     [InlineData("empty")]
     [InlineData("zero")]
-    [InlineData("missing-bin")]
     [InlineData("foreign-bin")]
     [InlineData("inactive-bin")]
     [InlineData("same-bin")]
@@ -95,12 +94,31 @@ public sealed class InventoryTransferOptionalApprovalTests : IDisposable
         await Setup();
         if (problem == "empty") _transfer.Items.Clear();
         if (problem == "zero") _transfer.Items.Single().RequestedQuantity = 0;
-        if (problem == "missing-bin") _transfer.Items.Single().SourceLocationId = null;
         if (problem == "foreign-bin") _source.TenantId = Guid.NewGuid();
         if (problem == "inactive-bin") _source.IsActive = false;
         if (problem == "same-bin") _transfer.Items.Single().DestinationLocationId = _source.Id;
-        await FluentActions.Awaiting(() => _service.SubmitForApprovalAsync(_transfer.Id, _actor)).Should().ThrowAsync<InvalidOperationException>();
+        if (problem == "same-bin")
+            await FluentActions.Awaiting(() => _service.SubmitForApprovalAsync(_transfer.Id, _actor)).Should().ThrowAsync<ArgumentException>();
+        else
+            await FluentActions.Awaiting(() => _service.SubmitForApprovalAsync(_transfer.Id, _actor)).Should().ThrowAsync<InvalidOperationException>();
         _workflow.Verify(x => x.SubmitAsync(It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Request_can_be_submitted_without_bins_and_does_not_allocate_or_move_stock()
+    {
+        await Setup();
+        var line = _transfer.Items.Single();
+        line.SourceLocationId = null;
+        line.DestinationLocationId = null;
+        _workflow.Setup(x => x.SubmitAsync("InventoryTransfer", _transfer.Id)).ReturnsAsync(Result(false));
+        (await _service.SubmitForApprovalAsync(_transfer.Id, _actor)).Should().BeTrue();
+        _transfer.Status.Should().Be(TransferStatus.Approved);
+        line.SourceLocationId.Should().BeNull();
+        line.DestinationLocationId.Should().BeNull();
+        (await _db.Set<StockMovement>().CountAsync()).Should().Be(0);
+        (await _db.Set<InventoryTransferDispatchAllocation>().CountAsync()).Should().Be(0);
+        _workflow.Verify(x => x.SubmitAsync("InventoryTransfer", _transfer.Id), Times.Once);
     }
 
     [Fact]

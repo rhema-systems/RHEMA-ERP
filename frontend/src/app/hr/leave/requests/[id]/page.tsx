@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useToast } from '@/components/ui/use-toast';
@@ -31,6 +32,8 @@ import {
 } from '@/components/hr/leave/LeaveDateChangeDialogs';
 import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions';
 import { MedicalBoardLinkPanel } from '@/components/hr/leave/MedicalBoardLinkPanel';
+import { MatchesApprovedPlanBadge } from '@/components/hr/leave/MatchesApprovedPlanBadge';
+import { SplitAbsencePanel } from '@/components/hr/leave/SplitAbsencePanel';
 
 function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
@@ -68,6 +71,9 @@ export default function LeaveRequestDetailPage() {
   const [busy, setBusy] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [closureNotes, setClosureNotes] = useState('');
+  // The first day back, as the confirmer states it. Blank keeps the employee's report, or closes
+  // the leave as over when nobody reported.
+  const [resumedOn, setResumedOn] = useState('');
 
   const { data: r, isLoading, isError } = useQuery({
     queryKey: ['hr', 'leave-requests', id],
@@ -173,20 +179,28 @@ export default function LeaveRequestDetailPage() {
     setBusy(true);
     try {
       if (action === 'cancel') {
-        if (!cancelReason.trim()) {
+        // Cancelling granted leave takes something back, so the server insists on a reason.
+        if (r?.viewerActions?.cancelNeedsReason && !cancelReason.trim()) {
           toast({ title: 'A reason is required', variant: 'destructive' });
           return false;
         }
         await leaveService.cancel(id, cancelReason.trim());
       } else {
-        await leaveService.close(id, { closureNotes: closureNotes.trim() || null });
+        await leaveService.close(id, {
+          closureNotes: closureNotes.trim() || null,
+          resumptionDate: resumedOn || null,
+        });
       }
       await refresh();
       await workflow.refresh();
-      toast({ title: 'Done', description: `Leave request ${action === 'cancel' ? 'cancelled' : 'closed'}.` });
+      toast({
+        title: 'Done',
+        description: action === 'cancel' ? 'Leave request cancelled.' : 'Return confirmed and the leave closed.',
+      });
       setAction(null);
       setCancelReason('');
       setClosureNotes('');
+      setResumedOn('');
       return true;
     } catch (e: any) {
       toast({ title: 'Error', description: e?.message || 'Action failed.', variant: 'destructive' });
@@ -213,22 +227,34 @@ export default function LeaveRequestDetailPage() {
   }
 
   const isDraft = r.status === 'Draft';
-  const canCancel = ['Draft', 'Pending', 'Approved', 'ChangesSuggested'].includes(r.status);
-  const canClose = r.status === 'InProgress' || r.status === 'Approved';
+  // Round 5, lane D: cancel, recall and confirming the return are offered as the SERVER decides.
+  // Two of the rules turn on facts this page cannot know: whether the viewer supervises or heads
+  // the employee's department, and today's date against the leave's first day.
+  const actions = r.viewerActions;
+  const canCancel = actions?.canCancel ?? false;
+  const canConfirmReturn = actions?.canConfirmResumption ?? false;
+  const today = new Date().toISOString().slice(0, 10);
 
+  // Maternity leave is confirmed or rejected, never moved: its dates follow the birth (round 5, A4).
+  // The service refuses both date acts for it; the page does not offer them.
+  const isMaternity = r.leaveTypeCategory === 'Maternity';
   // The third decision verb, offered wherever approve and reject are. The service refuses anyone
   // the engine has not assigned, and anyone approving their own leave.
-  const canSuggest = r.status === 'Pending';
+  const canSuggest = r.status === 'Pending' && !isMaternity;
   // The employee's answer. HR can drive it from here too — the endpoint is self-or-leave-write.
   const canRespond = r.status === 'ChangesSuggested';
   // Moving approved dates, and saying it is still going ahead. Neither applies once it is closed.
-  const canReschedule = r.status === 'Approved' && !r.closureDate;
-  const canConfirm = canReschedule && !r.observanceConfirmedDate;
+  // Round 5, lane H: the two parts of a split absence were approved as one and are not moved apart.
+  const running = (s?: string | null) => s === 'Approved' || s === 'InProgress';
+  const splitRunning =
+    (!!r.chargedToAnnualRequestId && running(r.chargedToAnnualStatus)) ||
+    (!!r.splitFromRequestId && running(r.splitFromStatus));
+  const canReschedule = r.status === 'Approved' && !r.closureDate && !isMaternity && !splitRunning;
+  const canConfirm = r.status === 'Approved' && !r.closureDate && !r.observanceConfirmedDate;
   // Recall applies to leave that has been granted, including leave already under way — that is the
-  // case it mainly exists for. HR-only: the server gates it on the write permission outright rather
-  // than self-or-HR, so offering it to someone who cannot use it would only produce a 403.
-  const canRecall =
-    canWrite && (r.status === 'Approved' || r.status === 'InProgress') && !r.closureDate;
+  // case it mainly exists for. The employer's act: HR, or the employee's supervisor or head of
+  // department (round 5, B1) — never the employee.
+  const canRecall = actions?.canRecall ?? false;
 
   return (
     <div className="space-y-6 p-6">
@@ -239,6 +265,7 @@ export default function LeaveRequestDetailPage() {
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={r.status} />
+            <MatchesApprovedPlanBadge show={r.matchesApprovedPlan} />
             {isDraft && (
               <Button
                 variant="outline"
@@ -277,9 +304,15 @@ export default function LeaveRequestDetailPage() {
               </Button>
             )}
 
-            {canClose && (
-              <Button variant="outline" onClick={() => setAction('close')}>
-                <CheckCheck className="mr-2 h-4 w-4" /> Close
+            {canConfirmReturn && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setResumedOn(r.resumptionDate?.slice(0, 10) ?? '');
+                  setAction('close');
+                }}
+              >
+                <CheckCheck className="mr-2 h-4 w-4" /> Confirm return
               </Button>
             )}
             {canCancel && (
@@ -302,6 +335,7 @@ export default function LeaveRequestDetailPage() {
           <SuggestedDatesPanel request={r} />
           <RescheduleTrailPanel request={r} />
           <RecallPanel request={r} />
+          <SplitAbsencePanel request={r} hrefFor={(requestId) => `/hr/leave/requests/${requestId}`} />
           {/*
             ⚠ The board arm of the evidence gate (G4/R-15b). The link endpoint went in first and I
             recorded the gate as closed while nothing in the product could call it — so a leave type
@@ -311,7 +345,7 @@ export default function LeaveRequestDetailPage() {
             It hides itself on leave types that neither name a board nor have a threshold, so it
             costs annual leave nothing.
           */}
-          <MedicalBoardLinkPanel request={r} canEdit={canWrite} onChanged={refresh} />
+          <MedicalBoardLinkPanel request={r} canEdit={canWrite} boardLocked={!isDraft} onChanged={refresh} />
 
           <InfoCard title="Leave">
             <InfoRow label="Leave type" value={r.leaveTypeName} />
@@ -373,6 +407,41 @@ export default function LeaveRequestDetailPage() {
             </CardContent>
           </Card>
 
+          {/* Round 5, B3: the employee reports the day they were back; their manager or HR confirms it. */}
+          {(r.status === 'Approved' || r.status === 'InProgress' || r.status === 'Completed') && (
+            <InfoCard title="Back at work">
+              <InfoRow label="Due back" value={r.expectedReturnDate?.slice(0, 10)} />
+              <InfoRow
+                label="Back on"
+                value={
+                  r.resumptionDate
+                    ? `${r.resumptionDate.slice(0, 10)}${r.resumptionReportedByName ? ` · reported by ${r.resumptionReportedByName}` : ''}`
+                    : r.closureDate
+                      ? 'Not stated'
+                      : 'Not reported yet'
+                }
+              />
+              <InfoRow
+                label="Timing"
+                value={
+                  r.resumptionTiming === 'Early'
+                    ? r.closureDate
+                      ? `Early · ${r.daysRestored ?? 0} day(s) returned`
+                      : 'Early · the unused days return when confirmed'
+                    : r.resumptionTiming === 'OnTime'
+                      ? 'On time'
+                      : r.resumptionTiming === 'Late'
+                        ? `Late · ${r.overstayDays ?? 0} working day(s) overstayed`
+                        : undefined
+                }
+              />
+              <InfoRow
+                label="Confirmed by"
+                value={r.closureConfirmedByName ?? (r.closureDate ? undefined : 'Not yet confirmed')}
+              />
+            </InfoCard>
+          )}
+
           {(r.cancellationDate || r.closureDate) && (
             <InfoCard title="Outcome">
               <InfoRow label="Cancelled on" value={r.cancellationDate?.slice(0, 10)} />
@@ -384,7 +453,7 @@ export default function LeaveRequestDetailPage() {
         </TabsContent>
 
         <TabsContent value="attachments" className="pt-4">
-          <LeaveAttachmentsPanel leaveRequestId={id} canUpload={isDraft || r.status === 'Pending'} />
+          <LeaveAttachmentsPanel leaveRequestId={id} canUpload={isDraft || r.status === 'Pending'} evidenceLocked={!isDraft} />
         </TabsContent>
 
         <WorkflowTabContent
@@ -447,38 +516,66 @@ export default function LeaveRequestDetailPage() {
       <ConfirmationDialog
         open={action !== null}
         onOpenChange={(open) => !open && setAction(null)}
-        title={action === 'cancel' ? 'Cancel leave request?' : 'Close leave request?'}
+        title={action === 'cancel' ? 'Cancel leave request?' : 'Confirm the return?'}
         description={
           action === 'cancel'
-            ? 'The request is withdrawn and any pending days are released.'
-            : 'Marks the leave as taken and complete.'
+            ? actions?.cancelNeedsReason
+              ? 'This leave was granted. Cancelling it gives every day back, and it can be done up to and including its first day.'
+              : 'The request is withdrawn and any pending days are released.'
+            : 'Confirming the return closes the leave.'
         }
-        confirmText={action === 'cancel' ? 'Cancel request' : 'Close'}
+        confirmText={action === 'cancel' ? 'Cancel request' : 'Confirm return'}
         variant={action === 'cancel' ? 'destructive' : 'default'}
         isLoading={busy}
         onConfirm={runAction}
       >
         {action === 'cancel' ? (
           <div className="space-y-2">
-            <Label htmlFor="cancelReason">Reason</Label>
+            <Label htmlFor="cancelReason">
+              Reason
+              {actions?.cancelNeedsReason && <span className="text-red-500"> *</span>}
+            </Label>
             <Textarea
               id="cancelReason"
               rows={3}
               value={cancelReason}
               onChange={(e) => setCancelReason(e.target.value)}
-              placeholder="Why is this being cancelled?"
+              placeholder={actions?.cancelNeedsReason ? 'Why is granted leave being taken back?' : 'Optional'}
             />
           </div>
         ) : (
-          <div className="space-y-2">
-            <Label htmlFor="closureNotes">Closure notes</Label>
-            <Textarea
-              id="closureNotes"
-              rows={3}
-              value={closureNotes}
-              onChange={(e) => setClosureNotes(e.target.value)}
-              placeholder="Optional"
-            />
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Due back {r.expectedReturnDate?.slice(0, 10) ?? '—'}.{' '}
+              {r.resumptionReportedDate
+                ? `${r.employeeName} reported being back on ${r.resumptionDate?.slice(0, 10)}.`
+                : 'Nobody has reported the return.'}
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="resumedOn">First day back</Label>
+              <Input
+                id="resumedOn"
+                type="date"
+                max={today}
+                value={resumedOn}
+                onChange={(e) => setResumedOn(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Blank closes the leave as over. A day on or before the end date cuts the leave short and
+                returns the unused days; the employee must have reported it. A day after the due date
+                records the working days overstayed. Nothing is charged for that; HR and payroll decide.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="closureNotes">Notes</Label>
+              <Textarea
+                id="closureNotes"
+                rows={3}
+                value={closureNotes}
+                onChange={(e) => setClosureNotes(e.target.value)}
+                placeholder="Optional"
+              />
+            </div>
           </div>
         )}
       </ConfirmationDialog>

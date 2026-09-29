@@ -41,7 +41,6 @@ import {
 } from '@/components/ui/popover';
 import {
     Command,
-    CommandEmpty,
     CommandGroup,
     CommandInput,
     CommandList,
@@ -64,7 +63,10 @@ import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
 import { useTenant } from '@/contexts/TenantContext';
 import type { ApBudgetCell } from '@/types/ap';
 import { receiptBasedInvoiceLines } from '@/lib/finance/ap-goods-invoice-entry';
-import { planApSupplierDefaults } from '@/lib/finance/ap-supplier-defaults';
+import {
+    planApSupplierDefaults,
+    taxGroupForNewApInvoiceLine,
+} from '@/lib/finance/ap-supplier-defaults';
 import { PostingAccountPicker } from '@/components/finance/PostingAccountPicker';
 import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
 import {
@@ -92,7 +94,6 @@ const lineItemSchema = z.object({
 });
 
 const invoiceSchema = z.object({
-    apAccountId: z.string().optional(),
     expenseAccountId: z.string().optional(),
     supplierId: z.string().min(1, 'Supplier is required'),
     supplierInvoiceNumber: z.string().optional(),
@@ -107,6 +108,7 @@ const invoiceSchema = z.object({
     exchangeRateId: z.string().optional(),
     exchangeRateDate: z.date().optional(),
     exchangeRateSource: z.string().optional().default('Daily'),
+    currencyOverrideReason: z.string().max(500).optional(),
     notes: z.string().optional(),
     reference: z.string().optional(),
     taxGroupId: z.string().optional(),
@@ -209,8 +211,14 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     });
 
     const { data: taxGroupsData } = useQuery({
-        queryKey: ['tax-groups-active'],
-        queryFn: () => taxDataService.getTaxGroups({ isActive: true, applicability: 'Purchases' }),
+        queryKey: ['tax-groups-active', 'purchases', 'transaction-taxes-only'],
+        queryFn: async () => {
+            const groups = await taxDataService.getTaxGroups({ isActive: true, applicability: 'Purchases' });
+            return groups.filter(group => group.components.every(component =>
+                component.taxCategory !== TaxCategory.Withholding &&
+                component.taxCategory !== TaxCategory.VatWithholding
+            ));
+        },
     });
 
     const { data: withholdingTaxes = [] } = useQuery({
@@ -229,6 +237,12 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     const { data: financeSettings } = useQuery({
         queryKey: ['finance-settings', currentTenantCode, 'ap-invoice-rate-policy'],
         queryFn: () => financeService.getSettings(),
+        enabled: Boolean(currentTenantCode),
+    });
+
+    const { data: activeCurrencies = [] } = useQuery({
+        queryKey: ['finance-currencies', currentTenantCode, 'active'],
+        queryFn: () => financeDataService.getCurrencies({ isActive: true }),
         enabled: Boolean(currentTenantCode),
     });
 
@@ -251,6 +265,16 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         selectedPurchaseOrder.procurementCategory !== 'Goods' &&
         selectedPurchaseOrder.procurementCategory !== 'Works';
     const goodsCategory = selectedPurchaseOrder?.procurementCategory === 'Goods';
+    const governedAcceptedSupply = Boolean(
+        editInvoice?.acceptedSupplyKind && editInvoice?.acceptedSupplySourceId
+    );
+    const acceptedSupplyLabel = editInvoice?.acceptedSupplyKind === 'WorksPaymentCertificate'
+        ? 'Service / Works certificate'
+        : editInvoice?.acceptedSupplyKind === 'ServiceCompletion'
+            ? 'Approved service completion'
+            : editInvoice?.acceptedSupplyKind
+                ? 'Accepted supply evidence'
+                : null;
     const { data: goodsEntry, error: goodsEntryError, isFetching: goodsEntryLoading } = useQuery({
         queryKey: ['ap-goods-invoice-entry', currentTenantCode, selectedPurchaseOrderId, editInvoiceId],
         queryFn: () => accountsPayableService.getGoodsInvoiceEntry(selectedPurchaseOrderId, editInvoiceId),
@@ -307,13 +331,13 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             invoiceDate: new Date(),
             dueDate: addDays(new Date(), 30),
             paymentTermId: '',
-            apAccountId: '',
             expenseAccountId: '',
             currencyCode: 'GHS',
             exchangeRate: 1.0,
             exchangeRateId: undefined,
             exchangeRateDate: new Date(),
             exchangeRateSource: 'Daily',
+            currencyOverrideReason: '',
             isOpeningBalance: defaultOpeningBalance,
             withholdingTaxId: 'none',
             withholdingTaxRate: 0,
@@ -330,7 +354,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     useEffect(() => {
         const subscription = form.watch((_values, event) => {
             if (event.type !== 'change' || !event.name) return;
-            if (['paymentTermId', 'dueDate', 'apAccountId', 'expenseAccountId', 'taxGroupId'].includes(event.name)) manualSupplierDefaults.current.add(event.name);
+            if (['paymentTermId', 'dueDate', 'expenseAccountId', 'taxGroupId'].includes(event.name)) manualSupplierDefaults.current.add(event.name);
             const line = /^lineItems\.(\d+)\.(taxGroupId|taxTreatment|glAccountId)$/.exec(event.name);
             if (line) manualSupplierDefaults.current.add(`${form.getValues(`lineItems.${Number(line[1])}.sourceLineId`)}:${line[2]}`);
         });
@@ -357,11 +381,24 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
 
     // Totals and dynamic tax calculation previews
     const watchTaxGroupId = form.watch('taxGroupId');
-    const watchApAccountId = form.watch('apAccountId');
     const watchExpenseAccountId = form.watch('expenseAccountId');
     const watchSupplierId = form.watch('supplierId');
     const watchIsOpeningBalance = form.watch('isOpeningBalance');
     const watchCurrencyCode = form.watch('currencyCode') || 'GHS';
+    const supplierCurrency = selectedSupplier?.currency?.trim().toUpperCase() || '';
+    const currencyOptions = activeCurrencies.map(currency => ({
+        id: currency.id,
+        currencyCode: currency.currencyCode,
+        currencyName: currency.currencyName,
+    }));
+    for (const code of [watchCurrencyCode, supplierCurrency, financeSettings?.baseCurrency || 'GHS'].filter(Boolean)) {
+        if (!currencyOptions.some(currency => currency.currencyCode === code)) {
+            currencyOptions.push({ id: `fallback-${code}`, currencyCode: code, currencyName: 'Configured currency' });
+        }
+    }
+    const currencyOverridesSupplier = Boolean(
+        selectedSupplier && !selectedPurchaseOrderId && supplierCurrency && watchCurrencyCode !== supplierCurrency
+    );
     const watchWithholdingTaxId = form.watch('withholdingTaxId');
     const withholdingTaxOptions = (withholdingTaxes as Tax[]).filter(tax =>
         tax.isActive && tax.category === TaxCategory.Withholding && (
@@ -474,13 +511,13 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             invoiceDate,
             dueDate,
             paymentTermId: editInvoice.paymentTermId || '',
-            apAccountId: editInvoice.apAccountId || '',
             expenseAccountId: editInvoice.expenseAccountId || '',
             currencyCode: editInvoice.currencyCode || 'GHS',
             exchangeRate: editInvoice.exchangeRate || 1,
             exchangeRateId: editInvoice.exchangeRateId,
             exchangeRateDate: invoiceDate,
             exchangeRateSource: editInvoice.exchangeRateId ? 'Approved rate' : 'Daily',
+            currencyOverrideReason: editInvoice.currencyOverrideReason || '',
             notes: editInvoice.notes || '',
             reference: editInvoice.reference || '',
             taxGroupId: 'none',
@@ -768,6 +805,13 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         form.setValue('purchaseOrderId', value || undefined);
         form.setValue('acceptedSupplyKind', undefined);
         form.setValue('acceptedSupplySourceId', undefined);
+        if (!value) {
+            form.setValue('lineItems', [{
+                sourceLineId: crypto.randomUUID(), lineItemType: 'Expense', description: '',
+                quantity: 1, unitPrice: 0, discountPercentage: 0,
+                taxGroupId: taxGroupForNewApInvoiceLine(form.getValues('taxGroupId'), watchIsOpeningBalance),
+            }]);
+        }
     };
 
     useEffect(() => {
@@ -799,7 +843,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             : selectedPurchaseOrder.items.map(item => ({ ...item, invoiceQuantity: item.remainingQuantity > 0 ? item.remainingQuantity : item.orderedQuantity }));
         form.setValue('lineItems', sourceItems.map(item => ({
             sourceLineId: crypto.randomUUID(),
-            lineItemType: selectedPurchaseOrder.procurementCategory === 'Goods' ? 'Inventory' : 'Expense',
+            lineItemType: selectedPurchaseOrder.procurementCategory === 'Goods' ? 'Inventory' : 'Service',
             inventoryItemId: item.inventoryItemId || undefined,
             warehouseId: item.warehouseId || undefined,
             purchaseOrderItemId: item.id,
@@ -807,7 +851,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             quantity: item.invoiceQuantity,
             unitPrice: item.unitPrice,
             discountPercentage: 0,
-            taxGroupId: 'none',
+            taxGroupId: taxGroupForNewApInvoiceLine(form.getValues('taxGroupId'), watchIsOpeningBalance),
             unit: item.unitOfMeasure,
         })));
         hydratedPurchaseOrderIdRef.current = selectedPurchaseOrder.id;
@@ -833,7 +877,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 if (form.getValues('dueDate')?.getTime() !== dueDate.getTime()) form.setValue('dueDate', dueDate);
             }
         }
-    }, [applySupplierDefaults, supplierDefaults, isEditMode, watchIsOpeningBalance, taxGroupsData, paymentTerms, form, watchLineItems, watchTaxGroupId, watchApAccountId, watchExpenseAccountId, watchInvoiceDateTime]);
+    }, [applySupplierDefaults, supplierDefaults, isEditMode, watchIsOpeningBalance, taxGroupsData, paymentTerms, form, watchLineItems, watchTaxGroupId, watchExpenseAccountId, watchInvoiceDateTime]);
 
     useEffect(() => {
         if (preselectedSupplierId && suppliersData?.items) {
@@ -869,6 +913,30 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 }
             }
             const isOpeningBalance = data.isOpeningBalance;
+            if (!data.purchaseOrderId && !governedAcceptedSupply && data.lineItems.some(line => line.lineItemType !== 'Expense')) {
+                toast({
+                    title: 'Manual invoices use GL expense lines',
+                    description: 'Inventory and service lines must come from their governed Procurement or accepted-supply source.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+            if (goodsCategory && data.lineItems.some(line => line.lineItemType !== 'Inventory' || !line.purchaseOrderItemId)) {
+                toast({
+                    title: 'Goods lines must come from accepted receipts',
+                    description: 'Reload the selected purchase order to restore its governed receipt lines.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+            if (serviceCategory && data.lineItems.some(line => line.lineItemType !== 'Service' || !line.purchaseOrderItemId)) {
+                toast({
+                    title: 'Service lines must come from the selected purchase order',
+                    description: 'Reload the selected purchase order and approved completion evidence.',
+                    variant: 'destructive',
+                });
+                return;
+            }
             if (serviceCategory && !data.acceptedSupplySourceId) {
                 toast({
                     title: 'Service completion required',
@@ -900,6 +968,14 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 return;
             }
             const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
+            if (currencyOverridesSupplier && (data.currencyOverrideReason?.trim().length || 0) < 10) {
+                toast({
+                    title: 'Currency override reason required',
+                    description: `Explain why this invoice uses ${data.currencyCode} instead of the supplier default ${supplierCurrency} (at least 10 characters).`,
+                    variant: 'destructive',
+                });
+                return;
+            }
             if (data.currencyCode !== functionalCurrency && !data.exchangeRateId) {
                 toast({
                     title: 'Approved exchange rate required',
@@ -915,7 +991,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 ...invoiceData,
                 businessPartnerId: supplierId,
                 businessPartnerRoleId: selectedSupplier?.businessPartnerRoleId,
-                apAccountId: data.apAccountId || undefined,
+                currencyOverrideReason: currencyOverridesSupplier ? data.currencyOverrideReason?.trim() : undefined,
                 expenseAccountId: data.expenseAccountId || undefined,
                 paymentTermsDays: !isOpeningBalance && applySupplierDefaults && supplierDefaults?.paymentTermId === data.paymentTermId && !manualSupplierDefaults.current.has('paymentTermId') && !manualSupplierDefaults.current.has('dueDate')
                     ? supplierDefaults?.paymentTermsDays ?? undefined : undefined,
@@ -992,7 +1068,6 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                     withholdingCertificateDate: editInvoice.withholdingCertificateDate,
                     matchingType: editInvoice.matchingType,
                     expenseAccountId: data.expenseAccountId || editInvoice.expenseAccountId,
-                    apAccountId: data.apAccountId || editInvoice.apAccountId,
                 });
             } else {
                 await accountsPayableService.createInvoice(request);
@@ -1092,6 +1167,10 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                         <CardTitle>Invoice Details</CardTitle>
                     </CardHeader>
                     <CardContent className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                        <div className="md:col-span-2 lg:col-span-3">
+                            <h2 className="text-base font-semibold">Supplier and document</h2>
+                            <p className="text-sm text-muted-foreground">Identify the payable, its governed source, dates, terms and transaction currency.</p>
+                        </div>
                         <div className="min-w-0 space-y-2">
                             <Label htmlFor="supplier">Supplier</Label>
                             <Popover open={supplierComboOpen} onOpenChange={setSupplierComboOpen}>
@@ -1123,9 +1202,15 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                             onValueChange={setSupplierSearch}
                                         />
                                         <CommandList>
-                                            <CommandEmpty>
-                                                {suppliersLoading ? "Loading..." : "No supplier found."}
-                                            </CommandEmpty>
+                                            {filteredSuppliers.length === 0 && (
+                                                <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                                                    {suppliersLoading
+                                                        ? 'Loading suppliers…'
+                                                        : supplierSearch
+                                                            ? `No supplier matches “${supplierSearch}”.`
+                                                            : 'No approved, transaction-ready suppliers are available.'}
+                                                </div>
+                                            )}
                                             <CommandGroup>
                                                 {filteredSuppliers.map((supplier: any) => (
                                                     <div
@@ -1273,6 +1358,9 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                         value={field.value}
                                         onValueChange={async (val) => {
                                             field.onChange(val);
+                                            if (!supplierCurrency || val === supplierCurrency || selectedPurchaseOrderId) {
+                                                form.setValue('currencyOverrideReason', '');
+                                            }
                                             try {
                                                 await applyInvoiceExchangeRate(val);
                                             } catch (err) {
@@ -1287,14 +1375,29 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                             <SelectValue placeholder="Select Currency" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="GHS">GHS - Ghana Cedi</SelectItem>
-                                            <SelectItem value="USD">USD - US Dollar</SelectItem>
-                                            <SelectItem value="EUR">EUR - Euro</SelectItem>
-                                            <SelectItem value="GBP">GBP - British Pound</SelectItem>
+                                            {currencyOptions.map(currency => (
+                                                <SelectItem key={currency.id} value={currency.currencyCode}>
+                                                    {currency.currencyCode} - {currency.currencyName}
+                                                    {currency.currencyCode === supplierCurrency ? ' (supplier default)' : ''}
+                                                </SelectItem>
+                                            ))}
                                         </SelectContent>
                                     </Select>
                                 )}
                             />
+                            {currencyOverridesSupplier && (
+                                <div className="mt-3 space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-950">
+                                    <p className="text-sm font-medium">Currency differs from the supplier default ({supplierCurrency}).</p>
+                                    <p className="text-xs">Confirm the commercial document currency and record why this exception is appropriate.</p>
+                                    <Label htmlFor="currencyOverrideReason">Override reason</Label>
+                                    <Textarea
+                                        id="currencyOverrideReason"
+                                        placeholder="Explain why this invoice uses a different currency…"
+                                        {...form.register('currencyOverrideReason')}
+                                    />
+                                    {form.formState.errors.currencyOverrideReason && <p className="text-xs text-destructive">{form.formState.errors.currencyOverrideReason.message}</p>}
+                                </div>
+                            )}
                         </div>
 
                         {watchCurrencyCode !== (financeSettings?.baseCurrency || 'GHS') && (
@@ -1358,31 +1461,37 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                             />
                         </div>
 
-                        <div className="space-y-2">
-                            <Label>Default Tax Group (For new lines)</Label>
-                            <Controller
-                                control={form.control}
-                                name="taxGroupId"
-                                render={({ field }) => (
-                                    <Select value={watchIsOpeningBalance ? 'none' : (field.value || 'none')} onValueChange={value => { manualSupplierDefaults.current.add('taxGroupId'); field.onChange(value); }} disabled={watchIsOpeningBalance}>
-                                        <SelectTrigger className={cn(watchIsOpeningBalance && 'bg-muted text-muted-foreground')}>
-                                            <SelectValue placeholder="No Tax (Zero/Exempt)" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="none">No Tax (Zero/Exempt)</SelectItem>
-                                            {taxGroupsData?.map((tg: any) => (
-                                                <SelectItem key={tg.id} value={tg.id}>{tg.name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                )}
-                            />
-                            <span className="text-[11px] text-muted-foreground block mt-1">
-                                {watchIsOpeningBalance
-                                    ? 'Disabled for opening balances; opening bills carry no tax reposting.'
-                                    : 'Optional. Pre-populates new lines; can be overridden on each line.'}
-                            </span>
-                        </div>
+                        <section className="space-y-4 rounded-xl border bg-muted/10 p-4 md:col-span-2 lg:col-span-3">
+                            <div>
+                                <h2 className="text-base font-semibold">VAT and levies</h2>
+                                <p className="text-sm text-muted-foreground">Choose the default transactional tax treatment for new invoice lines. WHT is handled separately at payment.</p>
+                            </div>
+                            <div className="max-w-xl space-y-2">
+                                <Label>Default tax group for new lines</Label>
+                                <Controller
+                                    control={form.control}
+                                    name="taxGroupId"
+                                    render={({ field }) => (
+                                        <Select value={watchIsOpeningBalance ? 'none' : (field.value || 'none')} onValueChange={value => { manualSupplierDefaults.current.add('taxGroupId'); field.onChange(value); }} disabled={watchIsOpeningBalance}>
+                                            <SelectTrigger className={cn(watchIsOpeningBalance && 'bg-muted text-muted-foreground')}>
+                                                <SelectValue placeholder="No Tax (Zero/Exempt)" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="none">No Tax (Zero/Exempt)</SelectItem>
+                                                {taxGroupsData?.map((tg: any) => (
+                                                    <SelectItem key={tg.id} value={tg.id}>{tg.name}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    )}
+                                />
+                                <span className="block text-xs text-muted-foreground">
+                                    {watchIsOpeningBalance
+                                        ? 'Disabled for opening balances; opening bills carry no tax reposting.'
+                                        : 'Applied to new lines only. Each line can use a different tax group.'}
+                                </span>
+                            </div>
+                        </section>
 
                         {watchCurrencyCode !== (financeSettings?.baseCurrency || 'GHS') && (
                             <div className="border p-4 rounded-lg bg-muted/20 md:col-span-2 lg:col-span-3 space-y-4">
@@ -1421,14 +1530,21 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                             </div>
                         )}
 
-                        <div className="space-y-2 md:col-span-2">
+                        <section className="space-y-4 rounded-xl border bg-muted/10 p-4 md:col-span-2 lg:col-span-3">
+                            <div>
+                                <h2 className="text-base font-semibold">Withholding tax classification</h2>
+                                <p className="text-sm text-muted-foreground">Record the payment-time WHT policy and statutory threshold scope without reducing the invoice liability now.</p>
+                            </div>
                             <div className="flex flex-wrap items-center gap-3">
                                 <Switch id="invoiceSubjectToWithholding" checked={!watchIsOpeningBalance && withholdingDecision === true} disabled={watchIsOpeningBalance}
                                     onCheckedChange={checked => { if (checked) setWithholdingPromptOpen(true); else declineWithholding(); }} />
-                                <Label htmlFor="invoiceSubjectToWithholding">Subject to withholding</Label>
+                                <Label htmlFor="invoiceSubjectToWithholding">Classify for WHT at payment</Label>
                                 {supplierWithholding?.required && withholdingDecision === null && !watchIsOpeningBalance && <Button type="button" variant="outline" size="sm" onClick={() => setWithholdingPromptOpen(true)}>Review withholding</Button>}
                             </div>
-                            <div className="grid gap-3 sm:grid-cols-[1fr_130px]">
+                            <p className="text-xs text-muted-foreground">
+                                This records the applicable WHT rule and statutory scope. The payable is not reduced now; the final deduction and any configured threshold are evaluated when a payment is posted.
+                            </p>
+                            <div className="grid max-w-3xl gap-3 sm:grid-cols-[minmax(280px,520px)_180px]">
                             <div className="space-y-1.5"><Label htmlFor="invoiceWithholdingTaxId">WHT Configuration</Label>
                             <Controller
                                 control={form.control}
@@ -1457,7 +1573,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                 )}
                             />
                             </div>
-                            <div className="space-y-1.5"><Label htmlFor="invoiceWithholdingRate">WHT Rate (%)</Label>
+                            <div className="space-y-1.5"><Label htmlFor="invoiceWithholdingRate" className="whitespace-nowrap">Expected WHT Rate (%)</Label>
                                 <Input id="invoiceWithholdingRate" type="number" min="0" max="100" step="0.0001" disabled={watchIsOpeningBalance || withholdingDecision !== true}
                                     value={form.watch('withholdingTaxRate') ?? 0} onChange={event => {
                                         const rate = event.target.value === '' ? 0 : Number(event.target.value);
@@ -1466,25 +1582,40 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                 {form.formState.errors.withholdingTaxRate && <p className="text-xs text-destructive">Enter a rate from 0 to 100.</p>}
                             </div></div>
                             {withholdingDecision === true && !withholdingAccountId && <p role="status" className="text-xs text-destructive">{supplierWithholding?.message || 'Select a WHT configuration with a payable account.'}</p>}
-                        </div>
+                        </section>
 
                         {!isEditMode && selectedSupplier && (
-                            <div className="space-y-3 rounded-lg border p-3 md:col-span-2 lg:col-span-3">
+                            <details className="rounded-lg border md:col-span-2 lg:col-span-3">
+                                <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">
+                                    Invoice defaults <span className="ml-2 font-normal text-muted-foreground">Approved payment, tax and line-account defaults</span>
+                                </summary>
+                                <div className="space-y-3 border-t p-4">
                                 <div className="flex flex-wrap items-center justify-between gap-3">
                                     <div className="flex items-center gap-2">
                                         <Checkbox id="applySupplierDefaults" checked={applySupplierDefaults} disabled={watchIsOpeningBalance} onCheckedChange={checked => setApplySupplierDefaults(checked === true)} />
-                                        <Label htmlFor="applySupplierDefaults">Use supplier defaults</Label>
+                                        <Label htmlFor="applySupplierDefaults">Use approved supplier invoice defaults</Label>
                                     </div>
                                     {supplierDefaultsLoading && <span className="text-xs text-muted-foreground">Loading defaults...</span>}
                                     {applySupplierDefaults && selectedPurchaseOrderId && supplierDefaults?.paymentTermsDays != null && <span className="text-xs text-muted-foreground">PO payment terms: {supplierDefaults.paymentTermsDays} days</span>}
                                 </div>
                                 {supplierDefaultsError && <p role="status" className="text-sm text-amber-700">Supplier defaults unavailable. You can enter the invoice details manually.</p>}
                                 {applySupplierDefaults && supplierDefaults?.postingDefaults.defaultTaxGroupId && taxGroupsData && !taxGroupsData.some(group => group.id === supplierDefaults.postingDefaults.defaultTaxGroupId) && <p role="status" className="text-sm text-amber-700">The saved supplier tax schedule is unavailable. Select tax manually.</p>}
-                                {(applySupplierDefaults || watchApAccountId || watchExpenseAccountId) && <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                                    <div className="space-y-1.5"><Label htmlFor="apAccountId">Accounts Payable</Label><Controller control={form.control} name="apAccountId" render={({ field }) => <PostingAccountPicker id="apAccountId" value={field.value} accounts={(glAccountsData?.items || []).filter(account => account.accountType === 'Liability' && (account.allowDirectPosting || account.isControlAccount))} onChange={value => { manualSupplierDefaults.current.add('apAccountId'); field.onChange(value || ''); }} />} /></div>
-                                    <div className="space-y-1.5"><Label htmlFor="expenseAccountId">Purchases Account</Label><Controller control={form.control} name="expenseAccountId" render={({ field }) => <PostingAccountPicker id="expenseAccountId" value={field.value} accounts={(glAccountsData?.items || []).filter(account => !account.isControlAccount && account.allowDirectPosting && ['Asset', 'Expense'].includes(account.accountType))} onChange={value => { manualSupplierDefaults.current.add('expenseAccountId'); field.onChange(value || ''); }} />} /></div>
+                                {(applySupplierDefaults || watchExpenseAccountId) && <div className="max-w-2xl space-y-1.5">
+                                        <Label htmlFor="expenseAccountId">Default line posting account</Label>
+                                        <Controller control={form.control} name="expenseAccountId" render={({ field }) => <PostingAccountPicker id="expenseAccountId" value={field.value} accounts={(glAccountsData?.items || []).filter(account => !account.isControlAccount && account.allowDirectPosting && ['Asset', 'Expense'].includes(account.accountType))} onChange={value => { manualSupplierDefaults.current.add('expenseAccountId'); field.onChange(value || ''); }} />} />
+                                        <p className="text-xs text-muted-foreground">Fallback for a manual GL line. A line-level GL account takes precedence.</p>
                                 </div>}
-                            </div>
+                                <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                                    <span className="font-medium text-foreground">AP liability account: system-controlled.</span>{' '}
+                                    Finance resolves the tenant&apos;s governed AP control account when the invoice is posted; it cannot be changed on this invoice.
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                    {applySupplierDefaults
+                                        ? 'Finance pre-fills approved payment terms, tax treatment and the fallback line account. A field you change is retained as an explicit invoice choice.'
+                                        : 'Automatic supplier invoice defaults are off. Values already displayed remain available for review and can be replaced before recording the invoice.'}
+                                </p>
+                                </div>
+                            </details>
                         )}
 
                         {selectedWithholdingTax && !watchIsOpeningBalance && (
@@ -1496,7 +1627,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                         placeholder="e.g. CONTRACT-2026-014"
                                         {...form.register('withholdingContractReference')}
                                     />
-                                    <p className="text-xs text-muted-foreground">Thresholds accumulate only within this supplier contract and category.</p>
+                                    <p className="text-xs text-muted-foreground">Identifies the engagement whose posted payments accumulate toward the statutory threshold.</p>
                                 </div>
                                 <div className="space-y-2">
                                     <Label>WHT Supply Category</Label>
@@ -1514,6 +1645,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                             </Select>
                                         )}
                                     />
+                                    <p className="text-xs text-muted-foreground">Separates Goods, Works, and Services threshold accumulation for this supplier and contract.</p>
                                 </div>
                             </div>
                         )}
@@ -1522,42 +1654,6 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                             <Label htmlFor="notes">Notes/Memo</Label>
                             <Textarea id="notes" placeholder="Reference number, payment instructions, etc." {...form.register('notes')} />
                         </div>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Finance coding dimensions</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <SourceDocumentDimensionPanel
-                            context={{
-                                sourceModule: 'AP',
-                                sourceDocumentType: 'VendorInvoice',
-                                postingAction: 'Post',
-                                sourceRoute: 'finance.ap.vendor-invoices.manual',
-                                contractVersion: '1.0',
-                            }}
-                            effectiveDate={format(watchInvoiceDate || new Date(), 'yyyy-MM-dd')}
-                            lines={watchLineItems.map((item) => ({
-                                id: item.sourceLineId,
-                                ...getSourceLineDimensionAccounts(watchIsOpeningBalance ? undefined : editInvoice?.financeDimensions, item.sourceLineId, !watchIsOpeningBalance
-                                    && !selectedPurchaseOrderId
-                                    && (item.lineItemType === 'Expense' || item.lineItemType === 'Service')
-                                    ? item.glAccountId
-                                    : undefined),
-                                accountLabel: item.description || undefined,
-                            }))}
-                            defaultValues={defaultDimensionValues}
-                            lineValues={lineDimensionValues}
-                            onDefaultValuesChange={(values) => {
-                                setDefaultDimensionValues(values);
-                                setApplyDefaultToAll(false);
-                            }}
-                            onLineValuesChange={setLineDimensionValues}
-                            onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
-                            certificationState={editInvoice?.financeDimensions?.certificationState}
-                        />
                     </CardContent>
                 </Card>
 
@@ -1570,11 +1666,36 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                     </div>
                 )}
                 <Card>
-                    <CardHeader className="flex flex-row items-center justify-between">
-                        <CardTitle>Line Items</CardTitle>
-                        <Button type="button" variant="outline" size="sm" onClick={() => append({ sourceLineId: crypto.randomUUID(), lineItemType: 'Expense' as const, description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' })}>
-                            <Plus className="mr-2 h-4 w-4" /> Add Item
-                        </Button>
+                    <CardHeader className="flex flex-row items-start justify-between gap-4">
+                        <div className="space-y-1">
+                            <CardTitle>Invoice lines</CardTitle>
+                            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                                <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
+                                    {selectedPurchaseOrderId || governedAcceptedSupply ? 'Source-controlled invoice' : 'Manual GL invoice'}
+                                </span>
+                                <span>
+                                    {selectedPurchaseOrderId || governedAcceptedSupply
+                                        ? 'Line type and posting treatment come from the approved procurement evidence.'
+                                        : 'Each line posts to the expense or asset account you select below.'}
+                                </span>
+                                {acceptedSupplyLabel && (
+                                    <span className="rounded-full border px-2.5 py-1 text-xs font-medium text-foreground">
+                                        {acceptedSupplyLabel}
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                        {!selectedPurchaseOrderId && !governedAcceptedSupply && <Button type="button" variant="outline" size="sm" onClick={() => append({
+                            sourceLineId: crypto.randomUUID(),
+                            lineItemType: 'Expense' as const,
+                            description: '',
+                            quantity: 1,
+                            unitPrice: 0,
+                            discountPercentage: 0,
+                            taxGroupId: taxGroupForNewApInvoiceLine(watchTaxGroupId, watchIsOpeningBalance),
+                        })}>
+                            <Plus className="mr-2 h-4 w-4" /> Add GL line
+                        </Button>}
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-4">
@@ -1583,30 +1704,14 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                 const selectedGlAccount = glAccountsData?.items?.find(
                                     (account: any) => account.id === form.watch(`lineItems.${index}.glAccountId`)
                                 );
+                                const budgetAllocationRequired = selectedGlAccount?.accountType === 'Expense'
+                                    && selectedGlAccount?.budgetTrackingEnabled;
                                 return (
-                                    <div key={field.id} className="grid grid-cols-12 gap-4 items-end border-b pb-4">
-                                        <div className="col-span-2 space-y-2">
-                                            <Label className={index !== 0 ? 'sr-only' : ''}>Type</Label>
-                                            <Controller
-                                                control={form.control}
-                                                name={`lineItems.${index}.lineItemType`}
-                                                render={({ field }) => (
-                                                    <Select value={field.value} onValueChange={field.onChange}>
-                                                        <SelectTrigger><SelectValue placeholder="Type" /></SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="Expense">GL Account / Expense</SelectItem>
-                                                            <SelectItem value="Service">Service / Works certificate</SelectItem>
-                                                            <SelectItem value="Inventory">Inventory Item</SelectItem>
-                                                            <SelectItem value="Product">Product / Other</SelectItem>
-                                                        </SelectContent>
-                                                    </Select>
-                                                )}
-                                            />
-                                        </div>
-
+                                    <div key={field.id} className="space-y-3 border-b pb-4">
+                                    <div className="grid grid-cols-12 items-end gap-4">
                                         {lineItemType === 'Expense' || lineItemType === 'Service' ? (
                                             <>
-                                                <div className="col-span-2 min-w-0 space-y-2">
+                                                <div className="col-span-12 min-w-0 space-y-2 md:col-span-3">
                                                     <Label className={index !== 0 ? 'sr-only' : ''}>GL Account</Label>
                                                     <Controller
                                                         control={form.control}
@@ -1617,7 +1722,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                                 onOpenChange={(open) => { setGlAccountOpenIndex(open ? index : null); if (!open) setGlAccountSearch(''); }}
                                                             >
                                                                 <PopoverTrigger asChild>
-                                                                    <Button variant="outline" role="combobox" className="h-10 w-full min-w-0 justify-between overflow-hidden px-3 text-left font-medium">
+                                                                    <Button variant="outline" role="combobox" disabled={governedAcceptedSupply} className="h-10 w-full min-w-0 justify-between overflow-hidden px-3 text-left font-medium">
                                                                         <span className="min-w-0 flex-1 truncate text-sm">
                                                                             {getAccountDisplay(accountField.value) || (glAccountsLoading ? "Loading..." : "Select account...")}
                                                                         </span>
@@ -1628,7 +1733,15 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                                     <Command shouldFilter={false}>
                                                                         <CommandInput placeholder="Search code or name..." value={glAccountSearch} onValueChange={setGlAccountSearch} />
                                                                         <CommandList>
-                                                                            <CommandEmpty>No account found.</CommandEmpty>
+                                                                            {filteredGlAccounts.length === 0 && (
+                                                                                <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                                                                                    {glAccountsLoading
+                                                                                        ? 'Loading posting accounts…'
+                                                                                        : glAccountSearch
+                                                                                            ? `No posting account matches “${glAccountSearch}”.`
+                                                                                            : 'No eligible posting accounts are available.'}
+                                                                                </div>
+                                                                            )}
                                                                             <CommandGroup>
                                                                                 {filteredGlAccounts.map((account: any) => (
                                                                                     <div
@@ -1658,56 +1771,15 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                             </Popover>
                                                         )}
                                                     />
-                                                    {(budgetCellsLoading[field.id]
-                                                        || (budgetCellsByLine[field.id]?.length ?? 0) > 0
-                                                        || selectedGlAccount?.budgetTrackingEnabled) && (
-                                                        <Controller
-                                                            control={form.control}
-                                                            name={`lineItems.${index}.budgetEntryId`}
-                                                            render={({ field: budgetField }) => (
-                                                                <Select
-                                                                    value={budgetField.value}
-                                                                    onValueChange={budgetField.onChange}
-                                                                    disabled={budgetCellsLoading[field.id] || (budgetCellsByLine[field.id]?.length ?? 0) === 0}
-                                                                >
-                                                                    <SelectTrigger className="mt-2 h-auto min-h-10 text-left">
-                                                                        <SelectValue placeholder={budgetCellsLoading[field.id]
-                                                                            ? 'Loading budget cells...'
-                                                                            : (budgetCellsByLine[field.id]?.length ?? 0) === 0
-                                                                                ? 'No adopted budget cell'
-                                                                                : 'Select adopted budget cell'} />
-                                                                    </SelectTrigger>
-                                                                    <SelectContent>
-                                                                        {(budgetCellsByLine[field.id] || []).map(cell => (
-                                                                            <SelectItem key={cell.budgetEntryId} value={cell.budgetEntryId}>
-                                                                                <span className="flex min-w-72 flex-col gap-1 py-1">
-                                                                                    <span>
-                                                                                        {cell.dimensionAssignments.map(item => `${item.dimensionCode}: ${item.valueCode}`).join(' · ') || 'Account total'}
-                                                                                    </span>
-                                                                                    <span className="text-xs text-muted-foreground">{cell.fiscalPeriodCode}</span>
-                                                                                    <span className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
-                                                                                        <span>Approved: {formatCurrency(cell.approvedAmount, cell.functionalCurrencyCode)}</span>
-                                                                                        <span>Actual: {formatCurrency(cell.postedActualAmount, cell.functionalCurrencyCode)}</span>
-                                                                                        <span>Reserved: {formatCurrency(cell.reservedAmount, cell.functionalCurrencyCode)}</span>
-                                                                                        <span>Available: {formatCurrency(cell.availableAmount, cell.functionalCurrencyCode)}</span>
-                                                                                    </span>
-                                                                                </span>
-                                                                            </SelectItem>
-                                                                        ))}
-                                                                    </SelectContent>
-                                                                </Select>
-                                                            )}
-                                                        />
-                                                    )}
                                                 </div>
-                                                <div className="col-span-2 space-y-2">
+                                                <div className="col-span-12 space-y-2 md:col-span-3">
                                                     <Label className={index !== 0 ? 'sr-only' : ''}>Description</Label>
                                                     <Input {...form.register(`lineItems.${index}.description` as const)} placeholder="Notes" />
                                                 </div>
                                             </>
                                         ) : lineItemType === 'Inventory' ? (
                                             <>
-                                                <div className="col-span-2 min-w-0 space-y-2">
+                                                <div className="col-span-12 min-w-0 space-y-2 md:col-span-3">
                                                     <Label className={index !== 0 ? 'sr-only' : ''}>Inventory Item</Label>
                                                     <Controller
                                                         control={form.control}
@@ -1718,7 +1790,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                                 onOpenChange={(open) => { setInventoryItemOpenIndex(open ? index : null); if (!open) setInventoryItemSearch(''); }}
                                                             >
                                                                 <PopoverTrigger asChild>
-                                                                    <Button variant="outline" role="combobox" className="h-10 w-full min-w-0 justify-between overflow-hidden px-3 text-left font-medium">
+                                                                    <Button variant="outline" role="combobox" disabled={Boolean(selectedPurchaseOrderId)} className="h-10 w-full min-w-0 justify-between overflow-hidden px-3 text-left font-medium">
                                                                         <span className="min-w-0 flex-1 truncate text-sm">
                                                                             {getInventoryItemDisplay(field.value) || (inventoryItemsLoading ? "Loading..." : "Select item...")}
                                                                         </span>
@@ -1729,7 +1801,15 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                                     <Command shouldFilter={false}>
                                                                         <CommandInput placeholder="Search item code or name..." value={inventoryItemSearch} onValueChange={setInventoryItemSearch} />
                                                                         <CommandList>
-                                                                            <CommandEmpty>No inventory items found.</CommandEmpty>
+                                                                            {filteredInventoryItems.length === 0 && (
+                                                                                <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                                                                                    {inventoryItemsLoading
+                                                                                        ? 'Loading inventory items…'
+                                                                                        : inventoryItemSearch
+                                                                                            ? `No inventory item matches “${inventoryItemSearch}”.`
+                                                                                            : 'No active inventory items are available.'}
+                                                                                </div>
+                                                                            )}
                                                                             <CommandGroup>
                                                                                 {filteredInventoryItems.map((item: any) => (
                                                                                     <div
@@ -1760,13 +1840,13 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                         )}
                                                     />
                                                 </div>
-                                                <div className="col-span-2 space-y-2">
+                                                <div className="col-span-12 space-y-2 md:col-span-3">
                                                     <Label className={index !== 0 ? 'sr-only' : ''}>Dest. Whse</Label>
                                                     <Controller
                                                         control={form.control}
                                                         name={`lineItems.${index}.warehouseId`}
                                                         render={({ field }) => (
-                                                            <Select value={field.value} onValueChange={field.onChange}>
+                                                            <Select value={field.value} onValueChange={field.onChange} disabled={Boolean(selectedPurchaseOrderId)}>
                                                                 <SelectTrigger><SelectValue placeholder="Warehouse..." /></SelectTrigger>
                                                                 <SelectContent>
                                                                     {warehousesData?.map((wh: any) => (
@@ -1779,29 +1859,29 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                 </div>
                                             </>
                                         ) : (
-                                            <div className="col-span-4 space-y-2">
+                                            <div className="col-span-12 space-y-2 md:col-span-6">
                                                 <Label className={index !== 0 ? 'sr-only' : ''}>Description</Label>
                                                 <Input {...form.register(`lineItems.${index}.description` as const)} placeholder="Item description" />
                                             </div>
                                         )}
 
 
-                                        <div className="col-span-1 space-y-2">
+                                        <div className="col-span-4 space-y-2 md:col-span-1">
                                             <Label className={index !== 0 ? 'sr-only' : ''}>Qty</Label>
                                             <Input type="number" step="1" {...form.register(`lineItems.${index}.quantity` as const)} className="text-center" />
                                         </div>
-                                        <div className="col-span-1 space-y-2">
+                                        <div className="col-span-4 space-y-2 md:col-span-1">
                                             <Label className={index !== 0 ? 'sr-only' : ''}>Price</Label>
                                             <Input type="number" step="0.01" {...form.register(`lineItems.${index}.unitPrice` as const)} className="text-right" />
                                         </div>
-                                        <div className="col-span-1 space-y-2">
+                                        <div className="col-span-4 space-y-2 md:col-span-1">
                                             <Label className={index !== 0 ? 'sr-only' : ''}>Trade Disc %</Label>
                                             <Input type="number" min="0" max="100" step="0.5" {...form.register(`lineItems.${index}.discountPercentage` as const)} className="text-center" />
                                             {form.formState.errors.lineItems?.[index]?.discountPercentage && (
                                                 <p className="text-xs text-red-500">Use 0–100</p>
                                             )}
                                         </div>
-                                        <div className="col-span-2 space-y-2">
+                                        <div className="col-span-10 space-y-2 md:col-span-2">
                                             <Label className={cn("text-amber-600 font-semibold", index !== 0 ? 'sr-only' : '')}>Tax Group</Label>
                                             {editInvoice?.lineItems.some(line => line.landedCostItemId) && <>
                                                 <Label>Tax treatment</Label>
@@ -1848,19 +1928,152 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                 )}
                                             />
                                         </div>
-                                        <div className="col-span-1 flex items-end justify-center">
-                                            <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} disabled={fields.length === 1} className="h-10">
+                                        <div className="col-span-2 flex items-end justify-center md:col-span-1">
+                                            <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} disabled={fields.length === 1 || Boolean(selectedPurchaseOrderId)} className="h-10">
                                                 <Trash2 className="h-4 w-4 text-red-500" />
                                             </Button>
                                         </div>
+                                    </div>
+                                    {(lineItemType === 'Expense' || lineItemType === 'Service')
+                                        && ((budgetAllocationRequired && budgetCellsLoading[field.id])
+                                            || (budgetCellsByLine[field.id]?.length ?? 0) > 0
+                                            || budgetAllocationRequired) && (
+                                        <div className={cn(
+                                            'rounded-md border p-3',
+                                            budgetAllocationRequired
+                                                && !budgetCellsLoading[field.id]
+                                                && (budgetCellsByLine[field.id]?.length ?? 0) === 0
+                                                ? 'border-amber-200 bg-amber-50/60'
+                                                : 'bg-muted/20'
+                                        )}>
+                                            <div className="grid gap-3 md:grid-cols-[minmax(220px,420px)_1fr] md:items-center">
+                                                <div className="space-y-1.5">
+                                                    <Label htmlFor={`lineItems.${index}.budgetEntryId`}>Budget allocation</Label>
+                                                    {(budgetCellsByLine[field.id]?.length ?? 0) > 0 ? (
+                                                        <Controller
+                                                            control={form.control}
+                                                            name={`lineItems.${index}.budgetEntryId`}
+                                                            render={({ field: budgetField }) => (
+                                                                <Select
+                                                                    value={budgetField.value}
+                                                                    onValueChange={budgetField.onChange}
+                                                                    disabled={budgetCellsLoading[field.id]}
+                                                                >
+                                                                    <SelectTrigger id={`lineItems.${index}.budgetEntryId`} className="h-auto min-h-10 text-left">
+                                                                        <SelectValue placeholder="Select adopted budget allocation" />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        {(budgetCellsByLine[field.id] || []).map(cell => (
+                                                                            <SelectItem key={cell.budgetEntryId} value={cell.budgetEntryId}>
+                                                                                <span className="flex min-w-72 flex-col gap-1 py-1">
+                                                                                    <span>
+                                                                                        {cell.dimensionAssignments.map(item => `${item.dimensionCode}: ${item.valueCode}`).join(' · ') || 'Account total'}
+                                                                                    </span>
+                                                                                    <span className="text-xs text-muted-foreground">{cell.fiscalPeriodCode}</span>
+                                                                                    <span className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
+                                                                                        <span>Approved: {formatCurrency(cell.approvedAmount, cell.functionalCurrencyCode)}</span>
+                                                                                        <span>Actual: {formatCurrency(cell.postedActualAmount, cell.functionalCurrencyCode)}</span>
+                                                                                        <span>Reserved: {formatCurrency(cell.reservedAmount, cell.functionalCurrencyCode)}</span>
+                                                                                        <span>Available: {formatCurrency(cell.availableAmount, cell.functionalCurrencyCode)}</span>
+                                                                                    </span>
+                                                                                </span>
+                                                                            </SelectItem>
+                                                                        ))}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            )}
+                                                        />
+                                                    ) : (
+                                                        <div className="flex min-h-10 items-center rounded-md border bg-background px-3 text-sm text-muted-foreground">
+                                                            {budgetCellsLoading[field.id] ? 'Loading adopted budget allocations…' : 'No eligible adopted budget allocation'}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <p className={cn(
+                                                    'text-xs',
+                                                    budgetAllocationRequired
+                                                        && !budgetCellsLoading[field.id]
+                                                        && (budgetCellsByLine[field.id]?.length ?? 0) === 0
+                                                        ? 'text-amber-800'
+                                                        : 'text-muted-foreground'
+                                                )}>
+                                                    {budgetAllocationRequired
+                                                        && !budgetCellsLoading[field.id]
+                                                        && (budgetCellsByLine[field.id]?.length ?? 0) === 0
+                                                        ? 'This account is budget-controlled. Finance must adopt a matching budget allocation for the invoice date before this invoice can be submitted.'
+                                                        : 'Required for this budget-controlled account. The selection links the invoice line to its approved budget and available-funds check.'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
                                     </div>
                                 );
                             })}
                         </div>
 
+                        <section className="mt-6 space-y-4 rounded-xl border bg-muted/10 p-4">
+                            <div>
+                                <h3 className="font-semibold">Line coding</h3>
+                                <p className="text-sm text-muted-foreground">
+                                    Set reusable document defaults, then review or override the coding on each invoice line.
+                                </p>
+                            </div>
+                            <SourceDocumentDimensionPanel
+                                context={{
+                                    sourceModule: 'AP',
+                                    sourceDocumentType: 'VendorInvoice',
+                                    postingAction: 'Post',
+                                    sourceRoute: governedAcceptedSupply
+                                        ? 'finance.ap.vendor-invoices.governed-source'
+                                        : 'finance.ap.vendor-invoices.manual',
+                                    contractVersion: '1.0',
+                                }}
+                                effectiveDate={format(watchInvoiceDate || new Date(), 'yyyy-MM-dd')}
+                                lines={watchLineItems.map((item) => ({
+                                    id: item.sourceLineId,
+                                    ...getSourceLineDimensionAccounts(watchIsOpeningBalance ? undefined : editInvoice?.financeDimensions, item.sourceLineId, !watchIsOpeningBalance
+                                        && !selectedPurchaseOrderId
+                                        && !governedAcceptedSupply
+                                        && (item.lineItemType === 'Expense' || item.lineItemType === 'Service')
+                                        ? item.glAccountId
+                                        : undefined),
+                                    accountLabel: item.description || undefined,
+                                    accountResolution: selectedPurchaseOrderId || governedAcceptedSupply
+                                        ? 'SourceDocument' as const
+                                        : 'UserSelection' as const,
+                                }))}
+                                defaultValues={defaultDimensionValues}
+                                lineValues={lineDimensionValues}
+                                onDefaultValuesChange={(values) => {
+                                    setDefaultDimensionValues(values);
+                                    setApplyDefaultToAll(false);
+                                }}
+                                onLineValuesChange={setLineDimensionValues}
+                                onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+                                certificationState={editInvoice?.financeDimensions?.certificationState}
+                            />
+                        </section>
+
                         {/* Dynamic Tax and Payable Breakdown */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-8 border-t mt-8">
-                            <div>
+                            <div className="space-y-4">
+                                <div className="rounded-lg border p-4">
+                                    <div className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Posting readiness</div>
+                                    <ul className="space-y-2 text-sm">
+                                        <li className={selectedSupplier?.isTransactionReady ? 'text-emerald-700' : 'text-amber-700'}>
+                                            {selectedSupplier?.isTransactionReady ? '✓' : '○'} Approved supplier and AP profile
+                                        </li>
+                                        <li className={watchCurrencyCode === (financeSettings?.baseCurrency || 'GHS') || Boolean(form.watch('exchangeRateId')) ? 'text-emerald-700' : 'text-amber-700'}>
+                                            {watchCurrencyCode === (financeSettings?.baseCurrency || 'GHS') || Boolean(form.watch('exchangeRateId')) ? '✓' : '○'} Currency and approved exchange-rate evidence
+                                        </li>
+                                        <li className={!selectedPurchaseOrderId || (goodsCategory ? Boolean(goodsEntry && !goodsEntryError) : Boolean(form.watch('acceptedSupplySourceId'))) ? 'text-emerald-700' : 'text-amber-700'}>
+                                            {!selectedPurchaseOrderId || (goodsCategory ? Boolean(goodsEntry && !goodsEntryError) : Boolean(form.watch('acceptedSupplySourceId'))) ? '✓' : '○'} Governed source-document evidence
+                                        </li>
+                                        <li className={watchIsOpeningBalance || withholdingDecision !== null ? 'text-emerald-700' : 'text-amber-700'}>
+                                            {watchIsOpeningBalance || withholdingDecision !== null ? '✓' : '○'} WHT classification decision
+                                        </li>
+                                    </ul>
+                                </div>
                                 {taxEstimate.taxList.length > 0 && (
                                     <div className="p-4 bg-muted/40 rounded-lg space-y-2 border">
                                         <div className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">Estimated Levies & VAT Details</div>
@@ -1875,31 +2088,30 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                     </div>
                                 )}
                             </div>
-                            <div className="flex flex-col items-end space-y-2 text-right">
-                                <div className="flex justify-between w-72 text-sm text-muted-foreground">
-                                    <span>Subtotal (Net):</span>
-                                    <span className="font-medium">{formatAmountWithCurrency(subtotal)}</span>
+                            <div className="rounded-lg border bg-muted/20 p-4">
+                                <div className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Invoice totals</div>
+                                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-6 gap-y-3">
+                                    <span className="text-sm text-muted-foreground">Subtotal (net)</span>
+                                    <span className="text-right text-sm font-medium tabular-nums">{formatAmountWithCurrency(subtotal)}</span>
+                                    <span className="text-sm text-muted-foreground">Estimated levies and VAT</span>
+                                    <span className="text-right text-sm font-medium tabular-nums text-amber-700">+{formatAmountWithCurrency(totalTax)}</span>
+                                    <div className="col-span-2 border-t" />
+                                    <span className="text-lg font-bold">Gross invoice total</span>
+                                    <span className="text-right text-lg font-bold tabular-nums">{formatAmountWithCurrency(taxEstimate.grandTotal)}</span>
+                                    {!watchIsOpeningBalance && withholdingDecision === true && (
+                                        <>
+                                            <span className="text-sm text-muted-foreground">Estimated WHT deducted at payment ({watchWithholdingTaxRate}%)</span>
+                                            <span className="text-right text-sm font-medium tabular-nums text-red-600">-{formatAmountWithCurrency(taxEstimate.withholdingTaxAmount)}</span>
+                                        </>
+                                    )}
+                                    {taxEstimate.withholdingTaxAmount > 0 && (
+                                        <>
+                                            <div className="col-span-2 border-t" />
+                                            <span className="font-semibold text-primary">Estimated cash payable after WHT</span>
+                                            <span className="text-right font-semibold tabular-nums text-primary">{formatAmountWithCurrency(taxEstimate.estimatedCashPayable)}</span>
+                                        </>
+                                    )}
                                 </div>
-                                <div className="flex justify-between w-72 text-sm text-muted-foreground">
-                                    <span>Est. Standard Taxes:</span>
-                                    <span className="font-medium text-amber-600">+{formatAmountWithCurrency(totalTax)}</span>
-                                </div>
-                                {!watchIsOpeningBalance && withholdingDecision === true && (
-                                    <div className="flex justify-between w-72 text-sm text-muted-foreground">
-                                        <span>Estimated WHT at payment ({watchWithholdingTaxRate}%):</span>
-                                        <span className="font-medium text-red-600">-{formatAmountWithCurrency(taxEstimate.withholdingTaxAmount)}</span>
-                                    </div>
-                                )}
-                                <div className="flex justify-between w-72 text-xl font-bold border-t pt-2 mt-2">
-                                    <span>Gross Invoice Total:</span>
-                                    <span>{formatAmountWithCurrency(taxEstimate.grandTotal)}</span>
-                                </div>
-                                {taxEstimate.withholdingTaxAmount > 0 && (
-                                    <div className="flex justify-between w-72 text-sm font-semibold text-primary">
-                                        <span>Est. Cash Payable after WHT:</span>
-                                        <span>{formatAmountWithCurrency(taxEstimate.estimatedCashPayable)}</span>
-                                    </div>
-                                )}
                             </div>
                         </div>
                     </CardContent>
@@ -1913,10 +2125,10 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 </Card>
             </form>
             <ConfirmationDialog open={withholdingPromptOpen && !watchIsOpeningBalance} onOpenChange={setWithholdingPromptOpen}
-                title="Apply withholding to this invoice?"
+                title="Classify this invoice for WHT at payment?"
                 description={supplierWithholding?.required
-                    ? `This supplier is subject to withholding at ${supplierWithholding.rate}%. Apply it to this invoice? You can change the invoice rate after selecting Yes.`
-                    : 'Apply withholding to this invoice? You can select the configuration and rate after selecting Yes.'}
+                    ? `This supplier's approved profile expects WHT at ${supplierWithholding.rate}%. The actual deduction and threshold test happen when payment is posted. You can change the expected rate after selecting Yes.`
+                    : 'Record a WHT classification for payment-time evaluation? You can select the configuration and expected rate after selecting Yes.'}
                 confirmText="Yes" cancelText="No" onConfirm={acceptWithholding} onCancel={declineWithholding} />
         </div>
     );

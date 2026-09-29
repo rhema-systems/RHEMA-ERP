@@ -177,6 +177,8 @@ export default function HrFinancePostingSettingsPage() {
                         <Badge variant="outline">{rule.area}</Badge>
                         {/* The event hands Finance an AP vendor invoice to approve and pay, not a GL journal. */}
                         {rule.kind === 'VendorInvoice' && <Badge variant="secondary">AP invoice</Badge>}
+                        {/* …or an AR customer invoice Finance issues and collects. */}
+                        {rule.kind === 'CustomerInvoice' && <Badge variant="secondary">AR invoice</Badge>}
                       </span>
                       <span className="flex items-center gap-3">
                         {rule.isReady ? (
@@ -395,6 +397,11 @@ function Register({ canAdmin }: { canAdmin: boolean }) {
             <p className="text-sm text-muted-foreground">
               HR can only withdraw a DRAFT invoice for {reversing?.eventName.toLowerCase()} on {reversing?.sourceReference}. Once Finance holds it,
               Accounts Payable must reject or void the invoice and the row is then refreshed.
+            </p>
+          ) : reversing?.kind === 'CustomerInvoice' ? (
+            <p className="text-sm text-muted-foreground">
+              HR can only withdraw a DRAFT invoice for {reversing?.eventName.toLowerCase()} on {reversing?.sourceReference}. Once Finance holds it,
+              Accounts Receivable must reject or cancel the invoice and the row is then refreshed.
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">

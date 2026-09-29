@@ -83,6 +83,23 @@ public interface IProbationService
     /// two different ways, ending in two different states.
     /// </remarks>
     Task<bool> ConfirmAsync(Guid probationId, Guid confirmedByUserId, string? notes = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Confirms the employees whose probation term ended before they were entered — the imported
+    /// workforce (HR finish plan lane 11).
+    /// </summary>
+    /// <remarks>
+    /// Each gets the hire date plus their term as a confirmation date, marked
+    /// <see cref="ConfirmationSource.Derived"/>; their probation record is closed as Completed and
+    /// they become Active. Nobody is written to — no letter, no notification: these people passed
+    /// probation years ago. Anyone already in the confirmation process, extended or reviewed is
+    /// held back and counted, never confirmed by a rule.
+    /// </remarks>
+    /// <param name="employeeId">Only this employee — the harness's scope. Null for the tenant.</param>
+    /// <param name="dryRun">⚠ Work it out and report it; write nothing.</param>
+    Task<ProbationConfirmationRepairResult> RepairImportedConfirmationsAsync(
+        Guid? employeeId, bool dryRun, CancellationToken cancellationToken = default);
+
     Task<bool> TerminateAsync(TerminateProbationPeriodDto dto, Guid terminatedByUserId, CancellationToken cancellationToken = default);
 
     // Extension audit trail
@@ -152,4 +169,40 @@ public interface IProbationService
     Task<IEnumerable<ProbationReviewDto>> GetReviewsByStatusAsync(ProbationReviewStatus status, CancellationToken cancellationToken = default);
     Task<IEnumerable<ProbationReviewDto>> GetOverdueReviewsAsync(CancellationToken cancellationToken = default);
     Task<IEnumerable<ProbationReviewDto>> GetReviewsByReviewerAsync(Guid reviewerEmployeeId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>What the imported-confirmation repair did, or would do (HR finish plan lane 11).</summary>
+/// <remarks>
+/// Every employee on probation with no confirmation date is <see cref="Examined"/> and lands in
+/// exactly one of the other counts, so they always add up to it.
+/// </remarks>
+public class ProbationConfirmationRepairResult
+{
+    /// <summary>⚠ <b>True when NOTHING WAS WRITTEN.</b> Same contract as the leave repairs.</summary>
+    public bool IsDryRun { get; set; }
+
+    /// <summary>Employees on probation with no confirmation date. ⚠ Not the number confirmed.</summary>
+    public int Examined { get; set; }
+
+    /// <summary>Confirmed by the rule — or, on a dry run, who would be.</summary>
+    public int Confirmed { get; set; }
+
+    /// <summary>No hire date, so no term can be worked out. They wait for TDC to supply the date.</summary>
+    public int NoHireDate { get; set; }
+
+    /// <summary>
+    /// Their term had not ended when they were entered: still on probation, or due for
+    /// confirmation through the ordinary process.
+    /// </summary>
+    public int StillOnProbation { get; set; }
+
+    /// <summary>
+    /// ⚠ Held back although their term ended before entry: somebody has already acted on their
+    /// probation — submitted it for confirmation, extended it, or reviewed it — so it is theirs to
+    /// finish, not a rule's.
+    /// </summary>
+    public int HeldBack { get; set; }
+
+    /// <summary>A summary sentence first, then one line per employee held back.</summary>
+    public List<string> Notes { get; set; } = new();
 }

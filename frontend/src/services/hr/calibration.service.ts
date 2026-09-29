@@ -27,7 +27,10 @@ import type {
  * the session's scope, a session covering nobody. `apiService` surfaces `.message`, so those are
  * safe to show verbatim. 404 means not found *or* not yours.
  *
- * Reads work for any authenticated user; every write needs an HR role.
+ * Reads are HR's, and a panellist's for the sessions they sit on — a participant or the
+ * facilitator (performance closure P3); anyone else gets 403, and the list reads return only
+ * the caller's own sessions. A panellist's own appraisal is left out of every read. Every write
+ * needs an HR role.
  */
 class CalibrationSessionService {
   private readonly baseUrl = '/CalibrationSessions';
@@ -171,7 +174,8 @@ class CalibrationSessionService {
 
   /**
    * The appraisal's frozen criteria with the manager's score and any adjustment already made —
-   * what a per-criterion calibration needs. A read, so panellists get it, not just HR.
+   * what a per-criterion calibration needs. A read, so panellists get it, not just HR — for an
+   * appraisal in the session's scope only, and never their own (404 otherwise, P3).
    */
   getAppraisalCriteria(sessionId: string, appraisalId: string): Promise<CalibrationCriterion[]> {
     return apiService.get<CalibrationCriterion[]>(

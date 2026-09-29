@@ -267,8 +267,16 @@ public class TdcDemoRecruitmentHistorySeeder
         var segments = await _context.Set<CandidateTalentSegment>().IgnoreQueryFilters()
             .Where(x => x.TenantId == tenantId && !x.IsDeleted).ToListAsync(ct);
 
+        // Round 4, lane Q: the ladder by its codes, so each dossier's degree carries its rung.
+        // Built by scenario 005 before this pass; empty without it, and then no level is written.
+        var ladderByCode = (await _context.Set<QualificationLevel>().IgnoreQueryFilters()
+                .Where(l => l.TenantId == tenantId && !l.IsDeleted && l.IsActive && l.Code != null)
+                .ToListAsync(ct))
+            .GroupBy(l => l.Code!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+
         var refs = new Refs(tenantId, pipelineStages, questionBank, associates, relationshipTypes,
-                            languageCatalogue, qualificationCatalogue, segments, hrHead);
+                            languageCatalogue, qualificationCatalogue, segments, hrHead, ladderByCode);
 
         if (questionBank.Count == 0)
         {
@@ -811,10 +819,13 @@ public class TdcDemoRecruitmentHistorySeeder
         // ── One overdue advert, so the dashboard's SLA panel has something to alert on ───────────
         //
         // The panel lists ACTIVE vacancies (Published or Approved — JobVacancyRepository) whose
-        // application deadline has passed. The API cannot produce one: a deadline is only ever set
-        // forward, and by the time it passes in real life the vacancy has moved on. So exactly one
-        // published vacancy is pushed six days past its deadline here. Everything else keeps a
-        // future deadline, including the one the "deadline approaching" panel is meant to show.
+        // SHORTLISTING deadline has passed — since G-15.4 (2026-09-15); before that it read the
+        // application deadline, which is what this block used to satisfy, so the card stayed empty
+        // on every build since. The API cannot produce one: a deadline is only ever set forward, and
+        // by the time it passes in real life the vacancy has moved on. So exactly one published
+        // vacancy is pushed past both deadlines here — applications closed six days ago and
+        // shortlisting was due yesterday. Everything else keeps future deadlines, including the one
+        // the "deadline approaching" panel is meant to show.
         //
         // ⚠ It has to be THIS vacancy, not simply the newest. The public careers board filters on
         // `ApplicationDeadline == null || ApplicationDeadline >= now`, so a past deadline takes a
@@ -841,7 +852,7 @@ public class TdcDemoRecruitmentHistorySeeder
         if (overdue is not null)
         {
             overdue.ApplicationDeadline = now.Date.AddDays(-6);
-            overdue.ShortlistingDeadline = now.Date.AddDays(4);
+            overdue.ShortlistingDeadline = now.Date.AddDays(-1);
             overdue.ShortlistingSlaBreached = true;
             overdue.UpdatedAt = now;
             overdue.UpdatedBy = By;
@@ -1211,7 +1222,47 @@ public class TdcDemoRecruitmentHistorySeeder
         List<Language> Languages,
         List<Qualification> Qualifications,
         List<CandidateTalentSegment> Segments,
-        Employee HrHead);
+        Employee HrHead,
+        Dictionary<string, Guid> LadderByCode);
+
+    /// <summary>
+    /// The ladder rung a dossier's degree string names — round 4, lane Q.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ Demo data only, and private to this seeder on purpose. The product never guesses a
+    /// level from a name at runtime: the level is a field the candidate or HR sets (decision Q-D1).
+    /// This only saves writing a rung beside each profile below, whose degree strings are fixed.</para>
+    /// <para>The rules are the ones the <c>AddCandidateQualificationLevel</c> migration used for its
+    /// one-off backfill of typed rows (decision Q-D2), so a rebuilt database and a migrated one
+    /// agree on every string both have seen.</para>
+    /// </remarks>
+    private static Guid? LevelFor(Refs r, string? qualificationName)
+    {
+        var name = qualificationName?.Trim();
+        if (string.IsNullOrEmpty(name)) return null;
+        foreach (var (code, pattern) in LevelRules)
+            if (pattern.IsMatch(name))
+                return r.LadderByCode.TryGetValue(code, out var id) ? id : null;
+        return null;
+    }
+
+    private const System.Text.RegularExpressions.RegexOptions LevelRx =
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant;
+
+    /// <summary>First match wins, most specific first: a postgraduate diploma before a diploma.</summary>
+    private static readonly (string Code, System.Text.RegularExpressions.Regex Pattern)[] LevelRules =
+    {
+        ("PHD",    new(@"^(ph\.?\s?d|d\.?phil|doctor of philosophy|doctorate)\b", LevelRx)),
+        ("PGDIP",  new(@"^(post-?\s?graduate diploma|pg\.?\s?dip)", LevelRx)),
+        ("PGCERT", new(@"^(post-?\s?graduate certificate|pg\.?\s?cert)", LevelRx)),
+        ("MDEG",   new(@"^(m\.?\s?sc|mba|m\.?\s?phil|m\.?a|m\.?\s?eng|m\.?\s?ed|llm|master'?s?)\b", LevelRx)),
+        ("BDEG",   new(@"^(b\.?\s?sc|b\.?a|b\.?\s?ed|b\.?\s?eng|b\.?\s?tech|bba|b\.?\s?com|llb|mbchb|bachelor'?s?)\b", LevelRx)),
+        ("HND",    new(@"^(hnd|higher national diploma)\b", LevelRx)),
+        ("WASSCE", new(@"^(wassce|sssce|senior high|west african senior school certificate|high school diploma)", LevelRx)),
+        ("BECE",   new(@"^(bece|basic education certificate)", LevelRx)),
+        ("DIP",    new(@"^((advanced|ordinary national|higher) )?diploma\b", LevelRx)),
+        ("CERT",   new(@"^(foundation certificate|certificate in)\b", LevelRx)),
+    };
 
     /// <summary>
     /// What a credible applicant for a given post looks like. Without this every dossier would read
@@ -1349,6 +1400,7 @@ public class TdcDemoRecruitmentHistorySeeder
             JobCandidateId = c.Id,
             QualificationType = QualificationType.Education,
             QualificationId = catalogueQualification?.Id,
+            QualificationLevelId = LevelFor(r, p.Degree),   // round 4, lane Q
             QualificationFreeText = p.Degree,
             Institution = p.Institutions[seat % p.Institutions.Length],
             DateAwarded = DateOnly.FromDateTime(graduated),
@@ -1370,6 +1422,7 @@ public class TdcDemoRecruitmentHistorySeeder
                 TenantId = r.TenantId,
                 JobCandidateId = c.Id,
                 QualificationType = QualificationType.Education,
+                QualificationLevelId = LevelFor(r, "MSc/MBA (part-time)"),   // round 4, lane Q
                 QualificationFreeText = "MSc/MBA (part-time)",
                 Institution = "University of Ghana Business School",
                 DateAwarded = DateOnly.FromDateTime(asOf.AddYears(-2)),

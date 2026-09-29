@@ -134,3 +134,47 @@ public sealed class EmployeeWorkHistoryGeoAreaConsumer : IGeoAreaConsumer
         => _unitOfWork.Repository<EmployeeWorkHistory>().GetQueryable()
             .CountAsync(w => w.TenantId == tenantId && !w.IsDeleted && w.GeoAreaId == geoAreaId, ct);
 }
+
+/// <summary>Where a job candidate lives — round 4, lane A.</summary>
+/// <remarks>
+/// ⚠ This is a live probe over a table candidates write to themselves through the careers portal,
+/// so it is the one place an area can accumulate usages without anyone in HR touching it. It is
+/// also the reason the Location shortlisting criterion can be trusted: an area silently deleted out
+/// from under a candidate would leave a dangling id that matches nothing and refuses nobody.
+/// </remarks>
+public sealed class JobCandidateGeoAreaConsumer : IGeoAreaConsumer
+{
+    private readonly IUnitOfWork _unitOfWork;
+    public JobCandidateGeoAreaConsumer(IUnitOfWork unitOfWork) => _unitOfWork = unitOfWork;
+
+    public string ResourceName => "job candidates";
+    public string ResourceNameSingular => "job candidate";
+
+    public Task<int> CountUsagesAsync(Guid geoAreaId, Guid tenantId, CancellationToken ct = default)
+        => _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Recruitment.JobCandidate>().GetQueryable()
+            .CountAsync(c => c.TenantId == tenantId && !c.IsDeleted && c.GeoAreaId == geoAreaId, ct);
+}
+
+/// <summary>
+/// The administrative areas a vacancy's Location shortlisting criterion accepts — round 4, lane A.
+/// </summary>
+/// <remarks>
+/// ⚠ Not an address, and the file header's rule still holds: this row does not describe a place,
+/// it <i>selects</i> one. It earns a probe anyway, because deleting an area a live vacancy screens
+/// on would silently stop matching candidates who are in it — a shortlist that quietly shrinks is
+/// worse than one that refuses, and there is nothing on screen to explain it.
+/// </remarks>
+public sealed class ShortlistingCriteriaGeoAreaConsumer : IGeoAreaConsumer
+{
+    private readonly IUnitOfWork _unitOfWork;
+    public ShortlistingCriteriaGeoAreaConsumer(IUnitOfWork unitOfWork) => _unitOfWork = unitOfWork;
+
+    public string ResourceName => "shortlisting criteria";
+    public string ResourceNameSingular => "shortlisting criterion";
+
+    public Task<int> CountUsagesAsync(Guid geoAreaId, Guid tenantId, CancellationToken ct = default)
+        => _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Recruitment.JobShortlistingCriteriaValue>()
+            .GetQueryable()
+            .CountAsync(v => v.TenantId == tenantId && !v.IsDeleted && v.ReferenceId == geoAreaId
+                             && v.Kind == ErpSystem.Core.Enums.ShortlistingValueKind.GeoArea, ct);
+}

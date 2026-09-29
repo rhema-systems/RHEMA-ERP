@@ -90,9 +90,16 @@ public static class ShortlistingCriteriaShapes
         },
         new ShortlistingCriteriaShape
         {
+            // Round 4, lane Q. Was ValueKind.Qualification, "scored exactly like Qualification":
+            // a name match, so the type existed in name only, and "A relevant first degree" matched
+            // the WORD "degree", which no Bachelor of Science contains (guide R4-5.2). Now one
+            // value, a rung of the ladder, compared by rank.
             Type = JobShortlistingCriteriaType.EducationLevel, Label = "Education level",
-            ValueKind = ShortlistingValueKind.Qualification, IsList = true, RequiresValues = true,
-            Hint = "Scored exactly like Qualification: the catalogue row first, then the name.",
+            ValueKind = ShortlistingValueKind.QualificationLevel, IsList = false, RequiresValues = true,
+            Hint = "Pick the minimum level on the qualification ladder. A candidate passes when any of "
+                 + "their qualifications sits at that level or higher; levels ranked alike count as "
+                 + "equivalent, so an HND meets \"at least Bachelor's\" when the ladder ranks them "
+                 + "together. Below the level, or with no level on file, is a miss.",
         },
         new ShortlistingCriteriaShape
         {
@@ -134,10 +141,25 @@ public static class ShortlistingCriteriaShapes
         },
         new ShortlistingCriteriaShape
         {
+            // Round 4, lane A. Was ValueKind.Text matched by ordinal substring against the
+            // candidate's typed city, which made "Greater Accra" miss everybody in Tema and made
+            // "Accra" match "Accra Central" by luck rather than by meaning. Now the values are
+            // areas from the shared geography tree and matching is CONTAINMENT: an accepted area
+            // matches a candidate in it and anywhere beneath it. The free-text path survives for
+            // candidates with no area on file — see EvaluateLocationCriterion.
             Type = JobShortlistingCriteriaType.Location, Label = "Location",
-            ValueKind = ShortlistingValueKind.Text, IsList = true, RequiresValues = true,
-            Operators = new[] { ShortlistingComparisonOperator.Contains, ShortlistingComparisonOperator.Equals },
-            Hint = "Matched against the candidate's city. Contains is the default; Equals demands the whole city name. Several cities may be listed.",
+            ValueKind = ShortlistingValueKind.GeoArea, IsList = true, RequiresValues = true,
+            Operators = new[]
+            {
+                ShortlistingComparisonOperator.In,
+                ShortlistingComparisonOperator.Equals,
+                ShortlistingComparisonOperator.NotEquals,
+                ShortlistingComparisonOperator.Contains,
+            },
+            Hint = "Pick the areas the role draws from. The default accepts a candidate anywhere "
+                 + "inside a listed area — choose Greater Accra and someone in Tema qualifies. "
+                 + "Equals demands that exact tier. Not in excludes the areas listed. A candidate "
+                 + "with no area on file is matched on their typed city instead.",
         },
         new ShortlistingCriteriaShape
         {

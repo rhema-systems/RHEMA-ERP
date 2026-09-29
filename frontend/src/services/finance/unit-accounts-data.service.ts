@@ -10,6 +10,8 @@ import type {
     UnitAccountBalance,
     RatioDefinition,
     UnitAccountBudget,
+    BudgetVariance,
+    RatioCalculationResult,
     AllocationRule,
     AllocationTarget,
     CreateUnitTypeDto,
@@ -40,11 +42,13 @@ class UnitAccountsDataService {
     async getUnitTypes(filters?: {
         isActive?: boolean;
     }): Promise<UnitType[]> {
-        const queryParams = new URLSearchParams();
-        if (filters?.isActive !== undefined) queryParams.append('isActive', String(filters.isActive));
-
-        const endpoint = `/finance/unit-types${queryParams.toString() ? `?${queryParams}` : ''}`;
-        return apiService.get<UnitType[]>(endpoint);
+        const endpoint = filters?.isActive === true
+            ? '/finance/unit-types/active'
+            : '/finance/unit-types';
+        const unitTypes = await apiService.get<UnitType[]>(endpoint);
+        return filters?.isActive === undefined
+            ? unitTypes
+            : unitTypes.filter((unitType) => unitType.isActive === filters.isActive);
     }
 
     async getUnitTypeById(id: string): Promise<UnitType> {
@@ -61,6 +65,10 @@ class UnitAccountsDataService {
 
     async deleteUnitType(id: string): Promise<void> {
         return apiService.delete(`/finance/unit-types/${id}`);
+    }
+
+    async setUnitTypeActive(id: string, isActive: boolean): Promise<void> {
+        return apiService.patch(`/finance/unit-types/${id}/${isActive ? 'activate' : 'deactivate'}`, {});
     }
 
     // ===== UNIT ACCOUNTS =====
@@ -196,11 +204,13 @@ class UnitAccountsDataService {
     async getRatioDefinitions(filters?: {
         isActive?: boolean;
     }): Promise<RatioDefinition[]> {
-        const queryParams = new URLSearchParams();
-        if (filters?.isActive !== undefined) queryParams.append('isActive', String(filters.isActive));
-
-        const endpoint = `/finance/ratio-definitions${queryParams.toString() ? `?${queryParams}` : ''}`;
-        return apiService.get<RatioDefinition[]>(endpoint);
+        const endpoint = filters?.isActive === true
+            ? '/finance/ratio-definitions/active'
+            : '/finance/ratio-definitions';
+        const ratios = await apiService.get<RatioDefinition[]>(endpoint);
+        return filters?.isActive === undefined
+            ? ratios
+            : ratios.filter((ratio) => ratio.isActive === filters.isActive);
     }
 
     async getRatioDefinitionById(id: string): Promise<RatioDefinition> {
@@ -230,18 +240,34 @@ class UnitAccountsDataService {
         return apiService.delete(`/finance/ratio-definitions/${id}`);
     }
 
+    async setRatioDefinitionActive(id: string, isActive: boolean): Promise<void> {
+        return apiService.patch(`/finance/ratio-definitions/${id}/${isActive ? 'activate' : 'deactivate'}`, {});
+    }
+
+    async calculateRatio(id: string, fiscalPeriodId: string): Promise<RatioCalculationResult> {
+        return apiService.get<RatioCalculationResult>(
+            `/finance/ratio-definitions/${id}/calculate?fiscalPeriodId=${encodeURIComponent(fiscalPeriodId)}`
+        );
+    }
+
+    async calculateRatioForRange(id: string, startDate: string, endDate: string): Promise<RatioCalculationResult> {
+        const query = new URLSearchParams({ startDate, endDate });
+        return apiService.get<RatioCalculationResult>(`/finance/ratio-definitions/${id}/calculate-range?${query}`);
+    }
+
     // ===== UNIT ACCOUNT BUDGETS =====
 
     async getUnitAccountBudgets(filters?: {
         unitAccountId?: string;
         fiscalYearId?: string;
     }): Promise<UnitAccountBudget[]> {
-        const queryParams = new URLSearchParams();
-        if (filters?.unitAccountId) queryParams.append('unitAccountId', filters.unitAccountId);
-        if (filters?.fiscalYearId) queryParams.append('fiscalYearId', filters.fiscalYearId);
-
-        const endpoint = `/finance/unit-budgets${queryParams.toString() ? `?${queryParams}` : ''}`;
-        return apiService.get<UnitAccountBudget[]>(endpoint);
+        const endpoint = filters?.unitAccountId
+            ? `/finance/unit-budgets/by-account/${filters.unitAccountId}`
+            : '/finance/unit-budgets';
+        const budgets = await apiService.get<UnitAccountBudget[]>(endpoint);
+        return filters?.fiscalYearId
+            ? budgets.filter((budget) => budget.fiscalYearId === filters.fiscalYearId)
+            : budgets;
     }
 
     async getUnitAccountBudgetById(id: string): Promise<UnitAccountBudget> {
@@ -260,6 +286,11 @@ class UnitAccountsDataService {
         return apiService.delete(`/finance/unit-budgets/${id}`);
     }
 
+    async getBudgetVariances(fiscalPeriodId?: string): Promise<BudgetVariance[]> {
+        const query = fiscalPeriodId ? `?periodId=${encodeURIComponent(fiscalPeriodId)}` : '';
+        return apiService.get<BudgetVariance[]>(`/finance/unit-budgets/variances${query}`);
+    }
+
     // ===== ALLOCATION RULES =====
     // Backend routes live under /finance/allocations/rules (AllocationController);
     // rule execution is exposed as "run".
@@ -268,12 +299,15 @@ class UnitAccountsDataService {
         isActive?: boolean;
         allocationType?: AllocationType;
     }): Promise<AllocationRule[]> {
-        const queryParams = new URLSearchParams();
-        if (filters?.isActive !== undefined) queryParams.append('isActive', String(filters.isActive));
-        if (filters?.allocationType) queryParams.append('allocationType', filters.allocationType);
-
-        const endpoint = `/finance/allocations/rules${queryParams.toString() ? `?${queryParams}` : ''}`;
-        return apiService.get<AllocationRule[]>(endpoint);
+        const endpoint = filters?.isActive === true
+            ? '/finance/allocations/rules/active'
+            : '/finance/allocations/rules';
+        const rules = await apiService.get<AllocationRule[]>(endpoint);
+        return rules.filter((rule) => {
+            const matchesActive = filters?.isActive === undefined || rule.isActive === filters.isActive;
+            const matchesType = filters?.allocationType === undefined || rule.allocationType === filters.allocationType;
+            return matchesActive && matchesType;
+        });
     }
 
     async getAllocationRuleById(id: string): Promise<AllocationRule> {

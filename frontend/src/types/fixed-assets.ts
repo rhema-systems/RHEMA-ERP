@@ -33,6 +33,7 @@ export interface FixedAssetCategory {
   name: string;
   code: string;
   description?: string;
+  requiresMaintenance: boolean;
   defaultMethod: DepreciationMethod;
   defaultUsefulLifeMonths: number;
   defaultResidualValuePercent: number;
@@ -53,6 +54,7 @@ export interface CreateFixedAssetCategoryDto {
   name: string;
   code: string;
   description?: string;
+  requiresMaintenance: boolean;
   defaultMethod: DepreciationMethod;
   defaultUsefulLifeMonths: number;
   defaultResidualValuePercent: number;
@@ -68,6 +70,24 @@ export interface CreateFixedAssetCategoryDto {
 }
 
 export interface UpdateFixedAssetCategoryDto extends CreateFixedAssetCategoryDto { }
+
+export interface MaintenanceEligibleFixedAsset {
+  id: string;
+  assetCode: string;
+  name: string;
+  description?: string;
+  fixedAssetCategoryId: string;
+  fixedAssetCategoryName: string;
+  fixedAssetCategoryCode: string;
+  serialNumber?: string;
+  location?: string;
+  currentCustodianId?: string;
+  currentCustodianName?: string;
+  placedInServiceDate?: string;
+  status: FixedAssetStatus;
+  maintenanceAssetId?: string;
+  updatedAt?: string;
+}
 
 export interface FixedAsset {
   id: string;

@@ -1380,6 +1380,11 @@ export interface FinanceSettings {
   controlAccountArId?: string;
   controlAccountApId?: string;
   controlAccountInventoryId?: string;
+  controlAccountCOGSId?: string | null;
+  supplierAdvanceAccountId?: string;
+  customerAdvanceAccountId?: string;
+  writeOffExpenseAccountId?: string;
+  writeOffRecoveryAccountId?: string;
   returnToVendorClearingAccountId?: string;
   purchaseReturnVarianceAccountId?: string;
   controlAccountPayrollId?: string;
@@ -2545,6 +2550,7 @@ export interface BalanceSheetCategoryDto {
 export type FinancialStatementType = 'BalanceSheet' | 'IncomeStatement';
 export type FinancialStatementLayoutVersionStatus =
   | 'Draft'
+  | 'Submitted'
   | 'Published'
   | 'Retired';
 export type FinancialStatementRowType =
@@ -2592,6 +2598,13 @@ export interface FinancialStatementLayoutVersionDto {
   publishedAt?: string;
   publishedById?: string;
   publishedByName?: string;
+  submittedAt?: string;
+  submittedById?: string;
+  submittedByName?: string;
+  lastDecisionAt?: string;
+  lastDecisionById?: string;
+  lastDecisionByName?: string;
+  lastDecisionReason?: string;
   publicationSnapshotSchemaVersion?: string;
   publishedAccountingBookId?: string;
   publishedAccountingBookCode?: string;
@@ -2658,10 +2671,60 @@ export interface CloneFinancialStatementLayoutDto {
   accountingBookId: string;
 }
 
+export interface FinancialStatementLayoutReadinessDto {
+  isReady: boolean;
+  books: FinancialStatementLayoutBookReadinessDto[];
+}
+
+export interface FinancialStatementLayoutBookReadinessDto {
+  accountingBookId: string;
+  accountingBookCode: string;
+  accountingBookName: string;
+  balanceSheetReady: boolean;
+  incomeStatementReady: boolean;
+  missingRequirements: string[];
+}
+
+export interface FinancialStatementLayoutInitializationItemDto {
+  accountingBookId: string;
+  accountingBookCode: string;
+  statementType: FinancialStatementType;
+  protectedStandardLayoutId?: string;
+  tenantLayoutId?: string;
+  created: boolean;
+  status: string;
+  validation?: FinancialStatementLayoutValidationResultDto;
+}
+
+export interface FinancialStatementLayoutInitializationResultDto {
+  createdCount: number;
+  items: FinancialStatementLayoutInitializationItemDto[];
+  readiness: FinancialStatementLayoutReadinessDto;
+}
+
 export interface PublishFinancialStatementLayoutVersionDto {
   expectedVersionRevision: number;
   effectiveFrom?: string;
   effectiveTo?: string;
+}
+
+export interface FinancialStatementLayoutApprovalQueueItemDto {
+  layoutId: string;
+  layoutCode: string;
+  layoutName: string;
+  statementType: FinancialStatementType;
+  accountingBookCode: string;
+  accountingBookName: string;
+  versionId: string;
+  versionNumber: number;
+  revision: number;
+  submittedAt: string;
+  submittedById?: string;
+  submittedByName?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  canDecide: boolean;
+  decisionDisabledReason?: string;
 }
 
 export interface FinancialStatementLayoutValidationResultDto {

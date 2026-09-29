@@ -9,6 +9,7 @@ using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Entities.HR.Requisition;
 using ErpSystem.Core.Entities.HR.Safety;
+using ErpSystem.Core.Entities.HR.StaffAttendance;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Services.HR.Finance;
@@ -823,6 +824,38 @@ public static class HrFinancePostingCommandFactory
             [
                 new HrFinancePostingLine(HrFinanceAccountRole.StaffPaymentsClearing, true, amount, $"Incident {incident.IncidentNumber} — insurance proceeds received"),
                 new HrFinancePostingLine(HrFinanceAccountRole.InsuranceRecoveriesIncome, false, amount, $"Incident {incident.IncidentNumber} — insurance recovery")
+            ]
+        };
+    }
+
+    // ── HR's one revenue (slice 6) ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The AR hand-off: one revenue line for the billed hours, before tax, to the client's Finance
+    /// customer. A client with no Finance customer has no AR path and is Skipped.
+    /// </summary>
+    public static HrFinancePostingCommand TimesheetInvoiceSent(TimesheetInvoice invoice, Guid? financeCustomerId, string clientName)
+    {
+        var amount = invoice.SubTotal;
+        var reference = invoice.InvoiceNumber;
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.TimesheetInvoiceSent,
+            SourceDocumentId = invoice.Id,
+            SourceReference = reference,
+            EmployeeId = invoice.ConsultantId,
+            SourceDate = invoice.IssuedDate?.ToDateTime(TimeOnly.MinValue),
+            TransactionCurrencyCode = invoice.Currency,
+            PayeeCustomerId = financeCustomerId,
+            PayeeName = clientName,
+            Description = $"Consulting invoice {reference} to {clientName}: {invoice.TotalHours:0.##} h × {invoice.HourlyRate:N2} for {invoice.BillingPeriodStart:yyyy-MM-dd} to {invoice.BillingPeriodEnd:yyyy-MM-dd}"
+                          + (invoice.TaxAmount > 0m ? $" (HR tax {invoice.TaxPercentage:0.##}% = {invoice.TaxAmount:N2}; Finance's tax group governs)" : string.Empty),
+            SkipReason = amount <= 0m ? "The invoice bills nothing; there is nothing to raise."
+                : !financeCustomerId.HasValue ? $"{clientName} is not linked to a Finance customer, so there is no receivables path; the invoice stays HR-side until the client is linked."
+                : null,
+            Lines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.ConsultingRevenue, false, amount, $"Consulting {reference} — {invoice.TotalHours:0.##} h × {invoice.HourlyRate:N2}")
             ]
         };
     }

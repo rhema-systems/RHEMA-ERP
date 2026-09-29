@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.AR;
 using FluentAssertions;
 using Xunit;
 
@@ -45,5 +46,58 @@ public sealed class InvoiceTradeDiscountPolicyTests
 
         action.Should().Throw<InvalidOperationException>()
             .WithMessage("*exceeds the eligible source-line amount*");
+    }
+}
+
+public sealed class ArDiscountGovernancePolicyTests
+{
+    [Fact]
+    public void NormalizeInvoiceDiscountReason_ShouldRequireEvidenceForManualDiscount()
+    {
+        var action = () => ArDiscountGovernancePolicy.NormalizeInvoiceDiscountReason(
+            25m,
+            new[] { 0m },
+            "short",
+            requireUserReason: true,
+            "manual AR invoice");
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*reason of at least 10 characters*");
+    }
+
+    [Fact]
+    public void NormalizeInvoiceDiscountReason_ShouldRetainGovernedSourceEvidence()
+    {
+        var reason = ArDiscountGovernancePolicy.NormalizeInvoiceDiscountReason(
+            0m,
+            new[] { 5m },
+            null,
+            requireUserReason: false,
+            "SalesOrderCustomerInvoice");
+
+        reason.Should().Be("Governed source pricing adjustment: SalesOrderCustomerInvoice.");
+    }
+
+    [Fact]
+    public void RequireTaxAdjustmentForEarlyPaymentDiscount_ShouldBlockTaxableInvoice()
+    {
+        var action = () => ArDiscountGovernancePolicy.RequireTaxAdjustmentForEarlyPaymentDiscount(
+            30m,
+            10m,
+            "AR-0001");
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*sales credit/adjustment note*");
+    }
+
+    [Fact]
+    public void RequireTaxAdjustmentForEarlyPaymentDiscount_ShouldAllowZeroRatedInvoice()
+    {
+        var action = () => ArDiscountGovernancePolicy.RequireTaxAdjustmentForEarlyPaymentDiscount(
+            0m,
+            10m,
+            "AR-0002");
+
+        action.Should().NotThrow();
     }
 }

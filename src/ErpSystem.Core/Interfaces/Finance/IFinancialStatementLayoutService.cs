@@ -33,6 +33,19 @@ public interface IFinancialStatementLayoutService
         CloneFinancialStatementLayoutDto request,
         CancellationToken cancellationToken = default);
 
+    Task<FinancialStatementLayoutReadinessDto> GetInitializationReadinessAsync(
+        Guid? accountingBookId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<FinancialStatementLayoutInitializationResultDto> InitializeFromProtectedStandardsAsync(
+        InitializeFinancialStatementLayoutsDto request,
+        CancellationToken cancellationToken = default);
+
+    Task DiscardUnusedDraftAsync(
+        Guid layoutId,
+        DiscardFinancialStatementLayoutDto request,
+        CancellationToken cancellationToken = default);
+
     Task<FinancialStatementLayoutVersionDto> CreateDraftVersionAsync(
         Guid layoutId,
         CreateFinancialStatementLayoutVersionDto request,
@@ -51,6 +64,19 @@ public interface IFinancialStatementLayoutService
         FinancialStatementType statementType,
         Guid accountingBookId,
         IReadOnlyList<FinancialStatementRowInputDto> rows,
+        CancellationToken cancellationToken = default);
+
+    Task<FinancialStatementLayoutVersionDto> SubmitVersionForApprovalAsync(
+        Guid versionId,
+        SubmitFinancialStatementLayoutVersionDto request,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<FinancialStatementLayoutApprovalQueueItemDto>> GetPendingApprovalsAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<FinancialStatementLayoutVersionDto> DecideVersionApprovalAsync(
+        Guid versionId,
+        DecideFinancialStatementLayoutVersionDto request,
         CancellationToken cancellationToken = default);
 
     Task<FinancialStatementLayoutVersionDto> PublishVersionAsync(

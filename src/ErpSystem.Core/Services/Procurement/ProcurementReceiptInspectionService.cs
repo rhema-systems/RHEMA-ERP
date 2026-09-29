@@ -21,7 +21,7 @@ using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Procurement;
 
-public sealed class ProcurementReceiptInspectionService :
+public sealed partial class ProcurementReceiptInspectionService :
     IProcurementReceiptInspectionService
 {
     private const string EventType = "ProcurementReceiptInspection";
@@ -1323,21 +1323,55 @@ public sealed class ProcurementReceiptInspectionService :
                 .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
             if (uom is not null && uom.ConversionToBase > 0) conversion = uom.ConversionToBase;
         }
-        var baseQuantity = quantity * conversion;
+        var baseQuantity = ProcurementReceiptQuantityPolicy.ToBaseQuantity(quantity, conversion);
         // Receipt valuation carries only the accepted purchase price. Freight, duty and
         // other landed costs are allocated and posted later by the authoritative landed-cost owner.
         var purchaseCost = poLine.UnitPrice;
-        var baseCost = purchaseCost / conversion;
+        var costRate = await ResolveReceiptCostRateAsync(receipt, cancellationToken);
+        var baseCost = purchaseCost * costRate.Rate / conversion;
         var inventoryItem = await _unitOfWork.Repository<InventoryItem>()
             .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
                                   item.Id == poLine.InventoryItemId.Value && !item.IsDeleted)
             .SingleAsync(cancellationToken);
+        var movementIdsBefore = _unitOfWork.Repository<InventoryMovement>().GetAddedEntities().Select(x => x.Id).ToHashSet();
+        var layerIdsBefore = _unitOfWork.Repository<InventoryLayer>().GetAddedEntities().Select(x => x.Id).ToHashSet();
         await _valuation.ProcessReceiptAsync(poLine.InventoryItemId.Value,
             location.InventoryWarehouseId, receiptLine.LocationId, baseQuantity, baseCost,
             ReferenceType.PO, receipt.ReceiptNumber, receipt.Id,
             receiptLine.LotNumber, receiptLine.SerialNumber, receiptLine.ExpirationDate,
             approvalRequired ? ProcurementPurchaseOrderSodRules.ApproveReceiptInspection :
                 ProcurementPurchaseOrderSodRules.SubmitReceiptInspection);
+
+        var newMovements = _unitOfWork.Repository<InventoryMovement>().GetAddedEntities()
+            .Where(x => !movementIdsBefore.Contains(x.Id) && x.TenantId == _currentUser.TenantId &&
+                        x.ReferenceId == receipt.Id && x.InventoryItemId == inventoryItem.Id &&
+                        x.MovementType == InventoryMovementType.PurchaseReceipt).ToArray();
+        if (newMovements.Length != 1)
+            throw Conflict("RCV_COST_MOVEMENT_REQUIRED", "The accepted receipt must retain exactly one original valuation movement per receipt line.");
+        var costMovement = newMovements[0];
+        if (inventoryItem.ValuationMethod == ValuationMethod.FIFO)
+        {
+            var newLayers = _unitOfWork.Repository<InventoryLayer>().GetAddedEntities()
+                .Where(x => !layerIdsBefore.Contains(x.Id) && x.TenantId == _currentUser.TenantId &&
+                            x.SourceId == receipt.Id && x.InventoryItemId == inventoryItem.Id).ToArray();
+            if (newLayers.Length != 1)
+                throw Conflict("RCV_COST_LAYER_REQUIRED", "The accepted FIFO receipt must retain its original cost layer.");
+            costMovement.CostLayerId = newLayers[0].Id;
+        }
+        await _unitOfWork.Repository<ProcurementReceiptCostBasis>().AddAsync(new ProcurementReceiptCostBasis
+        {
+            TenantId = _currentUser.TenantId, CreatedById = _currentUser.UserId,
+            PurchaseOrderReceiptId = receipt.Id, PurchaseOrderReceiptItemId = receiptLine.Id,
+            PurchaseOrderItemId = poLine.Id, InventoryItemId = inventoryItem.Id,
+            InventoryMovementId = costMovement.Id, WarehouseId = location.InventoryWarehouseId,
+            LocationId = location.Id, PurchaseQuantity = quantity, BaseQuantity = baseQuantity,
+            ConversionToBase = conversion, PurchaseCurrency = costRate.PurchaseCurrency,
+            FunctionalCurrency = costRate.FunctionalCurrency, ExchangeRateId = costRate.Id,
+            ExchangeRateToFunctional = costRate.Rate, ExchangeRateDate = costRate.Date,
+            PurchaseUnitCost = purchaseCost, PurchaseAmount = decimal.Round(quantity * purchaseCost, 2, MidpointRounding.AwayFromZero),
+            FunctionalAccrualAmount = decimal.Round(costMovement.TotalValue + costMovement.VarianceAmount.GetValueOrDefault(), 2, MidpointRounding.AwayFromZero),
+            FunctionalInventoryAmount = decimal.Round(costMovement.TotalValue, 2, MidpointRounding.AwayFromZero)
+        });
 
         var valuationBalance = await _unitOfWork.Repository<InventoryBalance>()
             .GetQueryable(item => item.TenantId == _currentUser.TenantId &&

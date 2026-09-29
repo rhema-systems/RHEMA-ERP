@@ -18,6 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -31,6 +32,7 @@ import {
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { leaveService } from '@/services/hr/leave.service';
+import { MatchesApprovedPlanBadge } from '@/components/hr/leave/MatchesApprovedPlanBadge';
 
 /**
  * Leave requests awaiting a given manager's decision.
@@ -57,6 +59,13 @@ export default function LeaveApprovalsPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['hr', 'leave-requests', 'my-approvals', page],
     queryFn: () => leaveService.getMyApprovals(page, 20),
+  });
+
+  // Round 5, B3: returns the employee has reported and the caller confirms, as their supervisor or
+  // head of department. Shown only when there is something to confirm.
+  const { data: returns } = useQuery({
+    queryKey: ['hr', 'leave-requests', 'resumptions-to-confirm'],
+    queryFn: () => leaveService.getResumptionsToConfirm(),
   });
 
   const rows = data?.items ?? [];
@@ -146,6 +155,56 @@ export default function LeaveApprovalsPage() {
         </p>
       </div>
 
+      {returns && returns.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Returns to confirm</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              These people have reported being back at work. Confirming closes their leave; an early
+              return gives back the days they did not take.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Request</TableHead>
+                    <TableHead>Employee</TableHead>
+                    <TableHead>Leave type</TableHead>
+                    <TableHead>Leave ended</TableHead>
+                    <TableHead>Back on</TableHead>
+                    <TableHead>Timing</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {returns.map((r) => (
+                    <TableRow
+                      key={r.id}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => router.push(`/hr/leave/requests/${r.id}`)}
+                    >
+                      <TableCell className="font-medium">{r.requestNumber}</TableCell>
+                      <TableCell>{r.employeeName}</TableCell>
+                      <TableCell>{r.leaveTypeName}</TableCell>
+                      <TableCell>{r.endDate?.slice(0, 10)}</TableCell>
+                      <TableCell>{r.resumptionDate?.slice(0, 10)}</TableCell>
+                      <TableCell>
+                        {r.resumptionTiming === 'Early'
+                          ? 'Early'
+                          : r.resumptionTiming === 'Late'
+                            ? `Late · ${r.overstayDays ?? 0} working day(s)`
+                            : 'On time'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle>Pending requests</CardTitle>
@@ -220,7 +279,22 @@ export default function LeaveApprovalsPage() {
                             aria-label={`Select ${r.requestNumber}`}
                           />
                         </TableCell>
-                        <TableCell className="font-medium">{r.requestNumber}</TableCell>
+                        <TableCell className="font-medium">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {r.requestNumber}
+                            <MatchesApprovedPlanBadge show={r.matchesApprovedPlan} />
+                            {/* Round 5, lane H: approving it may split it; the request page says how. */}
+                            {r.chargeExcessToAnnual && (
+                              <Badge
+                                variant="outline"
+                                className="border-primary/40 text-primary"
+                                title="Asks for the days beyond this leave's limit to be charged to annual leave. Open the request to see the split approving it would make."
+                              >
+                                Extra days to annual leave
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell>{r.employeeName}</TableCell>
                         <TableCell>{r.leaveTypeName}</TableCell>
                         <TableCell>{r.startDate?.slice(0, 10)}</TableCell>

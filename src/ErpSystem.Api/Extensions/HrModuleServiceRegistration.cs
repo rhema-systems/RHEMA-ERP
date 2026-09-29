@@ -231,6 +231,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IInterviewQuestionPresetRepository, InterviewQuestionPresetRepository>();
         services.AddScoped<IInterviewQuestionPresetItemRepository, InterviewQuestionPresetItemRepository>();
         services.AddScoped<IJobInterviewRepository, JobInterviewRepository>();
+        // Round 4, lane E: one repository for the whole test engine — the reference-number
+        // generator needs the Data layer; everything else goes through IUnitOfWork.Repository<T>().
+        services.AddScoped<IRecruitmentTestRepository, RecruitmentTestRepository>();
         services.AddScoped<IJobInterviewPanelistRepository, JobInterviewPanelistRepository>();
         services.AddScoped<IJobInterviewExternalPanelistRepository, JobInterviewExternalPanelistRepository>();
         services.AddScoped<IJobIntervieweeRepository, JobIntervieweeRepository>();
@@ -416,6 +419,12 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ILeaveEncashmentService, LeaveEncashmentService>();
         services.AddScoped<ILeaveBalanceRecalculationService, LeaveBalanceRecalculationService>();
         services.AddScoped<ILeaveEntitlementService, LeaveEntitlementService>();
+        // Round 5, lane G: "which days had been used by then" — the expiry run, reminder sweep 5 and
+        // the leave owed report share it, so they cannot disagree about a lapse.
+        services.AddScoped<ILeaveUsageReader, LeaveUsageReader>();
+        // Round 5, lane L2: "how much annual leave is owed at a date" — the leave owed report and a
+        // leaver's final settlement share it, so Finance's figure and the leaver's cannot disagree.
+        services.AddScoped<ILeaveOwedCalculator, LeaveOwedCalculator>();
         // Approved leave reaches the attendance register through this. Before it, StaffDailyAttendance
         // .LeaveRequestId and StaffAttendanceStatus.OnLeave were both written by nothing, so the
         // payroll export read zero days on leave for everybody (closure plan L-27).
@@ -474,6 +483,12 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IEmploymentActionProposalService, EmploymentActionProposalService>();
         services.AddScoped<IPerformanceRatingResolver, PerformanceRatingResolver>();
         services.AddScoped<ITalentRatingSyncService, TalentRatingSyncService>();
+        // The appraisal's score in one place — the only writer of OverallScore (performance closure lane A).
+        services.AddScoped<IAppraisalScoreService, AppraisalScoreService>();
+        // The appraisal pipeline's one gate evaluator, and the status it implies (performance closure lane B1).
+        services.AddScoped<IAppraisalLifecycleService, AppraisalLifecycleService>();
+        // An appraisal's goals section: one snapshot row per locked goal (performance closure lane L-b).
+        services.AddScoped<IAppraisalGoalRowService, AppraisalGoalRowService>();
         services.AddScoped<IAppraisalOutcomeService, AppraisalOutcomeService>();
         services.AddScoped<IOutcomeRecommendationHandler, SuccessionNominationHandler>();
         services.AddScoped<IOutcomeRecommendationHandler, TrainingRequestHandler>();
@@ -556,7 +571,17 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ILongServiceMilestoneService, LongServiceMilestoneService>();
         services.AddScoped<ILongServiceSweepService, LongServiceSweepService>();
         services.AddScoped<IAwardTypeTargetService, AwardTypeTargetService>();
+        // Round 4, D5 — one person's diary, assembled from the same commitment sources the
+        // interview clash check fans out over.
+        services.AddScoped<ErpSystem.Core.Services.HR.CompanySchedule.IPersonalScheduleService,
+            ErpSystem.Core.Services.HR.CompanySchedule.PersonalScheduleService>();
         services.AddScoped<ICompanyEventService, CompanyEventService>();
+        // ⚠ Round 4, D6. NOT optional: without the catalogue registration TemplatedEmailService has
+        // no fallback for the CompanySchedule module, and every invitation, reschedule notice and
+        // cancellation throws instead of rendering its shipped default. The same trap lane F
+        // recorded for the interview paper.
+        services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog,
+            ErpSystem.Core.Services.HR.CompanySchedule.CompanyScheduleEmailEventCatalog>();
         services.AddScoped<IMeetingRoomService, MeetingRoomService>();
         services.AddScoped<IRoomBookingService, RoomBookingService>();
         services.AddScoped<ICompanyMilestoneService, CompanyMilestoneService>();
@@ -616,6 +641,22 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IEmployeeOrientationService, EmployeeOrientationService>();
         services.AddScoped<IOrientationNotificationService, OrientationNotificationService>();
         services.AddScoped<IOrientationDashboardService, OrientationDashboardService>();
+
+        // Round 4, lane I — the audience rules made to fire, and onboarding templates made to
+        // choose themselves. The nightly host is registered in ServiceCollectionExtensions.
+        services.AddScoped<IOrientationEnrollmentTriggerService, OrientationEnrollmentTriggerService>();
+        // Round 4, lane K: the orientation & onboarding reminder engine — the first HR sweep that
+        // delivers (an in-app notification and an email), not only logs.
+        services.AddScoped<IOnboardingOrientationReminderService, OnboardingOrientationReminderService>();
+        // Round 4, lane K-b: the lifecycle notices (staged with the event they report) and the
+        // dispatcher that sends their queued emails.
+        services.AddScoped<IOnboardingOrientationNotices, ErpSystem.Core.Services.HR.Orientation.OnboardingOrientationNoticeService>();
+        services.AddScoped<IOrientationNoticeEmailDispatcher, ErpSystem.Core.Services.HR.Orientation.OrientationNoticeEmailDispatcher>();
+        // Round 4, lane N: every HR email, listed from the registered catalogues, reworded per tenant.
+        services.AddScoped<IHrLetterTemplateService, ErpSystem.Core.Services.HR.Templates.HrLetterTemplateService>();
+        // Round 4 lane N-b: an HR letter as a PDF, for the offer letter attached to the Offer Issued email.
+        services.AddScoped<ErpSystem.Core.Interfaces.Common.IHtmlToPdfRenderer, ErpSystem.Api.Services.DocumentManagement.HtmlToPdfRenderer>();
+        services.AddScoped<IOnboardingTemplateApplicabilityService, OnboardingTemplateApplicabilityService>();
         services.AddScoped<IStaffTravelRequestService, StaffTravelRequestService>();
         services.AddScoped<IStaffTravelItineraryService, StaffTravelItineraryService>();
         services.AddScoped<IStaffTravelBookingService, StaffTravelBookingService>();
@@ -639,12 +680,27 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IStaffSecondmentService, StaffSecondmentService>();
         services.AddScoped<IStaffActingAppointmentService, StaffActingAppointmentService>();
         services.AddScoped<IEmployeeCareerPathService, EmployeeCareerPathService>();
+        // Round 4, lane B. The criterion-value rules and the scoring engine are shared by the
+        // vacancy path and the talent-pool screen, so neither can drift from the other.
+        services.AddScoped<ErpSystem.Core.Services.HR.Recruitment.IShortlistingCriteriaResolver,
+            ErpSystem.Core.Services.HR.Recruitment.ShortlistingCriteriaResolver>();
         services.AddScoped<IJobVacancyService, JobVacancyService>();
         services.AddScoped<IJobPostingService, JobPostingService>();
         services.AddScoped<IRecruitmentPipelineService, RecruitmentPipelineService>();
         services.AddScoped<IJobCandidateService, JobCandidateService>();
         services.AddScoped<ICandidateTalentSegmentService, CandidateTalentSegmentService>();
         services.AddScoped<ICandidateEngagementEventService, CandidateEngagementEventService>();
+        // Round 4, lane B: screening the pool by a vacancy's criteria, then acting on the result.
+        services.AddScoped<ITalentPoolScreeningService, TalentPoolScreeningService>();
+        // Round 4, lane E: the recruitment test engine — authoring, sitting, marking, and the
+        // ledger row that finally gives JobVacancy.TestScoreWeight something to blend.
+        services.AddScoped<IRecruitmentTestService, RecruitmentTestService>();
+        // Lane E6 — the printed paper and marking key. ⚠ The catalogue line is not optional: without
+        // it TemplatedEmailService has no fallback for the RecruitmentTests module and every paper
+        // throws rather than rendering its shipped default. Lane F's interview paper has the same pair.
+        services.AddScoped<IRecruitmentTestPaperService, RecruitmentTestPaperService>();
+        services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog,
+            ErpSystem.Core.Services.HR.Recruitment.RecruitmentTestPaperEmailEventCatalog>();
         services.AddScoped<IJobApplicationService, JobApplicationService>();
         services.AddSingleton<IApplicationSnapshotService, ApplicationSnapshotService>();
         services.AddScoped<IApplicationPipelineService, ApplicationPipelineService>();
@@ -652,7 +708,26 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAutoScoringService, AutoScoringService>();
         services.AddScoped<IJobInterviewQuestionBankService, JobInterviewQuestionBankService>();
         services.AddScoped<IInterviewQuestionPresetService, InterviewQuestionPresetService>();
+        // ── Round 4, lane D1 — where a panelist may already be ──────────────────────────────
+        //
+        // ⚠ SEVEN sources, and every one of them must be here. A source that is written and not
+        // registered contributes nothing, and the clash check then answers "free" — the exact
+        // failure the interface exists to stop, reappearing as a DI omission. The check reports
+        // `sourcesConsulted` so a missing registration is visible rather than silent.
+        services.AddScoped<IPanelistCommitmentSource, ErpSystem.Core.Services.HR.Recruitment.InterviewPanelCommitmentSource>();
+        services.AddScoped<IPanelistCommitmentSource, ErpSystem.Core.Services.HR.Recruitment.LeaveCommitmentSource>();
+        services.AddScoped<IPanelistCommitmentSource, ErpSystem.Core.Services.HR.Recruitment.TravelCommitmentSource>();
+        services.AddScoped<IPanelistCommitmentSource, ErpSystem.Core.Services.HR.Recruitment.CompanyEventCommitmentSource>();
+        services.AddScoped<IPanelistCommitmentSource, ErpSystem.Core.Services.HR.Recruitment.RoomBookingCommitmentSource>();
+        services.AddScoped<IPanelistCommitmentSource, ErpSystem.Core.Services.HR.Recruitment.TrainingCommitmentSource>();
+        services.AddScoped<IPanelistCommitmentSource, ErpSystem.Core.Services.HR.Recruitment.ClosureCommitmentSource>();
         services.AddScoped<IJobInterviewService, JobInterviewService>();
+        // Round 4, lane F — the printed scoring sheet. ⚠ The catalogue registration below it is not
+        // optional: without it TemplatedEmailService has no fallback for the Interviews module and
+        // every paper throws rather than rendering its shipped default.
+        services.AddScoped<IInterviewPaperService, InterviewPaperService>();
+        services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog,
+            ErpSystem.Core.Services.HR.Recruitment.InterviewPaperEmailEventCatalog>();
         services.AddScoped<IJobOfferService, JobOfferService>();
         services.AddScoped<IOfferLetterService, OfferLetterService>();
         services.AddScoped<IJobHireService, JobHireService>();
@@ -707,6 +782,11 @@ public static class HrModuleServiceRegistration
         // under it, and that walk already existed here rather than being copied a fourth time.
         services.AddScoped<IStaffDirectoryService, StaffDirectoryService>();
 
+        // Developer Test Data (Administration → HR → HR Settings): seed-hr-all / seed-hr-demo as
+        // three buttons. A SINGLETON on purpose — it holds the one-run-at-a-time gate and the run
+        // log, and opens its own scope per phase, so no request's DbContext is ever used by a run.
+        services.AddSingleton<ErpSystem.Api.Services.IHrTestDataSeedService, ErpSystem.Api.Services.HrTestDataSeedService>();
+
         // The reminder sweep spans both halves of the area — disciplinary clocks and unanswered
         // grievance rungs. Scoped so the daily host and the run-now endpoint share one code path.
         services.AddScoped<IDisciplineReminderService, DisciplineReminderService>();
@@ -746,6 +826,7 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ErpSystem.Core.Services.HR.Finance.IHrFinancePostingStore, ErpSystem.Core.Services.HR.Finance.HrFinancePostingStore>();
         services.AddScoped<IHrFinancePostingAdapter, ErpSystem.Core.Services.HR.Finance.HrFinancePostingAdapter>();
         services.AddScoped<IHrFinancePostingAdminService, ErpSystem.Core.Services.HR.Finance.HrFinancePostingAdminService>();
+        services.AddScoped<IHrFinanceActualsService, ErpSystem.Core.Services.HR.Finance.HrFinanceActualsService>();
         // Resolves the travel policy's spend caps and refuses a booking above them (slice 8).
         services.AddScoped<StaffTravelPolicyGuard>();
         // Rolls a travel budget's committed/actual spend up from its bookings and claims (slice 9).
@@ -889,6 +970,9 @@ public static class HrModuleServiceRegistration
         // for the same reason: the built-in default is what makes it render before anyone has
         // opened the template editor.
         services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog, ErpSystem.Core.Services.HR.Assets.AssetsEmailEventCatalog>();
+        // Orientation & onboarding (round 4, lane K): the reminder digest. Registered so the built-in
+        // default renders before anyone has opened the template editor — the sweep emails from day one.
+        services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog, ErpSystem.Core.Services.HR.Orientation.OnboardingOrientationEmailEventCatalog>();
         services.AddScoped<ErpSystem.Core.Interfaces.Common.ITemplatedEmailService, ErpSystem.Core.Services.Common.TemplatedEmailService>();
         services.AddScoped<ErpSystem.Core.Interfaces.INumberSequenceService, ErpSystem.Data.Services.NumberSequenceService>();
         services.AddSingleton<ErpSystem.Core.Services.Common.IEmailTemplateRenderer, ErpSystem.Core.Services.Common.EmailTemplateRenderer>();

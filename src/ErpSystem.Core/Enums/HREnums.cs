@@ -263,6 +263,34 @@ public enum ProbationSource
 }
 
 /// <summary>
+/// Where an employee's confirmation date came from (HR finish plan lane 11).
+/// </summary>
+/// <remarks>
+/// <para>⚠ Null on every row that predates lane 11, as with <see cref="ProbationSource"/>: nobody
+/// recorded how those dates arrived, and a default would claim a provenance the data does not
+/// have.</para>
+///
+/// <para>The distinction the user asked for (2026-09-25) is between a date somebody SUPPLIED and
+/// one the system WORKED OUT. A derived date is the hire date plus the probation term, for staff
+/// whose term had ended before they were entered — true of nearly everybody imported, and still a
+/// deduction rather than a record. TDC names any exceptions, and they are corrected by hand.</para>
+/// </remarks>
+public enum ConfirmationSource
+{
+    /// <summary>Confirmed through their probation record, against its authority and letter.</summary>
+    Probation = 1,
+
+    /// <summary>Supplied on import: confirmed before this system, on the date the file gave.</summary>
+    Imported = 2,
+
+    /// <summary>
+    /// Nobody supplied it: the hire date plus the probation term, for somebody whose term had
+    /// ended before they were entered.
+    /// </summary>
+    Derived = 3
+}
+
+/// <summary>
 /// Which kind of tie a <c>RelationshipType</c> describes, so a screen can offer only the values
 /// that make sense on it.
 /// </summary>
@@ -1069,6 +1097,37 @@ public enum LeaveYearEndBasis
 }
 
 /// <summary>
+/// What kind of leave a leave type is (round 5, decision A4). The kind decides which rules apply,
+/// and what the leave-type form asks for.
+/// </summary>
+/// <remarks>
+/// <para>Three kinds, because three behave differently under the Labour Act and in practice.
+/// Everything else (sick, casual, compassionate, study) differs only in its settings, so it is
+/// <see cref="Other"/> with its own limit and evidence rules.</para>
+///
+/// <para>⚠ At most one ACTIVE leave type per tenant may be <see cref="Annual"/>: the plans, the
+/// compliance register and the untaken-leave reminder read "the annual leave", and the balances view
+/// and the leaver's settlement will (round 5 lanes J and L2); two would make each of them guess.</para>
+/// </remarks>
+public enum LeaveTypeCategory
+{
+    /// <summary>Everything else: a limit per year, and whatever evidence rules the type sets.</summary>
+    Other = 0,
+
+    /// <summary>
+    /// Annual leave, earned by service (Act 651 s.20). Absorbed <c>MandatoryAnnualLeave</c>, which
+    /// only ever meant this.
+    /// </summary>
+    Annual = 1,
+
+    /// <summary>
+    /// Maternity leave (Act 651 s.57): no notice rule, a certificate, and the dates follow the
+    /// birth, so an approver confirms or rejects and never moves them.
+    /// </summary>
+    Maternity = 2
+}
+
+/// <summary>
 /// How an accrual policy releases the annual entitlement over the leave year.
 /// </summary>
 public enum AccrualMode
@@ -1085,6 +1144,57 @@ public enum AccrualMode
     /// "entitled to the full days on your anniversary" model.
     /// </summary>
     FullGrantOnEligibility = 1
+}
+
+/// <summary>
+/// Where an employee's accrual stands for a leave year (round 5, lane C2): the one fact that decides
+/// how the rest of an accrual statement reads.
+/// </summary>
+public enum LeaveAccrualState
+{
+    /// <summary>
+    /// No accrual policy is in force, so the whole entitlement is there from the start of the year.
+    /// </summary>
+    NoPolicy = 0,
+
+    /// <summary>The date worked out to is before the leave year starts, or the employee left before it.</summary>
+    YearNotStarted = 1,
+
+    /// <summary>The employee has not yet served the policy's minimum months.</summary>
+    NotYetEligible = 2,
+
+    /// <summary>The policy grants the whole entitlement once the employee is eligible.</summary>
+    FullGrant = 3,
+
+    /// <summary>The entitlement builds up period by period.</summary>
+    Accruing = 4
+}
+
+/// <summary>
+/// Why an accrual is worked out to an earlier date than the one asked for.
+/// </summary>
+public enum LeaveAccrualAsOfLimit
+{
+    /// <summary>Worked out to the date asked for.</summary>
+    None = 0,
+
+    /// <summary>The date asked for is after the leave year ends, and accrual stops at the year end.</summary>
+    YearEnd = 1,
+
+    /// <summary>The employee has left, and the policy stops accrual on their last day (pro-rate on exit).</summary>
+    LastDayOfService = 2
+}
+
+/// <summary>
+/// Where a resolved annual entitlement came from.
+/// </summary>
+public enum LeaveEntitlementSource
+{
+    /// <summary>The leave type's own days per year.</summary>
+    LeaveTypeDefault = 0,
+
+    /// <summary>The allocation for the employee's staff level.</summary>
+    StaffLevelAllocation = 1
 }
 
 #endregion Staff Leave
@@ -1422,13 +1532,44 @@ public enum AppraisalStatus
     /// Appraisal fully closed — terminal state, no further transitions permitted.
     /// </summary>
     Closed = 6,
+
+    /// <summary>
+    /// Taken out of the cycle before it completed — a leaver, a long absence, or an appraisal
+    /// generated in error — with a reason, an actor and a date (performance closure D-10).
+    /// Terminal. A withdrawn appraisal counts in no score, no dashboard denominator and no
+    /// cycle-close check.
+    /// </summary>
+    Withdrawn = 7,
+}
+
+/// <summary>
+/// What caused a change to an appraisal's settled overall score — one row of the rating history
+/// (<c>AppraisalScoreChange</c>, performance closure lane N2).
+/// </summary>
+public enum AppraisalScoreChangeSource
+{
+    /// <summary>A re-settle from the scores themselves (a remand re-evaluation, a late leg).</summary>
+    Settle = 1,
+
+    /// <summary>A committed calibration restated it.</summary>
+    Calibration = 2,
+
+    /// <summary>An appeal was upheld with changes.</summary>
+    Appeal = 3,
+
+    /// <summary>HR's audited advance, or the nightly sweep, moved the appraisal on.</summary>
+    Advance = 4,
+
+    /// <summary>A finalised appraisal was reopened to HR review (D-17).</summary>
+    Reopen = 5,
 }
 
 /// <summary>
 /// Fine-grained sub-status of an appraisal within its lifecycle, derived from entity state and
-/// settings flags by <see cref="AppraisalSubStatusResolver"/>.
+/// settings flags by <c>AppraisalGates.Resolve</c> (performance closure B1).
 /// Used as the "current stuck step" identifier when HR manually advances a stalled pipeline.
-/// NOT persisted — always derived on demand.
+/// NOT persisted — always derived on demand. The advance log stores the name as text, so members
+/// are only ever appended.
 /// </summary>
 public enum AppraisalSubStatus
 {
@@ -1459,11 +1600,15 @@ public enum AppraisalSubStatus
     // ── Terminal ───────────────────────────────────
     Completed = 14,
     Closed = 15,
+
+    /// <summary>The appraisal was withdrawn from the cycle (D-10) — it is not being appraised.</summary>
+    Withdrawn = 16,
 }
 
 /// <summary>
-/// Fine-grained workflow phase computed dynamically from appraisal data.
-/// NOT persisted to the database — derive on demand via <c>IAppraisalWorkflowService.GetCurrentPhase</c>.
+/// Coarse workflow phase computed dynamically from appraisal data — the progress rail's steps.
+/// NOT persisted to the database — derived from the gates' sub-status (<c>AppraisalGates.ToPhase</c>).
+/// Members are appended, never renumbered: the order they run in is the rail's to decide.
 /// </summary>
 public enum AppraisalPhase
 {
@@ -1490,6 +1635,9 @@ public enum AppraisalPhase
 
     /// <summary>All steps complete — appraisal is in a terminal phase.</summary>
     Closed = 8,
+
+    /// <summary>Awaiting the peer nominations the cycle requires. Runs after goal setting, before the self-evaluation.</summary>
+    PeerNomination = 9,
 }
 
 public enum DevelopmentPlanStatus
@@ -1629,6 +1777,19 @@ public enum KpiTargetSource
 }
 
 /// <summary>
+/// How one row of an appraisal's criterion snapshot is scored (performance closure D-16).
+/// </summary>
+public enum CriterionScoringMethod
+{
+    /// <summary>Actual against target, minimum and maximum — a KPI, or a goal with a numeric target.</summary>
+    Measured = 1,
+
+    /// <summary>A score on grade bands — a competency, or a goal with no numeric target, rated on the
+    /// tenant's overall grade scale.</summary>
+    Rated = 2,
+}
+
+/// <summary>
 /// Approval lifecycle for an appraisal template. Units draft templates and submit them to HR;
 /// only Approved templates can be assigned to a cycle.
 /// </summary>
@@ -1638,6 +1799,20 @@ public enum TemplateApprovalStatus
     PendingApproval = 2,
     Approved = 3,
     Rejected = 4
+}
+
+/// <summary>
+/// What fills an appraisal template section (performance closure D-15, lane L).
+/// </summary>
+public enum AppraisalSectionKind
+{
+    /// <summary>The items on the template: competencies, shared KPIs with one target for everyone
+    /// on the template, and free-text questions.</summary>
+    Fixed = 1,
+
+    /// <summary>No items of its own. Each employee's rows are built from the goal set agreed with
+    /// their manager, when that set is locked.</summary>
+    EmployeeGoals = 2,
 }
 
 public enum PeerNominationMode
@@ -1778,6 +1953,22 @@ public enum PipStatus
     /// <summary>Out for approval on the workflow engine.</summary>
     [Description("Pending Approval")]
     PendingApproval = 7
+}
+
+/// <summary>
+/// Where a PIP review meeting stands — stored, where the screens used to infer it from the date
+/// (P-57, performance closure lane E7).
+/// </summary>
+public enum PipMeetingStatus
+{
+    [Description("Scheduled")]
+    Scheduled = 1,
+
+    [Description("Held")]
+    Held = 2,
+
+    [Description("Cancelled")]
+    Cancelled = 3
 }
 
 public enum PerformanceRating
@@ -2076,7 +2267,20 @@ public enum ApplicationSource
     Other = 10,
 
     [Description("Internal Portal")]
-    InternalPortal = 11
+    InternalPortal = 11,
+
+    /// <summary>
+    /// Sourced from the candidate talent pool: HR screened pooled candidates against a vacancy's
+    /// criteria and invited them to apply (round 4, lane B).
+    /// </summary>
+    /// <remarks>
+    /// Distinct from every other member in that the application was not initiated by the candidate.
+    /// It is worth its own member rather than being folded into Other, because "how many of our
+    /// hires came out of the pool we keep warm?" is exactly the question the pool exists to answer,
+    /// and Other cannot answer it.
+    /// </remarks>
+    [Description("Talent Pool")]
+    TalentPool = 12
 }
 
 public enum JobCandidateDocumentType
@@ -2122,6 +2326,86 @@ public enum JobApplicantTestType
 {
     Written = 1,
     Practical = 2
+}
+
+/// <summary>
+/// What a recruitment test question asks for (round 4, lane E).
+/// </summary>
+/// <remarks>
+/// ⚠ Mirrors <c>OrientationQuestionType</c> deliberately (decision D-2), because the marking follows
+/// the same rules — including the one it had to learn: the denominator is every GRADABLE question on
+/// the paper, and <see cref="FreeText"/> is the only member that is not one.
+/// </remarks>
+public enum RecruitmentQuestionType
+{
+    [Description("Single choice")]
+    SingleChoice = 1,
+
+    /// <summary>⚠ Marked on EXACT SET EQUALITY — every correct option and no incorrect one.</summary>
+    [Description("Multiple choice")]
+    MultiSelect = 2,
+
+    [Description("True or false")]
+    TrueFalse = 3,
+
+    /// <summary>The one type the machine cannot mark. Stored, and awaits a human.</summary>
+    [Description("Free text")]
+    FreeText = 4,
+
+    [Description("Numeric")]
+    Numeric = 5,
+}
+
+/// <summary>Where one candidate's attempt at a paper has got to (round 4, lane E).</summary>
+public enum RecruitmentSittingStatus
+{
+    [Description("Not started")]
+    NotStarted = 1,
+
+    [Description("In progress")]
+    InProgress = 2,
+
+    /// <summary>Submitted, and the closed questions are marked. A paper with free text is not done.</summary>
+    [Description("Awaiting marking")]
+    AwaitingMarking = 3,
+
+    [Description("Marked")]
+    Marked = 4,
+
+    /// <summary>
+    /// The window closed with the paper unsubmitted.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Distinct from a zero. A candidate who ran out of time has a mark; one who never started has
+    /// nothing, and recording that as 0% would blend a non-event into their shortlisting score.
+    /// </remarks>
+    [Description("Expired")]
+    Expired = 5,
+
+    [Description("Cancelled")]
+    Cancelled = 6,
+}
+
+/// <summary>
+/// How a recruitment test was sat (round 4, lane E6).
+/// </summary>
+/// <remarks>
+/// ⚠ Recorded rather than inferred. A script the candidate submitted themselves and one HR typed in
+/// from paper are different kinds of evidence, and a recruitment decision can be challenged: the
+/// record must say which without anybody having to reason it out of which columns happen to be null.
+/// </remarks>
+public enum RecruitmentSittingMode
+{
+    /// <summary>Sat in the careers portal, submitted by the candidate, marked by the server.</summary>
+    [Description("Online")]
+    Online = 1,
+
+    /// <summary>
+    /// Sat on the printed paper; what the candidate ticked, and the marks for their written answers,
+    /// entered by HR. The closed questions are still marked by the server against the key.
+    /// </summary>
+    [Description("On paper")]
+    Paper = 2,
 }
 
 public enum JobInterviewType
@@ -2260,6 +2544,29 @@ public enum JobInterviewRecommendation
     StrongNoHire = 5
 }
 
+/// <summary>
+/// How a scorecard reached the system (round 4, lane F4).
+/// </summary>
+/// <remarks>
+/// A panel that scored on paper hands HR a signed sheet, and HR types it in. The record that comes
+/// out is indistinguishable from one the panelist typed themselves unless the difference is stored,
+/// which is why this exists: the scorecard remains the panelist's verdict either way, but the
+/// keystrokes were somebody else's and an audit trail should not quietly claim otherwise.
+/// </remarks>
+public enum InterviewScoreSource
+{
+    /// <summary>The panelist filed it themselves, in the product.</summary>
+    [Description("Filed online")]
+    Online = 1,
+
+    /// <summary>
+    /// Transcribed by HR from a signed paper sheet. <c>FiledByHrOnBehalfOfUserId</c> names who
+    /// typed it.
+    /// </summary>
+    [Description("From a paper sheet")]
+    PaperSheet = 2
+}
+
 public enum JobShortlistingCriteriaType
 {
     [Description("Qualification")]
@@ -2382,6 +2689,31 @@ public enum ShortlistingValueKind
 
     [Description("Gender")]
     Gender = 5,
+
+    /// <summary>
+    /// An administrative area from the shared geography tree — round 4, lane A.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The value's <c>ReferenceId</c> is a <c>GeoArea.Id</c> and its <c>Label</c> is the area's
+    /// name mirrored at save. Matching is by <b>tree containment</b>, not by the label: an accepted
+    /// area matches a candidate in it and anywhere beneath it, so "Greater Accra" matches Tema. The
+    /// label exists for display and for the legacy text fallback, never as the comparison.
+    /// </remarks>
+    [Description("Geographic Area")]
+    GeoArea = 6,
+
+    /// <summary>
+    /// A rung of the tenant's qualification ladder — round 4, lane Q.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The value's <c>ReferenceId</c> is a <c>QualificationLevel.Id</c>: the MINIMUM an
+    /// "Education level" criterion accepts. Matching is by <b>rank</b>, never by the label. A
+    /// candidate passes when any of their qualifications sits on that rung or higher, so ties pass:
+    /// with HND and Bachelor's both at 50, an HND meets "at least Bachelor's". Appended, never
+    /// renumbered: the kind is stored as an integer.
+    /// </remarks>
+    [Description("Qualification Level")]
+    QualificationLevel = 7,
 }
 
 /// <summary>
@@ -3714,8 +4046,20 @@ public enum SettlementLineComputation
     /// The system knows this line is owed but cannot value it — no salary on record, no leave
     /// balance, no payroll figure. Carries no amount, and holds the statement open.
     /// </summary>
+    /// <remarks>
+    /// Since leave settings audit 2 this is also every PAY line HR records (unpaid salary, notice
+    /// pay, leave owed, gratuity, pension, tax) until Finance values it: HR records the days, and
+    /// the statement stays open until Finance has put the money on them.
+    /// </remarks>
     [Description("Cannot Compute")]
-    CannotCompute = 3
+    CannotCompute = 3,
+
+    /// <summary>
+    /// Valued by Finance — the holder of <c>HR.Pay.Value</c> — with <c>SourceReference</c> naming
+    /// where the figure came from (leave settings audit 2, P2). The line records who and when.
+    /// </summary>
+    [Description("Valued by Finance")]
+    ValuedByFinance = 4
 }
 
 /// <summary>
@@ -4814,12 +5158,12 @@ public enum MedicalReferralStatus
 }
 
 /// <summary>
-/// Where a medical board has got to (residue plan G4 / R-15b).
+/// Where a medical board — the PANEL — has got to (residue plan G4; round 5, lane K-II-a).
 /// </summary>
 /// <remarks>
-/// ⚠ A board is <b>convened for one employee about one question</b>, so its lifecycle is a case's,
-/// not a committee's. A standing panel that sits repeatedly on different people would need a
-/// different model, and TDC has not described one.
+/// ⚠ Since lane K-II-a a board is a panel that hears <b>cases</b>, one per employee, and each case
+/// has its own status (<see cref="MedicalBoardCaseStatus"/>). The board's status is the panel's:
+/// asked for, sitting, or finished. What leave and separation act on is a CASE's finding.
 /// </remarks>
 public enum MedicalBoardStatus
 {
@@ -4827,16 +5171,183 @@ public enum MedicalBoardStatus
     [Description("Requested")]
     Requested = 1,
 
-    /// <summary>Members appointed; it may now sit. Its recommendation is not yet given.</summary>
+    /// <summary>Members appointed; it may now sit and decide its cases.</summary>
     [Description("Convened")]
     Convened = 2,
 
-    /// <summary>It has reported. ⚠ The only status leave and separation will act on.</summary>
+    /// <summary>
+    /// Every case is decided or withdrawn, and at least one was decided — the board has reported.
+    /// Reached by itself when the last open case closes; nothing on the board changes after it.
+    /// </summary>
     [Description("Concluded")]
     Concluded = 3,
 
+    /// <summary>
+    /// Stopped before it reported. ⚠ One status, two words (round 5, lane K5): a board stopped while
+    /// only Requested was a <b>cancelled request</b>; one stopped after it was Convened was
+    /// <b>dissolved</b>. <c>ConvenedOn</c> tells them apart, so no second status is needed.
+    /// </summary>
     [Description("Cancelled")]
     Cancelled = 4
+}
+
+/// <summary>
+/// One employee's case before a medical board (round 5, lane K-II-a).
+/// </summary>
+public enum MedicalBoardCaseStatus
+{
+    /// <summary>Before the board, not yet decided.</summary>
+    [Description("Listed")]
+    Listed = 1,
+
+    /// <summary>
+    /// Decided, at a recorded sitting. ⚠ The only state leave and separation act on, and it cannot be
+    /// undone: a finding that needs revisiting is a new case.
+    /// </summary>
+    [Description("Concluded")]
+    Concluded = 2,
+
+    /// <summary>Taken off the board without a finding — a reason is required.</summary>
+    [Description("Withdrawn")]
+    Withdrawn = 3
+}
+
+/// <summary>
+/// Who convened a medical board (round 5, lane K-II-a; the Workmen's Compensation Act, checked in
+/// its primary text — <c>docs/HR/catalogues/HR-WORKMENS-COMPENSATION-SCHEDULES.md</c>).
+/// </summary>
+/// <remarks>
+/// The Act provides two statutory boards, both in its schedules' notes and both narrow; everything
+/// else — TDC's own fitness or sick-leave boards — is the employer's.
+/// </remarks>
+public enum MedicalBoardKind
+{
+    /// <summary>The employer's own board.</summary>
+    [Description("Employer's board")]
+    Employer = 1,
+
+    /// <summary>
+    /// A disputed disfigurement (First Schedule note): appointed by the chief labour officer — a chair
+    /// nominated by the Minister, one practitioner by the employer, one by the employee if they wish.
+    /// </summary>
+    [Description("Statutory — disfigurement (chief labour officer)")]
+    StatutoryDisfigurement = 2,
+
+    /// <summary>An injury to an internal organ or the spine (Third Schedule note): appointed by the Minister.</summary>
+    [Description("Statutory — internal organ (Minister)")]
+    StatutoryInternalOrgan = 3
+}
+
+/// <summary>
+/// The incapacity a medical board case assesses (round 5, lane K-II-b; PNDCL 187 ss.5–7, 38).
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Permanent partial and permanent total are not chosen independently.</b> The service derives
+/// which from the assessed percentage: 100 % or more is permanent total (s.38), anything less partial.
+/// Temporary incapacity (s.7) is paid periodically through payroll; it carries no lump-sum figure here.
+/// </remarks>
+public enum IncapacityKind
+{
+    /// <summary>Assessed, and no incapacity found.</summary>
+    [Description("No incapacity")]
+    None = 1,
+
+    /// <summary>Absence certified necessary by a medical practitioner (s.7(2)(b)).</summary>
+    [Description("Temporary total")]
+    TemporaryTotal = 2,
+
+    /// <summary>After it, until final assessment (s.7(2)(b)).</summary>
+    [Description("Temporary partial")]
+    TemporaryPartial = 3,
+
+    /// <summary>Less than 100 % (s.6).</summary>
+    [Description("Permanent partial")]
+    PermanentPartial = 4,
+
+    /// <summary>100 % or more (ss.5, 38).</summary>
+    [Description("Permanent total")]
+    PermanentTotal = 5
+}
+
+/// <summary>Which schedule an incapacity schedule row belongs to (round 5, lane K-II-b).</summary>
+public enum IncapacityScheduleKind
+{
+    /// <summary>PNDCL 187, First Schedule — disfiguring injuries (s.8): a percentage UP TO the row's.</summary>
+    [Description("Disfigurement (First Schedule)")]
+    Disfigurement = 1,
+
+    /// <summary>PNDCL 187, Third Schedule — incapacity (s.6(1)(a)): the row's percentage.</summary>
+    [Description("Incapacity (Third Schedule)")]
+    Incapacity = 2
+}
+
+/// <summary>
+/// How much of a member an assessed injury took (the Third Schedule's notes).
+/// </summary>
+public enum LossOfUse
+{
+    /// <summary>The member lost — or its use totally and permanently lost, which the Schedule treats the same.</summary>
+    [Description("Lost, or total loss of use")]
+    Total = 1,
+
+    /// <summary>Permanent partial loss of use: fifty percent of the row's percentage.</summary>
+    [Description("Partial loss of use (50 %)")]
+    Partial = 2
+}
+
+/// <summary>Why no compensation is payable although an injury is assessed (PNDCL 187 s.2).</summary>
+public enum CompensationNotPayableReason
+{
+    /// <summary>s.2(5): the injury was attributable to the employee being under the influence of drink or drugs.</summary>
+    [Description("Drink or drugs (s.2(5))")]
+    DrinkOrDrugs = 1,
+
+    /// <summary>s.2(7): the injury was deliberately self-inflicted.</summary>
+    [Description("Deliberately self-inflicted (s.2(7))")]
+    DeliberateSelfInjury = 2,
+
+    /// <summary>s.2(8): a false representation about a previous injury or illness.</summary>
+    [Description("False representation (s.2(8))")]
+    FalseRepresentation = 3
+}
+
+/// <summary>
+/// The question a medical board is asked (round 5, lane K1 — decision A6).
+/// </summary>
+/// <remarks>
+/// <para>Beside the free-text reason, not instead of it: the purpose is what the rest of the system
+/// can read, the reason is what the panel reads.</para>
+///
+/// <para>⚠ <b>Numbered from 1 on purpose.</b> An enum a request omits binds to 0, and a board whose
+/// purpose silently became the first value would be a board nobody asked that question of. The
+/// service refuses 0 and anything undefined.</para>
+///
+/// <para>⚠ <b>The leave evidence gate reads it</b> (lane K6): only a case about an absence —
+/// <see cref="ExtendedSickLeave"/>, <see cref="InjuryOnDuty"/> or <see cref="Other"/> — can stand as
+/// the board a leave type's threshold asks for. <c>MedicalBoardCase.CoversAbsence</c> is the one place
+/// that list lives. Since lane K-II-a the purpose is asked per case, not per board.</para>
+/// </remarks>
+public enum MedicalBoardPurpose
+{
+    /// <summary>Sick leave has passed the point at which a board must sit.</summary>
+    [Description("Extended sick leave")]
+    ExtendedSickLeave = 1,
+
+    /// <summary>An injury at work — the Workmen's Compensation case (PNDCL 187).</summary>
+    [Description("Injury on duty")]
+    InjuryOnDuty = 2,
+
+    /// <summary>Whether somebody can do their job, with or without restrictions.</summary>
+    [Description("Fitness for duty")]
+    FitnessForDuty = 3,
+
+    /// <summary>Whether somebody should retire on medical grounds.</summary>
+    [Description("Medical retirement")]
+    MedicalRetirement = 4,
+
+    /// <summary>Anything else. Also what every board recorded before purposes existed.</summary>
+    [Description("Other")]
+    Other = 5
 }
 
 /// <summary>What a person is doing on a medical board.</summary>
@@ -8043,6 +8554,61 @@ public enum EventVisibility
     Confidential = 5
 }
 
+/// <summary>
+/// What kind of thing is standing between a panelist and a proposed interview window
+/// (round 4, lane D1).
+/// </summary>
+public enum CommitmentKind
+{
+    [Description("Interview")]
+    Interview = 1,
+
+    [Description("Leave")]
+    Leave = 2,
+
+    [Description("Travel")]
+    Travel = 3,
+
+    [Description("Meeting or event")]
+    Event = 4,
+
+    [Description("Room booking")]
+    RoomBooking = 5,
+
+    [Description("Training")]
+    Training = 6,
+
+    [Description("Business closure")]
+    Closure = 7,
+
+    [Description("Public holiday")]
+    Holiday = 8,
+}
+
+/// <summary>
+/// Whether a clash refuses the schedule or merely warns about it (round 4, decision D-5).
+/// </summary>
+/// <remarks>
+/// <para><b>Hard</b> is a commitment that is both confirmed and time-precise: another interview, a
+/// Confirmed room booking, a Confirmed event this person accepted. Scheduling over it would
+/// double-book a real person at a real hour, so it is refused unless the recruiter supplies an
+/// override reason, which is recorded on the interview.</para>
+///
+/// <para><b>Soft</b> is everything the system knows but should not overrule: leave and travel, which
+/// are recorded by the DAY and cannot say whether the 09:00 hour is free; a Tentative booking; a
+/// training nomination, which is a plan rather than an attendance; a closure or a public holiday,
+/// which say the office is shut, not that the person is unavailable. A recruiter who knows the
+/// panelist swapped a meeting should not be stopped by the system's second-hand information.</para>
+/// </remarks>
+public enum CommitmentHardness
+{
+    [Description("Warns")]
+    Soft = 1,
+
+    [Description("Refuses")]
+    Hard = 2,
+}
+
 public enum EventStatus
 {
     [Description("Scheduled")]
@@ -9702,6 +10268,13 @@ public enum OrientationPriority
 /// <summary>
 /// Which employee population an orientation program targets.
 /// </summary>
+/// <remarks>
+/// ⚠ Since round 4 lane I this is a DESCRIPTIVE label on the programme only. Audience rules — the
+/// part that actually enrols people — target through <see cref="HrAudienceTargetType"/> plus
+/// <see cref="OrientationAudiencePopulation"/>, because a single value from this list could not say
+/// "new hires in one unit", and <see cref="JobGrade"/> / <see cref="Custom"/> named axes no resolver
+/// could ever evaluate.
+/// </remarks>
 public enum OrientationAudienceScope
 {
     AllEmployees = 1,
@@ -9713,6 +10286,46 @@ public enum OrientationAudienceScope
     Management = 7,
     Contractors = 8,
     Custom = 99
+}
+
+/// <summary>
+/// Which kind of person an orientation audience rule reaches, layered ON TOP of its target
+/// (round 4, lane I1).
+/// </summary>
+/// <remarks>
+/// <para><b>Why this is a second axis and not more members of the target enum.</b> An audience
+/// rule used to be ONE <see cref="OrientationAudienceScope"/> value, so "new hires" and "the
+/// Operations unit" were alternatives — "new hires in Operations" could not be said at all. The
+/// target now comes from the shared <see cref="HrAudienceTargetType"/> (where a person sits) and
+/// this says who, of the people there, the rule means. The two are intersected.</para>
+///
+/// <para>Each is DERIVED from data the system already holds, never typed in:</para>
+/// <list type="bullet">
+///   <item><see cref="NewHires"/> — employed within the last 90 days
+///   (<c>OrientationTriggerWindows.NewHireWindowDays</c>).</item>
+///   <item><see cref="Management"/> — heads an organisation unit, or has at least one active
+///   direct report.</item>
+///   <item><see cref="Contractors"/> — employed on a Contract, Fixed-term, Consultant or
+///   Freelance basis.</item>
+/// </list>
+///
+/// <para>⚠ <see cref="Anyone"/> is <c>0</c> on purpose: it is the value every rule that predates
+/// this column means, so a <c>DEFAULT 0</c> is the true value for existing rows rather than the
+/// non-member this module has tripped over before.</para>
+/// </remarks>
+public enum OrientationAudiencePopulation
+{
+    /// <summary>Everyone the target reaches.</summary>
+    Anyone = 0,
+
+    /// <summary>Only people employed within the new-hire window.</summary>
+    NewHires = 1,
+
+    /// <summary>Only people who head a unit or manage someone.</summary>
+    Management = 2,
+
+    /// <summary>Only contract, fixed-term, consultant and freelance staff.</summary>
+    Contractors = 3
 }
 
 /// <summary>
@@ -9784,7 +10397,14 @@ public enum OrientationEnrollmentSource
     AutoRule = 1,
     SelfEnrollment = 2,
     HrAssigned = 3,
-    ManagerAssigned = 4
+    ManagerAssigned = 4,
+
+    /// <summary>
+    /// The next cycle of a recurring programme, opened by the nightly sweep one period after the
+    /// last completion (round 4, lane I-b). No rule creates it, so it carries no rule id; its
+    /// <c>TriggerDate</c> is the completion it renews.
+    /// </summary>
+    Recurrence = 5
 }
 
 /// <summary>
@@ -9895,7 +10515,22 @@ public enum OrientationNotificationType
     Overdue = 4,
     Completion = 5,
     CertificateIssued = 6,
-    Cancellation = 7
+    Cancellation = 7,
+
+    /// <summary>A participant placed on a session, or a facilitator told of theirs (round 4, lane K-b).</summary>
+    SessionScheduled = 8,
+
+    /// <summary>A live session's date, time, place or link changed.</summary>
+    SessionRescheduled = 9,
+
+    /// <summary>A live session put off, with no new date yet.</summary>
+    SessionPostponed = 10,
+
+    /// <summary>An onboarding plan made: to the new hire, their coordinator and their buddy.</summary>
+    OnboardingPlanAssigned = 11,
+
+    /// <summary>An onboarding task given to a person.</summary>
+    OnboardingTaskAssigned = 12
 }
 
 /// <summary>
@@ -9940,16 +10575,6 @@ public enum PayComponentCalculationBasis
 {
     FixedAmount = 0,
     PercentageOfBasic = 1
-}
-
-/// <summary>
-/// How a leave type's per-day encashment rate is derived: computed from the employee's
-/// emoluments (basic + linked allowances) or entered manually per leave type.
-/// </summary>
-public enum EncashmentRateBasis
-{
-    DerivedFromEmoluments = 0,
-    Manual = 1
 }
 
 /// <summary>
@@ -10140,10 +10765,11 @@ public enum HrLetterRequestStatus
 /// <para><c>OrganizationUnit</c> includes CHILD units: announcing something to "Operations" and
 /// having it miss every team inside Operations is never what the sender meant.</para>
 ///
-/// <para>Note that <c>OrientationAudienceRule</c> models the same idea and has no resolver
-/// anywhere — its rules are stored and never expanded. If orientation's audience rules are ever
-/// made to work, they should come through the resolver this enum belongs to rather than growing
-/// a second one.</para>
+/// <para><c>OrientationAudienceRule</c> models the same idea and, until round 4 lane I, had no
+/// resolver anywhere — its rules were stored and never expanded. They now use this enum for their
+/// target and come through <c>IHrAudienceResolver</c>, as this note used to ask; the orientation-
+/// only notions (new hires, management, contractors) became <c>OrientationAudiencePopulation</c>,
+/// layered on top rather than added here.</para>
 /// </remarks>
 public enum HrAudienceTargetType
 {
@@ -10374,4 +11000,28 @@ public enum DisabilityCategory
 
     [Description("Other")]
     Other = 99
+}
+
+/// <summary>
+/// Whether an employee is available to Maintenance as a technician because of their position, or
+/// because HR said so for this person (round 4, lane O).
+/// </summary>
+/// <remarks>
+/// A view over two stored columns, <c>Employee.MaintenanceAssignmentSetByHand</c> and
+/// <c>Employee.CanBeAssignedToMaintenance</c>. The second is what every reader asks, HR's technician
+/// door and Maintenance's work-order gates alike.
+/// </remarks>
+public enum MaintenanceAssignmentMode
+{
+    /// <summary>The position decides: available exactly when it is a technician role.</summary>
+    [Description("Follow the position")]
+    FollowPosition = 0,
+
+    /// <summary>Available whatever the position says, e.g. someone seconded in from another post.</summary>
+    [Description("Include, set by hand")]
+    Include = 1,
+
+    /// <summary>Not available although the position is a technician role, e.g. long-term light duties.</summary>
+    [Description("Exclude, set by hand")]
+    Exclude = 2
 }

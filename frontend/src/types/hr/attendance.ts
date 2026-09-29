@@ -1534,6 +1534,11 @@ export interface PublicHolidaySummary {
   observanceType: HolidayObservanceType;
   attractsHolidayPay: boolean;
   isActive: boolean;
+  /** Round 5, lane N4: every field the edit dialog writes back, so an edit keeps them. */
+  description?: string | null;
+  substitutionDate?: string | null;
+  holidayPayMultiplier?: number | null;
+  isRecurringAnnually?: boolean;
 }
 
 export interface HolidayCalendar extends AuditFields {

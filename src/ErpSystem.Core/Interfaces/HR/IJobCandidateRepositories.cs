@@ -59,6 +59,20 @@ public interface IJobCandidateRepository : IGenericRepository<JobCandidate>
         Guid tenantId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The same slice of the pool as <see cref="GetTalentPoolFilteredAsync"/>, unpaged and loaded
+    /// with the collections the shortlisting engine scores (round 4, lane B1).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The DTO is fully qualified, as its sibling above is: this file has no <c>using</c> for
+    /// <c>ErpSystem.Core.DTOs.HR</c> and deliberately keeps none — the repository interfaces name
+    /// entities, and the one place a DTO leaks in says so at the call site.
+    /// </remarks>
+    Task<List<JobCandidate>> GetTalentPoolForScreeningAsync(
+        ErpSystem.Core.DTOs.HR.TalentPoolFilterDto filter,
+        Guid tenantId,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Returns pool candidates whose last engagement was before the threshold date.</summary>
     Task<IEnumerable<JobCandidate>> GetDormantPoolCandidatesAsync(
         DateTime engagedBefore,

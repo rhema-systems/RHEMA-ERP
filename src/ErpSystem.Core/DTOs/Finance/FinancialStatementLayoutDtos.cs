@@ -39,6 +39,13 @@ public sealed class FinancialStatementLayoutVersionDto
     public DateTime? PublishedAt { get; set; }
     public Guid? PublishedById { get; set; }
     public string? PublishedByName { get; set; }
+    public DateTime? SubmittedAt { get; set; }
+    public Guid? SubmittedById { get; set; }
+    public string? SubmittedByName { get; set; }
+    public DateTime? LastDecisionAt { get; set; }
+    public Guid? LastDecisionById { get; set; }
+    public string? LastDecisionByName { get; set; }
+    public string? LastDecisionReason { get; set; }
     public string? Notes { get; set; }
     public int Revision { get; set; }
     public string? PublicationSnapshotSchemaVersion { get; set; }
@@ -158,6 +165,63 @@ public sealed class CloneFinancialStatementLayoutDto
     public Guid AccountingBookId { get; set; }
 }
 
+public sealed class InitializeFinancialStatementLayoutsDto
+{
+    /// <summary>
+    /// Optional posting book to initialize. When omitted, every active posting book
+    /// owned by the current tenant is assessed.
+    /// </summary>
+    public Guid? AccountingBookId { get; set; }
+}
+
+public sealed class FinancialStatementLayoutInitializationResultDto
+{
+    public int CreatedCount { get; set; }
+    public IReadOnlyList<FinancialStatementLayoutInitializationItemDto> Items { get; set; }
+        = Array.Empty<FinancialStatementLayoutInitializationItemDto>();
+    public FinancialStatementLayoutReadinessDto Readiness { get; set; } = new();
+}
+
+public sealed class FinancialStatementLayoutInitializationItemDto
+{
+    public Guid AccountingBookId { get; set; }
+    public string AccountingBookCode { get; set; } = string.Empty;
+    public FinancialStatementType StatementType { get; set; }
+    public Guid? ProtectedStandardLayoutId { get; set; }
+    public Guid? TenantLayoutId { get; set; }
+    public bool Created { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public FinancialStatementLayoutValidationResultDto? Validation { get; set; }
+}
+
+public sealed class FinancialStatementLayoutReadinessDto
+{
+    public bool IsReady { get; set; }
+    public IReadOnlyList<FinancialStatementLayoutBookReadinessDto> Books { get; set; }
+        = Array.Empty<FinancialStatementLayoutBookReadinessDto>();
+}
+
+public sealed class FinancialStatementLayoutBookReadinessDto
+{
+    public Guid AccountingBookId { get; set; }
+    public string AccountingBookCode { get; set; } = string.Empty;
+    public string AccountingBookName { get; set; } = string.Empty;
+    public bool BalanceSheetReady { get; set; }
+    public bool IncomeStatementReady { get; set; }
+    public IReadOnlyList<string> MissingRequirements { get; set; } = Array.Empty<string>();
+}
+
+public sealed class DiscardFinancialStatementLayoutDto
+{
+    [Range(1, int.MaxValue)]
+    public int ExpectedRevision { get; set; }
+
+    [Required]
+    [MinLength(5)]
+    [MaxLength(500)]
+    public string Reason { get; set; } = string.Empty;
+}
+
 public sealed class ReplaceFinancialStatementRowsDto
 {
     [Range(1, int.MaxValue)]
@@ -236,6 +300,45 @@ public sealed class PublishFinancialStatementLayoutVersionDto
     public DateTime? EffectiveFrom { get; set; }
 
     public DateTime? EffectiveTo { get; set; }
+}
+
+public sealed class SubmitFinancialStatementLayoutVersionDto
+{
+    [Range(1, int.MaxValue)]
+    public int ExpectedVersionRevision { get; set; }
+}
+
+public sealed class DecideFinancialStatementLayoutVersionDto
+{
+    [Range(1, int.MaxValue)]
+    public int ExpectedVersionRevision { get; set; }
+
+    [Required]
+    public FinancialStatementLayoutApprovalDecision Decision { get; set; }
+
+    [MaxLength(500)]
+    public string? Reason { get; set; }
+}
+
+public sealed class FinancialStatementLayoutApprovalQueueItemDto
+{
+    public Guid VersionId { get; set; }
+    public Guid LayoutId { get; set; }
+    public string LayoutCode { get; set; } = string.Empty;
+    public string LayoutName { get; set; } = string.Empty;
+    public FinancialStatementType StatementType { get; set; }
+    public int VersionNumber { get; set; }
+    public int Revision { get; set; }
+    public Guid AccountingBookId { get; set; }
+    public string AccountingBookCode { get; set; } = string.Empty;
+    public string AccountingBookName { get; set; } = string.Empty;
+    public DateTime? EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
+    public DateTime SubmittedAt { get; set; }
+    public Guid? SubmittedById { get; set; }
+    public string SubmittedByName { get; set; } = string.Empty;
+    public bool CanDecide { get; set; }
+    public string? DecisionDisabledReason { get; set; }
 }
 
 public sealed class FinancialStatementLayoutValidationResultDto

@@ -146,12 +146,16 @@ public sealed class HrFinancePostingAdapterTests
         }
 
         public Mock<IVendorInvoiceService> VendorInvoices { get; } = new(MockBehavior.Strict);
+        public Mock<IInvoiceService> CustomerInvoices { get; } = new(MockBehavior.Strict);
+        public Mock<ICustomerService> Customers { get; } = new(MockBehavior.Strict);
 
         public HrFinancePostingAdapter Build() => new(
             Store.Object,
             UnitOfWork.Object,
             Engine.Object,
             VendorInvoices.Object,
+            CustomerInvoices.Object,
+            Customers.Object,
             new HrCurrencyBridge(Currencies.Object, Rates.Object),
             CurrentUser.Object,
             NullLogger<HrFinancePostingAdapter>.Instance);

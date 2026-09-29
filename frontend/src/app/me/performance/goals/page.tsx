@@ -104,7 +104,9 @@ const emptyGoal: GoalFormValues = {
 /** Statuses whose goal the owner may still edit and re-submit. */
 const EDITABLE = ['Draft', 'Rejected'];
 /** Statuses accepting progress entries (mirrors the service's LiveExecutionStatuses). */
-const LIVE = ['Approved', 'InProgress', 'OnTrack', 'AtRisk'];
+// A locked goal's year runs on — a lock freezes what the goal is, not its progress — and a goal
+// the old lock left in the Locked status reads as approved.
+const LIVE = ['Approved', 'InProgress', 'OnTrack', 'AtRisk', 'Locked'];
 
 export default function MyGoalsPage() {
   const { user } = useAuth();
@@ -155,6 +157,16 @@ export default function MyGoalsPage() {
         ? employeeGoalService.update(editing.id, {
             id: editing.id,
             progressPercent: editing.progressPercent,
+            // What this form does not show is carried through unchanged. The update replaces every
+            // field, so leaving these out cleared the goal's KPI, range, success criteria and
+            // alignment on every edit made here.
+            kpiDefinitionId: editing.kpiDefinitionId ?? null,
+            successCriteria: editing.successCriteria ?? null,
+            minValue: editing.minValue ?? null,
+            maxValue: editing.maxValue ?? null,
+            companyGoalId: editing.companyGoalId ?? null,
+            unitGoalId: editing.unitGoalId ?? null,
+            parentGoalId: editing.parentGoalId ?? null,
             ...payload,
           })
         : employeeGoalService.create(payload);
@@ -341,7 +353,7 @@ export default function MyGoalsPage() {
                       </Button>
                     </>
                   )}
-                  {LIVE.includes(goal.status) && !goal.isLocked && (
+                  {LIVE.includes(goal.status) && (
                     <Button
                       variant="outline"
                       size="sm"

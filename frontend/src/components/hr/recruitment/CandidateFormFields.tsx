@@ -7,13 +7,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   DateField,
   FieldRow,
+  // ⚠ NumberField, not `TextField type="number"` — TextField's `type` union is text|email|tel only.
+  NumberField,
   SelectField,
   SwitchField,
   TextField,
 } from '@/components/hr/employee/tabs/fields';
-import { countryService } from '@/services/hr/country.service';
+import { AddressCascadeField } from '@/components/hr/employee/tabs/address-fields';
 import { identificationTypeService } from '@/services/hr/lookup.service';
-import { GENDERS } from '@/types/hr/recruitment-pipeline';
+import { humanizeEnum } from '@/lib/hr/attendance-format';
+import { GENDERS, PREFERRED_WORK_ARRANGEMENTS } from '@/types/hr/recruitment-pipeline';
 
 export const candidateSchema = z.object({
   firstName: z.string().min(1, 'First name is required').max(100),
@@ -26,7 +29,13 @@ export const candidateSchema = z.object({
   alternatePhone: z.string().max(20).optional().nullable(),
   postalAddress: z.string().max(200).optional().nullable(),
   digitalAddress: z.string().max(30).optional().nullable(),
-  city: z.string().min(1, 'City is required').max(100),
+  // Round 4, lane A. No longer `min(1)`: when the chosen country has a geography scheme the
+  // cascade below owns the address, the city box is disabled, and the server rewrites it from the
+  // tree on save. A required-but-uneditable field is a form that cannot be submitted. The address
+  // stays compulsory through the refine at the bottom — an area, or a city, never neither.
+  city: z.string().max(100).optional().nullable(),
+  region: z.string().max(100).optional().nullable(),
+  geoAreaId: z.string().optional().nullable(),
   // G-7.3: free text, and optional. Nationality is not the same question as country of residence —
   // a dual national or a stateless applicant is not served by a single FK into the country table.
   nationality: z.string().max(100).optional().nullable(),
@@ -41,10 +50,27 @@ export const candidateSchema = z.object({
   nationalIdTypeId: z.string().optional().nullable(),
   nationalIdNumber: z.string().max(50).optional().nullable(),
   nationalIdExpiryDate: z.string().optional().nullable(),
+  // Round 4, lane B - the professional profile HR could not record. See the card below.
+  headline: z.string().max(300).optional().nullable(),
+  professionalSummary: z.string().max(4000).optional().nullable(),
+  currentJobTitle: z.string().max(200).optional().nullable(),
+  currentEmployer: z.string().max(200).optional().nullable(),
+  // Kept as strings: an <input type="number"> yields '' for empty, and coercing '' to 0 would
+  // record "no experience" for "not asked". The page maps '' to null on the way out.
+  totalYearsExperience: z.string().optional().nullable(),
+  noticePeriodDays: z.string().optional().nullable(),
+  availableFrom: z.string().optional().nullable(),
+  preferredWorkArrangement: z.string().optional().nullable(),
   isInTalentPool: z.boolean(),
 }).refine((v) => !v.nationalIdNumber?.trim() || !!v.nationalIdTypeId, {
   message: 'Say which document the number is from',
   path: ['nationalIdTypeId'],
+}).refine((v) => !!v.geoAreaId || !!v.city?.trim(), {
+  // Mirrors the server's JobCandidateAddressRule. Most of the world has no scheme loaded, so
+  // demanding an area would make the form unfillable outside Ghana; demanding a city would make it
+  // unfillable inside Ghana, where the cascade writes it. One or the other, never neither.
+  message: 'Say where the candidate is: pick an area, or type a city.',
+  path: ['city'],
 });
 
 export type CandidateFormValues = z.infer<typeof candidateSchema>;
@@ -61,6 +87,8 @@ export const emptyCandidate: CandidateFormValues = {
   postalAddress: null,
   digitalAddress: null,
   city: '',
+  region: null,
+  geoAreaId: null,
   nationality: null,
   countryId: '',
   linkedInProfile: null,
@@ -69,24 +97,36 @@ export const emptyCandidate: CandidateFormValues = {
   nationalIdTypeId: null,
   nationalIdNumber: null,
   nationalIdExpiryDate: null,
+  headline: null,
+  professionalSummary: null,
+  currentJobTitle: null,
+  currentEmployer: null,
+  totalYearsExperience: null,
+  noticePeriodDays: null,
+  availableFrom: null,
+  // 'Any' is the entity's default and means "no preference stated". The pool rubric scores it as
+  // genuine flexibility rather than as a match, which is the G-13.2 distinction.
+  preferredWorkArrangement: 'Any',
   isInTalentPool: false,
 };
 
 /**
  * The editable half of a candidate record.
  *
- * ⚠ Deliberately does **not** cover headline, current role, expected salary, notice period,
- * preferred work arrangement or work-authorization status. Those are on the read DTO but not on
- * `CreateJobCandidateDto`/`UpdateJobCandidateDto` — they belong to the candidate, who supplies them
- * through the portal or an external application. Saving from HR leaves them as they were; adding
- * inputs for them here would silently discard what the user typed.
+ * ⚠ Round 4, lane B: the professional profile and availability are now HERE as well as on the
+ * candidate's portal profile. They used to be portal-only, on the reasoning that they belong to the
+ * candidate — which is right for someone who applied online and wrong for everybody else. A career
+ * fair, a referral and an unsolicited CV all reach the talent pool through HR typing them in, and
+ * the pool's own match rubric scores on experience, work arrangement and availability. So the
+ * people HR knew most about scored lowest, because HR had nowhere to put what it knew.
+ *
+ * ⚠ Still not covered: expected salary and work-authorization status. Those remain candidate-only
+ * and the DTOs do not carry them, so an input here would silently discard what was typed.
  */
 export function CandidateFormFields({ form }: { form: UseFormReturn<CandidateFormValues> }) {
-  // Active only — an inactive country should not be offered on a new record.
-  const countries = useQuery({
-    queryKey: ['hr', 'countries', 'active'],
-    queryFn: () => countryService.getActive(),
-  });
+  // ⚠ Round 4, lane A: the country list is no longer fetched here. AddressCascadeField owns the
+  // country picker now, because the scheme it loads is keyed on the country — splitting the two
+  // across two components meant the cascade could not react to the country changing.
   // The tenant's identity documents (Ghana Card, passport, …) — the server refuses any other type.
   const idTypes = useQuery({
     queryKey: ['hr', 'identification-types', 'active'],
@@ -154,22 +194,57 @@ export function CandidateFormFields({ form }: { form: UseFormReturn<CandidateFor
             <TextField form={form} name="alternatePhone" label="Alternate phone" type="tel" />
             <TextField form={form} name="digitalAddress" label="Digital address" />
           </FieldRow>
+          {/* Round 4, lane A. The country select and the free-text city used to sit here as two
+              unrelated inputs; they are now one control, the same cascade the employee register
+              uses. City and Region render underneath — disabled when the chosen country has a
+              scheme, because the server rewrites both from the tree on save, and as ordinary text
+              inputs when it has none, which is most countries. The area is what lets a vacancy's
+              Location criterion match "Greater Accra" against somebody recorded in Tema. */}
+          <AddressCascadeField
+            form={form}
+            countryName="countryId"
+            geoAreaName="geoAreaId"
+            cityName="city"
+            regionName="region"
+          >
+            <FieldRow>
+              <TextField form={form} name="postalAddress" label="Postal address" />
+              {/* G-7.3: displayed on the Personal card since the module was built and settable by
+                  nothing — the demo seeder was its only writer, which is why it read "Ghanaian" in
+                  every walkthrough and "—" on every real tenant. */}
+              <TextField form={form} name="nationality" label="Nationality" />
+            </FieldRow>
+          </AddressCascadeField>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Professional profile</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
           <FieldRow>
-            <TextField form={form} name="postalAddress" label="Postal address" />
-            <TextField form={form} name="city" label="City" required />
+            <TextField form={form} name="headline" label="Headline" />
+            <NumberField form={form} name="totalYearsExperience" label="Years of experience" />
+          </FieldRow>
+          <FieldRow>
+            <TextField form={form} name="currentJobTitle" label="Current job title" />
+            <TextField form={form} name="currentEmployer" label="Current employer" />
+          </FieldRow>
+          <FieldRow>
+            <DateField form={form} name="availableFrom" label="Available from" />
+            <NumberField form={form} name="noticePeriodDays" label="Notice period (days)" />
           </FieldRow>
           <FieldRow>
             <SelectField
               form={form}
-              name="countryId"
-              label="Country"
-              options={(countries.data ?? []).map((c: any) => ({ value: c.id, label: c.name }))}
+              name="preferredWorkArrangement"
+              label="Preferred work arrangement"
+              options={PREFERRED_WORK_ARRANGEMENTS.map((w) => ({ value: w, label: humanizeEnum(w) }))}
             />
-            {/* G-7.3: displayed on the Personal card since the module was built and settable by
-                nothing — the demo seeder was its only writer, which is why it read "Ghanaian" in
-                every walkthrough and "—" on every real tenant. */}
-            <TextField form={form} name="nationality" label="Nationality" />
+            <div />
           </FieldRow>
+          <TextField form={form} name="professionalSummary" label="Professional summary" />
         </CardContent>
       </Card>
 

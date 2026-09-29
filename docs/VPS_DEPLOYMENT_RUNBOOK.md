@@ -1,6 +1,6 @@
 # Rhema ERP VPS Deployment Runbook
 
-Last updated: 2026-09-26
+Last updated: 2026-09-27
 
 This note captures the VPS deployment details that have caused repeat failures. Read it before deploying to the current Windows VPS. The server is presently a **test server**, so development-data seeding is intentionally enabled. It must be disabled before this host is promoted to production.
 
@@ -48,7 +48,7 @@ The command performs these controls automatically:
 - runs VPS/service/configuration/database preflight checks before spending time
   on a build;
 - compares repository and deployed EF migration IDs and refuses unprobed pending
-  migrations that contain SQL `THROW` guards;
+  migrations that contain SQL `THROW` guards or install guard helpers;
 - publishes the self-contained API with the full build and builds a clean production
   frontend using the public HTTPS origin;
 - creates commit-keyed packages, verifies their hashes, and reuses them safely;
@@ -74,6 +74,63 @@ uses an authenticated GitHub CLI session to verify the remote commit. It never
 opens an interactive credential prompt during a deployment.
 
 The remainder of this document is the detailed recovery and manual procedure.
+
+### Deploy and prepare the QS UAT report on the VPS
+
+From the clean, updated `C:\Users\Administrator\Documents\ERP\RHEMA-ERP`
+release checkout, invoke the wrapper as one script:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-QsUatVps.ps1
+```
+
+This uses the normal deployment's preflight, backup, migration, seed and smoke
+gates, then generates the read-only QS prerequisite report and VPS walkthrough.
+It stops on deployment failure and does not run the report or print completion.
+If only the report fails, it explicitly distinguishes that from deployment failure.
+The default target remains the previously cut-over test database
+`RhemaERP_VpsTest_20260926_173800`; the report checks the actual service target.
+
+For the explicitly authorized QS UAT configuration auto-approval, run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-QsUatVps.ps1 -ExpectedDatabase 'RhemaERP_VpsTest_20260926_173800' -PrepareQsUat -AutoApproveQsUat
+```
+
+This opt-in prepares the existing controlled selections, then approves all 17
+untouched seeded QS decisions and publishes the configuration through the normal
+profile owner. It accepts only the explicitly named test database. Existing user
+edits/reviews and unresolved or inactive selections stop auto-approval. Normal
+deployment without these switches continues to require independent review.
+
+Evidence, approval revisions and publication commit together. The DMS evidence is
+a clearly labelled metadata-only system memorandum recording the operator's UAT
+authorization, with no fictitious uploaded file or human signature. Audit revisions
+retain decision values and before/after approval states. Rerunning the command
+recognizes the published UAT profile without adding duplicate evidence or approvals.
+The initializer checks the child report before printing
+`QS_CONFIGURATION|AUTO_APPROVED_TEST_ONLY`. `QsEndToEndVerified` remains false until
+the actual QS business walkthrough is performed; this switch approves configuration
+decisions only. If deployment already passed and preparation was interrupted, rerun
+`scripts\vps\Initialize-QsUat.ps1` with `-ExpectedDatabase` and `-AutoApproveQsUat`,
+then run `scripts\vps\Get-QsUatReadiness.ps1` for that same database.
+
+The reviewed Medical Board preflight also covers the newly merged HR migration.
+It checks legacy employee links and the new unique indexes; its rollback-only
+restriction on multiple cases is not imposed on an upgrade. Migration source hashes
+remain pinned, so an unreviewed source change still stops deployment.
+
+Do not run normal `-DryRun` as a prerequisite for an upgrade with pending
+migrations: it verifies the already-deployed migration parity. Normal deployment
+performs the read-only upgrade preflight itself. Run the wrapper with `-File`
+rather than submitting each line separately at an interactive prompt, where a
+failed command cannot prevent later manually submitted lines from running.
+
+The 62-migration release adds `InventoryControlledMigrationPreflight.sql` to the
+packaged probes. It checks the actual existing-row and trigger-patch prerequisites
+for migrations 61 and 62 without changing data. Both migration source and their
+guard helper hashes are pinned to the reviewed probe. Missing coverage or changed
+guard source stops deployment before the build or service cutover.
 
 ### September 2026 canonical Finance preflight
 

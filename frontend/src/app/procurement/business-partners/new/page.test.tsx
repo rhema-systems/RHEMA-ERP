@@ -47,11 +47,16 @@ describe('new business partner canonical finance setup', () => {
   });
   it('allows independent Supplier and Customer roles on one partner', async () => {
     render(<NewBusinessPartnerPage />);
+    expect(screen.queryByRole('button', { name: 'Supplier & Customer' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Supplier' }));
     fireEvent.click(screen.getByRole('button', { name: 'Customer' }));
+    expect(screen.getByRole('tab', { name: 'Customer Details' })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Partner Name *'), { target: { value: 'Dual Partner' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Partner' }));
-    await waitFor(() => expect(businessPartnerService.createPartner).toHaveBeenCalledWith(expect.objectContaining({ roleTypes: ['Supplier', 'Customer'] })));
+    await waitFor(() => expect(businessPartnerService.createPartner).toHaveBeenCalledWith(expect.objectContaining({
+      partnerType: 'CustomerAndSupplier',
+      roleTypes: ['Supplier', 'Customer'],
+    })));
   });
   it('hides legacy account and WHT editors for customer records', async () => {
     render(<NewBusinessPartnerPage />);

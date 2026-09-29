@@ -7,6 +7,8 @@ using ErpSystem.Data;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -15,6 +17,23 @@ namespace ErpSystem.Core.Tests.Services.Inventory;
 
 public sealed class InventoryTransferValuationTests
 {
+    [Fact]
+    public async Task Physical_allocation_model_registers_replay_keys_and_restricts_history_deletion()
+    {
+        await using var f = new Fixture(ValuationMethod.WeightedAverage);
+        var model = f.Db.GetService<IDesignTimeModel>().Model;
+        var dispatch = model.FindEntityType(typeof(InventoryTransferDispatchAllocation))!;
+        dispatch.GetIndexes().Should().Contain(x => x.IsUnique && x.Properties.Select(p => p.Name).SequenceEqual(new[]
+            { "TenantId", "InventoryTransferActionId", "InventoryTransferItemId", "SourceLocationId" }));
+        dispatch.GetForeignKeys().Where(x => x.Properties.All(p => p.Name != "TenantId")).Should().OnlyContain(x => x.DeleteBehavior == DeleteBehavior.Restrict);
+        var receipt = model.FindEntityType(typeof(InventoryTransferReceiptAllocation))!;
+        receipt.GetIndexes().Should().Contain(x => x.IsUnique && x.Properties.Select(p => p.Name).SequenceEqual(new[]
+            { "TenantId", "InventoryTransferActionId", "DispatchAllocationId", "DestinationLocationId" }));
+        receipt.GetForeignKeys().Where(x => x.Properties.All(p => p.Name != "TenantId")).Should().OnlyContain(x => x.DeleteBehavior == DeleteBehavior.Restrict);
+        model.FindEntityType(typeof(InventoryMovement))!.GetIndexes().Should().Contain(x => x.IsUnique &&
+            x.Properties.Select(p => p.Name).SequenceEqual(new[] { "TenantId", "TransferReceiptAllocationId", "TransferLeg" }));
+    }
+
     [Theory]
     [InlineData(ValuationMethod.FIFO, 100, 15, 20)]
     [InlineData(ValuationMethod.WeightedAverage, 150, 15, 15)]
@@ -202,6 +221,86 @@ public sealed class InventoryTransferValuationTests
         f.DestinationBalance.QuantityOnHand.Should().Be(5);
     }
 
+    [Theory]
+    [InlineData(ValuationMethod.FIFO)]
+    [InlineData(ValuationMethod.WeightedAverage)]
+    [InlineData(ValuationMethod.StandardCost)]
+    public async Task Physical_transit_preserves_company_value_and_settles_original_pick(ValuationMethod method)
+    {
+        await using var f = new Fixture(method);
+        await f.Seed();
+        var originalValue = f.SourceBalance.TotalValue;
+        var pick = await f.PhysicalPick(10);
+        var dispatchValue = await f.Valuation.ProcessTransferAllocationDispatchAsync(pick.Id);
+        f.Transfer.Status = TransferStatus.InTransit;
+        f.Line.ShippedQuantity = 10;
+        await f.Db.SaveChangesAsync();
+        var transit = await f.Db.Set<InventoryBalance>().SingleAsync(x => x.LocationId == pick.InTransitLocationId);
+        transit.QuantityOnHand.Should().Be(10);
+        transit.QuantityAvailable.Should().Be(0);
+        (f.SourceBalance.TotalValue + transit.TotalValue).Should().Be(originalValue);
+        var first = await f.PhysicalReceipt(pick, 3);
+        var firstValue = await f.Valuation.ProcessTransferAllocationReceiptAsync(first.Id);
+        transit.QuantityOnHand.Should().Be(7);
+        (f.SourceBalance.TotalValue + transit.TotalValue + f.DestinationBalance.TotalValue).Should().Be(originalValue);
+        var second = await f.PhysicalReceipt(pick, 7);
+        var secondValue = await f.Valuation.ProcessTransferAllocationReceiptAsync(second.Id);
+        (firstValue + secondValue).Should().Be(dispatchValue);
+        transit.QuantityOnHand.Should().Be(0); transit.TotalValue.Should().Be(0);
+        f.DestinationBalance.QuantityOnHand.Should().Be(10);
+        (await f.Db.Set<InventoryMovement>().ToListAsync()).Should().HaveCount(6)
+            .And.OnlyContain(x => x.TransferDispatchAllocationId == pick.Id);
+    }
+
+    [Fact]
+    public async Task Zero_cost_physical_transit_can_be_received_and_returned_without_inventing_value()
+    {
+        await using var f = new Fixture(ValuationMethod.WeightedAverage);
+        f.SourceBalance.TotalValue = 0; f.SourceBalance.AverageUnitCost = 0;
+        await f.Seed();
+        var pick = await f.PhysicalPick(10);
+        (await f.Valuation.ProcessTransferAllocationDispatchAsync(pick.Id)).Should().Be(0);
+        f.Transfer.Status = TransferStatus.InTransit; f.Line.ShippedQuantity = 10;
+        await f.Db.SaveChangesAsync();
+        var receipt = await f.PhysicalReceipt(pick, 4);
+        (await f.Valuation.ProcessTransferAllocationReceiptAsync(receipt.Id)).Should().Be(0);
+        f.Transfer.Status = TransferStatus.Received;
+        var returned = await f.PhysicalReceipt(pick, 6, true);
+        (await f.Valuation.ProcessTransferAllocationReceiptAsync(returned.Id)).Should().Be(0);
+        (await f.Db.Set<InventoryBalance>().SingleAsync(x => x.LocationId == pick.InTransitLocationId)).QuantityOnHand.Should().Be(0);
+        f.DestinationBalance.QuantityOnHand.Should().Be(4); f.SourceBalance.QuantityOnHand.Should().Be(16);
+    }
+
+    [Theory]
+    [InlineData("duplicate")]
+    [InlineData("overreceipt")]
+    [InlineData("foreign-actor")]
+    [InlineData("wrong-bin")]
+    [InlineData("reversal-after-receipt")]
+    public async Task Physical_transit_receipt_rejects_duplicate_or_invalid_authority(string failure)
+    {
+        await using var f = new Fixture(ValuationMethod.WeightedAverage);
+        await f.Seed();
+        var pick = await f.PhysicalPick(10);
+        await f.Valuation.ProcessTransferAllocationDispatchAsync(pick.Id);
+        f.Transfer.Status = TransferStatus.InTransit; f.Line.ShippedQuantity = 10;
+        await f.Db.SaveChangesAsync();
+        var receipt = await f.PhysicalReceipt(pick, failure == "overreceipt" ? 11 : 4);
+        if (failure == "foreign-actor") receipt.InventoryTransferAction.ActorUserId = Guid.NewGuid();
+        if (failure == "wrong-bin") { receipt.DestinationLocationId = f.SourceBin.Id; receipt.DestinationLocation = f.SourceBin; }
+        await f.Db.SaveChangesAsync();
+        if (failure == "duplicate") await f.Valuation.ProcessTransferAllocationReceiptAsync(receipt.Id);
+        if (failure == "reversal-after-receipt")
+        {
+            await f.Valuation.ProcessTransferAllocationReceiptAsync(receipt.Id);
+            receipt = await f.PhysicalReceipt(pick, 6, true);
+        }
+        var before = f.DestinationBalance.QuantityOnHand;
+        await FluentActions.Awaiting(() => f.Valuation.ProcessTransferAllocationReceiptAsync(receipt.Id))
+            .Should().ThrowAsync<InvalidOperationException>();
+        f.DestinationBalance.QuantityOnHand.Should().Be(before);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         public Guid Tenant { get; } = Guid.NewGuid();
@@ -259,6 +358,27 @@ public sealed class InventoryTransferValuationTests
                     OriginalQuantity=10, RemainingQuantity=10, UnitCost=cost, RemainingValue=10*cost, IsActive=true });
         }
         public async Task Seed() { await Db.SaveChangesAsync(); await Unit.BeginTransactionAsync(System.Data.IsolationLevel.Serializable); }
+        public async Task<InventoryTransferDispatchAllocation> PhysicalPick(decimal quantity)
+        {
+            var warehouse = new Warehouse { TenantId=Tenant, Code="TRANSIT", Name="Transit", WarehouseType="Transit" };
+            var bin = new WarehouseLocation { TenantId=Tenant, WarehouseId=warehouse.Id, LocationCode="TRANSIT", IsInTransitLocation=true,
+                IsPickingLocation=false, IsReceivingLocation=false, IsActive=true };
+            Db.AddRange(warehouse, bin); await Db.SaveChangesAsync();
+            var action = await Action(InventoryTransferActionType.Dispatched, quantity);
+            var pick = new InventoryTransferDispatchAllocation { TenantId=Tenant, InventoryTransferActionId=action.Id,
+                InventoryTransferItemId=Line.Id, SourceLocationId=SourceBin.Id, SourceInventoryWarehouseId=Source.Id,
+                InTransitLocationId=bin.Id, Quantity=quantity };
+            Db.Add(pick); await Db.SaveChangesAsync(); return pick;
+        }
+        public async Task<InventoryTransferReceiptAllocation> PhysicalReceipt(InventoryTransferDispatchAllocation pick, decimal quantity, bool returned=false)
+        {
+            var action = await Action(returned ? (Transfer.Status == TransferStatus.Received ? InventoryTransferActionType.DiscrepancyResolved : InventoryTransferActionType.ShipmentReversed) : InventoryTransferActionType.Received, quantity);
+            var receipt = new InventoryTransferReceiptAllocation { TenantId=Tenant, InventoryTransferActionId=action.Id,
+                DispatchAllocationId=pick.Id, Quantity=quantity, ReturnedToSource=returned,
+                DestinationLocationId=returned ? SourceBin.Id : DestinationBin.Id,
+                DestinationInventoryWarehouseId=returned ? Source.Id : Destination.Id };
+            Db.Add(receipt); await Db.SaveChangesAsync(); return receipt;
+        }
         public async Task<InventoryTransferAction> Action(InventoryTransferActionType type, decimal quantity)
         {
             var action = new InventoryTransferAction { TenantId=Tenant, InventoryTransferId=Transfer.Id, ActionType=type,
@@ -267,6 +387,7 @@ public sealed class InventoryTransferValuationTests
             action.Lines.Add(new InventoryTransferActionLine { TenantId=Tenant, InventoryTransferItemId=Line.Id,
                 DispatchedQuantity=type is InventoryTransferActionType.Dispatched or InventoryTransferActionType.ShipmentReversed ? quantity : 0,
                 ReceivedQuantity=type == InventoryTransferActionType.Received ? quantity : 0, IntegrityHash=new string('c',64) });
+            if (type == InventoryTransferActionType.DiscrepancyResolved) action.Lines.Single().ShortageQuantity = quantity;
             Db.Add(action); await Db.SaveChangesAsync(); return action;
         }
         public async Task<decimal> Ship(decimal quantity)

@@ -451,49 +451,72 @@ namespace ErpSystem.Data.Repositories
                 .ToListAsync();
         }
 
-        private async Task<IEnumerable<Employee>> GetEmployeesForMaintenanceAsync()
+        // ── The technician door (round 4, lane O) ─────────────────────────────────────────────
+        //
+        // ⚠ ONE predicate: the stored CanBeAssignedToMaintenance, which follows the position's
+        // IsTechnicianRole unless HR set it by hand (ApplicationDbContext.HrTechnicianRole.cs). It is
+        // what Maintenance's work-order, labour and schedule gates read, so the door and the gates
+        // cannot disagree. Retired here: `|| Department.Code == "MAINT"`, a magic string over the
+        // legacy department model (the lane's migration converted anyone it matched into a by-hand
+        // inclusion first, so retiring it dropped nobody).
+
+        // Everything the door reports, in one read. ⚠ The list reads used WithBasicIncludes alone, so
+        // every technician on `technicians` and `technicians/available` went out with NO skills:
+        // the collection was never loaded, and nothing here lazy-loads.
+        private IQueryable<Employee> WithTechnicianDoorIncludes(IQueryable<Employee> query)
         {
-            // Prefer explicit flag, but keep the department-code fallback for backward compatibility.
-            return await WithBasicIncludes(BaseQuery())
+            return WithBasicIncludes(query)
+                .Include(e => e.OrganizationUnit)
                 .Include(e => e.Location)
-                .Where(e =>
-                    e.IsActive &&
-                    (e.StaffStatus == StaffStatus.Active || e.StaffStatus == StaffStatus.Probation) &&
-                    (e.CanBeAssignedToMaintenance || (e.Department != null && e.Department.Code == "MAINT")))
-                .OrderBy(e => e.LastName)
-                .ThenBy(e => e.FirstName)
-                .ToListAsync();
-        }
-
-        public async Task<IEnumerable<Employee>> GetMaintenanceTechniciansAsync()
-        {
-            return await GetEmployeesForMaintenanceAsync();
-        }
-
-        public async Task<IEnumerable<Employee>> GetAvailableTechniciansAsync()
-        {
-            return await WithBasicIncludes(BaseQuery())
-                .Where(e =>
-                    e.IsActive &&
-                    e.StaffStatus == StaffStatus.Active &&
-                    (e.CanBeAssignedToMaintenance || (e.Department != null && e.Department.Code == "MAINT")))
-                .OrderBy(e => e.LastName)
-                .ThenBy(e => e.FirstName)
-                .ToListAsync();
-        }
-
-        public async Task<IEnumerable<Employee>> GetEmployeesBySkillAsync(Guid skillId, SkillLevel? minLevel = null)
-        {
-            var query = WithBasicIncludes(BaseQuery())
                 .Include(e => e.Skills)
                     .ThenInclude(es => es.Skill)
-                .Where(e => e.IsActive && e.Skills.Any(es => es.SkillId == skillId));
+                .Include(e => e.Skills)
+                    .ThenInclude(es => es.CertifyingBodyRef)
+                .Include(e => e.Skills)
+                    .ThenInclude(es => es.EmployeeCertification);
+        }
 
-            if (minLevel.HasValue)
-            {
-                query = query.Where(e => e.Skills
-                    .Any(es => es.SkillId == skillId && es.SkillLevel >= minLevel.Value));
-            }
+        private IQueryable<Employee> TechniciansQuery()
+            => WithTechnicianDoorIncludes(BaseQuery())
+                .Where(e => e.IsActive && e.CanBeAssignedToMaintenance);
+
+        // Working = employed and at work: Active, or on probation. ⚠ Until round 4, lane O "available"
+        // meant Active ONLY — and every hire starts on probation (EmployeeService puts them there with
+        // a live probation record), so a newly hired artisan was in the pool but invisible to
+        // Maintenance's resource allocation for three to six months. Probation is a contract status,
+        // not an availability; TDC's call (2026-09-23) is that probationers are available.
+        // Suspended, inactive and terminated staff stay out.
+        public async Task<IEnumerable<Employee>> GetMaintenanceTechniciansAsync()
+        {
+            return await TechniciansQuery()
+                .Where(e => e.StaffStatus == StaffStatus.Active || e.StaffStatus == StaffStatus.Probation)
+                .OrderBy(e => e.LastName)
+                .ThenBy(e => e.FirstName)
+                .ToListAsync();
+        }
+
+        /// <summary>
+        /// The same people as <see cref="GetMaintenanceTechniciansAsync"/>: HR knows who is employed
+        /// and working, not who is booked. Schedules and work orders are Maintenance's.
+        /// </summary>
+        public Task<IEnumerable<Employee>> GetAvailableTechniciansAsync() => GetMaintenanceTechniciansAsync();
+
+        /// <summary>
+        /// One employee with the door's includes, WHETHER OR NOT they are a technician — the service
+        /// applies the predicate, so it can tell "not found" from "not a technician" if it ever needs to.
+        /// </summary>
+        public async Task<Employee?> GetMaintenanceTechnicianByIdAsync(Guid employeeId)
+        {
+            return await WithTechnicianDoorIncludes(BaseQuery())
+                .FirstOrDefaultAsync(e => e.Id == employeeId);
+        }
+
+        public async Task<IEnumerable<Employee>> GetMaintenanceTechniciansWithSkillAsync(Guid skillId, SkillLevel? minLevel = null)
+        {
+            // ⚠ `!es.IsDeleted` is new: a removed skill row used to qualify its holder.
+            var query = TechniciansQuery()
+                .Where(e => e.Skills.Any(es => !es.IsDeleted && es.SkillId == skillId
+                    && (!minLevel.HasValue || es.SkillLevel >= minLevel.Value)));
 
             return await query
                 .OrderBy(e => e.LastName)

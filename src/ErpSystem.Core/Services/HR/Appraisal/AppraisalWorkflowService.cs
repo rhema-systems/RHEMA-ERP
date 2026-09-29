@@ -13,62 +13,13 @@ using System.Text.Json;
 namespace ErpSystem.Core.Services.HR;
 
 /// <summary>
-/// Provides lifecycle phase computation, transition enforcement, and role-edit guards
-/// for <see cref="PerformanceAppraisal"/> entities.
-/// This service never persists evaluation data — it only reads/updates <c>Status</c>.
+/// The appraisal pipeline's read and override endpoints: where an appraisal is, who may edit it,
+/// the raw status transition, and HR's audited advance. Where an appraisal is comes from
+/// <see cref="AppraisalGates"/> through <see cref="IAppraisalLifecycleService"/> — the same answer
+/// every write path is held to (performance closure B1).
 /// </summary>
 public class AppraisalWorkflowService : IAppraisalWorkflowService
 {
-    // ────────────────────────────────────────────────────────────────────────
-    //  Allowed lifecycle transitions for the 6-value AppraisalStatus enum.
-    //  Key   = current status
-    //  Value = set of valid next states
-    // ────────────────────────────────────────────────────────────────────────
-    private static readonly IReadOnlyDictionary<AppraisalStatus, HashSet<AppraisalStatus>> AllowedTransitions =
-        new Dictionary<AppraisalStatus, HashSet<AppraisalStatus>>
-        {
-            // Draft → Active: HR/manager opens appraisal for employee action
-            [AppraisalStatus.Draft] = new() { AppraisalStatus.Active },
-
-            // Active → Governance: manager submitted, escalated to HR/Calibration
-            // Active → Completed: shortcut when neither HR review nor acknowledgment required
-            // Active → Appealed: rare edge case guard
-            [AppraisalStatus.Active] = new()
-            {
-                AppraisalStatus.Governance,
-                AppraisalStatus.Completed,
-                AppraisalStatus.Appealed,
-            },
-
-            // Governance → Completed: HR finalised, employee acknowledged (or ack not required)
-            // Governance → Appealed: appeal lodged while in HR governance
-            [AppraisalStatus.Governance] = new()
-            {
-                AppraisalStatus.Completed,
-                AppraisalStatus.Appealed,
-                AppraisalStatus.Active,   // HR can return to employee/manager for corrections
-            },
-
-            // Completed → Appealed: employee files appeal after acknowledgment
-            // Completed → Closed: HR closes out the cycle record
-            [AppraisalStatus.Completed] = new()
-            {
-                AppraisalStatus.Appealed,
-                AppraisalStatus.Closed,
-            },
-
-            // Appealed → Completed: appeal resolved — back to completed state
-            // Appealed → Closed: appeal resolved and HR closes immediately
-            [AppraisalStatus.Appealed] = new()
-            {
-                AppraisalStatus.Completed,
-                AppraisalStatus.Closed,
-            },
-
-            // Terminal — no transitions out of Closed
-            [AppraisalStatus.Closed] = new(),
-        };
-
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly IGenericRepository<EvaluatorEvaluation> _evalRepository;
     private readonly IGenericRepository<PeerNomination> _nominationRepository;
@@ -76,6 +27,9 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     private readonly IGenericRepository<AppraisalConversation> _conversationRepository;
     private readonly IGenericRepository<EmployeeGoal> _goalRepository;
     private readonly IGenericRepository<AppraisalManualAdvanceLog> _advanceLogRepository;
+    private readonly IAppraisalScoreService _scores;
+    private readonly IAppraisalLifecycleService _lifecycle;
+    private readonly IAppraisalGoalRowService _goalRows;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<AppraisalWorkflowService> _logger;
@@ -88,10 +42,14 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         IGenericRepository<AppraisalConversation> conversationRepository,
         IGenericRepository<EmployeeGoal> goalRepository,
         IGenericRepository<AppraisalManualAdvanceLog> advanceLogRepository,
+        IAppraisalScoreService scores,
+        IAppraisalLifecycleService lifecycle,
+        IAppraisalGoalRowService goalRows,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ILogger<AppraisalWorkflowService> logger)
     {
+        _goalRows             = goalRows;
         _appraisalRepository  = appraisalRepository;
         _evalRepository       = evalRepository;
         _nominationRepository = nominationRepository;
@@ -99,6 +57,8 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         _conversationRepository = conversationRepository;
         _goalRepository       = goalRepository;
         _advanceLogRepository = advanceLogRepository;
+        _scores               = scores;
+        _lifecycle            = lifecycle;
         _unitOfWork           = unitOfWork;
         _currentUserProvider  = currentUserProvider;
         _logger               = logger;
@@ -126,107 +86,17 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    //  GetCurrentPhase
+    //  Where the appraisal is
     // ────────────────────────────────────────────────────────────────────────
 
     /// <inheritdoc/>
     /// <remarks>
-    /// Requires the following navigation properties to be loaded on <paramref name="appraisal"/>:
-    /// <list type="bullet">
-    ///   <item><c>AppraisalCycle.AppraisalSettings</c></item>
-    ///   <item><c>Goals</c></item>
-    ///   <item><c>EvaluatorEvaluations</c></item>
-    ///   <item><c>HRReviews</c></item>
-    /// </list>
+    /// ⚠ This used to be its own walk of the pipeline — no nomination gate, no conversation gates,
+    /// goals counted by their appraisal link — so the rail could say "Self-evaluation" while HR's
+    /// dashboard said "Goal setting" for the same appraisal. It is the gates' answer now.
     /// </remarks>
-    public AppraisalPhase GetCurrentPhase(PerformanceAppraisal appraisal)
-    {
-        var settings = appraisal.AppraisalCycle?.AppraisalSettings
-            ?? throw new InvalidOperationException(
-                "AppraisalCycle.AppraisalSettings must be loaded before calling GetCurrentPhase.");
-
-        // ── 1. Goal-setting gate ────────────────────────────────────────────
-        // Phase stays at GoalSetting until all goals are past Draft/PendingApproval/Rejected.
-        if (settings.RequireGoalSetting)
-        {
-            bool goalsReady = appraisal.Goals.Any()
-                && appraisal.Goals.All(g =>
-                    g.Status != GoalStatus.Draft
-                    && g.Status != GoalStatus.PendingApproval
-                    && g.Status != GoalStatus.Rejected);
-
-            if (!goalsReady)
-                return AppraisalPhase.GoalSetting;
-        }
-
-        // ── 2. Self-evaluation ──────────────────────────────────────────────
-        if (settings.RequireSelfEvaluation)
-        {
-            bool selfSubmitted = appraisal.EvaluatorEvaluations
-                .Any(e => e.EvaluatorRole == EvaluatorRole.Self && e.SubmittedDate != null);
-
-            if (!selfSubmitted)
-                return AppraisalPhase.SelfEvaluation;
-        }
-
-        // ── 3. Peer evaluation ──────────────────────────────────────────────
-        if (settings.RequirePeerReviews && settings.MinPeerEvaluators > 0)
-        {
-            int submittedPeerCount = appraisal.EvaluatorEvaluations
-                .Count(e => e.EvaluatorRole == EvaluatorRole.Peer && e.SubmittedDate != null);
-
-            if (submittedPeerCount < settings.MinPeerEvaluators)
-                return AppraisalPhase.PeerEvaluation;
-        }
-
-        // ── 4. Manager evaluation ───────────────────────────────────────────
-        if (settings.RequireManagerEvaluation)
-        {
-            bool managerSubmitted = appraisal.EvaluatorEvaluations
-                .Any(e => e.EvaluatorRole == EvaluatorRole.Manager && e.SubmittedDate != null);
-
-            if (!managerSubmitted)
-                return AppraisalPhase.ManagerEvaluation;
-        }
-
-        // ── 5/6. Calibration and HR Review ──────────────────────────────────
-        // Step order depends on HRReviewTiming:
-        //   AfterCalibration  (default): Calibration → HR Review
-        //   BeforeCalibration          : HR Review → Calibration
-        if (settings.HRReviewTiming == HRReviewTiming.BeforeCalibration)
-        {
-            if (settings.RequireHRReview)
-            {
-                bool hrApproved = appraisal.HRReviews
-                    .Any(r => r.ReviewCompletedDate != null && r.IsApproved);
-                if (!hrApproved)
-                    return AppraisalPhase.HRReview;
-            }
-
-            if (settings.RequireCalibration && !appraisal.IsCalibrated)
-                return AppraisalPhase.Calibration;
-        }
-        else // AfterCalibration (default)
-        {
-            if (settings.RequireCalibration && !appraisal.IsCalibrated)
-                return AppraisalPhase.Calibration;
-
-            if (settings.RequireHRReview)
-            {
-                bool hrApproved = appraisal.HRReviews
-                    .Any(r => r.ReviewCompletedDate != null && r.IsApproved);
-                if (!hrApproved)
-                    return AppraisalPhase.HRReview;
-            }
-        }
-
-        // ── 7. Employee acknowledgment ──────────────────────────────────────
-        if (settings.RequireEmployeeAcknowledgment && !appraisal.EmployeeAcknowledged)
-            return AppraisalPhase.EmployeeReview;
-
-        // ── 8. All gates passed ────────────────────────────────────────────
-        return AppraisalPhase.Closed;
-    }
+    public Task<AppraisalGateState> GetCurrentStepAsync(Guid appraisalId, CancellationToken cancellationToken = default)
+        => _lifecycle.GetStateAsync(appraisalId, cancellationToken);
 
     // ────────────────────────────────────────────────────────────────────────
     //  TransitionAsync
@@ -241,22 +111,17 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         var appraisal = await GetOwnedAppraisalAsync(appraisalId, cancellationToken);
 
         var from = appraisal.Status;
-
-        if (!AllowedTransitions.TryGetValue(from, out var validNext) || !validNext.Contains(newStatus))
-        {
-            var allowed = validNext?.Count > 0
-                ? string.Join(", ", validNext)
-                : "none (terminal state)";
-
-            throw new InvalidOperationException(
-                $"Invalid appraisal lifecycle transition from '{from}' to '{newStatus}'. " +
-                $"Allowed transitions from '{from}': {allowed}.");
-        }
+        AppraisalLifecycle.EnsureTransition(from, newStatus);
 
         appraisal.Status = newStatus;
 
         await _appraisalRepository.UpdateAsync(appraisal);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Completed by any route settles and publishes in the same save (performance closure A7).
+        if (newStatus == AppraisalStatus.Completed)
+            await _scores.SettleAsync(appraisalId, AppraisalScoreChangeSource.Settle, publish: true, cancellationToken);
+        else
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
             "Appraisal {AppraisalId} transitioned from {From} → {To}.",
@@ -268,37 +133,42 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     // ────────────────────────────────────────────────────────────────────────
 
     /// <inheritdoc/>
-    /// <remarks>
-    /// Requires <c>AppraisalCycle.AppraisalSettings</c>, <c>Goals</c>,
-    /// <c>EvaluatorEvaluations</c>, and <c>HRReviews</c> loaded on <paramref name="appraisal"/>
-    /// when the status is <see cref="AppraisalStatus.Active"/>.
-    /// </remarks>
-    public bool IsEditableByRole(PerformanceAppraisal appraisal, string role)
+    public async Task<bool> IsEditableByRoleAsync(Guid appraisalId, string role, CancellationToken cancellationToken = default)
     {
-        // Terminal state — nobody can edit
-        if (appraisal.Status == AppraisalStatus.Closed)
-            return false;
+        var state = await _lifecycle.GetStateAsync(appraisalId, cancellationToken);
+        return IsEditableByRole(state, role);
+    }
 
+    /// <summary>
+    /// Who may write, per the step the appraisal is at — the same windows the write paths enforce:
+    /// the employee until their self-evaluation is in, a peer inside the cycle's peer window, the
+    /// manager (drafts included) until they submit, HR in governance.
+    /// </summary>
+    private static bool IsEditableByRole(AppraisalGateState state, string role)
+    {
         var r = role.ToLowerInvariant();
+        var facts = state.Facts;
 
-        return appraisal.Status switch
+        // A remanded appeal is the manager's to re-evaluate and HR's to decide, whatever the status.
+        if (facts.Remanded && facts.CurrentAppealStatus == AppraisalAppealStatus.Remanded)
+            return r is "manager" or "hr";
+
+        return facts.Status switch
         {
-            // Draft: goals are being set / approved — employee and manager may act; HR may manage
-            AppraisalStatus.Draft => r is "employee" or "manager" or "hr",
-
-            // Active: edit rights depend on the current fine-grained phase
-            AppraisalStatus.Active => r switch
+            // Draft (not yet worked on) and Active: by the step — the windows the writes are held to.
+            // A Draft appraisal is at a step too: a peer may start alongside the self-evaluation
+            // before anyone has saved anything.
+            AppraisalStatus.Draft or AppraisalStatus.Active => r switch
             {
-                "employee" => IsInPhase(appraisal, AppraisalPhase.GoalSetting, AppraisalPhase.SelfEvaluation),
-                // In WithSelfEval mode peers can evaluate in parallel with self-evaluation;
-                // in AfterSelfEval mode peers must wait until self-evaluation is complete.
-                "peer" => appraisal.AppraisalCycle?.AppraisalSettings?.PeerEvaluationOpenMode
-                              == PeerEvaluationOpenMode.WithSelfEval
-                          ? IsInPhase(appraisal, AppraisalPhase.SelfEvaluation, AppraisalPhase.PeerEvaluation)
-                          : IsInPhase(appraisal, AppraisalPhase.PeerEvaluation),
-                "manager"  => IsInPhase(appraisal, AppraisalPhase.GoalSetting, AppraisalPhase.ManagerEvaluation),
-                "hr"       => false,   // HR governs in Governance status, not Active
-                _          => false,
+                "employee" => AppraisalGates.Check(state.Block,
+                    AppraisalSubStatus.GoalSetting, AppraisalSubStatus.PeerNomination, AppraisalSubStatus.SelfEvaluation),
+                "peer" => AppraisalGates.Check(state.Block, AppraisalGates.PeerWindow(state.Settings)),
+                "manager" => AppraisalGates.Check(state.Block,
+                    AppraisalSubStatus.GoalSetting, AppraisalSubStatus.PeerNomination, AppraisalSubStatus.SelfEvaluation,
+                    AppraisalSubStatus.PeerEvaluation, AppraisalSubStatus.ManagerEvaluation),
+                // HR may manage a Draft appraisal; in Active it governs nothing yet.
+                "hr" => facts.Status == AppraisalStatus.Draft,
+                _ => false,
             },
 
             // Governance: calibration/HR review stage; HR acts, manager may be asked to revise
@@ -307,56 +177,29 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
             // Appealed: only HR resolves the appeal
             AppraisalStatus.Appealed => r == "hr",
 
-            // Completed: read-only (appeal filing is a distinct explicit action, not an edit)
-            AppraisalStatus.Completed => false,
-
+            // Completed, Closed, Withdrawn: read-only (filing an appeal is its own action, not an edit)
             _ => false,
         };
-    }
-
-    // ── private helpers ─────────────────────────────────────────────────────
-
-    private bool IsInPhase(PerformanceAppraisal appraisal, params AppraisalPhase[] phases)
-    {
-        var current = GetCurrentPhase(appraisal);
-        return Array.IndexOf(phases, current) >= 0;
-    }
-
-    private async Task<PerformanceAppraisal> LoadWithNavigationsAsync(Guid appraisalId, CancellationToken cancellationToken)
-    {
-        var tenantId = GetTenantId();
-        var appraisal = await _appraisalRepository
-            .GetQueryable(a => a.Id == appraisalId && a.TenantId == tenantId)
-            .Include(a => a.AppraisalCycle)
-                .ThenInclude(c => c!.AppraisalSettings)
-            .Include(a => a.Goals)
-            .Include(a => a.EvaluatorEvaluations)
-            .Include(a => a.HRReviews)
-            .Include(a => a.PeerNominations)
-            .Include(a => a.Conversations)
-            .FirstOrDefaultAsync(cancellationToken)
-            ?? throw new ArgumentException($"Appraisal '{appraisalId}' not found.", nameof(appraisalId));
-
-        return appraisal;
-    }
-
-    /// <inheritdoc/>
-    public async Task<AppraisalPhase> GetCurrentPhaseAsync(Guid appraisalId, CancellationToken cancellationToken = default)
-    {
-        var appraisal = await LoadWithNavigationsAsync(appraisalId, cancellationToken);
-        return GetCurrentPhase(appraisal);
-    }
-
-    /// <inheritdoc/>
-    public async Task<bool> IsEditableByRoleAsync(Guid appraisalId, string role, CancellationToken cancellationToken = default)
-    {
-        var appraisal = await LoadWithNavigationsAsync(appraisalId, cancellationToken);
-        return IsEditableByRole(appraisal, role);
     }
 
     // ────────────────────────────────────────────────────────────────────────
     //  ManuallyAdvanceStepAsync
     // ────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The appraisal with what the advance's step actions touch, tracked.</summary>
+    private async Task<PerformanceAppraisal> LoadForAdvanceAsync(Guid appraisalId, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        return await _appraisalRepository
+            .GetQueryable(a => a.Id == appraisalId && a.TenantId == tenantId)
+            .Include(a => a.EvaluatorEvaluations)
+            .Include(a => a.HRReviews)
+            .Include(a => a.PeerNominations)
+            .Include(a => a.Conversations)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new ArgumentException($"Appraisal '{appraisalId}' not found.", nameof(appraisalId));
+    }
 
     /// <inheritdoc/>
     public async Task<ManualAdvanceResult> ManuallyAdvanceStepAsync(
@@ -366,19 +209,14 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         Guid advancedByEmployeeId,
         CancellationToken ct = default)
     {
-        var appraisal = await LoadWithNavigationsAsync(appraisalId, ct);
-        var settings  = appraisal.AppraisalCycle?.AppraisalSettings
-            ?? throw new InvalidOperationException("AppraisalCycle.AppraisalSettings must be loaded.");
+        var state = await _lifecycle.GetStateAsync(appraisalId, ct);
+        var previousMajorStatus = state.Facts.Status;
+        var previousSubStatus   = state.SubStatus;
 
-        var previousMajorStatus = appraisal.Status;
-        var previousSubStatus   = AppraisalSubStatusResolver.Resolve(appraisal, settings);
-
-        // Determine which sub-step to complete (caller may specify or we auto-detect)
-        var stepToComplete = targetSubStatus ?? previousSubStatus;
-
-        // Guard: terminal states cannot be advanced
-        if (stepToComplete is AppraisalSubStatus.Completed
+        // Guard: terminal and appeal states cannot be advanced — appeals move by their own decisions.
+        if (previousSubStatus is AppraisalSubStatus.Completed
             or AppraisalSubStatus.Closed
+            or AppraisalSubStatus.Withdrawn
             or AppraisalSubStatus.AppealSubmitted
             or AppraisalSubStatus.AppealUnderReview
             or AppraisalSubStatus.AppealResolved)
@@ -386,7 +224,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
             return new ManualAdvanceResult
             {
                 Success              = false,
-                ErrorMessage         = $"Cannot manually advance an appraisal that is in sub-status '{stepToComplete}'.",
+                ErrorMessage         = $"Cannot manually advance an appraisal that is in sub-status '{previousSubStatus}'.",
                 PreviousSubStatus    = previousSubStatus,
                 NewSubStatus         = previousSubStatus,
                 PreviousMajorStatus  = previousMajorStatus,
@@ -394,8 +232,28 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
             };
         }
 
+        // The step advanced past is the one the appraisal is at (B1). A target anywhere else used to
+        // run that step's actions wherever the appraisal stood — marking an appraisal calibrated
+        // before its manager had scored it, approving goals on one already in governance.
+        if (targetSubStatus is AppraisalSubStatus target
+            && AppraisalGates.StepOf(target) != AppraisalGates.StepOf(previousSubStatus))
+        {
+            throw new AppraisalGateException(previousSubStatus,
+                $"This appraisal is at {AppraisalGates.Label(previousSubStatus)}, not {AppraisalGates.Label(target)}: " +
+                "HR's advance moves an appraisal past the step it is at.");
+        }
+
+        var stepToComplete = previousSubStatus;
+        var appraisal = await LoadForAdvanceAsync(appraisalId, ct);
         var actions = new List<string>();
         var now     = DateTime.UtcNow;
+
+        // The advance is work on the appraisal, as a first save is: a Draft one is opened.
+        if (appraisal.Status == AppraisalStatus.Draft)
+        {
+            appraisal.Status = AppraisalStatus.Active;
+            actions.Add("Opened the appraisal (Draft → Active).");
+        }
 
         // ── Per-step auto-completion ─────────────────────────────────────────
 
@@ -403,20 +261,48 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         {
             case AppraisalSubStatus.GoalSetting:
             {
-                var pendingGoals = appraisal.Goals
-                    .Where(g => g.Status is GoalStatus.Draft
-                                         or GoalStatus.PendingApproval
-                                         or GoalStatus.Rejected)
-                    .ToList();
+                // The goals the gate counts: the employee's in this cycle, not only those linked to
+                // the appraisal (a goal agreed before generation has no link).
+                //
+                // HR's audited waiver of goal setting (closure plan L2, D-16): the goals the
+                // employee put to the manager are approved on HR's recorded reason, and the agreed
+                // set is locked, so the year is appraised on what was agreed. A draft was never put
+                // to the manager and a rejected goal was refused by them — neither joins the set on
+                // a waiver; they used to be approved along with the rest. The lock is the flag only
+                // (D-29): the goals' year runs on.
+                var goals = await _goalRepository.GetQueryable()
+                    .Where(g => g.TenantId == appraisal.TenantId
+                             && g.EmployeeId == appraisal.EmployeeId
+                             && g.AppraisalCycleId == appraisal.AppraisalCycleId)
+                    .ToListAsync(ct);
 
-                foreach (var g in pendingGoals)
+                var submitted = goals.Where(g => g.Status == GoalStatus.PendingApproval).ToList();
+                foreach (var g in submitted)
                 {
                     g.Status       = GoalStatus.Approved;
                     g.ApprovalDate = now;
-                    await _goalRepository.UpdateAsync(g);
                 }
 
-                actions.Add($"Auto-approved {pendingGoals.Count} pending goal(s) to unblock goal-setting gate.");
+                var toLock = goals
+                    .Where(g => GoalSetRules.IsAgreed(g.Status) && !GoalSetRules.IsLocked(g.IsLocked, g.Status))
+                    .ToList();
+                foreach (var g in toLock)
+                {
+                    g.IsLocked   = true;
+                    g.LockedDate = now;
+                }
+
+                foreach (var g in submitted.Union(toLock))
+                    await _goalRepository.UpdateAsync(g);
+
+                var leftOut = goals.Count(g => g.Status is GoalStatus.Draft or GoalStatus.Rejected);
+                if (submitted.Count > 0)
+                    actions.Add($"Approved {submitted.Count} submitted goal(s) on HR's recorded reason.");
+                if (toLock.Count > 0)
+                    actions.Add($"Locked the agreed goal set: {toLock.Count} goal(s).");
+                if (leftOut > 0)
+                    actions.Add($"Left {leftOut} draft or rejected goal(s) out of the set.");
+                actions.Add($"Waived goal setting: {state.Block.Reason}.");
                 break;
             }
 
@@ -434,37 +320,21 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
                 }
 
                 actions.Add($"Approved {pending.Count} pending nomination(s). Minimum peer requirement bypassed by HR.");
+                actions.Add($"Waived peer nomination: {state.Block.Reason}.");
                 break;
             }
 
             case AppraisalSubStatus.SelfEvaluation:
             {
-                var selfEval = appraisal.EvaluatorEvaluations
-                    .FirstOrDefault(e => e.EvaluatorRole == EvaluatorRole.Self && e.SubmittedDate == null);
-
-                if (selfEval != null)
-                {
-                    selfEval.SubmittedDate = now;
-                    await _evalRepository.UpdateAsync(selfEval);
-                    actions.Add("Auto-submitted existing employee self-evaluation draft.");
-                }
-                else
-                {
-                    // Create a minimal self-eval record so the gate passes
-                    var newEval = new EvaluatorEvaluation
-                    {
-                        AppraisalId       = appraisalId,
-                        EvaluatorId       = appraisal.EmployeeId,
-                        EvaluatorRole     = EvaluatorRole.Self,
-                        EvaluatorWeight   = 0,
-                        StartedDate       = now,
-                        SubmittedDate     = now,
-                        OverallNotes      = $"[Auto-created by HR manual advance: {reason}]",
-                    };
-                    SetTenantId(newEval, appraisal);
-                    await _evalRepository.AddAsync(newEval);
-                    actions.Add("Created placeholder self-evaluation record (no prior draft existed).");
-                }
+                // Waived, not written: the employee's own judgement cannot be submitted for them. A
+                // draft stays a draft and — like every unsubmitted evaluation — counts in no score
+                // (lane A). This used to submit the draft on the employee's behalf, or create an empty
+                // "submitted" one, only so the gate would pass.
+                var hasDraft = appraisal.EvaluatorEvaluations
+                    .Any(e => e.EvaluatorRole == EvaluatorRole.Self && e.SubmittedDate == null);
+                actions.Add(hasDraft
+                    ? "Waived the self-evaluation: the employee's draft stays a draft and does not count in the score."
+                    : "Waived the self-evaluation: the employee has not written one.");
                 break;
             }
 
@@ -483,6 +353,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
                 }
 
                 actions.Add($"Auto-submitted {pendingPeerEvals.Count} pending peer evaluation(s). Minimum threshold bypassed by HR.");
+                actions.Add($"Waived peer evaluation: {state.Block.Reason}.");
                 break;
             }
 
@@ -515,8 +386,6 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
                     await _evalRepository.AddAsync(newEval);
                     actions.Add("Created placeholder manager evaluation record (no prior draft existed).");
                 }
-
-                await _appraisalRepository.UpdateAsync(appraisal);
                 break;
             }
 
@@ -524,7 +393,6 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
             case AppraisalSubStatus.CalibrationInProgress:
             {
                 appraisal.IsCalibrated = true;
-                await _appraisalRepository.UpdateAsync(appraisal);
                 actions.Add("Bypassed calibration requirement — marked appraisal as calibrated without a session.");
                 break;
             }
@@ -604,55 +472,64 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
                 appraisal.EmployeeAcknowledgedDate      = now;
                 appraisal.EmployeeAcknowledgmentComments =
                     $"[Auto-acknowledged by HR manual advance: {reason}]";
-                await _appraisalRepository.UpdateAsync(appraisal);
                 actions.Add("Auto-acknowledged appraisal on behalf of employee.");
                 break;
             }
         }
 
-        // ── Save data mutations ──────────────────────────────────────────────
-        await _unitOfWork.SaveChangesAsync(ct);
-
-        // ── Reload navigations to resolve the NEW sub-status ────────────────
-        appraisal = await LoadWithNavigationsAsync(appraisalId, ct);
-        settings  = appraisal.AppraisalCycle!.AppraisalSettings!;
-
-        var newSubStatus = AppraisalSubStatusResolver.Resolve(appraisal, settings);
-
-        // ── Automatic major-status transitions ───────────────────────────────
-        var targetMajorStatus = AppraisalSubStatusResolver.ExpectedMajorStatus(newSubStatus, settings);
-        var newMajorStatus    = appraisal.Status;
-
-        if (targetMajorStatus != appraisal.Status
-            && AllowedTransitions.TryGetValue(appraisal.Status, out var validNext)
-            && validNext.Contains(targetMajorStatus))
-        {
-            appraisal.Status = targetMajorStatus;
-            await _appraisalRepository.UpdateAsync(appraisal);
-            await _unitOfWork.SaveChangesAsync(ct);
-            newMajorStatus = targetMajorStatus;
-            actions.Add($"Appraisal major status auto-transitioned: {previousMajorStatus} → {newMajorStatus}.");
-
-            _logger.LogInformation(
-                "ManualAdvance: Appraisal {Id} major status auto-transitioned {From} → {To}.",
-                appraisalId, previousMajorStatus, newMajorStatus);
-        }
-
-        // ── Write audit log ──────────────────────────────────────────────────
+        // ── The audit log row — for a step before the manager's evaluation, the waiver itself ──
+        // Written before the sync, because the gates read it: a waived step is behind the appraisal
+        // from this row on, however few goals, nominations or peers it has.
         var auditLog = new AppraisalManualAdvanceLog
         {
             PerformanceAppraisalId = appraisalId,
             AdvancedByEmployeeId   = advancedByEmployeeId,
             AdvancedDate           = now,
             FromSubStatus          = previousSubStatus.ToString(),
-            ToSubStatus            = newSubStatus.ToString(),
+            ToSubStatus            = previousSubStatus.ToString(),
             FromMajorStatus        = previousMajorStatus.ToString(),
-            ToMajorStatus          = newMajorStatus.ToString(),
+            ToMajorStatus          = appraisal.Status.ToString(),
             Reason                 = reason,
-            ActionsPerformedJson   = JsonSerializer.Serialize(actions),
         };
         SetTenantId(auditLog, appraisal);
         await _advanceLogRepository.AddAsync(auditLog);
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        // HR's waiver of goal setting locked the agreed set, so the appraisal's goals section
+        // follows it (closure plan L2): one row per locked goal, when the template has one.
+        if (stepToComplete == AppraisalSubStatus.GoalSetting)
+        {
+            var built = await _goalRows.RebuildAsync(appraisal.EmployeeId, appraisal.AppraisalCycleId, ct);
+            if (built > 0)
+                actions.Add($"Built the goals section: {built} goal row(s).");
+        }
+
+        // ── Where the gates put it now: the major status follows, and completion settles ────
+        // An advance that completes the appraisal settles its score and publishes it, like every
+        // other way to Completed (performance closure A7) — it used to finish with whatever score
+        // was stored, often none.
+        var sync = await _lifecycle.SyncAsync(appraisalId, AppraisalScoreChangeSource.Advance, publish: true, ct);
+        var newSubStatus   = sync.SubStatus;
+        var newMajorStatus = sync.StatusAfter;
+
+        if (sync.Moved)
+        {
+            actions.Add($"Appraisal major status auto-transitioned: {sync.StatusBefore} → {sync.StatusAfter}.");
+            _logger.LogInformation(
+                "ManualAdvance: Appraisal {Id} major status auto-transitioned {From} → {To}.",
+                appraisalId, sync.StatusBefore, sync.StatusAfter);
+        }
+
+        if (sync.Settle is { } settled)
+        {
+            actions.Add(settled.ScoreAfter is decimal score
+                ? $"Settled the overall score at {score:0.##}."
+                : "Settled the overall score: no submitted evaluation scored anything, so it has none.");
+        }
+
+        auditLog.ToSubStatus          = newSubStatus.ToString();
+        auditLog.ToMajorStatus        = newMajorStatus.ToString();
+        auditLog.ActionsPerformedJson = JsonSerializer.Serialize(actions);
         await _unitOfWork.SaveChangesAsync(ct);
 
         _logger.LogInformation(
@@ -686,13 +563,10 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
                             && a.AppraisalCycleId == cycleId
                             && a.Status != AppraisalStatus.Completed
                             && a.Status != AppraisalStatus.Closed
-                            && a.Status != AppraisalStatus.Appealed)
+                            && a.Status != AppraisalStatus.Appealed
+                            && a.Status != AppraisalStatus.Withdrawn)
             .Include(a => a.AppraisalCycle).ThenInclude(c => c!.AppraisalSettings)
-            .Include(a => a.Goals)
-            .Include(a => a.EvaluatorEvaluations)
-            .Include(a => a.HRReviews)
-            .Include(a => a.PeerNominations)
-            .Include(a => a.Conversations)
+            .AsNoTracking()
             .ToListAsync(ct);
 
         var settings = appraisals.FirstOrDefault()?.AppraisalCycle?.AppraisalSettings;
@@ -702,13 +576,17 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         if (!result.AutoLockEnabled || settings is null || appraisals.Count == 0)
             return result;
 
+        var states = await _lifecycle.GetStatesAsync(appraisals.Select(a => a.Id).ToList(), ct);
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
         foreach (var appraisal in appraisals)
         {
             result.Evaluated++;
 
-            var subStatus = AppraisalSubStatusResolver.Resolve(appraisal, settings);
+            if (!states.TryGetValue(appraisal.Id, out var state))
+                continue;
+
+            var subStatus = state.SubStatus;
             var deadline  = DeadlineForSubStatus(appraisal.AppraisalCycle!, subStatus);
 
             // Only act on a configured, already-passed deadline.

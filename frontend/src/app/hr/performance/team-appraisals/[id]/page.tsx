@@ -39,14 +39,16 @@ import { PeerFeedbackPanel } from '@/components/hr/performance/PeerFeedbackPanel
 import { ConversationsPanel } from '@/components/hr/performance/ConversationsPanel';
 import { PeerNominationPanel } from '@/components/hr/performance/PeerNominationPanel';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { PerformanceAttachmentsPanel } from '@/components/hr/performance/PerformanceAttachmentsPanel';
+import { hasAnyPermissionAccess } from '@/lib/permissions';
 import { formatDate, humanizeEnum } from '@/lib/hr/attendance-format';
 import {
   appraisalWorkflowService,
   performanceAppraisalService,
 } from '@/services/hr/appraisal-run.service';
 import {
-  isKpiItem,
+  isMeasuredItem,
   toItemScores,
   type EvaluationItem,
   type ManagerEvaluationItem,
@@ -69,6 +71,7 @@ export default function ManagerEvaluationPage() {
   const appraisalId = params.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const [values, setValues] = useState<ScoreValues>({});
   const [narrative, setNarrative] = useState({
@@ -108,8 +111,11 @@ export default function ManagerEvaluationPage() {
     const seeded: ScoreValues = {};
     for (const section of context.sections) {
       for (const item of section.items) {
-        seeded[item.templateItemId] = {
-          numericScore: item.managerNumericScore ?? null,
+        seeded[item.criterionKey] = {
+          // A measured row is entered as an actual. A number in its NumericScore is a calibration
+          // or appeal restatement (D-22), which the form must not send back as the manager's own:
+          // a re-evaluation replaces it.
+          numericScore: isMeasuredItem(item) ? null : item.managerNumericScore ?? null,
           actualValue: item.managerActualValue ?? null,
           notes: item.managerNotes ?? null,
           evidenceLinks: item.managerEvidenceLinks ?? null,
@@ -141,15 +147,24 @@ export default function ManagerEvaluationPage() {
         sectionName: s.sectionName,
         sectionDescription: s.sectionDescription,
         sectionWeight: s.sectionWeight,
+        kind: s.kind,
         items: s.items,
       })),
     [context],
   );
 
+  const allItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
+
+  // The goals scored as rows of this form, whose assessment figures come from the rows.
+  const goalsOnForm = useMemo(
+    () => new Set(allItems.flatMap((i) => (i.employeeGoalId ? [i.employeeGoalId] : []))),
+    [allItems],
+  );
+
   const itemsById = useMemo(() => {
     const map = new Map<string, ManagerEvaluationItem>();
     for (const section of context?.sections ?? []) {
-      for (const item of section.items) map.set(item.templateItemId, item);
+      for (const item of section.items) map.set(item.criterionKey, item);
     }
     return map;
   }, [context]);
@@ -164,7 +179,7 @@ export default function ManagerEvaluationPage() {
         appraisalId,
         // Overwritten server-side from the token; sent to match the documented payload.
         managerId: '00000000-0000-0000-0000-000000000000',
-        itemScores: toItemScores(values),
+        itemScores: toItemScores(allItems, values),
         overallNotes: narrative.overallComments || null,
         recommendation: narrative.recommendationNotes || null,
         overallComments: narrative.overallComments || null,
@@ -327,10 +342,18 @@ export default function ManagerEvaluationPage() {
         {/* ⚠ The upload behind this tab was purpose-built for the controlled gate and had never
             been called by anything: an appraisal's evidence could not be attached at all. */}
         <TabsContent value="evidence" className="mt-4">
+          {/* P9: a file is removed by whoever attached it, or HR, and only until the appraisal is
+              complete — after that it is part of the record. The server refuses the rest. */}
           <PerformanceAttachmentsPanel
             basePath="/PerformanceAppraisals"
             ownerId={appraisalId}
             canUpload={!readOnly}
+            canDelete={!['Appealed', 'Completed', 'Closed', 'Withdrawn'].includes(context.status)}
+            canDeleteItem={(a) =>
+              (!!user?.employeeId && a.uploadedById === user.employeeId) ||
+              (hasAnyPermissionAccess(user, ['HR.Performance.Write', 'HR.Performance.Admin']) &&
+                user?.employeeId !== context.employeeId)
+            }
             helpText="Evidence behind the ratings — reports, certificates, correspondence. Scanned on upload; max 10 MB."
           />
         </TabsContent>
@@ -341,50 +364,62 @@ export default function ManagerEvaluationPage() {
             values={values}
             disabled={readOnly}
             isItemHighlighted={(item) =>
-              remanded && context.appealedTemplateItemIds.includes(item.templateItemId)
+              remanded && context.appealedTemplateItemIds.includes(item.criterionKey)
             }
             onChange={(id, patch) =>
               setValues((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }))
             }
-            renderItemAside={
-              showSelfScores
-                ? (item: EvaluationItem) => {
-                    const full = itemsById.get(item.templateItemId);
-                    if (!full) return null;
-                    const hasSelf =
-                      full.employeeSelfNumericScore != null || full.employeeSelfActualValue != null;
-                    if (!hasSelf) {
-                      return (
-                        <p className="text-muted-foreground">
-                          {context.employeeName.split(' ')[0]} has not scored this yet.
-                        </p>
-                      );
-                    }
-                    return (
-                      <div className="space-y-1">
-                        <p className="text-xs font-medium uppercase text-muted-foreground">
-                          Their self-assessment
-                        </p>
-                        <p className="text-lg font-semibold tabular-nums">
-                          {isKpiItem(item)
-                            ? `${full.employeeSelfActualValue ?? '—'}${item.kpiUnit ? ` ${item.kpiUnit}` : ''}`
-                            : (full.employeeSelfNumericScore ?? '—')}
-                          {full.employeeSelfAchievedGrade && (
-                            <span className="ml-2 text-sm font-normal text-muted-foreground">
-                              {full.employeeSelfAchievedGrade}
-                            </span>
-                          )}
-                        </p>
-                        {full.employeeSelfNotes && (
-                          <p className="whitespace-pre-wrap text-muted-foreground">
-                            {full.employeeSelfNotes}
-                          </p>
-                        )}
-                      </div>
-                    );
-                  }
-                : undefined
-            }
+            renderItemAside={(item: EvaluationItem) => {
+              const full = itemsById.get(item.criterionKey);
+              if (!full) return null;
+
+              // A KPI restated by calibration or an appeal is scored on the restated achievement,
+              // not on the actual in the input (D-22) — say so on the row.
+              const override = full.managerAchievementOverridden ? (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Overridden by calibration/appeal: scored at {full.managerAchievementPercent ?? '—'}%
+                  achievement, not on the actual above.
+                </p>
+              ) : null;
+
+              if (!showSelfScores) return override;
+
+              const hasSelf =
+                full.employeeSelfNumericScore != null || full.employeeSelfActualValue != null;
+              if (!hasSelf) {
+                return (
+                  <div className="space-y-1">
+                    <p className="text-muted-foreground">
+                      {context.employeeName.split(' ')[0]} has not scored this yet.
+                    </p>
+                    {override}
+                  </div>
+                );
+              }
+              return (
+                <div className="space-y-1">
+                  <p className="text-xs font-medium uppercase text-muted-foreground">
+                    Their self-assessment
+                  </p>
+                  <p className="text-lg font-semibold tabular-nums">
+                    {isMeasuredItem(item)
+                      ? `${full.employeeSelfActualValue ?? '—'}${item.kpiUnit ? ` ${item.kpiUnit}` : ''}`
+                      : (full.employeeSelfNumericScore ?? '—')}
+                    {full.employeeSelfAchievedGrade && (
+                      <span className="ml-2 text-sm font-normal text-muted-foreground">
+                        {full.employeeSelfAchievedGrade}
+                      </span>
+                    )}
+                  </p>
+                  {full.employeeSelfNotes && (
+                    <p className="whitespace-pre-wrap text-muted-foreground">
+                      {full.employeeSelfNotes}
+                    </p>
+                  )}
+                  {override}
+                </div>
+              );
+            }}
           />
         </TabsContent>
 
@@ -395,6 +430,7 @@ export default function ManagerEvaluationPage() {
             values={goalValues}
             onChange={setGoalValues}
             readOnly={readOnly}
+            scoredOnForm={goalsOnForm}
           />
         </TabsContent>
 

@@ -33,6 +33,9 @@ public class StaffMovementService : IStaffMovementService
     // Terms of employment are the employee service's to write — one door, one supersede rule.
     private readonly IEmployeeService _employees;
 
+    // Round 4, lane I3: an implemented transfer or promotion is an orientation trigger.
+    private readonly IOrientationEnrollmentTriggerService _orientationTriggers;
+
     private readonly ILogger<StaffMovementService> _logger;
 
     /// <summary>
@@ -53,8 +56,10 @@ public class StaffMovementService : IStaffMovementService
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         IEmployeeService employees,
+        IOrientationEnrollmentTriggerService orientationTriggers,
         ILogger<StaffMovementService> logger)
     {
+        _orientationTriggers = orientationTriggers;
         _movementRepo   = movementRepo;
         _approvalRepo   = approvalRepo;
         _historyRepo    = historyRepo;
@@ -1434,6 +1439,11 @@ public class StaffMovementService : IStaffMovementService
         }, cancellationToken);
 
         _logger.LogInformation("Staff movement implemented and applied: {MovementNumber}", entity.MovementNumber);
+
+        // Round 4, lane I3 — outside the movement's transaction, after its commit, best-effort: the
+        // movement stands whatever orientation makes of it. A movement implemented ahead of its
+        // effective date fires nothing now; the nightly sweep fires it when the date comes.
+        await _orientationTriggers.OnMovementImplementedAsync(entity.Id, cancellationToken);
 
         return true;
     }

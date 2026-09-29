@@ -51,7 +51,10 @@ public sealed class FinancialStatementLayoutExecutionService
             version.FinancialStatementLayout.StatementType,
             request.PeriodStart,
             request.PeriodEnd);
-        var validation = version.Status == FinancialStatementLayoutVersionStatus.Draft
+        // Submitted versions are frozen for editing but have not acquired a publication
+        // snapshot yet. Preview them against the live governed definition just like Drafts.
+        var validation = version.Status is FinancialStatementLayoutVersionStatus.Draft
+                or FinancialStatementLayoutVersionStatus.Submitted
             ? await _layoutService.ValidateVersionAsync(version.Id, cancellationToken)
             : ValidatePublishedSnapshot(version);
         ThrowForValidationErrors(validation);
@@ -140,7 +143,8 @@ public sealed class FinancialStatementLayoutExecutionService
                 version.TenantId == tenantId &&
                 version.FinancialStatementLayoutId == layout.Id &&
                 !version.IsDeleted &&
-                version.Status != FinancialStatementLayoutVersionStatus.Draft &&
+                (version.Status == FinancialStatementLayoutVersionStatus.Published ||
+                 version.Status == FinancialStatementLayoutVersionStatus.Retired) &&
                 (!version.EffectiveFrom.HasValue ||
                  version.EffectiveFrom.Value.Date <= effectiveDate) &&
                 (!version.EffectiveTo.HasValue ||
@@ -190,7 +194,10 @@ public sealed class FinancialStatementLayoutExecutionService
     {
         var layout = version.FinancialStatementLayout;
         var tenantId = TenantId;
-        var useSnapshot = version.Status != FinancialStatementLayoutVersionStatus.Draft;
+        // A snapshot is created only by the independent approval/publication transaction.
+        // Merely submitting a version must never make it executable as a published report.
+        var useSnapshot = version.Status is FinancialStatementLayoutVersionStatus.Published
+            or FinancialStatementLayoutVersionStatus.Retired;
 
         var selectedAccountIds = accountIds?
             .Where(accountId => accountId != Guid.Empty)

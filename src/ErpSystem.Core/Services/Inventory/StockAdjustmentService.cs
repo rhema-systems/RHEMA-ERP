@@ -214,6 +214,7 @@ public class StockAdjustmentService : IStockAdjustmentService
             .AsNoTracking()
             .OrderBy(x => x.Code).ThenBy(x => x.Name)
             .ToListAsync(cancellationToken);
+        warehouses = warehouses.Where(x => !InventoryTransitProtection.IsProtected(x)).ToList();
         var warehouseIds = warehouses.Select(x => x.Id).ToHashSet();
         var locations = await _unitOfWork.Repository<WarehouseLocation>().GetQueryable(x =>
                 x.TenantId == tenantId && !x.IsDeleted && x.IsActive && !x.IsConsignmentBin &&
@@ -225,6 +226,7 @@ public class StockAdjustmentService : IStockAdjustmentService
         var accessibleLocations = new List<WarehouseLocation>();
         foreach (var location in locations)
         {
+            if (InventoryTransitProtection.IsProtected(location)) continue;
             var decision = await _accessControl.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
             {
                 PermissionCode = "procurement.inventory.adjust.request",
@@ -1426,6 +1428,8 @@ public class StockAdjustmentService : IStockAdjustmentService
                 throw new ArgumentException("A selected stock-adjustment location was not found in the current tenant.");
             if (location.InventoryWarehouseId != adjustment.WarehouseId || !location.IsActive)
                 throw new InvalidOperationException("Every adjustment location must be active and belong to the selected warehouse.");
+            await InventoryTransitProtection.EnsureOrdinaryStockScopeAsync(
+                _unitOfWork, adjustment.TenantId, adjustment.WarehouseId, location.Id);
             if (adjustment.ReasonCode == StockAdjustmentReasonCodes.InitialStock &&
                 (location.IsConsignmentBin || location.WarehouseId != adjustment.WarehouseId))
                 throw new InvalidOperationException("Opening stock requires an owned location in the selected warehouse.");
@@ -1906,6 +1910,8 @@ public class StockAdjustmentService : IStockAdjustmentService
             ?? throw new InvalidOperationException("An adjustment item no longer exists.");
         if (warehouse.TenantId != adjustment.TenantId || warehouse.IsDeleted || (!reverse && !warehouse.IsActive))
             throw new InvalidOperationException("The effective adjustment warehouse is inactive or outside the current tenant.");
+        if (InventoryTransitProtection.IsProtected(location) || InventoryTransitProtection.IsProtected(warehouse))
+            throw new InvalidOperationException(InventoryTransitProtection.Message);
         if (inventoryItem.TenantId != adjustment.TenantId || inventoryItem.IsDeleted ||
             (!reverse && (inventoryItem.Status != ItemStatus.Active || !IsStockedInventoryItem(inventoryItem.ItemType))))
             throw new InvalidOperationException("The adjustment item is inactive or outside the current tenant.");
@@ -2186,7 +2192,7 @@ public class StockAdjustmentService : IStockAdjustmentService
 
     private async Task<InventoryDisposalCase?> GetDirectDisposalSourceAsync(StockAdjustment adjustment, bool allowUnlinkedDraft = false)
     {
-        if (!adjustment.IdempotencyKey.StartsWith("disposal:", StringComparison.Ordinal)) return null;
+        if (adjustment.IdempotencyKey?.StartsWith("disposal:", StringComparison.Ordinal) != true) return null;
         var parts = adjustment.IdempotencyKey.Split(':');
         if (parts.Length != 3 || parts[2] != "adjustment" || !Guid.TryParseExact(parts[1], "N", out var sourceId)) return null;
         // The persisted FK is assigned by the disposal owner, not accepted from an

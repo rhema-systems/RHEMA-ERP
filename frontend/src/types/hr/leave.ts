@@ -7,7 +7,6 @@
  * parent id travels in the body). Enums serialize as strings.
  */
 
-export type EncashmentRateBasis = 'DerivedFromEmoluments' | 'Manual';
 export type LeaveEligibilityType = 'Gender' | 'OrganizationLevel' | 'OrganizationUnit' | 'Position';
 export type AccrualFrequency = 'None' | 'Monthly' | 'Annual' | 'PerPayPeriod' | 'Quarterly' | 'SemiAnnual';
 export type AccrualMode = 'AccrueIncrementally' | 'FullGrantOnEligibility';
@@ -26,9 +25,36 @@ export const LEAVE_YEAR_END_BASIS_OPTIONS: { value: LeaveYearEndBasis; label: st
   { value: 'Earned', label: 'What they actually earned' },
 ];
 
-export const ENCASHMENT_RATE_BASIS_OPTIONS: { value: EncashmentRateBasis; label: string }[] = [
-  { value: 'DerivedFromEmoluments', label: 'Derived from emoluments' },
-  { value: 'Manual', label: 'Manual rate' },
+/**
+ * What kind of leave a leave type is (round 5, decision A4). The kind decides which rules apply and
+ * what the leave-type form asks for. At most one ACTIVE type may be Annual.
+ */
+export type LeaveTypeCategory = 'Annual' | 'Maternity' | 'Other';
+
+export const LEAVE_TYPE_CATEGORY_OPTIONS: {
+  value: LeaveTypeCategory;
+  label: string;
+  /** What choosing it drives, said where the choice is made. */
+  drives: string;
+}[] = [
+  {
+    value: 'Annual',
+    label: 'Annual leave',
+    drives:
+      'Earned by service. Only annual leave can be planned or cashed in; the compliance register and the untaken-leave reminder read it, and it is the balance on the portal’s home page. Only one active leave type can be Annual.',
+  },
+  {
+    value: 'Maternity',
+    label: 'Maternity leave',
+    drives:
+      'Statutory (Labour Act s.57). No notice rule applies, because a birth can come early, and an approver confirms or rejects it but never moves its dates. Switch its medical certificate on, from the first day, with no board.',
+  },
+  {
+    value: 'Other',
+    label: 'Other',
+    drives:
+      'Everything else: sick, casual, compassionate, study. Each has a limit per year, shown to staff as “limit · used · left”, and HR can give fewer days by suggesting other dates.',
+  },
 ];
 
 export const LEAVE_ELIGIBILITY_TYPE_OPTIONS: { value: LeaveEligibilityType; label: string }[] = [
@@ -51,7 +77,6 @@ export const LEAVE_ELIGIBILITY_TYPE_OPTIONS: { value: LeaveEligibilityType; labe
  * owns — it is a cross-module contract, not an HR setting.
  */
 export const ACCRUAL_FREQUENCY_OPTIONS: { value: AccrualFrequency; label: string }[] = [
-  { value: 'None', label: 'None' },
   { value: 'Monthly', label: 'Monthly' },
   { value: 'Quarterly', label: 'Quarterly' },
   { value: 'SemiAnnual', label: 'Semi-annual' },
@@ -59,12 +84,22 @@ export const ACCRUAL_FREQUENCY_OPTIONS: { value: AccrualFrequency; label: string
 ];
 
 /**
- * For DISPLAY only — the picker's options plus the retired value, so a policy that still carries
- * `PerPayPeriod` reads as words in a table rather than as a raw enum name.
+ * Values the picker no longer offers, kept for a policy that already carries one: `PerPayPeriod`
+ * is retired (decision D-6), and `None` accrues nothing, so it is no policy and the server refuses
+ * it (leave settings audit 2, L-92).
+ */
+export const ACCRUAL_FREQUENCY_NOT_OFFERED: { value: AccrualFrequency; label: string }[] = [
+  { value: 'None', label: 'None (accrues nothing)' },
+  { value: 'PerPayPeriod', label: 'Per pay period (retired — accrues monthly)' },
+];
+
+/**
+ * For DISPLAY only — the picker's options plus the values it no longer offers, so a policy that
+ * still carries one reads as words in a table rather than as a raw enum name.
  */
 export const ACCRUAL_FREQUENCY_DISPLAY: { value: AccrualFrequency; label: string }[] = [
   ...ACCRUAL_FREQUENCY_OPTIONS,
-  { value: 'PerPayPeriod', label: 'Per pay period (retired — accrues monthly)' },
+  ...ACCRUAL_FREQUENCY_NOT_OFFERED,
 ];
 
 export const ACCRUAL_MODE_OPTIONS: { value: AccrualMode; label: string }[] = [
@@ -107,10 +142,14 @@ export interface LeaveType {
    * months, and the derived per-period rate would deduct for them a third time.
    */
   proRateFirstYearEntitlement: boolean;
-  mandatoryAnnualLeave: boolean;
-  encashmentRateBasis: EncashmentRateBasis;
-  encashmentRatePerDay?: number | null;
-  encashmentWorkingDaysPerMonth: number;
+  /** Annual, Maternity or Other (round 5, A4). Replaced mandatoryAnnualLeave. */
+  category: LeaveTypeCategory;
+  /**
+   * Days asked for beyond this leave's limit may be charged to annual leave, HR deciding at the
+   * final approval (round 5, decision A5). Other kinds only.
+   */
+  allowOffsetAgainstAnnual: boolean;
+  // The encashment rate fields left with leave settings audit 2 (L-73): Finance values leave.
 
   /**
    * Excuse duty and the medical board (R-15a). ⚠ All three live on the LEAVE TYPE, not the
@@ -130,7 +169,6 @@ export interface LeaveTypeDetail extends LeaveType {
   allocations: LeaveCategoryAllocation[];
   eligibilities: LeaveTypeEligibility[];
   accrualPolicies: LeaveAccrualPolicy[];
-  allowanceComponentIds: string[];
 }
 
 export interface CreateLeaveTypeRequest {
@@ -165,10 +203,13 @@ export interface CreateLeaveTypeRequest {
    * months, and the derived per-period rate would deduct for them a third time.
    */
   proRateFirstYearEntitlement: boolean;
-  mandatoryAnnualLeave: boolean;
-  encashmentRateBasis: EncashmentRateBasis;
-  encashmentRatePerDay?: number | null;
-  encashmentWorkingDaysPerMonth: number;
+  /** Omit to leave the kind unchanged on update; Other on create (round 5, A4). */
+  category?: LeaveTypeCategory | null;
+  /**
+   * Omit to leave it unchanged on update; off on create (round 5, A5). The API refuses it on an
+   * Annual or Maternity type, and on a type that does not require approval.
+   */
+  allowOffsetAgainstAnnual?: boolean | null;
 
   /**
    * Excuse duty and the medical board (R-15a). ⚠ All three live on the LEAVE TYPE, not the
@@ -180,8 +221,6 @@ export interface CreateLeaveTypeRequest {
   selfCertificationDays: number;
   /** Cumulative days in a year past which a board must sit. Null = never. ⚠ Counted per YEAR. */
   medicalBoardThresholdDays?: number | null;
-  /** Pay components an encashment pays through — owned by the Emoluments area. */
-  allowanceComponentIds: string[];
 }
 
 export interface UpdateLeaveTypeRequest extends CreateLeaveTypeRequest {
@@ -215,19 +254,22 @@ export interface LeaveCategoryAllocation {
   id: string;
   leaveTypeId: string;
   leaveTypeName: string;
-  leaveSubTypeId?: string | null;
-  leaveSubTypeName?: string | null;
   staffLevelId: string;
   staffLevelName: string;
   allocationDays: number;
   /** DateOnly */
   effectiveFrom: string;
   effectiveTo?: string | null;
+  /**
+   * On a save's reply only (leave settings audit 2, L-89): how many of this type's balances in the
+   * current leave year the save re-worked; null when the allocation, before or after, is not in
+   * force in that year, so none was looked at.
+   */
+  balancesUpdated?: number | null;
 }
 
 export interface LeaveCategoryAllocationRequest {
   leaveTypeId: string;
-  leaveSubTypeId?: string | null;
   staffLevelId: string;
   allocationDays: number;
   effectiveFrom: string;
@@ -284,4 +326,6 @@ export interface LeaveAccrualPolicyRequest {
   minServiceMonths?: number | null;
   proRateOnJoin: boolean;
   proRateOnExit: boolean;
+  /** Round 5, lane N1. Omitted: in force on create, unchanged on update. */
+  isActive?: boolean;
 }

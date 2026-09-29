@@ -26,14 +26,13 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
+import { useLeaveYear } from '@/components/hr/leave/use-leave-year';
 import { useAuth } from '@/hooks/use-auth';
 import { useWorkflowEntitySummaries, formatPendingApprovers } from '@/hooks/useWorkflowEntitySummaries';
 import { leaveService } from '@/services/hr/leave.service';
 import { LEAVE_STATUS_OPTIONS } from '@/types/hr/leave-request';
 
 const ALL = '__all__';
-const currentYear = new Date().getFullYear();
-const years = [currentYear + 1, currentYear, currentYear - 1, currentYear - 2];
 
 /**
  * Leave requests are listed per employee — the backend exposes history by employee rather
@@ -56,7 +55,12 @@ export default function LeaveRequestsPage() {
     linkedEmployeeId ?? user?.employeeId ?? null,
   );
   const selfLabel = user?.employeeId ? [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Me' : null;
-  const [year, setYear] = useState<string>(String(currentYear));
+  // ⚠ Leave settings audit 2, L-95: the current leave year, not the calendar year; the choice is
+  // kept apart so a late answer moves the default and never overrides it (see useLeaveYear).
+  const { currentYear } = useLeaveYear();
+  const years = [currentYear + 1, currentYear, currentYear - 1, currentYear - 2];
+  const [chosenYear, setYear] = useState<string | null>(null);
+  const year = chosenYear ?? String(currentYear);
   const [status, setStatus] = useState<string>(ALL);
   const [page, setPage] = useState(1);
 

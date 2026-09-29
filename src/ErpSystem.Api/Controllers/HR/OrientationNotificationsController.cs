@@ -56,6 +56,30 @@ public class OrientationNotificationsController : ControllerBase
     public async Task<ActionResult<IEnumerable<OrientationNotificationDto>>> GetByEnrollment(Guid enrollmentId)
         => Ok(await _service.GetByEnrollmentIdAsync(enrollmentId));
 
+    /// <summary>
+    /// Round 4, lane K-b: everything the tenant told anybody lately — who, what, and what the email
+    /// did. HR's answer to "did they get it?".
+    /// </summary>
+    [HttpGet("recent")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
+    public async Task<ActionResult<IEnumerable<OrientationNoticeLogEntryDto>>> GetRecent(
+        [FromQuery] int days = 14, [FromQuery] string? kind = null, [FromQuery] string? emailStatus = null)
+        => Ok(await _service.GetRecentAsync(days, kind, emailStatus));
+
+    /// <summary>
+    /// Sends the queued notice emails now rather than on the dispatcher's next minute — after the mail
+    /// server has been fixed, say. Write, not Admin: the HR role holds no Admin, and a button HR cannot
+    /// press is the company-schedule finding again.
+    /// </summary>
+    [HttpPost("send-queued")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
+    public async Task<ActionResult<OrientationNoticeDispatchResultDto>> SendQueued(
+        [FromServices] IOrientationNoticeEmailDispatcher dispatcher)
+    {
+        if (_currentUser.TenantId is not { } tenantId) return BadRequest("Tenant context could not be resolved.");
+        return Ok(await dispatcher.DispatchAsync(tenantId));
+    }
+
     /// <summary>Sending a notification to someone is an administrative act.</summary>
     [HttpPost]
     [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
