@@ -588,6 +588,94 @@ public sealed class FxFunctionalCurrencyGovernanceTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FXFoundation")]
     [Trait("Category", "FX")]
+    public async Task CurrencyCreationUsesIsoMinorUnitsAndPersistsCountryMetadata()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        SeedCurrency(db, tenantId, "GHS", isBase: true);
+        await db.SaveChangesAsync();
+
+        var result = await CreateCurrencyService(db, tenantId).CreateCurrencyAsync(new CreateCurrencyDto
+        {
+            CurrencyCode = "JPY",
+            NumericCode = "392",
+            CurrencyName = "Japanese Yen",
+            CurrencySymbol = "JPY",
+            DecimalPlaces = 0,
+            CountryCode = "jp",
+            CountryName = "Japan"
+        });
+
+        result.DecimalPlaces.Should().Be(0);
+        result.RoundingPrecision.Should().Be(1m);
+        result.CountryCode.Should().Be("JP");
+        result.CountryName.Should().Be("Japan");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
+    public async Task CurrencyCreationRejectsNonIsoMinorUnitsWithoutPersistingCurrency()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        SeedCurrency(db, tenantId, "GHS", isBase: true);
+        await db.SaveChangesAsync();
+
+        var service = CreateCurrencyService(db, tenantId);
+        await service.Invoking(item => item.CreateCurrencyAsync(new CreateCurrencyDto
+            {
+                CurrencyCode = "JPY",
+                NumericCode = "392",
+                CurrencyName = "Japanese Yen",
+                DecimalPlaces = 2
+            }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*JPY uses 0 decimal place(s) under ISO 4217*");
+
+        (await db.Currencies.CountAsync(item => item.TenantId == tenantId && item.CurrencyCode == "JPY"))
+            .Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
+    public async Task CurrencyAndInitialExchangeRateAreCreatedAsOneGovernedOperation()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        SeedCurrency(db, tenantId, "GHS", isBase: true);
+        await db.SaveChangesAsync();
+
+        var result = await CreateCurrencyService(db, tenantId).CreateCurrencyAsync(new CreateCurrencyDto
+        {
+            CurrencyCode = "USD",
+            NumericCode = "840",
+            CurrencyName = "US Dollar",
+            CurrencySymbol = "$",
+            DecimalPlaces = 2,
+            CreateInitialExchangeRate = true,
+            InitialExchangeRate = 15.25m,
+            InitialExchangeRateDate = new DateTime(2026, 9, 30),
+            InitialExchangeRateType = "Daily",
+            InitialExchangeRateSource = "Manual Entry",
+            InitialExchangeRateSourceReference = "UAT-2026-09-30"
+        });
+
+        result.CurrencyCode.Should().Be("USD");
+        var rate = await db.ExchangeRates.SingleAsync(item => item.TenantId == tenantId);
+        rate.BaseCurrencyCode.Should().Be("GHS");
+        rate.TargetCurrencyCode.Should().Be("USD");
+        rate.Rate.Should().Be(15.25m);
+        rate.EffectiveDate.Should().Be(new DateTime(2026, 9, 30));
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
     public async Task BulkRateValidationIsAllOrNothing()
     {
         var tenantId = Guid.NewGuid();
