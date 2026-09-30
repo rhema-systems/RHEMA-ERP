@@ -59,7 +59,10 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    (D-42 seven slices, D-43 an Open cycle, D-44 no Employee target, D-45 three columns to batch 2, D-46)
    and lane E's *source check* block. ~~Slice **E-a** (the appraisal routes)~~ **Done 2026-09-30**
    (`run-final-lifecycle.mjs` 130/130 twice; regression 2631/2640; lane E's E-a State block).
-   **Slice E-b (calibration) is next.**
+   ~~Slice **E-b** (calibration)~~ **Done 2026-09-30** (`run-final-lifecycle.mjs` 276/276 twice; regression
+   2777/2786; lane E's E-b State block — read its refinements: a commit also skips what its manager
+   submitted after the panel closed, and the grid says what a commit would take). **Slice E-c (cycle
+   rules and D-14) is next.**
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -182,7 +185,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ☑ 2026-09-29 — L-a 157/157 twice; L-b 244/244 twice; L-c 261/261 twice (one suite holds L-b and L-c); staged |
 | C | One appeal machine | 2 days (+0.5–1, D-36) | D-22, D-34, D-35, D-36, D-37, D-38 | ☑ **complete 2026-09-30**; C10 was batch 1's. Two slices (D-36): C-a ☑ — 209/209 twice, regression 2089/2098, committed effb567f5. C-b ☑ — source-checked (§ 1f D-37, D-38), `run-final-appeals.mjs` 397/397 twice, regression 2309/2318; staged |
 | D | Peer nomination and evaluation integrity | 1 day (1.5–2, the source check) | D-39, D-40, D-41 | ☑ 2026-09-30 — source-checked (§ 1g); `run-final-nominations.mjs` 186/186 twice, regression 2496/2505; staged |
-| E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | ~12 days (D-42; was 4) | D-10, D-14, D-17, D-20, D-42–D-46 | ◐ source-checked 2026-09-30 (§ 1h); seven slices E-a…E-g. E-a ☑ — `run-final-lifecycle.mjs` 130/130 twice, regression 2631/2640; staged. E-b next |
+| E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | ~12 days (D-42; was 4) | D-10, D-14, D-17, D-20, D-42–D-46 | ◐ source-checked 2026-09-30 (§ 1h); seven slices E-a…E-g. E-a ☑ (130/130 twice, regression 2631/2640), E-b ☑ (`run-final-lifecycle.mjs` 276/276 twice, regression 2777/2786); staged. E-c next |
 | F | Recommendations, proposals, probation, PIP chain, segregation of duties | 2.5 days | D-12, D-19; **F1 waits on D-18** (the finish plan's lane 9) | ☐ |
 | G | Notifications on the platform topics | 5 days | D-21, D-28 | ☐ |
 | H | Nightly sweep and the advance path | 2.5 days | D-16, D-21 | ☐ |
@@ -2093,7 +2096,7 @@ not HR's; offered for the cross-module register). No suite was affected.
         `GoalLibraryId`).
       - `GoalRiskEvaluator` rule 2 is made reachable: the pre-filters at
         `AtRiskGoalsQueryService.cs:167` and `TeamGoalsQueryService.cs:237` admit all live goals.
-- [ ] E6 **Calibration:**
+- [x] E6 **Calibration:** *(lane E-b, 2026-09-30 — every bullet; the E-b State block.)*
       - Commit is idempotent and scoped to appraisals at the calibration step; Completed appraisals
         re-settle.
       - `DeleteRatingAdjustmentAsync` (:535) is guarded like update (:517).
@@ -2297,7 +2300,7 @@ with each:
       to its appraisee; the self-evaluation's submission saved whole or not at all, its blanket catch gone;
       422s where the routes answered 500. Harness: the three `calculate-score` suites and
       `run-final-scoring:294`; demo `061:137`.
-- [ ] **Slice E-b — calibration.** The commit skips what the session already calibrated (the appeal
+- [x] **Slice E-b — calibration.** *(2026-09-30 — the E-b State block below.)* The commit skips what the session already calibrated (the appeal
       undo); the adjustment delete guarded as the update is; the update pinned to its appraisal; a live
       session's scope and facilitator pinned (`FacilitatedById` from the token); deleting a session
       releases its appraisals, and a Cancel (Pending or in progress) does the same; *Start* folded into
@@ -2407,6 +2410,91 @@ with each:
 score; a correction once Completed refused; the A0 stored score untouched by the preview),
 `run-final-gates` and `run-final-goalkpis` unchanged in count; the demo pack's `061` loses its Governance →
 Active fallback (it called the raw transition).
+
+**E-b State (2026-09-30): DONE — built, verified on UAT, staged.** No migration. What exists now:
+- **The commit, once per appraisal** — `CommitSkipReason` (was `CalibrationSkipReason`) puts two reasons
+  first: an appraisal this session calibrated (`IsCalibrated` and linked to it) is skipped — *"Already
+  calibrated by this session: what has happened to it since stands"* — and, once the session has closed, an
+  appraisal whose manager submitted after its `CompletedDate` is skipped: the panel never saw that
+  evaluation. Run again, a commit re-applied every adjustment to a final appraisal it had adjusted — after an
+  upheld appeal it wrote the criterion back, restored the calibrated overall, re-settled and published, and
+  appended its rationale again — and an appraisal HR had returned, re-evaluated and back at the step took the
+  old panel's decisions.
+- **The link means one thing** — opening links only appraisals waiting for calibration (not calibrated, not
+  linked), and HR's advance past calibration drops the link (the bypass arm in `AppraisalWorkflowService`),
+  so "calibrated and linked to S" is S's commit and nothing else.
+- **Cancel** — `POST {id}/cancel` with a reason (`CancelCalibrationSessionDto`, required, up to 1,000), from
+  Pending or InProgress: `Cancelled`, the reason at the head of the meeting notes, the appraisals it holds
+  released. A cancelled session takes no adjustment, edit, completion or commit.
+- **Delete** releases the appraisals it holds — it left them linked to a deleted session, and the next
+  opening passed them over as linked already.
+- **Start folded into Open** — opening stamps `StartedDate`; `POST {id}/start`, `StartSessionAsync` and the
+  screen's *Mark convened* are gone.
+- **The facilitator** — the creator (from the token) at create, the opener at open; `FacilitatedById` is off
+  both session DTOs.
+- **The scope** — cycle, unit and level change only while the session is Pending (422 once open); a completed
+  or cancelled session is not edited at all.
+- **Adjustments** — the edit takes the score and rationale; a body naming another appraisal or criterion is
+  refused (422). Recording, changing and removing all go through one guard (`EnsureSitting`): only while the
+  session sits — the removal had no check.
+- **P-41 and the grid** — a calibrated row reads its settled `OverallScore` unless this session is still
+  proposing a new overall for it; *Pre-calibration* is the captured number, else the manager's total, else a
+  settled score — the commit's order (the grid put a settled score before the manager's total). Each row
+  carries `CommitSkipReason`: why a commit would leave it alone, or null.
+- **The screen** — *Cancel session* (Pending or in progress, a reason required); *Mark convened* gone;
+  *Commit ratings* shown only when a commit would take a row, its dialog counting those; the reason under a
+  row's gate cell, for a row waiting for calibration or one the panel moved; a cancelled session read-only,
+  with a banner.
+
+**Where the build refines the rows** (each deliberate; say if one should go back):
+1. **A commit also skips an appraisal whose manager submitted after the panel closed** — the row said "what
+   the session already calibrated". A return (E-a) and a remand clear the calibration, so the old session's
+   commit would otherwise put its decisions on the new evaluation — the same undo by another door.
+2. **The grid says what a commit would do** (`CommitSkipReason`), and the Commit button and its dialog count
+   it — they counted "not calibrated and in governance", which kept offering the undo.
+3. **Opening links only what waits for calibration, and HR's advance drops the link** — so the first skip
+   reads the link exactly.
+4. **Cancel takes a reason**, kept at the head of the meeting notes (no column), like HR's other cancels.
+5. **The creator facilitates until the session is opened** — the row said "from the token"; opening still
+   records the opener.
+6. **An adjustment edit that re-targets is refused (422), not ignored** — an adjustment is an audit record,
+   and a request to move it is a mistake worth saying.
+7. **A Pending session may still be re-scoped** — nothing is linked before it opens.
+
+**Verified** (Staging API on `ErpSystemDB_UAT`, the final build):
+- `run-final-lifecycle.mjs` **276/276, then 276/276** (and a third time inside the regression) — E-a's 130
+  and E-b's 146; every E-b check would fail on the old code.
+- Regression (`run-all.mjs`, fifteen suites): interim reviews 133/133, attachments 65/65, slice C 52/52, slice D 22/22,
+  **slice E 17/26 — the same 9 stale**, gates 32/32, lane A 187/187 (its A11 session is deleted while open —
+  the release path), lane P 338/338 (its grid averages read the live proposals, as before), lane B1 256/256
+  (its skipped appraisal still leaves the session), lane L-a 157/157, lanes L-b/L-c 296/296 (a goal-row
+  calibration), lane B2 363/363, lane C 397/397 (its calibrated overall restored after a rejected remand),
+  lane D 186/186, **lane E 276/276**. **2777/2786** — E-a's 2631/2640 plus exactly the 146 new; no assertion
+  lost.
+- API log: no request answered 5xx; the calibration refusals logged as rule warnings. Only UAT's missing
+  SMTP, defect #23's payroll-profile FK (one per fixture employee), the five-minutely HR/Identity
+  reconciliation, and two failures of the platform notification service's thirty-second clean-up (the bulk
+  UPDATE of old notifications, as at E-a) — the platform's, on no performance path.
+- Frontend: scoped `tsc` over the calibration pages, their service and types, 0 errors — the 4 errors
+  planted in a probe file were all reported; ESLint clean. Not browser-walked.
+- Demo: no score or step moves — every one of APC2026's 107 phases byte-identical before and after the
+  three runs, and both panels read the same before and after (Operations 42 rows, 3 calibrated; Finance &
+  Administration 34, 1). What the screens show differently: **Efua Seidu's (TDC/00017) *Calibrated* cell
+  reads 88.56, −2.24** — it was blank, the panel having restated one criterion (P-41); Cynthia Sarpong's
+  reads 87 as before; neither panel offers *Commit ratings* — a commit would take no row, and each row's gate
+  cell names why; *Mark convened* is gone, and *Cancel session* shows only on a Pending or open session (the
+  demo has none). The guide's chapter 30 live walk creates, opens and closes a session over Corporate
+  Planning & Communications: **its steps 9–10 — the *not committed* banner and the commit — have not been
+  possible since the 2026-09-29 rebuild** (the department's nine are at Goal Setting, so a commit takes no
+  one; the old screen counted none either); the guide now says so and gives the talking point. The demo
+  pack's `061` drops its `/start` call and the facilitator in its create body — `hr.head` creates and opens,
+  so the facilitator is who it was.
+
+**Harness changes in the slice:** `buildLifecycleFixture()` gains g4–g7 (LG appraisees) and turns
+`hrCanModifyScores` on for profile LG — an upheld appeal with a changed score; nothing else on that profile
+reads it. The demo pack's `061` no longer calls `/start` or names a facilitator. `hr-w3-permissions/
+run-slice10-performance.mjs` probes `/cancel` for the Write gate — it probed `/start`, which now answers 404
+from routing and would pass vacuously (edited, not run).
 
 ### Lane F — Recommendations, proposals, probation, PIP chain, segregation of duties
 
@@ -3002,10 +3090,10 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | PIP handler numbering `PIP-APR-…` vs `PIP-yyyy-NNNN` | `PipRecommendationHandler.cs:103` | E7 |
 | `AppraisalCycleTarget.EstimatedEmployeeCount` client-supplied; `ActiveEmployeeCount` can go negative | MAP :1044; entity :647 | E2 |
 | `PerformanceAppraisal.DevelopmentPlanId/RankInPosition/RankInUnit/NextAppraisalDate` never computed | entity | J (N5 computes `DevelopmentPlanId`) |
-| `EmployeeAcknowledgmentComments` written only by manual advance | AWS :605 | E1 |
+| ~~`EmployeeAcknowledgmentComments` written only by manual advance~~ | AWS :605 | E1 — done in lane E-a, 2026-09-30 (the acknowledgment keeps its comment) |
 | ~~`PeerNomination.DueDate` ignored~~ | PNS :525 | D5 — done 2026-09-30 |
 | Settings profile validation (Min≤Max, bands ordered) | `AppraisalSettingsService` | B6 |
-| Calibration `FacilitatedById` from body; session `UpdateEntity` ignores Status | MAP :2481 | E6 |
+| ~~Calibration `FacilitatedById` from body; session `UpdateEntity` ignores Status~~ | MAP :2481 | E6 — done in lane E-b, 2026-09-30 (the token's; the status was the lifecycle's already) |
 | Pre-remand snapshot copies no `ActualValue`; KPI snapshots never written | PAS :2085-2093 | C5 |
 | ~~`AppraisalScoring.OverallScore` 0 vs null~~ | `AppraisalScoring.cs:143` | A1 — done 2026-09-29 |
 | ~~Analytics includes pre-final scores~~ | `PerformanceAnalyticsService.cs:61` | A9 — done 2026-09-29 |
@@ -3027,7 +3115,7 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | P-22 goal-library link fixed at creation | DTO :4258 | E5 |
 | P-24 at-risk filters by the employee's unit and level | `AtRiskGoalsQueryService.cs:155-159` | kept — disclosed on screen (:176) |
 | P-25 no export on the at-risk list | `AtRiskGoalsController.cs:65` | D-23 (catalogue programme) |
-| P-41 calibration grid reads the adjustment record | CSS :875-876, :896 | E6 |
+| ~~P-41 calibration grid reads the adjustment record~~ | CSS :875-876, :896 | E6 — done in lane E-b, 2026-09-30 |
 | P-43 Finalise not disabled by the calibration gate | `hr-review/[id]/page.tsx:282-285` | I |
 | P-44 no un-finalise; the API can reopen by accident today | PAS :4472-4497 | D-17 / E1 |
 | P-49 HR's appeal review sets every weight to 0; criterion names probably blank | PAS :3319, :3237-3239 | C9 |
@@ -3071,6 +3159,14 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | HR's review page offers its actions to an HR officer reading their own appraisal; the server refuses them (403) | `hr-review/[id]/page.tsx` | I |
 | `probe-lane3-appraisals.mjs` still sends the old header (a probe, not in `run-all`) | dev-harness | S8 |
 | The E-a screens (HR's review page) not browser-walked | 1 page | K |
+| *Added by lane E-b (2026-09-30):* | | |
+| A participant can be added, removed or marked on a completed or cancelled session — the screen hides it; the service does not refuse | `AddParticipantAsync`, `RemoveParticipantAsync`, `RecordAttendanceAsync` | E-g |
+| Two sessions over one appraisal: a completed but uncommitted session keeps its links, so the next opening passes those appraisals over; a commit does not skip an appraisal another sitting session holds | `OpenSessionAsync`, `CommitSkipReason` | E-g |
+| After HR's return, the grid's *Manager proposed* reads the old total until the manager re-submits (the evaluation keeps its `TotalScore`) | `ManagerEvaluationsAsync` | E-g |
+| A cancel tells no one — nor was the panel told it had been convened | `CancelSessionAsync` | G |
+| A session's particulars edit and its delete have no screen (`update`, `remove` have no caller) | `calibration.service.ts` | I |
+| The E-b screen (the calibration session page) not browser-walked | 1 page | K |
+| `hr-w3-permissions/run-slice10-performance.mjs` edited for E-b, not run | dev-harness | S8 |
 
 ---
 

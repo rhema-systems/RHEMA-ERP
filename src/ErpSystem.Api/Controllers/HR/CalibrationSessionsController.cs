@@ -190,7 +190,7 @@ public class CalibrationSessionsController : ControllerBase
         }
     }
 
-    /// <summary>Create a new calibration session</summary>
+    /// <summary>Create a new calibration session, facilitated by the caller until someone opens it.</summary>
     [HttpPost]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(CalibrationSessionDto), StatusCodes.Status201Created)]
@@ -199,7 +199,7 @@ public class CalibrationSessionsController : ControllerBase
     {
         try
         {
-            var result = await _calibrationService.CreateAsync(createDto, cancellationToken);
+            var result = await _calibrationService.CreateAsync(createDto, _currentUserService.EmployeeId, cancellationToken);
             return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
         }
         catch (ArgumentException ex)
@@ -274,13 +274,17 @@ public class CalibrationSessionsController : ControllerBase
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
     //
-    // Pending → (open) → InProgress → (complete) → Completed → (commit).
+    // Pending → (open) → InProgress → (complete) → Completed → (commit), or (cancel) from Pending
+    // or InProgress → Cancelled.
     // Committing is a separate step from completing: closing the room and writing the agreed
     // ratings onto the appraisals are different decisions, and the second is irreversible.
+    // A separate "start" stamped the date a session convened, from a session already open; opening
+    // stamps it now, and the route is gone (performance closure E-b).
 
     /// <summary>
-    /// Opens the session and records the caller as its facilitator. Also links every appraisal in
-    /// scope to the session, so their computed phase reads "calibration in progress".
+    /// Opens the session, records the caller as its facilitator and stamps its start. Also links
+    /// every appraisal in scope waiting for calibration to the session, so their computed phase
+    /// reads "calibration in progress".
     /// </summary>
     [HttpPost("{sessionId:guid}/open")]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
@@ -310,16 +314,22 @@ public class CalibrationSessionsController : ControllerBase
         }
     }
 
-    /// <summary>Stamps the session as having actually convened.</summary>
-    [HttpPost("{sessionId:guid}/start")]
+    /// <summary>
+    /// Calls off a session that is pending or in progress, with a reason (performance closure E-b,
+    /// D-46). Its appraisals are released for the next session; its record stays and nothing of it
+    /// is applied.
+    /// </summary>
+    [HttpPost("{sessionId:guid}/cancel")]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(CalibrationSessionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> StartSession(Guid sessionId, CancellationToken cancellationToken = default)
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> CancelSession(
+        Guid sessionId, [FromBody] CancelCalibrationSessionDto dto, CancellationToken cancellationToken = default)
     {
         try
         {
-            var result = await _calibrationService.StartSessionAsync(sessionId, cancellationToken);
+            var result = await _calibrationService.CancelSessionAsync(sessionId, dto.Reason, cancellationToken);
             return Ok(result);
         }
         catch (ArgumentException ex)
@@ -328,12 +338,12 @@ public class CalibrationSessionsController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BusinessRuleRejected(ex, "starting the calibration session");
+            return BusinessRuleRejected(ex, "cancelling the calibration session");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error starting calibration session {SessionId}", sessionId);
-            return StatusCode(500, "An error occurred while starting the calibration session");
+            _logger.LogError(ex, "Error cancelling calibration session {SessionId}", sessionId);
+            return StatusCode(500, "An error occurred while cancelling the calibration session");
         }
     }
 
@@ -598,6 +608,10 @@ public class CalibrationSessionsController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "removing a calibration adjustment");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting rating adjustment {AdjustmentId} from calibration session {SessionId}", adjustmentId, sessionId);
@@ -607,7 +621,8 @@ public class CalibrationSessionsController : ControllerBase
 
     /// <summary>
     /// Commit the session: write the agreed ratings onto the appraisals and lift the calibration
-    /// gate on everyone in scope, adjusted or not.
+    /// gate on everyone in scope at the step, adjusted or not — once each, and only on the
+    /// evaluation the panel sat over (E-b). The rest are listed with the reason.
     /// </summary>
     [HttpPost("{sessionId:guid}/apply-adjustments")]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]

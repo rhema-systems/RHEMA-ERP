@@ -65,8 +65,12 @@ instructions; and in Manager mode with anonymous reviews the appraisee sees coun
 estimate — twelve days, built in seven slices. Slice E-a is built: a date correction no longer blanks
 the manager's recommendations; a raw status change can no longer complete an appraisal nobody signed
 off; a return to the manager is made before the sign-off and takes the calibration with it; HR does not
-act on their own appraisal. **Next: slice E-b**, calibration. The closure plan's START HERE block and
-§ 2 carry the live state.
+act on their own appraisal. Slice E-b is built: a calibration session commits each appraisal once, and
+only the evaluation its panel saw, so committing it again no longer undoes an upheld appeal or a return;
+the grid says whom a commit would take; a session can be cancelled, and cancelling or deleting one frees
+its appraisals; the panel's decisions stay on what they restated; and the grid shows the settled score.
+**Next: slice E-c**, cycle rules and D-14. The closure plan's START HERE block and § 2 carry the live
+state.
 
 ▶ **Lane 11 (added 2026-09-25): probation is not absence.** About 1,800 long-serving staff on the
 demo database are on probation, because the employee import has no confirmation date. Two code sites

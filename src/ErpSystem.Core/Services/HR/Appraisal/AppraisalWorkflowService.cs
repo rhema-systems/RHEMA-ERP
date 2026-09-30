@@ -401,6 +401,9 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
             case AppraisalSubStatus.CalibrationInProgress:
             {
                 appraisal.IsCalibrated = true;
+                // Without a session: a link to the one sitting on it would read as that session's
+                // calibration, and its commit skips what it calibrated (E-b).
+                appraisal.CalibrationSessionId = null;
                 actions.Add("Bypassed calibration requirement — marked appraisal as calibrated without a session.");
                 break;
             }

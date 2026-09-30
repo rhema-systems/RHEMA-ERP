@@ -5198,6 +5198,11 @@ public class CalibrationSessionDto : BaseDto
     public string? MeetingNotes { get; set; }
 }
 
+/// <summary>
+/// A new session. It carries no facilitator: the creator facilitates until someone opens it, and
+/// the opener after that (performance closure E-b — the body named one, so a session could be
+/// recorded as run by someone else).
+/// </summary>
 public class CreateCalibrationSessionDto : CreateDtoBase
 {
     [Required]
@@ -5211,7 +5216,6 @@ public class CreateCalibrationSessionDto : CreateDtoBase
     public Guid? OrganizationUnitId { get; set; }
 
     public DateTime? ScheduledDate { get; set; }
-    public Guid? FacilitatedById { get; set; }
 
     [MaxLength(2000)]
     public string? Agenda { get; set; }
@@ -5219,9 +5223,10 @@ public class CreateCalibrationSessionDto : CreateDtoBase
 
 /// <summary>
 /// Edits the session's own particulars. Deliberately carries no lifecycle fields: status and the
-/// started/completed stamps belong to the open/start/complete endpoints, which enforce the order
+/// started/completed stamps belong to the open/complete/cancel endpoints, which enforce the order
 /// and record who acted. Accepting them here let a caller mark a session Completed — and so lift
-/// the calibration gate on every appraisal in it — with a plain PUT.
+/// the calibration gate on every appraisal in it — with a plain PUT. The scope — cycle, unit,
+/// level — changes only while the session is Pending (E-b), and the facilitator not at all.
 /// </summary>
 public class UpdateCalibrationSessionDto : UpdateDtoBase
 {
@@ -5236,7 +5241,6 @@ public class UpdateCalibrationSessionDto : UpdateDtoBase
     public Guid? OrganizationUnitId { get; set; }
 
     public DateTime? ScheduledDate { get; set; }
-    public Guid? FacilitatedById { get; set; }
 
     [MaxLength(2000)]
     public string? Agenda { get; set; }
@@ -5250,6 +5254,14 @@ public class CompleteCalibrationSessionDto
 {
     [MaxLength(4000)]
     public string? MeetingNotes { get; set; }
+}
+
+/// <summary>Why a session that has not completed is called off (performance closure E-b, D-46).</summary>
+public class CancelCalibrationSessionDto
+{
+    [Required]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
 }
 
 /// <summary>Attendance mark for one participant.</summary>
@@ -5466,6 +5478,11 @@ public class CreateCalibrationRatingAdjustmentDto : CreateDtoBase
     public string? Rationale { get; set; }
 }
 
+/// <summary>
+/// A new score and rationale for a recorded adjustment. The appraisal and the criterion must be
+/// the adjustment's own (performance closure E-b): an adjustment stays on what it was recorded
+/// against, and a body naming anything else is refused.
+/// </summary>
 public class UpdateCalibrationRatingAdjustmentDto : UpdateDtoBase
 {
     [Required]
@@ -5738,10 +5755,22 @@ public class CalibrationMatrixRowDto
     /// <summary>The manager's own evaluation total, before any calibration.</summary>
     public decimal? ManagerProposedScore { get; set; }
     public decimal? PreCalibrationScore { get; set; }
+
+    /// <summary>
+    /// A calibrated appraisal's settled score, unless this session is still proposing another for
+    /// it; otherwise this session's proposed overall (P-41, E-b — it was always the proposal).
+    /// </summary>
     public decimal? CalibratedScore { get; set; }
     public decimal? ScoreAdjustment { get; set; }
     public string? AdjustmentRationale { get; set; }
     public bool IsCalibrated { get; set; }
+
+    /// <summary>
+    /// Why committing this session would leave the row alone — not at the calibration step, final
+    /// and unadjusted, calibrated by this session already, its manager's evaluation submitted after
+    /// the panel closed — or null when a commit would calibrate it (E-b).
+    /// </summary>
+    public string? CommitSkipReason { get; set; }
     public string? ManagerName { get; set; }
     public List<CalibrationRatingAdjustmentDto> Adjustments { get; set; } = new();
 }

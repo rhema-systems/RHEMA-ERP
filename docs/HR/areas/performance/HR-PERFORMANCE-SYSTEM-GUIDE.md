@@ -28,6 +28,13 @@ changes the window alone, and only before the appraisal is final; *Remove* only 
 counts; *Return to manager* only before the sign-off, taking the calibration with it; the raw status
 routes open a Draft appraisal and close a Completed one, nothing else; HR does not act on their own
 appraisal; the acknowledgment keeps a comment.
+**And for lane E, slice E-b** (calibration, 2026-09-30): Rule 2 and chapter 30 — a commit takes each
+appraisal once, and only the evaluation the panel sat over, so running it again undoes neither an upheld
+appeal nor a return; the grid says why a commit would leave each row alone, and *Commit ratings* appears
+only when a commit would take someone; a session can be cancelled, which releases its appraisals, as
+deleting one now does; *Mark convened* is gone — opening stamps the start; the facilitator is whoever
+creates and opens the session; an open session's scope is fixed; an adjustment stays on what it restated;
+and the grid's *Calibrated* column reads the appraisal's settled score (P-41 fixed).
 **The database was rebuilt on 2026-09-29**: Rule 2, Rule 9, the demo tables and the Efua arithmetic give its figures (Efua 88.56, Cynthia 87.00, Efua's appeal window to 6 October). The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
 **Seventh in the series**, after Recruitment, Employees, Leave, Attendance & Time, Company Schedule and Staff Travel.
 
@@ -176,7 +183,9 @@ labels the row **"overridden by calibration/appeal"**.
   87.0 too.
 - **Efua Seidu** — the Operations panel moved *Project Delivery Timeliness* from 92 to 88 (the row
   carries `NumericScore 88` beside `ActualValue 92`), and her appraisal reads **88.56**, the panel's
-  88 counting.
+  88 counting. The grid shows **88.56** too, 2.24 below the 90.80 the panel started from — *since
+  2026-09-30* (lane E-b, P-41): the grid read the adjustment record, which for a criterion restatement
+  holds no overall, so her *Calibrated* cell was blank.
 
 Both stay *Exceeds*. *(Until the 2026-09-29 rebuild both still read the figures they had been signed
 off at before the fix — 88.74 and 89.40. Finalised scores are never restated automatically, decision
@@ -3795,15 +3804,19 @@ organisation unit *(and everything beneath it)* or an organisation level. Leave 
 the whole cycle — which is what you want for a small organisation and almost never what you want
 otherwise.
 
-**The lifecycle is four steps, and the last two are different decisions:**
+**The lifecycle is three steps, and the last two are different decisions:**
 
 ```
-  Open        links every appraisal in scope, records you as facilitator
-  Convened    stamps that the panel actually met
+  Open        records you as facilitator, stamps the start, and links every appraisal
+              in scope that is waiting for calibration
   Close       no further adjustments; the panel is notified the ratings are ready
   COMMIT      irreversible. Writes the agreed ratings onto the appraisals AND lifts the
               calibration gate on everyone at the calibration step (manager submitted) —
               including the people left alone. The rest are listed as skipped, with why.
+              Once per appraisal: run again, it skips what it calibrated.
+
+  Cancel      before the session completes: called off with a reason; its appraisals
+              are released for another session, and nothing of it is ever applied
 ```
 
 ### 👁 On the list
@@ -3823,14 +3836,17 @@ Scheduled for · Agenda *("What the panel will work through.")*.
 ### 👁 On the detail page
 
 **Header:** the session name, the scope in words — *"Operations Directorate, and every unit beneath
-it."* — and the buttons for the current state: **Open session** / **Mark convened** / **Close session** /
-**Commit ratings**.
+it."* — and the buttons for the current state: **Open session** / **Cancel session** / **Close session** /
+**Commit ratings**. *Commit ratings* renders only when a commit would take at least one row.
 
 **Banners:** *Not open yet* — *"Add the panel first, then open the session. Opening records you as
 facilitator and links every appraisal in scope, so no ratings can be recorded before it."* · and, once
 closed but not committed, *Closed, but not committed* — *"N appraisals in this session have not been
 through the calibration gate. Until you commit, none of them can reach HR review on a cycle that
-requires calibration — including the ones the panel agreed to leave as they are."*
+requires calibration — including the ones the panel agreed to leave as they are."* — N counts the rows a
+commit would take · and on a cancelled session, *Cancelled* — *"This session was called off — the reason
+is in its meeting notes. Its appraisals were released for another session, and none of its adjustments
+is applied."*
 
 **Four tiles:** In scope · Adjusted · Calibrated · Average score.
 
@@ -3838,7 +3854,7 @@ requires calibration — including the ones the panel agreed to leave as they ar
 
 | Tab | What is in it |
 |---|---|
-| **Grid** | Employee · Manager · **Manager proposed** · **Pre-calibration** · **Calibrated** · **Δ** · **Gate** · action. The Δ is coloured — green up, red down |
+| **Grid** | Employee · Manager · **Manager proposed** · **Pre-calibration** · **Calibrated** · **Δ** · **Gate** · action. The Δ is coloured — green up, red down. Under *Gate*, a row waiting for calibration — or one the panel moved — says why a commit would leave it alone, when it would (*"Not at the calibration step: it is at Goal Setting — …"*, *"Already calibrated by this session …"*) |
 | **Panel** | Panelist · Role in the room · **Attended** checkbox · Remove, plus an **Add a panelist** form |
 | **Decisions** | Employee · **Applies to** *(Overall score, or a named criterion)* · From · To · **Rationale** · Recorded *(when, by whom)* |
 | **Notes** | The agenda, and the meeting notes recorded at close |
@@ -3901,48 +3917,54 @@ Leave one blank to leave it alone."*
    Go to **Panel**, add **Akpene Amoah** as *Facilitator* and **Nana Nyaho** as *Manager*. Then press
    **Open session**.
 
-   💬 *"Opening does two things. It records me as facilitator, and it links every appraisal in scope to
-   the session — so from this moment every one of them that has reached calibration reports
-   'calibration in progress'. Nothing can be adjusted before that, because there is nothing to adjust
-   against."*
+   💬 *"Opening does three things. It records me as facilitator, it stamps the start, and it links every
+   appraisal in scope that is waiting for calibration to the session — so from this moment every one of
+   them reports 'calibration in progress'. Nothing can be adjusted before that, because there is
+   nothing to adjust against."*
    *(Corrected 2026-09-29: only an appraisal at the calibration step reads "in progress"; the rest show
    their own step. None of this department's nine has reached calibration.)*
 
-8. Press **Mark convened**. Go to the **Grid** and press **Adjust** on any row. Read the dialog, expand
-   **Adjust individual criteria**, and then **Cancel** — you do not need to record one.
+8. Go to the **Grid**. Under each row's *Gate* the grid says why a commit would leave it alone — here,
+   *"Not at the calibration step: it is at Goal Setting …"*. Press **Adjust** on any row, read the dialog,
+   expand **Adjust individual criteria**, and then **Cancel** — you do not need to record one.
+   *(Mark convened is gone since 2026-09-30: opening stamps the start.)*
 
 9. 🔴 **LIVE WRITE 9 — close it.** Press **Close session**, add meeting notes
    `Panel confirmed every rating in Corporate Planning & Communications as proposed.` Confirm.
 
-   The *Closed, but not committed* banner appears with a count.
+   ⚠ **On this database no banner appears and no Commit button renders** — none of the nine has
+   reached calibration, so a commit would take nobody. *(True since the 2026-09-29 rebuild; the old
+   screen counted appraisals in governance, and these are at goal setting.)* The *Gate* column says why.
 
-   💬 *"And now the important half. Closing the room is not committing the decisions. Until I commit,
-   none of these appraisals can reach HR sign-off — including every one the panel looked at and agreed
-   to leave exactly as it was. A session with no adjustments is still meaningful: committing it confirms
-   every rating in scope."*
+   💬 *"And now the important half. Closing the room is not committing the decisions. The grid tells me
+   whom a commit would take and why the rest wait: here, nobody's manager has submitted yet, so there is
+   nothing to commit — the panel sat early. When an appraisal in a session like this reaches the step,
+   committing confirms it — including every one the panel agreed to leave exactly as it was."*
 
-10. Press **Commit ratings**, read the confirmation out loud, and confirm.
+10. **When a commit is on offer** (on a cycle with appraisals at the calibration step), press **Commit
+    ratings**, read the confirmation out loud, and confirm.
 
-    > *"This writes the agreed scores onto the N appraisal(s) whose manager has submitted and marks
-    > them calibrated — including the M the panel left as they are. The other K are not at the
-    > calibration step yet and are left alone; the result lists them. It cannot be undone."*
-    > *(Wording since 2026-09-29; before that a commit stamped everyone in scope.)*
+    > *"This writes the agreed scores onto N appraisal(s) at the calibration step and marks them
+    > calibrated — including the M the panel left as they are. The other K are left as they are, each
+    > for the reason on its row; the result lists them. It cannot be undone."*
+    > *(Wording since 2026-09-30.)*
 
-    💬 *"Committed. Those appraisals are now through the gate, and HR can sign them off."*
+    💬 *"Committed. Those appraisals are now through the gate, and HR can sign them off. And a commit is
+    made once: run again, it leaves alone what it calibrated — an appeal decided since stands."*
 
 ### ⚙ Behind the page
 
 | Control | Endpoint |
 |---|---|
 | By cycle | `GET api/CalibrationSessions/by-cycle/{cycleId}` |
-| Create / amend | `POST` / `PUT api/CalibrationSessions[/{id}]` — particulars only; status is owned by the actions |
-| Open | `POST …/{id}/open` — Pending → InProgress, records the caller as facilitator, links every appraisal in scope |
-| Mark convened | `POST …/{id}/start` — only from InProgress |
+| Create / amend | `POST` / `PUT api/CalibrationSessions[/{id}]` — particulars only; status is owned by the actions. The creator is the facilitator (the token's — the body named one until 2026-09-30); the scope changes only while Pending, and a completed or cancelled session is not edited (422) |
+| Open | `POST …/{id}/open` — Pending → InProgress, records the caller as facilitator, stamps the start, links every appraisal in scope waiting for calibration |
+| Cancel | `POST …/{id}/cancel` `{ reason }` — from Pending or InProgress; the reason heads the meeting notes; the appraisals it holds are released *(since 2026-09-30; `POST …/start` is gone)* |
 | Close | `POST …/{id}/complete` — adjustments refused afterwards; the panel is notified |
-| **Commit** | `POST …/{id}/apply-adjustments` — **only from Completed, and irreversible** |
-| Grid | `GET …/{id}/matrix` — **every appraisal the session covers, not only the adjusted ones** |
+| **Commit** | `POST …/{id}/apply-adjustments` — **only from Completed, and irreversible**; once per appraisal, and only an evaluation submitted before the panel closed |
+| Grid | `GET …/{id}/matrix` — **every appraisal the session covers, not only the adjusted ones**; each row carries `commitSkipReason` |
 | Per-criterion detail | `GET …/{id}/appraisals/{appraisalId}/criteria` — a *read*, so panellists get it, not just HR; **404 for an appraisal outside the session's scope** (any session id used to open any appraisal's criteria) |
-| Adjustments | `GET/POST/PUT/DELETE …/{id}/adjustments[/{id}]` — **422 while the session is Pending, Completed or Cancelled**, and 422 if the appraisal is outside scope |
+| Adjustments | `GET/POST/PUT/DELETE …/{id}/adjustments[/{id}]` — **422 while the session is Pending, Completed or Cancelled** (the removal too, since 2026-09-30), and 422 if the appraisal is outside scope; an edit changes the score and rationale, and 422s a body naming another appraisal or criterion |
 | Panel | `…/{id}/participants[/{id}]`, `PATCH …/attendance` |
 | Attachments | `…/{id}/attachments` — HR only, through the scan gate |
 
@@ -3953,7 +3975,8 @@ everyone else only the sessions they sit on. The per-criterion read answers only
 the session's scope. **A panellist's own appraisal is left out of every read** — their matrix row,
 its adjustments and criteria, and the grid's counts and average, which would otherwise let them work
 their own score out. Panellists reach the detail page from the *"session complete"* notification.
-Deleting a session needs `HR.Performance.Admin` — 403 for `hr.head`.
+Deleting a session needs `HR.Performance.Admin` — 403 for `hr.head` — and releases the appraisals it
+holds; a completed session is not deleted.
 
 **Scope resolution:** every appraisal in the cycle whose employee sits in the named unit **or any unit
 beneath it**; or, when a level is named instead, everyone at that level. Anything already linked to the
@@ -3970,6 +3993,21 @@ session, or carrying one of its adjustments, is pulled in even if the scope has 
 > confirmation dialog still counts every appraisal in Governance as *at the step*, so where some are
 > already calibrated, or wait on HR under HR-first timing, its *N* runs high; the result's skipped list
 > is the truth (lane I aligns the dialog).
+>
+> **Changed 2026-09-30** (performance closure lane E-b). **A commit takes each appraisal once, and only
+> the evaluation the panel sat over.** Run again, it re-applied every decision to a final appraisal it had
+> adjusted — after an upheld appeal it wrote the manager's criterion back, restored the panel's overall,
+> re-settled and published — and an appraisal HR returned to its manager, re-evaluated and back at the
+> step took the old panel's decisions. Now it skips *"Already calibrated by this session"* and, once the
+> session has closed, anything whose manager submitted after it (*"the panel did not see that
+> evaluation"*); the next panel calibrates those. **The grid says in advance** why a commit would leave
+> each row alone, and the dialog and the *Commit ratings* button count from it — the dialog's *N* is now
+> exact (the paragraph above). **Opening links only appraisals waiting for calibration**, and HR's advance
+> past calibration drops the link. **A session can be cancelled** (a reason required) and **a deleted one
+> releases its appraisals** — both left them linked to a session that would never commit. **Mark
+> convened is gone**: opening stamps the start. **The facilitator** is the creator, then the opener,
+> never a field. **An open session's scope is fixed.** **An adjustment stays on its appraisal and
+> criterion**, and is changed or removed only while the panel sits.
 
 ### ⚠ Known gaps
 **P-39.** ~~**The overall calibrated score does not survive HR sign-off** (Rule 2). HR's finalise
@@ -3981,10 +4019,13 @@ is kept and sign-off settles *from* it. Cynthia Sarpong's record predates the fi
 overall re-summed the stored weighted scores. The settle recomputes every item from its raw inputs,
 and a KPI restatement is an achievement percentage, labelled on every screen. Efua Seidu's record
 predates the fix (Rule 2).
-**P-41.** The grid's **Calibrated** column reads the *adjustment record*, not the appraisal — so it can
-legitimately disagree with the score on the HR review screen. Do not put them side by side.
-**P-42.** **Only 76 of 107 appraisals are calibrated.** The two panels cover two directorates; anyone
-outside them cannot be finalised until a session covering them is committed.
+**P-41.** ~~The grid's **Calibrated** column reads the *adjustment record*, not the appraisal — so it can
+legitimately disagree with the score on the HR review screen.~~ **Fixed 2026-09-30** (closure E-b): a
+calibrated row reads the appraisal's settled score, unless the session is still proposing another — Efua
+Seidu's reads 88.56 (it was blank).
+**P-42.** **Only 4 of 107 appraisals are calibrated** *(76 before the 2026-09-29 rebuild; Rule 2)*.
+The two panels cover two directorates, and only the four whose manager had submitted were at the step;
+no appraisal can be finalised until a session covering it is committed.
 
 ---
 ## 31. `/hr/performance/hr-review` — the sign-off

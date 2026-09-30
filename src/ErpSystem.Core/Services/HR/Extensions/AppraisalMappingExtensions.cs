@@ -2394,6 +2394,7 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <summary>The tenant, the status and the facilitator are the service's — the facilitator from the token (E-b).</summary>
     public static CalibrationSession ToEntity(this CreateCalibrationSessionDto dto)
     {
         return new CalibrationSession
@@ -2403,11 +2404,15 @@ public static class AppraisalMappingExtensions
             OrganizationLevelId = dto.OrganizationLevelId,
             OrganizationUnitId = dto.OrganizationUnitId,
             ScheduledDate = dto.ScheduledDate,
-            FacilitatedById = dto.FacilitatedById,
             Agenda = dto.Agenda
         };
     }
 
+    /// <summary>
+    /// The particulars. The scope fields are refused by the service once the session is open (E-b);
+    /// the facilitator is recorded by creating and opening it, never edited — a body naming one
+    /// recorded the session as run by someone else.
+    /// </summary>
     public static void UpdateEntity(this UpdateCalibrationSessionDto dto, CalibrationSession entity)
     {
         entity.AppraisalCycleId = dto.AppraisalCycleId;
@@ -2417,12 +2422,6 @@ public static class AppraisalMappingExtensions
         entity.ScheduledDate = dto.ScheduledDate;
         entity.Agenda = dto.Agenda;
         entity.MeetingNotes = dto.MeetingNotes;
-
-        // ⚠ Only reassign the facilitator when one is actually named. Opening a session records
-        // who opened it, and a later edit of the session's name or agenda does not mention the
-        // facilitator — so overwriting unconditionally silently blanked the record of who ran it.
-        if (dto.FacilitatedById.HasValue)
-            entity.FacilitatedById = dto.FacilitatedById;
 
         // Status and the started/completed stamps are set only by the lifecycle endpoints.
     }
@@ -2531,12 +2530,13 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <summary>
+    /// The decision's numbers and rationale. The appraisal and the criterion it restates are the
+    /// adjustment's for good (E-b): copied from the body, one decision could be moved onto another
+    /// appraisal in the session or another item.
+    /// </summary>
     public static void UpdateEntity(this UpdateCalibrationRatingAdjustmentDto dto, CalibrationRatingAdjustment entity)
     {
-        entity.PerformanceAppraisalId = dto.PerformanceAppraisalId;
-        entity.TemplateItemId = dto.TemplateItemId;
-        entity.CriterionConfigId = dto.CriterionConfigId;
-        entity.IsOverall = !dto.TemplateItemId.HasValue && !dto.CriterionConfigId.HasValue;
         entity.OriginalScore = dto.OriginalScore;
         entity.AdjustedScore = dto.AdjustedScore;
         entity.Rationale = dto.Rationale;

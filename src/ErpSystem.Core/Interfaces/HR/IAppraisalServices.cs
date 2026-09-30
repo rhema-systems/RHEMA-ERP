@@ -1070,14 +1070,16 @@ public interface ICalibrationSessionService
     // or facilitator); null is the desk's whole list.
     Task<IEnumerable<CalibrationSessionDto>> GetByCycleIdAsync(Guid cycleId, Guid? panellistEmployeeId, CancellationToken cancellationToken = default);
     Task<PagedResult<CalibrationSessionDto>> GetPagedAsync(int pageNumber, int pageSize, Guid? panellistEmployeeId, CancellationToken cancellationToken = default);
-    Task<CalibrationSessionDto> CreateAsync(CreateCalibrationSessionDto createDto, CancellationToken cancellationToken = default);
+    // facilitatorId is the caller's employee, from the token (E-b); null for an unlinked account.
+    Task<CalibrationSessionDto> CreateAsync(CreateCalibrationSessionDto createDto, Guid? facilitatorId, CancellationToken cancellationToken = default);
     Task<CalibrationSessionDto> UpdateAsync(UpdateCalibrationSessionDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
-    // Lifecycle
+    // Lifecycle: Pending → open → InProgress → complete → Completed → commit, or cancel from Pending
+    // or InProgress (E-b). Opening stamps the start — there is no separate start.
     Task<CalibrationSessionDto> OpenSessionAsync(Guid sessionId, Guid facilitatedById, CancellationToken cancellationToken = default);
-    Task<CalibrationSessionDto> StartSessionAsync(Guid sessionId, CancellationToken cancellationToken = default);
     Task<CalibrationSessionDto> CompleteSessionAsync(Guid sessionId, Guid completedById, string? meetingNotes, CancellationToken cancellationToken = default);
+    Task<CalibrationSessionDto> CancelSessionAsync(Guid sessionId, string reason, CancellationToken cancellationToken = default);
 
     // Participant management
     Task<CalibrationParticipantDto> AddParticipantAsync(Guid sessionId, CreateCalibrationParticipantDto dto, CancellationToken cancellationToken = default);
@@ -1096,7 +1098,8 @@ public interface ICalibrationSessionService
 
     /// <summary>
     /// Commits the session: applies each appraisal's latest adjustments and lifts the calibration
-    /// gate on <em>every</em> appraisal in the session's scope, not only the adjusted ones.
+    /// gate on <em>every</em> appraisal in the session's scope at the step, not only the adjusted
+    /// ones — once each, and only on the evaluation the panel sat over (E-b).
     /// </summary>
     Task<CalibrationApplyResultDto> ApplyAllAdjustmentsAsync(Guid sessionId, Guid appliedById, CancellationToken cancellationToken = default);
 
