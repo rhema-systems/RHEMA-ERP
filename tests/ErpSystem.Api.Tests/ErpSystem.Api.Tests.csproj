@@ -311,6 +311,7 @@
          implicit compile items, so keep both lifecycle and schema-contract tests in CI. -->
     <Compile Include="Services\Finance\FinanceSourceBookAuthorityServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceSourceBookAuthorityMigrationTests.cs" />
+    <Compile Include="Services\Finance\FinanceSourceBookAuthorityCallerAdoptionTests.cs" />
     <Compile Include="Services\Finance\CashierTillControlTests.cs" />
     <Compile Include="Services\Finance\CashBankControlledDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\WhtCertificateDocumentBuilderTests.cs" />
