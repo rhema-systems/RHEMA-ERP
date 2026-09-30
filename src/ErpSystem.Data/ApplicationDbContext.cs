@@ -11035,6 +11035,16 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             {
                 if (property.ClrType == typeof(decimal) || property.ClrType == typeof(decimal?))
                 {
+                    // Year-end closing evidence is a functional-currency amount. Keep the
+                    // runtime model aligned with the entity annotation and migration instead
+                    // of allowing the broad name-based convention below to widen it to 18,4.
+                    if (entityType.ClrType == typeof(YearEndBookCloseCycle)
+                        && property.Name == nameof(YearEndBookCloseCycle.NetIncomeTransferred))
+                    {
+                        property.SetColumnType("decimal(18,2)");
+                        continue;
+                    }
+
                     if ((entityType.ClrType == typeof(InventoryItem) && property.Name == nameof(InventoryItem.Weight)) ||
                         (entityType.ClrType == typeof(GoodsReceiptNoteItem) && property.Name == nameof(GoodsReceiptNoteItem.UnitWeightKg)) ||
                         (entityType.ClrType == typeof(PurchaseOrderReceiptItem) && property.Name == nameof(PurchaseOrderReceiptItem.UnitWeightKg)) ||

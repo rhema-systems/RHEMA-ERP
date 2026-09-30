@@ -440,6 +440,7 @@ public sealed class FiscalYearCloseTests
         var table = migration.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.CreateTableOperation>().Single();
         table.Name.Should().Be("YearEndBookCloseCycles");
         table.Columns.Single(x => x.Name == "RowVersion").IsRowVersion.Should().BeTrue();
+        table.Columns.Single(x => x.Name == "NetIncomeTransferred").ColumnType.Should().Be("decimal(18,2)");
         table.ForeignKeys.Should().Contain(x => x.Columns.SequenceEqual(new[] { "TenantId", "FiscalYearId" }));
         table.ForeignKeys.Should().Contain(x => x.Columns.SequenceEqual(new[] { "TenantId", "ClosingJournalEntryId", "AccountingBookId" }));
         migration.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.CreateIndexOperation>()
@@ -448,6 +449,13 @@ public sealed class FiscalYearCloseTests
             .Should().Contain(x => x.Sql.Contains("ImmutableEvidence") && x.Sql.Contains("cannot be deleted"));
         migration.DownOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.SqlOperation>()
             .Should().Contain(x => x.Sql.Contains("IF EXISTS") && x.Sql.Contains("retained book-year close evidence"));
+
+        using var modelDb = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer("Server=invalid.example;Database=unused;Integrated Security=true;TrustServerCertificate=true")
+            .Options);
+        modelDb.Model.FindEntityType(typeof(YearEndBookCloseCycle))!
+            .FindProperty(nameof(YearEndBookCloseCycle.NetIncomeTransferred))!
+            .GetColumnType().Should().Be("decimal(18,2)");
     }
 
     [Fact]
