@@ -26,7 +26,9 @@ public sealed class FinanceSourceBookAuthorityMigrationTests
             .And.Contain("ReferentialAction.Restrict")
             .And.Contain("SOURCE_BOOK_AUTHORITY_CALLER_DOWN_BLOCKED")
             .And.Contain("SOURCE_BOOK_AUTHORITY_WORKFLOW_TYPE_DOWN_BLOCKED");
-        source.Should().NotContain("AK_WorkflowInstances_TenantId_Id");
+        source.Should().Contain("initiatorApproval.InitiatorApproved");
+        source.Should().NotContain("AK_WorkflowInstances_TenantId_Id")
+            .And.NotContain("SUM(CASE WHEN a.ProcessedById=w.InitiatedById");
     }
 
     [Fact]
@@ -77,7 +79,7 @@ public sealed class FinanceSourceBookAuthorityMigrationTests
             .And.Contain("[dbo].[WorkflowStepInstances]")
             .And.Contain("[dbo].[WorkflowApprovals]")
             .And.Contain("finalApproval.FinalApprovalCount<>1")
-            .And.Contain("finalApproval.InitiatorApprovalCount")
+            .And.Contain("initiatorApproval.InitiatorApproved")
             .And.Contain("a.ProcessedDate<=w.CompletedDate")
             .And.Contain("TR_FinanceSourceBookAuthorityOrigins_AppendOnly")
             .And.Contain("TR_FinanceSourceBookAuthorityOrigins_Evidence")
@@ -89,6 +91,7 @@ public sealed class FinanceSourceBookAuthorityMigrationTests
             .And.Contain("SOURCE_BOOK_AUTHORITY_DOWN_BLOCKED");
         source.Should().NotContain("UPDATE [dbo].[FinanceSourceBookAuthorities]")
             .And.NotContain("INSERT INTO [dbo].[FinanceSourceBookAuthorities]")
+            .And.NotContain("SUM(CASE WHEN a.ProcessedById=w.InitiatedById")
             .And.NotContain("AK_WorkflowInstances_TenantId_Id");
     }
 

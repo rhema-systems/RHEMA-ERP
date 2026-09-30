@@ -137,20 +137,29 @@ public partial class AddFinanceSourceBookAuthorityCallerBindings : Migration
                 ) latestApproval
                 OUTER APPLY
                 (
-                    SELECT COUNT_BIG(*) AS FinalApprovalCount,
-                        SUM(CASE WHEN a.ProcessedById=w.InitiatedById THEN 1 ELSE 0 END) AS InitiatorApprovalCount
+                    SELECT COUNT_BIG(*) AS FinalApprovalCount
                     FROM [dbo].[WorkflowStepInstances] s
                     JOIN [dbo].[WorkflowApprovals] a ON a.StepInstanceId=s.Id AND a.TenantId=s.TenantId
                     WHERE s.TenantId=i.TenantId AND s.WorkflowInstanceId=w.Id AND s.IsDeleted=0 AND a.IsDeleted=0
                       AND s.Status=2 AND s.CompletedDate IS NOT NULL AND a.Status=1 AND a.ProcessedById IS NOT NULL
                       AND a.ProcessedDate=latestApproval.FinalProcessedDate AND a.ProcessedDate<=s.CompletedDate AND a.ProcessedDate<=w.CompletedDate
                 ) finalApproval
+                OUTER APPLY
+                (
+                    SELECT TOP (1) 1 AS InitiatorApproved
+                    FROM [dbo].[WorkflowStepInstances] s
+                    JOIN [dbo].[WorkflowApprovals] a ON a.StepInstanceId=s.Id AND a.TenantId=s.TenantId
+                    WHERE s.TenantId=i.TenantId AND s.WorkflowInstanceId=w.Id AND s.IsDeleted=0 AND a.IsDeleted=0
+                      AND s.Status=2 AND s.CompletedDate IS NOT NULL AND a.Status=1 AND a.ProcessedById=w.InitiatedById
+                      AND a.ProcessedDate=latestApproval.FinalProcessedDate
+                      AND a.ProcessedDate<=s.CompletedDate AND a.ProcessedDate<=w.CompletedDate
+                ) initiatorApproval
                 WHERE i.SourceWorkflowInstanceId IS NOT NULL
                   AND (w.Id IS NULL OR w.EntityId<>i.SourceDocumentId OR w.IsDeleted=1 OR wt.Id IS NULL OR wt.IsDeleted=1 OR wt.IsActive=0
                     OR UPPER(LTRIM(RTRIM(wt.Code))) COLLATE Latin1_General_100_BIN2<>{{workflowTypeExpression}} COLLATE Latin1_General_100_BIN2
                     OR (i.OriginalFinancePostingEventId IS NULL AND i.FreezeStage=N'SUBMITTED' AND w.Status NOT IN (0,1,6))
                     OR ((i.OriginalFinancePostingEventId IS NOT NULL OR i.FreezeStage IN (N'AUTHORIZED',N'PRE_POST'))
-                        AND (w.Status<>2 OR w.CompletedDate IS NULL OR finalApproval.FinalApprovalCount<>1 OR COALESCE(finalApproval.InitiatorApprovalCount,0)<>0)))
+                        AND (w.Status<>2 OR w.CompletedDate IS NULL OR finalApproval.FinalApprovalCount<>1 OR COALESCE(initiatorApproval.InitiatorApproved,0)<>0)))
             ) THROW 51005, 'SOURCE_BOOK_AUTHORITY_WORKFLOW_EVIDENCE_MISMATCH', 1;
 
             IF EXISTS
