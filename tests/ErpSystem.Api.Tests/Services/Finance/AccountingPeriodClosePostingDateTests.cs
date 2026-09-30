@@ -540,6 +540,13 @@ public sealed class AccountingPeriodClosePostingDateTests
         await using var db = CreateContext();
         SeedTenant(db, tenantId);
         var period = SeedPeriod(db, tenantId);
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            BookType = AccountingBookType.PrimaryFull, IsDefault = true,
+            IsActive = true, AllowsPosting = true
+        };
+        db.AccountingBooks.Add(book);
         db.FinancePostingEvents.Add(new FinancePostingEvent
         {
             Id = Guid.NewGuid(),
@@ -552,6 +559,7 @@ public sealed class AccountingPeriodClosePostingDateTests
             PostingDate = new DateTime(2026, 7, 10),
             FunctionalCurrencyCode = "GHS",
             BookClassification = "IFRS",
+            AccountingBookId = book.Id,
             TotalDebitAmount = 100m,
             TotalCreditAmount = 100m
         });

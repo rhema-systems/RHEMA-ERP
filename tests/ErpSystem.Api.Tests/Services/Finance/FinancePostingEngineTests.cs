@@ -1457,7 +1457,12 @@ public sealed class FinancePostingEngineTests
         var postingEvent = await db.FinancePostingEvents.Include(item => item.JournalEntry)!
             .ThenInclude(journal => journal!.Transactions).SingleAsync();
         if (corruptedEvidence == "event")
-            postingEvent.AccountingBookId = localBook.Id;
+        {
+            // AccountingBookId is an identifying FK and EF correctly forbids mutating it in
+            // place. Corrupt the stored book code instead; the transaction branch below still
+            // exercises an ID mismatch, while both prove replay fails closed on book identity.
+            postingEvent.BookClassification = localBook.Code;
+        }
         else
             postingEvent.JournalEntry!.Transactions.First().AccountingBookId = localBook.Id;
         await db.SaveChangesAsync();
