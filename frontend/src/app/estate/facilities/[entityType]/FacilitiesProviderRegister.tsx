@@ -36,6 +36,30 @@ import { FacilitiesProviderRates } from './FacilitiesProviderRates';
 const PAGE_SIZE = 20;
 const todayInputValue = () => new Date().toISOString().slice(0, 10);
 const billingFrequencies = ['OnDemand', 'Weekly', 'Monthly', 'Quarterly', 'SemiAnnual', 'Annual'];
+const approvedContractStatuses = new Set(['active', 'approved']);
+
+function isApprovedContractStatus(status?: string | null) {
+  return approvedContractStatuses.has((status || '').toLowerCase());
+}
+
+function dateOnly(value?: string | null) {
+  return value ? value.slice(0, 10) : '';
+}
+
+function addDaysToDateInput(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime())) return '';
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function isFutureDate(value?: string | null) {
+  return Boolean(value && dateOnly(value) > todayInputValue());
+}
+
+function isPastDate(value?: string | null) {
+  return Boolean(value && dateOnly(value) < todayInputValue());
+}
 
 const emptyAssignmentForm = (): FacilitiesProviderAssignmentRequest => ({
   estateManagedAssetId: '',
@@ -76,9 +100,32 @@ function supplierInvoiceHref(provider: FacilitiesProviderOption | null, assignme
     const facility = [assignment.assetCode, assignment.assetName].filter(Boolean).join(' - ');
     const details = [assignment.serviceScope, assignment.serviceArea, facility].filter(Boolean).join(' | ');
     params.set('lineDescription', details || 'Facilities provider service');
-    params.set('notes', `Facilities provider assignment${facility ? `: ${facility}` : ''}`);
+    const invoiceDate = dateOnly(assignment.nextInvoiceDate) || todayInputValue();
+    params.set('invoiceDate', invoiceDate);
+    if (assignment.contractPaymentTermId) params.set('paymentTermId', assignment.contractPaymentTermId);
+    if (assignment.contractPaymentTermDueDays != null) {
+      params.set('paymentTermsDays', String(assignment.contractPaymentTermDueDays));
+      const dueDate = addDaysToDateInput(invoiceDate, assignment.contractPaymentTermDueDays);
+      if (dueDate) params.set('dueDate', dueDate);
+    }
+    params.set('notes', [
+      `Facilities provider assignment${facility ? `: ${facility}` : ''}`,
+      assignment.contractNumber ? `Contract: ${assignment.contractNumber}` : '',
+      assignment.billingFrequency ? `Billing frequency: ${assignment.billingFrequency}` : '',
+    ].filter(Boolean).join('\n'));
   }
   return `/procurement/supplier-invoices/create?${params.toString()}`;
+}
+
+function assignmentInvoiceBlockReason(assignment: FacilitiesProviderAssignment) {
+  if (assignment.assignmentStatus !== 'Active') return 'Assignment is not active.';
+  if (!assignment.providerRate) return 'Link a provider rate first.';
+  if (!assignment.contractId) return 'Link an approved contract first.';
+  if (!isApprovedContractStatus(assignment.contractStatus)) return 'Contract is not approved or active.';
+  if (isPastDate(assignment.contractEndDate)) return 'Contract has ended.';
+  if (isPastDate(assignment.effectiveTo)) return 'Assignment has ended.';
+  if (isFutureDate(assignment.nextInvoiceDate)) return 'Next invoice is not due yet.';
+  return null;
 }
 
 export function FacilitiesProviderRegister() {
@@ -119,12 +166,16 @@ export function FacilitiesProviderRegister() {
   };
 
   const openAssignments = async (provider: FacilitiesProviderOption) => {
+    const firstContract = provider.contracts[0];
     setAssignmentProvider(provider);
     setAssignments([]);
     setAssignmentRates([]);
     setAssignmentForm({
       ...emptyAssignmentForm(),
-      contractId: provider.contracts[0]?.id ?? null,
+      contractId: firstContract?.id ?? null,
+      effectiveFrom: dateOnly(firstContract?.startDate) || todayInputValue(),
+      effectiveTo: dateOnly(firstContract?.endDate),
+      nextInvoiceDate: dateOnly(firstContract?.startDate) || todayInputValue(),
     });
     setAssignmentAssetLabel('');
     setAssignmentError(null);
@@ -162,6 +213,9 @@ export function FacilitiesProviderRegister() {
       setAssignmentForm({
         ...emptyAssignmentForm(),
         contractId: assignmentProvider.contracts[0]?.id ?? null,
+        effectiveFrom: dateOnly(assignmentProvider.contracts[0]?.startDate) || todayInputValue(),
+        effectiveTo: dateOnly(assignmentProvider.contracts[0]?.endDate),
+        nextInvoiceDate: dateOnly(assignmentProvider.contracts[0]?.startDate) || todayInputValue(),
       });
       setAssignmentAssetLabel('');
     } catch (error) {
@@ -243,7 +297,8 @@ export function FacilitiesProviderRegister() {
                   <div key={item.id} className="flex flex-wrap items-center gap-1">
                     <span title={item.contractTitle}>{item.contractNumber}</span>
                     <span className="text-xs text-muted-foreground">{item.currency} {item.contractValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                    {item.paymentTerms ? <span className="text-xs text-muted-foreground" title="Payment terms">{item.paymentTerms}</span> : null}
+                    {item.paymentTermName || item.paymentTerms ? <span className="text-xs text-muted-foreground" title="Payment terms">{item.paymentTermName || item.paymentTerms}</span> : null}
+                    {item.startDate ? <span className="text-xs text-muted-foreground">starts {new Date(item.startDate).toLocaleDateString()}</span> : null}
                     {item.endDate ? <span className="text-xs text-muted-foreground">ends {new Date(item.endDate).toLocaleDateString()}</span> : null}
                     {expiringProviderContracts(provider).some((contract) => contract.id === item.id)
                       ? <Badge variant="destructive">Soon</Badge> : null}
@@ -358,15 +413,40 @@ export function FacilitiesProviderRegister() {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="provider-assignment-contract">Contract</Label>
-                <Select value={assignmentForm.contractId || 'none'} onValueChange={(value) => setAssignmentForm((current) => ({ ...current, contractId: value === 'none' ? null : value }))}>
+                <Select value={assignmentForm.contractId || 'none'} onValueChange={(value) => {
+                  const selectedContract = assignmentProvider?.contracts.find((contract) => contract.id === value);
+                  setAssignmentForm((current) => ({
+                    ...current,
+                    contractId: value === 'none' ? null : value,
+                    effectiveFrom: dateOnly(selectedContract?.startDate) || current.effectiveFrom,
+                    effectiveTo: dateOnly(selectedContract?.endDate) || current.effectiveTo,
+                    nextInvoiceDate: dateOnly(selectedContract?.startDate) || current.nextInvoiceDate,
+                    providerRateId: assignmentRates.find((rate) => rate.id === current.providerRateId)?.contractId === value
+                      ? current.providerRateId
+                      : null,
+                  }));
+                }}>
                   <SelectTrigger id="provider-assignment-contract"><SelectValue placeholder="Select contract" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">No contract selected</SelectItem>
+                    <SelectItem value="none">Select approved contract</SelectItem>
                     {(assignmentProvider?.contracts ?? []).map((contract) => (
-                      <SelectItem key={contract.id} value={contract.id}>{contract.contractNumber} - {contract.contractTitle}</SelectItem>
+                      <SelectItem key={contract.id} value={contract.id}>
+                        {contract.contractNumber} - {contract.contractTitle}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {assignmentForm.contractId ? (() => {
+                  const contract = assignmentProvider?.contracts.find((item) => item.id === assignmentForm.contractId);
+                  return contract ? (
+                    <p className="text-xs text-muted-foreground">
+                      {[contract.status, contract.paymentTermName || contract.paymentTerms,
+                        contract.startDate ? `starts ${new Date(contract.startDate).toLocaleDateString()}` : '',
+                        contract.endDate ? `ends ${new Date(contract.endDate).toLocaleDateString()}` : '']
+                        .filter(Boolean).join(' | ')}
+                    </p>
+                  ) : null;
+                })() : null}
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="provider-assignment-rate">Provider rate</Label>
@@ -382,7 +462,9 @@ export function FacilitiesProviderRegister() {
                   <SelectTrigger id="provider-assignment-rate"><SelectValue placeholder="Select service rate" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No rate selected</SelectItem>
-                    {assignmentRates.map((rate) => (
+                    {assignmentRates
+                      .filter((rate) => !assignmentForm.contractId || !rate.contractId || rate.contractId === assignmentForm.contractId)
+                      .map((rate) => (
                       <SelectItem key={rate.id} value={rate.id}>
                         {rate.serviceName} - {rate.currency} {rate.rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} / {rate.unitOfMeasure}
                       </SelectItem>
@@ -467,7 +549,7 @@ export function FacilitiesProviderRegister() {
                 <Textarea id="provider-assignment-notes" value={assignmentForm.notes || ''}
                   onChange={(event) => setAssignmentForm((current) => ({ ...current, notes: event.target.value }))} />
               </div>
-              <Button onClick={() => void saveAssignment()} disabled={assignmentSaving || !assignmentForm.estateManagedAssetId || !assignmentForm.serviceScope.trim()}>
+              <Button onClick={() => void saveAssignment()} disabled={assignmentSaving || !assignmentForm.estateManagedAssetId || !assignmentForm.contractId || !assignmentForm.serviceScope.trim()}>
                 {assignmentSaving ? 'Saving...' : 'Assign provider'}
               </Button>
             </div>
@@ -479,39 +561,48 @@ export function FacilitiesProviderRegister() {
                 <TableBody>
                   {assignmentLoading ? <TableRow><TableCell colSpan={7}>Loading assignments...</TableCell></TableRow>
                     : assignments.length === 0 ? <TableRow><TableCell colSpan={7}>No facility assignments yet.</TableCell></TableRow>
-                      : assignments.map((assignment) => (
-                        <TableRow key={assignment.id}>
-                          <TableCell><div className="font-medium">{assignment.assetCode || '-'}</div><div className="text-xs text-muted-foreground">{assignment.assetName || assignment.assetLocation || '-'}</div></TableCell>
-                          <TableCell><div>{assignment.serviceScope}</div>{assignment.serviceArea ? <div className="text-xs text-muted-foreground">{assignment.serviceArea}</div> : null}</TableCell>
-                          <TableCell>
-                            <div>{assignment.billingFrequency || 'On demand'}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {assignment.providerRate != null && assignment.providerRateCurrency
-                                ? `${assignment.billingQuantity || 1} x ${assignment.providerRateCurrency} ${assignment.providerRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
-                                : 'No rate linked'}
-                            </div>
-                            {assignment.nextInvoiceDate ? <div className="text-xs text-muted-foreground">next {new Date(assignment.nextInvoiceDate).toLocaleDateString()}</div> : null}
-                          </TableCell>
-                          <TableCell>{assignment.contractNumber || '-'}</TableCell>
-                          <TableCell><Badge variant={assignment.assignmentStatus === 'Active' ? 'default' : 'secondary'}>{assignment.assignmentStatus}</Badge></TableCell>
-                          <TableCell><span className="text-xs">{new Date(assignment.effectiveFrom).toLocaleDateString()} {assignment.effectiveTo ? `- ${new Date(assignment.effectiveTo).toLocaleDateString()}` : 'onward'}</span></TableCell>
-                          <TableCell className="text-right">
-                            {assignment.providerRate ? (
-                              <Button size="icon" variant="ghost" asChild title="Raise supplier invoice">
-                                <Link href={supplierInvoiceHref(assignmentProvider, assignment)}>
+                      : assignments.map((assignment) => {
+                        const invoiceBlockReason = assignmentInvoiceBlockReason(assignment);
+                        return (
+                          <TableRow key={assignment.id}>
+                            <TableCell><div className="font-medium">{assignment.assetCode || '-'}</div><div className="text-xs text-muted-foreground">{assignment.assetName || assignment.assetLocation || '-'}</div></TableCell>
+                            <TableCell><div>{assignment.serviceScope}</div>{assignment.serviceArea ? <div className="text-xs text-muted-foreground">{assignment.serviceArea}</div> : null}</TableCell>
+                            <TableCell>
+                              <div>{assignment.billingFrequency || 'On demand'}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {assignment.providerRate != null && assignment.providerRateCurrency
+                                  ? `${assignment.billingQuantity || 1} x ${assignment.providerRateCurrency} ${assignment.providerRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+                                  : 'No rate linked'}
+                              </div>
+                              {assignment.nextInvoiceDate ? <div className="text-xs text-muted-foreground">next {new Date(assignment.nextInvoiceDate).toLocaleDateString()}</div> : null}
+                            </TableCell>
+                            <TableCell>
+                              <div>{assignment.contractNumber || '-'}</div>
+                              {assignment.contractPaymentTermName || assignment.contractPaymentTerms ? (
+                                <div className="text-xs text-muted-foreground">{assignment.contractPaymentTermName || assignment.contractPaymentTerms}</div>
+                              ) : null}
+                              {assignment.contractEndDate ? <div className="text-xs text-muted-foreground">ends {new Date(assignment.contractEndDate).toLocaleDateString()}</div> : null}
+                            </TableCell>
+                            <TableCell><Badge variant={assignment.assignmentStatus === 'Active' ? 'default' : 'secondary'}>{assignment.assignmentStatus}</Badge></TableCell>
+                            <TableCell><span className="text-xs">{new Date(assignment.effectiveFrom).toLocaleDateString()} {assignment.effectiveTo ? `- ${new Date(assignment.effectiveTo).toLocaleDateString()}` : 'onward'}</span></TableCell>
+                            <TableCell className="text-right">
+                              {invoiceBlockReason ? (
+                                <Button size="icon" variant="ghost" disabled title={invoiceBlockReason}>
                                   <FileText className="h-4 w-4" />
-                                  <span className="sr-only">Raise supplier invoice</span>
-                                </Link>
-                              </Button>
-                            ) : (
-                              <Button size="icon" variant="ghost" disabled title="Link a provider rate first">
-                                <FileText className="h-4 w-4" />
-                                <span className="sr-only">Link a provider rate first</span>
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                                  <span className="sr-only">{invoiceBlockReason}</span>
+                                </Button>
+                              ) : (
+                                <Button size="icon" variant="ghost" asChild title="Raise supplier invoice">
+                                  <Link href={supplierInvoiceHref(assignmentProvider, assignment)}>
+                                    <FileText className="h-4 w-4" />
+                                    <span className="sr-only">Raise supplier invoice</span>
+                                  </Link>
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                 </TableBody>
               </Table>
             </div>

@@ -61,8 +61,12 @@ export interface FacilitiesProviderOption {
     contractValue: number;
     currency: string;
     paymentTerms?: string | null;
+    paymentTermId?: string | null;
+    paymentTermName?: string | null;
+    paymentTermDueDays?: number | null;
     startDate?: string | null;
     endDate?: string | null;
+    status?: string | null;
   }>;
 }
 
@@ -106,6 +110,13 @@ export interface FacilitiesProviderAssignment {
   contractId?: string | null;
   contractNumber?: string | null;
   contractTitle?: string | null;
+  contractStatus?: string | null;
+  contractStartDate?: string | null;
+  contractEndDate?: string | null;
+  contractPaymentTerms?: string | null;
+  contractPaymentTermId?: string | null;
+  contractPaymentTermName?: string | null;
+  contractPaymentTermDueDays?: number | null;
   providerRateId?: string | null;
   providerRateServiceName?: string | null;
   providerRateUnitOfMeasure?: string | null;

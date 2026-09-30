@@ -128,6 +128,25 @@ export function VendorInvoiceFormPage({
   const prefilledUnitPrice = Number(searchParams.get('unitPrice') || 0);
   const prefilledCurrencyCode = (searchParams.get('currencyCode') || 'GHS').trim().toUpperCase();
   const prefilledNotes = searchParams.get('notes') || '';
+  const prefilledInvoiceDate = searchParams.get('invoiceDate') || '';
+  const prefilledDueDate = searchParams.get('dueDate') || '';
+  const prefilledPaymentTermId = searchParams.get('paymentTermId') || '';
+  const prefilledPaymentTermsDays = Number(searchParams.get('paymentTermsDays') || NaN);
+  const parsePrefilledDate = (value: string, fallback: Date) => {
+    if (!value) return fallback;
+    const date = new Date(`${value.slice(0, 10)}T00:00:00`);
+    return Number.isFinite(date.getTime()) ? date : fallback;
+  };
+  const defaultInvoiceDate = parsePrefilledDate(prefilledInvoiceDate, new Date());
+  const defaultDueDate = parsePrefilledDate(
+    prefilledDueDate,
+    addDays(
+      defaultInvoiceDate,
+      Number.isFinite(prefilledPaymentTermsDays) && prefilledPaymentTermsDays >= 0
+        ? prefilledPaymentTermsDays
+        : 30
+    )
+  );
   const { toast } = useToast();
   const { currentTenantCode } = useTenant();
   const exchangeRateRequestId = useRef(0);
@@ -156,7 +175,9 @@ export function VendorInvoiceFormPage({
   const [applySupplierDefaults, setApplySupplierDefaults] = useState(
     !editInvoiceId && !defaultOpeningBalance
   );
-  const manualSupplierDefaults = useRef(new Set<string>());
+  const manualSupplierDefaults = useRef(new Set<string>(
+    prefilledPaymentTermId || prefilledDueDate ? ['paymentTermId', 'dueDate'] : []
+  ));
   const supplierSelectionRef = useRef('');
   const [withholdingDecision, setWithholdingDecision] = useState<
     boolean | null
@@ -399,9 +420,9 @@ export function VendorInvoiceFormPage({
       supplierId: preselectedSupplierId || '',
       supplierInvoiceNumber: '',
       purchaseOrderId: preselectedPurchaseOrderId || undefined,
-      invoiceDate: new Date(),
-      dueDate: addDays(new Date(), 30),
-      paymentTermId: '',
+      invoiceDate: defaultInvoiceDate,
+      dueDate: defaultDueDate,
+      paymentTermId: prefilledPaymentTermId,
       apAccountId: '',
       expenseAccountId: '',
       currencyCode: prefilledCurrencyCode || 'GHS',

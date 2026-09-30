@@ -25,6 +25,12 @@ public sealed class FacilitiesProviderOptionsController(
         "Annual"
     };
 
+    private static readonly HashSet<string> ApprovedContractStatuses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Active",
+        "Approved"
+    };
+
     [HttpGet]
     public async Task<IActionResult> Get(CancellationToken cancellationToken)
     {
@@ -43,9 +49,10 @@ public sealed class FacilitiesProviderOptionsController(
         var ids = providers.Select(item => item.Id).ToList();
         var today = now.Date;
         var contracts = await db.Contracts.AsNoTracking()
+            .Include(item => item.PaymentTerm)
             .Where(item => item.TenantId == tenantId && !item.IsDeleted
-                && ids.Contains(item.BusinessPartnerId) && item.Status == "Active"
-                && (!item.StartDate.HasValue || item.StartDate.Value.Date <= today)
+                && ids.Contains(item.BusinessPartnerId)
+                && ApprovedContractStatuses.Contains(item.Status)
                 && (!item.EndDate.HasValue || item.EndDate.Value.Date >= today))
             .OrderBy(item => item.ContractNumber)
             .Select(item => new
@@ -57,8 +64,12 @@ public sealed class FacilitiesProviderOptionsController(
                 item.ContractValue,
                 item.Currency,
                 item.PaymentTerms,
+                item.PaymentTermId,
+                PaymentTermName = item.PaymentTerm != null ? item.PaymentTerm.Name : null,
+                PaymentTermDueDays = item.PaymentTerm != null ? (int?)item.PaymentTerm.DueDays : null,
                 item.StartDate,
-                item.EndDate
+                item.EndDate,
+                item.Status
             })
             .ToListAsync(cancellationToken);
         var results = providers.Select(item => new
@@ -141,6 +152,8 @@ public sealed class FacilitiesProviderOptionsController(
         if (!await db.BusinessPartners.AsNoTracking().AnyAsync(item =>
             item.TenantId == tenantId && item.Id == id && !item.IsDeleted, cancellationToken))
             return NotFound();
+
+        await SyncContractBoundAssignmentStatusesAsync(id, cancellationToken);
 
         var assignments = await db.EstateFacilityProviderAssignments.AsNoTracking()
             .Where(item => item.TenantId == tenantId && item.BusinessPartnerId == id && !item.IsDeleted)
@@ -257,11 +270,12 @@ public sealed class FacilitiesProviderOptionsController(
                 item.TenantId == tenantId && item.Id == contractId && !item.IsDeleted
                 && item.BusinessPartnerId == providerId, cancellationToken);
             if (contract is null) return BadRequest("Contract does not belong to this provider.");
-            if (request.IsActive && (contract.Status != "Active"
+            if (request.IsActive && (!IsApprovedContractStatus(contract.Status)
+                || contract.EndDate is { } expired && expired.Date < DateTime.UtcNow.Date
                 || contract.StartDate is { } start && request.EffectiveFrom.Date < start.Date
                 || contract.EndDate is { } contractEnd &&
                     (request.EffectiveTo?.Date ?? DateTime.MaxValue.Date) > contractEnd.Date))
-                return BadRequest("Active rate dates must fall within an active provider contract.");
+                return BadRequest("Active rate dates must fall within an approved, unexpired provider contract.");
         }
 
         if (!request.IsActive) return null;
@@ -295,6 +309,8 @@ public sealed class FacilitiesProviderOptionsController(
             item.TenantId == tenantId && item.Id == request.EstateManagedAssetId && !item.IsDeleted,
             cancellationToken);
         if (asset is null) return BadRequest("Select a valid facility, property, site, or unit.");
+        if (request.AssignmentStatus == "Active" && request.ContractId is null)
+            return BadRequest("Select an approved provider contract before activating a facility assignment.");
 
         if (request.ContractId is { } contractId)
         {
@@ -302,11 +318,19 @@ public sealed class FacilitiesProviderOptionsController(
                 item.TenantId == tenantId && item.Id == contractId && !item.IsDeleted
                 && item.BusinessPartnerId == providerId, cancellationToken);
             if (contract is null) return BadRequest("Contract does not belong to this provider.");
-            if (request.AssignmentStatus == "Active" && (contract.Status != "Active"
+            if (request.AssignmentStatus == "Active" && (!IsApprovedContractStatus(contract.Status)
+                || contract.EndDate is { } expired && expired.Date < DateTime.UtcNow.Date
                 || contract.StartDate is { } start && request.EffectiveFrom.Date < start.Date
                 || contract.EndDate is { } contractEnd &&
                     (request.EffectiveTo?.Date ?? DateTime.MaxValue.Date) > contractEnd.Date))
-                return BadRequest("Active assignment dates must fall within the active provider contract.");
+                return BadRequest("Active assignment dates must fall within the approved, unexpired provider contract.");
+            if (request.NextInvoiceDate is { } nextInvoiceDate)
+            {
+                if (nextInvoiceDate.Date < request.EffectiveFrom.Date)
+                    return BadRequest("Next invoice date cannot be before the assignment start date.");
+                if (contract.EndDate is { } invoiceContractEnd && nextInvoiceDate.Date > invoiceContractEnd.Date)
+                    return BadRequest("Next invoice date cannot fall after the provider contract end date.");
+            }
         }
 
         if (request.ProviderRateId is { } providerRateId)
@@ -336,8 +360,59 @@ public sealed class FacilitiesProviderOptionsController(
             return BadRequest("Billing frequency must be OnDemand, Weekly, Monthly, Quarterly, SemiAnnual, or Annual.");
         if (request.BillingQuantity is <= 0 or > 99999999999999.9999m)
             return BadRequest("Billing quantity must be positive.");
+        if (request.NextInvoiceDate is { } assignmentNextInvoice
+            && request.EffectiveTo is { } assignmentEnd
+            && assignmentNextInvoice.Date > assignmentEnd.Date)
+            return BadRequest("Next invoice date cannot fall after the assignment end date.");
 
         return null;
+    }
+
+    private async Task SyncContractBoundAssignmentStatusesAsync(Guid providerId, CancellationToken cancellationToken)
+    {
+        var tenantId = TenantId();
+        var today = DateTime.UtcNow.Date;
+        var assignments = await db.EstateFacilityProviderAssignments
+            .Where(item => item.TenantId == tenantId
+                && item.BusinessPartnerId == providerId
+                && !item.IsDeleted
+                && item.AssignmentStatus == "Active"
+                && item.ContractId.HasValue)
+            .ToListAsync(cancellationToken);
+        if (assignments.Count == 0) return;
+
+        var contractIds = assignments.Select(item => item.ContractId!.Value).Distinct().ToList();
+        var contracts = await db.Contracts.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && contractIds.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
+        var changed = false;
+        var now = DateTime.UtcNow;
+        foreach (var assignment in assignments)
+        {
+            var shouldEnd = assignment.ContractId is not { } contractId
+                || !contracts.TryGetValue(contractId, out var contract)
+                || contract.IsDeleted
+                || !IsApprovedContractStatus(contract.Status)
+                || contract.EndDate is { } contractEnd && contractEnd.Date < today;
+            if (!shouldEnd) continue;
+
+            assignment.AssignmentStatus = "Ended";
+            var contractEndDate = assignment.ContractId is { } endedContractId
+                && contracts.TryGetValue(endedContractId, out var endedContract)
+                ? endedContract.EndDate?.Date
+                : null;
+            var endedDate = contractEndDate is { } end && end < today ? end : today;
+            if (!assignment.EffectiveTo.HasValue || assignment.EffectiveTo.Value.Date > endedDate)
+                assignment.EffectiveTo = endedDate;
+            if (assignment.NextInvoiceDate.HasValue && assignment.NextInvoiceDate.Value.Date > endedDate)
+                assignment.NextInvoiceDate = null;
+            assignment.UpdatedAt = now;
+            assignment.UpdatedBy = "Contract lifecycle sync";
+            assignment.LastModifiedById = CurrentUserId();
+            changed = true;
+        }
+
+        if (changed) await db.SaveChangesAsync(cancellationToken);
     }
 
     private static void Apply(EstateFacilityProviderRate rate, ProviderRateRequest request)
@@ -393,6 +468,7 @@ public sealed class FacilitiesProviderOptionsController(
             .Where(item => item.TenantId == tenantId && assetIds.Contains(item.Id))
             .ToDictionaryAsync(item => item.Id, cancellationToken);
         var contracts = await db.Contracts.AsNoTracking()
+            .Include(item => item.PaymentTerm)
             .Where(item => item.TenantId == tenantId && contractIds.Contains(item.Id))
             .ToDictionaryAsync(item => item.Id, cancellationToken);
         var rates = await db.EstateFacilityProviderRates.AsNoTracking()
@@ -418,6 +494,13 @@ public sealed class FacilitiesProviderOptionsController(
                 item.ContractId,
                 ContractNumber = contract?.ContractNumber,
                 ContractTitle = contract?.ContractTitle,
+                ContractStatus = contract?.Status,
+                ContractStartDate = contract?.StartDate,
+                ContractEndDate = contract?.EndDate,
+                ContractPaymentTerms = contract?.PaymentTerms,
+                ContractPaymentTermId = contract?.PaymentTermId,
+                ContractPaymentTermName = contract?.PaymentTerm?.Name,
+                ContractPaymentTermDueDays = contract?.PaymentTerm?.DueDays,
                 item.ProviderRateId,
                 ProviderRateServiceName = rate?.ServiceName,
                 ProviderRateUnitOfMeasure = rate?.UnitOfMeasure,
@@ -444,6 +527,9 @@ public sealed class FacilitiesProviderOptionsController(
 
     private static string? TrimToNull(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static bool IsApprovedContractStatus(string? status)
+        => !string.IsNullOrWhiteSpace(status) && ApprovedContractStatuses.Contains(status.Trim());
 }
 
 public sealed record ProviderRateRequest(Guid? ContractId, string ServiceName,
