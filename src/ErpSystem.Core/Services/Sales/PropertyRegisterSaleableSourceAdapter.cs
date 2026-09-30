@@ -27,7 +27,9 @@ public class PropertyRegisterSaleableSourceAdapter : ISalesSaleableSourceAdapter
         new() { Field = "district", DisplayName = "District" },
         new() { Field = "town", DisplayName = "Town" },
         new() { Field = "currency", DisplayName = "Currency" },
-        new() { Field = "boundaryVerified", DisplayName = "Boundary verified", ValueType = "boolean", Options = ["true", "false"] }
+        new() { Field = "boundaryVerified", DisplayName = "Boundary verified", ValueType = "boolean", Options = ["true", "false"] },
+        new() { Field = "isPublishedToExternalPortal", DisplayName = "Published to portal", ValueType = "boolean", Options = ["true", "false"] },
+        new() { Field = "externalListingStatus", DisplayName = "Portal listing status", Options = ["Published"] }
     ];
 
     public async Task<IReadOnlyCollection<SalesSaleableItemDto>> SearchItemsAsync(
@@ -41,26 +43,19 @@ public class PropertyRegisterSaleableSourceAdapter : ISalesSaleableSourceAdapter
         }
 
         var normalizedTake = Math.Clamp(take, 1, 100);
+        var filters = SaleableSourceFilterSettings.Parse(source.SettingsJson);
         var query = new EstateManagedAssetQuery
         {
             Search = search,
             Take = Math.Max(normalizedTake * 5, 100),
-            ExcludedStatuses = [EstateManagedAssetStatus.Sold, EstateManagedAssetStatus.Retired]
+            AssetType = ResolveAssetType(filters),
+            PublishedToExternalPortal = true
         };
 
-        if (source.AllowSalesAgreements)
-        {
-            query.AvailableForSaleOrLease = true;
-        }
-        else
-        {
-            query.AvailableForSale = true;
-        }
-
-        // Estate/Sales handoff: request only transaction-eligible estate assets before the source service applies its take limit.
+        // Property and Facility sources are portal-register views. Transaction eligibility remains
+        // explicit on each result through the CanCreate... flags below.
         var assets = await _managedAssetService.GetManagedAssetsAsync(query);
 
-        var filters = SaleableSourceFilterSettings.Parse(source.SettingsJson);
         return assets
             .Where(asset => MatchesFilters(asset, filters))
             .Take(normalizedTake)
@@ -70,7 +65,7 @@ public class PropertyRegisterSaleableSourceAdapter : ISalesSaleableSourceAdapter
                 SourceCode = source.Code,
                 SourceType = source.SourceType,
                 AdapterKey = AdapterKey,
-                SourceItemId = asset.Id.ToString(),
+                SourceItemId = (asset.ProjectUnitId ?? asset.Id).ToString(),
                 ItemCode = asset.AssetCode,
                 ItemName = asset.Name,
                 ItemType = asset.AssetType.ToString(),
@@ -110,6 +105,20 @@ public class PropertyRegisterSaleableSourceAdapter : ISalesSaleableSourceAdapter
             "town" => SaleableSourceFilterSettings.TextMatches(asset.Town, filter.Value),
             "currency" => asset.Currency.Equals(filter.Value, StringComparison.OrdinalIgnoreCase),
             "boundaryverified" => SaleableSourceFilterSettings.BoolMatches(asset.BoundaryVerified, filter.Value),
+            "ispublishedtoexternalportal" => SaleableSourceFilterSettings.BoolMatches(asset.IsPublishedToExternalPortal, filter.Value),
+            "externallistingstatus" => asset.ExternalListingStatus.Equals(filter.Value, StringComparison.OrdinalIgnoreCase),
             _ => true
         });
+
+    private static EstateManagedAssetType? ResolveAssetType(
+        IReadOnlyCollection<SaleableSourceFilterValue> filters)
+    {
+        var configured = filters.FirstOrDefault(filter =>
+            SaleableSourceFilterSettings.Normalize(filter.Field) is "assettype" or "propertytype" or "type");
+
+        return configured != null
+            && Enum.TryParse<EstateManagedAssetType>(configured.Value, true, out var assetType)
+                ? assetType
+                : null;
+    }
 }
