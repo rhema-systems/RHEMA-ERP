@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Performance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Data;
@@ -46,20 +47,69 @@ public class PeerNominationController : ControllerBase
         return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
     }
 
-    /// <summary>The nomination's peer, its appraisee, the appraisee's manager, or a policy holder.</summary>
-    private async Task<bool> CanAccessNominationAsync(Guid nominationId, string policy)
+    /// <summary>
+    /// Who reads a nomination: the appraisee — except in Manager mode with anonymous reviews, where
+    /// the manager chose the peers and the appraisee is told the counts only (performance closure
+    /// D-40); the appraisee's manager; the nominated peer once it is approved — the nomination they
+    /// are asked to act on, never one still pending or rejected (D-41); or a policy holder. A party
+    /// reads as the party, desk or not (the two-actor rule): the policy test came first.
+    /// </summary>
+    private async Task<bool> CanReadNominationAsync(Guid nominationId, string policy)
     {
-        if (await HoldsPolicyAsync(policy)) return true;
-        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
         if (_currentUserService.TenantId is not Guid tenantId) return false;
+        var me = _currentUserService.EmployeeId is Guid id && id != Guid.Empty ? id : (Guid?)null;
 
-        return await _db.Set<PeerNomination>()
+        var nomination = await _db.Set<PeerNomination>()
             .AsNoTracking()
             .Where(n => n.Id == nominationId && n.TenantId == tenantId)
-            .AnyAsync(n => n.PeerEmployeeId == me
-                        || n.Appraisal.EmployeeId == me
-                        || n.Appraisal.Employee.ManagerId == me,
-                HttpContext.RequestAborted);
+            .Select(n => new
+            {
+                n.PeerEmployeeId,
+                n.NominationStatus,
+                AppraiseeId = n.Appraisal.EmployeeId,
+                n.Appraisal.Employee.ManagerId,
+                n.Appraisal.AppraisalCycle.AppraisalSettings.PeerNominationMode,
+                n.Appraisal.AppraisalCycle.AppraisalSettings.PeerReviewsAnonymous,
+            })
+            .FirstOrDefaultAsync(HttpContext.RequestAborted);
+
+        // An unknown id falls to the desk, so the action reports it missing rather than forbidden.
+        if (nomination is null) return await HoldsPolicyAsync(policy);
+        if (me is Guid subject && nomination.AppraiseeId == subject)
+            return !(nomination.PeerNominationMode == PeerNominationMode.Manager && nomination.PeerReviewsAnonymous);
+        if (me is Guid manager && nomination.ManagerId == manager) return true;
+        if (me is Guid peer && nomination.PeerEmployeeId == peer)
+            return nomination.NominationStatus == PeerNominationStatus.Approved;
+        return await HoldsPolicyAsync(policy);
+    }
+
+    /// <summary>
+    /// Who reads an appraisal's list of nominations: its appraisee — not in Manager mode with anonymous
+    /// reviews (D-40) — the appraisee's manager, or a policy holder. The appraisee reads as the
+    /// appraisee, desk or not.
+    /// </summary>
+    private async Task<bool> CanReadAppraisalNominationsAsync(Guid appraisalId, string policy)
+    {
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+        var me = _currentUserService.EmployeeId is Guid id && id != Guid.Empty ? id : (Guid?)null;
+
+        var appraisal = await _db.Set<PerformanceAppraisal>()
+            .AsNoTracking()
+            .Where(a => a.Id == appraisalId && a.TenantId == tenantId)
+            .Select(a => new
+            {
+                a.EmployeeId,
+                a.Employee.ManagerId,
+                a.AppraisalCycle.AppraisalSettings.PeerNominationMode,
+                a.AppraisalCycle.AppraisalSettings.PeerReviewsAnonymous,
+            })
+            .FirstOrDefaultAsync(HttpContext.RequestAborted);
+
+        if (appraisal is null) return await HoldsPolicyAsync(policy);
+        if (me is Guid subject && appraisal.EmployeeId == subject)
+            return !(appraisal.PeerNominationMode == PeerNominationMode.Manager && appraisal.PeerReviewsAnonymous);
+        if (me is Guid manager && appraisal.ManagerId == manager) return true;
+        return await HoldsPolicyAsync(policy);
     }
 
     /// <summary>
@@ -128,7 +178,7 @@ public class PeerNominationController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid id)
     {
-        if (!await CanAccessNominationAsync(id, HrPermissions.PerformanceReadPolicy)) return Forbid();
+        if (!await CanReadNominationAsync(id, HrPermissions.PerformanceReadPolicy)) return Forbid();
 
         try
         {
@@ -153,7 +203,7 @@ public class PeerNominationController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<PeerNominationDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetByAppraisalId(Guid appraisalId)
     {
-        if (!await CanAccessAppraisalAsync(appraisalId, HrPermissions.PerformanceReadPolicy)) return Forbid();
+        if (!await CanReadAppraisalNominationsAsync(appraisalId, HrPermissions.PerformanceReadPolicy)) return Forbid();
 
         try
         {
@@ -286,40 +336,11 @@ public class PeerNominationController : ControllerBase
         }
     }
 
-    /// <summary>
-    /// Send peer evaluation invitation
-    /// </summary>
-    [HttpPost("{id:guid}/send-invitation")]
-    [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> SendInvitation(Guid id)
-    {
-        if (!await CanWriteNominationAsync(id, HrPermissions.PerformanceWritePolicy)) return Forbid();
-
-        try
-        {
-            var invitationDto = new SendPeerEvaluationInvitationDto { PeerNominationId = id };
-            var response = await _nominationService.SendInvitationAsync(invitationDto);
-            return Ok(response);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BusinessRuleRejected(ex);
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error sending invitation for peer nomination {NominationId}", id);
-            return StatusCode(500, "An error occurred while sending the invitation");
-        }
-    }
+    // POST {id}/send-invitation went in performance closure D3: a stub that stamped a date and sent
+    // nothing ("TODO: Send email"), with no screen. Approval asks the peer, and says so.
 
     /// <summary>
-    /// Delete a peer nomination
+    /// Withdraw a pending peer nomination
     /// </summary>
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]

@@ -13,7 +13,7 @@ namespace ErpSystem.Core.Services.HR.Appraisal;
 /// criterion snapshot and the criterion score, because a goal row (lane L) has no template item.
 /// Lane L-b moved the scoring, the forms, the saves, appeals, calibration and the HR review onto
 /// the criterion key, and lane C6 the appeal page's list, which offered competencies only. The
-/// appeal reads describe their rows through <c>PerformanceAppraisalService.LoadAppealCriteriaAsync</c>.</para>
+/// appeal reads and the manager's peer review describe their rows through <c>PerformanceAppraisalService.LoadCriterionRowsAsync</c>.</para>
 ///
 /// <para>A goal row reaching <see cref="TemplateKey(CriterionScore)"/> is therefore a defect, and
 /// it fails there, naming the row, instead of colliding with another row under an empty key.</para>

@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { formatDate } from '@/lib/hr/attendance-format';
+import { formatActualAgainstTarget, formatCriterionScore } from '@/types/hr/appeals';
 import { performanceAppraisalService } from '@/services/hr/appraisal-run.service';
 
 /**
@@ -111,78 +112,55 @@ export function PeerFeedbackPanel({ appraisalId }: { appraisalId: string }) {
                 </div>
               </div>
             </CardHeader>
-            {peer.isSubmitted && (
+            {peer.isSubmitted && peer.criterionScores.length > 0 && (
               <CardContent className="p-0">
-                {peer.competencyScores.length > 0 && (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Criterion</TableHead>
-                        <TableHead className="w-20 text-right">Weight</TableHead>
-                        <TableHead className="w-20 text-right">Score</TableHead>
-                        <TableHead className="w-28">Grade</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {peer.competencyScores.map((score) => (
-                        <TableRow key={score.criterionScoreId}>
+                {/* Every criterion the peer scored — a KPI or goal row too, where the cycle lets
+                    peers score them (performance closure lane D). This listed competencies only,
+                    at weight 0, beside a KPI table that was always empty. */}
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Criterion</TableHead>
+                      <TableHead className="w-20 text-right">Weight</TableHead>
+                      <TableHead className="w-24 text-right">Score</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {peer.criterionScores.map((row) => {
+                      const against =
+                        row.scoringMethod === 'Measured'
+                          ? formatActualAgainstTarget(row.actualValue, row.targetValue, row.unit)
+                          : null;
+                      return (
+                        <TableRow key={row.criterionScoreId}>
                           <TableCell>
-                            <div className="font-medium">{score.criteriaName}</div>
-                            {score.comments && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-medium">{row.itemName || '—'}</span>
+                              <Badge variant="secondary">{row.itemType}</Badge>
+                            </div>
+                            {row.sectionName && (
+                              <div className="text-xs text-muted-foreground">{row.sectionName}</div>
+                            )}
+                            {against && (
+                              <div className="text-xs text-muted-foreground tabular-nums">
+                                Measured: {against}
+                              </div>
+                            )}
+                            {row.comments && (
                               <div className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
-                                {score.comments}
+                                {row.comments}
                               </div>
                             )}
                           </TableCell>
-                          <TableCell className="text-right tabular-nums">{score.weight}%</TableCell>
+                          <TableCell className="text-right tabular-nums">{row.weight}%</TableCell>
                           <TableCell className="text-right tabular-nums">
-                            {score.numericScore}
-                          </TableCell>
-                          <TableCell>{score.achievedGrade ?? '—'}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-
-                {data.allowKpiEvaluation && peer.kpiEvaluations.length > 0 && (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>KPI</TableHead>
-                        <TableHead className="w-28 text-right">Target</TableHead>
-                        <TableHead className="w-28 text-right">Actual</TableHead>
-                        <TableHead className="w-24 text-right">Achieved</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {peer.kpiEvaluations.map((kpi) => (
-                        <TableRow key={kpi.kpiEvaluationRecordId}>
-                          <TableCell>
-                            <div className="font-medium">{kpi.kpiName}</div>
-                            {kpi.notes && (
-                              <div className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
-                                {kpi.notes}
-                              </div>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {kpi.targetValue ?? '—'}
-                            {kpi.unit ? ` ${kpi.unit}` : ''}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {kpi.actualValue ?? '—'}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {kpi.achievementPercent != null
-                              ? `${Number(kpi.achievementPercent).toFixed(1)}%`
-                              : '—'}
+                            {formatCriterionScore(row.score, row.scoringMethod)}
                           </TableCell>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
+                      );
+                    })}
+                  </TableBody>
+                </Table>
               </CardContent>
             )}
           </Card>

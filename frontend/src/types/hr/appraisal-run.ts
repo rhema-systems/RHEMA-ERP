@@ -663,13 +663,18 @@ export interface PeerNomination extends AuditFields {
 }
 
 /**
- * `canSubmit` reports whether the nomination *count* is within the configured min/max — it is
- * about the list, not about approval. `canEdit` is false once the appraisal leaves Draft or
- * Active.
+ * `canSubmit` reports whether the *active* count (pending + approved) is within the configured
+ * min/max — it is about the list, not about approval. A rejected nomination counts in
+ * `totalNominations` only: it leaves room for a replacement (performance closure D2). `canEdit` is
+ * the cycle's window: in Employee mode while the appraisal is Draft or Active, in Manager mode
+ * until it is completed or closed.
  */
 export interface PeerNominationSummary {
   appraisalId: string;
+  /** Every nomination, rejected ones included. */
   totalNominations: number;
+  /** Pending and approved — what the minimum and the maximum count. */
+  activeNominations: number;
   pendingCount: number;
   approvedCount: number;
   rejectedCount: number;
@@ -678,6 +683,12 @@ export interface PeerNominationSummary {
   canSubmit: boolean;
   canEdit: boolean;
   nominationMode: PeerNominationMode;
+  /**
+   * The appraisee, in Manager mode with anonymous peer reviews, is told the counts only (D-40):
+   * `nominations` comes back empty. The manager chose the peers, and with one peer the peer average
+   * is that person's score.
+   */
+  peersWithheld: boolean;
   nominations: PeerNomination[];
 }
 
@@ -715,8 +726,11 @@ export interface PeerEvaluationAssignment {
   status: string;
   startedDate?: string | null;
   submittedDate?: string | null;
+  /** The nomination's due date, else the cycle's peer deadline (D5). */
   dueDate?: string | null;
   evaluatorWeight: number;
+  /** What the nominator asked this peer to comment on. */
+  instructionsToPeer?: string | null;
 }
 
 /**
@@ -734,7 +748,10 @@ export interface PeerEvaluationDetail {
   allowPeerKpiEvaluation: boolean;
   isAnonymous: boolean;
   isSubmitted: boolean;
+  /** The nomination's due date, else the cycle's peer deadline (D5). */
   dueDate?: string | null;
+  /** What the nominator asked this peer to comment on. */
+  instructionsToPeer?: string | null;
   sections: PeerEvaluationSection[];
 }
 
@@ -745,27 +762,31 @@ export interface SavePeerEvaluation {
 
 // ── The manager's view of peer feedback ──────────────────────────────────────────
 
-export interface PeerCompetencyScore {
+/**
+ * One criterion a peer scored, named and weighted from the appraisal's snapshot, and scored as the
+ * appeal pages describe a row (C6): a rated row's score on its scale, a measured row's achievement %
+ * with the actual and the target beside it. It replaced a competency list at weight 0 and a KPI
+ * list that was always empty (performance closure lane D).
+ */
+export interface PeerCriterionScore {
   criterionScoreId: string;
-  criteriaName: string;
-  criteriaDescription?: string | null;
+  /** The template item for a template row, the snapshot row for a goal row. */
+  criterionKey: string;
+  templateItemId?: string | null;
+  criterionConfigId?: string | null;
+  itemType: 'Competency' | 'KPI' | 'Goal' | 'Question' | 'Criterion';
+  scoringMethod: CriterionScoringMethod;
+  itemName: string;
+  description?: string | null;
+  sectionName?: string | null;
+  /** The row's weight within its section. */
   weight: number;
-  numericScore: number;
+  score?: number | null;
+  actualValue?: number | null;
+  targetValue?: number | null;
+  unit?: string | null;
   weightedScore: number;
   comments?: string | null;
-  achievedGrade?: string | null;
-}
-
-export interface PeerKpiEvaluation {
-  kpiEvaluationRecordId: string;
-  kpiName: string;
-  kpiDescription?: string | null;
-  targetValue?: number | null;
-  actualValue?: number | null;
-  achievementPercent?: number | null;
-  unit?: string | null;
-  notes?: string | null;
-  achievedGrade?: string | null;
 }
 
 export interface PeerEvaluatorDetail {
@@ -777,8 +798,8 @@ export interface PeerEvaluatorDetail {
   isSubmitted: boolean;
   submittedDate?: string | null;
   totalScore?: number | null;
-  competencyScores: PeerCompetencyScore[];
-  kpiEvaluations: PeerKpiEvaluation[];
+  /** Every criterion the peer scored, in the forms' order — empty while the scores are withheld. */
+  criterionScores: PeerCriterionScore[];
 }
 
 export interface ManagerPeerEvaluationReview {

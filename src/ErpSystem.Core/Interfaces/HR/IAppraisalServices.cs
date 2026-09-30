@@ -358,14 +358,31 @@ public interface IPeerNominationService
     Task<PeerNominationDto> CreateAsync(CreatePeerNominationDto createDto, CancellationToken cancellationToken = default);
     Task<PeerNominationDto> UpdateAsync(UpdatePeerNominationDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<bool> SendInvitationAsync(SendPeerEvaluationInvitationDto invitationDto, CancellationToken cancellationToken = default);
-    
+    // send-invitation, a stub with no screen, went in performance closure D3: approval asks the peer.
+
     // Batch operations
-    Task<PeerNominationSummaryDto> GetNominationSummaryAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// The appraisal's nominations and counts. <paramref name="viewerEmployeeId"/> is the reader: the
+    /// appraisee in Manager mode with anonymous reviews is told the counts only (D-40).
+    /// </summary>
+    Task<PeerNominationSummaryDto> GetNominationSummaryAsync(Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default);
     // P14: nominatedById is the caller (from the token); Manager mode refuses the appraisee.
     Task<IEnumerable<PeerNominationDto>> BatchCreateAsync(BatchCreatePeerNominationsDto batchDto, Guid nominatedById, CancellationToken cancellationToken = default);
     Task<IEnumerable<PeerNominationDto>> ApproveNominationsAsync(ApprovePeerNominationsDto approveDto, CancellationToken cancellationToken = default);
     Task<IEnumerable<PeerNominationDto>> RejectNominationsAsync(RejectPeerNominationsDto rejectDto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The one approval path (performance closure D1, D4, D-39): approves the pending nominations among
+    /// <paramref name="nominations"/> — each peer's evaluation added, the appraisal's peer count moved,
+    /// the due date set when given — on the caller's unit of work. The caller saves, then calls
+    /// <see cref="NotifyApprovedAsync"/>. The appraisal and the nominations must be tracked.
+    /// </summary>
+    Task<IReadOnlyList<PeerNomination>> StageApprovalAsync(
+        PerformanceAppraisal appraisal, IEnumerable<PeerNomination> nominations, DateTime? dueDate, CancellationToken cancellationToken = default);
+
+    /// <summary>Tells each approved peer they have been asked for feedback, with the due date. Best-effort.</summary>
+    Task NotifyApprovedAsync(
+        Guid appraisalId, IReadOnlyCollection<PeerNomination> approved, DateTime? dueDate, CancellationToken cancellationToken = default);
 }
 
 #endregion Peer Nomination

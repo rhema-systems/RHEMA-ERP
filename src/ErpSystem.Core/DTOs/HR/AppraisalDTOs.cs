@@ -1545,35 +1545,26 @@ public class CreatePeerNominationDto : CreateDtoBase
     
     [MaxLength(500)]
     public string? InstructionsToPeer { get; set; }
-    
+
+    /// <summary>
+    /// Pending, or the nomination is refused (422, performance closure D1): it was stored as sent, so
+    /// a raw POST made an Approved nomination with no peer evaluation behind it. Approval is the
+    /// manager's (or, in Manager mode, the nomination itself).
+    /// </summary>
     public PeerNominationStatus NominationStatus { get; set; } = PeerNominationStatus.Pending;
 }
 
+/// <summary>
+/// What may change on a pending nomination (performance closure D1): its due date and its
+/// instructions. It carried the appraisal, the peer, the nominator, the invitation date and the
+/// status, all copied as sent.
+/// </summary>
 public class UpdatePeerNominationDto : UpdateDtoBase
 {
-    [Required]
-    public Guid AppraisalId { get; set; }
-    
-    [Required]
-    public Guid PeerEmployeeId { get; set; }
-    
-    [Required]
-    public Guid NominatedById { get; set; }
-    
-    public DateTime? InvitationSentDate { get; set; }
-    
     public DateTime? DueDate { get; set; }
-    
+
     [MaxLength(500)]
     public string? InstructionsToPeer { get; set; }
-    
-    public PeerNominationStatus NominationStatus { get; set; }
-}
-
-public class SendPeerEvaluationInvitationDto
-{
-    [Required]
-    public Guid PeerNominationId { get; set; }
 }
 
 public class BatchCreatePeerNominationsDto
@@ -1620,15 +1611,26 @@ public class RejectPeerNominationsDto
 public class PeerNominationSummaryDto
 {
     public Guid AppraisalId { get; set; }
+    /// <summary>Every nomination, rejected ones included.</summary>
     public int TotalNominations { get; set; }
+    /// <summary>Pending and approved — what the minimum and the maximum count (D2: a rejected one leaves room for a replacement).</summary>
+    public int ActiveNominations { get; set; }
     public int PendingCount { get; set; }
     public int ApprovedCount { get; set; }
     public int RejectedCount { get; set; }
     public int MinRequired { get; set; }
     public int MaxAllowed { get; set; }
+    /// <summary>The active nominations are within the cycle's range.</summary>
     public bool CanSubmit { get; set; }
+    /// <summary>Nominations may be made or decided: in Employee mode while Draft or Active, in Manager mode until completed or closed.</summary>
     public bool CanEdit { get; set; }
     public PeerNominationMode NominationMode { get; set; }
+
+    /// <summary>
+    /// The list is withheld from this reader (D-40): the appraisee, in Manager mode with anonymous peer
+    /// reviews — the manager chose the peers, so the appraisee is told the counts only.
+    /// </summary>
+    public bool PeersWithheld { get; set; }
     public List<PeerNominationDto> Nominations { get; set; } = new();
 }
 
@@ -2510,8 +2512,14 @@ public class PeerEvaluationAssignmentDto
     public string Status { get; set; } = string.Empty; // Not Started, In Progress, Submitted
     public DateTime? StartedDate { get; set; }
     public DateTime? SubmittedDate { get; set; }
+    /// <summary>
+    /// The nomination's due date, else the cycle's peer deadline (performance closure D5): it was
+    /// always the cycle's, though the approval told the peer the nomination's.
+    /// </summary>
     public DateOnly? DueDate { get; set; }
     public decimal EvaluatorWeight { get; set; }
+    /// <summary>What the nominator asked this peer to comment on — collected on the nomination, and shown nowhere.</summary>
+    public string? InstructionsToPeer { get; set; }
 }
 
 /// <summary>
@@ -2531,8 +2539,11 @@ public class PeerEvaluationDetailDto
     public bool AllowPeerKpiEvaluation { get; set; }
     public bool IsAnonymous { get; set; }
     public bool IsSubmitted { get; set; }
+    /// <summary>The nomination's due date, else the cycle's peer deadline (D5).</summary>
     public DateOnly? DueDate { get; set; }
-    
+    /// <summary>What the nominator asked this peer to comment on.</summary>
+    public string? InstructionsToPeer { get; set; }
+
     /// <summary>Template sections in display order, containing scoreable items.</summary>
     public List<PeerEvaluationSectionDto> Sections { get; set; } = new();
 }
@@ -2817,43 +2828,39 @@ public class PeerEvaluatorDetailDto
     public bool IsSubmitted { get; set; }
     public DateTime? SubmittedDate { get; set; }
     public decimal? TotalScore { get; set; }
-    
-    // Competency evaluations
-    public List<PeerCompetencyScoreDto> CompetencyScores { get; set; } = new();
-    
-    // KPI evaluations (if allowed)
-    public List<PeerKpiEvaluationDto> KpiEvaluations { get; set; } = new();
+
+    /// <summary>
+    /// Every criterion the peer scored — competency, and KPI or goal rows where the cycle lets peers
+    /// score them — in the forms' order (performance closure lane D). It listed competencies only, so
+    /// a peer's KPI or goal score never reached the manager; its KPI list was always empty.
+    /// </summary>
+    public List<PeerCriterionScoreDto> CriterionScores { get; set; } = new();
 }
 
-/// <summary>
-/// Peer's competency score detail
-/// </summary>
-public class PeerCompetencyScoreDto
+/// <summary>One criterion a peer scored, named, weighted and scored as the appeal reads describe a row (C6).</summary>
+public class PeerCriterionScoreDto
 {
     public Guid CriterionScoreId { get; set; }
-    public string CriteriaName { get; set; } = string.Empty;
-    public string? CriteriaDescription { get; set; }
+    /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
+    public Guid CriterionKey { get; set; }
+    public Guid? TemplateItemId { get; set; }
+    public Guid? CriterionConfigId { get; set; }
+    /// <summary><c>Competency</c>, <c>KPI</c>, <c>Goal</c> or <c>Question</c>.</summary>
+    public string ItemType { get; set; } = string.Empty;
+    public CriterionScoringMethod ScoringMethod { get; set; }
+    public string ItemName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string? SectionName { get; set; }
+    /// <summary>The row's weight within its section, from the snapshot (it was 0).</summary>
     public int Weight { get; set; }
-    public int NumericScore { get; set; }
+    /// <summary>A rated row's score on its scale, a measured row's achievement %.</summary>
+    public decimal? Score { get; set; }
+    /// <summary>A measured row's actual, and its target; null on a rated row.</summary>
+    public decimal? ActualValue { get; set; }
+    public decimal? TargetValue { get; set; }
+    public string? Unit { get; set; }
     public decimal WeightedScore { get; set; }
     public string? Comments { get; set; }
-    public string? AchievedGrade { get; set; }
-}
-
-/// <summary>
-/// Peer's KPI evaluation detail
-/// </summary>
-public class PeerKpiEvaluationDto
-{
-    public Guid KpiEvaluationRecordId { get; set; }
-    public string KpiName { get; set; } = string.Empty;
-    public string? KpiDescription { get; set; }
-    public decimal? TargetValue { get; set; }
-    public decimal? ActualValue { get; set; }
-    public decimal? AchievementPercent { get; set; }
-    public string? Unit { get; set; }
-    public string? Notes { get; set; }
-    public string? AchievedGrade { get; set; }
 }
 /// <summary>
 /// DTO for employee to acknowledge their appraisal

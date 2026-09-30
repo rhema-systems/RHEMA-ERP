@@ -23,6 +23,10 @@ import { peerEvaluationService } from '@/services/hr/appraisal-run.service';
  * A row appears only once the nomination has been **approved** — approval is what creates the
  * evaluation record. A nomination still pending is invisible here, which is correct: there is
  * nothing to fill in yet.
+ *
+ * The due date is the nomination's, else the cycle's peer deadline, and the nominator's
+ * instructions show under the colleague (performance closure D5) — the page showed the cycle's
+ * deadline whatever the nomination said, and the instructions nowhere.
  */
 export default function PeerReviewsPage() {
   const { data, isLoading, isError, error } = useQuery({
@@ -38,7 +42,7 @@ export default function PeerReviewsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Peer Reviews"
-        description="Colleagues who have nominated you for feedback, and the forms still waiting on you."
+        description="Colleagues you have been asked to give feedback on, and the forms still waiting on you."
         backHref="/me"
         actions={
           <Button variant="outline" asChild>
@@ -78,7 +82,7 @@ export default function PeerReviewsPage() {
             <EmptyState
               icon={MessagesSquare}
               title="No peer reviews assigned"
-              description="A colleague's appraisal appears here once they nominate you and the nomination is approved."
+              description="A colleague's appraisal appears here once you are nominated as their peer and the nomination is approved."
             />
           ) : (
             <Table>
@@ -102,6 +106,11 @@ export default function PeerReviewsPage() {
                         <div className="text-xs text-muted-foreground">
                           {row.appraiseePosition} · {row.appraiseeOrganizationUnit}
                         </div>
+                        {row.instructionsToPeer && (
+                          <div className="mt-1 max-w-md whitespace-pre-wrap text-xs text-muted-foreground">
+                            Instructions: {row.instructionsToPeer}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {row.appraisalCycleName}

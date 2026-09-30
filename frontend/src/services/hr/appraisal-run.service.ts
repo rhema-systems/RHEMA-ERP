@@ -182,7 +182,10 @@ class PerformanceAppraisalService {
     );
   }
 
-  /** Peer feedback in full, for the manager. Evaluator identities are always shown here. */
+  /**
+   * Peer feedback in full, for the manager: every criterion each peer scored — competency, and KPI
+   * or goal rows where the cycle lets peers score them. Evaluator identities are always shown here.
+   */
   getPeerEvaluationReview(appraisalId: string): Promise<ManagerPeerEvaluationReview> {
     return apiService.get<ManagerPeerEvaluationReview>(
       `${this.baseUrl}/${appraisalId}/manager-peer-evaluations`,
@@ -191,13 +194,18 @@ class PerformanceAppraisalService {
 
   // ── Peer nominations ─────────────────────────────────────────────────────────────
 
+  /** The appraisee in Manager mode with anonymous reviews gets the counts only (`peersWithheld`). */
   getPeerNominationSummary(appraisalId: string): Promise<PeerNominationSummary> {
     return apiService.get<PeerNominationSummary>(
       `${this.baseUrl}/${appraisalId}/peer-nominations/summary`,
     );
   }
 
-  /** Nominations land Pending; approving them is a separate step. */
+  /**
+   * In Employee mode nominations land Pending and the manager approves them. In Manager mode the
+   * manager chooses the peers, so they are approved as they are made and the peers asked at once
+   * (performance closure D4).
+   */
   nominatePeers(
     appraisalId: string,
     data: BatchCreatePeerNominations,
@@ -389,19 +397,20 @@ class PeerNominationService {
     return apiService.get<PeerNomination[]>(`${this.baseUrl}/appraisal/${appraisalId}`);
   }
 
-  /** Nominations where this employee is the peer — including ones not yet approved. */
+  /**
+   * The nominations this employee has been asked to act on as the peer: approved ones only, with no
+   * rejection reason (performance closure D-41).
+   */
   getForPeer(peerEmployeeId: string): Promise<PeerNomination[]> {
     return apiService.get<PeerNomination[]>(`${this.baseUrl}/peer/${peerEmployeeId}`);
   }
 
-  /** Refused with 422 once the invitation has been sent. */
+  /**
+   * Withdraws a pending nomination. 422 once it is approved — the peer has been asked for their
+   * feedback — or rejected. (`send-invitation` went in D3: approval asks the peer.)
+   */
   remove(id: string): Promise<boolean> {
     return apiService.delete<boolean>(`${this.baseUrl}/${id}`);
-  }
-
-  /** Marks the invitation sent. 422 if it already was. */
-  sendInvitation(id: string): Promise<boolean> {
-    return apiService.post<boolean>(`${this.baseUrl}/${id}/send-invitation`);
   }
 }
 

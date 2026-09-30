@@ -7,24 +7,26 @@ using Microsoft.EntityFrameworkCore;
 namespace ErpSystem.Core.Services.HR;
 
 /// <summary>
-/// The rows the appeal reads show (performance closure C6): every criterion an appraisal was scored
-/// on — competency, KPI, goal — found by its criterion key and described from the appraisal's own
-/// snapshot, and every score read as the one number its row scored as.
+/// The rows the appeal reads and the manager's peer review show (performance closure C6, lane D):
+/// every criterion an appraisal was scored on — competency, KPI, goal — found by its criterion key and
+/// described from the appraisal's own snapshot, and every score read as the one number its row scored
+/// as.
 /// </summary>
 /// <remarks>
 /// <para>The five appeal reads each described a row their own way. The appeal page listed
 /// competencies only; the status read typed every template item a competency and named a KPI "Item";
 /// HR's review never loaded a name and set every weight to 0; the post-remand comparison and the
 /// outcome read a KPI's score from <c>NumericScore</c>, which a measured row holds only when calibration
-/// or an appeal restated it — so a KPI read "—" everywhere its actual was the score.</para>
+/// or an appeal restated it — so a KPI read "—" everywhere its actual was the score. The manager's peer
+/// review listed competencies only, at weight 0 (lane D).</para>
 /// </remarks>
 public partial class PerformanceAppraisalService
 {
-    /// <summary>One criterion of an appraisal as the appeal reads describe it.</summary>
+    /// <summary>One criterion of an appraisal as the rows' reads describe it.</summary>
     /// <param name="ItemType"><c>Competency</c>, <c>KPI</c>, <c>Goal</c>, or <c>Question</c> for a template item that is neither.</param>
     /// <param name="Weight">The row's weight within its section, frozen on the snapshot (A12).</param>
     /// <param name="ScaleTop">The top of the row's own scale: its highest grade band, or 100 for a measured row (A11).</param>
-    private sealed record AppealCriterion(
+    private sealed record CriterionRow(
         Guid Key,
         Guid? TemplateItemId,
         Guid? CriterionConfigId,
@@ -45,11 +47,11 @@ public partial class PerformanceAppraisalService
     }
 
     /// <summary>An appraisal's criteria for the appeal reads, and the scoring that reads a score on each.</summary>
-    private sealed class AppealCriteria
+    private sealed class CriterionRows
     {
-        private readonly Dictionary<Guid, AppealCriterion> _byKey;
+        private readonly Dictionary<Guid, CriterionRow> _byKey;
 
-        public AppealCriteria(Dictionary<Guid, AppealCriterion> byKey, AppraisalCriterionScoring scoring)
+        public CriterionRows(Dictionary<Guid, CriterionRow> byKey, AppraisalCriterionScoring scoring)
         {
             _byKey = byKey;
             Scoring = scoring;
@@ -57,7 +59,7 @@ public partial class PerformanceAppraisalService
 
         public AppraisalCriterionScoring Scoring { get; }
 
-        public AppealCriterion? this[Guid key] => _byKey.GetValueOrDefault(key);
+        public CriterionRow? this[Guid key] => _byKey.GetValueOrDefault(key);
 
         /// <summary>A sort key that puts rows in the order the forms show them: by section, then within it.</summary>
         public (int, int) OrderOf(Guid key)
@@ -121,7 +123,7 @@ public partial class PerformanceAppraisalService
     /// the scoring reads it: a template item or section soft-deleted after generation still names the
     /// row it scored.
     /// </remarks>
-    private async Task<AppealCriteria> LoadAppealCriteriaAsync(
+    private async Task<CriterionRows> LoadCriterionRowsAsync(
         Guid appraisalId, IEnumerable<Guid> keys, CancellationToken cancellationToken)
     {
         var tenantId = GetTenantId();
@@ -159,14 +161,14 @@ public partial class PerformanceAppraisalService
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
-        var byKey = new Dictionary<Guid, AppealCriterion>();
+        var byKey = new Dictionary<Guid, CriterionRow>();
         foreach (var row in rows)
         {
             var key = row.TemplateItemId ?? row.Id;
             if (byKey.ContainsKey(key)) continue;
 
             var measured = scoring.IsMeasured(key);
-            byKey[key] = new AppealCriterion(
+            byKey[key] = new CriterionRow(
                 key,
                 row.TemplateItemId,
                 row.Id,
@@ -220,7 +222,7 @@ public partial class PerformanceAppraisalService
                 // Resolved here first, so the scoring knows the item before a score on it is read.
                 var scaleTop = await _scores.GetScaleTopAsync(scoring, item.Id, cancellationToken);
                 var measured = scoring.IsMeasured(item.Id);
-                byKey[item.Id] = new AppealCriterion(
+                byKey[item.Id] = new CriterionRow(
                     item.Id,
                     item.Id,
                     null,
@@ -239,7 +241,7 @@ public partial class PerformanceAppraisalService
             }
         }
 
-        return new AppealCriteria(byKey, scoring);
+        return new CriterionRows(byKey, scoring);
     }
 
     /// <summary>
@@ -295,7 +297,7 @@ public partial class PerformanceAppraisalService
     /// </summary>
     private static decimal? ScoreWhenAppealed(
         AppraisalAppealItem item,
-        AppealCriteria criteria,
+        CriterionRows criteria,
         Dictionary<Guid, AppraisalCriterionScoreSnapshot>? remandSnapshot,
         CriterionScore? managerNow,
         bool openAndUnmoved)

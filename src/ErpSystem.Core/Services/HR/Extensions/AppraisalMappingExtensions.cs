@@ -1096,6 +1096,7 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <summary>A new nomination is Pending (performance closure D1) — approval is its own path, which creates the peer's evaluation.</summary>
     public static PeerNomination ToEntity(this CreatePeerNominationDto dto)
     {
         return new PeerNomination
@@ -1106,19 +1107,18 @@ public static class AppraisalMappingExtensions
             NominationDate = DateTime.UtcNow,
             DueDate = dto.DueDate,
             InstructionsToPeer = dto.InstructionsToPeer,
-            NominationStatus = dto.NominationStatus
+            NominationStatus = PeerNominationStatus.Pending
         };
     }
 
+    /// <summary>
+    /// A pending nomination's due date and instructions (D1). This copied the appraisal, the peer, the
+    /// nominator, the invitation date and the status from the body.
+    /// </summary>
     public static void UpdateEntity(this UpdatePeerNominationDto dto, PeerNomination entity)
     {
-        entity.AppraisalId = dto.AppraisalId;
-        entity.PeerEmployeeId = dto.PeerEmployeeId;
-        entity.NominatedById = dto.NominatedById;
-        entity.InvitationSentDate = dto.InvitationSentDate;
         entity.DueDate = dto.DueDate;
         entity.InstructionsToPeer = dto.InstructionsToPeer;
-        entity.NominationStatus = dto.NominationStatus;
     }
 
     public static List<PeerNominationDto> ToDtoList(this IEnumerable<PeerNomination> entities)

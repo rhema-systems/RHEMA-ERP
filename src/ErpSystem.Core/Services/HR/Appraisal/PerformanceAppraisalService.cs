@@ -949,11 +949,13 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             if (saveDto.ItemScores.Any(e => !e.ActualValue.HasValue && !e.NumericScore.HasValue))
                 return new SelfEvaluationResultDto { Success = false, Message = "One or more scored items are missing a value. Please complete all evaluations before submitting." };
 
-            // Enforce peer nominations when required and employee-driven nomination mode
+            // Enforce peer nominations when required and employee-driven nomination mode. A rejected
+            // nomination does not count (D2), as the gate before it counts — this counted every one,
+            // against the minimum and the maximum both.
             var settings = appraisal.AppraisalCycle?.AppraisalSettings;
             if (settings != null && settings.RequirePeerReviews && settings.PeerNominationMode == PeerNominationMode.Employee)
             {
-                var nominatedPeers = appraisal.PeerNominations?.Count ?? 0;
+                var nominatedPeers = appraisal.PeerNominations?.Count(n => n.NominationStatus != PeerNominationStatus.Rejected) ?? 0;
                 if (nominatedPeers < settings.MinPeerEvaluators || nominatedPeers > settings.MaxPeerEvaluators)
                 {
                     return new SelfEvaluationResultDto
@@ -2100,7 +2102,11 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         }, cancellationToken);
 
     /// <summary>
-    /// Gets detailed peer evaluations for manager to review
+    /// Every peer's evaluation of an appraisal, for its manager or the desk: who the peers are, whether
+    /// each has submitted, and — as the visibility rule allows (B2) — each submitted peer's scores on
+    /// every criterion they scored, competency, KPI or goal row, named and weighted from the snapshot.
+    /// It listed competency rows only, at weight 0, so a peer's KPI or goal score never reached the
+    /// manager where the cycle lets peers score them (performance closure lane D).
     /// </summary>
     public async Task<ManagerPeerEvaluationReviewDto> GetManagerPeerEvaluationReviewAsync(
         Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default)
@@ -2113,7 +2119,8 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                     .ThenInclude(emp => emp.Position)
             .Include(a => a.EvaluatorEvaluations.Where(e => e.EvaluatorRole == EvaluatorRole.Peer))
                 .ThenInclude(e => e.CriterionScores)
-                    .ThenInclude(cs => cs.TemplateItem)
+            .AsSplitQuery()
+            .AsNoTracking()
             .FirstOrDefaultAsync(a => a.Id == appraisalId, cancellationToken);
 
         if (appraisal == null)
@@ -2135,28 +2142,46 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             .Where(e => e.EvaluatorRole == EvaluatorRole.Peer)
             .ToList();
 
+        var criteria = await LoadCriterionRowsAsync(
+            appraisalId,
+            peerEvaluationsList.SelectMany(e => e.CriterionScores).Where(HasCriterion).Select(s => s.CriterionKey()),
+            cancellationToken);
+
         var peerDetails = new List<PeerEvaluatorDetailDto>();
 
         foreach (var peerEval in peerEvaluationsList)
         {
             var entriesShown = scoresShown && peerEval.SubmittedDate.HasValue;
-            var competencyScores = peerEval.CriterionScores
-                .Where(cs => entriesShown && cs.TemplateItem?.CompetencyId != null)
-                .Select(cs => new PeerCompetencyScoreDto
-                {
-                    CriterionScoreId = cs.Id,
-                    CriteriaName = cs.TemplateItem?.Competency?.CriteriaName ?? string.Empty,
-                    CriteriaDescription = cs.TemplateItem?.Competency?.Description,
-                    Weight = 0, // Weight is stored in PositionCriteriaMapping, not in AppraisalCompetency
-                    NumericScore = cs.NumericScore ?? 0,
-                    WeightedScore = cs.WeightedScore,
-                    Comments = cs.Notes,
-                    AchievedGrade = null // Grade calculation would require additional logic
-                })
-                .ToList();
-
-            var kpiEvaluations = new List<PeerKpiEvaluationDto>();
-            // KPI peer evaluations are deprecated (EmployeeKpiTarget removed)
+            var criterionScores = entriesShown
+                ? peerEval.CriterionScores
+                    .Where(HasCriterion)
+                    .OrderBy(cs => criteria.OrderOf(cs.CriterionKey()))
+                    .Select(cs =>
+                    {
+                        var key = cs.CriterionKey();
+                        var c = criteria[key];
+                        return new PeerCriterionScoreDto
+                        {
+                            CriterionScoreId = cs.Id,
+                            CriterionKey = key,
+                            TemplateItemId = cs.TemplateItemId,
+                            CriterionConfigId = cs.CriterionConfigId,
+                            ItemType = c?.ItemType ?? "Criterion",
+                            ScoringMethod = c?.ScoringMethod ?? CriterionScoringMethod.Rated,
+                            ItemName = c?.Name ?? string.Empty,
+                            Description = c?.Description,
+                            SectionName = c?.SectionName,
+                            Weight = c?.Weight ?? 0,
+                            Score = criteria.ScoreOf(cs),
+                            ActualValue = criteria.ActualOf(cs),
+                            TargetValue = c?.TargetValue,
+                            Unit = c?.Unit,
+                            WeightedScore = cs.WeightedScore,
+                            Comments = cs.Notes,
+                        };
+                    })
+                    .ToList()
+                : new List<PeerCriterionScoreDto>();
 
             peerDetails.Add(new PeerEvaluatorDetailDto
             {
@@ -2168,8 +2193,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                 IsSubmitted = peerEval.SubmittedDate.HasValue,
                 SubmittedDate = peerEval.SubmittedDate,
                 TotalScore = entriesShown ? peerEval.TotalScore : null,
-                CompetencyScores = competencyScores,
-                KpiEvaluations = kpiEvaluations
+                CriterionScores = criterionScores,
             });
         }
 
@@ -2437,7 +2461,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             var scores = (await SubmittedManagerScoresAsync(appraisal.Id, cancellationToken))
                 .GroupBy(s => s.CriterionKey())
                 .ToDictionary(g => g.Key, g => g.First());
-            var criteria = await LoadAppealCriteriaAsync(appraisal.Id, scores.Keys, cancellationToken);
+            var criteria = await LoadCriterionRowsAsync(appraisal.Id, scores.Keys, cancellationToken);
 
             // The submit names a criterion by its snapshot row, so a row the snapshot does not hold is
             // not offered.
@@ -2559,7 +2583,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         // D-38: what each item scored when the appeal was filed, kept on the item — a remand re-scores
         // the manager's evaluation in place and an upheld appeal restates it, and the status and
         // outcome pages say what it moved from. A rated row's score, a measured row's achievement %.
-        var criteria = await LoadAppealCriteriaAsync(appraisal.Id, appealedKeys, cancellationToken);
+        var criteria = await LoadCriterionRowsAsync(appraisal.Id, appealedKeys, cancellationToken);
 
         // Create appeal
         var appeal = new AppraisalAppeal
@@ -2810,7 +2834,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         var breakdownShown = facts.ShowScoreBreakdownToEmployee;
 
         var items = appeal.Items.Where(HasCriterion).ToList();
-        var criteria = await LoadAppealCriteriaAsync(appraisalId, items.Select(i => i.CriterionKey()), cancellationToken);
+        var criteria = await LoadCriterionRowsAsync(appraisalId, items.Select(i => i.CriterionKey()), cancellationToken);
         var managerNow = view.ManagerScores
             ? await ManagerScoresByKeyAsync(appraisalId, cancellationToken)
             : new Dictionary<Guid, CriterionScore>();
@@ -3033,7 +3057,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         // column were never set; a KPI's scores read NumericScore, which a measured row holds only when
         // restated.
         var items = appeal.Items.Where(HasCriterion).ToList();
-        var criteria = await LoadAppealCriteriaAsync(appraisalId, items.Select(i => i.CriterionKey()), cancellationToken);
+        var criteria = await LoadCriterionRowsAsync(appraisalId, items.Select(i => i.CriterionKey()), cancellationToken);
         var remand = items.Any(i => i.OriginalScore == null)
             ? (await RemandSnapshotAsync(appraisalId, cancellationToken))?.ByKey
             : null;
@@ -3492,7 +3516,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             .GroupBy(i => i.CriterionKey())
             .ToDictionary(g => g.Key, g => g.First());
         var currentScores = currentManagerEval.CriterionScores.Where(HasCriterion).ToList();
-        var criteria = await LoadAppealCriteriaAsync(appraisalId, currentScores.Select(s => s.CriterionKey()), cancellationToken);
+        var criteria = await LoadCriterionRowsAsync(appraisalId, currentScores.Select(s => s.CriterionKey()), cancellationToken);
 
         foreach (var currentScore in currentScores.OrderBy(s => criteria.OrderOf(s.CriterionKey())))
         {
@@ -3752,7 +3776,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             .Where(HasCriterion)
             .GroupBy(i => i.CriterionKey())
             .ToDictionary(g => g.Key, g => g.First());
-        var criteria = await LoadAppealCriteriaAsync(appraisalId, finalScores.Keys.Union(contested.Keys), cancellationToken);
+        var criteria = await LoadCriterionRowsAsync(appraisalId, finalScores.Keys.Union(contested.Keys), cancellationToken);
         var remand = await RemandSnapshotAsync(appraisalId, cancellationToken);
 
         // D-38: each contested criterion from what it scored when the appeal was filed to what it

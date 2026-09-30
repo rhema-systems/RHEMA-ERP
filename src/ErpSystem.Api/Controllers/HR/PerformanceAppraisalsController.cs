@@ -1055,7 +1055,9 @@ public class PerformanceAppraisalsController : ControllerBase
 
         try
         {
-            var response = await _peerNominationService.GetNominationSummaryAsync(appraisalId);
+            // The reader decides what the list carries: the appraisee in Manager mode with anonymous
+            // reviews is told the counts only (performance closure D-40).
+            var response = await _peerNominationService.GetNominationSummaryAsync(appraisalId, _currentUserService.EmployeeId);
             return Ok(response);
         }
         catch (ArgumentException ex)

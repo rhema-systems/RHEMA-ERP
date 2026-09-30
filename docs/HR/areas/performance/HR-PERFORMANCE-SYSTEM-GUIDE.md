@@ -17,6 +17,12 @@ the manager scored can be appealed on the page, KPIs and goals included; every a
 weighs and scores each row on its own terms (a KPI by its actual against its target); each item keeps
 what it scored when the appeal was filed; HR's review shows the peers and the weights and opens a
 decided appeal; and the outcome says whether a score moved (P-47, P-49 and P-50 fixed).
+**And for lane D** (peer nominations, 2026-09-30): chapters 28 and 29 — a nomination starts pending
+and changes only its due date and instructions; the line manager cannot be a peer; a rejected
+nomination leaves room for another; in *Manager* mode the manager's nominations need no approval;
+HR's advance past the step asks the peers; the peer reads the nomination's due date and
+instructions; with anonymous reviews in *Manager* mode the appraisee sees counts, not names; and
+*Peer feedback* lists every criterion a peer scored, weighted.
 **The database was rebuilt on 2026-09-29**: Rule 2, Rule 9, the demo tables and the Efua arithmetic give its figures (Efua 88.56, Cynthia 87.00, Efua's appeal window to 6 October). The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
 **Seventh in the series**, after Recruitment, Employees, Leave, Attendance & Time, Company Schedule and Staff Travel.
 
@@ -3481,7 +3487,9 @@ them would put a colleague's appraisal under a heading that implies it is yours.
 record. A nomination still pending is invisible here, which is correct: there is nothing to fill in yet.
 
 ### 👁 On the list
-**Colleague · Cycle · Status · Due**, with a link to *My own appraisals*.
+**Colleague · Cycle · Status · Due**, with a link to *My own appraisals*. **Due** is the date the
+nomination set, else the cycle's peer deadline; the nominator's instructions sit under the colleague's
+name.
 
 ### 👁 On the detail page
 The **same scoring form** as the self and manager legs — the snapshot is shared, so the criteria and
@@ -3491,14 +3499,16 @@ their weights are identical to what everyone else is scoring against. Two things
   profile — those items still appear, so the criterion is visible in context, but cannot be scored. The
   server enforces the same rule when validating the submission.
   *(Since closure lane L-b the same setting governs the employee's **goal rows**: shown, read-only, and
-  a peer's score on one is refused when saved. For KPI items the server checks only the submission;
-  lane D closes the draft.)*
+  a peer's score on one is refused when saved. For KPI items the server checked only the submission
+  until lane B-w, which refuses the draft too.)*
   *(Since closure lane L-c the screen takes which rows are read-only from the server and sends only
   the rows you may score. Its note reads: "This cycle does not ask peers to score KPI targets or the
   employee's goals — those rows are shown for context but cannot be scored.")*
 * **Anonymity is about the appraisee, not you.** `isAnonymous` means *they* will not see who said what.
   **Their manager always sees your name**, and the screen says so plainly rather than letting the word
   "anonymous" imply more than it means.
+
+Above the form, a card — *What you were asked to comment on* — carries the nominator's instructions.
 
 **Save draft** and **Submit** — and submit is *score-then-submit*: the draft carries the scores, the
 submit validates completeness, and doing both in one click saves the user from remembering to save
@@ -3507,7 +3517,13 @@ first.
 ### ▶ Walk it
 
 1. Sign in to window B as `new.hire` *(Kojo Ansah)*.
-2. Open **Peer Reviews**. He owes — or owed — feedback on Efua Seidu and Cynthia Sarpong.
+2. Open **Peer Reviews**. He owes — or owed — feedback on Efua Seidu and Cynthia Sarpong. Both rows
+   are due **9 Oct 2026**, the date their nominations set, and carry the instructions under the name:
+   *"Please comment on how you have found working with this colleague over the year. …"*
+
+   💬 *"The date is the one his nomination gave him, and the line under each name is what he was asked
+   to speak to — it is on the form too."*
+
 3. Open one.
 4. Point at the KPI rows, which are present but not editable.
 
@@ -3531,9 +3547,10 @@ first.
 | Submit | `POST api/PeerEvaluations/{id}/submit` — everything required must be scored; **422 names how many are outstanding** |
 
 **Peer nominations** live on the appraisal, not here: `…/peer-nominations/batch` to nominate,
-`…/peer-nominations/approve` and `…/reject` in batches. Nominations land **Pending**; approving is what
-creates each peer's evaluation record and notifies them. A nomination can be removed until the
-invitation has been sent — which approval does.
+`…/peer-nominations/approve` and `…/reject` in batches. In *Employee* mode nominations land
+**Pending**, and approving is what creates each peer's evaluation record and notifies them; in
+*Manager* mode the manager's nominations are approved as they are made. Only a pending nomination can
+be edited — its due date and instructions — or removed.
 
 > **Changed 2026-09-29** (closure lane P, P14). **The nominated peer can read their nomination but
 > never change or delete it** — they could mark it approved or withdraw one they did not want. A
@@ -3548,6 +3565,23 @@ invitation has been sent — which approval does.
 > a pending one counts, a rejected one does not — so the self-evaluation waits only for the employee's
 > own step, nominating. A peer's submission that is the last step (no manager evaluation, nothing
 > after) completes the appraisal.
+
+> **Changed 2026-09-30** (closure lane D). **A nomination is what it says it is.** It starts *Pending* —
+> a request that says otherwise is refused — and an edit changes only its due date and instructions,
+> while it is pending (it could move a nomination to another appraisal, swap the peer or mark it
+> approved). The appraisee's **line manager cannot be nominated** — they evaluate as the manager — on
+> either route, nor can anyone who is not an employee. **A rejected nomination leaves room for
+> another**: the counts, the maximum and the self-evaluation's rule count pending and approved ones
+> only (with one peer allowed, a rejection stranded the employee). In **Manager** mode the manager's
+> nominations are approved as they are made — the peer is asked at once — and nobody is asked to
+> approve them. **HR's advance past peer nomination** approves the pending nominations the same way,
+> forms and notices (it set the status alone, so its "approved" peers had no form). **The peer sees the
+> nomination's due date and the nominator's instructions** — on this database *9 Oct*, where the list
+> showed the cycle's *20 Nov*. **The peer reads a nomination once it is approved**, and their own lists
+> carry approved ones only (they listed pending and rejected ones, with the reason written for the
+> appraisee). In *Manager* mode with anonymous reviews **the appraisee sees how many peers were asked,
+> not who** — the manager chose them, and with one peer the peers' average would be that person's
+> score. The *send invitation* door, which sent nothing, is gone: approval tells the peer.
 
 ### ⚠ Known gaps
 **P-36.** Every peer evaluation on this database is already submitted, so the forms open read-only.
@@ -3601,8 +3635,8 @@ it needs changing.*
 | **Evaluation** | The scoring form — **with the employee's own score beside every row** |
 | **Goals** | The goal assessment panel in *manager* mode: his conclusion, **with her claim shown read-only above it** |
 | **Assessment & recommendations** | Six narrative boxes, each 2000 characters with a live counter: **Overall comments · Strengths · Areas for improvement · Training needs · Career aspirations · Notes on your recommendations** — then five checkboxes: **Promotion · Salary increment · Training · Performance improvement plan · Termination** |
-| **Peer feedback** | Every peer's scores and comments, attributed |
-| **Nominations** | Only when the cycle nominates in *Manager* mode |
+| **Peer feedback** | Every peer's scores and comments, attributed — each criterion a peer scored, with its section and weight |
+| **Nominations** | Only when the cycle nominates in *Manager* mode — the manager chooses the peers, and each is asked as soon as they are nominated |
 | **History** | The employee's score across previous cycles |
 | **Conversations** | The panel that schedules and completes appraisal conversations |
 | **Evidence** | Attachments — *"Evidence behind the ratings — reports, certificates, correspondence. Scanned on upload; max 10 MB."* **Remove** is offered on a file to whoever attached it, or to HR, and on nothing once the appraisal is complete — the server refuses the rest (closure P9, 2026-09-29; it removed anyone's file, at any stage) |
@@ -3632,6 +3666,15 @@ submitted count always, the scores and comments once the manager has submitted.
 > the **Goals** tab, a goal scored on the form has its actual and percentage greyed out — the row is
 > where they are entered. Before this lane every goal row shared one key on this screen and the
 > employee's: a score typed on one showed on all of them, and the save could not name the row.
+
+> **Changed 2026-09-30** (performance closure lane D). **Peer feedback lists every criterion a peer
+> scored** — a competency, and a KPI or goal row where the cycle lets peers score them — each with its
+> kind, its section, its weight in the section and its score, a measured row by its achievement with
+> the actual against the target. It listed competencies alone, every one at weight 0 % with a *Grade*
+> of "—", beside a KPI table that was always empty. On the demo (peers score competencies only) each
+> peer's rows are *Communication* and *Teamwork* in *Core Competencies*, 50 % each. In *Manager* mode
+> the **Nominations** tab asks each peer as soon as the manager nominates them — there is no approval
+> step — and HR's advance past peer nomination asks the pending ones too.
 
 ### ▶ Walk it
 
@@ -3671,9 +3714,10 @@ submitted count always, the scores and comments once the manager has submitted.
    does not start a salary increment — it tells HR that this appraisal called for one. What happens next
    is a separate, approved chain, and we will follow it in Part Six."*
 
-9. Go to **Peer feedback**. Point at the banner.
+9. Go to **Peer feedback**. Point at the banner — *2 of 2 peer evaluations submitted* — then at a
+   peer's rows: *Communication* and *Teamwork*, each in *Core Competencies* at 50 %.
 
-   💬 *"Two of four peers submitted — and he sees their names, because this setting is about what **she**
+   💬 *"Both her peers have submitted — and he sees their names, because this setting is about what **she**
    sees, not what he does. The screen says so, so he knows before he quotes a comment back to her in a
    conversation."*
 

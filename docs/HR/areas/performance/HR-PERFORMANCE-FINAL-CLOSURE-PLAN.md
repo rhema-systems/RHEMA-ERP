@@ -50,8 +50,12 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    in its d34). ~~Slice **C-b** (the reads)~~ **Done 2026-09-30** (source-checked first: § 1f D-37 a
    decided appeal opens, D-38 each item's score kept at the filing; `run-final-appeals.mjs` 397/397
    twice; regression 2309/2318; lane C's C-b State block — read its refinements: HR's changes go
-   only on a contested row, and one score per row across the reads). **Lane C is complete; lane D is
-   next.**
+   only on a contested row, and one score per row across the reads). **Lane C is complete.**
+   ~~Lane **D**~~ **Done 2026-09-30** (source-checked first: § 1g D-39 HR's advance approves through
+   the one path, D-40 counts only for the appraisee in Manager mode with anonymous reviews, D-41 a
+   peer's reads list approved nominations only; `run-final-nominations.mjs` 186/186 twice;
+   regression 2496/2505; lane D's State block — read its refinements and the harness changes
+   it made in other suites). **Lane D is complete; lane E is next.**
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -144,6 +148,14 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | D-37 | **A decided appeal on HR's desk.** The queue's *Decided* tab links **View** to the appeal page, whose read refuses an Upheld or Rejected appeal — every decided appeal opens to an error, and the page's own *Decided* state is unreachable | **Open it read-only**: the review read answers for a decided appeal and carries the decision — who, when, the notes, the overall before → after; the page offers no action | C-b |
 | D-38 | **What an appeal remembers of each item.** The status page's *Original score* is the manager's *current* score: after an upheld change it shows the new score, and during a remand the manager's re-scoring | **Record each appealed item's score at filing** on the appeal item (`AppraisalAppealItem.OriginalScore`, never written until now — no migration): a rated row's score on its scale, a measured row's achievement %. The status and outcome pages show *was → now* per item; appeals filed before it fall back to the remand snapshot, or "—" | C-b |
 
+### 1g. Decisions from lane D's source check — settled with the user, 2026-09-30
+
+| # | Question | Decision (2026-09-30) | Affects |
+|---|---|---|---|
+| D-39 | **HR's advance past peer nomination.** It marks pending nominations Approved but creates no peer evaluation — "approved" peers with no form, told nothing | **Approve them properly, through the one approval path** the manager's approve uses: each peer's evaluation, the count, the notification. A peer who then does not submit is the next step's waiver | D1 |
+| D-40 | **Anonymity in Manager mode.** The appraisee reads the peers the manager chose through the nomination reads (the summary, the list, a nomination by id); with one peer, the HR review's peer average is that person's score | **Counts only**: in Manager mode with anonymous reviews the appraisee's summary carries counts and statuses but no peer identity, and the list and by-id reads refuse the appraisee (403). Employee mode is unchanged — the appraisee chose the peers | D4, P |
+| D-41 | **A peer's own reads** (`PeerNomination/peer/{id}`, `pending/{id}`) list nominations never approved — rejected ones too, with the reason written for the appraisee | **Approved only, no rejection reason**; the routes stay | D1, P |
+
 ---
 
 ## 2. Lane status
@@ -155,7 +167,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | B | One gate evaluator (B1 first); settings enforced or removed | 3.5 days (+1, D-33) | D-32, D-33 | ☑ 2026-09-29. B1 — 256/256 twice; B3–B5 with it; B1 enforces nine of the fourteen settings. B2's rest and B6–B8 in two slices (D-33): B-v — 246/246 twice; B-w — 363/363 twice (the suite holds both), regression 1877/1886; staged. The tolerance moved to batch 2 (D-32); `AppealReevaluationWindowDays`' flip is lane C's |
 | L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ☑ 2026-09-29 — L-a 157/157 twice; L-b 244/244 twice; L-c 261/261 twice (one suite holds L-b and L-c); staged |
 | C | One appeal machine | 2 days (+0.5–1, D-36) | D-22, D-34, D-35, D-36, D-37, D-38 | ☑ **complete 2026-09-30**; C10 was batch 1's. Two slices (D-36): C-a ☑ — 209/209 twice, regression 2089/2098, committed effb567f5. C-b ☑ — source-checked (§ 1f D-37, D-38), `run-final-appeals.mjs` 397/397 twice, regression 2309/2318; staged |
-| D | Peer nomination and evaluation integrity | 1 day | — | ☐ |
+| D | Peer nomination and evaluation integrity | 1 day (1.5–2, the source check) | D-39, D-40, D-41 | ☑ 2026-09-30 — source-checked (§ 1g); `run-final-nominations.mjs` 186/186 twice, regression 2496/2505; staged |
 | E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | 4 days | D-10, D-14, D-17, D-20 | ☐ |
 | F | Recommendations, proposals, probation, PIP chain, segregation of duties | 2.5 days | D-12, D-19; **F1 waits on D-18** (the finish plan's lane 9) | ☐ |
 | G | Notifications on the platform topics | 5 days | D-21, D-28 | ☐ |
@@ -1826,23 +1838,22 @@ recorded at filing. C-b stays one slice (D-36), about 2 days.
 
 ### Lane D — Peer nomination and evaluation integrity
 
-- [ ] D1 *(The nominator from the token is done — both create routes, lane P14. The rest stands.)*
-      `ToEntity` forces Pending + nominator from the token (PNS validates appraisee or manager);
-      `UpdateEntity` copies only `DueDate`/`InstructionsToPeer`; update refused unless Pending;
-      a posted non-Pending status → 422; `PeerEmployeeId` ≠ appraisee and ≠ manager, **on the batch
-      route too** (`hr-portal/run-slice5.mjs:122` nominates the manager today — lane S8). Approval
-      only through the batch endpoints (the only path that creates the peer `EvaluatorEvaluation`,
-      PNS :530-541).
-- [ ] D2 Counts exclude Rejected (PNS :211, :360-361, :398; PAS :1448) so a replacement can be nominated.
-- [ ] D3 `send-invitation` stub (PNS :314-333, `// TODO: Send email`) removed — approval notifies;
-      its client method (`appraisal-run.service.ts:403-405`, no screen caller) goes with it.
-- [ ] D4 `PeerNominationMode.Manager`: manager nominates, nominator recorded as manager, no
-      approval step; wording per mode (PNS :430 records the appraisee today); the appraisee is not
-      admitted to batch nominate in Manager mode (PAC :1324-1338). *(The access half is done in lane
-      P14: the nominator is recorded from the login on both routes, and Manager mode refuses the
-      appraisee on both — `EnsureMayNominate`. Left for D4: no approval step, wording per mode.)*
-- [ ] D5 Peer submit checks appraisal + cycle status; peer `DueDate` (PNS :525) shown on the assignment
-      instead of the cycle deadline (`PeerEvaluationService.cs:128`); dead decrement at PNS :299-305 removed.
+- [x] D1 *(2026-09-30 — the D State block below. The nominator from the token was lane P14's.)*
+      A nomination starts Pending on both routes — a posted non-Pending status → 422; the edit takes
+      `DueDate`/`InstructionsToPeer` only, and only while Pending; not the appraisee, not their line
+      manager, not an unknown employee, **on the batch route too** (`hr-portal/run-slice5.mjs:122`
+      nominated the manager — fixed in the slice). Approval only through the one path,
+      `StageApprovalAsync`, which creates the peer `EvaluatorEvaluation`.
+- [x] D2 Counts exclude Rejected — both maximums, the summary (`ActiveNominations`, `CanSubmit`), the
+      self-evaluation submit, the panel's *at max* and *N more needed* — so a replacement can be nominated.
+- [x] D3 `send-invitation` removed — the route, the service method, its DTO and the client method;
+      approval notifies.
+- [x] D4 `PeerNominationMode.Manager`: the manager's nominations are approved as they are made, on
+      both routes — the peer has the evaluation and is told; nobody is asked to approve; the panel's
+      wording follows the mode. *(The access half was lane P14's: `EnsureMayNominate`.)*
+- [x] D5 The peer's list and form read the nomination's due date, else the cycle's peer deadline, and
+      the nominator's instructions; the dead decrement removed; only a pending nomination is withdrawn.
+      *(The peer write's window was B1's: `AppraisalGates.PeerWindow`.)*
 - [x] D6 The nominated peer cannot write the nomination (P14). *Done in lane P, 2026-09-29.*
 
 **Assertion** (`run-final-nominations.mjs`):
@@ -1851,6 +1862,153 @@ recorded at filing. C-b stays one slice (D-36), about 2 days.
 - After one nomination is rejected, the employee can nominate another without hitting
   `MaxPeerEvaluators`.
 - The peer's own PUT → 403.
+
+*Built 2026-09-30:* every assertion above, and the suite's d3, d4, d5, d39, d40, d41, dpr and dwin
+(its header lists them) — 186 in all.
+
+**Lane D source check (2026-09-30, after C-b; line numbers as of `1521aadc9`).** Row by row:
+- **D1 live, and wider than written.** `ToEntity` copies the posted status (mapping :1109): a raw POST
+  creates an *Approved* nomination with no peer evaluation behind it. `UpdateEntity` copies seven fields
+  (:1113-1122): a party can re-point a nomination at **another appraisal** (the edit window is checked
+  on the original), swap the peer or the nominator, set it Approved or Rejected, or clear the invitation
+  date that guards its deletion. Neither route refuses the appraisee's line manager as a peer (PNS :219,
+  :429); the batch never checks its peers exist in the tenant (the single create does, :215).
+- **D2 live in five places**: the single and batch maximum (PNS :228, :416), the summary's `canSubmit`
+  (:377), the self-evaluation submit (PAS :956, the plan's ":1448") — which counts rejected nominations
+  against the minimum *and* the maximum though the B1 gate it runs first counts live ones — and the
+  panel's *at max* and *N more needed*.
+- **D3 live**: the stub (PNS :331-350, `TODO`), its route, a client method no screen calls.
+- **D4 half done** (P14 did the access half): in Manager mode the manager's nominations still land
+  Pending and wait for the manager's own approval; nobody is told anything in that mode (PNS :488); the
+  panel says "waiting for approval" in both modes.
+- **D5 half done**: B1's peer window already refuses a peer write outside the self, peer and manager
+  steps (`AppraisalGates.PeerWindow`). Left: the peer's list and form show the **cycle's** deadline,
+  never the nomination's due date (PES :147, :220) — **on UAT every demo nomination is due 9 Oct and every
+  peer sees 20 Nov** — and the dead decrement (PNS :316-322: approval stamps the invitation date, so the
+  delete is refused before it).
+- **D6 done** (P14).
+
+**Carried in:** from L-b, a peer's KPI row caught only at submission — **done** by B-w (the draft save
+refuses it, PES :285). From B-v, a peer's goal row missing on `manager-peer-evaluations` — **live and
+wider**: the read lists competency rows only (PAS :2143), so a peer's KPI or goal score is invisible
+wherever peers may score them; weight 0 on every row; a dead KPI list — C9's shape.
+
+**Beyond the rows:**
+1. **HR's advance past peer nomination approves pending nominations without creating the peers'
+   evaluations** (AWS :309-325): no form, nobody told; the self-evaluation's "form open" notice then goes
+   to them (PAS :1236), and the dashboard counts them outstanding for good (D-39).
+2. **The peer never sees the nominator's instructions** — neither the peer's list nor the form carries
+   them; the dialog asks "What would you like them to comment on?", and scenario 061 writes one.
+3. **Manager mode with anonymous reviews**: the appraisee reads who the manager chose through the
+   nomination reads — the privacy suite scans seven appraisee reads, not these (D-40).
+4. **A peer's own reads** list nominations never approved, with the rejection reason written for the
+   appraisee; no screen calls them (D-41).
+5. Small: the summary's `canEdit` ignores Manager mode's longer window; Employee mode's "locked after
+   self-evaluation submission" is a status rule (Active/Draft), so it holds only once the manager submits.
+
+**Demo and harness impact.** UAT's 10 demo nominations are consistent (none names a manager, none is
+an approval without an evaluation, every count matches); the peer page's *Due* reads 9 Oct, not 20 Nov
+(guide ch. 28). `hr-portal/run-slice5.mjs:123` nominates the manager — fixed in the slice. The privacy
+suite's P14 read by the nominated peer of a pending nomination follows D-41; the gates suite holds. New
+suite `run-final-nominations.mjs`. About 1.5–2 days; one slice.
+
+Settled the same day (§ 1g): D-39 the advance approves properly, D-40 counts only for the appraisee in
+Manager mode with anonymous reviews, D-41 a peer's reads list approved nominations only.
+
+**D State (2026-09-30): DONE — built, verified on UAT, staged.** No migration. What exists now:
+- **One approval path** — `PeerNominationService.StageApprovalAsync`: each pending nomination becomes
+  Approved with its dates (and the due date, when one is given), the peer gets their
+  `EvaluatorEvaluation` at the profile's peer weight (never a second one), and the appraisal's peer
+  count moves; the caller saves, then `NotifyApprovedAsync` tells each peer, with the due date. Three
+  callers: the manager's approve; a **Manager-mode nomination**, approved as it is made on either route
+  (D4); and **HR's advance past peer nomination** (D-39), which set the status alone.
+- **What a nomination may be (D1)** — Pending, or 422; the appraisee, their line manager and an employee
+  who does not exist are refused on both routes; `UpdatePeerNominationDto` carries the due date and the
+  instructions and nothing else, and only a pending nomination is edited or withdrawn (422).
+- **Counts that leave a rejection out (D2)** — the summary's `ActiveNominations` (pending + approved)
+  beside `TotalNominations`; `CanSubmit` and both maximums on the active count; the self-evaluation
+  submit the same, as the B1 gate before it already was.
+- **One window** — `NominationsEditable`: Employee mode while Draft or Active, Manager mode until
+  completed or closed. The summary's `CanEdit` reads it (it ignored Manager mode's longer window), and
+  the manager's approve and reject are held to it (they were taken on a completed appraisal too).
+- **What the peer reads (D5)** — the nomination's due date, else the cycle's peer deadline, and the
+  nominator's instructions, on the assignment list and the form (`PeerEvaluationService.NominationsBehindAsync`).
+- **Who reads a nomination (D-40, D-41)** — `PeerNominationController.CanReadNominationAsync` and
+  `CanReadAppraisalNominationsAsync`: the appraisee, except in Manager mode with anonymous reviews (then
+  the summary sets `PeersWithheld` and lists none); the line manager; the peer once it is approved;
+  the desk. A party reads as the party, desk or not. The peer's own lists (`peer/{id}`,
+  `pending/{id}`) carry approved nominations only, with no rejection reason.
+- **The manager's peer review** (B-v's carried item) — `PeerEvaluatorDetailDto.CriterionScores`, one row
+  per criterion the peer scored, competency, KPI or goal, described as the appeal reads describe a row:
+  C-b's `LoadAppealCriteriaAsync` is now `LoadCriterionRowsAsync` in
+  `PerformanceAppraisalService.CriterionRows.cs` (renamed from `…AppealRows.cs`). The competency
+  list at weight 0 and the always-empty KPI list went, with their two DTOs.
+- **Gone** — `send-invitation` (D3), the dead decrement, the workflow service's unused nomination
+  repository.
+- **The screens** — the nomination panel's wording follows the mode (*"They have been asked for their
+  feedback"* when the manager chooses; the dialog says so), its counts are the active ones, it shows
+  *N not approved*, offers *Remove* on a pending row only, and tells a D-40 appraisee the count; the
+  manager's *Peer feedback* lists every criterion with its kind, section, weight and score (a KPI's
+  actual against its target); the peer's list and form show the instructions.
+
+**Where the build refines the rows** (each deliberate; say if one should go back):
+1. **Approval never calls a repository `UpdateAsync`.** A Manager-mode nomination is still being added
+   in the caller's unit of work, and an update would turn its INSERT into an UPDATE of a row that does
+   not exist; the tracked entities carry the changes.
+2. **HR's advance approves through `StageApprovalAsync`, not `ApproveNominationsAsync`** (H3's
+   wording): the advance is the decision and saves its own unit of work with its audit row, and the
+   window must not refuse it. H3 keeps the peer-evaluation arm.
+3. **The approve and reject are held to the window** — found by the source check (*beyond the rows* 5),
+   not in the rows.
+4. **The Employee-mode refusal says what the rule is** — *"Peer nominations are closed on this
+   appraisal: it has moved past the evaluations"*; it said "after self-evaluation submission", which the
+   status rule never checked.
+5. **A withdrawn nomination frees its place** — the unique index is filtered on `IsDeleted`; d1 withdraws
+   one and the count returns to 0.
+6. **Withdrawing an approved peer is refused (422)** — the peer has been asked; replacing an evaluator is
+   lane M's reassignment.
+
+**Verified** (Staging API on `ErpSystemDB_UAT`, the final build):
+- `run-final-nominations.mjs` **186/186, then 186/186**, and a third time inside the regression. No
+  first-run misses. Each defect has an assertion the old code fails beside the one it passes (the raw
+  Approved POST, the manager as peer on the batch, the unknown peer on the batch, the edit that moved
+  the nomination, the replacement at "the maximum of 1", the self-evaluation's count, 13 Nov against the
+  cycle's 27 Nov, the instructions, Manager mode's Approved, the advance's evaluation, the D-40 and D-41
+  refusals, the KPI row).
+- Regression (`run-all.mjs`, fourteen suites): interim reviews 133/133, attachments 65/65, slice C 52/52, slice D
+  22/22, **slice E 17/26 — the same 9 stale**, gates 32/32, lane A 182/182, **lane P 338/338** (337 + the D-41
+  pair), lane B1 256/256, lane L-a 157/157, lanes L-b/L-c 296/296, **lane B2 363/363** (its peer-row check reads
+  `criterionScores` now), lane C 397/397 (its C-b peer story approves through the new path), **lane D 186/186**.
+  **2496/2505** — C-b's 2309/2318 plus exactly the 187 new; no assertion lost.
+- API log: no error from a nomination or peer endpoint (19 expected refusals, logged as rule warnings) — only UAT's
+  missing SMTP, defect #23's payroll-profile FK, the five-minutely HR/Identity reconciliation and the one
+  login 500 below; no 500 from any other route.
+- Frontend: scoped `tsc` over the 6 touched files and the 3 that read their types (the two appraisal pages
+  and `appeals.ts`), 0 errors — the 3 errors planted in a probe file were all reported; ESLint clean on
+  the 6. Not browser-walked.
+- Demo: no score or step moves — every one of APC2026's 107 phases byte-identical before and after the
+  regression; its 10 nominations (all approved, each with its evaluation, due 9 Oct) untouched. Three screens
+  show it differently: the peers' *Peer Reviews* list reads **Due 9 Oct 2026**, the nomination's (it read the
+  cycle's 20 Nov) — as does the form of the two peers yet to submit, on Kojo Ansah's appraisal; a submitted
+  form shows no date — and the list and every form show 061's instructions; and the manager's *Peer feedback* tab — read as the desk
+  after the build — lists each peer's *Communication* and *Teamwork* in *Core Competencies* at **50 %** each
+  (they read 0 %, with a *Grade* of "—"): Efua's two peers 80 / 80 and 84 / 84. The demo nominates in
+  Employee mode, so D-40 changes nothing it shows. The guide's ch. 28 walk names the date and the
+  instructions; ch. 29's step 9 said *"Two of four peers submitted"* — the banner reads 2 of 2 — and now
+  says so.
+
+**Harness changes in the slice:** `run-final-privacy.mjs` — the nominated peer's read of a *pending*
+nomination is refused now (D-41), paired with the read once it is approved (+1 → 338);
+`run-final-settings.mjs` — the peer row's "no scores" check reads `criterionScores` (it passed
+vacuously on the gone `competencyScores`); `hr-portal/run-slice5.mjs` nominates the HR actor, not the
+line manager, and files the peer leg as them — **not run**: its fixtures hang off the tenant's first real
+position (lane S8); `hr-w3-permissions/run-slice10-performance.mjs` loses its `send-invitation` row —
+**not run** (it must not run on UAT). The demo pack's 061 holds: Employee mode, no manager nominated.
+
+**Found on the way, not lane D's:** two logins of the same user at the same instant — mine as admin while
+the regression's fixture logged in as admin — answered one of them 500 after 17 s:
+`SecurityLogService.CreateSecurityLogAsync` hit a `DbUpdateConcurrencyException` (the platform's auth,
+not HR's; offered for the cross-module register). No suite was affected.
 
 ### Lane E — Lifecycle guards
 
@@ -2184,7 +2342,9 @@ Events → audiences:
       - The manager placeholder gets `EvaluatorId = Employee.ManagerId` (refused when null) and the
         profile weight. Today it gets the HR actor and weight 1 (:503-517).
       - Peer arms approve through `IPeerNominationService.ApproveNominationsAsync`, which creates the
-        evaluations, and auto-submit drafts with scores.
+        evaluations, and auto-submit drafts with scores. *(The nomination arm is done — lane D, D-39,
+        through `StageApprovalAsync`, the path beneath the approve. The peer-evaluation arm stands: it
+        submits every unsubmitted peer evaluation, empty ones included, on HR's reason.)*
       - A gate HR cannot satisfy is a **waiver**, recorded as the `AppraisalManualAdvanceLog` row
         (`AppraisalGates.IsWaived`).
       - The calibration arm runs only from the manual endpoint, stamps `PreCalibrationScore`, and
@@ -2577,12 +2737,12 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | Deadline-reminder dedupe defeated by countdown titles ("closes in 5 days") | `AppraisalCycleService.cs:549-562` | G |
 | Calibration-completed notice tells participants to "commit", which only HR can do | CSS :264-295 | G |
 | Conversation scheduled by the employee does not tell the manager; PIP meeting notice to employee only | `AppraisalConversationService.cs:185`; PIP :192-206 | G |
-| Nothing told in Manager nomination mode | PNS :464-489 | D/G |
+| ~~Nothing told in Manager nomination mode~~ | PNS :464-489 | D/G — done in lane D, 2026-09-30 (the peers are told at approval) |
 | PIP handler numbering `PIP-APR-…` vs `PIP-yyyy-NNNN` | `PipRecommendationHandler.cs:103` | E7 |
 | `AppraisalCycleTarget.EstimatedEmployeeCount` client-supplied; `ActiveEmployeeCount` can go negative | MAP :1044; entity :647 | E2 |
 | `PerformanceAppraisal.DevelopmentPlanId/RankInPosition/RankInUnit/NextAppraisalDate` never computed | entity | J (N5 computes `DevelopmentPlanId`) |
 | `EmployeeAcknowledgmentComments` written only by manual advance | AWS :605 | E1 |
-| `PeerNomination.DueDate` ignored | PNS :525 | D5 |
+| ~~`PeerNomination.DueDate` ignored~~ | PNS :525 | D5 — done 2026-09-30 |
 | Settings profile validation (Min≤Max, bands ordered) | `AppraisalSettingsService` | B6 |
 | Calibration `FacilitatedById` from body; session `UpdateEntity` ignores Status | MAP :2481 | E6 |
 | Pre-remand snapshot copies no `ActualValue`; KPI snapshots never written | PAS :2085-2093 | C5 |
@@ -2639,6 +2799,12 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | An upheld change's justification is appended to the manager's criterion `Notes`, rewriting the manager's comment; the appeal item's `ResolutionNotes` is the natural home | `ResolveAppealAsync` (the modifications loop) | J |
 | `AppraisalAppealItem.OriginalScore` declares `decimal(5,2)`; the model maps `decimal(18,4)` (a model-wide decimal rule) — harmless, the attribute misleads | entity; model snapshot | J |
 | The C-b screens (appeal form, status, outcome, HR's review) not browser-walked | 5 pages | K |
+| *Added by lane D (2026-09-30):* | | |
+| `PeerNomination.ApprovedByManagerId` is never written — no approval path records who approved (the manager, Manager mode, HR's advance; the advance's log row names HR) | `StageApprovalAsync` | J |
+| A nominated peer is checked to exist in the tenant, not to be employed — a leaver can be nominated | `EnsurePeersMayBeNominatedAsync` | E (with D-10's withdrawn state) |
+| `GET PeerNomination/peer/{id}` and `pending/{id}` have no screen (D-41 kept them, approved only) | `PeerNominationController` | I |
+| The lane D screens (nomination panel, peer feedback, the peer's list and form) not browser-walked | 4 files | K |
+| `hr-portal/run-slice5.mjs` and `hr-w3-permissions/run-slice10-performance.mjs` edited for lane D, not run | dev-harness | S8 |
 
 ---
 

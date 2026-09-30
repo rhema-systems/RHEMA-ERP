@@ -22,7 +22,6 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
 {
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly IGenericRepository<EvaluatorEvaluation> _evalRepository;
-    private readonly IGenericRepository<PeerNomination> _nominationRepository;
     private readonly IGenericRepository<AppraisalHRReview> _hrReviewRepository;
     private readonly IGenericRepository<AppraisalConversation> _conversationRepository;
     private readonly IGenericRepository<EmployeeGoal> _goalRepository;
@@ -30,6 +29,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     private readonly IAppraisalScoreService _scores;
     private readonly IAppraisalLifecycleService _lifecycle;
     private readonly IAppraisalGoalRowService _goalRows;
+    private readonly IPeerNominationService _peerNominations;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<AppraisalWorkflowService> _logger;
@@ -37,7 +37,6 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     public AppraisalWorkflowService(
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
         IGenericRepository<EvaluatorEvaluation> evalRepository,
-        IGenericRepository<PeerNomination> nominationRepository,
         IGenericRepository<AppraisalHRReview> hrReviewRepository,
         IGenericRepository<AppraisalConversation> conversationRepository,
         IGenericRepository<EmployeeGoal> goalRepository,
@@ -45,14 +44,15 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         IAppraisalScoreService scores,
         IAppraisalLifecycleService lifecycle,
         IAppraisalGoalRowService goalRows,
+        IPeerNominationService peerNominations,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ILogger<AppraisalWorkflowService> logger)
     {
         _goalRows             = goalRows;
+        _peerNominations      = peerNominations;
         _appraisalRepository  = appraisalRepository;
         _evalRepository       = evalRepository;
-        _nominationRepository = nominationRepository;
         _hrReviewRepository   = hrReviewRepository;
         _conversationRepository = conversationRepository;
         _goalRepository       = goalRepository;
@@ -247,6 +247,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         var appraisal = await LoadForAdvanceAsync(appraisalId, ct);
         var actions = new List<string>();
         var now     = DateTime.UtcNow;
+        IReadOnlyList<PeerNomination> approvedByAdvance = Array.Empty<PeerNomination>();
 
         // The advance is work on the appraisal, as a first save is: a Draft one is opened.
         if (appraisal.Status == AppraisalStatus.Draft)
@@ -308,18 +309,16 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
 
             case AppraisalSubStatus.PeerNomination:
             {
+                // D-39: through the one approval path — each peer's evaluation, the count, the due
+                // date — and the peers are told once the advance is saved. The status alone was set,
+                // so the "approved" peers had no form to fill in and heard nothing.
                 var pending = appraisal.PeerNominations
                     .Where(n => n.NominationStatus == PeerNominationStatus.Pending)
                     .ToList();
 
-                foreach (var n in pending)
-                {
-                    n.NominationStatus = PeerNominationStatus.Approved;
-                    n.ApprovedDate     = now;
-                    await _nominationRepository.UpdateAsync(n);
-                }
+                approvedByAdvance = await _peerNominations.StageApprovalAsync(appraisal, pending, null, ct);
 
-                actions.Add($"Approved {pending.Count} pending nomination(s). Minimum peer requirement bypassed by HR.");
+                actions.Add($"Approved {approvedByAdvance.Count} pending nomination(s), each peer asked for their feedback. Minimum peer requirement bypassed by HR.");
                 actions.Add($"Waived peer nomination: {state.Block.Reason}.");
                 break;
             }
@@ -494,6 +493,9 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         SetTenantId(auditLog, appraisal);
         await _advanceLogRepository.AddAsync(auditLog);
         await _unitOfWork.SaveChangesAsync(ct);
+
+        // The peers the advance approved are asked, as an approval by the manager asks them (D-39).
+        await _peerNominations.NotifyApprovedAsync(appraisalId, approvedByAdvance, null, ct);
 
         // HR's waiver of goal setting locked the agreed set, so the appraisal's goals section
         // follows it (closure plan L2): one row per locked goal, when the template has one.

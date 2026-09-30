@@ -112,8 +112,34 @@ public class PeerEvaluationService : IPeerEvaluationService
         AppraisalGates.EnsureAt(state.Facts, state.Settings, action, AppraisalGates.PeerWindow(state.Settings));
     }
 
+    /// <summary>
+    /// The approved nomination behind each of this peer's evaluations, by appraisal: its due date and
+    /// the nominator's instructions (performance closure D5). Neither reached the peer — the due date
+    /// shown was always the cycle's, and the instructions nowhere.
+    /// </summary>
+    private async Task<Dictionary<Guid, (DateTime? DueDate, string? Instructions)>> NominationsBehindAsync(
+        Guid evaluatorId, IEnumerable<Guid> appraisalIds, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var ids = appraisalIds.Distinct().ToList();
+        var rows = await _appraisalRepository.GetQueryable()
+            .Where(a => a.TenantId == tenantId && ids.Contains(a.Id))
+            .SelectMany(a => a.PeerNominations
+                .Where(n => !n.IsDeleted && n.PeerEmployeeId == evaluatorId && n.NominationStatus == PeerNominationStatus.Approved)
+                .Select(n => new { n.AppraisalId, n.DueDate, n.InstructionsToPeer }))
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .GroupBy(r => r.AppraisalId)
+            .ToDictionary(g => g.Key, g => (g.First().DueDate, g.First().InstructionsToPeer));
+    }
+
+    /// <summary>The nomination's due date, else the cycle's peer deadline.</summary>
+    private static DateOnly? DueDateOf(DateTime? nominationDue, DateOnly? cycleDeadline)
+        => nominationDue is DateTime due ? DateOnly.FromDateTime(due) : cycleDeadline;
+
     public async Task<IEnumerable<PeerEvaluationAssignmentDto>> GetPeerEvaluationAssignmentsAsync(
-        Guid evaluatorId, 
+        Guid evaluatorId,
         CancellationToken cancellationToken = default)
     {
         // Get all peer evaluation assignments for this evaluator
@@ -131,21 +157,28 @@ public class PeerEvaluationService : IPeerEvaluationService
             .OrderByDescending(e => e.Id)
             .ToListAsync(cancellationToken);
 
-        var assignments = evaluations.Select(e => new PeerEvaluationAssignmentDto
+        var nominations = await NominationsBehindAsync(evaluatorId, evaluations.Select(e => e.AppraisalId), cancellationToken);
+
+        var assignments = evaluations.Select(e =>
         {
-            EvaluationId = e.Id,
-            AppraisalId = e.AppraisalId,
-            AppraisalCycleName = e.Appraisal.AppraisalCycle?.CycleName ?? "Unknown Cycle",
-            AppraiseeId = e.Appraisal.EmployeeId,
-            AppraiseeName = e.Appraisal.Employee.FullName,
-            AppraiseePosition = e.Appraisal.Employee.Position?.Title ?? "Unknown",
-            AppraiseeOrganizationUnit = e.Appraisal.Employee.OrganizationUnit?.Name ?? "Unknown",
-            Status = e.SubmittedDate.HasValue ? "Submitted" : 
-                     e.StartedDate.HasValue ? "In Progress" : "Not Started",
-            StartedDate = e.StartedDate,
-            SubmittedDate = e.SubmittedDate,
-            DueDate = e.Appraisal.AppraisalCycle?.PeerEvaluationDeadline,
-            EvaluatorWeight = e.EvaluatorWeight
+            var nomination = nominations.GetValueOrDefault(e.AppraisalId);
+            return new PeerEvaluationAssignmentDto
+            {
+                EvaluationId = e.Id,
+                AppraisalId = e.AppraisalId,
+                AppraisalCycleName = e.Appraisal.AppraisalCycle?.CycleName ?? "Unknown Cycle",
+                AppraiseeId = e.Appraisal.EmployeeId,
+                AppraiseeName = e.Appraisal.Employee.FullName,
+                AppraiseePosition = e.Appraisal.Employee.Position?.Title ?? "Unknown",
+                AppraiseeOrganizationUnit = e.Appraisal.Employee.OrganizationUnit?.Name ?? "Unknown",
+                Status = e.SubmittedDate.HasValue ? "Submitted" :
+                         e.StartedDate.HasValue ? "In Progress" : "Not Started",
+                StartedDate = e.StartedDate,
+                SubmittedDate = e.SubmittedDate,
+                DueDate = DueDateOf(nomination.DueDate, e.Appraisal.AppraisalCycle?.PeerEvaluationDeadline),
+                EvaluatorWeight = e.EvaluatorWeight,
+                InstructionsToPeer = nomination.Instructions,
+            };
         }).ToList();
 
         return assignments;
@@ -205,6 +238,9 @@ public class PeerEvaluationService : IPeerEvaluationService
             throw new InvalidOperationException("Appraisal settings not found.");
         }
 
+        var nomination = (await NominationsBehindAsync(evaluatorId, new[] { evaluation.AppraisalId }, cancellationToken))
+            .GetValueOrDefault(evaluation.AppraisalId);
+
         var detail = new PeerEvaluationDetailDto
         {
             EvaluationId = evaluation.Id,
@@ -217,7 +253,8 @@ public class PeerEvaluationService : IPeerEvaluationService
             AllowPeerKpiEvaluation = settings.AllowPeerKpiEvaluation,
             IsAnonymous = settings.PeerReviewsAnonymous,
             IsSubmitted = evaluation.SubmittedDate.HasValue,
-            DueDate = evaluation.Appraisal.AppraisalCycle?.PeerEvaluationDeadline,
+            DueDate = DueDateOf(nomination.DueDate, evaluation.Appraisal.AppraisalCycle?.PeerEvaluationDeadline),
+            InstructionsToPeer = nomination.Instructions,
             Sections = BuildPeerEvaluationSections(evaluation.Appraisal, evaluation, settings.AllowPeerKpiEvaluation)
         };
 

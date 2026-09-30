@@ -56,8 +56,13 @@ setting now does what it says; the KPI tolerance moved to batch 2). **Lane C**, 
 is complete in two slices (2026-09-30): C-a made the remand work, the decisions honest and HR's
 two-actor rule; C-b opened the page to every scored criterion (KPIs and goals), made every appeal read
 name and score its rows on their own terms, kept each item's score at the filing, and let HR open a
-decided appeal. **Next: lane D**, peer nomination and evaluation integrity. The closure plan's START
-HERE block and § 2 carry the live state.
+decided appeal. **Lane D**, peer nomination and evaluation integrity, is complete (2026-09-30): a
+nomination is what it says it is and changes only its date and instructions; a rejected one leaves
+room for another; approval — the manager's, a Manager-mode nomination's, HR's advance past the step —
+always creates the peer's form and tells them; the peer sees the nomination's due date and
+instructions; and in Manager mode with anonymous reviews the appraisee sees counts, not names.
+**Next: lane E**, the lifecycle guards. The closure plan's START HERE block and § 2 carry the live
+state.
 
 ▶ **Lane 11 (added 2026-09-25): probation is not absence.** About 1,800 long-serving staff on the
 demo database are on probation, because the employee import has no confirmation date. Two code sites
