@@ -4896,6 +4896,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasFilter("[WorkflowInstanceId] IS NOT NULL");
             entity.HasIndex(item => new { item.TenantId, item.SourceBookAuthorityId }).IsUnique()
                 .HasFilter("[SourceBookAuthorityId] IS NOT NULL");
+            entity.HasIndex(item => new { item.TenantId, item.OriginalFinancePostingEventId }).IsUnique()
+                .HasFilter("[OriginalFinancePostingEventId] IS NOT NULL");
+            entity.HasIndex(item => new { item.TenantId, item.OriginalJournalEntryId }).IsUnique()
+                .HasFilter("[OriginalJournalEntryId] IS NOT NULL");
+            entity.HasIndex(item => new { item.TenantId, item.ReversalFinancePostingEventId }).IsUnique()
+                .HasFilter("[ReversalFinancePostingEventId] IS NOT NULL");
+            entity.HasIndex(item => new { item.TenantId, item.ReversalJournalEntryId }).IsUnique()
+                .HasFilter("[ReversalJournalEntryId] IS NOT NULL");
             entity.HasOne(item => item.FixedAsset).WithMany()
                 .HasForeignKey(item => new { item.TenantId, item.FixedAssetId })
                 .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);

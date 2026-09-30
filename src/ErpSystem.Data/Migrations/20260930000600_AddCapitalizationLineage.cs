@@ -16,6 +16,12 @@ public partial class AddCapitalizationLineage : Migration
         migrationBuilder.AddColumn<string>("CapitalizationEvidenceHash", "CapitalProjects", "nvarchar(64)", maxLength: 64, nullable: true);
         migrationBuilder.AddColumn<Guid>("SourceFinancePostingEventId", "ProjectCostLines", "uniqueidentifier", nullable: true);
         migrationBuilder.AddColumn<Guid>("SourceBookAuthorityId", "ProjectCostLines", "uniqueidentifier", nullable: true);
+        migrationBuilder.DropIndex("IX_CapitalProjects_TenantId", "CapitalProjects");
+        migrationBuilder.DropIndex("IX_ProjectCostLines_TenantId", "ProjectCostLines");
+        migrationBuilder.AddUniqueConstraint(
+            name: "AK_FixedAssets_TenantId_Id",
+            table: "FixedAssets",
+            columns: new[] { "TenantId", "Id" });
 
         migrationBuilder.CreateTable(
             name: "FixedAssetCapitalizationCycles",
@@ -120,6 +126,7 @@ public partial class AddCapitalizationLineage : Migration
             DROP TRIGGER IF EXISTS [dbo].[TR_FixedAssetCapitalizationCycles_Evidence];
             """);
         migrationBuilder.DropTable("FixedAssetCapitalizationCycles");
+        migrationBuilder.DropUniqueConstraint("AK_FixedAssets_TenantId_Id", "FixedAssets");
         migrationBuilder.DropForeignKey("FK_CapitalProjects_WorkflowInstances_TenantId_CapitalizationWorkflowInstanceId", "CapitalProjects");
         migrationBuilder.DropForeignKey("FK_CapitalProjects_FinanceSourceBookAuthorities_TenantId_CapitalizationSourceBookAuthorityId", "CapitalProjects");
         migrationBuilder.DropForeignKey("FK_ProjectCostLines_FinancePostingEvents_TenantId_SourceFinancePostingEventId", "ProjectCostLines");
@@ -128,6 +135,8 @@ public partial class AddCapitalizationLineage : Migration
         migrationBuilder.DropIndex("IX_CapitalProjects_TenantId_CapitalizationSourceBookAuthorityId", "CapitalProjects");
         migrationBuilder.DropIndex("IX_ProjectCostLines_TenantId_SourceFinancePostingEventId", "ProjectCostLines");
         migrationBuilder.DropIndex("IX_ProjectCostLines_TenantId_SourceBookAuthorityId", "ProjectCostLines");
+        migrationBuilder.CreateIndex("IX_CapitalProjects_TenantId", "CapitalProjects", "TenantId");
+        migrationBuilder.CreateIndex("IX_ProjectCostLines_TenantId", "ProjectCostLines", "TenantId");
         migrationBuilder.DropColumn("CapitalizationWorkflowInstanceId", "CapitalProjects");
         migrationBuilder.DropColumn("CapitalizationSourceBookAuthorityId", "CapitalProjects");
         migrationBuilder.DropColumn("CapitalizationEvidenceHash", "CapitalProjects");

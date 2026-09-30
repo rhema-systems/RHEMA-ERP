@@ -2,6 +2,7 @@ using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Data;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
@@ -18,6 +19,13 @@ public sealed class CapitalizationLineageMigrationTests
             .And.Contain("CapitalizationSourceBookAuthorityId")
             .And.Contain("SourceFinancePostingEventId")
             .And.Contain("SourceBookAuthorityId")
+            .And.Contain("AddUniqueConstraint(")
+            .And.Contain("name: \"AK_FixedAssets_TenantId_Id\"")
+            .And.Contain("DropUniqueConstraint(\"AK_FixedAssets_TenantId_Id\"")
+            .And.Contain("DropIndex(\"IX_CapitalProjects_TenantId\"")
+            .And.Contain("DropIndex(\"IX_ProjectCostLines_TenantId\"")
+            .And.Contain("CreateIndex(\"IX_CapitalProjects_TenantId\"")
+            .And.Contain("CreateIndex(\"IX_ProjectCostLines_TenantId\"")
             .And.Contain("principalColumns: new[] { \"TenantId\", \"Id\" }")
             .And.Contain("CAPITALIZATION_LINEAGE_DOWN_BLOCKED")
             .And.Contain("SELECT 1 FROM [dbo].[FixedAssetCapitalizationCycles]")
@@ -35,12 +43,36 @@ public sealed class CapitalizationLineageMigrationTests
             .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=CapitalizationLineageModel;Trusted_Connection=True")
             .Options);
         var cycle = db.Model.FindEntityType(typeof(FixedAssetCapitalizationCycle));
+        var fixedAsset = db.Model.FindEntityType(typeof(FixedAsset));
+        var project = db.Model.FindEntityType(typeof(CapitalProject));
+        var costLine = db.Model.FindEntityType(typeof(ProjectCostLine));
         cycle.Should().NotBeNull();
+        fixedAsset!.GetKeys().Should().Contain(key => key.Properties.Select(item => item.Name)
+            .SequenceEqual(new[] { nameof(FixedAsset.TenantId), nameof(FixedAsset.Id) }));
+        project!.GetIndexes().Should().NotContain(index => index.Properties.Select(item => item.Name)
+            .SequenceEqual(new[] { nameof(CapitalProject.TenantId) }));
+        costLine!.GetIndexes().Should().NotContain(index => index.Properties.Select(item => item.Name)
+            .SequenceEqual(new[] { nameof(ProjectCostLine.TenantId) }));
         cycle!.FindProperty(nameof(FixedAssetCapitalizationCycle.RowVersion))!.IsConcurrencyToken.Should().BeTrue();
         cycle.GetForeignKeys().Should().Contain(foreignKey => foreignKey.Properties.Select(item => item.Name)
             .SequenceEqual(new[] { nameof(FixedAssetCapitalizationCycle.TenantId), nameof(FixedAssetCapitalizationCycle.WorkflowInstanceId) }));
         cycle.GetForeignKeys().Should().Contain(foreignKey => foreignKey.Properties.Select(item => item.Name)
             .SequenceEqual(new[] { nameof(FixedAssetCapitalizationCycle.TenantId), nameof(FixedAssetCapitalizationCycle.SourceBookAuthorityId) }));
+        foreach (var propertyName in new[]
+                 {
+                     nameof(FixedAssetCapitalizationCycle.OriginalFinancePostingEventId),
+                     nameof(FixedAssetCapitalizationCycle.OriginalJournalEntryId),
+                     nameof(FixedAssetCapitalizationCycle.ReversalFinancePostingEventId),
+                     nameof(FixedAssetCapitalizationCycle.ReversalJournalEntryId)
+                 })
+        {
+            cycle.GetIndexes().Should().Contain(index => index.IsUnique &&
+                index.GetFilter() == $"[{propertyName}] IS NOT NULL" &&
+                index.Properties.Select(item => item.Name).SequenceEqual(new[]
+                {
+                    nameof(FixedAssetCapitalizationCycle.TenantId), propertyName
+                }));
+        }
         cycle.GetDeclaredTriggers().Select(item => item.ModelName)
             .Should().Contain("TR_FixedAssetCapitalizationCycles_Evidence");
     }
