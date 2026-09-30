@@ -355,8 +355,8 @@ public sealed class EstateWorkflowIntegrationRegressionTests
             "private async Task EnsureStampDutyPayableAsync",
             "private async Task EnsureOtherAcquisitionCostsPayableAsync");
 
-        method.Should().Contain("payment.AccountsPayableSupplierId = invoice.SupplierId;");
-        method.Should().Contain("[\"accountsPayableSupplierId\"] = invoice.SupplierId");
+        method.Should().Contain("payment.AccountsPayableSupplierId = invoice.BusinessPartnerId;");
+        method.Should().Contain("[\"accountsPayableSupplierId\"] = invoice.BusinessPartnerId");
         method.Should().NotContain("payment.AccountsPayableSupplierId = payee.Id;");
         method.Should().NotContain("[\"accountsPayableSupplierId\"] = payee.Id");
     }
@@ -1237,10 +1237,12 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         var portfolio = Slice(portal,
             "public async Task<IActionResult> GetMyProperties",
             "public async Task<IActionResult> DownloadLegalTransferDraft");
-        portfolio.Should().Contain("customerIds.Contains(invoice.BusinessPartnerId)");
-        portfolio.Should().Contain("invoice.Status == InvoiceStatus.Sent");
-        portfolio.Should().Contain("invoice.Status == InvoiceStatus.Paid");
-        portfolio.Should().Contain("invoice.Notes.Contains(\"Estate / Property Management\")");
+        portfolio.Should().Contain(".ForCustomerProperties(tenantId, customerIds)");
+        var invoiceScope = ReadSource("src", "ErpSystem.Api", "Services", "Estate", "EstateExternalInvoiceScope.cs");
+        invoiceScope.Should().Contain("ids.Contains(invoice.BusinessPartnerId)");
+        invoiceScope.Should().Contain("invoice.Status == InvoiceStatus.Sent");
+        invoiceScope.Should().Contain("invoice.Status == InvoiceStatus.Paid");
+        invoiceScope.Should().Contain("invoice.Notes.Contains(\"Estate / Property Management\")");
         portfolio.Should().Contain("_db.Set<PaymentAllocation>()");
         portfolio.Should().Contain("Receipts = receipts ?? new List<ExternalInvoiceReceiptDto>()");
         portfolio.Should().Contain("FullTermLeaseAmount");

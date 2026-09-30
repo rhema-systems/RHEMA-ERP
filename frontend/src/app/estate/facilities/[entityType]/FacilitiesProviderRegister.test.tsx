@@ -22,6 +22,10 @@ const provider = (id: string, partnerType: string, partnerName: string): Facilit
   contracts: [],
 });
 
+function openActions(partnerName: string) {
+  fireEvent.keyDown(screen.getByRole('button', { name: `Actions for ${partnerName}` }), { key: 'Enter', code: 'Enter' });
+}
+
 it('flags only active contracts ending within 30 days', () => {
   const item = provider('1', 'Supplier', 'Clean Co');
   item.contracts = [
@@ -49,7 +53,8 @@ it('shows approved supplier types and filters by provider or category', async ()
     target: { value: 'Repair' },
   });
   expect(screen.queryByText('Clean Co')).not.toBeInTheDocument();
-  expect(screen.getByRole('link', { name: 'View Repair Co' })).toHaveAttribute(
+  openActions('Repair Co');
+  expect(await screen.findByRole('menuitem', { name: 'Details' })).toHaveAttribute(
     'href', '/procurement/business-partners/2'
   );
 });
@@ -64,7 +69,9 @@ it('shows direct supplier invoices in the provider history dialog', async () => 
   }]);
 
   render(<FacilitiesProviderRegister />);
-  fireEvent.click(await screen.findByRole('button', { name: 'View invoices for Clean Co' }));
+  await screen.findByRole('button', { name: 'Actions for Clean Co' });
+  openActions('Clean Co');
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'View supplier invoices' }));
   expect(await screen.findByText('AP-001')).toBeInTheDocument();
   expect(screen.getByText('Direct invoice')).toBeInTheDocument();
   expect(screen.getByText('GHS 100.00')).toBeInTheDocument();
@@ -84,7 +91,9 @@ it('shows service rate history and saves a new rate for an approved provider', a
   });
 
   render(<FacilitiesProviderRegister />);
-  fireEvent.click(await screen.findByRole('button', { name: 'View rates for Clean Co' }));
+  await screen.findByRole('button', { name: 'Actions for Clean Co' });
+  openActions('Clean Co');
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Rates' }));
   expect(await screen.findByText('No service rates recorded.')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Add rate' }));
   fireEvent.change(screen.getByRole('textbox', { name: 'Service' }), { target: { value: 'Cleaning' } });

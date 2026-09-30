@@ -445,8 +445,12 @@ namespace ErpSystem.Web.Services
             await EnsureProcurementOperationalWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring project workflows are seeded...");
             await EnsureProjectWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring Estate land acquisition workflow is seeded...");
+            await EnsureEstateAcquisitionWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring Estate SOP example workflows are seeded...");
             await EnsureEstateSopWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring Property Management listing workflow is seeded...");
+            await EnsurePropertyManagementListingWorkflowSeededAsync();
             _logger.LogInformation("Ensuring Planning procedure workflows are seeded...");
             await EnsurePlanningProcedureWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring HR workflows are seeded...");
@@ -819,6 +823,88 @@ namespace ErpSystem.Web.Services
             }
         }
 
+        private async Task EnsureEstateAcquisitionWorkflowsSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    foreach (var spec in GetEstateAcquisitionWorkflowSeedSpecs())
+                    {
+                        await EnsureEstateSopWorkflowDefinitionSeededAsync(tenant.Id, spec);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed Estate land acquisition workflows");
+            }
+        }
+
+        private async Task EnsurePropertyManagementListingWorkflowSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    await EnsureEstateSopWorkflowDefinitionSeededAsync(tenant.Id, GetPropertyManagementListingWorkflowSeedSpec());
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed Property Management listing workflow");
+            }
+        }
+
+        private static EstateSopWorkflowSeedSpec GetPropertyManagementListingWorkflowSeedSpec()
+        {
+            const string entityType = "EstatePropertyManagementListingApplication";
+            const string documentType = "PropertyManagementListingEvidence";
+
+            return new EstateSopWorkflowSeedSpec(
+                entityType,
+                entityType,
+                "Property Management Listing Application",
+                "Estate review and approval of property and demarcated-land sale, rental, and lease applications received from Sales.",
+                [
+                    Stage("Estate intake review", WorkflowStepType.Manual, "Estate Officer",
+                        ["Customer and property listing references are verified", "Completed Sales opportunity and agreed transaction are recorded"],
+                        ["customerValidationStatus", "listingValidationStatus", "salesPaymentReference"]),
+                    Stage("Commercial and availability review", WorkflowStepType.Manual, "Property Manager",
+                        ["Availability and reservation position are confirmed", "Commercial review outcome is recorded"],
+                        ["availabilityCheck", "commercialReviewStatus", "premiumChargeAmount"]),
+                    Stage("Estate decision and agreement", WorkflowStepType.Approval, "Estate Manager",
+                        ["Management decision is recorded", "Agreement is generated for the approved request"],
+                        ["decisionStatus", "generatedAgreementReference"]),
+                    Stage("Legal agreement review", WorkflowStepType.Manual, "Legal Officer",
+                        ["Generated agreement is lodged with Legal", "Legal approval is recorded on the Estate case"],
+                        ["legalAgreementReviewReference", "legalAgreementReviewStatus"]),
+                    Stage("Customer agreement execution", WorkflowStepType.Manual, "Estate Officer",
+                        ["Customer signed agreement is received", "Internal approval and digital signature are complete"],
+                        ["signedAgreementReference", "agreementExecutionStatus", "finalSignedAgreementReference"]),
+                    Stage("Payment, billing and Finance check", WorkflowStepType.Manual, "Finance User",
+                        ["Sales payment and Estate balance are checked", "Finance invoice, payment, or rent billing readiness is recorded"],
+                        ["salePaymentCheckStatus", "billingStartStatus", "billingStartDate"]),
+                    Stage("Legal conveyance or lease follow-up", WorkflowStepType.Manual, "Legal Officer",
+                        ["Sale conveyance and registration is completed where applicable", "Rental move-in and billing readiness is confirmed where applicable"],
+                        ["legalConveyanceStatus", "moveInEffectiveStatus"]),
+                    Stage("Estate completion", WorkflowStepType.Approval, "Estate Manager",
+                        ["Customer outcome is recorded", "Estate application closeout is complete"],
+                        ["applicationStatus", "ownershipTransferStatus"])
+                ]);
+
+            static EstateSopWorkflowStepSeed Stage(
+                string name,
+                WorkflowStepType type,
+                string role,
+                IReadOnlyList<string> checks,
+                IReadOnlyList<string> fields)
+                => new(name, type, role, string.Join(" ", checks), checks, [],
+                    "property-management-listing", documentType, FieldKeys: fields);
+        }
+
         private async Task EnsureLegalProcedureWorkflowsSeededAsync()
         {
             try
@@ -1133,6 +1219,347 @@ namespace ErpSystem.Web.Services
             }
 
             return JsonSerializer.Serialize(configuration, WorkflowSeedJsonOptions);
+        }
+
+        private static IReadOnlyList<EstateSopWorkflowSeedSpec> GetEstateAcquisitionWorkflowSeedSpecs()
+        {
+            const string TaskActionType = "land-acquisition";
+            const string DocumentType = "LandAcquisitionEvidence";
+
+            return
+            [
+                new(
+                    "LandAcquisition",
+                    "LandAcquisition",
+                    "Estate Land Acquisition Workflow",
+                    "Default Estate land acquisition workflow covering parcel identification, suitability approval, cadastral survey, ownership verification, agreement, payment, consent, stamp duty, registration, and land creation.",
+                    [
+                        AcquisitionStep(
+                            "Parcel Identification",
+                            WorkflowStepType.Manual,
+                            "Estate Officer",
+                            [
+                                "Project reference, location, intended use, estimated size, and vendor are captured",
+                                "Physical inspection observations are recorded",
+                                "Planning and constraint checks are captured"
+                            ],
+                            [
+                                "Planning Evidence",
+                                "Site Photograph",
+                                "Acquisition Request Memo"
+                            ],
+                            [
+                                "projectReference", "parcelLocation", "estimatedSize", "coordinates", "vendorId", "vendorName",
+                                "acquisitionType", "intendedUse", "openingNotes", "inspectionDate", "inspectionOfficer",
+                                "soilType", "topography", "hasAccessRoad", "hasUtilities", "siteAccessRoute",
+                                "drainageCondition", "existingDevelopment", "zoningClassification", "planningSchemeReference",
+                                "isFloodProne", "planningCompatible", "accessConfirmed", "environmentalClearance",
+                                "utilityAvailability", "encumbranceObserved"
+                            ]),
+                        AcquisitionStep(
+                            "Suitability Approval",
+                            WorkflowStepType.Approval,
+                            "Estate Manager",
+                            [
+                                "Physical inspection and planning constraints are reviewed",
+                                "Suitability recommendation and approval notes are recorded"
+                            ],
+                            [
+                                "Physical Assessment Report",
+                                "Zoning / Planning Clearance",
+                                "Access and Utility Evidence"
+                            ],
+                            ["assessmentRecommendation", "approvalNotes"]),
+                        AcquisitionStep(
+                            "Cadastral Survey",
+                            WorkflowStepType.Manual,
+                            "Survey Officer",
+                            [
+                                "Cadastre description, area, map sheet, and survey plan are captured",
+                                "Beacon coordinates and demarcation details are recorded",
+                                "Surveyor and certification metadata are captured"
+                            ],
+                            [
+                                "Survey Plan",
+                                "Cadastral Site Plan",
+                                "Beacon / Demarcation Evidence"
+                            ],
+                            [
+                                "cadastreDescription", "regionId", "districtId", "townId", "totalArea", "areaUnit",
+                                "beacon1Index", "beacon1NorthingFeet", "beacon1EastingFeet", "beacon1Bearing",
+                                "beacon1DistanceFeet", "beacon2Index", "beacon2NorthingFeet", "beacon2EastingFeet",
+                                "beacon2Bearing", "beacon2DistanceFeet", "beacon3Index", "beacon3NorthingFeet",
+                                "beacon3EastingFeet", "beacon3Bearing", "beacon3DistanceFeet", "beacon4Index",
+                                "beacon4NorthingFeet", "beacon4EastingFeet", "beacon4Bearing", "beacon4DistanceFeet",
+                                "boundaryCoordinates", "surveyorSource", "surveyorBusinessPartnerId", "surveyorFeeAmount",
+                                "surveyorFeeDueDate", "surveyorName", "licensedSurveyor", "surveyDate",
+                                "surveyorSignedDate", "surveyPlanNumber", "mapSheetNumber", "surveyStatus",
+                                "isCertified", "beaconCount", "regionalSurveyorName", "regionalSurveyorSignedDate",
+                                "mainPortion", "coordinateReference", "surveyNotes"
+                            ]),
+                        AcquisitionStep(
+                            "Cadastral Survey Verification",
+                            WorkflowStepType.Approval,
+                            "Senior Surveyor",
+                            [
+                                "Submitted survey plan and saved demarcated boundary are reviewed",
+                                "Coordinate completeness and boundary consistency are confirmed"
+                            ],
+                            [
+                                "Survey Verification Report",
+                                "Certified Survey Plan"
+                            ]),
+                        AcquisitionStep(
+                            "Ownership Classification",
+                            WorkflowStepType.Manual,
+                            "Legal Officer",
+                            [
+                                "Ownership type, owner identity, tenure, and acquisition method are captured",
+                                "Ownership history, witness evidence, and classification risk are recorded",
+                                "Owner boundary coordinates are captured where available"
+                            ],
+                            [
+                                "Owner Identity Evidence",
+                                "Root of Title / Ownership Evidence",
+                                "Witness Declaration Evidence"
+                            ],
+                            [
+                                "ownershipType", "ownerName", "contactNumber", "address", "acquisitionMethod", "tenureType",
+                                "ownershipStartDate", "ownershipEndDate", "isCurrentOwner", "identificationType",
+                                "identificationNumber", "classificationRisk", "dateGapReason", "ownerRegionId",
+                                "ownerDistrictId", "ownerTownId", "ownerBeacon1NorthingFeet", "ownerBeacon1EastingFeet",
+                                "ownerBeacon2NorthingFeet", "ownerBeacon2EastingFeet", "ownerBeacon3NorthingFeet",
+                                "ownerBeacon3EastingFeet", "ownerBeacon4NorthingFeet", "ownerBeacon4EastingFeet",
+                                "witnessName1", "witnessContact1", "witnessRelation1", "witnessAddress1",
+                                "witnessSwornOath1", "witnessOathSwornBefore1", "witnessOathSwornDate1",
+                                "witnessName2", "witnessContact2", "witnessRelation2", "witnessAddress2",
+                                "witnessSwornOath2", "witnessOathSwornBefore2", "witnessOathSwornDate2",
+                                "classificationNotes"
+                            ]),
+                        AcquisitionStep(
+                            "Ownership Verification",
+                            WorkflowStepType.Approval,
+                            "Legal Manager",
+                            [
+                                "Title search, owner identity, authority to sell, and ownership are verified",
+                                "Boundary/title overlaps, encumbrances, and litigation risks are reviewed"
+                            ],
+                            [
+                                "Lands Commission Search Report",
+                                "Title / Ownership Verification Report",
+                                "Encumbrance and Litigation Clearance"
+                            ],
+                            [
+                                "dueDiligenceStatus", "titleSearchCompleted", "ownerIdentityVerified",
+                                "authorityToSellVerified", "overlapCleared", "encumbrancesFound", "litigationFound",
+                                "landsCommissionSearchReference", "searchReference", "ownershipVerified",
+                                "verificationNotes"
+                            ]),
+                        AcquisitionStep(
+                            "Agreement Negotiation",
+                            WorkflowStepType.Manual,
+                            "Acquisition Committee",
+                            [
+                                "Offer, counter-offer, negotiated value, terms, and acceptance are captured",
+                                "Agreement parties, root of title, payment schedule, and witnesses are recorded"
+                            ],
+                            [
+                                "Negotiation Minutes",
+                                "Draft Land Acquisition Agreement",
+                                "Payment Schedule"
+                            ],
+                            [
+                                "sellerQuote", "offerAmount", "counterOffer", "negotiatedValue", "paymentType",
+                                "offerTerms", "agreementDay", "agreementMonth", "agreementYear", "isAccepted",
+                                "agreementGenerated", "negotiationNotes", "agreementDate", "rootOfTitle",
+                                "specialConditions", "partyDetails", "paymentSchedule", "agreementWitnessDetails",
+                                "grantorName", "grantorAddress", "grantorPhone", "granteeName", "granteeAddress",
+                                "granteePhone", "agreementPaymentType", "agreementPaymentAmount",
+                                "agreementPaymentDueDate", "agreementPaymentMethod", "agreementWitness1Name",
+                                "agreementWitness1Address", "agreementWitness2Name", "agreementWitness2Address"
+                            ]),
+                        AcquisitionStep(
+                            "Agreement Approval",
+                            WorkflowStepType.Approval,
+                            "Executive Approver",
+                            [
+                                "Legal and finance reviews are confirmed",
+                                "Board approval reference and approval conditions are recorded"
+                            ],
+                            [
+                                "Legal Review Note",
+                                "Finance Review Note",
+                                "Board / Executive Approval Memo"
+                            ],
+                            ["legalReviewComplete", "financeReviewComplete", "boardApprovalReference", "approvalConditions"]),
+                        AcquisitionStep(
+                            "Vendor Payment",
+                            WorkflowStepType.Manual,
+                            "Procurement Supplier Invoice",
+                            [
+                                "Approved vendor consideration is tied to the supplier invoice",
+                                "Payment status and receipt evidence are confirmed before execution"
+                            ],
+                            [
+                                "Supplier Invoice",
+                                "Vendor Payment Receipt"
+                            ],
+                            [
+                                "vendorName", "paymentPurpose", "agreedAmount", "vendorPaymentDueDate",
+                                "vendorPaymentMethod", "boardApprovalReference", "accountsPayableInvoiceNumber",
+                                "accountsPayableInvoiceStatus", "accountsPayablePaymentNumber",
+                                "accountsPayablePaymentStatus", "receiptNumber", "paymentReference", "paymentDate",
+                                "amountPaid", "paymentMethod", "isPaid", "paymentNotes"
+                            ]),
+                        AcquisitionStep(
+                            "Land Instrument Execution",
+                            WorkflowStepType.Manual,
+                            "Legal Officer",
+                            [
+                                "Instrument type, number, execution date, signatories, and witnesses are captured",
+                                "Executed instrument evidence is attached"
+                            ],
+                            [
+                                "Executed Land Instrument",
+                                "Witness / Execution Evidence"
+                            ],
+                            [
+                                "instrumentType", "instrumentNumber", "documentName", "documentType", "executionDate",
+                                "executedBy", "counterpartySignatory", "isExecuted", "witnessDetails", "executionNotes"
+                            ]),
+                        AcquisitionStep(
+                            "Statutory Consent",
+                            WorkflowStepType.Manual,
+                            "Lands Commission Liaison",
+                            [
+                                "Consent authority, application number, submission date, and consent status are captured",
+                                "Consent application documents are attached"
+                            ],
+                            [
+                                "Statutory Consent Application",
+                                "Consent Submission Receipt"
+                            ],
+                            [
+                                "consentAuthority", "consentDate", "applicationNumber", "submissionDate",
+                                "documentName", "documentType", "isApproved", "consentNotes"
+                            ]),
+                        AcquisitionStep(
+                            "Statutory Consent Approval",
+                            WorkflowStepType.Approval,
+                            "Legal Manager",
+                            [
+                                "Consent approval reference, date, conditions, and approval notes are reviewed",
+                                "Consent approval evidence is attached"
+                            ],
+                            [
+                                "Statutory Consent Approval",
+                                "Consent Conditions Schedule"
+                            ],
+                            ["approvalReference", "approvalDate", "consentConditions", "approvalNotes"]),
+                        AcquisitionStep(
+                            "Stamp Duty Assessment",
+                            WorkflowStepType.Manual,
+                            "Finance Officer",
+                            [
+                                "Property value, assessed duty, authority, reference, and assessment date are captured",
+                                "Assessment evidence is attached"
+                            ],
+                            [
+                                "Valuation / Property Value Evidence",
+                                "Stamp Duty Assessment Notice"
+                            ],
+                            [
+                                "propertyValue", "stampDutyAmount", "assessmentAuthority", "assessmentReference",
+                                "assessmentDate", "isApproved", "assessmentNotes"
+                            ]),
+                        AcquisitionStep(
+                            "Stamp Duty Approval",
+                            WorkflowStepType.Approval,
+                            "Finance Manager",
+                            [
+                                "Approved duty amount, approver, approval reference, and approval notes are recorded",
+                                "Finance approval evidence is attached"
+                            ],
+                            [
+                                "Stamp Duty Finance Approval"
+                            ],
+                            ["financeApprovalReference", "approvedDutyAmount", "approverName", "approvalNotes"]),
+                        AcquisitionStep(
+                            "Stamp Duty Payment",
+                            WorkflowStepType.Manual,
+                            "Procurement Supplier Invoice",
+                            [
+                                "Stamp duty payable request is linked",
+                                "Payment record, reference, receipt, and paid status are confirmed"
+                            ],
+                            [
+                                "Stamp Duty Payment Receipt",
+                                "Stamp Duty Supplier Invoice"
+                            ],
+                            [
+                                "accountsPayableInvoiceNumber", "accountsPayableInvoiceStatus",
+                                "accountsPayablePaymentNumber", "accountsPayablePaymentStatus", "receiptNumber",
+                                "paymentReference", "paymentDate", "amountPaid", "paymentMethod", "isPaid",
+                                "paymentNotes"
+                            ]),
+                        AcquisitionStep(
+                            "Registration",
+                            WorkflowStepType.Manual,
+                            "Land Registry Officer",
+                            [
+                                "Publication, land title reference, registration number, volume, folio, and dates are captured",
+                                "Registration evidence is attached"
+                            ],
+                            [
+                                "Registration Certificate",
+                                "Land Title / Registry Extract"
+                            ],
+                            [
+                                "registryOffice", "publicationDate", "landTitleReference", "landTitleCapturedDate",
+                                "registrationNumber", "volume", "folio", "registrationDate", "isRegistered",
+                                "documentName", "registrationNotes"
+                            ]),
+                        AcquisitionStep(
+                            "Land Creation",
+                            WorkflowStepType.Manual,
+                            "Fixed Asset Officer",
+                            [
+                                "Land asset code, size, status, purpose, ownership verification, and custodian are confirmed",
+                                "Capitalized cost breakdown and GL account are reviewed"
+                            ],
+                            [
+                                "Land Asset Creation Memo",
+                                "Capitalization Breakdown",
+                                "Fixed Asset / Land Bank Registration Evidence"
+                            ],
+                            [
+                                "assetCode", "assetNumber", "parcelIdentifier", "registrationNumber", "assetCategory",
+                                "size", "sizeUnit", "assetStatus", "purpose", "zoningClassification",
+                                "ownershipVerification", "ownerConsiderationCost", "externalSurveyorCost",
+                                "stampDutyCost", "otherAcquisitionCost", "totalCapitalizedCost", "capitalizationValue",
+                                "capitalizationBreakdown", "glAccount", "custodian", "assetNotes"
+                            ])
+                    ])
+            ];
+
+            static EstateSopWorkflowStepSeed AcquisitionStep(
+                string name,
+                WorkflowStepType type,
+                string role,
+                IReadOnlyList<string> checks,
+                IReadOnlyList<string> documents,
+                IReadOnlyList<string>? fields = null)
+                => new(
+                    name,
+                    type,
+                    role,
+                    string.Join(" ", checks),
+                    checks,
+                    documents,
+                    TaskActionType,
+                    DocumentType,
+                    $"Complete the {name} stage for the Estate land acquisition workflow.",
+                    FieldKeys: fields);
         }
 
         private static IReadOnlyList<EstateSopWorkflowSeedSpec> GetEstateSopWorkflowSeedSpecs()
@@ -1554,8 +1981,8 @@ namespace ErpSystem.Web.Services
             const string TaskActionType = "legal-property-agreement-review";
             const string DocumentType = "LegalAgreementReviewEvidence";
 
-            return
-            [
+            var specs = new List<EstateSopWorkflowSeedSpec>
+            {
                 new(
                     "LegalPropertyAgreementReview",
                     "LegalPropertyAgreementReview",
@@ -1599,7 +2026,32 @@ namespace ErpSystem.Web.Services
                                 "Head of Legal signed agreement"
                             ])
                     ])
-            ];
+            };
+
+            var catalog = new ErpSystem.Core.Services.Legal.LegalProcedureCatalogService();
+            foreach (var procedure in catalog.GetProcedures().Where(item =>
+                         item.EntityType != "LegalPropertyAgreementReview"))
+            {
+                var workspace = catalog.GetProcedureWorkspace(procedure.EntityType)!;
+                specs.Add(new EstateSopWorkflowSeedSpec(
+                    procedure.EntityType,
+                    procedure.EntityType,
+                    $"Legal Procedure - {procedure.Title}",
+                    $"Default Legal procedure workflow for {procedure.Title}.",
+                    workspace.Stages.Select(stage => new EstateSopWorkflowStepSeed(
+                        stage.Name,
+                        stage.Owner is "Head of Legal" or "Managing Director"
+                            ? WorkflowStepType.Approval
+                            : WorkflowStepType.Manual,
+                        stage.Owner,
+                        string.Join(" ", stage.Checklist),
+                        stage.Checklist,
+                        [],
+                        "legal-procedure",
+                        "LegalProcedureEvidence")).ToList()));
+            }
+
+            return specs;
 
             static EstateSopWorkflowStepSeed LegalStep(
                 string name,
