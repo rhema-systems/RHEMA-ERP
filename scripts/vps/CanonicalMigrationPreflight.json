@@ -171,6 +171,35 @@
           "sourceSha256": "B9C42A2C9F335D766ABB7DAC0E41E40061B99B4B2F07910237EFE499AC69E5B3"
         }
       ]
+    },
+    {
+      "sqlFile": "FinanceBookAuthorityMigrationPreflight.sql",
+      "migrations": [
+        {
+          "id": "20260930000100_YearEndBookCloseCycles",
+          "sourceSha256": "4253DD87FD3481203D8075328E9281853E76CFA1C5D9827C212659E4659BFB44"
+        },
+        {
+          "id": "20260930000200_ApWithholdingNetBasisEvidence",
+          "sourceSha256": "9EF14565ACC38ABDB70B5B95DC5871A83434FFC3298F6B216D909993BC5E950A"
+        },
+        {
+          "id": "20260930000300_LeaseInstalmentApOpenItems",
+          "sourceSha256": "7A61D49F82F099DB48432C36F870D356DF672BEEF531337BACF5D28CA9D40A1F"
+        },
+        {
+          "id": "20260930000400_FinanceSourceBookAuthority",
+          "sourceSha256": "1326F0A4B465C52D497CAB2B67339D35335D04878D1B71E7E9671C66F9D75610"
+        },
+        {
+          "id": "20260930000500_AddFinanceSourceBookAuthorityCallerBindings",
+          "sourceSha256": "A9F7BE1B2042AA37B083CD4C49CCAEBD24261AC2C372CA726CD5EE9093655A07"
+        },
+        {
+          "id": "20260930000600_AddCapitalizationLineage",
+          "sourceSha256": "EE2BE207977293AB566645626C02B1629ADC273597B0ADE2CC1F93D74A874506"
+        }
+      ]
     }
   ]
 }
