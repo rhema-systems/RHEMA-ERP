@@ -25,7 +25,7 @@ public partial class AddFinanceSourceBookAuthorityCallerBindings : Migration
                     STRING_AGG(CONCAT(LOWER(CONVERT(varchar(36),o.[OriginAuthorityId])),N':',o.[Role],N':',
                         LOWER(CONVERT(varchar(36),o.[OriginalFinancePostingEventId])),N':',
                         LOWER(CONVERT(varchar(36),o.[OriginalJournalEntryId]))),N'|')
-                    WITHIN GROUP (ORDER BY o.[OriginAuthorityId],o.[Role]) AS Evidence
+                    WITHIN GROUP (ORDER BY CONVERT(char(36),o.[OriginAuthorityId]),o.[Role]) AS Evidence
                 FROM [dbo].[FinanceSourceBookAuthorityOrigins] o
                 WHERE o.[IsDeleted]=0
                 GROUP BY o.[TenantId],o.[FinanceSourceBookAuthorityId]
