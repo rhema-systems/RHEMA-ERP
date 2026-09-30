@@ -124,6 +124,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<Account> Accounts { get; set; }
     public DbSet<AccountingBook> AccountingBooks { get; set; }
     public DbSet<AccountingBookPrimaryDesignation> AccountingBookPrimaryDesignations { get; set; }
+    public DbSet<FinanceSourceBookAuthority> FinanceSourceBookAuthorities { get; set; }
+    public DbSet<FinanceSourceBookAuthorityOrigin> FinanceSourceBookAuthorityOrigins { get; set; }
     public DbSet<AccountingBookPeriod> AccountingBookPeriods { get; set; }
     public DbSet<YearEndBookCloseCycle> YearEndBookCloseCycles { get; set; }
     public DbSet<AccountingBookInitialization> AccountingBookInitializations { get; set; }
@@ -3248,6 +3250,82 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.Tenant).WithMany()
                 .HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceSourceBookAuthority>(entity =>
+        {
+            entity.ToTable("FinanceSourceBookAuthorities", table =>
+            {
+                table.HasTrigger("TR_FinanceSourceBookAuthorities_ImmutableBinding");
+                table.HasTrigger("TR_FinanceSourceBookAuthorities_NoDelete");
+                table.HasTrigger("TR_FinanceSourceBookAuthorities_Evidence");
+                table.HasCheckConstraint("CK_FinanceSourceBookAuthorities_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_FinanceSourceBookAuthorities_Version", "[AuthorityVersion] > 0");
+                table.HasCheckConstraint("CK_FinanceSourceBookAuthorities_Lineage", "([AuthorityVersion] = 1 AND [SupersedesAuthorityId] IS NULL) OR ([AuthorityVersion] > 1 AND [SupersedesAuthorityId] IS NOT NULL)");
+                table.HasCheckConstraint("CK_FinanceSourceBookAuthorities_BindingShape", "([OriginalFinancePostingEventId] IS NULL AND [OriginalJournalEntryId] IS NULL AND [BoundByUserId] IS NULL AND [BoundAtUtc] IS NULL) OR ([OriginalFinancePostingEventId] IS NOT NULL AND [OriginalJournalEntryId] IS NOT NULL AND [BoundAtUtc] IS NOT NULL AND (([SelectionBasis] = 'RETAINED_POSTED_ORIGINAL' AND [BoundByUserId] IS NULL) OR ([SelectionBasis] <> 'RETAINED_POSTED_ORIGINAL' AND [BoundByUserId] IS NOT NULL)))");
+                table.HasCheckConstraint("CK_FinanceSourceBookAuthorities_FreezeStage", "[FreezeStage] IN ('SUBMITTED','AUTHORIZED','PRE_POST','LEGACY_POSTED')");
+                table.HasCheckConstraint("CK_FinanceSourceBookAuthorities_SelectionBasis", "[SelectionBasis] IN ('DEFAULT_PRIMARY','INHERITED_ORIGINAL','RETAINED_POSTED_ORIGINAL')");
+                table.HasCheckConstraint("CK_FinanceSourceBookAuthorities_LegacyShape", "([SelectionBasis] = 'RETAINED_POSTED_ORIGINAL' AND [FreezeStage] = 'LEGACY_POSTED' AND [SourceWorkflowInstanceId] IS NULL AND [FrozenByUserId] IS NULL AND [OriginalFinancePostingEventId] IS NOT NULL) OR ([SelectionBasis] <> 'RETAINED_POSTED_ORIGINAL' AND [FreezeStage] <> 'LEGACY_POSTED' AND [FrozenByUserId] IS NOT NULL)");
+                if (Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_FinanceSourceBookAuthorities_IdentityCanonical", "DATALENGTH([OriginModuleCode])=LEN([OriginModuleCode])*2 AND LEFT([OriginModuleCode],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OriginModuleCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND DATALENGTH([SourceDocumentType])=LEN([SourceDocumentType])*2 AND LEFT([SourceDocumentType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND DATALENGTH([PostingAction])=LEN([PostingAction])*2 AND LEFT([PostingAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' ");
+                    table.HasCheckConstraint("CK_FinanceSourceBookAuthorities_CurrencyCanonical", "[FunctionalCurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]' AND [TransactionCurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]'");
+                    table.HasCheckConstraint("CK_FinanceSourceBookAuthorities_Fingerprint", "LEN([AuthorityFingerprint])=64 AND [AuthorityFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                }
+            });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id });
+            entity.Property(item => item.EffectiveDate).HasColumnType("date");
+            entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasIndex(item => new { item.TenantId, item.OriginModuleCode, item.SourceDocumentType,
+                item.SourceDocumentId, item.PostingAction, item.AuthorityVersion }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.OriginModuleCode, item.SourceDocumentType,
+                item.SourceDocumentId, item.PostingAction, item.SourceWorkflowInstanceId }).IsUnique()
+                .HasFilter("[SourceWorkflowInstanceId] IS NOT NULL");
+            entity.HasIndex(item => new { item.TenantId, item.SupersedesAuthorityId }).IsUnique()
+                .HasFilter("[SupersedesAuthorityId] IS NOT NULL");
+            entity.HasIndex(item => new { item.TenantId, item.OriginalFinancePostingEventId }).IsUnique()
+                .HasFilter("[OriginalFinancePostingEventId] IS NOT NULL");
+            entity.HasIndex(item => new { item.TenantId, item.OriginalJournalEntryId }).IsUnique()
+                .HasFilter("[OriginalJournalEntryId] IS NOT NULL");
+            entity.HasOne(item => item.AccountingBook).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.SupersedesAuthority).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.SupersedesAuthorityId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.SourceWorkflowInstance).WithMany()
+                .HasForeignKey(item => item.SourceWorkflowInstanceId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.OriginalFinancePostingEvent).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.OriginalFinancePostingEventId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.OriginalJournalEntry).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.OriginalJournalEntryId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceSourceBookAuthorityOrigin>(entity =>
+        {
+            entity.ToTable("FinanceSourceBookAuthorityOrigins", table =>
+            {
+                table.HasTrigger("TR_FinanceSourceBookAuthorityOrigins_AppendOnly");
+                table.HasTrigger("TR_FinanceSourceBookAuthorityOrigins_Evidence");
+                table.HasCheckConstraint("CK_FinanceSourceBookAuthorityOrigins_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_FinanceSourceBookAuthorityOrigins_NoSelf", "[FinanceSourceBookAuthorityId] <> [OriginAuthorityId]");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.FinanceSourceBookAuthorityId,
+                item.OriginAuthorityId, item.Role }).IsUnique();
+            entity.HasOne(item => item.FinanceSourceBookAuthority).WithMany(item => item.Origins)
+                .HasForeignKey(item => new { item.TenantId, item.FinanceSourceBookAuthorityId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.OriginAuthority).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.OriginAuthorityId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.OriginalFinancePostingEvent).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.OriginalFinancePostingEventId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.OriginalJournalEntry).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.OriginalJournalEntryId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<AccountingEvent>(entity =>
@@ -10875,6 +10953,29 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 throw new InvalidOperationException("Workflow audit events are immutable and cannot be changed or deleted.");
             if (entry.Entity is FinanceSourceDimensionChange && entry.State is EntityState.Modified or EntityState.Deleted)
                 throw new InvalidOperationException("Finance source-dimension change evidence is immutable and cannot be changed or deleted.");
+            if (entry.Entity is FinanceSourceBookAuthorityOrigin && entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException("Finance source-book origin evidence is append-only and cannot be changed or deleted.");
+            if (entry.Entity is FinanceSourceBookAuthority authority)
+            {
+                if (entry.State == EntityState.Deleted)
+                    throw new InvalidOperationException("Finance source-book authority cannot be deleted.");
+                if (entry.State == EntityState.Modified)
+                {
+                    var allowed = new HashSet<string>(StringComparer.Ordinal)
+                    {
+                        nameof(FinanceSourceBookAuthority.OriginalFinancePostingEventId),
+                        nameof(FinanceSourceBookAuthority.OriginalJournalEntryId),
+                        nameof(FinanceSourceBookAuthority.BoundByUserId),
+                        nameof(FinanceSourceBookAuthority.BoundAtUtc)
+                    };
+                    if (entry.Properties.Where(item => item.IsModified).Any(item => !allowed.Contains(item.Metadata.Name)) ||
+                        entry.OriginalValues.GetValue<Guid?>(nameof(FinanceSourceBookAuthority.OriginalFinancePostingEventId)).HasValue ||
+                        entry.OriginalValues.GetValue<Guid?>(nameof(FinanceSourceBookAuthority.OriginalJournalEntryId)).HasValue ||
+                        !authority.OriginalFinancePostingEventId.HasValue || !authority.OriginalJournalEntryId.HasValue ||
+                        !authority.BoundAtUtc.HasValue)
+                        throw new InvalidOperationException("Finance source-book authority is immutable except for its first complete original-posting binding.");
+                }
+            }
             switch (entry.State)
             {
                 case EntityState.Added:
