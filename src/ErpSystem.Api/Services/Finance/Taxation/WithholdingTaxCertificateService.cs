@@ -50,7 +50,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         query ??= new WhtCertificateQueryDto();
         var page = Math.Max(query.Page, 1);
         var pageSize = Math.Clamp(query.PageSize, 1, 200);
-        var payments = BuildEligibleApPaymentQuery(query);
+        var payments = BuildEligibleApPaymentQuery(query, includeCertificateHistory: true);
         var normalizedStatus = NormalizeStatus(query.Status);
 
         // Lifecycle status belongs to the immutable certificate versions, not to the legacy
@@ -101,18 +101,20 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         Guid vendorPaymentId,
         CancellationToken cancellationToken = default)
     {
-        var payment = await LoadEligibleApPaymentAsync(vendorPaymentId, asTracking: false, cancellationToken);
+        var payment = await LoadEligibleApPaymentAsync(vendorPaymentId, asTracking: false, cancellationToken, includeRetiredPayment: true);
         if (payment == null)
         {
             return null;
         }
 
-        await EnsurePaymentJournalIsPostedAsync(payment, cancellationToken);
+        await EnsurePaymentJournalIsPostedAsync(payment, cancellationToken, allowReversedOriginal: true);
         var versions = await LoadCertificateVersionsAsync(new[] { payment.Id }, cancellationToken);
+        if (!versions.TryGetValue(payment.Id, out var paymentVersions) || paymentVersions.Count == 0)
+            await EnsurePaymentJournalIsPostedAsync(payment, cancellationToken);
         var remittances = await LoadActiveRemittancesAsync(new[] { payment.Id }, cancellationToken);
         return MapToDto(
             payment,
-            versions.GetValueOrDefault(payment.Id) ?? new List<WithholdingTaxCertificate>(),
+            paymentVersions ?? new List<WithholdingTaxCertificate>(),
             remittances.GetValueOrDefault(payment.Id));
     }
 
@@ -145,9 +147,9 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         Guid? certificateId = null,
         CancellationToken cancellationToken = default)
     {
-        var payment = await LoadEligibleApPaymentAsync(vendorPaymentId, asTracking: false, cancellationToken)
+        var payment = await LoadEligibleApPaymentAsync(vendorPaymentId, asTracking: false, cancellationToken, includeRetiredPayment: true)
             ?? throw new InvalidOperationException("AP WHT payment was not found.");
-        await EnsurePaymentJournalIsPostedAsync(payment, cancellationToken);
+        await EnsurePaymentJournalIsPostedAsync(payment, cancellationToken, allowReversedOriginal: true);
 
         var certificateQuery = _context.WithholdingTaxCertificates
             .AsNoTracking()
@@ -214,7 +216,23 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         var paymentDate = dto.PaymentDate == default ? DateTime.UtcNow.Date : dto.PaymentDate.Date;
         var effectiveRate = await ResolveEffectiveRateAsync(tax, paymentDate, cancellationToken)
             ?? throw new InvalidOperationException($"WHT tax {tax.Code} is not effective on {paymentDate:yyyy-MM-dd}.");
+        var functionalCurrency = await ResolveFunctionalCurrencyAsync(cancellationToken);
+        if (functionalCurrency != "GHS")
+            throw new InvalidOperationException("Ghana WHT amounts and thresholds are denominated in GHS. A non-GHS functional-currency tenant requires governed statutory-currency conversion before settlement.");
         var invoiceIds = (dto.VendorInvoiceIds ?? new List<Guid>()).Distinct().ToList();
+        var settlements = dto.InvoiceSettlements ?? new List<WhtInvoiceSettlementDto>();
+        if (settlements.Count > 0)
+        {
+            if (settlements.Select(row => row.VendorInvoiceId).Distinct().Count() != settlements.Count ||
+                settlements.Any(row => row.GrossSettlementAmount < 0m))
+                throw new InvalidOperationException("WHT preview requires unique invoices and non-negative gross settlements.");
+            var settlementIds = settlements.Select(row => row.VendorInvoiceId).ToList();
+            if (invoiceIds.Count > 0 && !invoiceIds.Order().SequenceEqual(settlementIds.Order()))
+                throw new InvalidOperationException("WHT invoice ids do not match settlement evidence.");
+            invoiceIds = settlementIds;
+        }
+        var taxableBase = RoundMoney(dto.TaxableBase);
+        var knownContractBase = 0m;
         if (invoiceIds.Count > 0)
         {
             var invoices = await _context.Set<VendorInvoice>().AsNoTracking().Where(invoice =>
@@ -222,12 +240,29 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
                 invoiceIds.Contains(invoice.Id)).ToListAsync(cancellationToken);
             if (invoices.Count != invoiceIds.Count)
                 throw new InvalidOperationException("A selected WHT invoice does not belong to this supplier and tenant.");
-            if (invoices.Any(invoice =>
-                    !string.Equals(invoice.WithholdingContractReference, contractReference, StringComparison.OrdinalIgnoreCase)
-                    || invoice.WithholdingSupplyCategory != dto.SupplyCategory))
-                throw new InvalidOperationException("Selected WHT invoices must share the requested contract/reference and supply category.");
+            if (invoices.Any(invoice => invoice.IsOpeningBalance || invoice.InvoiceDate.Date > paymentDate ||
+                    (invoice.Status != VendorInvoiceStatus.Approved && invoice.Status != VendorInvoiceStatus.PartiallyPaid &&
+                     invoice.Status != VendorInvoiceStatus.Paid && invoice.Status != VendorInvoiceStatus.Overdue)))
+                throw new InvalidOperationException("WHT calculation requires approved ordinary invoices dated on or before the payment date.");
+            if (invoices.Any(invoice => string.IsNullOrWhiteSpace(invoice.WithholdingContractReference) ||
+                    invoice.WithholdingSupplyCategory != dto.SupplyCategory))
+                throw new InvalidOperationException("Selected WHT invoices require a contract/reference and the requested supply category.");
+            if (settlements.Count != invoiceIds.Count)
+                throw new InvalidOperationException("WHT preview requires invoice gross-settlement evidence. Refresh the payment form before calculating.");
             var decision = ApInvoiceWithholdingPolicy.Resolve(invoices, dto.TaxId);
             if (decision != null) effectiveRate = decision.Rate;
+            taxableBase = 0m;
+            foreach (var invoice in invoices)
+            {
+                var settlement = settlements.Single(row => row.VendorInvoiceId == invoice.Id);
+                if (settlement.GrossSettlementAmount > invoice.TotalAmount)
+                    throw new InvalidOperationException($"WHT settlement exceeds invoice '{invoice.InvoiceNumber}'.");
+                RequireGhsStatutorySource(invoice.CurrencyCode);
+                if (settlement.ExchangeRateId.HasValue)
+                    throw new InvalidOperationException("GHS WHT settlement must not specify a commercial FX rate. Statutory conversion requires separate governed evidence.");
+                taxableBase += ApWithholdingBasis.FunctionalBase(invoice, settlement.GrossSettlementAmount);
+            }
+            taxableBase = RoundMoney(taxableBase);
         }
 
         var settings = await _context.Set<FinanceSettings>().AsNoTracking()
@@ -239,11 +274,35 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             ? boundaryThisYear
             : boundaryThisYear.AddYears(-1);
         var fiscalYearEnd = fiscalYearStart.AddYears(1);
+        if (invoiceIds.Count > 0)
+        {
+            // Include governed invoices in the same statutory scope even when the payment
+            // screen did not select them. Book FX is not statutory conversion authority under
+            // Ghana Act 915 section 21. Foreign scope requires separately governed statutory
+            // evidence. Unbilled external contracts cannot be invented from a payment request.
+            var paymentDateExclusive = paymentDate.AddDays(1);
+            var governedInvoices = await _context.Set<VendorInvoice>().AsNoTracking().Where(invoice =>
+                invoice.TenantId == TenantId && !invoice.IsDeleted && !invoice.IsOpeningBalance &&
+                invoice.BusinessPartnerId == dto.BusinessPartnerId && invoice.WithholdingTaxId == dto.TaxId &&
+                invoice.WithholdingSupplyCategory == dto.SupplyCategory &&
+                invoice.ApplySupplierWithholdingDefaults != false &&
+                invoice.InvoiceDate >= fiscalYearStart && invoice.InvoiceDate < paymentDateExclusive &&
+                (invoice.Status == VendorInvoiceStatus.Approved || invoice.Status == VendorInvoiceStatus.PartiallyPaid ||
+                 invoice.Status == VendorInvoiceStatus.Paid || invoice.Status == VendorInvoiceStatus.Overdue))
+                .ToListAsync(cancellationToken);
+            foreach (var invoice in governedInvoices)
+            {
+                if (string.IsNullOrWhiteSpace(invoice.WithholdingContractReference))
+                    throw new InvalidOperationException($"Invoice '{invoice.InvoiceNumber}' lacks contract evidence for the supplier's WHT threshold scope.");
+                RequireGhsStatutorySource(invoice.CurrencyCode);
+                knownContractBase += ApWithholdingBasis.FunctionalBase(invoice, invoice.TotalAmount);
+            }
+            knownContractBase = RoundMoney(knownContractBase);
+        }
 
-        // Only posted allocation evidence contributes. Draft/authorized payments are reservations,
-        // not statutory payments, and abandoned drafts must never move the threshold. The invoice
-        // owns the contract/category scope, preventing unrelated engagements with one supplier
-        // from being combined.
+        // Ghana's threshold aggregates contracts for the same supplier and supply category within
+        // the statutory year. A new contract number must not reset that aggregate. Only effective
+        // posted payment evidence contributes; drafts are not statutory payments.
         var cumulativeQuery = _context.Set<VendorPaymentAllocation>().AsNoTracking().Where(allocation =>
             allocation.TenantId == TenantId && !allocation.IsDeleted && !allocation.IsReversal
             && allocation.VendorPayment.TenantId == TenantId && !allocation.VendorPayment.IsDeleted
@@ -253,13 +312,13 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             && _context.Set<JournalEntry>().Any(journal =>
                 journal.TenantId == TenantId && !journal.IsDeleted
                 && journal.Id == allocation.VendorPayment.JournalEntryId.Value
-                && journal.PostingStatus == PostedStatus)
+                && journal.PostingStatus == PostedStatus && !journal.IsReversed
+                && !journal.ReversalJournalEntryId.HasValue)
             && allocation.VendorPayment.PaymentDate >= fiscalYearStart
             && allocation.VendorPayment.PaymentDate < fiscalYearEnd
             && allocation.VendorPayment.Status != VendorPaymentStatus.Voided
             && allocation.VendorPayment.Status != VendorPaymentStatus.Reversed
             && allocation.VendorPayment.Status != VendorPaymentStatus.Failed
-            && allocation.VendorInvoice.WithholdingContractReference == contractReference
             && allocation.VendorInvoice.WithholdingSupplyCategory == dto.SupplyCategory
             && !_context.Set<VendorPaymentAllocation>().Any(reversal =>
                 reversal.TenantId == TenantId && !reversal.IsDeleted && reversal.IsReversal
@@ -270,15 +329,37 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
                 allocation.VendorPaymentId != dto.ExcludeVendorPaymentId.Value);
         }
 
-        var cumulativeBefore = RoundMoney(await cumulativeQuery.SumAsync(
-            allocation => allocation.SettlementFunctionalAmount,
-            cancellationToken));
-        var taxableBase = RoundMoney(dto.TaxableBase);
+        var history = await cumulativeQuery.Include(row => row.VendorInvoice)
+            .Include(row => row.VendorPayment).ToListAsync(cancellationToken);
+        foreach (var allocation in history)
+        {
+            RequireGhsStatutorySource(allocation.VendorInvoice.CurrencyCode);
+            RequireGhsStatutorySource(allocation.VendorPayment.CurrencyCode);
+        }
+        if (history.Any(row => row.VendorPayment.PaymentDate.Date > paymentDate))
+            throw new InvalidOperationException("Later posted WHT payments exist in this statutory scope. Use a governed tax correction instead of backdating the threshold calculation.");
+        if (history.Any(row => !row.WithholdingTaxBaseFunctionalAmount.HasValue))
+            throw new InvalidOperationException("Posted WHT history lacks frozen net-supply basis evidence. Finance must reconcile the historical statutory scope before another settlement; current invoice values cannot rebuild that evidence.");
+        var priorBases = history.Select(row => new
+        {
+            Base = row.WithholdingTaxBaseFunctionalAmount.GetValueOrDefault(),
+            Rate = row.VendorPayment.WithholdingTaxRate,
+            Withheld = row.WithholdingTaxFunctionalAmount
+        }).ToList();
+        var cumulativeBefore = RoundMoney(priorBases.Sum(row => row.Base));
         var cumulativeAfter = RoundMoney(cumulativeBefore + taxableBase);
         decimal? threshold = tax.ThresholdAmount is > 0m ? RoundMoney(tax.ThresholdAmount.Value) : null;
-        var thresholdApplied = taxableBase > 0m && (!threshold.HasValue || cumulativeAfter >= threshold.Value);
+        var thresholdApplied = taxableBase > 0m && (!threshold.HasValue ||
+            Math.Max(cumulativeAfter, knownContractBase) > threshold.Value);
+        var priorWithheld = RoundMoney(priorBases.Sum(row => row.Withheld));
+        var priorLiability = RoundMoney(priorBases.Sum(row => row.Base * row.Rate / 100m));
+        var catchUp = thresholdApplied && threshold.HasValue
+            ? Math.Max(RoundMoney(priorLiability - priorWithheld), 0m) : 0m;
+        if (catchUp > 0m && priorBases.Any(row => row.Rate != effectiveRate))
+            throw new InvalidOperationException("Threshold catch-up spans different approved WHT rates. Finance must review a rate-specific tax adjustment before settlement.");
+        var catchUpBase = catchUp > 0m && effectiveRate > 0m ? RoundMoney(catchUp * 100m / effectiveRate) : 0m;
         var withholdingAmount = thresholdApplied
-            ? RoundMoney(taxableBase * effectiveRate / 100m)
+            ? RoundMoney(taxableBase * effectiveRate / 100m) + catchUp
             : 0m;
         var remaining = threshold.HasValue
             ? Math.Max(RoundMoney(threshold.Value - cumulativeAfter), 0m)
@@ -286,8 +367,8 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         var note = !threshold.HasValue
             ? $"{tax.Code} has no minimum threshold; {effectiveRate:N4}% applies to the full taxable base."
             : thresholdApplied
-                ? $"Statutory aggregate for {contractReference}/{dto.SupplyCategory} is {cumulativeAfter:N2} and meets/exceeds the configured {threshold.Value:N2} threshold; {effectiveRate:N4}% applies to the full current payment base."
-                : $"Statutory aggregate for {contractReference}/{dto.SupplyCategory} is {cumulativeAfter:N2} and remains below the configured {threshold.Value:N2} threshold; no WHT is deducted."
+                ? $"Ghana WHT v2: {dto.SupplyCategory} net paid aggregate {cumulativeAfter:N2}; governed invoice contract base {knownContractBase:N2}; threshold {threshold.Value:N2} exceeded. Current net base {taxableBase:N2} at {effectiveRate:N4}%, plus prior-period-in-year catch-up {catchUp:N2}."
+                : $"Ghana WHT v2: {dto.SupplyCategory} net paid aggregate {cumulativeAfter:N2} does not exceed {threshold.Value:N2}; no WHT is deducted."
 ;
 
         return new WhtCalculationResultDto
@@ -296,7 +377,10 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             TaxCode = tax.Code,
             TaxName = tax.Name,
             TaxRate = RoundRate(effectiveRate),
-            TaxableBase = taxableBase,
+            TaxableBase = RoundMoney(taxableBase + catchUpBase),
+            CurrentPaymentTaxableBase = taxableBase,
+            CatchUpTaxableBase = catchUpBase,
+            CatchUpWithholdingAmount = catchUp,
             CumulativeBefore = cumulativeBefore,
             CumulativeAfter = cumulativeAfter,
             ThresholdAmount = threshold,
@@ -310,6 +394,12 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             StatutoryPeriodStart = fiscalYearStart,
             StatutoryPeriodEnd = fiscalYearEnd.AddDays(-1)
         };
+    }
+
+    private static void RequireGhsStatutorySource(string currency)
+    {
+        if (!string.Equals(currency?.Trim(), "GHS", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Foreign-currency WHT scope requires governed GHS statutory conversion evidence at the applicable Bank of Ghana inter-bank rate. Commercial settlement rates and invoice book values cannot substitute for that evidence. Finance must resolve this scope before settlement.");
     }
 
     public async Task<IReadOnlyList<WhtRemittanceLiabilityDto>> GetUnremittedLiabilitiesAsync(
@@ -437,6 +527,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         {
             throw new InvalidOperationException("A WHT remittance must contain at least one liability.");
         }
+        await RequireStatutoryRemittanceEvidenceAsync(remittance, cancellationToken);
 
         var before = RemittanceAuditSnapshot(remittance);
         remittance.Status = WhtRemittanceStatus.Submitted;
@@ -479,6 +570,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         {
             throw new InvalidOperationException("Remittance payment date cannot precede the liability period.");
         }
+        await RequireStatutoryRemittanceEvidenceAsync(remittance, cancellationToken);
 
         var before = RemittanceAuditSnapshot(remittance);
         remittance.Status = WhtRemittanceStatus.Paid;
@@ -537,7 +629,9 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         DateTime? toDate,
         CancellationToken cancellationToken = default)
     {
-        var query = BuildEligibleApPaymentQuery(new WhtCertificateQueryDto { FromDate = fromDate, ToDate = toDate });
+        var query = BuildEligibleApPaymentQuery(
+            new WhtCertificateQueryDto { FromDate = fromDate, ToDate = toDate },
+            includeCertificateHistory: true);
         var payments = await query.OrderBy(item => item.PaymentDate).ThenBy(item => item.PaymentNumber).ToListAsync(cancellationToken);
         var paymentIds = payments.Select(item => item.Id).ToList();
         var versions = await LoadCertificateVersionsAsync(paymentIds, cancellationToken);
@@ -552,16 +646,18 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             var remittance = remittances.GetValueOrDefault(payment.Id);
             builder.AppendLine(string.Join(',', new[]
             {
-                Csv(payment.PaymentDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
-                Csv(payment.PaymentNumber),
-                Csv(payment.BusinessPartnerName),
-                Csv(payment.BusinessPartnerTaxIdentificationNumber),
-                Csv(payment.WithholdingTax?.Code),
-                Csv(RoundRate(payment.WithholdingTaxRate != 0m ? payment.WithholdingTaxRate : payment.WithholdingTax?.Rate ?? 0m).ToString("0.####", CultureInfo.InvariantCulture)),
-                Csv(ResolveTaxableBase(payment).ToString("0.00", CultureInfo.InvariantCulture)),
-                Csv(RoundMoney(payment.WithholdingTaxAmount).ToString("0.00", CultureInfo.InvariantCulture)),
-                Csv(NormalizeCurrency(payment.CurrencyCode)),
-                Csv(payment.JournalEntryId?.ToString()),
+                Csv((current?.PaymentDate ?? payment.PaymentDate).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
+                Csv(current?.PaymentNumber ?? payment.PaymentNumber),
+                Csv(current?.SupplierName ?? payment.BusinessPartnerName),
+                Csv(current?.SupplierTin ?? payment.BusinessPartnerTaxIdentificationNumber),
+                Csv(current?.TaxCode ?? payment.WithholdingTax?.Code),
+                Csv((current?.TaxRate ?? RoundRate(payment.WithholdingTaxRate != 0m
+                    ? payment.WithholdingTaxRate
+                    : payment.WithholdingTax?.Rate ?? 0m)).ToString("0.####", CultureInfo.InvariantCulture)),
+                Csv((current?.TaxableBase ?? ResolveTaxableBase(payment)).ToString("0.00", CultureInfo.InvariantCulture)),
+                Csv((current?.WithholdingAmount ?? RoundMoney(payment.WithholdingTaxAmount)).ToString("0.00", CultureInfo.InvariantCulture)),
+                Csv(NormalizeCurrency(current?.CurrencyCode ?? payment.CurrencyCode)),
+                Csv((current?.JournalEntryId ?? payment.JournalEntryId)?.ToString()),
                 Csv(current?.CertificateNumber),
                 Csv(current?.VersionNumber.ToString(CultureInfo.InvariantCulture)),
                 Csv(current?.Status.ToString() ?? "Missing"),
@@ -603,9 +699,8 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         GenerateWhtCertificateDto dto,
         CancellationToken cancellationToken)
     {
-        var payment = await LoadEligibleApPaymentAsync(vendorPaymentId, asTracking: true, cancellationToken)
+        var payment = await LoadEligibleApPaymentAsync(vendorPaymentId, asTracking: true, cancellationToken, includeRetiredPayment: true)
             ?? throw new InvalidOperationException("AP WHT payment was not found or is not eligible for certificate issue.");
-        await EnsurePaymentJournalIsPostedAsync(payment, cancellationToken);
         var versions = await _context.WithholdingTaxCertificates
             .Where(certificate => certificate.TenantId == TenantId && !certificate.IsDeleted && certificate.VendorPaymentId == payment.Id)
             .OrderByDescending(certificate => certificate.VersionNumber)
@@ -613,13 +708,22 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         var active = versions.FirstOrDefault(certificate => certificate.Status == WhtCertificateStatus.Issued);
         if (active != null)
         {
+            // Idempotent replay is allowed for immutable certificate evidence even when the
+            // original payment or journal was later retired. The linked source must still
+            // exist, but it must not be mistaken for authority to create new evidence.
+            await EnsurePaymentJournalIsPostedAsync(payment, cancellationToken, allowReversedOriginal: true);
             var remittances = await LoadActiveRemittancesAsync(new[] { payment.Id }, cancellationToken);
             return MapToDto(payment, versions, remittances.GetValueOrDefault(payment.Id));
         }
+        // With no active certificate this is a new statutory-evidence request. Apply the
+        // strict payment-status check before journal eligibility so a retired payment fails
+        // with the accurate, stable reason even if its GL source has also been reversed.
+        await EnsurePaymentJournalIsPostedAsync(payment, cancellationToken);
         if (versions.Count > 0)
         {
             throw new InvalidOperationException("This payment has certificate history. Use the controlled reissue action instead of issuing a disconnected certificate.");
         }
+        await RequireStatutoryPaymentEvidenceAsync(payment, cancellationToken);
 
         var requestedNumber = NormalizeCertificateNumber(dto.CertificateNumber);
         var certificateNumber = requestedNumber
@@ -651,6 +755,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         var payment = await LoadEligibleApPaymentAsync(vendorPaymentId, asTracking: true, cancellationToken)
             ?? throw new InvalidOperationException("AP WHT payment was not found or is not eligible for certificate reissue.");
         await EnsurePaymentJournalIsPostedAsync(payment, cancellationToken);
+        await RequireStatutoryPaymentEvidenceAsync(payment, cancellationToken);
         var versions = await _context.WithholdingTaxCertificates
             .Where(certificate => certificate.TenantId == TenantId && !certificate.IsDeleted && certificate.VendorPaymentId == payment.Id)
             .OrderByDescending(certificate => certificate.VersionNumber)
@@ -716,9 +821,9 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         CancellationToken cancellationToken)
     {
         var reason = RequireReason(dto.Reason, "Cancellation reason", 10);
-        var payment = await LoadEligibleApPaymentAsync(vendorPaymentId, asTracking: true, cancellationToken)
+        var payment = await LoadEligibleApPaymentAsync(vendorPaymentId, asTracking: true, cancellationToken, includeRetiredPayment: true)
             ?? throw new InvalidOperationException("AP WHT payment was not found or is not eligible for certificate cancellation.");
-        await EnsurePaymentJournalIsPostedAsync(payment, cancellationToken);
+        await EnsurePaymentJournalIsPostedAsync(payment, cancellationToken, allowReversedOriginal: true);
         var versions = await _context.WithholdingTaxCertificates
             .Where(certificate => certificate.TenantId == TenantId && !certificate.IsDeleted && certificate.VendorPaymentId == payment.Id)
             .OrderByDescending(certificate => certificate.VersionNumber)
@@ -782,6 +887,8 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         {
             throw new InvalidOperationException("One or more selected WHT liabilities are not posted, fall outside the period/currency, are reversed, or already belong to an active remittance.");
         }
+        foreach (var payment in eligible)
+            await RequireStatutoryPaymentEvidenceAsync(payment, cancellationToken);
         var versions = await LoadCertificateVersionsAsync(paymentIds, cancellationToken);
         var remittanceNumber = await GenerateRemittanceNumberAsync(dto.PeriodTo, cancellationToken);
         var now = DateTime.UtcNow;
@@ -837,7 +944,8 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         return MapRemittance(remittance);
     }
 
-    private IQueryable<VendorPayment> BuildEligibleApPaymentQuery(WhtCertificateQueryDto query)
+    private IQueryable<VendorPayment> BuildEligibleApPaymentQuery(
+        WhtCertificateQueryDto query, bool includeCertificateHistory = false)
     {
         var tenantId = TenantId;
         var payments = _context.Set<VendorPayment>()
@@ -848,11 +956,13 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             .Include(payment => payment.Allocations)
             .Where(payment => payment.TenantId == tenantId && !payment.IsDeleted
                 && payment.WithholdingTaxAmount > 0m
-                && payment.Status != VendorPaymentStatus.Reversed
-                && payment.Status != VendorPaymentStatus.Voided
                 && payment.JournalEntryId.HasValue
                 && _context.Set<JournalEntry>().Any(journal => journal.TenantId == tenantId && !journal.IsDeleted
-                    && journal.Id == payment.JournalEntryId && journal.PostingStatus == PostedStatus));
+                    && journal.Id == payment.JournalEntryId && journal.PostingStatus == PostedStatus
+                    && ((!journal.IsReversed && !journal.ReversalJournalEntryId.HasValue
+                        && payment.Status != VendorPaymentStatus.Reversed && payment.Status != VendorPaymentStatus.Voided)
+                        || (includeCertificateHistory && _context.WithholdingTaxCertificates.Any(certificate =>
+                            certificate.TenantId == tenantId && !certificate.IsDeleted && certificate.VendorPaymentId == payment.Id)))));
         if (query.BusinessPartnerId.HasValue)
         {
             payments = payments.Where(payment => payment.BusinessPartnerId == query.BusinessPartnerId.Value);
@@ -900,7 +1010,8 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             && !line.Remittance.IsDeleted && line.Remittance.Status != WhtRemittanceStatus.Cancelled));
     }
 
-    private async Task<VendorPayment?> LoadEligibleApPaymentAsync(Guid vendorPaymentId, bool asTracking, CancellationToken cancellationToken)
+    private async Task<VendorPayment?> LoadEligibleApPaymentAsync(
+        Guid vendorPaymentId, bool asTracking, CancellationToken cancellationToken, bool includeRetiredPayment = false)
     {
         var query = _context.Set<VendorPayment>()
             .Include(payment => payment.BusinessPartner)
@@ -909,8 +1020,8 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             .Include(payment => payment.Allocations)
             .Where(payment => payment.TenantId == TenantId && !payment.IsDeleted && payment.Id == vendorPaymentId
                 && payment.WithholdingTaxAmount > 0m
-                && payment.Status != VendorPaymentStatus.Reversed
-                && payment.Status != VendorPaymentStatus.Voided);
+                && (includeRetiredPayment || (payment.Status != VendorPaymentStatus.Reversed
+                    && payment.Status != VendorPaymentStatus.Voided)));
         if (!asTracking)
         {
             query = query.AsNoTracking();
@@ -918,15 +1029,51 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         return await query.FirstOrDefaultAsync(cancellationToken);
     }
 
-    private async Task EnsurePaymentJournalIsPostedAsync(VendorPayment payment, CancellationToken cancellationToken)
+    private async Task RequireStatutoryPaymentEvidenceAsync(VendorPayment payment, CancellationToken cancellationToken)
     {
+        RequireGhsStatutorySource(await ResolveFunctionalCurrencyAsync(cancellationToken));
+        RequireGhsStatutorySource(payment.CurrencyCode);
+        var allocations = await _context.Set<VendorPaymentAllocation>().AsNoTracking()
+            .Where(row => row.TenantId == TenantId && !row.IsDeleted && !row.IsReversal && row.VendorPaymentId == payment.Id)
+            .Select(row => new { row.WithholdingTaxBaseFunctionalAmount, row.VendorInvoice.TenantId, row.VendorInvoice.IsDeleted, row.VendorInvoice.CurrencyCode })
+            .ToListAsync(cancellationToken);
+        if (allocations.Count == 0 || allocations.Any(row => row.TenantId != TenantId || row.IsDeleted ||
+                !row.WithholdingTaxBaseFunctionalAmount.HasValue))
+            throw new InvalidOperationException("WHT issue/remittance requires frozen, tenant-owned statutory allocation evidence. Reconcile historical liabilities before issuing new evidence.");
+        foreach (var allocation in allocations)
+            RequireGhsStatutorySource(allocation.CurrencyCode);
+        _ = ResolveTaxableBase(payment);
+    }
+
+    private async Task RequireStatutoryRemittanceEvidenceAsync(WithholdingTaxRemittance remittance, CancellationToken cancellationToken)
+    {
+        RequireGhsStatutorySource(remittance.CurrencyCode);
+        var ids = remittance.Lines.Select(line => line.VendorPaymentId).Distinct().ToList();
+        var payments = await _context.Set<VendorPayment>().AsNoTracking()
+            .Where(payment => payment.TenantId == TenantId && !payment.IsDeleted && ids.Contains(payment.Id))
+            .ToListAsync(cancellationToken);
+        if (ids.Count == 0 || payments.Count != ids.Count)
+            throw new InvalidOperationException("WHT remittance source-payment evidence is unavailable.");
+        foreach (var payment in payments)
+        {
+            await EnsurePaymentJournalIsPostedAsync(payment, cancellationToken);
+            await RequireStatutoryPaymentEvidenceAsync(payment, cancellationToken);
+        }
+    }
+
+    private async Task EnsurePaymentJournalIsPostedAsync(
+        VendorPayment payment, CancellationToken cancellationToken, bool allowReversedOriginal = false)
+    {
+        if (!allowReversedOriginal && payment.Status is VendorPaymentStatus.Reversed or VendorPaymentStatus.Voided)
+            throw new InvalidOperationException($"AP payment {payment.PaymentNumber} is reversed or voided and cannot support new statutory evidence.");
         if (!payment.JournalEntryId.HasValue)
         {
             throw new InvalidOperationException($"AP payment {payment.PaymentNumber} must be posted before a WHT certificate can be issued.");
         }
         var posted = await _context.Set<JournalEntry>().AsNoTracking().AnyAsync(journal =>
             journal.TenantId == payment.TenantId && !journal.IsDeleted && journal.Id == payment.JournalEntryId.Value
-            && journal.PostingStatus == PostedStatus,
+            && journal.PostingStatus == PostedStatus
+            && (allowReversedOriginal || (!journal.IsReversed && !journal.ReversalJournalEntryId.HasValue)),
             cancellationToken);
         if (!posted)
         {
@@ -1321,18 +1468,23 @@ body{font-family:Arial,sans-serif;color:#111827;margin:40px}.certificate{positio
             .AsNoTracking()
             .Where(settings => settings.TenantId == TenantId && !settings.IsDeleted)
             .Select(settings => settings.BaseCurrency)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        // TDC's configured functional currency is GHS. The fallback only protects a partially
-        // seeded development tenant; posted Finance transactions normally require settings.
-        return NormalizeCurrency(string.IsNullOrWhiteSpace(configured) ? "GHS" : configured);
+            .SingleOrDefaultAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(configured))
+            throw new InvalidOperationException("Finance must configure the tenant functional currency before WHT calculation or reporting.");
+        return NormalizeCurrency(configured);
     }
 
     private static decimal ResolveTaxableBase(VendorPayment payment)
-        => RoundMoney(payment.WithholdingTaxBaseAmount > 0m
-            ? payment.WithholdingTaxBaseAmount
-            : payment.Allocations.Where(allocation => !allocation.IsDeleted)
-                .Sum(allocation => allocation.SettlementFunctionalAmount));
+    {
+        if (payment.WithholdingTaxBaseAmount > 0m)
+            return RoundMoney(payment.WithholdingTaxBaseAmount);
+        // Gross settlement may include VAT/levies and cannot stand in for statutory base.
+        // In particular, rebuilding a catch-up certificate from this payment's allocations
+        // would omit the prior-year-to-date base that was withheld on the crossing payment.
+        if (payment.WithholdingTaxAmount > 0m)
+            throw new InvalidOperationException($"Payment '{payment.PaymentNumber}' has no frozen WHT taxable-base evidence. Finance must reconcile it before issuing or remitting a certificate.");
+        return 0m;
+    }
 
     private static DateTime DefaultRemittanceDueDate(DateTime periodTo)
         => new DateTime(periodTo.Year, periodTo.Month, 1).AddMonths(1).AddDays(14);

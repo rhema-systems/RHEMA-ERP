@@ -5,6 +5,11 @@ namespace ErpSystem.Core.Interfaces.Finance;
 
 public interface IFinancePostingEngine
 {
+    /// <summary>Internal year-end leaf. Requires durable cycle authority in the caller's transaction.</summary>
+    Task<FinancePostingResultDto> PostYearEndAsync(
+        FinancePostingRequestV2Dto request, Guid bookCloseCycleId,
+        CancellationToken cancellationToken = default);
+
     Task<FinancePostingResultDto> PostAsync(
         FinancePostingRequestV2Dto request,
         CancellationToken cancellationToken = default);

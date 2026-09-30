@@ -389,7 +389,7 @@ public sealed class FinancePostingEngineTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         SeedTenant(db, tenantId);
-        SeedOpenPeriod(db, tenantId, isOpen: false, isClosed: true);
+        var period = SeedOpenPeriod(db, tenantId, isOpen: false, isClosed: true);
         var debitAccount = SeedAccount(db, tenantId, "1000", AccountType.Asset);
         var creditAccount = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
         await db.SaveChangesAsync();
@@ -399,8 +399,12 @@ public sealed class FinancePostingEngineTests
 
         var act = () => service.PostAsync(request);
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Posting period is not open.");
+        var error = await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Posting period is not open.*");
+        error.Which.Message.Should().Contain($"book '{request.AccountingBookCode}'")
+            .And.Contain($"fiscal period '{period.PeriodCode}'")
+            .And.Contain(request.PostingDate.ToString("yyyy-MM-dd"))
+            .And.Contain("approved workflow");
     }
 
     [Fact]
@@ -565,7 +569,7 @@ public sealed class FinancePostingEngineTests
         var act = () => service.PostAsync(request);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Posting period is not open.");
+            .WithMessage("Posting period is not open.*");
         (await db.AuditLogs.CountAsync(a =>
             a.TenantId == tenantId &&
             a.Action == FinanceAuditEvents.PostingBlockedPeriodClosedLocked)).Should().Be(1);
@@ -1453,7 +1457,12 @@ public sealed class FinancePostingEngineTests
         var postingEvent = await db.FinancePostingEvents.Include(item => item.JournalEntry)!
             .ThenInclude(journal => journal!.Transactions).SingleAsync();
         if (corruptedEvidence == "event")
-            postingEvent.AccountingBookId = localBook.Id;
+        {
+            // AccountingBookId is an identifying FK and EF correctly forbids mutating it in
+            // place. Corrupt the stored book code instead; the transaction branch below still
+            // exercises an ID mismatch, while both prove replay fails closed on book identity.
+            postingEvent.BookClassification = localBook.Code;
+        }
         else
             postingEvent.JournalEntry!.Transactions.First().AccountingBookId = localBook.Id;
         await db.SaveChangesAsync();

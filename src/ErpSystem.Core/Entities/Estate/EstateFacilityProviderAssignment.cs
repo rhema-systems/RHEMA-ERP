@@ -8,6 +8,7 @@ public sealed class EstateFacilityProviderAssignment : TenantEntity
     public Guid BusinessPartnerId { get; set; }
     public Guid EstateManagedAssetId { get; set; }
     public Guid? ContractId { get; set; }
+    public Guid? ProviderRateId { get; set; }
 
     [Required, MaxLength(160)]
     public string ServiceScope { get; set; } = string.Empty;
@@ -23,6 +24,13 @@ public sealed class EstateFacilityProviderAssignment : TenantEntity
 
     [MaxLength(160)]
     public string? SchedulePattern { get; set; }
+
+    [MaxLength(40)]
+    public string? BillingFrequency { get; set; }
+
+    public decimal BillingQuantity { get; set; } = 1m;
+    public DateTime? NextInvoiceDate { get; set; }
+    public DateTime? LastInvoiceDate { get; set; }
 
     [MaxLength(200)]
     public string? SupervisorName { get; set; }

@@ -42,6 +42,7 @@ namespace ErpSystem.Api.Services.Finance.AR
         private readonly IFinanceSourceDimensionService? _sourceDimensions;
         private readonly IWorkflowIntegrationService? _workflowIntegration;
         private readonly IInventoryTrackingControlService? _inventoryTracking;
+        private readonly IFinanceSourceBookAuthorityService? _sourceBookAuthority;
 
         public InvoiceService(
             IUnitOfWork unitOfWork,
@@ -54,7 +55,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             IFinanceAuditService? financeAuditService = null,
             IFinanceSourceDimensionService? sourceDimensions = null,
             IWorkflowIntegrationService? workflowIntegration = null,
-            IInventoryTrackingControlService? inventoryTracking = null)
+            IInventoryTrackingControlService? inventoryTracking = null,
+            IFinanceSourceBookAuthorityService? sourceBookAuthority = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -67,6 +69,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             _sourceDimensions = sourceDimensions;
             _workflowIntegration = workflowIntegration;
             _inventoryTracking = inventoryTracking;
+            _sourceBookAuthority = sourceBookAuthority;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -823,6 +826,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             await SalesOrderInvoiceGuard.ValidateAsync(_unitOfWork, TenantId, invoice, producer, cancellationToken);
             if (invoice.Status is not (InvoiceStatus.Draft or InvoiceStatus.Rejected) || invoice.JournalEntryId.HasValue)
                 throw new InvalidOperationException("Only unposted draft or rejected invoices can be submitted.");
+            var resubmissionAuthorityId = invoice.Status == InvoiceStatus.Rejected
+                ? invoice.SourceBookAuthorityId
+                : null;
             await ResolveCustomerForPostingAsync(invoice, cancellationToken);
             var lines = invoice.LineItems.Where(line => !line.IsDeleted).ToArray();
             if (lines.Length == 0 || lines.Any(line => line.InvoiceId != invoice.Id || line.TenantId != TenantId || line.Quantity <= 0))
@@ -858,6 +864,17 @@ namespace ErpSystem.Api.Services.Finance.AR
             invoice.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId;
             invoice.Status = !approvalRequired ? InvoiceStatus.ReadyToPost
                 : result.Outcome == WorkflowOutcome.Approved ? InvoiceStatus.Approved : InvoiceStatus.PendingApproval;
+            var authorityRequest = InvoiceBookAuthorityRequest(
+                invoice,
+                producer,
+                result.Outcome == WorkflowOutcome.Pending
+                    ? FinanceSourceBookAuthorityFreezeStages.Submitted
+                    : FinanceSourceBookAuthorityFreezeStages.Authorized);
+            var authority = resubmissionAuthorityId.HasValue
+                ? await RequireSourceBookAuthority().FreezeResubmissionAsync(
+                    authorityRequest, resubmissionAuthorityId.Value, cancellationToken)
+                : await RequireSourceBookAuthority().FreezeInitialPrimaryAsync(authorityRequest, cancellationToken);
+            invoice.SourceBookAuthorityId = authority.AuthorityId;
             if (invoice.Status == InvoiceStatus.Approved)
                 await RequireCompletedInvoiceWorkflowAsync(invoice, cancellationToken);
             invoice.UpdatedAt = DateTime.UtcNow;
@@ -925,7 +942,12 @@ namespace ErpSystem.Api.Services.Finance.AR
             await SalesOrderInvoiceGuard.ValidateAsync(_unitOfWork, TenantId, invoice, producer, cancellationToken);
 
             if (invoice.Status == InvoiceStatus.Sent && invoice.JournalEntryId.HasValue)
+            {
+                await RequireInvoicePostingAuthorityAsync(invoice, producer, cancellationToken);
+                await _unitOfWork.Repository<Invoice>().UpdateAsync(invoice);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
                 return MapToDto(invoice); // Retried release must never issue stock or increase debt twice.
+            }
             if (invoice.Status == InvoiceStatus.Draft)
             {
                 // Trusted internal producers retain their release entry point, but cannot skip an active invoice process.
@@ -997,11 +1019,13 @@ namespace ErpSystem.Api.Services.Finance.AR
             FinancePostingRequestV2Dto postingRequest;
             try
             {
+                var bookAuthority = await RequireInvoicePostingAuthorityAsync(invoice, producer, cancellationToken);
                 postingRequest = await BuildArInvoicePostingRequestAsync(
                     invoice,
                     allowDraftTransition: true,
                     producer,
                     cancellationToken);
+                postingRequest.AccountingBookCode = bookAuthority.AccountingBookCode;
             }
             catch (Exception ex)
             {
@@ -1128,11 +1152,13 @@ namespace ErpSystem.Api.Services.Finance.AR
             FinancePostingRequestV2Dto postingRequest;
             try
             {
+                var bookAuthority = await RequireInvoicePostingAuthorityAsync(invoice, producer, cancellationToken);
                 postingRequest = await BuildArInvoicePostingRequestAsync(
                     invoice,
                     allowDraftTransition: false,
                     producer,
                     cancellationToken);
+                postingRequest.AccountingBookCode = bookAuthority.AccountingBookCode;
             }
             catch (Exception ex)
             {
@@ -1685,7 +1711,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Description = $"Customer invoice {invoice.InvoiceNumber} - {invoice.CustomerName}",
                 PostingDate = invoice.InvoiceDate,
                 JournalType = "AR Invoice",
-                AccountingBookCode = "IFRS",
+                AccountingBookCode = string.Empty,
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"AR:CustomerInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
@@ -1802,7 +1828,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Description = $"AR opening balance {invoice.InvoiceNumber} - {invoice.CustomerName}",
                 PostingDate = invoice.InvoiceDate,
                 JournalType = "AR Opening Balance",
-                AccountingBookCode = "IFRS",
+                AccountingBookCode = string.Empty,
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"AR:CustomerInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
@@ -1870,6 +1896,14 @@ namespace ErpSystem.Api.Services.Finance.AR
             {
                 throw new InvalidOperationException("Customer invoice is linked to a different journal entry than the posting engine result.");
             }
+
+            if (!invoice.SourceBookAuthorityId.HasValue)
+                throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_REQUIRED: customer invoice authority was not retained.");
+            await RequireSourceBookAuthority().BindOriginalPostingAsync(
+                invoice.SourceBookAuthorityId.Value,
+                postingResult.PostingEventId,
+                postingResult.JournalEntryId,
+                cancellationToken);
 
             if (!invoice.JournalEntryId.HasValue)
             {
@@ -2313,7 +2347,60 @@ namespace ErpSystem.Api.Services.Finance.AR
                     ? "AR-FixedAssetDisposalProceeds"
                     : line.LineItemType == LineItemType.FixedAssetDisposalAdjustment
                         ? "AR-FixedAssetDisposalAdjustment"
-                        : "AR-Revenue";
+                    : "AR-Revenue";
+
+        private IFinanceSourceBookAuthorityService RequireSourceBookAuthority() =>
+            _sourceBookAuthority ?? throw new InvalidOperationException(
+                "Finance source-book authority is not configured for AR invoice posting.");
+
+        private FinanceSourceBookAuthorityFreezeRequest InvoiceBookAuthorityRequest(
+            Invoice invoice,
+            FinancePostingProducerContext? producer,
+            string freezeStage,
+            bool retainLegacy = false) => new()
+        {
+            OriginModuleCode = producer is null
+                ? FinanceModuleLockCatalog.Finance
+                : FinanceModuleLockCatalog.ResolveOriginModuleCode(producer.Definition.ProducerModule),
+            SourceDocumentType = "CustomerInvoice",
+            SourceDocumentId = invoice.Id,
+            PostingAction = "Post",
+            EffectiveDate = invoice.InvoiceDate.Date,
+            TransactionCurrencyCode = invoice.CurrencyCode,
+            FreezeStage = retainLegacy ? FinanceSourceBookAuthorityFreezeStages.LegacyPosted : freezeStage,
+            SourceWorkflowInstanceId = retainLegacy ? null : invoice.WorkflowInstanceId,
+            SourceWorkflowEntityType = "Invoice"
+        };
+
+        private async Task<FinanceSourceBookAuthorityResult> RequireInvoicePostingAuthorityAsync(
+            Invoice invoice,
+            FinancePostingProducerContext? producer,
+            CancellationToken cancellationToken)
+        {
+            var service = RequireSourceBookAuthority();
+            if (!invoice.SourceBookAuthorityId.HasValue)
+            {
+                if (!invoice.JournalEntryId.HasValue)
+                    throw new InvalidOperationException(
+                        "SOURCE_BOOK_AUTHORITY_REAPPROVAL_REQUIRED: unposted legacy invoice requires governed resubmission before posting.");
+                var legacyRetained = await service.RetainExistingPostedOriginalAsync(
+                    InvoiceBookAuthorityRequest(invoice, producer, FinanceSourceBookAuthorityFreezeStages.PrePost, retainLegacy: true),
+                    invoice.JournalEntryId.Value,
+                    cancellationToken: cancellationToken);
+                invoice.SourceBookAuthorityId = legacyRetained.AuthorityId;
+                return legacyRetained;
+            }
+
+            var retained = await _unitOfWork.Repository<FinanceSourceBookAuthority>()
+                .GetQueryable(item => item.TenantId == TenantId
+                    && item.Id == invoice.SourceBookAuthorityId.Value && !item.IsDeleted)
+                .AsNoTracking()
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_MISSING: retained invoice authority was not found.");
+            return await service.RequireForPostingAsync(
+                InvoiceBookAuthorityRequest(invoice, producer, retained.FreezeStage),
+                cancellationToken);
+        }
 
         private static void ValidateControlledNegativeInvoiceLine(
             LineItemType lineItemType,

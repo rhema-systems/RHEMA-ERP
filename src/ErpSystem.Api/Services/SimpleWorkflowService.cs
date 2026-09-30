@@ -1173,9 +1173,12 @@ public class SimpleWorkflowService : IWorkflowService
 
         if (IsEntityType(entityTypeRecord, "FixedAsset", "Fixed Asset"))
         {
-            var asset = await _unitOfWork.Repository<FixedAsset>()
+            var cycle = await _unitOfWork.Repository<FixedAssetCapitalizationCycle>()
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && item.Id == entityId,
+                    item => item.FixedAsset, item => item.FixedAsset.Category);
+            var asset = cycle?.FixedAsset ?? await _unitOfWork.Repository<FixedAsset>()
                 .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == entityId, a => a.Category)
-                ?? throw new InvalidOperationException("Fixed asset not found");
+                ?? throw new InvalidOperationException("Fixed asset capitalization cycle not found");
             context["assetCode"] = asset.AssetCode;
             context["assetName"] = asset.Name;
             context["assetStatus"] = asset.Status.ToString();

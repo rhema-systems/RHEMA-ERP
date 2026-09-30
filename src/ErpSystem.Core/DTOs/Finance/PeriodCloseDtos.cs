@@ -89,6 +89,11 @@ namespace ErpSystem.Core.DTOs.Finance
     /// </summary>
     public class PeriodCloseResultDto
     {
+        public Guid? AccountingBookId { get; set; }
+        public Guid? BookCloseCycleId { get; set; }
+        public Guid? ClosingJournalEntryId { get; set; }
+        public Guid? ReversalJournalEntryId { get; set; }
+        public decimal? NetIncomeTransferred { get; set; }
         public bool Success { get; set; }
         public string Message { get; set; } = string.Empty;
         public Guid FiscalPeriodId { get; set; }
@@ -514,6 +519,12 @@ namespace ErpSystem.Core.DTOs.Finance
     public class YearEndCloseRequestDto
     {
         [Required]
+        public Guid AccountingBookId { get; set; }
+
+        [Required, MaxLength(100)]
+        public string IdempotencyKey { get; set; } = string.Empty;
+
+        [Required]
         public Guid FiscalYearId { get; set; }
 
         [Required]
@@ -529,6 +540,12 @@ namespace ErpSystem.Core.DTOs.Finance
     /// </summary>
     public class CloseFiscalYearRequestDto
     {
+        [Required]
+        public Guid AccountingBookId { get; set; }
+
+        [Required, MaxLength(100)]
+        public string IdempotencyKey { get; set; } = string.Empty;
+
         public Guid? RetainedEarningsAccountId { get; set; }
 
         [MaxLength(2000)]
@@ -541,8 +558,30 @@ namespace ErpSystem.Core.DTOs.Finance
     public class FiscalYearReopenRequestDto
     {
         [Required]
-        [MaxLength(1000)]
+        public Guid AccountingBookId { get; set; }
+
+        [Required]
+        public Guid BookCloseCycleId { get; set; }
+
+        [Required]
+        [MinLength(20), MaxLength(500)]
         public string Reason { get; set; } = string.Empty;
+    }
+
+    public class YearEndBookCloseCycleDto
+    {
+        public Guid Id { get; set; }
+        public Guid FiscalYearId { get; set; }
+        public Guid AccountingBookId { get; set; }
+        public string AccountingBookCode { get; set; } = string.Empty;
+        public string FunctionalCurrencyCode { get; set; } = string.Empty;
+        public int CycleNumber { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public Guid? ClosingJournalEntryId { get; set; }
+        public Guid? ReversalJournalEntryId { get; set; }
+        public decimal NetIncomeTransferred { get; set; }
+        public DateTime ClosedAtUtc { get; set; }
+        public DateTime? ReopenedAtUtc { get; set; }
     }
 
     /// <summary>

@@ -2078,6 +2078,10 @@ public sealed class FxRealizedUnrealizedRevaluationTests
     {
         private bool _hasThrown;
 
+        public Task<FinancePostingResultDto> PostYearEndAsync(
+            FinancePostingRequestV2Dto request, Guid bookCloseCycleId,
+            CancellationToken cancellationToken = default) => inner.PostYearEndAsync(request, bookCloseCycleId, cancellationToken);
+
         public async Task<FinancePostingResultDto> PostAsync(
             FinancePostingRequestV2Dto request,
             CancellationToken cancellationToken = default)

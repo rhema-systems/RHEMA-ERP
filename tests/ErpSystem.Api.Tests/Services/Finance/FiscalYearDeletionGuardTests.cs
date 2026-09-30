@@ -175,6 +175,27 @@ public sealed class FiscalYearDeletionGuardTests
         return new ApplicationDbContext(options);
     }
 
+    [Fact]
+    public async Task DeleteFiscalYearAsync_PreservesBookCloseEvidenceEvenWithoutAJournal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var (year, _) = SeedFiscalYear(db, tenantId);
+        db.YearEndBookCloseCycles.Add(new YearEndBookCloseCycle
+        {
+            TenantId = tenantId, FiscalYearId = year.Id, AccountingBookId = Guid.NewGuid(),
+            AccountingBookCode = "BASE", FunctionalCurrencyCode = "GHS", CycleNumber = 1,
+            IdempotencyKey = "empty-year-close", RetainedEarningsAccountId = Guid.NewGuid(),
+            Status = "Closed", ClosedByUserId = Guid.NewGuid(), ClosedAtUtc = DateTime.UtcNow,
+            PeriodAuthoritySnapshotJson = "[]"
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        await service.Invoking(x => x.DeleteFiscalYearAsync(year.Id)).Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*year-end close cycles*");
+        year.IsDeleted.Should().BeFalse();
+    }
+
     private static FiscalPeriodService CreateService(ApplicationDbContext db, Guid tenantId)
     {
         var currentUser = new Mock<ICurrentUserService>();

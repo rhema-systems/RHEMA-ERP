@@ -18,7 +18,8 @@ export function paymentWithholdingChoice(invoices: InvoiceChoice[]) {
   const choices = invoices.map(invoiceWithholdingChoice);
   const decided = choices.filter((choice) => choice !== null);
   if (!decided.length) return null;
-  const first = decided[0]!;
+  const first = decided[0];
+  if (!first) return null;
   if (decided.some((choice) => choice?.taxId !== first.taxId || choice?.rate !== first.rate) ||
       (decided.length !== invoices.length && first.taxId)) {
     throw new Error('Selected invoices have different WHT decisions or rates. Record separate payments for each WHT choice and rate.');
@@ -28,14 +29,29 @@ export function paymentWithholdingChoice(invoices: InvoiceChoice[]) {
 
 const round = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
+/** Commercial FX approval is not Ghana statutory conversion authority (Act915, s21). */
+export function requireGhsWhtScope(paymentCurrency: string, functionalCurrency: string, invoiceCurrencies: string[]) {
+  if ([paymentCurrency, functionalCurrency, ...invoiceCurrencies].some(currency => currency.trim().toUpperCase() !== 'GHS')) {
+    throw new Error('Foreign-currency WHT requires Finance-approved statutory GHS conversion evidence. An approved payment exchange rate alone is not sufficient.');
+  }
+}
+
 /** Payment amount is bank cash. WHT also settles AP, including a partial payment. */
-export function allocateInvoiceCash(balance: number, availableCash: number, discount: number, rate: number) {
-  const ratio = Math.max(0, Math.min(rate, 100)) / 100;
-  const fullDiscount = ratio === 1 ? 0 : Math.min(discount, balance * (1 - ratio));
-  const fullWht = round(balance * ratio);
-  const fullCash = round(Math.max(balance - fullDiscount - fullWht, 0));
+export function allocateInvoiceCash(balance: number, availableCash: number, discount: number, rate: number,
+  netSupplyFraction = 1, catchUp = 0) {
+  if (![balance, availableCash, discount, rate, netSupplyFraction, catchUp].every(Number.isFinite) ||
+      balance < 0 || availableCash < 0 || discount < 0 || rate < 0 || rate > 100 ||
+      netSupplyFraction < 0 || netSupplyFraction > 1 || catchUp < 0) {
+    throw new Error('Review the invoice tax-base and withholding evidence before allocation.');
+  }
+  const ratio = rate * netSupplyFraction / 100;
+  const wht = (gross: number) => round(round(gross * netSupplyFraction) * rate / 100) + catchUp;
+  const fullWht = wht(balance);
+  if (fullWht > balance) throw new Error('WHT catch-up exceeds this invoice balance. Finance must review recovery before payment.');
+  const fullDiscount = Math.min(discount, balance - fullWht);
+  const fullCash = round(balance - fullDiscount - fullWht);
   if (availableCash >= fullCash) return { cash: fullCash, discount: fullDiscount, withholding: fullWht };
-  const cash = round(Math.max(availableCash, 0));
-  const gross = ratio < 1 ? Math.min(balance, round(cash / (1 - ratio))) : balance;
-  return { cash, discount: 0, withholding: round(Math.max(gross - cash, 0)) };
+  const cash = round(availableCash);
+  const gross = ratio < 1 ? Math.min(balance, round((cash + catchUp) / (1 - ratio))) : balance;
+  return { cash, discount: 0, withholding: wht(gross) };
 }

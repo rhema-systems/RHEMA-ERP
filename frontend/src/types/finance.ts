@@ -3078,6 +3078,8 @@ export interface RevaluationDetailDto {
 
 // Year End Close
 export interface YearEndCloseRequestDto {
+  accountingBookId: string;
+  idempotencyKey: string;
   fiscalYearId: string;
   retainedEarningsAccountId: string;
   closingNotes?: string;

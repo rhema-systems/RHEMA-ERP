@@ -1825,7 +1825,7 @@ public sealed class ControlledOpeningBalancePostingTests
         var act = () => service.PostAsync(batch.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Posting period is not open.");
+            .WithMessage("Posting period is not open.*");
         (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
         (await db.OpeningBalanceBatches.SingleAsync(b => b.Id == batch.Id)).Status.Should().Be("PostingFailed");
     }

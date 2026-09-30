@@ -549,7 +549,7 @@ public sealed class GhanaStatutoryTaxEngineTests
         var act = () => CreateApService(db, tenantId).PostAsync(fixture.Invoice.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Posting period is not open.");
+            .WithMessage("Posting period is not open.*");
     }
 
     [Fact]

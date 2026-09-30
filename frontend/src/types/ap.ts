@@ -1175,6 +1175,7 @@ export interface ProcurementFinanceReconciliationIssue {
 }
 
 export interface OutstandingVendorInvoice {
+    netSupplyAmount?: number;
     applySupplierWithholdingDefaults?: boolean | null;
     withholdingTaxId?: string | null;
     withholdingTaxRate?: number;

@@ -110,6 +110,11 @@ import {
 
 // Mirrors the backend PeriodCloseResultDto returned by fiscal year close/reopen.
 export interface FiscalYearCloseResult {
+  accountingBookId?: string;
+  bookCloseCycleId?: string;
+  closingJournalEntryId?: string;
+  reversalJournalEntryId?: string;
+  netIncomeTransferred?: number;
   success: boolean;
   message: string;
   fiscalPeriodId: string;
@@ -117,6 +122,21 @@ export interface FiscalYearCloseResult {
   closedDate?: string | null;
   closedByUserName?: string | null;
   errors: string[];
+}
+
+export interface YearEndBookCloseCycle {
+  id: string;
+  fiscalYearId: string;
+  accountingBookId: string;
+  accountingBookCode: string;
+  functionalCurrencyCode: string;
+  cycleNumber: number;
+  status: 'Closing' | 'Closed' | 'Reopened';
+  closingJournalEntryId?: string;
+  reversalJournalEntryId?: string;
+  netIncomeTransferred: number;
+  closedAtUtc: string;
+  reopenedAtUtc?: string;
 }
 
 // =============================================================================
@@ -745,23 +765,27 @@ class FinanceDataService {
 
   async closeFiscalYear(
     id: string,
-    options?: { retainedEarningsAccountId?: string; closingNotes?: string }
+    options: { accountingBookId: string; idempotencyKey: string; retainedEarningsAccountId?: string; closingNotes?: string }
   ): Promise<FiscalYearCloseResult> {
     // The retained earnings account defaults from Finance Settings when omitted.
     return apiService.post<FiscalYearCloseResult>(
       `/finance/fiscal-years/${id}/close`,
-      options ?? {}
+      options
     );
   }
 
   async reopenFiscalYear(
     id: string,
-    reason: string
+    request: { accountingBookId: string; bookCloseCycleId: string; reason: string }
   ): Promise<FiscalYearCloseResult> {
     return apiService.post<FiscalYearCloseResult>(
       `/finance/fiscal-years/${id}/reopen`,
-      { reason }
+      request
     );
+  }
+
+  async getYearEndCloseCycles(id: string): Promise<YearEndBookCloseCycle[]> {
+    return apiService.get<YearEndBookCloseCycle[]>(`/finance/fiscal-years/${id}/book-close-cycles`);
   }
 
   // ===== FISCAL PERIODS =====
