@@ -420,14 +420,6 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 lease.FunctionalCurrencyCode!,
                 postingLines), RecognitionProducer, cancellationToken);
 
-            var postingEvent = await _context.Set<FinancePostingEvent>().AsNoTracking()
-                .SingleOrDefaultAsync(item => item.TenantId == TenantId && !item.IsDeleted &&
-                    item.Id == recognition.PostingEventId && item.JournalEntryId == recognition.JournalEntryId &&
-                    item.SourceDocumentType == RecognitionProducer.Definition.DocumentType &&
-                    item.SourceDocumentId == lease.Id && item.PostingAction == "Post" &&
-                    item.PostingStatus == "Posted" && item.AccountingBookId == primaryBook.Id,
-                    cancellationToken)
-                ?? throw new InvalidOperationException("The lease recognition posting event evidence is inconsistent.");
             var journals = await _context.JournalEntries.AsNoTracking()
                 .Where(item => item.TenantId == TenantId && !item.IsDeleted &&
                     (item.Id == recognition.JournalEntryId || item.ReplicatedFromJournalEntryId == recognition.JournalEntryId))
@@ -439,14 +431,39 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             if (representationBooks.Any(book => !journalByBook.TryGetValue(book.Id, out var values) || values.Length != 1) ||
                 journalByBook.Keys.Except(representationBooks.Select(item => item.Id)).Any())
                 throw new InvalidOperationException("Lease recognition book representations are missing, duplicated, or unexpected.");
+            var journalIds = journals.Select(item => item.Id).ToArray();
+            var postingEvents = await _context.Set<FinancePostingEvent>().AsNoTracking()
+                .Where(item => item.TenantId == TenantId && !item.IsDeleted && item.JournalEntryId.HasValue &&
+                    journalIds.Contains(item.JournalEntryId.Value))
+                .ToListAsync(cancellationToken);
+            if (postingEvents.Count != representationBooks.Count)
+                throw new InvalidOperationException(
+                    "Lease recognition representation posting-event evidence is missing or duplicated.");
 
             var rouSourceLineId = FinanceSourceLineIdentity.Create(lease.Id, "ROU-ASSET", lease.Id);
             var liabilitySourceLineId = FinanceSourceLineIdentity.Create(lease.Id, "LEASE-LIABILITY", lease.Id);
             var representationCosts = new Dictionary<Guid, decimal>();
+            var postingEventByBook = new Dictionary<Guid, FinancePostingEvent>();
             foreach (var book in representationBooks)
             {
                 var journal = journalByBook[book.Id].Single();
                 var isPrimary = book.Id == primaryBook.Id;
+                var journalEvents = postingEvents.Where(item => item.JournalEntryId == journal.Id).ToArray();
+                if (journalEvents.Length != 1)
+                    throw new InvalidOperationException(
+                        "Lease recognition representation posting-event evidence is missing or duplicated.");
+                var postingEvent = journalEvents[0];
+                var bookCurrency = CanonicalBookCurrency(book);
+                if (postingEvent.AccountingBookId != book.Id || postingEvent.BookClassification != book.Code ||
+                    postingEvent.FunctionalCurrencyCode != bookCurrency ||
+                    postingEvent.SourceDocumentType != RecognitionProducer.Definition.DocumentType ||
+                    postingEvent.SourceDocumentId != lease.Id || postingEvent.PostingAction != "Post" ||
+                    postingEvent.PostingStatus != "Posted" || postingEvent.PostingDate.Date != lease.StartDate.Date ||
+                    isPrimary && (postingEvent.Id != recognition.PostingEventId ||
+                        postingEvent.JournalEntryId != recognition.JournalEntryId))
+                    throw new InvalidOperationException(
+                        "A lease recognition representation posting event has inconsistent source, book, currency, or journal authority.");
+                postingEventByBook[book.Id] = postingEvent;
                 if (journal.EntryDate.Date != lease.StartDate.Date || journal.PostingStatus != "Posted" ||
                     journal.IsReversed || journal.ReversalJournalEntryId.HasValue ||
                     journal.SourceDocumentType != RecognitionProducer.Definition.DocumentType ||
@@ -465,7 +482,6 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     item.DebitAmount > 0m && item.CreditAmount == 0m).ToArray();
                 var liability = lines.Where(item => item.SourceDocumentLineId == liabilitySourceLineId &&
                     item.CreditAmount > 0m && item.DebitAmount == 0m).ToArray();
-                var bookCurrency = book.FunctionalCurrencyCode?.Trim().ToUpperInvariant();
                 if (lines.Count != 2 || rou.Length != 1 || liability.Length != 1 ||
                     Math.Abs(rou[0].DebitAmount - liability[0].CreditAmount) > 0.01m ||
                     lines.Any(item => item.FunctionalCurrencyCode != bookCurrency) ||
@@ -475,6 +491,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     throw new InvalidOperationException("A lease recognition book representation has inconsistent source lines or amounts.");
                 representationCosts[book.Id] = rou[0].DebitAmount;
             }
+            var primaryPostingEvent = postingEventByBook[primaryBook.Id];
 
             var usefulLifeMonths = Math.Max(1, (int)Math.Ceiling((lease.EndDate.Date - lease.StartDate.Date).TotalDays / 30.44d));
             var asset = new FixedAsset
@@ -501,7 +518,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 SourceDocumentLineId = rouSourceLineId,
                 JournalEntryId = recognition.JournalEntryId,
                 PostingEventId = recognition.PostingEventId,
-                CapitalizedAt = postingEvent.PostedAt ?? DateTime.UtcNow,
+                CapitalizedAt = primaryPostingEvent.PostedAt ?? DateTime.UtcNow,
                 CapitalizationApprovalWorkflowInstanceId = lease.ActivationWorkflowInstanceId,
                 CapitalizationApprovalSubmittedByUserId = lease.ActivationSubmittedByUserId,
                 CapitalizationApprovalSubmittedAt = lease.ActivationSubmittedAtUtc,
@@ -512,6 +529,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             foreach (var book in representationBooks)
             {
                 var journal = journalByBook[book.Id].Single();
+                var postingEvent = postingEventByBook[book.Id];
                 var cost = representationCosts[book.Id];
                 asset.BookValues.Add(new FixedAssetBookValue
                 {
@@ -529,7 +547,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     PlacedInServiceDate = lease.StartDate,
                     CapitalizationDate = lease.StartDate,
                     CapitalizationJournalEntryId = journal.Id,
-                    CapitalizationPostingEventId = recognition.PostingEventId,
+                    CapitalizationPostingEventId = postingEvent.Id,
                     OpeningSource = "LeaseRecognition",
                     SourceDocumentType = RecognitionProducer.Definition.DocumentType,
                     SourceDocumentId = lease.Id,

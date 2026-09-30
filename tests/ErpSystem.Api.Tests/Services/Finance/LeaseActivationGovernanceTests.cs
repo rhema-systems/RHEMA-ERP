@@ -73,9 +73,62 @@ public sealed class LeaseActivationGovernanceTests
         values.Select(item => item.AccountingBookId).Should().BeEquivalentTo(
             [seeded.Primary.Id, seeded.Parallel.Id]);
         values.Should().NotContain(item => item.AccountingBookId == seeded.Delta.Id);
-        values.Should().OnlyContain(item => item.CapitalizationJournalEntryId.HasValue &&
-            item.CapitalizationPostingEventId == lease.RecognitionPostingEventId &&
-            item.SourceDocumentType == "LeaseRecognition");
+        var events = await db.FinancePostingEvents.AsNoTracking()
+            .Where(item => item.SourceDocumentType == "LeaseRecognition" &&
+                item.SourceDocumentId == seeded.Lease.Id && item.PostingStatus == "Posted")
+            .ToListAsync();
+        events.Should().HaveCount(2);
+        events.Select(item => item.Id).Should().OnlyHaveUniqueItems();
+        foreach (var value in values)
+        {
+            value.CapitalizationJournalEntryId.Should().NotBeNull();
+            value.CapitalizationPostingEventId.Should().NotBeNull();
+            value.SourceDocumentType.Should().Be("LeaseRecognition");
+            var postingEvent = events.Single(item => item.Id == value.CapitalizationPostingEventId);
+            postingEvent.AccountingBookId.Should().Be(value.AccountingBookId);
+            postingEvent.BookClassification.Should().Be(value.BookClassification);
+            postingEvent.FunctionalCurrencyCode.Should().Be("GHS");
+            postingEvent.JournalEntryId.Should().Be(value.CapitalizationJournalEntryId);
+            postingEvent.SourceDocumentId.Should().Be(seeded.Lease.Id);
+        }
+        values.Single(item => item.AccountingBookId == seeded.Primary.Id)
+            .CapitalizationPostingEventId.Should().Be(lease.RecognitionPostingEventId);
+        values.Single(item => item.AccountingBookId == seeded.Parallel.Id)
+            .CapitalizationPostingEventId!.Value.Should().NotBe(lease.RecognitionPostingEventId!.Value);
+    }
+
+    [Theory]
+    [InlineData("Missing")]
+    [InlineData("Duplicate")]
+    [InlineData("Mismatch")]
+    public async Task Replica_event_evidence_faults_fail_closed_before_asset_materialization(string eventFault)
+    {
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        var checkerId = Guid.NewGuid();
+        var workflowId = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"lease-activation-event-fault-{Guid.NewGuid():N}")
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+            .Options);
+        var seeded = await SeedAsync(db, tenantId);
+        var workflow = Workflow(workflowId);
+        var dimensions = Dimensions();
+        var assets = new Mock<IFixedAssetService>();
+        assets.Setup(item => item.GenerateAssetCodeAsync(seeded.Category.Id)).ReturnsAsync("ROU-0001");
+        var posting = PostingEngine(db, tenantId, seeded, eventFault);
+        var maker = Service(db, tenantId, makerId, workflow.Object, dimensions.Object, assets.Object, posting.Object);
+        await maker.ActivateLeaseAsync(seeded.Lease.Id);
+        await SeedCompletedWorkflowAsync(db, tenantId, seeded.Lease.Id, workflowId, makerId, checkerId);
+        var checker = Service(db, tenantId, checkerId, workflow.Object, dimensions.Object, assets.Object, posting.Object);
+
+        var approve = () => checker.CompleteApprovedActivationAsync(seeded.Lease.Id, checkerId);
+
+        await approve.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*posting*event*");
+        (await db.FixedAssets.CountAsync()).Should().Be(0);
+        (await db.LeaseContracts.AsNoTracking().SingleAsync(item => item.Id == seeded.Lease.Id)).Status
+            .Should().Be(LeaseStatus.PendingApproval);
     }
 
     private static LeaseAccountingService Service(
@@ -129,7 +182,8 @@ public sealed class LeaseActivationGovernanceTests
     private static Mock<IFinancePostingEngine> PostingEngine(
         ApplicationDbContext db,
         Guid tenantId,
-        Seeded seeded)
+        Seeded seeded,
+        string? eventFault = null)
     {
         var engine = new Mock<IFinancePostingEngine>();
         engine.Setup(item => item.PostAsync(
@@ -140,6 +194,29 @@ public sealed class LeaseActivationGovernanceTests
             {
                 var primaryJournalId = Guid.NewGuid();
                 var postingEventId = Guid.NewGuid();
+                FinancePostingEvent CreateEvent(
+                    AccountingBook book,
+                    JournalEntry journal,
+                    Guid eventId,
+                    bool mismatch = false) => new()
+                {
+                    Id = eventId,
+                    TenantId = tenantId,
+                    SourceModule = request.SourceModule,
+                    OriginModuleCode = request.OriginModuleCode,
+                    SourceDocumentType = request.SourceDocumentType,
+                    SourceDocumentId = request.SourceDocumentId,
+                    PostingAction = "Post",
+                    PostingStatus = "Posted",
+                    PostingDate = request.PostingDate,
+                    PostedAt = DateTime.UtcNow,
+                    JournalEntryId = journal.Id,
+                    AccountingBookId = book.Id,
+                    BookClassification = mismatch ? "WRONG_BOOK" : book.Code,
+                    FunctionalCurrencyCode = book.FunctionalCurrencyCode!,
+                    TotalDebitAmount = request.Lines.Sum(line => line.DebitAmount),
+                    TotalCreditAmount = request.Lines.Sum(line => line.CreditAmount)
+                };
                 foreach (var book in new[] { seeded.Primary, seeded.Parallel })
                 {
                     var journal = new JournalEntry
@@ -188,26 +265,18 @@ public sealed class LeaseActivationGovernanceTests
                             BookClassification = book.Code
                         });
                     }
+                    var isParallel = book.Id == seeded.Parallel.Id;
+                    if (!(isParallel && eventFault == "Missing"))
+                    {
+                        db.FinancePostingEvents.Add(CreateEvent(
+                            book,
+                            journal,
+                            book.Id == seeded.Primary.Id ? postingEventId : Guid.NewGuid(),
+                            mismatch: isParallel && eventFault == "Mismatch"));
+                        if (isParallel && eventFault == "Duplicate")
+                            db.FinancePostingEvents.Add(CreateEvent(book, journal, Guid.NewGuid()));
+                    }
                 }
-                db.FinancePostingEvents.Add(new FinancePostingEvent
-                {
-                    Id = postingEventId,
-                    TenantId = tenantId,
-                    SourceModule = request.SourceModule,
-                    OriginModuleCode = request.OriginModuleCode,
-                    SourceDocumentType = request.SourceDocumentType,
-                    SourceDocumentId = request.SourceDocumentId,
-                    PostingAction = "Post",
-                    PostingStatus = "Posted",
-                    PostingDate = request.PostingDate,
-                    PostedAt = DateTime.UtcNow,
-                    JournalEntryId = primaryJournalId,
-                    AccountingBookId = seeded.Primary.Id,
-                    BookClassification = seeded.Primary.Code,
-                    FunctionalCurrencyCode = seeded.Primary.FunctionalCurrencyCode!,
-                    TotalDebitAmount = request.Lines.Sum(line => line.DebitAmount),
-                    TotalCreditAmount = request.Lines.Sum(line => line.CreditAmount)
-                });
                 await db.SaveChangesAsync(ct);
                 return new FinancePostingResultDto
                 {
