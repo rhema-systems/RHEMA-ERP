@@ -276,6 +276,11 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
                 cancellationToken)
             ?? throw new KeyNotFoundException("The selected property or land lease record was not found.");
 
+        if (string.Equals(request.Status, "Active", StringComparison.OrdinalIgnoreCase)
+            && asset.Status is (EstateManagedAssetStatus.Reserved
+                or EstateManagedAssetStatus.Blocked or EstateManagedAssetStatus.Retired))
+            throw new InvalidOperationException("Billing cannot be activated while the property is reserved, blocked, or retired.");
+
         if (asset.AssetType != EstateManagedAssetType.Land && asset.ExternalGroundRentRequired != true)
         {
             throw new InvalidOperationException(
@@ -417,6 +422,10 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
         {
             throw new InvalidOperationException("Only active ground-rent accounts can generate invoices.");
         }
+
+        if (account.EstateManagedAsset.Status is EstateManagedAssetStatus.Reserved
+            or EstateManagedAssetStatus.Blocked or EstateManagedAssetStatus.Retired)
+            throw new InvalidOperationException("Billing is paused while this property is reserved, blocked, or retired.");
 
         if (account.EstateManagedAsset.CustomerBusinessPartnerId != account.CustomerBusinessPartnerId)
         {
@@ -577,6 +586,14 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
             ?? throw new KeyNotFoundException("Ground-rent charge was not found.");
 
         var account = charge.GroundRentAccount;
+        if (account.Status != "Active"
+            || account.EstateManagedAsset.Status is EstateManagedAssetStatus.Reserved
+                or EstateManagedAssetStatus.Blocked or EstateManagedAssetStatus.Retired)
+        {
+            throw new InvalidOperationException(
+                "Ground-rent penalties cannot be assessed while the property is reserved, blocked, or retired.");
+        }
+
         if (string.Equals(account.PenaltyMethod, "None", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("No arrears penalty rule is configured for this account.");

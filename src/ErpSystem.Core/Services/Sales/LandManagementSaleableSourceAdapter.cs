@@ -163,7 +163,8 @@ public sealed class LandManagementSaleableSourceAdapter : ISalesSaleableSourceAd
         EstateLandDemarcation item)
     {
         var asset = item.EstateManagedAsset;
-        var reference = EstateLandDemarcationReference.Build(asset.AssetCode, item.DemarcationNumber);
+        var reference = EstateLandDemarcationReference.DisplayReference(
+            item.ChildFixedAssetReference, asset.AssetCode, item.DemarcationNumber);
         var listingType = item.ExternalListingType;
         var supportsSale = MatchesListingType(listingType, "Sale", "SaleAndRent", "SaleAndLease");
         var supportsAgreement = MatchesListingType(listingType, "Rent", "Lease", "SaleAndRent", "SaleAndLease");
@@ -181,7 +182,8 @@ public sealed class LandManagementSaleableSourceAdapter : ISalesSaleableSourceAd
             AdapterKey = source.AdapterKey,
             SourceItemId = item.Id.ToString(),
             ItemCode = reference,
-            ItemName = $"{asset.Name} - Parcel {item.DemarcationNumber:000}",
+            ItemName = EstateLandDemarcationReference.DisplayReference(
+                item.ChildFixedAssetReference, asset.AssetCode, item.DemarcationNumber),
             ItemType = item.ExternalListingType,
             Status = item.ExternalListingStatus,
             CommercialStatus = "Available",

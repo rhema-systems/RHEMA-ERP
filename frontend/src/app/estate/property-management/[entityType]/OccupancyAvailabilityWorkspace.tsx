@@ -609,8 +609,11 @@ export function OccupancyAvailabilityWorkspace() {
               </div>
             ) : (
               <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-                Reserved, occupied, sold, blocked, maintenance, and retired
-                statuses hide the portal listing and block new requests.
+                Only Available properties can enter Portal Listings. All other
+                statuses hide the listing and block new requests.
+                {[EstateManagedAssetStatus.Reserved, EstateManagedAssetStatus.Blocked, EstateManagedAssetStatus.Retired].includes(nextStatus)
+                  ? ' Future rent and ground-rent billing will be paused, and future staff duties cancelled. Existing invoices and attendance remain.'
+                  : ''}
               </div>
             )}
 
@@ -631,6 +634,14 @@ export function OccupancyAvailabilityWorkspace() {
                 </div>
               </div>
             ) : null}
+
+            {selectedAsset && nextStatus === EstateManagedAssetStatus.Reserved
+              && !selectedAsset.customerBusinessPartnerId && !selectedAsset.lesseeName ? (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-900">
+                  Link the customer in Lease Management before reserving this property.{' '}
+                  <Link className="underline" href="/estate/property-management/EstatePropertyManagementLease">Open Lease Management</Link>
+                </div>
+              ) : null}
 
             <div className="space-y-2">
               <Label htmlFor="occupancy-notes">Notes</Label>

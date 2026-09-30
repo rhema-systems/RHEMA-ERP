@@ -70,7 +70,8 @@ public sealed class PropertyListingEnquiryTests
     {
         var asset = Asset();
         var portion = new EstateLandDemarcation { TenantId = tenantId, EstateManagedAsset = asset,
-            EstateManagedAssetId = asset.Id, DemarcationNumber = 2, Description = "Serviced plot", BoundaryVerified = true,
+            EstateManagedAssetId = asset.Id, DemarcationNumber = 2, ChildFixedAssetReference = "LAND-002-D002",
+            Description = "Serviced plot", BoundaryVerified = true,
             IsPublishedToExternalPortal = true, ExternalListingStatus = "Published", ExternalListingType = "Sale",
             ExternalListingCurrency = "GHS", ExternalSalePrice = 1250000m };
         var partner = new BusinessPartner { TenantId = tenantId, PartnerCode = "SUP-TEST", PartnerName = "Supplier Only Ltd",
@@ -359,9 +360,77 @@ public sealed class PropertyListingEnquiryTests
             new(Guid.NewGuid(), "Can we arrange a visit?", seeded.Partner.Id), default);
         Assert.IsType<OkObjectResult>(result); Assert.NotNull(captured);
         Assert.Equal("estate-public-listing", captured.Source); Assert.Equal(seeded.Portion.Id, captured.ListingId);
-        Assert.Equal("LAND-002-PORTION-002", captured.ListingReference); Assert.Equal("Parcel Two - Parcel 002", captured.ListingName);
+        Assert.Equal("LAND-002-D002", captured.ListingReference); Assert.Equal("LAND-002-D002", captured.ListingName);
         Assert.Equal("Sale", captured.ListingType); Assert.Equal("GHS", captured.Currency); Assert.Equal(1250000m, captured.Price);
         Assert.Equal(seeded.Partner.Id, captured.BusinessPartnerId);
+    }
+
+    [Fact]
+    public async Task ParcelListingsUseUniqueChildReferencesInPortalAndPropertyManagement()
+    {
+        await using var db = Database();
+        var seeded = await Seed(db);
+        var legacyPortion = new EstateLandDemarcation
+        {
+            TenantId = tenantId,
+            EstateManagedAssetId = seeded.Asset.Id,
+            DemarcationNumber = 3,
+            Description = "Legacy plot",
+            BoundaryVerified = true,
+            IsPublishedToExternalPortal = true,
+            ExternalListingStatus = "Published",
+            ExternalListingType = "Sale",
+            ExternalListingCurrency = "GHS"
+        };
+        db.Add(legacyPortion);
+        await db.SaveChangesAsync();
+
+        var external = Assert.IsType<OkObjectResult>(await Controller(db, new Mock<IEhcTicketService>())
+            .GetListings(cancellationToken: default));
+        using var externalJson = JsonDocument.Parse(JsonSerializer.Serialize(external.Value));
+        var externalListings = externalJson.RootElement.GetProperty("data").EnumerateArray().ToList();
+        Assert.Equal("LAND-002-D002", externalListings.Single(item => item.GetProperty("Id").GetGuid() == seeded.Portion.Id)
+            .GetProperty("Name").GetString());
+        Assert.Equal("LAND-002-D003", externalListings.Single(item => item.GetProperty("Id").GetGuid() == legacyPortion.Id)
+            .GetProperty("AssetCode").GetString());
+        Assert.All(externalListings, item => Assert.DoesNotContain("PORTION", item.GetProperty("AssetCode").GetString()!));
+
+        var managed = new EstateManagedAssetsController(null!, null!, null!, null!, db, User().Object, null!);
+        var propertyManagement = Assert.IsType<OkObjectResult>(await managed.GetPortalListingDemarcations());
+        using var managementJson = JsonDocument.Parse(JsonSerializer.Serialize(propertyManagement.Value));
+        var managedListings = managementJson.RootElement.GetProperty("data").EnumerateArray().ToList();
+        Assert.Equal("LAND-002-D002", managedListings.Single(item => item.GetProperty("Id").GetGuid() == seeded.Portion.Id)
+            .GetProperty("Name").GetString());
+        Assert.Equal("LAND-002-D003", managedListings.Single(item => item.GetProperty("Id").GetGuid() == legacyPortion.Id)
+            .GetProperty("Name").GetString());
+        Assert.Equal("Serviced plot", managedListings.Single(item => item.GetProperty("Id").GetGuid() == seeded.Portion.Id)
+            .GetProperty("Description").GetString());
+    }
+
+    [Fact]
+    public void ChildFixedAssetReferenceHasTenantScopedUniqueIndex()
+    {
+        using var db = Database();
+        var index = Assert.Single(db.Model.FindEntityType(typeof(EstateLandDemarcation))!.GetIndexes(), item =>
+            item.Properties.Select(property => property.Name).SequenceEqual(new[]
+            {
+                nameof(EstateLandDemarcation.TenantId),
+                nameof(EstateLandDemarcation.ChildFixedAssetReference)
+            }));
+
+        Assert.True(index.IsUnique);
+        Assert.Equal("[ChildFixedAssetReference] IS NOT NULL", index.GetFilter());
+    }
+
+    [Fact]
+    public void LandReferenceParserStillAcceptsHistoricalPortionReferences()
+    {
+        Assert.True(EstateLandDemarcationReference.TryParse("LAND-002-D002", out var childAssetCode, out var childNumber));
+        Assert.Equal("LAND-002", childAssetCode);
+        Assert.Equal(2, childNumber);
+        Assert.True(EstateLandDemarcationReference.TryParse("LAND-002-PORTION-002", out var legacyAssetCode, out var legacyNumber));
+        Assert.Equal(childAssetCode, legacyAssetCode);
+        Assert.Equal(childNumber, legacyNumber);
     }
 
     [Fact]
@@ -485,6 +554,7 @@ public sealed class PropertyListingEnquiryTests
             EstateManagedAsset = asset,
             EstateManagedAssetId = asset.Id,
             DemarcationNumber = 1,
+            ChildFixedAssetReference = "LAND-002-D001",
             Description = "Published sale plot",
             BoundaryCoordinates = "[]",
             BoundaryVerified = true,
@@ -546,7 +616,8 @@ public sealed class PropertyListingEnquiryTests
 
         var result = Assert.Single(results);
         Assert.Equal(sale.Id.ToString(), result.SourceItemId);
-        Assert.Equal("LAND-002-PORTION-001", result.PropertyReference);
+        Assert.Equal("LAND-002-D001", result.PropertyReference);
+        Assert.Equal("LAND-002-D001", result.ItemName);
         Assert.Equal(300000m, result.EstimatedValue);
         Assert.DoesNotContain(results, item => item.SourceItemId == rent.Id.ToString());
         Assert.DoesNotContain(results, item => item.SourceItemId == unpublished.Id.ToString());

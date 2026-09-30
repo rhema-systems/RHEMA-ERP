@@ -191,6 +191,7 @@
     <Compile Include="Services\Estate\FacilitiesComplaintHandoffServiceTests.cs" />
     <Compile Include="Services\Estate\FacilitiesProviderSelectionServiceTests.cs" />
     <Compile Include="Services\Estate\EstateTerminationReleaseTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesMaintenanceHandoffTests.cs" />
     <Compile Include="Services\Estate\FacilitiesMaintenanceCloseoutTests.cs" />
     <Compile Include="Services\Estate\FacilitiesProviderOptionsControllerTests.cs" />
     <Compile Include="Services\Estate\FacilitiesBudgetProjectionTests.cs" />

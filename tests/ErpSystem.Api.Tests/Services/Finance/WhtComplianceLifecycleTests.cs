@@ -708,7 +708,115 @@ public sealed class WhtComplianceLifecycleTests
             SupplyCategory = WhtSupplyCategory.Services,
             InvoiceSettlements = new() { new() { VendorInvoiceId = selected.Id, GrossSettlementAmount = selected.TotalAmount } }
         });
-        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*statutory conversion evidence*");
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Bank of Ghana statutory*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-WHT")]
+    [Trait("Category", "Tax")]
+    public async Task Calculation_ForeignInvoice_ShouldUseExactDateApprovedBankOfGhanaRateForNetSupply()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        fixture.Tax.ThresholdAmount = null;
+        var recognitionDate = new DateTime(2026, 9, 29);
+        var invoice = new VendorInvoice
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, InvoiceNumber = "INV-USD-STATUTORY",
+            BusinessPartnerId = fixture.Partner.Id, BusinessPartnerRoleId = fixture.Role.Id,
+            BusinessPartnerApProfileVersionId = fixture.Profile.Id, SupplierName = fixture.Partner.PartnerName,
+            InvoiceDate = recognitionDate, CurrencyCode = "USD", ExchangeRate = 10m,
+            SubTotal = 80m, TaxAmount = 20m, TotalAmount = 100m, BaseCurrencyAmount = 1_000m,
+            Status = VendorInvoiceStatus.Approved, ApprovalStatus = "Approved",
+            WithholdingTaxId = fixture.Tax.Id, WithholdingTaxRate = 7.5m,
+            WithholdingContractReference = "USD-SERVICES-2026",
+            WithholdingSupplyCategory = WhtSupplyCategory.Services
+        };
+        var statutoryRate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 0.08m, InverseRate = 12.5m,
+            EffectiveDate = recognitionDate, EndDate = recognitionDate,
+            RateType = ExchangeRateType.GhanaStatutory, QuoteSide = ExchangeRateQuoteSide.Mid,
+            RateSource = "Bank of Ghana", APIResponseMetadata = "BoG daily interbank reference 2026-09-29",
+            ApprovalStatus = RateApprovalStatus.Approved, IsActive = true,
+            CreatedByUserId = Guid.NewGuid(), CreatedDate = recognitionDate
+        };
+        db.VendorInvoices.Add(invoice);
+        db.ExchangeRates.Add(statutoryRate);
+        await db.SaveChangesAsync();
+
+        var result = await CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id, BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = recognitionDate, ContractReference = "USD-SERVICES-2026",
+            SupplyCategory = WhtSupplyCategory.Services,
+            VendorInvoiceIds = new() { invoice.Id },
+            InvoiceSettlements = new() { new() { VendorInvoiceId = invoice.Id, GrossSettlementAmount = 50m } }
+        });
+
+        result.CurrentPaymentTaxableBase.Should().Be(500m, "USD 40 net supply is converted at the governed GHS 12.5 statutory factor");
+        result.WithholdingAmount.Should().Be(37.50m);
+        result.StatutoryFxEvidence.Should().ContainSingle(evidence =>
+            evidence.VendorInvoiceId == invoice.Id
+            && evidence.CurrencyCode == "USD"
+            && evidence.NetTaxableBaseAmount == 40m
+            && evidence.GhsTaxableBaseAmount == 500m
+            && evidence.ExchangeRateId == statutoryRate.Id
+            && evidence.ExchangeRateToGhs == 12.5m
+            && evidence.RecognitionDate == recognitionDate
+            && evidence.RateSource == "Bank of Ghana"
+            && evidence.SourceReference == "BoG daily interbank reference 2026-09-29");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-WHT")]
+    [Trait("Category", "Tax")]
+    public async Task Calculation_ForeignInvoice_ShouldRejectPriorDateStatutoryRate()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        fixture.Tax.ThresholdAmount = null;
+        var recognitionDate = new DateTime(2026, 9, 29);
+        var invoice = new VendorInvoice
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, InvoiceNumber = "INV-USD-NO-EXACT-RATE",
+            BusinessPartnerId = fixture.Partner.Id, BusinessPartnerRoleId = fixture.Role.Id,
+            BusinessPartnerApProfileVersionId = fixture.Profile.Id, SupplierName = fixture.Partner.PartnerName,
+            InvoiceDate = recognitionDate, CurrencyCode = "USD", ExchangeRate = 10m,
+            SubTotal = 80m, TaxAmount = 20m, TotalAmount = 100m, BaseCurrencyAmount = 1_000m,
+            Status = VendorInvoiceStatus.Approved, ApprovalStatus = "Approved",
+            WithholdingTaxId = fixture.Tax.Id, WithholdingTaxRate = 7.5m,
+            WithholdingContractReference = "USD-SERVICES-2026",
+            WithholdingSupplyCategory = WhtSupplyCategory.Services
+        };
+        db.VendorInvoices.Add(invoice);
+        db.ExchangeRates.Add(new ExchangeRate
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 0.08m, InverseRate = 12.5m,
+            EffectiveDate = recognitionDate.AddDays(-1), EndDate = recognitionDate.AddDays(-1),
+            RateType = ExchangeRateType.GhanaStatutory, QuoteSide = ExchangeRateQuoteSide.Mid,
+            RateSource = "Bank of Ghana", APIResponseMetadata = "BoG daily interbank reference 2026-09-28",
+            ApprovalStatus = RateApprovalStatus.Approved, IsActive = true,
+            CreatedByUserId = Guid.NewGuid(), CreatedDate = recognitionDate.AddDays(-1)
+        });
+        await db.SaveChangesAsync();
+
+        var act = () => CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id, BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = recognitionDate, ContractReference = "USD-SERVICES-2026",
+            SupplyCategory = WhtSupplyCategory.Services,
+            InvoiceSettlements = new() { new() { VendorInvoiceId = invoice.Id, GrossSettlementAmount = 50m } }
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*No approved Bank of Ghana statutory USD/GHS rate exists for 2026-09-29*");
     }
 
     [Fact]
@@ -719,6 +827,7 @@ public sealed class WhtComplianceLifecycleTests
         var fixture = SeedFoundation(db, tenantId);
         var payment = SeedPostedWhtPayment(db, fixture, "FOREIGN-HISTORY", new DateTime(2026, 9, 1), 1000m, 0m);
         payment.CurrencyCode = "USD";
+        db.VendorInvoices.Local.Single().CurrencyCode = "USD";
         await db.SaveChangesAsync();
         var act = () => CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
         {
@@ -726,7 +835,7 @@ public sealed class WhtComplianceLifecycleTests
             PaymentDate = new DateTime(2026, 9, 29), TaxableBase = 1200m,
             ContractReference = "CONTRACT-001", SupplyCategory = WhtSupplyCategory.Services
         });
-        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*statutory conversion evidence*");
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Bank of Ghana statutory*");
     }
 
     [Theory]
@@ -741,19 +850,20 @@ public sealed class WhtComplianceLifecycleTests
         await db.SaveChangesAsync();
         var service = CreateService(db, tenantId);
         var issued = await service.GenerateApCertificateAsync(payment.Id, new GenerateWhtCertificateDto());
-        // Simulate pre-existing foreign history; no production history is rewritten by the service.
+        // WHT statutory conversion is driven by the invoice supply currency. A foreign payment
+        // settling a GHS invoice does not need a second conversion of an already-GHS tax base.
         if (foreignPayment) payment.CurrencyCode = "USD";
-        else (await db.VendorInvoices.SingleAsync()).CurrencyCode = "USD";
+        (await db.VendorInvoices.SingleAsync()).CurrencyCode = "USD";
         await db.SaveChangesAsync();
         (await service.GetApCertificateAsync(payment.Id)).Should().NotBeNull();
         var reissue = () => service.ReissueApCertificateAsync(payment.Id, new ReissueWhtCertificateDto { Reason = "Foreign statutory evidence requires review." });
-        await reissue.Should().ThrowAsync<InvalidOperationException>().WithMessage("*statutory conversion evidence*");
+        await reissue.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Bank of Ghana statutory*");
         var remittance = () => service.CreateRemittanceAsync(new CreateWhtRemittanceDto
         {
             PeriodFrom = new DateTime(2026, 7, 1), PeriodTo = new DateTime(2026, 7, 31), CurrencyCode = "GHS",
             VendorPaymentIds = new() { payment.Id }
         });
-        await remittance.Should().ThrowAsync<InvalidOperationException>().WithMessage("*statutory conversion evidence*");
+        await remittance.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Bank of Ghana statutory*");
         var cancelled = await service.CancelApCertificateAsync(payment.Id, new CancelWhtCertificateDto { Reason = "Preserve history while statutory evidence is reconciled." });
         cancelled.CertificateStatus.Should().Be("Cancelled");
         (await db.WithholdingTaxCertificates.CountAsync()).Should().Be(1);
@@ -774,16 +884,16 @@ public sealed class WhtComplianceLifecycleTests
             PeriodFrom = new DateTime(2026, 7, 1), PeriodTo = new DateTime(2026, 7, 31), CurrencyCode = "GHS",
             VendorPaymentIds = new() { payment.Id }
         });
-        payment.CurrencyCode = "USD";
+        (await db.VendorInvoices.SingleAsync()).CurrencyCode = "USD";
         await db.SaveChangesAsync();
         var issue = () => service.GenerateApCertificateAsync(payment.Id, new GenerateWhtCertificateDto());
-        await issue.Should().ThrowAsync<InvalidOperationException>().WithMessage("*statutory conversion evidence*");
+        await issue.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Bank of Ghana statutory*");
         var submit = () => service.SubmitRemittanceAsync(draft.Id, new SubmitWhtRemittanceDto { SubmissionReference = "GRA-LEGACY-FX" });
-        await submit.Should().ThrowAsync<InvalidOperationException>().WithMessage("*statutory conversion evidence*");
+        await submit.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Bank of Ghana statutory*");
         (await db.WithholdingTaxRemittances.SingleAsync()).Status = WhtRemittanceStatus.Submitted;
         await db.SaveChangesAsync();
         var pay = () => service.MarkRemittancePaidAsync(draft.Id, new PayWhtRemittanceDto { PaymentDate = new DateTime(2026, 8, 14), PaymentReference = "BANK-LEGACY-FX" });
-        await pay.Should().ThrowAsync<InvalidOperationException>().WithMessage("*statutory conversion evidence*");
+        await pay.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Bank of Ghana statutory*");
         await service.CancelRemittanceAsync(draft.Id, new CancelWhtRemittanceDto { Reason = "Reconcile the legacy foreign statutory evidence." });
         (await db.WithholdingTaxRemittances.SingleAsync()).Status.Should().Be(WhtRemittanceStatus.Cancelled);
         (await db.WithholdingTaxCertificates.CountAsync()).Should().Be(0);

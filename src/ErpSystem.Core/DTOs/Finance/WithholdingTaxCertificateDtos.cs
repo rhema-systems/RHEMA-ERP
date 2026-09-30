@@ -125,6 +125,21 @@ public sealed class WhtCalculationResultDto
     public WhtSupplyCategory SupplyCategory { get; set; }
     public DateTime StatutoryPeriodStart { get; set; }
     public DateTime StatutoryPeriodEnd { get; set; }
+    public List<WhtStatutoryFxEvidenceDto> StatutoryFxEvidence { get; set; } = new();
+}
+
+public sealed class WhtStatutoryFxEvidenceDto
+{
+    public Guid VendorInvoiceId { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
+    public decimal GrossSettlementAmount { get; set; }
+    public decimal NetTaxableBaseAmount { get; set; }
+    public decimal GhsTaxableBaseAmount { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public decimal ExchangeRateToGhs { get; set; } = 1m;
+    public DateTime RecognitionDate { get; set; }
+    public string RateSource { get; set; } = "Functional currency";
+    public string? SourceReference { get; set; }
 }
 
 public sealed class WhtRemittanceQueryDto

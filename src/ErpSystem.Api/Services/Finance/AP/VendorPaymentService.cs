@@ -487,17 +487,15 @@ namespace ErpSystem.Api.Services.Finance.AP
                             : invoice.ExchangeRate,
                         requireApprovedSource: !string.Equals(invoiceCurrency, baseCurrencyCode, StringComparison.OrdinalIgnoreCase),
                         cancellationToken);
-                    allocationWhtFunctionalAmount += RoundMoney(
-                        Math.Max(requestedAllocation.WithholdingTaxAmount, 0m) * invoiceRate.Rate);
                     pendingWhtScopes.Add(new PendingWhtScope(
                         invoice.Id,
                         invoice.WithholdingContractReference,
                         invoice.WithholdingSupplyCategory,
                         invoice.WithholdingTaxId.HasValue ? ApWithholdingBasis.FunctionalBase(invoice,
-                            RoundMoney((Math.Max(requestedAllocation.AllocatedAmount, 0m) +
+                            RoundMoney(Math.Max(requestedAllocation.AllocatedAmount, 0m) +
                                 Math.Max(requestedAllocation.DiscountAmount, 0m) +
-                                Math.Max(requestedAllocation.WithholdingTaxAmount, 0m)) * invoiceRate.Rate)) : 0m,
-                        RoundMoney(Math.Max(requestedAllocation.WithholdingTaxAmount, 0m) * invoiceRate.Rate),
+                                Math.Max(requestedAllocation.WithholdingTaxAmount, 0m))) : 0m,
+                        RoundMoney(Math.Max(requestedAllocation.WithholdingTaxAmount, 0m)),
                         RoundMoney(requestedAllocation.AllocatedAmount + requestedAllocation.DiscountAmount + requestedAllocation.WithholdingTaxAmount),
                         invoiceRate.Id));
                 }
@@ -507,21 +505,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (invoiceWithholding != null)
                 dto.WithholdingTaxId = invoiceWithholding.TaxId;
             var requestedWhtAmount = allocationWhtFunctionalAmount;
-            // The header value is retained for API compatibility and functional-currency
-            // reporting, but allocation rows are now the authoritative source. Reject a stale
-            // client total instead of silently accepting two contradictory WHT representations.
-            // Zero is the documented cross-currency client sentinel requesting server derivation;
-            // only a positive legacy/header assertion is compared with the line roll-up.
-            if (dto.WithholdingTaxAmount is > 0m &&
-                Math.Abs(RoundMoney(dto.WithholdingTaxAmount.Value - requestedWhtAmount)) > 0.01m)
-            {
-                throw new InvalidOperationException(
-                    $"Payment WHT total {dto.WithholdingTaxAmount.Value:N2} does not match the line-level functional WHT total {requestedWhtAmount:N2}. Recalculate the payment before saving.");
-            }
             WhtCalculationResultDto? whtCalculation = null;
             if (dto.WithholdingTaxId.HasValue)
             {
-                RequireGhsApWhtScope(paymentCurrencyCode, withholdingInvoices);
                 if (dto.Allocations?.Any() != true)
                 {
                     throw new InvalidOperationException("Configured WHT may only be applied to allocated supplier invoices; supplier advances must not carry WHT.");
@@ -539,16 +525,20 @@ namespace ErpSystem.Api.Services.Finance.AP
                     excludeVendorPaymentId: null,
                     cancellationToken);
                 whtCalculation = RollUpWhtCalculations(calculations);
-
-                if (Math.Abs(RoundMoney(requestedWhtAmount - whtCalculation.WithholdingAmount)) > 0.01m)
-                {
-                    throw new InvalidOperationException(
-                        $"WHT allocations total {requestedWhtAmount:N2}, but configured tax {whtCalculation.TaxCode} requires {whtCalculation.WithholdingAmount:N2}. Recalculate the payment before saving.");
-                }
+                requestedWhtAmount = whtCalculation.WithholdingAmount;
             }
-            else if (requestedWhtAmount > 0m || dto.WithholdingTaxRate > 0m)
+            else if (pendingWhtScopes.Sum(item => item.WithholdingAmount) > 0m || dto.WithholdingTaxRate > 0m)
             {
                 throw new InvalidOperationException("Select an active configured WHT tax before entering a withholding amount or rate.");
+            }
+
+            // The header is a GHS statutory roll-up. A zero value is the documented
+            // server-derivation sentinel for foreign-currency settlements.
+            if (dto.WithholdingTaxAmount is > 0m &&
+                Math.Abs(RoundMoney(dto.WithholdingTaxAmount.Value - requestedWhtAmount)) > 0.01m)
+            {
+                throw new InvalidOperationException(
+                    $"Payment WHT total {dto.WithholdingTaxAmount.Value:N2} does not match the governed GHS WHT total {requestedWhtAmount:N2}. Recalculate the payment before saving.");
             }
 
             var whtAmount = whtCalculation?.WithholdingAmount ?? 0m;
@@ -1532,6 +1522,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                         WithholdingTaxAmount = -allocation.WithholdingTaxAmount,
                         WithholdingTaxFunctionalAmount = -allocation.WithholdingTaxFunctionalAmount,
                         WithholdingTaxBaseFunctionalAmount = -allocation.WithholdingTaxBaseFunctionalAmount,
+                        WithholdingTaxStatutoryExchangeRateId = allocation.WithholdingTaxStatutoryExchangeRateId,
+                        WithholdingTaxStatutoryExchangeRate = allocation.WithholdingTaxStatutoryExchangeRate,
+                        WithholdingTaxStatutoryExchangeRateDate = allocation.WithholdingTaxStatutoryExchangeRateDate,
+                        WithholdingTaxStatutoryExchangeRateSource = allocation.WithholdingTaxStatutoryExchangeRateSource,
+                        WithholdingTaxStatutoryExchangeRateReference = allocation.WithholdingTaxStatutoryExchangeRateReference,
                         AllocationDate = reversalDate,
                         Notes = $"Payment reversal of allocation {allocation.Id}: {reason}",
                         IsReversal = true,
@@ -1992,6 +1987,17 @@ namespace ErpSystem.Api.Services.Finance.AP
             // server-owned WHT threshold evidence after every allocation change so a caller
             // cannot bypass the configured Ghana WHT policy by adding lines after creation.
             await SynchronizeApWithholdingComplianceAsync(payment, effectiveAllocations, cancellationToken);
+            foreach (var resultAllocation in result.Allocations)
+            {
+                var stored = createdAllocations.Single(item => item.Id == resultAllocation.Id);
+                resultAllocation.WithholdingTaxBaseFunctionalAmount = stored.WithholdingTaxBaseFunctionalAmount;
+                resultAllocation.WithholdingTaxFunctionalAmount = stored.WithholdingTaxFunctionalAmount;
+                resultAllocation.WithholdingTaxStatutoryExchangeRateId = stored.WithholdingTaxStatutoryExchangeRateId;
+                resultAllocation.WithholdingTaxStatutoryExchangeRate = stored.WithholdingTaxStatutoryExchangeRate;
+                resultAllocation.WithholdingTaxStatutoryExchangeRateDate = stored.WithholdingTaxStatutoryExchangeRateDate;
+                resultAllocation.WithholdingTaxStatutoryExchangeRateSource = stored.WithholdingTaxStatutoryExchangeRateSource;
+                resultAllocation.WithholdingTaxStatutoryExchangeRateReference = stored.WithholdingTaxStatutoryExchangeRateReference;
+            }
             payment.UpdatedAt = now;
             payment.UpdatedBy = UserName;
             await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
@@ -2708,6 +2714,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                     WithholdingTaxAmount = -allocation.WithholdingTaxAmount,
                     WithholdingTaxFunctionalAmount = -allocation.WithholdingTaxFunctionalAmount,
                     WithholdingTaxBaseFunctionalAmount = -allocation.WithholdingTaxBaseFunctionalAmount,
+                    WithholdingTaxStatutoryExchangeRateId = allocation.WithholdingTaxStatutoryExchangeRateId,
+                    WithholdingTaxStatutoryExchangeRate = allocation.WithholdingTaxStatutoryExchangeRate,
+                    WithholdingTaxStatutoryExchangeRateDate = allocation.WithholdingTaxStatutoryExchangeRateDate,
+                    WithholdingTaxStatutoryExchangeRateSource = allocation.WithholdingTaxStatutoryExchangeRateSource,
+                    WithholdingTaxStatutoryExchangeRateReference = allocation.WithholdingTaxStatutoryExchangeRateReference,
                     AllocationDate = now,
                     Notes = $"Reversal of allocation {allocationId}: {reason}",
                     IsReversal = true,
@@ -2897,6 +2908,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                 DiscountFunctionalAmount = a.DiscountFunctionalAmount,
                 WithholdingTaxAmount = a.WithholdingTaxAmount,
                 WithholdingTaxFunctionalAmount = a.WithholdingTaxFunctionalAmount,
+                WithholdingTaxBaseFunctionalAmount = a.WithholdingTaxBaseFunctionalAmount,
+                WithholdingTaxStatutoryExchangeRateId = a.WithholdingTaxStatutoryExchangeRateId,
+                WithholdingTaxStatutoryExchangeRate = a.WithholdingTaxStatutoryExchangeRate,
+                WithholdingTaxStatutoryExchangeRateDate = a.WithholdingTaxStatutoryExchangeRateDate,
+                WithholdingTaxStatutoryExchangeRateSource = a.WithholdingTaxStatutoryExchangeRateSource,
+                WithholdingTaxStatutoryExchangeRateReference = a.WithholdingTaxStatutoryExchangeRateReference,
                 AllocationDate = a.AllocationDate,
                 Notes = a.Notes,
                 IsReversal = a.IsReversal,
@@ -3658,6 +3675,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                         WithholdingTaxAmount = -original.WithholdingTaxAmount,
                         WithholdingTaxFunctionalAmount = -original.WithholdingTaxFunctionalAmount,
                         WithholdingTaxBaseFunctionalAmount = -original.WithholdingTaxBaseFunctionalAmount,
+                        WithholdingTaxStatutoryExchangeRateId = original.WithholdingTaxStatutoryExchangeRateId,
+                        WithholdingTaxStatutoryExchangeRate = original.WithholdingTaxStatutoryExchangeRate,
+                        WithholdingTaxStatutoryExchangeRateDate = original.WithholdingTaxStatutoryExchangeRateDate,
+                        WithholdingTaxStatutoryExchangeRateSource = original.WithholdingTaxStatutoryExchangeRateSource,
+                        WithholdingTaxStatutoryExchangeRateReference = original.WithholdingTaxStatutoryExchangeRateReference,
                         AllocationDate = now,
                         Notes = $"Controlled void reversal of allocation {original.Id}: {reason.Trim()}",
                         IsReversal = true,
@@ -5331,8 +5353,6 @@ namespace ErpSystem.Api.Services.Finance.AP
             var settings = await GetFinanceSettingsAsync(cancellationToken);
             var functionalCurrency = bookAuthority.FunctionalCurrencyCode;
             var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
-            if (payment.WithholdingTaxId.HasValue)
-                RequireGhsApWhtScope(paymentCurrency, Array.Empty<VendorInvoice>());
             NormalizeAndValidateAllocationCurrencyEvidence(
                 payment,
                 activeAllocations,
@@ -5502,9 +5522,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                         settlementDimensions, allocation.Id, FinanceSettlementComponentType.WithholdingTax,
                         allocation.WithholdingTaxAmount, allocation.WithholdingTaxFunctionalAmount,
                         allocation.VendorInvoiceId, allocation.InvoiceCurrencyCode,
-                        allocation.InvoiceSettlementExchangeRateId,
-                        allocation.InvoiceSettlementExchangeRate);
+                        allocation.WithholdingTaxStatutoryExchangeRateId
+                            ?? allocation.InvoiceSettlementExchangeRateId,
+                        allocation.WithholdingTaxStatutoryExchangeRate
+                            ?? allocation.InvoiceSettlementExchangeRate);
                     foreach (var component in evidence)
+                    {
                         postingLines.Add(BuildPostingLine(
                             taxAccountId,
                             $"Withholding tax - {payment.PaymentNumber} / {allocation.VendorInvoice.InvoiceNumber}",
@@ -5522,6 +5545,49 @@ namespace ErpSystem.Api.Services.Finance.AP
                             sourceDocumentLineId: component.OriginatingSourceLineId,
                             dimensions: await ResolveVendorSettlementPostingDimensionsAsync(
                                 component, taxAccountId, payment.PaymentDate, cancellationToken)));
+
+                        // Ghana WHT is payable in GHS at the governed BoG statutory rate. Cash,
+                        // discount and AP-control settlement remain measured at the approved
+                        // commercial settlement rate. The difference is an auditable FX variance;
+                        // omitting it would either misstate the tax liability or leave the payment
+                        // journal unbalanced whenever the two approved rates differ.
+                        var commercialFunctionalAmount = RoundMoney(
+                            component.TransactionAmount *
+                            NormalizeExchangeRate(allocation.InvoiceSettlementExchangeRate));
+                        var statutoryFxVariance = RoundMoney(
+                            component.FunctionalAmount - commercialFunctionalAmount);
+                        if (statutoryFxVariance != 0m)
+                        {
+                            var isLoss = statutoryFxVariance > 0m;
+                            var varianceAccountId = isLoss
+                                ? settings.RealizedFxLossAccountId
+                                : settings.RealizedFxGainAccountId;
+                            var varianceAccount = await ResolvePaymentPostingAccountAsync(
+                                varianceAccountId ?? throw new InvalidOperationException(
+                                    $"Realized FX {(isLoss ? "loss" : "gain")} account is not configured for the Ghana WHT statutory conversion variance."),
+                                isLoss ? "realized FX loss account" : "realized FX gain account",
+                                accountCache,
+                                allowControlAccount: false,
+                                requireDirectPosting: true,
+                                cancellationToken);
+                            var varianceAmount = Math.Abs(statutoryFxVariance);
+                            postingLines.Add(BuildPostingLine(
+                                varianceAccount.Id,
+                                $"Ghana WHT statutory FX {(isLoss ? "loss" : "gain")} - {payment.PaymentNumber} / {allocation.VendorInvoice.InvoiceNumber}",
+                                debitTransactionAmount: isLoss ? varianceAmount : 0m,
+                                creditTransactionAmount: isLoss ? 0m : varianceAmount,
+                                functionalCurrency,
+                                functionalCurrency,
+                                exchangeRate: 1m,
+                                payment.PaymentDate,
+                                payment.PaymentNumber,
+                                lineNumber++,
+                                isLoss ? "AP-WHT-Statutory-FX-Loss" : "AP-WHT-Statutory-FX-Gain",
+                                sourceDocumentLineId: component.OriginatingSourceLineId,
+                                dimensions: await ResolveVendorSettlementPostingDimensionsAsync(
+                                    component, varianceAccount.Id, payment.PaymentDate, cancellationToken)));
+                        }
+                    }
                 }
             }
 
@@ -6527,7 +6593,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                     "discount functional amount");
                 allocation.WithholdingTaxFunctionalAmount = NormalizeEvidenceAmount(
                     allocation.WithholdingTaxFunctionalAmount,
-                    expected.WithholdingFunctionalAmount,
+                    allocation.WithholdingTaxStatutoryExchangeRate is > 0m
+                        ? RoundMoney(allocation.WithholdingTaxAmount *
+                            allocation.WithholdingTaxStatutoryExchangeRate.Value)
+                        : expected.WithholdingFunctionalAmount,
                     mayNormalizeSameCurrency,
                     allocation.Id,
                     "WHT functional amount");
@@ -6571,7 +6640,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             IReadOnlyCollection<VendorPaymentAllocation> allocations,
             CancellationToken cancellationToken)
         {
-            var functionalWht = RoundMoney(allocations.Sum(item => item.WithholdingTaxFunctionalAmount));
+            var functionalWht = 0m;
+            var hasNativeWht = allocations.Any(item => item.WithholdingTaxAmount != 0m);
             var invoiceIds = allocations.Select(item => item.VendorInvoiceId).Distinct().ToList();
             var withholdingInvoices = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(invoice =>
                 invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.BusinessPartnerId == payment.BusinessPartnerId &&
@@ -6581,10 +6651,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             var invoiceWithholding = ApInvoiceWithholdingPolicy.Resolve(withholdingInvoices, payment.WithholdingTaxId);
             if (invoiceWithholding != null)
                 payment.WithholdingTaxId = invoiceWithholding.TaxId;
-            payment.WithholdingTaxAmount = functionalWht;
             // A configured payment below its threshold must keep its taxable base: later
             // payments use that evidence when evaluating the supplier's cumulative threshold.
-            if (!payment.WithholdingTaxId.HasValue && functionalWht == 0m)
+            if (!payment.WithholdingTaxId.HasValue && !hasNativeWht)
             {
                 payment.WithholdingTaxBaseAmount = 0m;
                 payment.WithholdingTaxRate = 0m;
@@ -6598,11 +6667,17 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (!payment.WithholdingTaxId.HasValue)
                 throw new InvalidOperationException("AP WHT allocations require a configured WHT tax.");
-            RequireGhsApWhtScope(payment.CurrencyCode, withholdingInvoices);
             if (_withholdingTaxService == null)
                 throw new InvalidOperationException("WHT compliance service is not configured.");
 
-            if (payment.JournalEntryId.HasValue && allocations.Any(item => !item.WithholdingTaxBaseFunctionalAmount.HasValue))
+            if (payment.JournalEntryId.HasValue && allocations.Any(item =>
+                    !item.WithholdingTaxBaseFunctionalAmount.HasValue ||
+                    (!string.Equals(item.InvoiceCurrencyCode, "GHS", StringComparison.OrdinalIgnoreCase) &&
+                     (!item.WithholdingTaxStatutoryExchangeRateId.HasValue ||
+                      item.WithholdingTaxStatutoryExchangeRate is null or <= 0m ||
+                      !item.WithholdingTaxStatutoryExchangeRateDate.HasValue ||
+                      string.IsNullOrWhiteSpace(item.WithholdingTaxStatutoryExchangeRateSource) ||
+                      string.IsNullOrWhiteSpace(item.WithholdingTaxStatutoryExchangeRateReference)))))
                 throw new InvalidOperationException("Posted WHT allocations lack frozen net-supply basis evidence. Finance must reconcile this historical payment before changing its allocations.");
             var calculations = await CalculateWhtByScopeAsync(
                 payment.WithholdingTaxId.Value,
@@ -6612,20 +6687,44 @@ namespace ErpSystem.Api.Services.Finance.AP
                     item.VendorInvoiceId,
                     withholdingInvoices.Single(invoice => invoice.Id == item.VendorInvoiceId).WithholdingContractReference,
                     withholdingInvoices.Single(invoice => invoice.Id == item.VendorInvoiceId).WithholdingSupplyCategory,
-                    item.WithholdingTaxBaseFunctionalAmount ?? ApWithholdingBasis.FunctionalBase(
-                        withholdingInvoices.Single(invoice => invoice.Id == item.VendorInvoiceId), item.SettlementFunctionalAmount),
-                    item.WithholdingTaxFunctionalAmount,
+                    ApWithholdingBasis.FunctionalBase(
+                        withholdingInvoices.Single(invoice => invoice.Id == item.VendorInvoiceId),
+                        RoundMoney(item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount)),
+                    item.WithholdingTaxAmount,
                     RoundMoney(item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount),
                     item.InvoiceSettlementExchangeRateId)),
                 payment.Id,
                 cancellationToken);
             var calculation = RollUpWhtCalculations(calculations);
+            var evidenceByInvoice = calculation.StatutoryFxEvidence
+                .ToDictionary(item => item.VendorInvoiceId);
+            foreach (var allocation in allocations)
+            {
+                if (!evidenceByInvoice.TryGetValue(allocation.VendorInvoiceId, out var evidence))
+                    throw new InvalidOperationException("The WHT calculation did not return statutory FX evidence for every allocation.");
+                allocation.WithholdingTaxBaseFunctionalAmount = evidence.GhsTaxableBaseAmount;
+                allocation.WithholdingTaxFunctionalAmount = RoundMoney(
+                    allocation.WithholdingTaxAmount * evidence.ExchangeRateToGhs);
+                allocation.WithholdingTaxStatutoryExchangeRateId = evidence.ExchangeRateId;
+                allocation.WithholdingTaxStatutoryExchangeRate = evidence.ExchangeRateId.HasValue
+                    ? evidence.ExchangeRateToGhs
+                    : null;
+                allocation.WithholdingTaxStatutoryExchangeRateDate = evidence.ExchangeRateId.HasValue
+                    ? evidence.RecognitionDate.Date
+                    : null;
+                allocation.WithholdingTaxStatutoryExchangeRateSource = evidence.ExchangeRateId.HasValue
+                    ? evidence.RateSource
+                    : null;
+                allocation.WithholdingTaxStatutoryExchangeRateReference = evidence.SourceReference;
+            }
+            functionalWht = RoundMoney(allocations.Sum(item => item.WithholdingTaxFunctionalAmount));
             if (Math.Abs(RoundMoney(functionalWht - calculation.WithholdingAmount)) > 0.01m)
             {
                 throw new InvalidOperationException(
                     $"AP allocation WHT totals {functionalWht:N2}, but configured tax {calculation.TaxCode} requires {calculation.WithholdingAmount:N2}.");
             }
 
+            payment.WithholdingTaxAmount = functionalWht;
             payment.WithholdingTaxBaseAmount = calculation.TaxableBase;
             payment.WithholdingTaxRate = calculation.TaxRate;
             payment.WithholdingTaxCumulativeBefore = calculation.CumulativeBefore;
@@ -6633,16 +6732,6 @@ namespace ErpSystem.Api.Services.Finance.AP
             payment.WithholdingTaxThresholdApplied = calculation.ThresholdApplied;
             payment.WithholdingTaxCalculationNote = calculation.CalculationNote;
             payment.WithholdingTaxAccountId = calculation.TaxPayableAccountId;
-            foreach (var allocation in allocations)
-                allocation.WithholdingTaxBaseFunctionalAmount ??= ApWithholdingBasis.FunctionalBase(
-                    withholdingInvoices.Single(invoice => invoice.Id == allocation.VendorInvoiceId), allocation.SettlementFunctionalAmount);
-        }
-
-        private static void RequireGhsApWhtScope(string paymentCurrency, IEnumerable<VendorInvoice> invoices)
-        {
-            if (!string.Equals(paymentCurrency?.Trim(), "GHS", StringComparison.OrdinalIgnoreCase) ||
-                invoices.Any(invoice => !string.Equals(invoice.CurrencyCode?.Trim(), "GHS", StringComparison.OrdinalIgnoreCase)))
-                throw new InvalidOperationException("Foreign-currency WHT payments require governed GHS statutory conversion evidence. Commercial payment or invoice FX cannot substitute for the applicable Bank of Ghana inter-bank rate.");
         }
 
         private async Task<IReadOnlyList<WhtCalculationResultDto>> CalculateWhtByScopeAsync(
@@ -6684,7 +6773,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                         }).ToList()
                     },
                     cancellationToken);
-                var supplied = RoundMoney(group.Sum(item => item.WithholdingAmount));
+                var statutoryFxEvidence = calculation.StatutoryFxEvidence
+                    ?? throw new InvalidOperationException(
+                        "Bank of Ghana statutory conversion evidence is missing for a WHT allocation.");
+                var evidenceByInvoice = statutoryFxEvidence
+                    .ToDictionary(item => item.VendorInvoiceId);
+                var supplied = RoundMoney(group.Sum(item =>
+                    item.WithholdingAmount *
+                    (evidenceByInvoice.TryGetValue(item.VendorInvoiceId, out var evidence)
+                        ? evidence.ExchangeRateToGhs
+                        : throw new InvalidOperationException("Bank of Ghana statutory conversion evidence is missing for a WHT allocation."))));
                 if (Math.Abs(RoundMoney(supplied - calculation.WithholdingAmount)) > 0.01m)
                 {
                     throw new InvalidOperationException(
@@ -6723,7 +6821,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ContractReference = calculations.Count == 1 ? first.ContractReference : "MULTIPLE",
                 SupplyCategory = first.SupplyCategory,
                 StatutoryPeriodStart = calculations.Min(item => item.StatutoryPeriodStart),
-                StatutoryPeriodEnd = calculations.Max(item => item.StatutoryPeriodEnd)
+                StatutoryPeriodEnd = calculations.Max(item => item.StatutoryPeriodEnd),
+                StatutoryFxEvidence = calculations
+                    .SelectMany(item => item.StatutoryFxEvidence ?? new List<WhtStatutoryFxEvidenceDto>())
+                    .ToList()
             };
         }
 
@@ -7015,6 +7116,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                     DiscountFunctionalAmount = a.DiscountFunctionalAmount,
                     WithholdingTaxAmount = a.WithholdingTaxAmount,
                     WithholdingTaxFunctionalAmount = a.WithholdingTaxFunctionalAmount,
+                    WithholdingTaxBaseFunctionalAmount = a.WithholdingTaxBaseFunctionalAmount,
+                    WithholdingTaxStatutoryExchangeRateId = a.WithholdingTaxStatutoryExchangeRateId,
+                    WithholdingTaxStatutoryExchangeRate = a.WithholdingTaxStatutoryExchangeRate,
+                    WithholdingTaxStatutoryExchangeRateDate = a.WithholdingTaxStatutoryExchangeRateDate,
+                    WithholdingTaxStatutoryExchangeRateSource = a.WithholdingTaxStatutoryExchangeRateSource,
+                    WithholdingTaxStatutoryExchangeRateReference = a.WithholdingTaxStatutoryExchangeRateReference,
                     AllocationDate = a.AllocationDate,
                     Notes = a.Notes,
                     IsReversal = a.IsReversal,

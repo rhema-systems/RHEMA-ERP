@@ -216,6 +216,8 @@ public sealed class EstateManagedAssetsController : ControllerBase
         {
             query = query.Where(item =>
                 item.Description.ToLower().Contains(normalizedSearch)
+                || (item.ChildFixedAssetReference != null
+                    && item.ChildFixedAssetReference.ToLower().Contains(normalizedSearch))
                 || (item.ParentLandAssetReference != null
                     && item.ParentLandAssetReference.ToLower().Contains(normalizedSearch))
                 || item.EstateManagedAsset.AssetCode.ToLower().Contains(normalizedSearch)
@@ -223,18 +225,22 @@ public sealed class EstateManagedAssetsController : ControllerBase
                 || (item.EstateManagedAsset.Location != null && item.EstateManagedAsset.Location.ToLower().Contains(normalizedSearch)));
         }
 
-        var candidates = await query
+        var demarcations = await query
             .OrderByDescending(item => item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt)
             .Skip(offset)
             .Take(limit)
+            .ToListAsync();
+        var candidates = demarcations
             .Select(item => new
             {
                 ListingScope = "demarcation",
                 ParentAssetId = item.EstateManagedAssetId,
                 Id = item.Id,
-                AssetCode = item.ParentLandAssetReference ?? item.EstateManagedAsset.AssetCode,
-                Name = item.Description,
-                Description = $"Demarcation {item.DemarcationNumber} of {item.EstateManagedAsset.AssetCode} - {item.EstateManagedAsset.Name}",
+                AssetCode = EstateLandDemarcationReference.DisplayReference(
+                    item.ChildFixedAssetReference, item.EstateManagedAsset.AssetCode, item.DemarcationNumber),
+                Name = EstateLandDemarcationReference.DisplayReference(
+                    item.ChildFixedAssetReference, item.EstateManagedAsset.AssetCode, item.DemarcationNumber),
+                Description = item.Description,
                 Location = item.EstateManagedAsset.Location,
                 Purpose = item.EstateManagedAsset.Purpose,
                 ZoningClassification = item.EstateManagedAsset.ZoningClassification,
@@ -299,7 +305,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
                 ExternalPublishedAt = item.ExternalPublishedAt,
                 Notes = item.FixedAssetPostingStatus
             })
-            .ToListAsync();
+            .ToList();
 
         return Ok(new { success = true, data = candidates });
     }

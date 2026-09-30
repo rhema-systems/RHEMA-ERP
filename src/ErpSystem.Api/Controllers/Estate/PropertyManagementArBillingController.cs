@@ -340,6 +340,8 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             || asset.ExternalListingType?.Contains("Lease", StringComparison.OrdinalIgnoreCase) == true
             || !asset.RentBillingActivatedAt.HasValue)
             throw new InvalidOperationException("Activate monthly rental billing before adjusting its schedule.");
+        if (asset.Status is not EstateManagedAssetStatus.Leased and not EstateManagedAssetStatus.Occupied)
+            throw new InvalidOperationException("Billing remains paused until the property is leased or occupied again.");
         var billingStart = (asset.RightOfEntryDate ?? asset.DateOfTenancy)?.Date;
         if (billingStart.HasValue && request.NextBillingDate.Date < billingStart.Value)
             throw new InvalidOperationException("The next billing date cannot precede the tenancy start date.");

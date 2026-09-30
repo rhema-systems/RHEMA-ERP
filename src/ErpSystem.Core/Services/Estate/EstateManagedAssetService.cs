@@ -356,6 +356,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.ExternalListingStatus = "Withdrawn";
         asset.ExternalListingType = "None";
         asset.ExternalPublishedAt = null;
+        await PausePropertyOperationsAsync(asset);
         asset.UpdatedAt = DateTime.UtcNow;
         asset.UpdatedBy = _currentUserProvider.Username;
         asset.LastModifiedById = _currentUserProvider.UserId;
@@ -547,6 +548,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                         && ((currentReferenceIsAssetId
                                 && item.EstateManagedAssetId == currentAssetId)
                             || item.EstateManagedAsset.AssetCode == normalizedCurrentReference
+                            || item.ChildFixedAssetReference == normalizedCurrentReference
                             || item.EstateManagedAsset.ProjectCode == normalizedCurrentReference
                             || item.EstateManagedAsset.Name == normalizedCurrentReference
                             || (currentReferenceIsDemarcation
@@ -568,6 +570,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 DemarcationIsReadyForProjectManagement = item.IsReadyForProjectManagement,
                 DemarcationIsPublishedToExternalPortal = item.IsPublishedToExternalPortal,
                 DemarcationNumber = item.DemarcationNumber,
+                ChildFixedAssetReference = item.ChildFixedAssetReference,
                 Description = item.Description,
                 AreaSquareFeet = item.AreaSquareFeet,
                 BoundaryVerified = item.BoundaryVerified
@@ -612,9 +615,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                     AssetName = candidate.AssetName,
                     AssetLocation = candidate.AssetLocation,
                     DemarcationId = candidate.DemarcationId,
-                    LandReference = EstateLandDemarcationReference.Build(
-                        candidate.AssetCode,
-                        candidate.DemarcationNumber),
+                    LandReference = EstateLandDemarcationReference.DisplayReference(
+                        candidate.ChildFixedAssetReference, candidate.AssetCode, candidate.DemarcationNumber),
                     DemarcationNumber = candidate.DemarcationNumber,
                     Description = candidate.Description,
                     AreaSquareFeet = candidate.AreaSquareFeet,
@@ -1479,6 +1481,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             asset.ExternalPublishedAt = null;
         }
 
+        await PausePropertyOperationsAsync(asset);
+
         asset.UpdatedAt = DateTime.UtcNow;
         asset.UpdatedBy = _currentUserProvider.Username;
         asset.LastModifiedById = _currentUserProvider.UserId;
@@ -1486,6 +1490,50 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         await repository.UpdateAsync(asset);
         await _unitOfWork.SaveChangesAsync();
         return MapToDto(asset);
+    }
+
+    private async Task PausePropertyOperationsAsync(EstateManagedAsset asset)
+    {
+        if (asset.Status is not (EstateManagedAssetStatus.Reserved
+            or EstateManagedAssetStatus.Blocked
+            or EstateManagedAssetStatus.Retired))
+            return;
+
+        var today = DateTime.UtcNow.Date;
+        var now = DateTime.UtcNow;
+        asset.AutoGenerateRentInvoices = false;
+        asset.NextRentBillingDate = null;
+
+        var groundRentRepository = _unitOfWork.Repository<EstateGroundRentAccount>();
+        var accounts = await groundRentRepository.FindAsync(account =>
+            account.TenantId == asset.TenantId && !account.IsDeleted
+            && account.EstateManagedAssetId == asset.Id && account.Status == "Active");
+        foreach (var account in accounts)
+        {
+            account.Status = "Held";
+            account.UpdatedAt = now;
+            account.UpdatedBy = _currentUserProvider.Username;
+            await groundRentRepository.UpdateAsync(account);
+        }
+
+        var rosterRepository = _unitOfWork.Repository<EstateFacilityDutyRoster>();
+        var rosters = await rosterRepository.FindAsync(item =>
+            item.TenantId == asset.TenantId && !item.IsDeleted
+            && item.CompletionStatus != "Completed"
+            && item.CompletionStatus != "Cancelled"
+            && (item.EndDate == null || item.EndDate >= today)
+            && (item.PropertyUnit == asset.AssetCode
+                || (asset.ProjectUnitCode != null && item.PropertyUnit == asset.ProjectUnitCode)
+                || item.PropertyReference == asset.AssetCode));
+        foreach (var roster in rosters)
+        {
+            roster.EndDate = today.AddDays(-1);
+            roster.CompletionStatus = "Cancelled";
+            roster.UpdatedAt = now;
+            roster.UpdatedBy = _currentUserProvider.Username;
+            roster.LastModifiedById = _currentUserProvider.UserId;
+            await rosterRepository.UpdateAsync(roster);
+        }
     }
 
     public Task<EstateManagedAssetDto> UpdateExternalListingAsync(
@@ -2470,10 +2518,10 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         EstateLandDemarcation demarcation,
         ISet<string> assignedLandReferences)
     {
-        var landReference = EstateLandDemarcationReference.Build(
-            asset.AssetCode,
-            demarcation.DemarcationNumber);
-        if (assignedLandReferences.Contains(landReference))
+        var landReference = EstateLandDemarcationReference.DisplayReference(
+            demarcation.ChildFixedAssetReference, asset.AssetCode, demarcation.DemarcationNumber);
+        if (assignedLandReferences.Contains(landReference)
+            || assignedLandReferences.Contains(EstateLandDemarcationReference.Build(asset.AssetCode, demarcation.DemarcationNumber)))
         {
             return true;
         }
@@ -2494,10 +2542,10 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         ReadyLandCandidate candidate,
         ISet<string> assignedLandReferences)
     {
-        var landReference = EstateLandDemarcationReference.Build(
-            candidate.AssetCode,
-            candidate.DemarcationNumber);
-        if (assignedLandReferences.Contains(landReference))
+        var landReference = EstateLandDemarcationReference.DisplayReference(
+            candidate.ChildFixedAssetReference, candidate.AssetCode, candidate.DemarcationNumber);
+        if (assignedLandReferences.Contains(landReference)
+            || assignedLandReferences.Contains(EstateLandDemarcationReference.Build(candidate.AssetCode, candidate.DemarcationNumber)))
         {
             return true;
         }
@@ -2527,6 +2575,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         public bool DemarcationIsReadyForProjectManagement { get; init; }
         public bool DemarcationIsPublishedToExternalPortal { get; init; }
         public int DemarcationNumber { get; init; }
+        public string? ChildFixedAssetReference { get; init; }
         public string Description { get; init; } = string.Empty;
         public decimal AreaSquareFeet { get; init; }
         public bool BoundaryVerified { get; init; }
@@ -2539,9 +2588,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         Id = demarcation.Id,
         EstateManagedAssetId = demarcation.EstateManagedAssetId,
         ParentDemarcationId = demarcation.ParentDemarcationId,
-        LandReference = EstateLandDemarcationReference.Build(
-            assetCode,
-            demarcation.DemarcationNumber),
+        LandReference = EstateLandDemarcationReference.DisplayReference(
+            demarcation.ChildFixedAssetReference, assetCode, demarcation.DemarcationNumber),
         DemarcationNumber = demarcation.DemarcationNumber,
         Description = demarcation.Description,
         BeaconCount = demarcation.BeaconCount,

@@ -313,11 +313,15 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ? []
             : await _db.EstateManagedAssets
                 .AsNoTracking()
+                .Include(asset => asset.Demarcations.Where(parcel => !parcel.IsDeleted))
                 .Where(asset => asset.TenantId == tenantId
                     && !asset.IsDeleted
                     && (propertyReferences.Contains(asset.AssetCode)
                         || (asset.ProjectUnitCode != null
-                            && propertyReferences.Contains(asset.ProjectUnitCode))))
+                            && propertyReferences.Contains(asset.ProjectUnitCode))
+                        || asset.Demarcations.Any(parcel => !parcel.IsDeleted
+                            && parcel.ChildFixedAssetReference != null
+                            && propertyReferences.Contains(parcel.ChildFixedAssetReference))))
                 .ToListAsync(cancellationToken);
 
         var requests = cases
@@ -332,7 +336,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 var asset = managedAssets.FirstOrDefault(candidate =>
                     string.Equals(candidate.AssetCode, listingReference, StringComparison.OrdinalIgnoreCase)
                     || string.Equals(candidate.AssetCode, propertyUnit, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(candidate.ProjectUnitCode, propertyUnit, StringComparison.OrdinalIgnoreCase));
+                    || string.Equals(candidate.ProjectUnitCode, propertyUnit, StringComparison.OrdinalIgnoreCase)
+                    || candidate.Demarcations.Any(parcel => !parcel.IsDeleted
+                        && (string.Equals(parcel.ChildFixedAssetReference, listingReference, StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(parcel.ChildFixedAssetReference, propertyUnit, StringComparison.OrdinalIgnoreCase))));
                 if (asset?.RightOfEntryDate is { } actualPossessionDate)
                 {
                     fieldValues["actualPossessionDate"] = actualPossessionDate.ToString("yyyy-MM-dd");
@@ -1491,6 +1498,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return BadRequest(new { success = false, message = "Unsupported Estate service request type." });
         }
 
+        EstateManagedAsset? selectedProperty = null;
         if (!string.IsNullOrWhiteSpace(request.PropertyReference))
         {
             var tenantId = _currentUserService.TenantId ?? Guid.Empty;
@@ -1504,7 +1512,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 .Select(customer => customer.Id)
                 .ToListAsync(cancellationToken);
             var propertyReference = request.PropertyReference.Trim();
-            var ownsProperty = await _db.EstateManagedAssets.AsNoTracking().AnyAsync(asset =>
+            selectedProperty = await _db.EstateManagedAssets.AsNoTracking().FirstOrDefaultAsync(asset =>
                 asset.TenantId == tenantId
                 && !asset.IsDeleted
                 && asset.CustomerBusinessPartnerId.HasValue
@@ -1515,7 +1523,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     || asset.Status == EstateManagedAssetStatus.Sold)
                 && (asset.ProjectUnitCode == propertyReference || asset.AssetCode == propertyReference),
                 cancellationToken);
-            if (!ownsProperty)
+            if (selectedProperty is null)
             {
                 return BadRequest(new { success = false, message = "Select a property linked to your account." });
             }
@@ -1529,6 +1537,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ? _currentUserService.Email ?? _currentUserService.UserName
             : request.Contact.Trim();
         var fieldValues = BuildFieldValues(definition, request, reference, contact);
+        if (definition.EntityType == "EstateFacilityMaintenance" && selectedProperty is not null)
+            fieldValues["estateManagedAssetId"] = selectedProperty.Id.ToString();
 
         try
         {
@@ -1716,6 +1726,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         {
             demarcationQuery = demarcationQuery.Where(item =>
                 item.Description.ToLower().Contains(normalizedSearch)
+                || (item.ChildFixedAssetReference != null && item.ChildFixedAssetReference.ToLower().Contains(normalizedSearch))
                 || item.EstateManagedAsset.AssetCode.ToLower().Contains(normalizedSearch)
                 || item.EstateManagedAsset.Name.ToLower().Contains(normalizedSearch)
                 || (item.EstateManagedAsset.Description != null && item.EstateManagedAsset.Description.ToLower().Contains(normalizedSearch))
@@ -1861,6 +1872,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         {
             demarcationQuery = demarcationQuery.Where(item =>
                 item.Description.ToLower().Contains(normalizedSearch)
+                || (item.ChildFixedAssetReference != null && item.ChildFixedAssetReference.ToLower().Contains(normalizedSearch))
                 || item.EstateManagedAsset.AssetCode.ToLower().Contains(normalizedSearch)
                 || item.EstateManagedAsset.Name.ToLower().Contains(normalizedSearch)
                 || (item.EstateManagedAsset.Description != null && item.EstateManagedAsset.Description.ToLower().Contains(normalizedSearch))
@@ -2084,10 +2096,12 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var listingType = demarcationListing?.ExternalListingType ?? asset.ExternalListingType;
         var listingReference = demarcationListing is null
             ? asset.AssetCode
-            : EstateLandDemarcationReference.Build(asset.AssetCode, demarcationListing.DemarcationNumber);
+            : EstateLandDemarcationReference.DisplayReference(
+                demarcationListing.ChildFixedAssetReference, asset.AssetCode, demarcationListing.DemarcationNumber);
         var listingName = demarcationListing is null
             ? asset.Name
-            : $"{asset.Name} - Parcel {demarcationListing.DemarcationNumber:000}";
+            : EstateLandDemarcationReference.DisplayReference(
+                demarcationListing.ChildFixedAssetReference, asset.AssetCode, demarcationListing.DemarcationNumber);
         var listingCurrency = demarcationListing?.ExternalListingCurrency ?? asset.ExternalListingCurrency;
         var listingSalePrice = demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice;
         var listingPrice = demarcationListing is null
@@ -2369,8 +2383,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 });
             }
             var reference = demarcationListing is null ? asset.AssetCode
-                : EstateLandDemarcationReference.Build(asset.AssetCode, demarcationListing.DemarcationNumber);
-            var name = demarcationListing is null ? asset.Name : $"{asset.Name} - Parcel {demarcationListing.DemarcationNumber:000}";
+                : EstateLandDemarcationReference.DisplayReference(
+                    demarcationListing.ChildFixedAssetReference, asset.AssetCode, demarcationListing.DemarcationNumber);
+            var name = demarcationListing is null ? asset.Name : EstateLandDemarcationReference.DisplayReference(
+                demarcationListing.ChildFixedAssetReference, asset.AssetCode, demarcationListing.DemarcationNumber);
             var type = demarcationListing?.ExternalListingType ?? asset.ExternalListingType;
             var currency = demarcationListing?.ExternalListingCurrency ?? asset.ExternalListingCurrency;
             var price = type == "Rent"
@@ -2529,8 +2545,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             }
 
             var reference = demarcationListing is null ? asset.AssetCode
-                : EstateLandDemarcationReference.Build(asset.AssetCode, demarcationListing.DemarcationNumber);
-            var name = demarcationListing is null ? asset.Name : $"{asset.Name} - Parcel {demarcationListing.DemarcationNumber:000}";
+                : EstateLandDemarcationReference.DisplayReference(
+                    demarcationListing.ChildFixedAssetReference, asset.AssetCode, demarcationListing.DemarcationNumber);
+            var name = demarcationListing is null ? asset.Name : EstateLandDemarcationReference.DisplayReference(
+                demarcationListing.ChildFixedAssetReference, asset.AssetCode, demarcationListing.DemarcationNumber);
             var type = demarcationListing?.ExternalListingType ?? asset.ExternalListingType;
             var currency = demarcationListing?.ExternalListingCurrency ?? asset.ExternalListingCurrency;
             var price = type == "Rent"
@@ -3033,15 +3051,13 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             .OrderByDescending(document => document.IsPrimaryListingImage)
             .ThenByDescending(document => document.CreatedAt)
             .FirstOrDefault();
-        var landReference = EstateLandDemarcationReference.Build(
-            asset.AssetCode,
-            demarcation.DemarcationNumber);
-
         return new
         {
             Id = demarcation.Id,
-            AssetCode = landReference,
-            Name = $"{asset.Name} - Parcel {demarcation.DemarcationNumber:000}",
+            AssetCode = EstateLandDemarcationReference.DisplayReference(
+                demarcation.ChildFixedAssetReference, asset.AssetCode, demarcation.DemarcationNumber),
+            Name = EstateLandDemarcationReference.DisplayReference(
+                demarcation.ChildFixedAssetReference, asset.AssetCode, demarcation.DemarcationNumber),
             asset.AssetType,
             asset.Status,
             Description = FirstNonBlank(demarcation.ExternalListingNotes, demarcation.Description, asset.Description),
@@ -3951,8 +3967,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["issueDescription"] = request.Description,
             ["complaintDescription"] = request.Description,
             ["serviceImpact"] = request.ServiceImpact,
-            ["reportedPriority"] = request.Priority,
-            ["customerReportedUrgency"] = request.Priority,
+            ["reportedPriority"] = definition.EntityType == "EstateFacilityMaintenance" ? null : request.Priority,
+            ["customerReportedUrgency"] = definition.EntityType == "EstateFacilityMaintenance" ? null : request.Priority,
             ["requester"] = request.ApplicantName,
             ["requesterType"] = "Tenant / occupant",
             ["complainantName"] = request.ApplicantName,
@@ -3975,7 +3991,14 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
         foreach (var item in request.AdditionalValues ?? new Dictionary<string, string?>())
         {
-            if (!string.IsNullOrWhiteSpace(item.Key))
+            if (!string.IsNullOrWhiteSpace(item.Key)
+                && !(definition.EntityType == "EstateFacilityMaintenance"
+                    && new[] {
+                        "priority", "reportedPriority", "customerReportedUrgency", "maintenanceTypeId", "handoffDescription",
+                        "estimatedHours", "estimatedCost", "serviceProviderBusinessPartnerId", "serviceProviderContractId",
+                        "propertyUnit", "propertyNumber", "estateManagedAssetId", "issueDescription"
+                    }
+                        .Contains(item.Key.Trim(), StringComparer.OrdinalIgnoreCase)))
             {
                 values[item.Key.Trim()] = item.Value;
             }

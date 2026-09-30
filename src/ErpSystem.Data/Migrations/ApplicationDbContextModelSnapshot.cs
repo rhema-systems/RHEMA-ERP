@@ -6660,6 +6660,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ParentDemarcationId");
 
+                    b.HasIndex("TenantId", "ChildFixedAssetReference")
+                        .IsUnique()
+                        .HasFilter("[ChildFixedAssetReference] IS NOT NULL");
+
                     b.HasIndex("TenantId", "EstateManagedAssetId", "DemarcationNumber")
                         .IsUnique();
 
@@ -32676,6 +32680,23 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("WithholdingTaxFunctionalAmount")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<decimal?>("WithholdingTaxStatutoryExchangeRate")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime?>("WithholdingTaxStatutoryExchangeRateDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("WithholdingTaxStatutoryExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("WithholdingTaxStatutoryExchangeRateReference")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("WithholdingTaxStatutoryExchangeRateSource")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ApplicationJournalEntryId");
@@ -32688,6 +32709,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("VendorPaymentId");
 
+                    b.HasIndex("WithholdingTaxStatutoryExchangeRateId");
+
                     b.HasIndex("TenantId", "ApplicationPostingEventId");
 
                     b.HasIndex("TenantId", "OriginalAllocationId")
@@ -32696,6 +32719,9 @@ namespace ErpSystem.Data.Migrations
                         .HasFilter("[IsReversal] = 1 AND [OriginalAllocationId] IS NOT NULL");
 
                     b.HasIndex("TenantId", "PaymentReadinessControlEventId");
+
+                    b.HasIndex("TenantId", "WithholdingTaxStatutoryExchangeRateId")
+                        .HasFilter("[WithholdingTaxStatutoryExchangeRateId] IS NOT NULL");
 
                     b.ToTable("VendorPaymentAllocation", null, t =>
                         {
@@ -195850,6 +195876,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("VendorPaymentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ExchangeRate", null)
+                        .WithMany()
+                        .HasForeignKey("WithholdingTaxStatutoryExchangeRateId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("PaymentReadinessControlEvent");
 

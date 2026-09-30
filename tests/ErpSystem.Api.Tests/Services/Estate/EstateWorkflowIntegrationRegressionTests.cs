@@ -652,7 +652,7 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         updateMethod.Should().Contain(
             "MapDemarcationToDto(demarcation, asset.AssetCode)");
         mapper.Should().Contain(
-            "LandReference = EstateLandDemarcationReference.Build(");
+            "LandReference = EstateLandDemarcationReference.DisplayReference(");
     }
 
     [Fact]

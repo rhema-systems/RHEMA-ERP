@@ -30,8 +30,8 @@ vi.mock('@/services/settings', () => ({
 }));
 const listing = {
   id: 'listing-2',
-  assetCode: 'LAND-002-PORTION-001',
-  name: 'East Legon Parcel',
+  assetCode: 'LAND-002-D001',
+  name: 'LAND-002-D001',
   externalListingType: 'Sale',
   externalListingCurrency: 'GHS',
   externalSalePrice: 1250000,
@@ -72,8 +72,7 @@ const mount = () => {
 describe('Property enquiry dialog', () => {
   it('shows the selected property and supplier without submitting until a message is sent', async () => {
     const { onCreated } = mount();
-    expect(screen.getByText('East Legon Parcel')).toBeVisible();
-    expect(screen.getByText('LAND-002-PORTION-001')).toBeVisible();
+    expect(screen.getAllByText('LAND-002-D001')).toHaveLength(2);
     await screen.findByRole('option', { name: 'Supplier Only Ltd' });
     expect(externalEstateListingsService.createEnquiry).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Send enquiry' })).toBeDisabled();

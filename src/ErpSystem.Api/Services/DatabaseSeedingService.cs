@@ -14,6 +14,7 @@ using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
+using ErpSystem.Core.Services.Estate;
 using ErpSystem.Core.Services.Projects;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
@@ -1650,12 +1651,14 @@ namespace ErpSystem.Web.Services
             var facilitiesMaintenanceSteps = new[]
             {
                 Step("Facilities Intake", WorkflowStepType.Manual, "Facilities Officer",
-                    ["Requester, contact, property/unit, issue type, and priority are confirmed", "Service impact, target date, and access notes are recorded", "Maintenance job card need is assessed"],
+                    ["Requester, contact, property/unit, and issue are confirmed", "Service impact, target date, and access notes are recorded", "Maintenance job card need is assessed"],
                     [],
                     fieldKeys:
                     [
+                        "propertyUnit",
+                        "location",
+                        "contactReference",
                         "issueType",
-                        "priority",
                         "serviceImpact",
                         "targetDate",
                         "preferredVisitDate",
@@ -1663,14 +1666,20 @@ namespace ErpSystem.Web.Services
                         "issueDescription"
                     ]),
                 Step("Maintenance Handoff Review", WorkflowStepType.Manual, "Facilities Supervisor",
-                    ["Maintenance routing decision is recorded", "Safety, access, and SLA context are confirmed", "Requester update has been issued"],
+                    ["Maintenance type, priority, job description, hours, and cost are confirmed", "Safety, access, and SLA context are confirmed", "Requester update has been issued"],
                     [],
                     fieldKeys:
                     [
                         "priority",
+                        "maintenanceTypeId",
+                        "handoffDescription",
+                        "estimatedHours",
+                        "estimatedCost",
                         "serviceImpact",
                         "targetDate",
                         "accessInstructions",
+                        "serviceProviderBusinessPartnerId",
+                        "serviceProviderContractId",
                         "closureNotes"
                     ]),
                 Step("Maintenance Closeout", WorkflowStepType.Approval, "Facilities Manager",
@@ -1680,6 +1689,8 @@ namespace ErpSystem.Web.Services
                     [
                         "maintenanceJobCardReference",
                         "maintenanceWorkOrderReference",
+                        "inspectionOutcome",
+                        "inspectionReference",
                         "requesterFeedbackStatus",
                         "closureNotes"
                     ])
@@ -9000,6 +9011,11 @@ namespace ErpSystem.Web.Services
                         && !item.IsDeleted);
                     if (demarcation is not null)
                     {
+                        if (string.IsNullOrWhiteSpace(demarcation.ChildFixedAssetReference))
+                        {
+                            demarcation.ChildFixedAssetReference = EstateLandDemarcationReference.DisplayReference(
+                                null, asset.AssetCode, demarcationNumber);
+                        }
                         continue;
                     }
 
@@ -9013,6 +9029,9 @@ namespace ErpSystem.Web.Services
                         EstateManagedAssetId = asset.Id,
                         EstateManagedAsset = asset,
                         DemarcationNumber = demarcationNumber,
+                        ParentFixedAssetReference = asset.AssetCode,
+                        ChildFixedAssetReference = EstateLandDemarcationReference.DisplayReference(
+                            null, asset.AssetCode, demarcationNumber),
                         Description = $"{seed.ListingNotes} Demarcation {demarcationNumber} of {seed.DemarcationCount}.",
                         CreatedAt = now,
                         CreatedBy = "System"
