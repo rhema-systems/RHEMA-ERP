@@ -902,6 +902,12 @@ public class VendorPaymentAllocationDto
     public decimal DiscountFunctionalAmount { get; set; }
     public decimal WithholdingTaxAmount { get; set; }
     public decimal WithholdingTaxFunctionalAmount { get; set; }
+    public decimal? WithholdingTaxBaseFunctionalAmount { get; set; }
+    public Guid? WithholdingTaxStatutoryExchangeRateId { get; set; }
+    public decimal? WithholdingTaxStatutoryExchangeRate { get; set; }
+    public DateTime? WithholdingTaxStatutoryExchangeRateDate { get; set; }
+    public string? WithholdingTaxStatutoryExchangeRateSource { get; set; }
+    public string? WithholdingTaxStatutoryExchangeRateReference { get; set; }
     public DateTime AllocationDate { get; set; }
     public string? Notes { get; set; }
     public bool IsReversal { get; set; }

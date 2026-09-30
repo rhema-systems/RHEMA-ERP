@@ -3016,6 +3016,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(e => e.PaymentReadinessControlEventId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.TenantId, e.ApplicationPostingEventId });
+            entity.HasOne<ExchangeRate>()
+                .WithMany()
+                .HasForeignKey(e => e.WithholdingTaxStatutoryExchangeRateId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.TenantId, e.WithholdingTaxStatutoryExchangeRateId })
+                .HasFilter("[WithholdingTaxStatutoryExchangeRateId] IS NOT NULL");
             entity.HasIndex(e => new { e.TenantId, e.PaymentReadinessControlEventId });
             entity.HasIndex(e => new { e.TenantId, e.OriginalAllocationId })
                 .HasDatabaseName("UX_VendorPaymentAllocation_TenantId_OriginalAllocationId_Reversal")

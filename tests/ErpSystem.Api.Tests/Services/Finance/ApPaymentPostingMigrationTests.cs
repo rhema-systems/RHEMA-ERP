@@ -519,8 +519,144 @@ public sealed partial class ApPaymentPostingMigrationTests
 
         var act = () => service.PostAsync(fixture.Payment.Id);
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*statutory conversion evidence*");
-        wht.Verify(service => service.CalculateApWithholdingAsync(It.IsAny<WhtCalculationRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        wht.Verify(service => service.CalculateApWithholdingAsync(It.IsAny<WhtCalculationRequestDto>(), It.IsAny<CancellationToken>()), Times.Once);
         (await db.FinancePostingEvents.CountAsync(row => row.SourceDocumentId == fixture.Payment.Id)).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CrossCurrencyDeductions")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task CrossCurrencyApPayment_WithDifferentStatutoryRate_ShouldPostBalancedGovernedVariance()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId);
+        var withholdingAccount = SeedAccount(db, tenantId, "2310", AccountType.Liability,
+            isControlAccount: true, allowDirectPosting: false);
+        var realizedFxLossAccount = SeedAccount(db, tenantId, "5800", AccountType.Expense);
+        var settings = await db.Set<FinanceSettings>().SingleAsync();
+        settings.RealizedFxLossAccountId = realizedFxLossAccount.Id;
+        var discountAccount = await db.Accounts.SingleAsync(account =>
+            account.Id == settings.DiscountReceivedAccountId!.Value);
+        EnableCurrencyForAccounts(db, tenantId, "USD", fixture.ApAccount, discountAccount, withholdingAccount);
+        var taxId = Guid.NewGuid();
+        var settlementRate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 0.08m, InverseRate = 12.5m,
+            EffectiveDate = new DateTime(2026, 7, 5),
+            RateType = ExchangeRateType.Daily, RateSource = "Commercial regression fixture",
+            IsActive = true, ApprovalStatus = RateApprovalStatus.Approved,
+            CreatedByUserId = Guid.NewGuid(), CreatedDate = DateTime.UtcNow
+        };
+        var statutoryRate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 1m / 13m, InverseRate = 13m,
+            EffectiveDate = new DateTime(2026, 7, 5),
+            RateType = ExchangeRateType.GhanaStatutory, QuoteSide = ExchangeRateQuoteSide.Mid,
+            RateSource = "Bank of Ghana",
+            APIResponseMetadata = "https://www.bog.gov.gh/treasury-and-the-markets/daily-interbank-fx-rates/",
+            IsActive = true, ApprovalStatus = RateApprovalStatus.Approved,
+            CreatedByUserId = Guid.NewGuid(), CreatedDate = DateTime.UtcNow
+        };
+        db.ExchangeRates.AddRange(settlementRate, statutoryRate);
+
+        fixture.Payment.TotalAmount = 937.50m;
+        fixture.Payment.AllocatedAmount = 937.50m;
+        fixture.Payment.CurrencyCode = "GHS";
+        fixture.Payment.ExchangeRate = 1m;
+        fixture.Payment.WithholdingTaxId = taxId;
+        fixture.Payment.WithholdingTaxAccountId = withholdingAccount.Id;
+        fixture.Payment.WithholdingTaxAmount = 39m;
+        fixture.Invoice.CurrencyCode = "USD";
+        fixture.Invoice.ExchangeRate = 10m;
+        fixture.Invoice.SubTotal = 80m;
+        fixture.Invoice.TaxAmount = 0m;
+        fixture.Invoice.TotalAmount = 80m;
+        fixture.Invoice.BaseCurrencyAmount = 800m;
+        fixture.Invoice.WithholdingTaxId = taxId;
+        fixture.Invoice.WithholdingTaxRate = 3.75m;
+        fixture.Invoice.WithholdingContractReference = "CONTRACT-STATUTORY-FX-001";
+        fixture.Invoice.WithholdingSupplyCategory = WhtSupplyCategory.Services;
+        fixture.Allocation.AllocatedAmount = 75m;
+        fixture.Allocation.DiscountAmount = 2m;
+        fixture.Allocation.WithholdingTaxAmount = 3m;
+        fixture.Allocation.PaymentCurrencyCode = "GHS";
+        fixture.Allocation.InvoiceCurrencyCode = "USD";
+        fixture.Allocation.PaymentCurrencyAmount = 937.50m;
+        fixture.Allocation.PaymentExchangeRate = 1m;
+        fixture.Allocation.PaymentFunctionalAmount = 937.50m;
+        fixture.Allocation.InvoiceSettlementExchangeRate = 12.5m;
+        fixture.Allocation.InvoiceSettlementExchangeRateId = settlementRate.Id;
+        fixture.Allocation.DiscountFunctionalAmount = 25m;
+        fixture.Allocation.WithholdingTaxFunctionalAmount = 39m;
+        fixture.Allocation.WithholdingTaxBaseFunctionalAmount = 1_040m;
+        fixture.Allocation.WithholdingTaxStatutoryExchangeRateId = statutoryRate.Id;
+        fixture.Allocation.WithholdingTaxStatutoryExchangeRate = 13m;
+        fixture.Allocation.WithholdingTaxStatutoryExchangeRateDate = fixture.Payment.PaymentDate;
+        fixture.Allocation.WithholdingTaxStatutoryExchangeRateSource = "Bank of Ghana";
+        fixture.Allocation.WithholdingTaxStatutoryExchangeRateReference = statutoryRate.APIResponseMetadata;
+        fixture.Allocation.SettlementFunctionalAmount = 1_000m;
+        fixture.Allocation.IsCrossCurrency = true;
+        await db.SaveChangesAsync();
+
+        var fx = new Mock<IFxAccountingService>();
+        fx.Setup(service => service.PostRealizedFxForApPaymentAsync(
+                fixture.Payment.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FxRealizedSettlement>());
+        var wht = new Mock<IWithholdingTaxCertificateService>();
+        wht.Setup(service => service.CalculateApWithholdingAsync(
+                It.IsAny<WhtCalculationRequestDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WhtCalculationResultDto
+            {
+                TaxId = taxId,
+                TaxCode = "WHT-SERVICES",
+                TaxName = "Services withholding tax",
+                TaxRate = 3.75m,
+                TaxableBase = 1_040m,
+                WithholdingAmount = 39m,
+                TaxPayableAccountId = withholdingAccount.Id,
+                ContractReference = "CONTRACT-STATUTORY-FX-001",
+                SupplyCategory = WhtSupplyCategory.Services,
+                CalculationNote = "BoG statutory regression fixture",
+                StatutoryFxEvidence = new List<WhtStatutoryFxEvidenceDto>
+                {
+                    new()
+                    {
+                        VendorInvoiceId = fixture.Invoice.Id,
+                        CurrencyCode = "USD",
+                        GrossSettlementAmount = 80m,
+                        NetTaxableBaseAmount = 80m,
+                        GhsTaxableBaseAmount = 1_040m,
+                        ExchangeRateId = statutoryRate.Id,
+                        ExchangeRateToGhs = 13m,
+                        RecognitionDate = fixture.Payment.PaymentDate,
+                        RateSource = "Bank of Ghana",
+                        SourceReference = statutoryRate.APIResponseMetadata
+                    }
+                }
+            });
+        var (service, _) = CreateService(db, tenantId, fx.Object, wht.Object);
+
+        var posted = await service.PostAsync(fixture.Payment.Id);
+
+        var journal = await db.JournalEntries.Include(entry => entry.Transactions)
+            .SingleAsync(entry => entry.Id == posted.JournalEntryId);
+        journal.Transactions.Sum(line => line.DebitAmount).Should().Be(1_001.50m);
+        journal.Transactions.Sum(line => line.CreditAmount).Should().Be(1_001.50m);
+        journal.Transactions.Single(line => line.AccountId == withholdingAccount.Id)
+            .CreditAmount.Should().Be(39m);
+        journal.Transactions.Single(line => line.AccountId == realizedFxLossAccount.Id)
+            .Should().Match<AccountTransaction>(line =>
+                line.DebitAmount == 1.50m &&
+                line.TransactionTag == "AP-WHT-Statutory-FX-Loss");
+        var stored = await db.Set<VendorPaymentAllocation>().SingleAsync(row => row.Id == fixture.Allocation.Id);
+        stored.WithholdingTaxStatutoryExchangeRateId.Should().Be(statutoryRate.Id);
+        stored.WithholdingTaxStatutoryExchangeRate.Should().Be(13m);
+        stored.WithholdingTaxFunctionalAmount.Should().Be(39m);
     }
 
     [Fact]

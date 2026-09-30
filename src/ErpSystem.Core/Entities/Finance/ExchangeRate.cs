@@ -412,7 +412,14 @@ namespace ErpSystem.Core.Entities.Finance
         /// <summary>
         /// Real-time spot rate (rarely stored, typically for reference).
         /// </summary>
-        Spot = 8
+        Spot = 8,
+
+        /// <summary>
+        /// Bank of Ghana inter-bank/reference rate approved specifically for Ghana statutory
+        /// tax conversion under section 21 of the Revenue Administration Act, 2016 (Act 915).
+        /// This rate is not a substitute for commercial invoice or settlement FX.
+        /// </summary>
+        GhanaStatutory = 9
     }
 
     /// <summary>

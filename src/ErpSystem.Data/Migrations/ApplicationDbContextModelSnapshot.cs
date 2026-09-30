@@ -32205,6 +32205,23 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal?>("WithholdingTaxBaseFunctionalAmount")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<Guid?>("WithholdingTaxStatutoryExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("WithholdingTaxStatutoryExchangeRate")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<DateTime?>("WithholdingTaxStatutoryExchangeRateDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("WithholdingTaxStatutoryExchangeRateReference")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("WithholdingTaxStatutoryExchangeRateSource")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<decimal>("WithholdingTaxFunctionalAmount")
                         .HasColumnType("decimal(18,2)");
 
@@ -32221,6 +32238,9 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("VendorPaymentId");
 
                     b.HasIndex("TenantId", "ApplicationPostingEventId");
+
+                    b.HasIndex("TenantId", "WithholdingTaxStatutoryExchangeRateId")
+                        .HasFilter("[WithholdingTaxStatutoryExchangeRateId] IS NOT NULL");
 
                     b.HasIndex("TenantId", "OriginalAllocationId")
                         .IsUnique()
@@ -195190,6 +195210,11 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null)
                         .WithMany()
                         .HasForeignKey("ApplicationPostingEventId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ExchangeRate", null)
+                        .WithMany()
+                        .HasForeignKey("WithholdingTaxStatutoryExchangeRateId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementControlEvent", "PaymentReadinessControlEvent")
