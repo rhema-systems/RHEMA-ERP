@@ -1393,6 +1393,7 @@ public sealed partial class ArReceiptPostingMigrationTests
             PartnerName = "Test Customer",
             PartnerType = "Customer",
             RegistrationStatus = "Approved",
+            ApprovalStatus = "Approved",
             IsActive = true,
             IsBlacklisted = false,
             DefaultArAccountId = arAccountId,
