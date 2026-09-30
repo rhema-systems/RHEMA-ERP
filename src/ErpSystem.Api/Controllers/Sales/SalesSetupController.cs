@@ -21,6 +21,10 @@ public class SalesSetupController : ControllerBase
     public async Task<ActionResult<IReadOnlyCollection<SalesSaleableSourceDto>>> GetSaleableSources([FromQuery] bool includeInactive = false)
         => Ok(await _salesSetupService.GetSaleableSourcesAsync(includeInactive));
 
+    [HttpGet("saleable-source-adapters")]
+    public async Task<ActionResult<IReadOnlyCollection<SalesSaleableSourceAdapterDefinitionDto>>> GetSaleableSourceAdapters()
+        => Ok(await _salesSetupService.GetSaleableSourceAdapterDefinitionsAsync());
+
     [HttpGet("saleable-sources/{id:guid}/items")]
     public async Task<ActionResult<IReadOnlyCollection<SalesSaleableItemDto>>> SearchSaleableSourceItems(
         Guid id,

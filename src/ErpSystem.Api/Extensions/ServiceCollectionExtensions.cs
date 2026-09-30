@@ -1458,6 +1458,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesSaleableSourceAdapter, ErpSystem.Core.Services.Sales.InventorySaleableSourceAdapter>();
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesSaleableSourceAdapter, ErpSystem.Core.Services.Sales.FixedAssetSaleableSourceAdapter>();
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesSaleableSourceAdapter, ErpSystem.Core.Services.Sales.PropertyRegisterSaleableSourceAdapter>();
+        services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesSaleableSourceAdapter, ErpSystem.Core.Services.Sales.LandManagementSaleableSourceAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.IQuoteService, ErpSystem.Core.Services.Sales.QuoteService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ICommissionService, ErpSystem.Core.Services.Sales.CommissionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.IReturnOrderService, ErpSystem.Core.Services.Sales.ReturnOrderService>();
