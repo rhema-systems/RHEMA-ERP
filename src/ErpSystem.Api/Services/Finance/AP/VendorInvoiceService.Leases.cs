@@ -3,7 +3,9 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Finance.Integration;
+using ErpSystem.Core.Interfaces.Finance;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Finance.AP;
@@ -12,6 +14,8 @@ public partial class VendorInvoiceService
 {
     private static readonly FinancePostingProducerContext LeaseApProducer =
         new(FinanceDimensionRouteId.FinanceApVendorInvoice);
+    private static readonly FinancePostingProducerContext LeaseRecognitionAuthorityProducer =
+        new(FinanceDimensionRouteId.FinanceLeaseRecognition);
 
     public Task<VendorInvoiceDto> CreateLeaseInstallmentDraftAsync(
         Guid leaseId, Guid scheduleLineId, CancellationToken cancellationToken = default)
@@ -330,7 +334,8 @@ public partial class VendorInvoiceService
                 await _unitOfWork.AcquireTransactionLockAsync($"lease-ap:{TenantId:N}:{invoice.LeaseScheduleLineId:N}", ct);
                 var current = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(item =>
                     item.Id == id && item.TenantId == TenantId && !item.IsDeleted).SingleAsync(ct);
-                if (current.JournalEntryId.HasValue || current.Status != VendorInvoiceStatus.Draft)
+                if (current.JournalEntryId.HasValue || current.SourceBookAuthorityId.HasValue ||
+                    current.Status != VendorInvoiceStatus.Draft)
                     throw new InvalidOperationException("Only an unposted lease invoice draft can be deleted.");
                 await _unitOfWork.Repository<VendorInvoice>().DeleteAsync(current);
                 await _unitOfWork.SaveChangesAsync(ct);
@@ -363,6 +368,157 @@ public partial class VendorInvoiceService
         line.LeaseContract.UpdatedAt = DateTime.UtcNow;
         line.LeaseContract.UpdatedBy = UserName;
         await _unitOfWork.SaveChangesAsync(ct);
+    }
+
+    private async Task FreezeLeaseInvoiceBookAuthorityAsync(
+        VendorInvoice invoice,
+        Guid workflowInstanceId,
+        CancellationToken ct)
+    {
+        if (!invoice.LeaseScheduleLineId.HasValue) return;
+        if (_sourceBookAuthorities == null)
+            throw new InvalidOperationException(
+                "Lease AP source-book authority is not configured.");
+        if (workflowInstanceId == Guid.Empty)
+            throw new InvalidOperationException(
+                "Lease AP source-book authority requires the exact approval workflow instance.");
+
+        var source = await _unitOfWork.Repository<LeaseScheduleLine>().GetQueryable(item =>
+                item.Id == invoice.LeaseScheduleLineId && item.TenantId == TenantId && !item.IsDeleted)
+            .Include(item => item.LeaseContract)
+            .SingleOrDefaultAsync(ct)
+            ?? throw new InvalidOperationException("The lease schedule source is unavailable in this tenant.");
+        var lease = source.LeaseContract;
+        await ValidateLeaseAuthorityAsync(lease, source.PeriodDate, ct);
+        var recognitionAuthority = await _sourceBookAuthorities.RetainExistingPostedOriginalAsync(
+            new FinanceSourceBookAuthorityFreezeRequest
+            {
+                OriginModuleCode = FinanceModuleLockCatalog.Finance,
+                SourceDocumentType = LeaseRecognitionAuthorityProducer.Definition.DocumentType,
+                SourceDocumentId = lease.Id,
+                PostingAction = "Post",
+                EffectiveDate = lease.StartDate,
+                TransactionCurrencyCode = lease.FunctionalCurrencyCode!,
+                FreezeStage = FinanceSourceBookAuthorityFreezeStages.LegacyPosted
+            },
+            lease.RecognitionJournalEntryId!.Value,
+            lease.RecognitionPostingEventId!.Value,
+            ct);
+        var invoiceAuthority = await _sourceBookAuthorities.FreezeInheritedAsync(
+            LeaseInvoiceAuthorityRequest(
+                invoice,
+                workflowInstanceId,
+                FinanceSourceBookAuthorityFreezeStages.Submitted),
+            [new FinanceSourceBookAuthorityOriginRequest
+            {
+                OriginAuthorityId = recognitionAuthority.AuthorityId,
+                Role = "LEASE_RECOGNITION"
+            }],
+            ct);
+        RequireLeaseAuthorityCoordinate(invoice, invoiceAuthority);
+        if (invoice.SourceBookAuthorityId.HasValue &&
+            invoice.SourceBookAuthorityId.Value != invoiceAuthority.AuthorityId)
+            throw new InvalidOperationException(
+                "Lease AP invoice is already linked to another source-book authority.");
+        invoice.SourceBookAuthorityId = invoiceAuthority.AuthorityId;
+    }
+
+    private async Task<FinanceSourceBookAuthorityResult> RequireLeaseInvoiceBookAuthorityForPostingAsync(
+        VendorInvoice invoice,
+        CancellationToken ct)
+    {
+        if (!invoice.LeaseScheduleLineId.HasValue)
+            throw new InvalidOperationException("The invoice is not a governed lease instalment.");
+        if (!invoice.SourceBookAuthorityId.HasValue || _sourceBookAuthorities == null)
+            throw new InvalidOperationException(
+                "LEASE_AP_SOURCE_BOOK_AUTHORITY_REQUIRED: submit the lease invoice through the governed approval workflow before posting.");
+        var retained = await _unitOfWork.Repository<FinanceSourceBookAuthority>().GetQueryable(item =>
+                item.TenantId == TenantId && item.Id == invoice.SourceBookAuthorityId && !item.IsDeleted)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(ct)
+            ?? throw new InvalidOperationException(
+                "LEASE_AP_SOURCE_BOOK_AUTHORITY_REQUIRED: the linked source-book authority is unavailable in this tenant.");
+        if (!retained.SourceWorkflowInstanceId.HasValue ||
+            retained.OriginModuleCode != FinanceModuleLockCatalog.Finance ||
+            retained.SourceDocumentType != LeaseApProducer.Definition.DocumentType.ToUpperInvariant() ||
+            retained.SourceDocumentId != invoice.Id || retained.PostingAction != "POST")
+            throw new InvalidOperationException(
+                "The lease AP source-book authority does not own this exact invoice and workflow.");
+        var authority = await _sourceBookAuthorities.RequireForPostingAsync(
+            LeaseInvoiceAuthorityRequest(
+                invoice,
+                retained.SourceWorkflowInstanceId.Value,
+                FinanceSourceBookAuthorityFreezeStages.PrePost),
+            ct);
+        if (authority.AuthorityId != invoice.SourceBookAuthorityId.Value)
+            throw new InvalidOperationException(
+                "The lease AP invoice is linked to a stale source-book authority version.");
+        RequireLeaseAuthorityCoordinate(invoice, authority);
+        return authority;
+    }
+
+    private async Task BindLeaseInvoiceBookAuthorityAsync(
+        VendorInvoice invoice,
+        FinancePostingResultDto posting,
+        CancellationToken ct)
+    {
+        if (!invoice.LeaseScheduleLineId.HasValue) return;
+        var authority = await RequireLeaseInvoiceBookAuthorityForPostingAsync(invoice, ct);
+        var bound = await _sourceBookAuthorities!.BindOriginalPostingAsync(
+            authority.AuthorityId,
+            posting.PostingEventId,
+            posting.JournalEntryId,
+            ct);
+        if (bound.OriginalFinancePostingEventId != posting.PostingEventId ||
+            bound.OriginalJournalEntryId != posting.JournalEntryId)
+            throw new InvalidOperationException(
+                "Lease AP posting evidence was not bound to the exact source-book authority.");
+    }
+
+    private async Task<FinanceSourceBookAuthorityResult?> RequireLeaseInvoiceBoundAuthorityAsync(
+        VendorInvoice invoice,
+        CancellationToken ct)
+    {
+        if (!invoice.LeaseScheduleLineId.HasValue || !invoice.JournalEntryId.HasValue) return null;
+        if (!invoice.SourceBookAuthorityId.HasValue || _sourceBookAuthorities == null)
+            throw new InvalidOperationException(
+                "LEASE_AP_SOURCE_BOOK_AUTHORITY_REQUIRED: posted lease invoice authority is unavailable.");
+        var authority = await _sourceBookAuthorities.RequireBoundOriginalAsync(
+            invoice.SourceBookAuthorityId.Value,
+            ct);
+        RequireLeaseAuthorityCoordinate(invoice, authority);
+        if (authority.OriginalJournalEntryId != invoice.JournalEntryId)
+            throw new InvalidOperationException(
+                "The posted lease invoice journal differs from its bound source-book authority.");
+        return authority;
+    }
+
+    private static FinanceSourceBookAuthorityFreezeRequest LeaseInvoiceAuthorityRequest(
+        VendorInvoice invoice,
+        Guid workflowInstanceId,
+        string stage) => new()
+    {
+        OriginModuleCode = FinanceModuleLockCatalog.Finance,
+        SourceDocumentType = LeaseApProducer.Definition.DocumentType,
+        SourceDocumentId = invoice.Id,
+        PostingAction = "Post",
+        EffectiveDate = invoice.InvoiceDate,
+        TransactionCurrencyCode = invoice.CurrencyCode,
+        FreezeStage = stage,
+        SourceWorkflowInstanceId = workflowInstanceId
+    };
+
+    private static void RequireLeaseAuthorityCoordinate(
+        VendorInvoice invoice,
+        FinanceSourceBookAuthorityResult authority)
+    {
+        if (authority.AccountingBookId != invoice.LeaseAccountingBookId ||
+            authority.AccountingBookCode != invoice.LeaseAccountingBookCode ||
+            authority.FunctionalCurrencyCode != invoice.LeaseFunctionalCurrencyCode ||
+            authority.EffectiveDate.Date != invoice.InvoiceDate.Date ||
+            authority.TransactionCurrencyCode != invoice.CurrencyCode)
+            throw new InvalidOperationException(
+                "The lease AP source-book authority differs from the frozen lease invoice coordinate.");
     }
 
     private async Task ValidateLeaseAuthorityAsync(

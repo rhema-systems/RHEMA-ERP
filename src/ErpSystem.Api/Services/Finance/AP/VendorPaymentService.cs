@@ -62,6 +62,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         private ExchangeRateQuoteSide? _settlementQuoteSide;
         private readonly IFinanceSourceDimensionService? _sourceDimensions;
         private readonly IFinancePaymentDimensionAdapter? _paymentDimensions;
+        private readonly IFinanceSourceBookAuthorityService? _sourceBookAuthorities;
 
         private static readonly JsonSerializerOptions PaymentControlJsonOptions = new()
         {
@@ -94,7 +95,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             IControlledFileUploadService? controlledFiles = null,
             ICentralDocumentRepositoryFileService? centralDocuments = null,
             IFinanceSourceDimensionService? sourceDimensions = null,
-            IFinancePaymentDimensionAdapter? paymentDimensions = null)
+            IFinancePaymentDimensionAdapter? paymentDimensions = null,
+            IFinanceSourceBookAuthorityService? sourceBookAuthorities = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -117,6 +119,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             _centralDocuments = centralDocuments;
             _sourceDimensions = sourceDimensions;
             _paymentDimensions = paymentDimensions;
+            _sourceBookAuthorities = sourceBookAuthorities;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -5596,7 +5599,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                 throw new InvalidOperationException("At least one posted invoice is required to derive payment book authority.");
             var invoices = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(item =>
                     item.TenantId == TenantId && !item.IsDeleted && distinctIds.Contains(item.Id))
-                .Select(item => new { item.Id, item.JournalEntryId, item.InvoiceNumber })
+                .Select(item => new
+                {
+                    item.Id,
+                    item.JournalEntryId,
+                    item.InvoiceNumber,
+                    item.LeaseScheduleLineId,
+                    item.SourceBookAuthorityId
+                })
                 .ToListAsync(cancellationToken);
             if (invoices.Count != distinctIds.Length)
             {
@@ -5630,6 +5640,29 @@ namespace ErpSystem.Api.Services.Finance.AP
                     journal.BookClassification != postingEvent.BookClassification)
                     throw new InvalidOperationException(
                         $"Invoice '{invoice.InvoiceNumber}' posting authority is reversed, replicated, or inconsistent.");
+                if (invoice.SourceBookAuthorityId.HasValue)
+                {
+                    if (_sourceBookAuthorities == null)
+                        throw new InvalidOperationException(
+                            "AP payment source-book authority validation is not configured.");
+                    var bound = await _sourceBookAuthorities.RequireBoundOriginalAsync(
+                        invoice.SourceBookAuthorityId.Value,
+                        cancellationToken);
+                    if (bound.OriginModuleCode != "FIN" || bound.SourceDocumentType != "VENDORINVOICE" ||
+                        bound.SourceDocumentId != invoice.Id || bound.PostingAction != "POST" ||
+                        bound.OriginalFinancePostingEventId != postingEvent.Id ||
+                        bound.OriginalJournalEntryId != journal.Id)
+                        throw new InvalidOperationException(
+                            $"Invoice '{invoice.InvoiceNumber}' bound source-book authority does not match its original posting evidence.");
+                    authorities.Add(new PaymentBookAuthority(
+                        bound.AccountingBookId,
+                        bound.AccountingBookCode,
+                        bound.FunctionalCurrencyCode));
+                    continue;
+                }
+                if (invoice.LeaseScheduleLineId.HasValue)
+                    throw new InvalidOperationException(
+                        $"LEASE_AP_SOURCE_BOOK_AUTHORITY_REQUIRED: posted lease invoice '{invoice.InvoiceNumber}' has no bound source-book authority.");
                 authorities.Add(new PaymentBookAuthority(
                     postingEvent.AccountingBookId,
                     postingEvent.BookClassification,

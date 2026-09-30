@@ -997,7 +997,24 @@ public sealed partial class ApPaymentPostingMigrationTests
             item.SourceDocumentType == "VendorInvoice" && item.SourceDocumentId == fixture.Invoice.Id);
         invoiceEvent.BookClassification = book.Code;
         await db.SaveChangesAsync();
-        var (service, _) = CreateService(db, tenantId);
+        var authorityCurrentUser = CreateCurrentUser(tenantId);
+        var sourceBookAuthorities = new FinanceSourceBookAuthorityService(db, authorityCurrentUser.Object);
+        var invoiceAuthority = await sourceBookAuthorities.RetainExistingPostedOriginalAsync(
+            new FinanceSourceBookAuthorityFreezeRequest
+            {
+                OriginModuleCode = "FIN",
+                SourceDocumentType = "VendorInvoice",
+                SourceDocumentId = fixture.Invoice.Id,
+                PostingAction = "Post",
+                EffectiveDate = fixture.Invoice.InvoiceDate,
+                TransactionCurrencyCode = "GHS",
+                FreezeStage = FinanceSourceBookAuthorityFreezeStages.LegacyPosted
+            },
+            invoiceJournal.Id,
+            invoiceEvent.Id);
+        fixture.Invoice.SourceBookAuthorityId = invoiceAuthority.AuthorityId;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId, sourceBookAuthorities: sourceBookAuthorities);
 
         var posted = await service.PostAsync(fixture.Payment.Id);
         var reversed = await service.ReversePaymentAsync(fixture.Payment.Id, new ReverseVendorPaymentDto
@@ -1015,6 +1032,37 @@ public sealed partial class ApPaymentPostingMigrationTests
             .BookClassification.Should().Be("LEASE_PRIMARY");
         (await db.VendorInvoices.SingleAsync(item => item.Id == fixture.Invoice.Id)).Status
             .Should().Be(VendorInvoiceStatus.Approved);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task LeaseInvoiceSettlementWithoutBoundAuthority_ShouldFailBeforePaymentJournal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId, accountingBookCode: "LEASE_PRIMARY");
+        var book = await db.AccountingBooks.SingleAsync(item => item.TenantId == tenantId);
+        fixture.Invoice.LeaseScheduleLineId = Guid.NewGuid();
+        fixture.Invoice.LeaseAccountingBookId = book.Id;
+        fixture.Invoice.LeaseAccountingBookCode = book.Code;
+        fixture.Invoice.LeaseFunctionalCurrencyCode = "GHS";
+        var invoiceJournal = await db.JournalEntries.SingleAsync(item => item.Id == fixture.Invoice.JournalEntryId);
+        invoiceJournal.BookClassification = book.Code;
+        var invoiceEvent = await db.FinancePostingEvents.SingleAsync(item =>
+            item.SourceDocumentType == "VendorInvoice" && item.SourceDocumentId == fixture.Invoice.Id);
+        invoiceEvent.BookClassification = book.Code;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId,
+            sourceBookAuthorities: new FinanceSourceBookAuthorityService(db, CreateCurrentUser(tenantId).Object));
+
+        var post = () => service.PostAsync(fixture.Payment.Id);
+
+        await post.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("LEASE_AP_SOURCE_BOOK_AUTHORITY_REQUIRED:*");
+        (await db.FinancePostingEvents.CountAsync(item =>
+            item.SourceDocumentType == "VendorPayment" && item.SourceDocumentId == fixture.Payment.Id))
+            .Should().Be(0);
     }
 
     [Fact]
@@ -1315,7 +1363,8 @@ public sealed partial class ApPaymentPostingMigrationTests
         bool useRealPaymentSod = false,
         ICentralDocumentRepositoryFileService? paymentEvidenceFiles = null,
         IControlledFileUploadService? paymentEvidenceUploader = null,
-        IFinanceAccessScopeService? paymentEvidenceAccess = null)
+        IFinanceAccessScopeService? paymentEvidenceAccess = null,
+        IFinanceSourceBookAuthorityService? sourceBookAuthorities = null)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var auditService = new FinanceAuditService(
@@ -1392,7 +1441,8 @@ public sealed partial class ApPaymentPostingMigrationTests
                 : invoicePaymentSod.Object,
             exchangeRateService: exchangeRateService,
             controlledFiles: paymentEvidenceUploader,
-            centralDocuments: paymentEvidenceFiles);
+            centralDocuments: paymentEvidenceFiles,
+            sourceBookAuthorities: sourceBookAuthorities);
 
         return (service, subledgerPostingMock);
     }

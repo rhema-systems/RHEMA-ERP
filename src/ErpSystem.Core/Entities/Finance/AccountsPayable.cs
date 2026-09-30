@@ -125,6 +125,9 @@ public class VendorInvoice : TenantEntity
     public Guid? LeaseAccountingBookId { get; set; }
     [MaxLength(20)] public string? LeaseAccountingBookCode { get; set; }
     [MaxLength(3)] public string? LeaseFunctionalCurrencyCode { get; set; }
+    /// <summary>Server-owned immutable book authority for governed posting and settlement.</summary>
+    public Guid? SourceBookAuthorityId { get; set; }
+    public FinanceSourceBookAuthority? SourceBookAuthority { get; set; }
     public Guid? EstateAcquisitionId { get; set; }
     public EstatePayableKind? EstatePayableKind { get; set; }
     /// <summary>Reviewed Procurement distribution overrides; applied by the shared posting builder.</summary>

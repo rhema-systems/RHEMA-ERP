@@ -2308,6 +2308,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(invoice => new { invoice.TenantId, invoice.ReplacesLeaseVendorInvoiceId })
                 .HasPrincipalKey(invoice => new { invoice.TenantId, invoice.Id })
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(invoice => new { invoice.TenantId, invoice.SourceBookAuthorityId });
+            entity.HasOne(invoice => invoice.SourceBookAuthority).WithMany()
+                .HasForeignKey(invoice => new { invoice.TenantId, invoice.SourceBookAuthorityId })
+                .HasPrincipalKey(authority => new { authority.TenantId, authority.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(invoice => new { invoice.TenantId, invoice.EstateAcquisitionId, invoice.EstatePayableKind })
                 .IsUnique().HasFilter("[EstateAcquisitionId] IS NOT NULL");
             entity.HasOne<LandAcquisition>().WithMany()

@@ -51,6 +51,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly IProcurementAcceptedSupplyService? _acceptedSupply;
         private readonly IFinanceBudgetCommitmentService? _budgetCommitments;
         private readonly IFinanceSourceDimensionService? _sourceDimensions;
+        private readonly IFinanceSourceBookAuthorityService? _sourceBookAuthorities;
         private readonly ErpSystem.Core.Interfaces.Inventory.ILandedCostService? _landedCosts;
         private readonly IProcurementAccessControlService? _receiptAccess;
 
@@ -72,7 +73,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             IFinanceSourceDimensionService? sourceDimensions = null,
             ErpSystem.Core.Interfaces.Inventory.ILandedCostService? landedCosts = null,
             IWorkflowIntegrationService? workflowIntegration = null,
-            IProcurementAccessControlService? receiptAccess = null)
+            IProcurementAccessControlService? receiptAccess = null,
+            IFinanceSourceBookAuthorityService? sourceBookAuthorities = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -92,6 +94,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             _acceptedSupply = acceptedSupply;
             _budgetCommitments = budgetCommitments;
             _sourceDimensions = sourceDimensions;
+            _sourceBookAuthorities = sourceBookAuthorities;
             _landedCosts = landedCosts;
             _receiptAccess = receiptAccess;
         }
@@ -1005,7 +1008,10 @@ namespace ErpSystem.Api.Services.Finance.AP
             var invalidDirectCompletion = !submission.ApprovalRequired &&
                 (submission.Outcome != WorkflowOutcome.Approved || workflowResult.WorkflowInstanceId.HasValue ||
                  invoice.ApprovedById.HasValue || invoice.ApprovedDate.HasValue);
-            if (!workflowResult.Success || invalidDirectCompletion)
+            var invalidLeaseWorkflow = invoice.LeaseScheduleLineId.HasValue &&
+                (!submission.ApprovalRequired || submission.Outcome != WorkflowOutcome.Pending ||
+                 !workflowResult.WorkflowInstanceId.HasValue);
+            if (!workflowResult.Success || invalidDirectCompletion || invalidLeaseWorkflow)
             {
                 await ReleaseVendorInvoiceBudgetAsync(
                     invoice.Id,
@@ -1029,10 +1035,17 @@ namespace ErpSystem.Api.Services.Finance.AP
                 invoice.UpdatedBy = UserName;
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-                throw new InvalidOperationException(invalidDirectCompletion
+                throw new InvalidOperationException(invalidLeaseWorkflow
+                    ? "A governed lease supplier invoice requires an active maker/checker approval workflow."
+                    : invalidDirectCompletion
                     ? "The invoice cannot complete directly with an approval instance or recorded human approval."
                     : workflowResult.Message ?? "Unable to start vendor invoice approval workflow.");
             }
+            if (invoice.LeaseScheduleLineId.HasValue)
+                await FreezeLeaseInvoiceBookAuthorityAsync(
+                    invoice,
+                    workflowResult.WorkflowInstanceId!.Value,
+                    cancellationToken);
 
             invoice.ApprovalRequired = submission.ApprovalRequired;
             if (!submission.ApprovalRequired)
@@ -1313,6 +1326,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                         requireCurrentBudgetEvidence: invoice.LineItems.Any(line => line.BudgetEntryId.HasValue),
                         cancellationToken);
                 }
+                if (invoice.LeaseScheduleLineId.HasValue)
+                    await RequireLeaseInvoiceBookAuthorityForPostingAsync(invoice, cancellationToken);
                 var wasAlreadyLinked = invoice.JournalEntryId.HasValue;
                 // Procured assets are capitalized from the accepted receipt carrying value by
                 // FIN-INT-007. Their later supplier invoice clears GRV only, so treating those lines
@@ -1338,6 +1353,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var postingResult = producer is null
                     ? await _financePostingEngine.PostAsync(postingRequest, cancellationToken)
                     : await _financePostingEngine.PostAsync(postingRequest, producer, cancellationToken);
+                await BindLeaseInvoiceBookAuthorityAsync(invoice, postingResult, cancellationToken);
                 if (!postingResult.WasDuplicate && receiptCostPlans.Count > 0)
                     await PersistReceiptCostsAsync(invoice, receiptCostPlans, postingResult.PostingEventId,
                         postingResult.JournalEntryId, cancellationToken);
@@ -1738,6 +1754,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 FinancePostingResultDto? reversal = null;
                 if (invoice.JournalEntryId.HasValue)
                 {
+                    var boundLeaseAuthority = await RequireLeaseInvoiceBoundAuthorityAsync(invoice, cancellationToken);
                     // AP-created fixed assets share the invoice journal. Validate the asset
                     // lifecycle before reversing that journal; otherwise a successful AP void
                     // could leave depreciation/valuation based on cost that no longer exists.
@@ -1747,6 +1764,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                         await _fixedAssetService.ValidateApInvoiceCapitalizationReversalAsync(invoice.Id, cancellationToken);
 
                     var originalEvent = await GetPostedInvoiceEventAsync(invoice, cancellationToken);
+                    if (boundLeaseAuthority != null &&
+                        boundLeaseAuthority.OriginalFinancePostingEventId != originalEvent.Id)
+                        throw new InvalidOperationException(
+                            "The posted lease invoice event differs from its bound source-book authority.");
                     var originalJournal = await _unitOfWork.Repository<JournalEntry>()
                         .GetQueryable(j =>
                             j.TenantId == TenantId &&

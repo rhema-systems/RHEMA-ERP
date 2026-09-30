@@ -2,6 +2,7 @@ using ErpSystem.Api.Authorization;
 using ErpSystem.Api.Controllers.Finance;
 using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Procurement;
@@ -64,6 +65,13 @@ public sealed class LeaseInstallmentApOpenItemTests
         invoice.GetForeignKeys().Should().Contain(foreignKey =>
             foreignKey.Properties.Select(property => property.Name)
                 .SequenceEqual(leaseSourceKey));
+        invoice.GetIndexes().Should().Contain(index => index.Properties.Select(property => property.Name)
+            .SequenceEqual(new[] { nameof(VendorInvoice.TenantId), nameof(VendorInvoice.SourceBookAuthorityId) }));
+        invoice.GetForeignKeys().Should().Contain(foreignKey =>
+            foreignKey.Properties.Select(property => property.Name)
+                .SequenceEqual(new[] { nameof(VendorInvoice.TenantId), nameof(VendorInvoice.SourceBookAuthorityId) }) &&
+            foreignKey.PrincipalKey.Properties.Select(property => property.Name)
+                .SequenceEqual(new[] { nameof(FinanceSourceBookAuthority.TenantId), nameof(FinanceSourceBookAuthority.Id) }));
     }
 
     [Fact]
@@ -174,6 +182,90 @@ public sealed class LeaseInstallmentApOpenItemTests
     }
 
     [Fact]
+    public async Task Submit_requires_maker_checker_and_freezes_inherited_recognition_authority()
+    {
+        await using var fixture = new Fixture();
+        var lease = await fixture.AddLeaseAsync();
+        var draft = await fixture.Service.CreateLeaseInstallmentDraftAsync(
+            lease.Id, lease.ScheduleLines.Single().Id);
+        await fixture.ReviewLeaseTaxAsync(draft.Id);
+        var workflowId = Guid.NewGuid();
+        fixture.ConfigureWorkflow(approvalRequired: true, workflowId);
+
+        var submitted = await fixture.Service.SubmitForApprovalAsync(draft.Id);
+
+        submitted.Status.Should().Be(VendorInvoiceStatus.PendingApproval);
+        var retained = await fixture.Context.VendorInvoices.AsNoTracking()
+            .SingleAsync(item => item.Id == draft.Id);
+        retained.SourceBookAuthorityId.Should().NotBeNull();
+        fixture.BookAuthorities.Verify(item => item.RetainExistingPostedOriginalAsync(
+            It.Is<FinanceSourceBookAuthorityFreezeRequest>(request =>
+                request.SourceDocumentId == lease.Id && request.SourceDocumentType == "LeaseRecognition" &&
+                request.FreezeStage == FinanceSourceBookAuthorityFreezeStages.LegacyPosted),
+            lease.RecognitionJournalEntryId!.Value,
+            lease.RecognitionPostingEventId!.Value,
+            It.IsAny<CancellationToken>()), Times.Once);
+        fixture.BookAuthorities.Verify(item => item.FreezeInheritedAsync(
+            It.Is<FinanceSourceBookAuthorityFreezeRequest>(request =>
+                request.SourceDocumentId == draft.Id && request.SourceWorkflowInstanceId == workflowId &&
+                request.FreezeStage == FinanceSourceBookAuthorityFreezeStages.Submitted),
+            It.Is<IReadOnlyCollection<FinanceSourceBookAuthorityOriginRequest>>(origins =>
+                origins.Count == 1 && origins.Single().Role == "LEASE_RECOGNITION"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Submit_without_approval_workflow_fails_without_fabricating_book_authority()
+    {
+        await using var fixture = new Fixture();
+        var lease = await fixture.AddLeaseAsync();
+        var draft = await fixture.Service.CreateLeaseInstallmentDraftAsync(
+            lease.Id, lease.ScheduleLines.Single().Id);
+        await fixture.ReviewLeaseTaxAsync(draft.Id);
+        fixture.ConfigureWorkflow(approvalRequired: false, workflowId: null);
+
+        var submit = () => fixture.Service.SubmitForApprovalAsync(draft.Id);
+
+        await submit.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*requires an active maker/checker approval workflow*");
+        var retained = await fixture.Context.VendorInvoices.AsNoTracking()
+            .SingleAsync(item => item.Id == draft.Id);
+        retained.Status.Should().Be(VendorInvoiceStatus.Draft);
+        retained.SourceBookAuthorityId.Should().BeNull();
+        fixture.BookAuthorities.Verify(item => item.FreezeInheritedAsync(
+            It.IsAny<FinanceSourceBookAuthorityFreezeRequest>(),
+            It.IsAny<IReadOnlyCollection<FinanceSourceBookAuthorityOriginRequest>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Legacy_approved_lease_invoice_without_authority_fails_before_posting()
+    {
+        await using var fixture = new Fixture();
+        var lease = await fixture.AddLeaseAsync();
+        var draft = await fixture.Service.CreateLeaseInstallmentDraftAsync(
+            lease.Id, lease.ScheduleLines.Single().Id);
+        await fixture.ReviewLeaseTaxAsync(draft.Id);
+        var invoice = await fixture.Context.VendorInvoices.Include(item => item.LineItems)
+            .SingleAsync(item => item.Id == draft.Id);
+        invoice.Status = VendorInvoiceStatus.Approved;
+        invoice.ApprovalRequired = true;
+        invoice.ApprovalStatus = "Approved";
+        invoice.ApprovedById = Guid.NewGuid();
+        invoice.ApprovedDate = DateTime.UtcNow;
+        await fixture.Context.SaveChangesAsync();
+
+        var post = () => fixture.Service.PostAsync(invoice.Id);
+
+        await post.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("LEASE_AP_SOURCE_BOOK_AUTHORITY_REQUIRED:*");
+        fixture.FinanceEngine.Verify(item => item.PostAsync(
+            It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
+        (await fixture.Context.Set<LeaseScheduleLine>().AsNoTracking()
+            .SingleAsync(item => item.Id == lease.ScheduleLines.Single().Id)).IsPosted.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Ap_post_uses_frozen_principal_interest_and_control_accounts_without_marking_paid()
     {
         await using var fixture = new Fixture();
@@ -189,6 +281,7 @@ public sealed class LeaseInstallmentApOpenItemTests
         invoice.ApprovalStatus = "NotRequired";
         foreach (var line in invoice.LineItems)
             line.TaxTreatment = TaxTreatment.OutOfScope;
+        await fixture.AttachSubmittedAuthorityAsync(invoice);
         (await fixture.Context.AccountingBooks.SingleAsync(item => item.Id == fixture.BookId)).IsDefault = false;
         await fixture.Context.SaveChangesAsync();
 
@@ -215,6 +308,14 @@ public sealed class LeaseInstallmentApOpenItemTests
             "an uncertain prepare response must reconcile to the canonical invoice even after lease completion");
         (await fixture.Context.Set<FinancePostingEvent>().CountAsync(item =>
             item.SourceDocumentType == "LeasePeriodPosting")).Should().Be(0);
+        fixture.BookAuthorities.Verify(item => item.RequireForPostingAsync(
+            It.Is<FinanceSourceBookAuthorityFreezeRequest>(request => request.SourceDocumentId == invoice.Id),
+            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        fixture.BookAuthorities.Verify(item => item.BindOriginalPostingAsync(
+            invoice.SourceBookAuthorityId!.Value,
+            It.IsAny<Guid>(),
+            posted.JournalEntryId!.Value,
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -233,6 +334,7 @@ public sealed class LeaseInstallmentApOpenItemTests
         invoice.ApprovalStatus = "NotRequired";
         foreach (var line in invoice.LineItems)
             line.TaxTreatment = TaxTreatment.OutOfScope;
+        await fixture.AttachSubmittedAuthorityAsync(invoice);
         await fixture.Context.SaveChangesAsync();
         fixture.FinanceEngine.Setup(item => item.PostAsync(
                 It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()))
@@ -247,6 +349,8 @@ public sealed class LeaseInstallmentApOpenItemTests
         persisted.PaidAmount.Should().Be(0m);
         (await fixture.Context.Set<LeaseScheduleLine>().AsNoTracking().SingleAsync(item => item.Id == scheduleId))
             .IsPosted.Should().BeFalse();
+        fixture.BookAuthorities.Verify(item => item.BindOriginalPostingAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         (await fixture.Context.Set<FinancePostingEvent>().CountAsync(item =>
             item.SourceDocumentType == "LeasePeriodPosting")).Should().Be(0);
     }
@@ -266,6 +370,7 @@ public sealed class LeaseInstallmentApOpenItemTests
         invoice.ApprovalRequired = false;
         invoice.ApprovalStatus = "NotRequired";
         foreach (var line in invoice.LineItems) line.TaxTreatment = TaxTreatment.OutOfScope;
+        await fixture.AttachSubmittedAuthorityAsync(invoice);
         await fixture.Context.SaveChangesAsync();
         var posted = await fixture.Service.PostAsync(invoice.Id);
         var originalEventId = Guid.NewGuid();
@@ -289,6 +394,7 @@ public sealed class LeaseInstallmentApOpenItemTests
             TotalDebitAmount = 100m, TotalCreditAmount = 100m, FunctionalCurrencyCode = "GHS",
             BookClassification = "PRIMARY", AccountingBookId = fixture.BookId
         });
+        fixture.SetBoundPostingEvidence(invoice.Id, originalEventId, originalJournal.Id);
         await fixture.Context.SaveChangesAsync();
         fixture.FinanceEngine.Setup(item => item.GetReversalPlanAsync(
                 originalEventId, It.IsAny<string>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
@@ -330,6 +436,7 @@ public sealed class LeaseInstallmentApOpenItemTests
         replacementEntity.ApprovalRequired = false;
         replacementEntity.ApprovalStatus = "NotRequired";
         foreach (var line in replacementEntity.LineItems) line.TaxTreatment = TaxTreatment.OutOfScope;
+        await fixture.AttachSubmittedAuthorityAsync(replacementEntity);
         await fixture.Context.SaveChangesAsync();
         await fixture.Service.PostAsync(replacement.Id);
 
@@ -694,6 +801,10 @@ public sealed class LeaseInstallmentApOpenItemTests
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly Guid _userId = Guid.NewGuid();
+        private readonly Guid _recognitionAuthorityId = Guid.NewGuid();
+        private readonly Dictionary<Guid, Guid> _authorityIds = [];
+        private readonly Dictionary<Guid, FinanceSourceBookAuthorityFreezeRequest> _authorityRequests = [];
+        private readonly Dictionary<Guid, (Guid EventId, Guid JournalId)> _boundEvidence = [];
         public Guid TenantId { get; } = Guid.NewGuid();
         public Guid BookId { get; } = Guid.NewGuid();
         public Guid RouAccountId { get; } = Guid.NewGuid();
@@ -703,6 +814,8 @@ public sealed class LeaseInstallmentApOpenItemTests
         public ApplicationDbContext Context { get; }
         public VendorInvoiceService Service { get; }
         public Mock<IFinancePostingEngine> FinanceEngine { get; } = new();
+        public Mock<IFinanceSourceBookAuthorityService> BookAuthorities { get; } = new();
+        public Mock<IWorkflowIntegrationService> WorkflowIntegration { get; } = new();
         public FinancePostingRequestV2Dto? PostedRequest { get; private set; }
 
         public Fixture()
@@ -732,6 +845,47 @@ public sealed class LeaseInstallmentApOpenItemTests
                     It.IsAny<FinancePostingProducerContext>(), It.IsAny<Guid>(), It.IsAny<DateTime>(),
                     It.IsAny<IReadOnlyList<FinanceSourceDocumentLineContext>>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new FinanceSourceDocumentDimensionDto());
+            BookAuthorities.Setup(item => item.RetainExistingPostedOriginalAsync(
+                    It.IsAny<FinanceSourceBookAuthorityFreezeRequest>(), It.IsAny<Guid>(), It.IsAny<Guid?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((FinanceSourceBookAuthorityFreezeRequest request, Guid journalId, Guid? eventId,
+                    CancellationToken _) => AuthorityResult(
+                        request, _recognitionAuthorityId, eventId, journalId,
+                        FinanceSourceBookAuthoritySelectionBases.RetainedPostedOriginal));
+            BookAuthorities.Setup(item => item.FreezeInheritedAsync(
+                    It.IsAny<FinanceSourceBookAuthorityFreezeRequest>(),
+                    It.IsAny<IReadOnlyCollection<FinanceSourceBookAuthorityOriginRequest>>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((FinanceSourceBookAuthorityFreezeRequest request,
+                    IReadOnlyCollection<FinanceSourceBookAuthorityOriginRequest> _, CancellationToken _) =>
+                {
+                    var authorityId = AuthorityIdFor(request.SourceDocumentId);
+                    _authorityRequests[authorityId] = request;
+                    return AuthorityResult(request, authorityId);
+                });
+            BookAuthorities.Setup(item => item.RequireForPostingAsync(
+                    It.IsAny<FinanceSourceBookAuthorityFreezeRequest>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((FinanceSourceBookAuthorityFreezeRequest request, CancellationToken _) =>
+                {
+                    var authorityId = AuthorityIdFor(request.SourceDocumentId);
+                    _authorityRequests[authorityId] = request;
+                    return AuthorityResult(request, authorityId);
+                });
+            BookAuthorities.Setup(item => item.BindOriginalPostingAsync(
+                    It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid authorityId, Guid eventId, Guid journalId, CancellationToken _) =>
+                {
+                    _boundEvidence[authorityId] = (eventId, journalId);
+                    return AuthorityResult(_authorityRequests[authorityId], authorityId, eventId, journalId);
+                });
+            BookAuthorities.Setup(item => item.RequireBoundOriginalAsync(
+                    It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid authorityId, CancellationToken _) =>
+                {
+                    var evidence = _boundEvidence[authorityId];
+                    return AuthorityResult(_authorityRequests[authorityId], authorityId,
+                        evidence.EventId, evidence.JournalId);
+                });
             FinanceEngine.Setup(item => item.PostAsync(
                     It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()))
                 .Callback<FinancePostingRequestV2Dto, CancellationToken>((request, _) => PostedRequest = request)
@@ -751,8 +905,117 @@ public sealed class LeaseInstallmentApOpenItemTests
                 new UnitOfWork(Context), current.Object, Mock.Of<IInventoryValuationService>(),
                 NullLogger<VendorInvoiceService>.Instance, numbering.Object, Mock.Of<IWorkflowService>(),
                 financePostingEngine: FinanceEngine.Object,
-                sourceDimensions: dimensions.Object);
+                sourceDimensions: dimensions.Object,
+                workflowIntegration: WorkflowIntegration.Object,
+                sourceBookAuthorities: BookAuthorities.Object);
         }
+
+        public void ConfigureWorkflow(bool approvalRequired, Guid? workflowId)
+        {
+            WorkflowIntegration.Setup(item => item.SubmitAsync("VendorInvoice", It.IsAny<Guid>()))
+                .ReturnsAsync(new WorkflowIntegrationResult(
+                    new WorkflowExecutionResult
+                    {
+                        Success = true,
+                        Status = approvalRequired ? WorkflowInstanceStatus.InProgress : WorkflowInstanceStatus.Completed,
+                        WorkflowInstanceId = workflowId
+                    },
+                    approvalRequired ? WorkflowOutcome.Pending : WorkflowOutcome.Approved,
+                    approvalRequired));
+        }
+
+        public async Task ReviewLeaseTaxAsync(Guid invoiceId)
+        {
+            var invoice = await Context.VendorInvoices.Include(item => item.LineItems)
+                .SingleAsync(item => item.Id == invoiceId);
+            invoice.WithholdingDecisionPending = false;
+            foreach (var line in invoice.LineItems.Where(item => !item.IsDeleted))
+                line.TaxTreatment = TaxTreatment.OutOfScope;
+            await Context.SaveChangesAsync();
+        }
+
+        public async Task<Guid> AttachSubmittedAuthorityAsync(VendorInvoice invoice)
+        {
+            var authorityId = AuthorityIdFor(invoice.Id);
+            var workflowId = Guid.NewGuid();
+            var request = new FinanceSourceBookAuthorityFreezeRequest
+            {
+                OriginModuleCode = "FIN",
+                SourceDocumentType = "VENDORINVOICE",
+                SourceDocumentId = invoice.Id,
+                PostingAction = "POST",
+                EffectiveDate = invoice.InvoiceDate,
+                TransactionCurrencyCode = invoice.CurrencyCode,
+                FreezeStage = FinanceSourceBookAuthorityFreezeStages.Submitted,
+                SourceWorkflowInstanceId = workflowId
+            };
+            _authorityRequests[authorityId] = request;
+            invoice.SourceBookAuthorityId = authorityId;
+            if (!await Context.FinanceSourceBookAuthorities.AnyAsync(item => item.Id == authorityId))
+            {
+                Context.FinanceSourceBookAuthorities.Add(new FinanceSourceBookAuthority
+                {
+                    Id = authorityId,
+                    TenantId = TenantId,
+                    OriginModuleCode = "FIN",
+                    SourceDocumentType = "VENDORINVOICE",
+                    SourceDocumentId = invoice.Id,
+                    PostingAction = "POST",
+                    AuthorityVersion = 1,
+                    SourceWorkflowInstanceId = workflowId,
+                    FreezeStage = FinanceSourceBookAuthorityFreezeStages.Submitted,
+                    EffectiveDate = invoice.InvoiceDate,
+                    AccountingBookId = BookId,
+                    AccountingBookCode = "PRIMARY",
+                    FunctionalCurrencyCode = "GHS",
+                    TransactionCurrencyCode = invoice.CurrencyCode,
+                    SelectionBasis = FinanceSourceBookAuthoritySelectionBases.InheritedOriginal,
+                    AuthorityFingerprint = new string('A', 64),
+                    FrozenByUserId = _userId,
+                    FrozenAtUtc = DateTime.UtcNow
+                });
+            }
+            await Context.SaveChangesAsync();
+            return authorityId;
+        }
+
+        public void SetBoundPostingEvidence(Guid invoiceId, Guid eventId, Guid journalId)
+        {
+            var authorityId = AuthorityIdFor(invoiceId);
+            _boundEvidence[authorityId] = (eventId, journalId);
+        }
+
+        private Guid AuthorityIdFor(Guid sourceDocumentId)
+        {
+            if (_authorityIds.TryGetValue(sourceDocumentId, out var authorityId)) return authorityId;
+            authorityId = Guid.NewGuid();
+            _authorityIds[sourceDocumentId] = authorityId;
+            return authorityId;
+        }
+
+        private FinanceSourceBookAuthorityResult AuthorityResult(
+            FinanceSourceBookAuthorityFreezeRequest request,
+            Guid authorityId,
+            Guid? eventId = null,
+            Guid? journalId = null,
+            string selectionBasis = FinanceSourceBookAuthoritySelectionBases.InheritedOriginal) => new(
+                authorityId,
+                1,
+                "FIN",
+                request.SourceDocumentType.Trim().ToUpperInvariant(),
+                request.SourceDocumentId,
+                "POST",
+                request.EffectiveDate.Date,
+                request.FreezeStage,
+                request.SourceWorkflowInstanceId,
+                BookId,
+                "PRIMARY",
+                "GHS",
+                request.TransactionCurrencyCode.Trim().ToUpperInvariant(),
+                selectionBasis,
+                new string('A', 64),
+                eventId,
+                journalId);
 
         public async Task<LeaseContract> AddLeaseAsync(
             bool twoPeriods = false,
