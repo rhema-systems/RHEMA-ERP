@@ -1490,6 +1490,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return BadRequest(new { success = false, message = "Unsupported Estate service request type." });
         }
 
+        EstateManagedAsset? selectedProperty = null;
         if (!string.IsNullOrWhiteSpace(request.PropertyReference))
         {
             var tenantId = _currentUserService.TenantId ?? Guid.Empty;
@@ -1503,7 +1504,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 .Select(customer => customer.Id)
                 .ToListAsync(cancellationToken);
             var propertyReference = request.PropertyReference.Trim();
-            var ownsProperty = await _db.EstateManagedAssets.AsNoTracking().AnyAsync(asset =>
+            selectedProperty = await _db.EstateManagedAssets.AsNoTracking().FirstOrDefaultAsync(asset =>
                 asset.TenantId == tenantId
                 && !asset.IsDeleted
                 && asset.CustomerBusinessPartnerId.HasValue
@@ -1514,7 +1515,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     || asset.Status == EstateManagedAssetStatus.Sold)
                 && (asset.ProjectUnitCode == propertyReference || asset.AssetCode == propertyReference),
                 cancellationToken);
-            if (!ownsProperty)
+            if (selectedProperty is null)
             {
                 return BadRequest(new { success = false, message = "Select a property linked to your account." });
             }
@@ -1528,6 +1529,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ? _currentUserService.Email ?? _currentUserService.UserName
             : request.Contact.Trim();
         var fieldValues = BuildFieldValues(definition, request, reference, contact);
+        if (definition.EntityType == "EstateFacilityMaintenance" && selectedProperty is not null)
+            fieldValues["estateManagedAssetId"] = selectedProperty.Id.ToString();
 
         try
         {
@@ -3950,8 +3953,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["issueDescription"] = request.Description,
             ["complaintDescription"] = request.Description,
             ["serviceImpact"] = request.ServiceImpact,
-            ["reportedPriority"] = request.Priority,
-            ["customerReportedUrgency"] = request.Priority,
+            ["reportedPriority"] = definition.EntityType == "EstateFacilityMaintenance" ? null : request.Priority,
+            ["customerReportedUrgency"] = definition.EntityType == "EstateFacilityMaintenance" ? null : request.Priority,
             ["requester"] = request.ApplicantName,
             ["requesterType"] = "Tenant / occupant",
             ["complainantName"] = request.ApplicantName,
@@ -3974,7 +3977,14 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
         foreach (var item in request.AdditionalValues ?? new Dictionary<string, string?>())
         {
-            if (!string.IsNullOrWhiteSpace(item.Key))
+            if (!string.IsNullOrWhiteSpace(item.Key)
+                && !(definition.EntityType == "EstateFacilityMaintenance"
+                    && new[] {
+                        "priority", "reportedPriority", "customerReportedUrgency", "maintenanceTypeId", "handoffDescription",
+                        "estimatedHours", "estimatedCost", "serviceProviderBusinessPartnerId", "serviceProviderContractId",
+                        "propertyUnit", "propertyNumber", "estateManagedAssetId", "issueDescription"
+                    }
+                        .Contains(item.Key.Trim(), StringComparer.OrdinalIgnoreCase)))
             {
                 values[item.Key.Trim()] = item.Value;
             }

@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   Building2,
@@ -10,6 +11,7 @@ import {
   MapPin,
   RefreshCw,
   Search,
+  Settings2,
   Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -490,37 +492,43 @@ export function PropertyUnitRegister() {
                           ) : null}
                         </TableCell>
                         <TableCell>
-                          {isPortalListing ? (
-                            <div className="flex min-w-56 justify-end gap-2">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                disabled={sendingListingId === asset.id}
-                                onClick={() =>
-                                  router.push(
-                                    `/estate/property-management/listings?assetId=${encodeURIComponent(asset.id)}`
-                                  )
-                                }
-                              >
-                                <Globe2 className="mr-2 h-3.5 w-3.5" />
-                                Open listing
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={sendingListingId === asset.id}
-                                onClick={() =>
-                                  void recallFromPortalListings(asset)
-                                }
-                              >
-                                {sendingListingId === asset.id ? (
-                                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                          <div className="flex items-center justify-end gap-1">
+                            <Button asChild variant="ghost" size="icon" title="Manage property status" aria-label={`Manage status for ${asset.name}`}>
+                              <Link href={`/estate/property-management/EstatePropertyManagementOccupancyAvailability?assetId=${encodeURIComponent(asset.id)}`}>
+                                <Settings2 className="h-4 w-4" />
+                              </Link>
+                            </Button>
+                            {isPortalListing ? (
+                              <div className="flex min-w-56 justify-end gap-2">
+                                {asset.status === EstateManagedAssetStatus.Available ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={sendingListingId === asset.id}
+                                    onClick={() =>
+                                      router.push(
+                                        `/estate/property-management/listings?assetId=${encodeURIComponent(asset.id)}`
+                                      )
+                                    }
+                                  >
+                                    <Globe2 className="mr-2 h-3.5 w-3.5" />
+                                    Open listing
+                                  </Button>
                                 ) : null}
-                                Recall
-                              </Button>
-                            </div>
-                          ) : canSendProjectProperty ? (
-                            <div className="flex min-w-44 justify-end">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={sendingListingId === asset.id}
+                                  onClick={() => void recallFromPortalListings(asset)}
+                                >
+                                  {sendingListingId === asset.id ? (
+                                    <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                                  ) : null}
+                                  Recall
+                                </Button>
+                              </div>
+                            ) : canSendProjectProperty ? (
+                              <div className="flex min-w-44 justify-end">
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -536,12 +544,13 @@ export function PropertyUnitRegister() {
                                 )}
                                 Send to portal
                               </Button>
-                            </div>
-                          ) : (
-                            <span className="block min-w-32 px-3 text-right text-muted-foreground">
-                              —
-                            </span>
-                          )}
+                              </div>
+                            ) : (
+                              <span className="block min-w-32 px-3 text-right text-muted-foreground">
+                                —
+                              </span>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     );

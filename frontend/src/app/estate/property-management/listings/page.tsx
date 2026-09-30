@@ -40,6 +40,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import {
   estateLandManagementService,
+  EstateManagedAssetStatus,
   EstateManagedAssetType,
   type EstateManagedAsset,
   type EstateManagedAssetDocument,
@@ -339,6 +340,10 @@ export default function EstatePropertyListingsPage() {
   );
   const listingIsLease = isLeaseListing(form.externalListingType);
   const selectedIsLand = selected?.assetType === EstateManagedAssetType.Land;
+  const listingBlockedByAssetStatus = Boolean(
+    selected && selected.listingScope !== 'demarcation'
+      && selected.status !== EstateManagedAssetStatus.Available
+  );
   const selectedListingStatus = selected ? listingStatusLabel(selected) : '';
   const listingLockedByWorkflow = isWorkflowLockedListingStatus(
     selectedListingStatus
@@ -368,6 +373,10 @@ export default function EstatePropertyListingsPage() {
 
   const saveListing = async () => {
     if (!selected) return;
+    if (listingBlockedByAssetStatus) {
+      toast.error('Only an Available property can be sent to Portal Listings. Clear the property status first.');
+      return;
+    }
     if (listingLockedByWorkflow) {
       toast.error(
         'This listing is reserved for an active Estate case and cannot be republished manually.'
@@ -730,6 +739,12 @@ export default function EstatePropertyListingsPage() {
               </div>
             ) : selected ? (
               <>
+                {listingBlockedByAssetStatus ? (
+                  <div className="flex items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                    <span>Only an Available property can be listed. Clear its current status first.</span>
+                    <Button asChild variant="outline" size="sm"><Link href={`/estate/property-management/EstatePropertyManagementOccupancyAvailability?assetId=${encodeURIComponent(selected.id)}`}>Manage status</Link></Button>
+                  </div>
+                ) : null}
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="rounded-md border p-3">
                     <div className="text-xs text-muted-foreground">Type</div>
@@ -755,7 +770,7 @@ export default function EstatePropertyListingsPage() {
                   <div className="space-y-2">
                     <Label>Customer portal visibility</Label>
                     <Select
-                      disabled={listingLockedByWorkflow}
+                      disabled={listingLockedByWorkflow || listingBlockedByAssetStatus}
                       value={
                         form.externalListingStatus === 'Published'
                           ? 'published'
@@ -1037,13 +1052,16 @@ export default function EstatePropertyListingsPage() {
                     onClick={saveListing}
                     disabled={
                       isSaving ||
+                      listingBlockedByAssetStatus ||
                       listingLockedByWorkflow ||
                       listingPublicationBlockedByGroundRent ||
                       listingPublicationNeedsGroundRentChoice ||
                       listingPublicationNeedsPremiumChoice
                     }
                     title={
-                      listingLockedByWorkflow
+                      listingBlockedByAssetStatus
+                        ? 'Only Available properties can be listed.'
+                        : listingLockedByWorkflow
                         ? 'Reserved listings cannot be republished manually.'
                         : listingPublicationNeedsPremiumChoice
                         ? 'Select whether a premium charge is required.'

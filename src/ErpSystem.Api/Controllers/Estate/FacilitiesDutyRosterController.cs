@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Estate;
 using System.Globalization;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -75,6 +76,9 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         var tenantId = GetTenantId();
         var assets = await _db.EstateManagedAssets.AsNoTracking()
             .Where(asset => asset.TenantId == tenantId && !asset.IsDeleted
+                && (asset.Status == EstateManagedAssetStatus.Available
+                    || asset.Status == EstateManagedAssetStatus.Leased
+                    || asset.Status == EstateManagedAssetStatus.Occupied)
                 && (asset.AssetCode.Contains(term) || asset.Name.Contains(term)
                     || (asset.ProjectCode != null && asset.ProjectCode.Contains(term))
                     || (asset.ProjectTitle != null && asset.ProjectTitle.Contains(term))
@@ -131,7 +135,10 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
 
         var term = search?.Trim();
         var query = _db.EstateManagedAssets.AsNoTracking()
-            .Where(asset => asset.TenantId == tenantId && !asset.IsDeleted);
+            .Where(asset => asset.TenantId == tenantId && !asset.IsDeleted
+                && (asset.Status == EstateManagedAssetStatus.Available
+                    || asset.Status == EstateManagedAssetStatus.Leased
+                    || asset.Status == EstateManagedAssetStatus.Occupied));
         query = string.IsNullOrWhiteSpace(property.ProjectCode)
             ? query.Where(asset => asset.Id == property.Id)
             : query.Where(asset => asset.ProjectCode == property.ProjectCode);
@@ -521,9 +528,12 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
             var reference = request.PropertyReference.Trim();
             var property = await _db.EstateManagedAssets.AsNoTracking()
                 .Where(asset => asset.TenantId == tenantId && !asset.IsDeleted && asset.AssetCode == reference)
-                .Select(asset => new { asset.Id, asset.AssetCode, asset.ProjectCode })
+                .Select(asset => new { asset.Id, asset.AssetCode, asset.ProjectCode, asset.Status })
                 .FirstOrDefaultAsync(cancellationToken);
             if (property is null) return "Select a property or site from Estate.";
+            if (property.Status is not (EstateManagedAssetStatus.Available
+                or EstateManagedAssetStatus.Leased or EstateManagedAssetStatus.Occupied))
+                return "Staff duties cannot be assigned to a reserved, blocked, retired, or otherwise unavailable property.";
             request.PropertyReference = property.AssetCode;
 
             if (!string.IsNullOrWhiteSpace(request.PropertyUnit))
@@ -534,9 +544,12 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
                         && (asset.AssetCode == unitReference || asset.ProjectUnitCode == unitReference)
                         && (asset.Id == property.Id
                             || (property.ProjectCode != null && asset.ProjectCode == property.ProjectCode)))
-                    .Select(asset => new { asset.AssetCode, asset.ProjectUnitCode })
+                    .Select(asset => new { asset.AssetCode, asset.ProjectUnitCode, asset.Status })
                     .FirstOrDefaultAsync(cancellationToken);
                 if (unit is null) return "Select a unit or parcel belonging to the selected property.";
+                if (unit.Status is not (EstateManagedAssetStatus.Available
+                    or EstateManagedAssetStatus.Leased or EstateManagedAssetStatus.Occupied))
+                    return "Staff duties cannot be assigned to a reserved, blocked, retired, or otherwise unavailable unit.";
                 request.PropertyUnit = unit.ProjectUnitCode ?? unit.AssetCode;
             }
         }

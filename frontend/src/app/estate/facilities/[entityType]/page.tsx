@@ -301,81 +301,6 @@ function FacilitiesWorkflowOverview({
   );
 }
 
-function FacilitiesMaintenanceWorkspace({
-  workspace,
-  operationalHandoff,
-  canOpenOperationalHandoff,
-}: {
-  workspace: FacilitiesProcedureWorkspace;
-  operationalHandoff: OperationalHandoff | null;
-  canOpenOperationalHandoff: boolean;
-}) {
-  return (
-    <div className="space-y-4">
-      {workspace.stages.length === 0 ? (
-        <div className="rounded-md border border-dashed border-border bg-muted/40 p-4">
-          <div className="font-medium">Setup required</div>
-        </div>
-      ) : null}
-
-      {operationalHandoff ? (
-        <Card className="border-border bg-card text-card-foreground">
-          <CardHeader>
-            <CardTitle>Maintenance Handoff</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {!canOpenOperationalHandoff ? (
-              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
-                Maintenance access is required for job cards and work orders.
-              </div>
-            ) : null}
-            <Button
-              asChild={canOpenOperationalHandoff}
-              disabled={!canOpenOperationalHandoff}
-              className="w-full"
-            >
-              {canOpenOperationalHandoff ? (
-                <Link href={operationalHandoff.primaryAction.href}>
-                  {operationalHandoff.primaryAction.label}
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Link>
-              ) : (
-                <span>
-                  {operationalHandoff.primaryAction.label}
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </span>
-              )}
-            </Button>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {operationalHandoff.secondaryActions.map((action) => (
-                <Button
-                  key={action.href}
-                  asChild={canOpenOperationalHandoff}
-                  disabled={!canOpenOperationalHandoff}
-                  variant="outline"
-                  size="sm"
-                >
-                  {canOpenOperationalHandoff ? (
-                    <Link href={action.href}>
-                      {action.label}
-                      <ExternalLink className="ml-2 h-3.5 w-3.5" />
-                    </Link>
-                  ) : (
-                    <span>
-                      {action.label}
-                      <ExternalLink className="ml-2 h-3.5 w-3.5" />
-                    </span>
-                  )}
-                </Button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-    </div>
-  );
-}
-
 function dateInputValue(date: Date) {
   return date.toISOString().slice(0, 10);
 }
@@ -1307,13 +1232,6 @@ export default function FacilitiesProcedureWorkspacePage() {
             defaultTitle={procedure.title}
             workspaceType="Case Workflow"
           />
-          {showMaintenanceIntakeRegister ? (
-            <FacilitiesMaintenanceWorkspace
-              workspace={workspace}
-              operationalHandoff={operationalHandoff}
-              canOpenOperationalHandoff={canOpenOperationalHandoff}
-            />
-          ) : null}
         </>
       ) : hasConfiguredWorkflow && !operatingMode ? (
         <FacilitiesWorkflowOverview workspace={workspace} />

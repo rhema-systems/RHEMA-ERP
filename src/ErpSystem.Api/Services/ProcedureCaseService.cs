@@ -14,6 +14,7 @@ using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
@@ -1036,6 +1037,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         EnsurePropertyAgreementHeadOfLegalSignatureReady(procedureCase);
         EnsureExternalListingApprovalIsReady(procedureCase);
         EnsurePropertyListingStageReady(procedureCase);
+        await EnsureFacilitiesMaintenanceHandoffReadyAsync(procedureCase);
         if (IsPropertyListingApplication(procedureCase) && procedureCase.CurrentStageIndex >= 2)
             await EnsurePremiumFinancePaymentAsync(procedureCase);
         if (IsPropertyListingApplication(procedureCase) && procedureCase.CurrentStageIndex >= 5
@@ -2175,6 +2177,39 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         await _db.SaveChangesAsync();
     }
 
+    private async Task EnsureFacilitiesMaintenanceHandoffReadyAsync(ProcedureCase procedureCase)
+    {
+        if (!string.Equals(procedureCase.Module, "Facilities", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(procedureCase.EntityType, "EstateFacilityMaintenance", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(procedureCase.CurrentStageName, "Maintenance Handoff Review", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        EnsureFacilitiesMaintenanceHandoffFields(procedureCase);
+        if (await ResolveFacilitiesMaintenanceTypeAsync(procedureCase, procedureCase.TenantId) is null)
+            throw new InvalidOperationException("Select an active Maintenance type before creating the maintenance handoff.");
+        if (await ResolveFacilitiesPriorityLevelAsync(procedureCase, procedureCase.TenantId) is null)
+            throw new InvalidOperationException("Select a configured Low, Medium, or High Maintenance priority before creating the handoff.");
+        await ResolveFacilitiesMaintenanceAssetAsync(procedureCase, procedureCase.TenantId);
+    }
+
+    internal static void EnsureFacilitiesMaintenanceHandoffFields(ProcedureCase procedureCase)
+    {
+        if (string.IsNullOrWhiteSpace(FieldValue(procedureCase, "propertyUnit")))
+            throw new InvalidOperationException("Select a property before creating the maintenance handoff.");
+        if (string.IsNullOrWhiteSpace(FirstNonBlank(FieldValue(procedureCase, "issueDescription"), procedureCase.Description)))
+            throw new InvalidOperationException("Record the customer's problem description before creating the maintenance handoff.");
+        if (string.IsNullOrWhiteSpace(FieldValue(procedureCase, "handoffDescription")))
+            throw new InvalidOperationException("Enter the job card description before creating the maintenance handoff.");
+        if (!double.TryParse(FieldValue(procedureCase, "estimatedHours"), NumberStyles.Float, CultureInfo.InvariantCulture, out var hours) || hours <= 0)
+            throw new InvalidOperationException("Enter estimated hours greater than zero before creating the maintenance handoff.");
+        if (!decimal.TryParse(FieldValue(procedureCase, "estimatedCost"), NumberStyles.Number, CultureInfo.InvariantCulture, out var cost) || cost < 0)
+            throw new InvalidOperationException("Enter a valid estimated cost before creating the maintenance handoff.");
+        if (!Guid.TryParse(FieldValue(procedureCase, "maintenanceTypeId"), out _))
+            throw new InvalidOperationException("Select a Maintenance type before creating the maintenance handoff.");
+        if (!new[] { "Low", "Medium", "High" }.Contains(FieldValue(procedureCase, "priority")?.Trim(), StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Select Low, Medium, or High priority before creating the maintenance handoff.");
+    }
+
     private async Task CreateMaintenanceJobCardForFacilitiesHandoffAsync(
         ProcedureCase procedureCase,
         string completedStageName,
@@ -2233,15 +2268,26 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var maintenanceAsset = await ResolveFacilitiesMaintenanceAssetAsync(procedureCase, tenantId);
         var maintenanceType = await ResolveFacilitiesMaintenanceTypeAsync(procedureCase, tenantId);
         var priorityLevel = await ResolveFacilitiesPriorityLevelAsync(procedureCase, tenantId);
-        if (maintenanceAsset is null || maintenanceType is null || priorityLevel is null)
+        if (maintenanceType is null || priorityLevel is null)
         {
-            throw new InvalidOperationException("Maintenance setup is incomplete. Configure an active maintenance asset, maintenance type, and priority level before routing this Facilities request.");
+            throw new InvalidOperationException("Maintenance setup is incomplete for the selected property, type, or priority.");
         }
 
         var sourceReference = FirstNonBlank(procedureCase.ReferenceNumber, procedureCase.Title, procedureCase.Id.ToString()) ?? procedureCase.Id.ToString();
         var propertyUnit = FirstNonBlank(FieldValue(procedureCase, "propertyUnit"), FieldValue(procedureCase, "propertyNumber"), FieldValue(procedureCase, "housePlotShopNumber"));
+        var estatePropertyId = Guid.TryParse(FieldValue(procedureCase, "estateManagedAssetId"), out var selectedEstatePropertyId)
+            ? selectedEstatePropertyId : Guid.Empty;
+        var estateProperty = await _db.EstateManagedAssets.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                && (estatePropertyId != Guid.Empty
+                    ? item.Id == estatePropertyId
+                    : item.AssetCode == propertyUnit || item.ProjectUnitCode == propertyUnit))
+            .Select(item => new { item.Id, item.Name, item.AssetCode })
+            .FirstOrDefaultAsync();
+        var propertyName = FirstNonBlank(estateProperty?.Name, propertyUnit) ?? "Property";
         var issueType = FirstNonBlank(FieldValue(procedureCase, "issueType"), "Maintenance request")!;
         var issueDescription = FirstNonBlank(FieldValue(procedureCase, "issueDescription"), procedureCase.Description, FieldValue(procedureCase, "notes"));
+        var handoffDescription = FieldValue(procedureCase, "handoffDescription")?.Trim();
         var serviceImpact = FirstNonBlank(FieldValue(procedureCase, "serviceImpact"), "Not recorded")!;
         var accessInstructions = FirstNonBlank(FieldValue(procedureCase, "accessInstructions"), "Not recorded")!;
         var targetDate = ParseProcedureDate(FieldValue(procedureCase, "targetDate"));
@@ -2257,8 +2303,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         var createdJobCard = await _jobCardService.CreateJobCardAsync(new CreateJobCardDto
         {
-            Title = $"Facilities maintenance - {FirstNonBlank(propertyUnit, issueType, sourceReference)}",
-            Description = $"Source: Estate / Facilities. Facilities case {sourceReference}. Property/unit: {propertyUnit ?? "Not recorded"}. Service impact: {serviceImpact}. Access: {accessInstructions}.",
+            Title = $"Facilities maintenance - {propertyName}",
+            Description = handoffDescription,
             ProblemDescription = issueDescription ?? issueType,
             AssetId = maintenanceAsset.Id,
             MaintenanceTypeId = maintenanceType.Id,
@@ -2266,8 +2312,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             CustomerBusinessPartnerId = customerBusinessPartnerId,
             MaintenanceLocation = "External",
             RequiredCompletionDate = targetDate,
-            EstimatedHours = maintenanceType.EstimatedHours > 0 ? maintenanceType.EstimatedHours : 2,
-            EstimatedCost = maintenanceType.EstimatedCost,
+            EstimatedHours = double.Parse(FieldValue(procedureCase, "estimatedHours")!, CultureInfo.InvariantCulture),
+            EstimatedCost = decimal.Parse(FieldValue(procedureCase, "estimatedCost")!, CultureInfo.InvariantCulture),
             RequiresShutdown = maintenanceType.RequiresShutdown,
             RequiresSafetyPermit = maintenanceType.RequiresSafetyPermit,
             SafetyRequirements = FirstNonBlank(maintenanceType.SafetyRequirements, FieldValue(procedureCase, "safetyNotes")),
@@ -2281,6 +2327,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 ["sourceReference"] = sourceReference,
                 ["sourceEntityType"] = procedureCase.EntityType,
                 ["propertyUnit"] = propertyUnit ?? string.Empty,
+                ["estateManagedAssetId"] = estateProperty?.Id.ToString() ?? string.Empty,
+                ["propertyName"] = propertyName,
+                ["problemDescription"] = issueDescription ?? string.Empty,
+                ["handoffDescription"] = handoffDescription ?? string.Empty,
+                ["accessInstructions"] = accessInstructions,
                 ["issueType"] = issueType,
                 ["serviceImpact"] = serviceImpact,
                 ["serviceProviderBusinessPartnerId"] = providerSelection?.Provider.Id.ToString() ?? string.Empty,
@@ -2424,72 +2475,119 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             || status.Trim().Equals("Closed", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<ErpSystem.Core.Entities.Maintenance.MaintenanceAsset?> ResolveFacilitiesMaintenanceAssetAsync(
+    private Task<MaintenanceAsset> ResolveFacilitiesMaintenanceAssetAsync(
         ProcedureCase procedureCase,
         Guid tenantId)
     {
         var propertyUnit = FirstNonBlank(FieldValue(procedureCase, "propertyUnit"), FieldValue(procedureCase, "propertyNumber"), FieldValue(procedureCase, "housePlotShopNumber"));
-        var normalizedPropertyUnit = propertyUnit?.ToLowerInvariant();
-        if (!string.IsNullOrWhiteSpace(normalizedPropertyUnit))
+        return EnsureFacilitiesMaintenanceAssetAsync(
+            _db, tenantId, propertyUnit,
+            FieldValue(procedureCase, "estateManagedAssetId"), _currentUser.UserName);
+    }
+
+    internal static async Task<MaintenanceAsset> EnsureFacilitiesMaintenanceAssetAsync(
+        ApplicationDbContext db,
+        Guid tenantId,
+        string? propertyUnit,
+        string? estateManagedAssetId,
+        string? createdBy)
+    {
+        if (string.IsNullOrWhiteSpace(propertyUnit))
+            throw new InvalidOperationException("Select an Estate property before creating the maintenance handoff.");
+
+        EstateManagedAsset? estateProperty;
+        if (!string.IsNullOrWhiteSpace(estateManagedAssetId))
         {
-            var matchingAsset = await _db.MaintenanceAssets
-                .AsNoTracking()
-                .Where(item => item.TenantId == tenantId && !item.IsDeleted)
-                .Where(item =>
-                    item.AssetNumber.ToLower() == normalizedPropertyUnit
-                    || item.Name.ToLower() == normalizedPropertyUnit
-                    || item.AssetNumber.ToLower().Contains(normalizedPropertyUnit)
-                    || item.Name.ToLower().Contains(normalizedPropertyUnit))
-                .OrderBy(item => item.AssetNumber)
-                .FirstOrDefaultAsync();
-            if (matchingAsset is not null)
-            {
-                return matchingAsset;
-            }
+            if (!Guid.TryParse(estateManagedAssetId, out var propertyId))
+                throw new InvalidOperationException("The selected Estate property ID is invalid.");
+            estateProperty = await db.EstateManagedAssets.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && item.Id == propertyId && !item.IsDeleted);
+        }
+        else
+        {
+            var matches = await db.EstateManagedAssets.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                    && (item.AssetCode == propertyUnit || item.ProjectUnitCode == propertyUnit))
+                .OrderBy(item => item.AssetCode == propertyUnit ? 0 : 1)
+                .Take(2).ToListAsync();
+            if (matches.Count > 1 && string.Equals(matches[0].AssetCode, matches[1].AssetCode, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("More than one Estate property matches this reference. Select the property again.");
+            if (matches.Count > 1 && !string.Equals(matches[0].AssetCode, propertyUnit, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("More than one Estate property matches this unit. Select the property again.");
+            estateProperty = matches.FirstOrDefault();
         }
 
-        return await _db.MaintenanceAssets
-            .AsNoTracking()
-            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.Status == AssetStatus.Active)
-            .OrderBy(item => item.AssetNumber)
-            .FirstOrDefaultAsync()
-            ?? await _db.MaintenanceAssets
-                .AsNoTracking()
-                .Where(item => item.TenantId == tenantId && !item.IsDeleted)
-                .OrderBy(item => item.AssetNumber)
-                .FirstOrDefaultAsync();
+        if (estateProperty is null)
+            throw new InvalidOperationException("The selected property is not in the Estate property register.");
+        if (!string.Equals(estateProperty.AssetCode, propertyUnit, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(estateProperty.ProjectUnitCode, propertyUnit, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The selected Estate property no longer matches this maintenance case. Select the property again.");
+
+        var marker = $"EST-{estateProperty.Id:N}";
+        var manualName = estateProperty.Name.Length <= 100 ? estateProperty.Name : estateProperty.Name[..100];
+        var displayName = $"{estateProperty.AssetCode} - {estateProperty.Name}";
+        var asset = await db.MaintenanceAssets.FirstOrDefaultAsync(item =>
+            item.TenantId == tenantId && !item.IsDeleted && item.AssetNumber == marker);
+        if (asset is null)
+        {
+            var manualMatches = await db.MaintenanceAssets
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                    && item.AssetNumber.ToLower() == estateProperty.AssetCode.ToLower())
+                .Take(2).ToListAsync();
+            if (manualMatches.Count > 1 || manualMatches.Count == 1
+                && !string.Equals(manualMatches[0].Name, manualName, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("A different Maintenance asset already uses this Estate property reference. Resolve the asset reference before creating the handoff.");
+            asset = manualMatches.FirstOrDefault();
+        }
+        if (asset is not null)
+        {
+            if (asset.Status != AssetStatus.Active)
+                throw new InvalidOperationException("The linked Maintenance asset is inactive. Reactivate it before creating the handoff.");
+            return asset;
+        }
+
+        var category = await db.MaintenanceAssetCategories.FirstOrDefaultAsync(item =>
+            item.TenantId == tenantId && !item.IsDeleted && item.IsActive && item.Code == "EST-PROP");
+        if (category is null)
+        {
+            category = new MaintenanceAssetCategory
+            {
+                TenantId = tenantId,
+                Name = "Estate Properties",
+                Code = "EST-PROP",
+                AssetType = "Building",
+                AutoGenerateSchedules = false,
+                CreatedBy = createdBy ?? "Facilities"
+            };
+            db.MaintenanceAssetCategories.Add(category);
+        }
+
+        asset = new MaintenanceAsset
+        {
+            TenantId = tenantId,
+            AssetNumber = marker,
+            Name = displayName[..Math.Min(100, displayName.Length)],
+            Description = $"Linked Estate property {estateProperty.AssetCode} ({estateProperty.Id}).",
+            AssetCategoryId = category.Id,
+            AssetCategory = category,
+            Location = estateProperty.Location,
+            Status = AssetStatus.Active,
+            CreatedBy = createdBy ?? "Facilities"
+        };
+        db.MaintenanceAssets.Add(asset);
+        await db.SaveChangesAsync();
+        return asset;
     }
 
     private async Task<ErpSystem.Core.Entities.Maintenance.MaintenanceType?> ResolveFacilitiesMaintenanceTypeAsync(
         ProcedureCase procedureCase,
         Guid tenantId)
     {
-        var issueType = FirstNonBlank(FieldValue(procedureCase, "issueType"), FieldValue(procedureCase, "complaintCategory"));
-        if (!string.IsNullOrWhiteSpace(issueType))
-        {
-            var normalizedIssueType = issueType.ToLowerInvariant();
-            var matchingType = await _db.MaintenanceTypes
-                .AsNoTracking()
-                .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
-                .Where(item =>
-                    item.Name.ToLower().Contains(normalizedIssueType)
-                    || item.Code.ToLower().Contains(normalizedIssueType)
-                    || item.Category.ToLower().Contains(normalizedIssueType))
-                .OrderBy(item => item.SortOrder)
-                .ThenBy(item => item.Name)
-                .FirstOrDefaultAsync();
-            if (matchingType is not null)
-            {
-                return matchingType;
-            }
-        }
-
+        if (!Guid.TryParse(FieldValue(procedureCase, "maintenanceTypeId"), out var maintenanceTypeId))
+            return null;
         return await _db.MaintenanceTypes
             .AsNoTracking()
-            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
-            .OrderByDescending(item => item.MaintenanceClass == "Corrective")
-            .ThenBy(item => item.SortOrder)
-            .ThenBy(item => item.Name)
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive && item.Id == maintenanceTypeId)
             .FirstOrDefaultAsync();
     }
 
@@ -2498,20 +2596,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         Guid tenantId)
     {
         var priority = FieldValue(procedureCase, "priority")?.Trim();
-        var desiredLevel = priority?.ToLowerInvariant() switch
-        {
-            "urgent" or "critical" or "emergency" => 1,
-            "high" => 2,
-            "normal" or "medium" => 3,
-            "low" => 4,
-            _ => 3
-        };
-
+        if (priority is null || !new[] { "Low", "Medium", "High" }.Contains(priority, StringComparer.OrdinalIgnoreCase))
+            return null;
         return await _db.PriorityLevels
             .AsNoTracking()
-            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
-            .OrderBy(item => item.Level == desiredLevel ? 0 : 1)
-            .ThenBy(item => item.Level)
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive && item.Name.ToLower() == priority.ToLower())
             .FirstOrDefaultAsync();
     }
 
@@ -4420,18 +4509,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 && item.Id == assetId
                 && !item.IsDeleted
                 && item.ExternalListingType != "None"
-                && (item.Status == EstateManagedAssetStatus.LandBank
-                    || item.Status == EstateManagedAssetStatus.Available
-                    || item.Status == EstateManagedAssetStatus.Reserved))
+                && item.Status == EstateManagedAssetStatus.Available)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(item => item.IsPublishedToExternalPortal, true)
                 .SetProperty(item => item.ExternalListingStatus, "Published")
                 .SetProperty(item => item.ExternalPublishedAt, item => item.ExternalPublishedAt ?? now)
-                .SetProperty(
-                    item => item.Status,
-                    item => item.Status == EstateManagedAssetStatus.Reserved
-                        ? EstateManagedAssetStatus.Available
-                        : item.Status)
                 .SetProperty(item => item.UpdatedAt, now));
 
         return updated > 0;
@@ -5996,6 +6078,17 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     {
         var currentStageFieldKeys = await GetCurrentStageFieldKeysAsync(procedureCase);
         var fields = procedureCase.Fields.OrderBy(item => item.CreatedAt).Select(ToFieldDto).ToList();
+        if (string.Equals(procedureCase.Module, "Facilities", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(procedureCase.EntityType, "EstateFacilityMaintenance", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var seed in BuildFacilitiesSeed(procedureCase.EntityType).Fields
+                .Where(item => new[] { "maintenanceTypeId", "handoffDescription", "estimatedHours", "estimatedCost" }
+                    .Contains(item.Key, StringComparer.OrdinalIgnoreCase)))
+            {
+                if (fields.All(item => !string.Equals(item.Key, seed.Key, StringComparison.OrdinalIgnoreCase)))
+                    fields.Add(new ProcedureCaseFieldDto(Guid.NewGuid(), seed.Key, seed.Label, seed.FieldType, null, seed.Options));
+            }
+        }
         var documents = procedureCase.Documents.OrderBy(item => item.CreatedAt).ToList();
         var dmsDocuments = await LoadDmsDocumentSnapshotsAsync(procedureCase.TenantId, documents);
         await AddFacilitiesMaintenanceExecutionStatusFieldsAsync(procedureCase, fields);
@@ -6245,15 +6338,37 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             .ToList() ?? [];
         if (configuredFields.Count > 0)
         {
-            return configuredFields;
+            return FacilitiesMaintenanceStageFieldKeys(procedureCase, configuredFields);
         }
 
         if (!IsPropertyManagementListingApplication(procedureCase))
         {
-            return [];
+            return FacilitiesMaintenanceStageFieldKeys(procedureCase, []);
         }
 
         return GetPropertyListingStageFieldKeys(procedureCase);
+    }
+
+    private static IReadOnlyList<string> FacilitiesMaintenanceStageFieldKeys(ProcedureCase procedureCase, IReadOnlyList<string> configuredFields)
+    {
+        if (!string.Equals(procedureCase.Module, "Facilities", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(procedureCase.EntityType, "EstateFacilityMaintenance", StringComparison.OrdinalIgnoreCase))
+            return configuredFields;
+
+        if (string.Equals(procedureCase.CurrentStageName, "Facilities Intake", StringComparison.OrdinalIgnoreCase))
+            return configuredFields.Concat(["propertyUnit", "location", "contactReference", "issueType", "serviceImpact", "targetDate", "preferredVisitDate", "accessInstructions", "issueDescription"])
+                .Where(key => !string.Equals(key, "priority", StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        if (string.Equals(procedureCase.CurrentStageName, "Maintenance Closeout", StringComparison.OrdinalIgnoreCase))
+            return configuredFields.Concat(["inspectionOutcome", "inspectionReference", "requesterFeedbackStatus", "closureNotes"])
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        if (!string.Equals(procedureCase.CurrentStageName, "Maintenance Handoff Review", StringComparison.OrdinalIgnoreCase))
+            return configuredFields;
+
+        return configuredFields.Concat(["priority", "maintenanceTypeId", "handoffDescription", "estimatedHours", "estimatedCost", "serviceProviderBusinessPartnerId", "serviceProviderContractId"])
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private static bool IsPropertyManagementListingApplication(ProcedureCase procedureCase)
