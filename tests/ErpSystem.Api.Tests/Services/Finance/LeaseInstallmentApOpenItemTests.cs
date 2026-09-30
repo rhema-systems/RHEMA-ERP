@@ -1008,6 +1008,7 @@ public sealed class LeaseInstallmentApOpenItemTests
                 request.EffectiveDate.Date,
                 request.FreezeStage,
                 request.SourceWorkflowInstanceId,
+                request.SourceWorkflowEntityType,
                 BookId,
                 "PRIMARY",
                 "GHS",
