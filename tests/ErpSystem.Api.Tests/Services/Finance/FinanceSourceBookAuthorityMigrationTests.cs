@@ -49,7 +49,6 @@ public sealed class FinanceSourceBookAuthorityMigrationTests
             .And.Contain("AK_FinanceSourceBookAuthorities_TenantId_Id")
             .And.Contain("IX_FinanceSourceBookAuthorities_SourceVersion")
             .And.Contain("IX_FinanceSourceBookAuthorities_SourceWorkflow")
-            .And.Contain("AK_WorkflowInstances_TenantId_Id")
             .And.Contain("FK_FinanceSourceBookAuthorities_WorkflowInstances_TenantId_SourceWorkflowInstanceId")
             .And.Contain("IX_FinanceSourceBookAuthorities_Tenant_Workflow")
             .And.Contain("CK_FinanceSourceBookAuthorities_Lineage")
@@ -69,7 +68,8 @@ public sealed class FinanceSourceBookAuthorityMigrationTests
             .And.Contain("CAST(f.PostingDate AS date)<>i.EffectiveDate")
             .And.Contain("SOURCE_BOOK_AUTHORITY_DOWN_BLOCKED");
         source.Should().NotContain("UPDATE [dbo].[FinanceSourceBookAuthorities]")
-            .And.NotContain("INSERT INTO [dbo].[FinanceSourceBookAuthorities]");
+            .And.NotContain("INSERT INTO [dbo].[FinanceSourceBookAuthorities]")
+            .And.NotContain("AK_WorkflowInstances_TenantId_Id");
     }
 
     private static string ReadMigration()

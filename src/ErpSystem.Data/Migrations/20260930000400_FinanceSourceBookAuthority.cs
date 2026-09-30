@@ -17,9 +17,6 @@ public partial class FinanceSourceBookAuthority : Migration
                OR OBJECT_ID(N'[dbo].[FinanceSourceBookAuthorities]', N'U') IS NOT NULL
                 THROW 51000, 'SOURCE_BOOK_AUTHORITY_SCHEMA_EXISTS: reconcile the existing schema before applying this migration.', 1;
 
-            ALTER TABLE [dbo].[WorkflowInstances]
-                ADD CONSTRAINT [AK_WorkflowInstances_TenantId_Id] UNIQUE ([TenantId],[Id]);
-
             CREATE TABLE [dbo].[FinanceSourceBookAuthorities]
             (
                 [Id] uniqueidentifier NOT NULL,
@@ -270,7 +267,6 @@ public partial class FinanceSourceBookAuthority : Migration
             DROP TRIGGER IF EXISTS [dbo].[TR_FinanceSourceBookAuthorities_Evidence];
             DROP TABLE [dbo].[FinanceSourceBookAuthorityOrigins];
             DROP TABLE [dbo].[FinanceSourceBookAuthorities];
-            ALTER TABLE [dbo].[WorkflowInstances] DROP CONSTRAINT [AK_WorkflowInstances_TenantId_Id];
             """);
     }
 }
