@@ -38,7 +38,7 @@ import { accountsPayableService } from '@/services/accountsPayableService';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import { financeService } from '@/services/finance.service';
 import { taxDataService } from '@/services/finance/tax-data.service';
-import { allocateInvoiceCash, invoiceWithholdingChoice, paymentWithholdingChoice } from '@/lib/finance/ap-payment-withholding';
+import { allocateInvoiceCash, invoiceWithholdingChoice, paymentWithholdingChoice, requireGhsWhtScope } from '@/lib/finance/ap-payment-withholding';
 import { PaymentMethodType } from '@/types/cash-management';
 import { TaxApplicability, TaxCategory, type Tax, type WhtCalculationResult } from '@/types/tax';
 import type { OutstandingVendorInvoice } from '@/types/ap';
@@ -387,6 +387,7 @@ export default function NewVendorPaymentPage() {
                         const choice = invoiceWithholdingChoice(invoice);
                         let calculation = null;
                         if (!existingAdvancePaymentId && choice?.taxId) {
+                            requireGhsWhtScope(form.getValues('currencyCode'), functionalCurrencyCode, [invoice.currencyCode]);
                             if (!invoice.withholdingContractReference || invoice.withholdingSupplyCategory == null) {
                                 throw new Error(`${invoice.invoiceNumber} is missing its WHT contract/category scope.`);
                             }
@@ -395,13 +396,18 @@ export default function NewVendorPaymentPage() {
                                 paymentDate: form.getValues('paymentDate').toISOString(),
                                 taxableBase: invoice.balanceAmount,
                                 vendorInvoiceIds: [invoice.invoiceId],
+                                invoiceSettlements: [{ vendorInvoiceId: invoice.invoiceId, grossSettlementAmount: invoice.balanceAmount,
+                                    exchangeRateId: invoice.currencyCode === functionalCurrencyCode ? undefined : form.getValues('exchangeRateId') }],
                                 contractReference: invoice.withholdingContractReference,
                                 supplyCategory: invoice.withholdingSupplyCategory,
                             });
                         }
                         if (cancelled) return;
                         const discountAmount = Number(invoice.discountAmount) || 0;
-                        const withholdingAmount = calculation?.withholdingAmount ?? 0;
+                        const functionalRate = invoice.currencyCode === functionalCurrencyCode ? 1 : Number(form.getValues('exchangeRate'));
+                        if (calculation && (!Number.isFinite(functionalRate) || functionalRate <= 0 || invoice.currencyCode !== form.getValues('currencyCode')))
+                            throw new Error('Select the invoice currency and an approved settlement rate before calculating WHT.');
+                        const withholdingAmount = roundMoney((calculation?.withholdingAmount ?? 0) / functionalRate);
                         const netPaymentAmount = roundMoney(Math.max(invoice.balanceAmount - discountAmount - withholdingAmount, 0));
                         form.setValue('totalAmount', netPaymentAmount);
                         setAllocations({ [invoice.invoiceId]: netPaymentAmount });
@@ -486,6 +492,8 @@ export default function NewVendorPaymentPage() {
                             : amount,
                         discountAmount: Number(discountAllocations[invoiceId]) || 0,
                         withholdingTaxAmount: Number(withholdingAllocations[invoiceId]) || 0,
+                        invoiceSettlementExchangeRateId: invoice?.currencyCode !== functionalCurrencyCode &&
+                            invoice?.currencyCode === data.currencyCode ? data.exchangeRateId : undefined,
                     };
                 });
 
@@ -596,9 +604,13 @@ export default function NewVendorPaymentPage() {
             }
 
             let verifiedWithholding: WhtCalculationResult | null = null;
+            if (data.withholdingTaxId) {
+                requireGhsWhtScope(data.currencyCode, functionalCurrencyCode, paymentAllocations.map(allocation =>
+                    outstandingInvoices?.find(invoice => invoice.invoiceId === allocation.vendorInvoiceId)?.currencyCode ?? ''));
+            }
             const whtScopeKeys = Array.from(new Set(paymentAllocations.map(allocation => {
                 const invoice = outstandingInvoices?.find(item => item.invoiceId === allocation.vendorInvoiceId);
-                return `${invoice?.withholdingContractReference || ''}|${invoice?.withholdingSupplyCategory ?? ''}`;
+                return `${invoice?.withholdingSupplyCategory ?? ''}`;
             })));
             const requiresServerFunctionalWithholding = whtScopeKeys.length !== 1 || paymentAllocations.some(allocation => {
                 const invoice = outstandingInvoices?.find(item => item.invoiceId === allocation.vendorInvoiceId);
@@ -623,6 +635,11 @@ export default function NewVendorPaymentPage() {
                     paymentDate: data.paymentDate.toISOString(),
                     taxableBase: withholdingTaxableBase,
                     vendorInvoiceIds: paymentAllocations.map(allocation => allocation.vendorInvoiceId),
+                    invoiceSettlements: paymentAllocations.map(allocation => ({
+                        vendorInvoiceId: allocation.vendorInvoiceId,
+                        grossSettlementAmount: roundMoney(allocation.allocatedAmount + (allocation.discountAmount || 0) + (allocation.withholdingTaxAmount || 0)),
+                        exchangeRateId: allocation.invoiceSettlementExchangeRateId,
+                    })),
                     contractReference: scopedInvoice.withholdingContractReference,
                     supplyCategory: scopedInvoice.withholdingSupplyCategory,
                 });
@@ -797,9 +814,11 @@ export default function NewVendorPaymentPage() {
             .sort((a, b) => new Date(a.dueDate || a.invoiceDate).getTime() - new Date(b.dueDate || b.invoiceDate).getTime());
         let invoicesToAllocate = eligibleInvoices;
         const scopeKey = (invoice: OutstandingVendorInvoice) =>
-            `${invoice.withholdingContractReference || ''}|${invoice.withholdingSupplyCategory ?? ''}`;
-        const buildAllocation = (rateForInvoice: (invoice: OutstandingVendorInvoice) => number) => {
+            `${invoice.withholdingSupplyCategory ?? ''}`;
+        const buildAllocation = (rateForInvoice: (invoice: OutstandingVendorInvoice) => number,
+            catchUpByScope = new Map<string, number>()) => {
             let remaining = currentAmount;
+            const remainingCatchUp = new Map(catchUpByScope);
             const cash: Record<string, number> = {};
             const discounts: Record<string, number> = {};
             const withholding: Record<string, number> = {};
@@ -808,20 +827,16 @@ export default function NewVendorPaymentPage() {
             for (const inv of invoicesToAllocate) {
                 if (remaining <= 0) break;
                 const discountAmount = Number(inv.discountAmount) || 0;
-                const rate = Math.max(0, Math.min(rateForInvoice(inv), 99.9999)) / 100;
-                const fullWithholding = roundMoney(inv.balanceAmount * rate);
-                const fullCashRequired = Math.max(inv.balanceAmount - discountAmount - fullWithholding, 0);
-                const settlesInFull = remaining + 0.01 >= fullCashRequired;
-                const settlementBase = settlesInFull
-                    ? inv.balanceAmount
-                    : Math.min(inv.balanceAmount, remaining / Math.max(1 - rate, 0.000001));
-                const withholdingAmount = roundMoney(settlementBase * rate);
-                const appliedDiscount = settlesInFull ? discountAmount : 0;
-                const allocateAmount = Math.min(remaining, Math.max(settlementBase - appliedDiscount - withholdingAmount, 0));
-                cash[inv.invoiceId] = allocateAmount;
-                if (appliedDiscount > 0) discounts[inv.invoiceId] = appliedDiscount;
-                if (withholdingAmount > 0) withholding[inv.invoiceId] = withholdingAmount;
-                remaining = roundMoney(remaining - allocateAmount);
+                const rate = rateForInvoice(inv);
+                if (rate > 0 && (inv.netSupplyAmount == null || inv.totalAmount <= 0))
+                    throw new Error(`${inv.invoiceNumber} is missing net supply evidence. Refresh the invoice list.`);
+                const split = allocateInvoiceCash(inv.balanceAmount, remaining, discountAmount, rate,
+                    rate > 0 ? Number(inv.netSupplyAmount) / inv.totalAmount : 1, remainingCatchUp.get(scopeKey(inv)) || 0);
+                remainingCatchUp.delete(scopeKey(inv));
+                cash[inv.invoiceId] = split.cash;
+                if (split.discount > 0) discounts[inv.invoiceId] = split.discount;
+                if (split.withholding > 0) withholding[inv.invoiceId] = split.withholding;
+                remaining = roundMoney(remaining - split.cash);
             }
             return { cash, discounts, withholding };
         };
@@ -850,12 +865,19 @@ export default function NewVendorPaymentPage() {
             }
             let next = buildAllocation(() => configuredRate);
             if (taxId && selectedSupplierId) {
+                requireGhsWhtScope(currentCurrencyCode, functionalCurrencyCode, invoicesToAllocate.map(invoice => invoice.currencyCode));
                 let finalCalculations: WhtCalculationResult[] = [];
                 let ratesByScope = new Map<string, number>();
-                // Rebuild twice because removing provisional WHT increases the partial-payment
-                // base and may itself cross a statutory threshold.
-                for (let pass = 0; pass < 2; pass += 1) {
-                    const grouped = new Map<string, { invoice: OutstandingVendorInvoice; taxableBase: number; invoiceIds: string[] }>();
+                const functionalRate = currentCurrencyCode === functionalCurrencyCode ? 1 : Number(form.getValues('exchangeRate'));
+                if (!Number.isFinite(functionalRate) || functionalRate <= 0 ||
+                    (currentCurrencyCode !== functionalCurrencyCode && !form.getValues('exchangeRateId')))
+                    throw new Error('An approved settlement rate is required before calculating WHT.');
+                // Tax/threshold/catch-up policy comes from the server. Rebuild until the exact
+                // proposed settlements are verified; do not submit an unverified second pass.
+                let verified = false;
+                for (let pass = 0; pass < 8; pass += 1) {
+                    const grouped = new Map<string, { invoice: OutstandingVendorInvoice; taxableBase: number; invoiceIds: string[];
+                        invoiceSettlements: { vendorInvoiceId: string; grossSettlementAmount: number; exchangeRateId?: string }[] }>();
                     for (const invoiceId of Object.keys(next.cash)) {
                         const invoice = displayedOutstandingInvoices.find(item => item.invoiceId === invoiceId);
                         if (!invoice) continue;
@@ -870,6 +892,10 @@ export default function NewVendorPaymentPage() {
                             invoice,
                             taxableBase: (existing?.taxableBase || 0) + taxableBase,
                             invoiceIds: [...(existing?.invoiceIds || []), invoiceId],
+                            invoiceSettlements: [...(existing?.invoiceSettlements || []), {
+                                vendorInvoiceId: invoiceId, grossSettlementAmount: roundMoney(taxableBase),
+                                exchangeRateId: currentCurrencyCode === functionalCurrencyCode ? undefined : form.getValues('exchangeRateId'),
+                            }],
                         });
                     }
                     finalCalculations = await Promise.all(Array.from(grouped.values()).map(group => {
@@ -884,16 +910,27 @@ export default function NewVendorPaymentPage() {
                             paymentDate: form.getValues('paymentDate').toISOString(),
                             taxableBase: group.taxableBase,
                             vendorInvoiceIds: group.invoiceIds,
+                            invoiceSettlements: group.invoiceSettlements,
                             contractReference,
                             supplyCategory,
                         });
                     }));
                     ratesByScope = new Map(finalCalculations.map(calculation => [
-                        `${calculation.contractReference}|${calculation.supplyCategory}`,
+                        `${calculation.supplyCategory}`,
                         calculation.thresholdApplied ? calculation.taxRate : 0,
                     ]));
-                    next = buildAllocation(invoice => ratesByScope.get(scopeKey(invoice)) || 0);
+                    verified = finalCalculations.every(calculation => {
+                        const scopeInvoices = grouped.get(`${calculation.supplyCategory}`)?.invoiceIds || [];
+                        const supplied = roundMoney(scopeInvoices.reduce((sum, id) => sum + roundMoney((next.withholding[id] || 0) * functionalRate), 0));
+                        return Math.abs(roundMoney(supplied - calculation.withholdingAmount)) <= 0.01;
+                    });
+                    if (verified) break;
+                    const catchUpByScope = new Map(finalCalculations.map(calculation => [
+                        `${calculation.supplyCategory}`, roundMoney((calculation.catchUpWithholdingAmount || 0) / functionalRate),
+                    ]));
+                    next = buildAllocation(invoice => ratesByScope.get(scopeKey(invoice)) || 0, catchUpByScope);
                 }
+                if (!verified) throw new Error('The proposed payment does not reconcile to the statutory WHT calculation. Review the cash amount, FX rounding and threshold catch-up before saving.');
                 setWithholdingCalculation(finalCalculations[0] || null);
             } else {
                 setWithholdingCalculation(null);

@@ -133,6 +133,8 @@ namespace ErpSystem.Core.Entities.Finance
         public virtual TaxGroup? TaxGroup { get; set; }
 
         public Guid? JournalEntryId { get; set; }
+        public Guid? SourceBookAuthorityId { get; set; }
+        public virtual FinanceSourceBookAuthority? SourceBookAuthority { get; set; }
 
         // Multi-tenant
         public Guid TenantId { get; set; }

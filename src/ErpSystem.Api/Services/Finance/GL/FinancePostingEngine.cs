@@ -8,6 +8,7 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -55,6 +56,55 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         FinancePostingProducerContext producerContext,
         CancellationToken cancellationToken = default) =>
         await PostCoreAsync(request, request.AccountingBookCode, producerContext ?? throw new ArgumentNullException(nameof(producerContext)), allowHistoricalMappingException: false, cancellationToken);
+
+    public async Task<FinancePostingResultDto> PostYearEndAsync(
+        FinancePostingRequestV2Dto request, Guid bookCloseCycleId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = _currentUserService.GetRequiredFinanceTenantId();
+        var actor = GetCurrentUserGuid() ?? throw new UnauthorizedAccessException("An authenticated Finance user is required.");
+        if (_context.Database.IsRelational() && (_context.Database.CurrentTransaction is null
+            || _context.Database.CurrentTransaction.GetDbTransaction().IsolationLevel != System.Data.IsolationLevel.Serializable))
+            throw new InvalidOperationException("Year-end posting requires the caller's serializable transaction.");
+        var cycle = _context.YearEndBookCloseCycles.Local.SingleOrDefault(item =>
+            item.Id == bookCloseCycleId && item.TenantId == tenantId && !item.IsDeleted);
+        var stored = await _context.YearEndBookCloseCycles.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.Id == bookCloseCycleId && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+        if (cycle == null || stored == null || cycle.AccountingBookId != stored.AccountingBookId
+            || cycle.AccountingBookCode != stored.AccountingBookCode || cycle.FunctionalCurrencyCode != stored.FunctionalCurrencyCode
+            || cycle.FiscalYearId != stored.FiscalYearId || cycle.Status != stored.Status
+            || cycle.ClosingJournalEntryId != stored.ClosingJournalEntryId
+            || cycle.RetainedEarningsAccountId != stored.RetainedEarningsAccountId || cycle.IdempotencyKey != stored.IdempotencyKey
+            || cycle.ClosedByUserId != stored.ClosedByUserId || cycle.ClosedAtUtc != stored.ClosedAtUtc
+            || cycle.PeriodAuthoritySnapshotJson != stored.PeriodAuthoritySnapshotJson)
+            throw new InvalidOperationException("Year-end posting requires its durable, unchanged book-close cycle authority.");
+        var reverse = request.SourceDocumentType == "YearEndCloseReversal";
+        if (request.SourceModule != "GL" || request.SourceDocumentTenantId != tenantId || request.SourceDocumentId != cycle.Id
+            || request.AccountingBookCode != cycle.AccountingBookCode || request.FunctionalCurrencyCode != cycle.FunctionalCurrencyCode
+            || request.ExistingJournalEntryId != null || !request.AllowPostingToClosedPeriod
+            || (reverse
+                ? cycle.Status != "Closed" || cycle.ClosingJournalEntryId == null
+                    || request.ReversalOfJournalEntryId != cycle.ClosingJournalEntryId || request.PostingAction != "Reverse"
+                : request.SourceDocumentType != "YearEndClose" || cycle.Status != "Closing"
+                    || cycle.ClosedByUserId != actor || request.ReversalOfJournalEntryId != null || request.PostingAction != "Post")
+            || request.IdempotencyKey != $"GL:{(reverse ? "YearEndCloseReversal" : "YearEndClose")}:{tenantId:N}:{cycle.AccountingBookId:N}:{cycle.Id:N}")
+            throw new InvalidOperationException("The year-end request does not match its exact book-close cycle.");
+        var period = await _context.FiscalPeriods.Include(item => item.FiscalYear).SingleOrDefaultAsync(item =>
+            item.Id == request.FiscalPeriodId && item.TenantId == tenantId && item.FiscalYearId == cycle.FiscalYearId
+            && !item.IsDeleted, cancellationToken);
+        if (period == null || period.FiscalYear.IsLocked || period.FiscalYear.IsClosed
+            || request.PostingDate.Date != period.FiscalYear.EndDate.Date || period.IsLocked)
+            throw new InvalidOperationException("Year-end posting date and fiscal-year authority do not match.");
+        var currentPeriodAuthority = await YearEndTenantPeriodAuthority.CaptureAsync(
+            _context, tenantId, cycle.FiscalYearId, cancellationToken);
+        if (!string.Equals(cycle.PeriodAuthoritySnapshotJson, currentPeriodAuthority, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "Year-end posting requires unchanged captured tenant fiscal-period close authority.");
+        var validation = await ValidatePostingRequestAsync(tenantId, request, cycle.AccountingBookCode,
+            producerContext: null, allowHistoricalMappingException: reverse, cancellationToken, cycle);
+        if (validation.AccountingBookId != cycle.AccountingBookId)
+            throw new InvalidOperationException("The resolved accounting book differs from the frozen close cycle.");
+        return await ExecutePostingAsync(tenantId, validation, request, accountingEventContext: null, cancellationToken, cycle);
+    }
 
     private async Task<FinancePostingResultDto> PostCoreAsync(
         FinancePostingCommandDto request,
@@ -123,10 +173,13 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         ValidatedPosting validation,
         FinancePostingCommandDto request,
         AccountingEventPostingAuthority? accountingEventContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        YearEndBookCloseCycle? yearEndCycle = null)
     {
         await EnsureNoParallelBookPostingAsync(tenantId, validation, acquireLock: true,
             accountingEventContext, cancellationToken);
+        if (yearEndCycle == null)
+            await EnsureBookYearIsOpenAsync(tenantId, validation.AccountingBookId, validation.FiscalPeriod.FiscalYearId, cancellationToken);
         var duplicateInsideTransaction = await FindExistingPostingAsync(tenantId, validation, accountingEventContext, cancellationToken);
         if (duplicateInsideTransaction != null)
         {
@@ -153,7 +206,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         // Resolve every active foreign-currency representation before any ledger row is
         // committed. Missing rates, mappings, or rounding authority therefore roll the
         // Primary posting back instead of creating an inconsistent Parallel ledger.
-        var parallelReplicas = await BuildParallelReplicasAsync(
+        var parallelReplicas = yearEndCycle != null ? Array.Empty<ParallelReplica>() : await BuildParallelReplicasAsync(
             tenantId, validation, journalEntry, now, postedByUserId, cancellationToken);
 
         if (validation.BudgetReservationIds.Count > 0)
@@ -924,6 +977,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         var replicas = new List<ParallelReplica>(books.Count);
         foreach (var book in books)
         {
+            await EnsureBookYearIsOpenAsync(tenantId, book.Id, validation.FiscalPeriod.FiscalYearId, cancellationToken);
             if (string.IsNullOrWhiteSpace(book.FunctionalCurrencyCode)
                 || string.Equals(book.FunctionalCurrencyCode, validation.FunctionalCurrencyCode, StringComparison.Ordinal))
                 throw new InvalidOperationException($"PARALLEL_CURRENCY_INVALID: Parallel book {book.Code} must use a foreign currency.");
@@ -1289,8 +1343,15 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         string accountingBookCode,
         FinancePostingProducerContext? producerContext,
         bool allowHistoricalMappingException,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        YearEndBookCloseCycle? yearEndCycle = null)
     {
+        YearEndClosingPlan? yearEndPlan = null;
+        if (yearEndCycle?.Status == "Closing")
+        {
+            yearEndPlan = await YearEndClosingPlan.BuildAsync(_context, yearEndCycle, cancellationToken);
+            yearEndPlan.RequireExactLines(request.Lines);
+        }
         if (!await _context.Tenants.AnyAsync(t => t.Id == tenantId && !t.IsDeleted, cancellationToken))
         {
             throw new InvalidOperationException("Finance tenant context is invalid.");
@@ -1306,6 +1367,9 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             sourceModule,
             request.OriginModuleCode);
         var sourceDocumentType = NormalizeRequired(request.SourceDocumentType, "Source document type", 100);
+        if (yearEndCycle == null && (string.Equals(sourceDocumentType, "YearEndClose", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sourceDocumentType, "YearEndCloseReversal", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("Year-end postings must use the governed book-close cycle workflow.");
         var route = producerContext?.Definition
             ?? FinanceDimensionRouteCatalog.MatchLegacyPosting(sourceModule, sourceDocumentType);
         if (producerContext is not null
@@ -1341,7 +1405,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 tenantId, request, normalizedAccountingBookCode, "BOOK_NOT_POSTABLE", cancellationToken);
             throw new InvalidOperationException("Accounting book is unavailable for posting.");
         }
-        if (accountingBook.BookType == AccountingBookType.ParallelFull)
+        if (accountingBook.BookType == AccountingBookType.ParallelFull && yearEndCycle == null)
             throw new InvalidOperationException("PARALLEL_DIRECT_POSTING_FORBIDDEN: Parallel books accept only immutable system-generated replicas of Primary postings.");
         if (accountingBook.BookType == AccountingBookType.PrimaryFull
             && (accountingBook.EffectiveFromUtc.HasValue || accountingBook.EffectiveToUtc.HasValue))
@@ -1420,16 +1484,23 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         var fiscalPeriod = await ResolveFiscalPeriodAsync(tenantId, postingDate, request.FiscalPeriodId, cancellationToken);
         // Year-end closing may target the closed final period, but an explicit period lock is
         // still authoritative and must be lifted through the controlled reopen process first.
-        var isYearEndClosePosting = request.AllowPostingToClosedPeriod
+        var isYearEndClosePosting = yearEndCycle != null && request.AllowPostingToClosedPeriod
             && !fiscalPeriod.IsLocked
             && string.Equals(sourceModule, "GL", StringComparison.OrdinalIgnoreCase)
             && (string.Equals(sourceDocumentType, "YearEndClose", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(sourceDocumentType, "YearEndCloseReversal", StringComparison.OrdinalIgnoreCase));
 
+        if (yearEndCycle == null)
+            await EnsureBookYearIsOpenAsync(tenantId, accountingBook.Id, fiscalPeriod.FiscalYearId, cancellationToken);
+
         if ((!fiscalPeriod.IsOpen || fiscalPeriod.IsClosed || fiscalPeriod.IsLocked) && !isYearEndClosePosting)
         {
             await RecordPostingBlockedByPeriodAuditAsync(tenantId, request, fiscalPeriod, postingDate, cancellationToken);
-            throw new InvalidOperationException("Posting period is not open.");
+            var periodState = fiscalPeriod.IsLocked ? "locked" : fiscalPeriod.IsClosed ? "closed" : "not open";
+            throw new InvalidOperationException(
+                $"Posting period is not open. Posting date {postingDate:yyyy-MM-dd}, book '{accountingBook.Code}', " +
+                $"fiscal period '{fiscalPeriod.PeriodCode}' ({fiscalPeriod.PeriodName}) is {periodState}. " +
+                "Ask Finance to open the tenant fiscal period through the approved workflow, or correct the document date.");
         }
 
         if (!isYearEndClosePosting)
@@ -1590,7 +1661,11 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 exchangeRateDate = null;
             }
 
-            var dimensionSet = await ResolveDimensionSetAsync(
+            // Only a validated immutable close-cycle plan may carry historical coding into
+            // a new nominal/equity transfer. Ordinary producers retain the existing resolver.
+            var dimensionSet = yearEndPlan != null
+                ? ResolveYearEndDimensionSet(yearEndPlan.Sources[line.SourceDocumentLineId!.Value])
+                : await ResolveDimensionSetAsync(
                 tenantId,
                 postingDate,
                 request,
@@ -1712,6 +1787,11 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         foreach (var line in normalizedLines)
         {
             var account = accounts[line.AccountId];
+            // Parallel year-end transfers close that book's functional balances; they do not
+            // introduce a new foreign transaction into the primary account's native ledger.
+            if (yearEndCycle != null && accountingBook.BookType == AccountingBookType.ParallelFull
+                && string.Equals(line.TransactionCurrency, functionalCurrency, StringComparison.Ordinal))
+                continue;
             var accountCurrency = NormalizeCurrency(account.CurrencyCode, "Account currency", functionalCurrency);
             if (!account.IsMultiCurrency
                 && !string.Equals(accountCurrency, line.TransactionCurrency, StringComparison.OrdinalIgnoreCase))
@@ -1841,6 +1921,13 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 cancellationToken);
 
         return period ?? throw new InvalidOperationException("No fiscal period covers the posting date for this tenant.");
+    }
+
+    private async Task EnsureBookYearIsOpenAsync(Guid tenantId, Guid bookId, Guid fiscalYearId, CancellationToken ct)
+    {
+        if (await _context.YearEndBookCloseCycles.AsNoTracking().AnyAsync(item => item.TenantId == tenantId
+            && item.AccountingBookId == bookId && item.FiscalYearId == fiscalYearId && item.Status != "Reopened", ct))
+            throw new InvalidOperationException("The accounting book is closed for this fiscal year. Reopen its year-end close cycle first.");
     }
 
     private async Task EnsureOriginModuleCanPostAsync(
@@ -3348,6 +3435,11 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
         return new ValidatedDimensionSet(dimensionSetId, combinationHash, displayValue, resolvedItems, true);
     }
 
+    private static ValidatedDimensionSet? ResolveYearEndDimensionSet(AccountTransaction source) =>
+        source.FinanceDimensionSnapshot != null ? ToValidatedDimensionSet(source.FinanceDimensionSnapshot)
+        : source.FinanceDimensionSet != null ? ToValidatedDimensionSet(source.FinanceDimensionSet, requiresInsert: false)
+        : null;
+
     private async Task EnsureDimensionSetsAsync(
         Guid tenantId,
         IReadOnlyList<ValidatedPostingLine> lines,
@@ -3709,4 +3801,164 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
         ExchangeRateType RateType,
         ExchangeRateQuoteSide QuoteSide,
         bool IsOverride);
+}
+
+internal static class YearEndTenantPeriodAuthority
+{
+    private const string SnapshotVersion = "TENANT-FISCAL-PERIOD-CLOSE-V2";
+
+    internal static async Task<string> CaptureAsync(
+        ApplicationDbContext context,
+        Guid tenantId,
+        Guid fiscalYearId,
+        CancellationToken cancellationToken = default)
+    {
+        var year = await context.FiscalYears.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.Id == fiscalYearId && !item.IsDeleted,
+            cancellationToken)
+            ?? throw new InvalidOperationException("The tenant fiscal year is unavailable.");
+        if (year.IsLocked)
+            throw new InvalidOperationException("The tenant fiscal year is locked.");
+        if (year.IsClosed)
+            throw new InvalidOperationException("The tenant fiscal year is already globally closed.");
+
+        var periods = await context.FiscalPeriods.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && item.FiscalYearId == fiscalYearId && !item.IsDeleted)
+            .OrderBy(item => item.StartDate)
+            .ThenBy(item => item.EndDate)
+            .ThenBy(item => item.Id)
+            .ToListAsync(cancellationToken);
+        if (periods.Count == 0)
+            throw new InvalidOperationException("The fiscal year has no tenant fiscal periods.");
+
+        var expectedStart = year.StartDate.Date;
+        foreach (var period in periods)
+        {
+            if (period.StartDate.Date != expectedStart || period.EndDate.Date < period.StartDate.Date
+                || period.EndDate.Date > year.EndDate.Date)
+                throw new InvalidOperationException(
+                    "Tenant fiscal periods must cover the fiscal year exactly once without gaps or overlaps.");
+            expectedStart = period.EndDate.Date.AddDays(1);
+            if (!period.IsClosed || period.IsOpen || period.IsLocked
+                || !string.Equals(period.PeriodStatus, "Closed", StringComparison.Ordinal)
+                || period.ClosedByUserId == null || period.ClosedDate == null)
+                throw new InvalidOperationException(
+                    $"Fiscal period '{period.PeriodCode}' is not an unlocked, consistently closed tenant period.");
+        }
+        if (expectedStart != year.EndDate.Date.AddDays(1))
+            throw new InvalidOperationException(
+                "Tenant fiscal periods must cover the fiscal year exactly once without gaps or overlaps.");
+
+        var periodIds = periods.Select(item => item.Id).ToArray();
+        var closeCycles = await context.FinanceCloseCycles.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && periodIds.Contains(item.FiscalPeriodId)
+                && !item.IsDeleted && item.Status == FinanceCloseStatuses.Closed)
+            .ToListAsync(cancellationToken);
+        var cycleIds = closeCycles.Select(item => item.Id).ToArray();
+        var certifications = await context.FinanceCloseCertifications.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && cycleIds.Contains(item.FinanceCloseCycleId)
+                && !item.IsDeleted && !item.IsSuperseded)
+            .ToListAsync(cancellationToken);
+
+        var snapshots = new List<TenantPeriodCloseEvidence>(periods.Count);
+        foreach (var period in periods)
+        {
+            var cycleRows = closeCycles.Where(item => item.FiscalPeriodId == period.Id).ToArray();
+            if (cycleRows.Length != 1)
+                throw new InvalidOperationException(
+                    $"Fiscal period '{period.PeriodCode}' must retain exactly one current closed Finance close cycle.");
+            var cycle = cycleRows[0];
+            var certificateRows = certifications.Where(item => item.FinanceCloseCycleId == cycle.Id).ToArray();
+            if (certificateRows.Length != 1)
+                throw new InvalidOperationException(
+                    $"Fiscal period '{period.PeriodCode}' must retain one active Finance close certification.");
+            var certificate = certificateRows[0];
+            if (cycle.PreparedAt == null || cycle.ClosedAt == null
+                || certificate.PreparedByUserId == null || certificate.PreparedAt == null
+                || certificate.ReviewedByUserId == null || certificate.ReviewedAt == null
+                || certificate.ApprovedByUserId == null || certificate.ApprovedAt == null
+                || certificate.PreparedByUserId == certificate.ApprovedByUserId
+                || certificate.ReviewedByUserId != certificate.ApprovedByUserId
+                || certificate.ReviewedAt != certificate.ApprovedAt
+                || cycle.PreparedAt != certificate.PreparedAt
+                || cycle.ClosedAt != certificate.ApprovedAt
+                || period.ClosedByUserId != certificate.ApprovedByUserId
+                || string.IsNullOrWhiteSpace(certificate.PreparerDeclaration)
+                || string.IsNullOrWhiteSpace(certificate.ReviewerDeclaration))
+                throw new InvalidOperationException(
+                    $"Fiscal period '{period.PeriodCode}' lacks consistent independent preparation and approval evidence.");
+
+            snapshots.Add(new TenantPeriodCloseEvidence(
+                period.Id,
+                period.PeriodCode,
+                period.PeriodNumber,
+                period.StartDate,
+                period.EndDate,
+                period.PeriodStatus,
+                period.IsOpen,
+                period.IsClosed,
+                period.IsLocked,
+                period.IsGlobalLockSuspended,
+                period.ClosedDate.Value,
+                period.ClosedByUserId.Value,
+                cycle.Id,
+                cycle.CycleNumber,
+                cycle.TemplateCode,
+                cycle.CloseType,
+                cycle.TemplateVersion,
+                cycle.PreparedAt.Value,
+                cycle.ClosedAt.Value,
+                certificate.Id,
+                certificate.PreparedByUserId.Value,
+                certificate.PreparedAt.Value,
+                certificate.ReviewedByUserId.Value,
+                certificate.ReviewedAt.Value,
+                certificate.ApprovedByUserId.Value,
+                certificate.ApprovedAt.Value));
+        }
+
+        return System.Text.Json.JsonSerializer.Serialize(new TenantFiscalYearCloseAuthority(
+            SnapshotVersion,
+            tenantId,
+            fiscalYearId,
+            year.StartDate,
+            year.EndDate,
+            snapshots));
+    }
+
+    private sealed record TenantFiscalYearCloseAuthority(
+        string Version,
+        Guid TenantId,
+        Guid FiscalYearId,
+        DateTime FiscalYearStart,
+        DateTime FiscalYearEnd,
+        IReadOnlyList<TenantPeriodCloseEvidence> Periods);
+
+    private sealed record TenantPeriodCloseEvidence(
+        Guid FiscalPeriodId,
+        string PeriodCode,
+        int PeriodNumber,
+        DateTime StartDate,
+        DateTime EndDate,
+        string PeriodStatus,
+        bool IsOpen,
+        bool IsClosed,
+        bool IsLocked,
+        bool IsGlobalLockSuspended,
+        DateTime ClosedDate,
+        Guid ClosedByUserId,
+        Guid FinanceCloseCycleId,
+        int FinanceCloseCycleNumber,
+        string TemplateCode,
+        string CloseType,
+        int TemplateVersion,
+        DateTime CyclePreparedAt,
+        DateTime CycleClosedAt,
+        Guid CertificationId,
+        Guid PreparedByUserId,
+        DateTime PreparedAt,
+        Guid ReviewedByUserId,
+        DateTime ReviewedAt,
+        Guid ApprovedByUserId,
+        DateTime ApprovedAt);
 }

@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.Finance;
 
@@ -59,6 +60,7 @@ public class LeaseAccountingController : ControllerBase
     }
 
     [HttpPost("{id}/activate")]
+    [Authorize(Policy = FinancePermissions.ManageFixedAssets)]
     public async Task<ActionResult<LeaseContractDetailDto>> Activate(
         Guid id,
         [FromBody] ActivateLeaseDto? dto = null,
@@ -72,16 +74,16 @@ public class LeaseAccountingController : ControllerBase
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
     }
 
-    [HttpPost("{id}/schedule-lines/{lineId}/post")]
-    public async Task<ActionResult<LeaseContractDetailDto>> PostPeriodJournal(
+    [HttpPost("{id}/schedule-lines/{lineId}/prepare-payable")]
+    [Authorize(Policy = FinancePermissions.CreateApInvoices)]
+    public async Task<ActionResult<LeaseContractDetailDto>> PreparePeriodPayable(
         Guid id,
         Guid lineId,
-        [FromBody] PostLeasePeriodDto? dto = null,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            return Ok(await _service.PostPeriodJournalAsync(id, lineId, dto, cancellationToken));
+            return Ok(await _service.PreparePeriodPayableAsync(id, lineId, cancellationToken));
         }
         catch (KeyNotFoundException) { return NotFound(); }
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }

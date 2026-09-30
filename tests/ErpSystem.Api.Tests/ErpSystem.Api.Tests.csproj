@@ -36,6 +36,8 @@
     <Compile Include="Controllers\Inventory\PhysicalCountReviewTests.cs" />
     <Compile Include="Services\Finance\ProcurementAutoInvoiceTests.cs" />
     <Compile Include="Services\Finance\CustomerBalanceAdjustmentPostingTests.cs" />
+    <Compile Include="Services\Finance\CapitalProjectPostingTests.cs" />
+    <Compile Include="Services\Finance\CapitalizationLineageMigrationTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementSupplierInvoiceBoundaryTests.cs" />
     <Compile Include="Controllers\Procurement\EstateSupplierInvoiceLineageTests.cs" />
     <Compile Include="Services\Workflow\OptionalApprovalConfigurationTests.cs" />
@@ -263,6 +265,9 @@
     <Compile Include="Services\Finance\ArReceiptPostingMigrationTests.PartnerDefaults.cs" />
     <Compile Include="Services\Finance\CustomerPostingSettingsFixture.cs" />
     <Compile Include="Services\Finance\CanonicalVendorInvoiceBusinessPartnerTests.cs" />
+    <Compile Include="Services\Finance\LeaseInstallmentApOpenItemTests.cs" />
+    <Compile Include="Services\Finance\LeaseActivationGovernanceTests.cs" />
+    <Compile Include="Services\Finance\LeaseGovernanceMigrationModelTests.cs" />
     <Compile Include="Services\Finance\CanonicalCustomerProfileReadTests.cs" />
     <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentOptionalApprovalTests.cs" />
@@ -303,6 +308,11 @@
     <Compile Include="Services\Finance\CashBankPermissionContractTests.cs" />
     <Compile Include="Services\Finance\CashBankOperationalBalanceHardeningTests.cs" />
     <Compile Include="Services\Finance\BankingSettlementReleaseGateTests.cs" />
+    <!-- Source-book authority is shared Finance posting evidence. This project disables
+         implicit compile items, so keep both lifecycle and schema-contract tests in CI. -->
+    <Compile Include="Services\Finance\FinanceSourceBookAuthorityServiceTests.cs" />
+    <Compile Include="Services\Finance\FinanceSourceBookAuthorityMigrationTests.cs" />
+    <Compile Include="Services\Finance\FinanceSourceBookAuthorityCallerAdoptionTests.cs" />
     <Compile Include="Services\Finance\CashierTillControlTests.cs" />
     <Compile Include="Services\Finance\CashBankControlledDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\WhtCertificateDocumentBuilderTests.cs" />

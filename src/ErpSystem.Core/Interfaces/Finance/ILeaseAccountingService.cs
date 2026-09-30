@@ -18,8 +18,8 @@ public interface ILeaseAccountingService
     Task<LeaseContractDetailDto> CreateLeaseAsync(CreateLeaseContractDto dto);
 
     /// <summary>
-    /// Activate the lease: create the ROU FixedAsset + post recognition GL journal
-    /// (DR ROU Asset, CR Lease Liability)
+    /// Submit the immutable lease-recognition proposal to the shared Finance workflow.
+    /// No GL or asset mutation occurs until an independent final approval.
     /// </summary>
     Task<LeaseContractDetailDto> ActivateLeaseAsync(
         Guid leaseId,
@@ -27,11 +27,20 @@ public interface ILeaseAccountingService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Post a single period's journal: DR Interest Expense + DR Lease Liability, CR Cash/Payable
+    /// Completes an independently approved activation inside the shared approval transaction.
+    /// This is not a public maker action.
     /// </summary>
-    Task<LeaseContractDetailDto> PostPeriodJournalAsync(
+    Task<LeaseContractDetailDto> CompleteApprovedActivationAsync(
+        Guid leaseId,
+        Guid approvedByUserId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Prepare the canonical AP draft for a single period. Normal AP maker/checker approval owns
+    /// the only recognition journal and normal AP settlement owns payment.
+    /// </summary>
+    Task<LeaseContractDetailDto> PreparePeriodPayableAsync(
         Guid leaseId,
         Guid scheduleLineId,
-        PostLeasePeriodDto? dto = null,
         CancellationToken cancellationToken = default);
 }

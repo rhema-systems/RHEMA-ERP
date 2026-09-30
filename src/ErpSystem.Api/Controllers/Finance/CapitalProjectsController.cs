@@ -90,6 +90,18 @@ public class CapitalProjectsController : ControllerBase
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
     }
 
+    [HttpPost("{id}/submit-capitalization")]
+    public async Task<ActionResult<CapitalProjectDetailDto>> SubmitCapitalization(
+        Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _service.SubmitForCapitalizationApprovalAsync(id, cancellationToken));
+        }
+        catch (KeyNotFoundException) { return NotFound(); }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+    }
+
     [HttpDelete("{id}/costs/{costId}")]
     public async Task<ActionResult<CapitalProjectDetailDto>> RemoveCost(Guid id, Guid costId)
     {

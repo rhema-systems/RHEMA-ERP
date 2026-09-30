@@ -173,6 +173,8 @@ public sealed partial class ArReceiptPostingMigrationTests
         fixture.Payment.WithholdingTaxAccountId = withholdingReceivable.Id;
         fixture.Payment.VatWithholdingAccountId = vatWithholdingReceivable.Id;
         fixture.Invoice.CurrencyCode = "USD";
+        db.FinancePostingEvents.Single(item => item.SourceDocumentId == fixture.Invoice.Id)
+            .PrimaryTransactionCurrencyCode = "USD";
         fixture.Invoice.ExchangeRate = 10m;
         fixture.Invoice.TotalAmount = 80m;
         fixture.Invoice.BaseCurrencyAmount = 800m;
@@ -321,6 +323,8 @@ public sealed partial class ArReceiptPostingMigrationTests
         fixture.Invoice.TotalAmount = 8m;
         fixture.Invoice.PaidAmount = 0m;
         fixture.Invoice.CurrencyCode = "EUR";
+        db.FinancePostingEvents.Single(item => item.SourceDocumentId == fixture.Invoice.Id)
+            .PrimaryTransactionCurrencyCode = "EUR";
         fixture.Invoice.ExchangeRate = applicationRate.InverseRate;
         fixture.Invoice.BaseCurrencyAmount = 104m;
         fixture.Invoice.Status = InvoiceStatus.Sent;
@@ -589,6 +593,7 @@ public sealed partial class ArReceiptPostingMigrationTests
             PartnerName = "Other Customer",
             PartnerType = "Customer",
             RegistrationStatus = "Approved",
+            ApprovalStatus = "Approved",
             IsActive = true,
             DefaultArAccountId = fixture.ArAccount.Id,
             CreatedAt = DateTime.UtcNow,
@@ -697,7 +702,7 @@ public sealed partial class ArReceiptPostingMigrationTests
         var act = () => service.PostAsync(fixture.Payment.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Posting period is not open.");
+            .WithMessage("Posting period is not open.*");
         fixture.Payment.JournalEntryId.Should().BeNull();
     }
 
@@ -1091,7 +1096,8 @@ public sealed partial class ArReceiptPostingMigrationTests
             postingEngine,
             auditService,
             fxAccountingService: fxAccountingService,
-            exchangeRateService: exchangeRateService);
+            exchangeRateService: exchangeRateService,
+            sourceBookAuthority: new FinanceSourceBookAuthorityService(db, currentUser.Object));
 
         return (service, subledgerPostingMock);
     }
@@ -1393,6 +1399,7 @@ public sealed partial class ArReceiptPostingMigrationTests
             PartnerName = "Test Customer",
             PartnerType = "Customer",
             RegistrationStatus = "Approved",
+            ApprovalStatus = "Approved",
             IsActive = true,
             IsBlacklisted = false,
             DefaultArAccountId = arAccountId,

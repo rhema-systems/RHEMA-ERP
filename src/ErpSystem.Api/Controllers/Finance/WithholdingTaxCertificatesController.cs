@@ -106,6 +106,8 @@ public sealed class WithholdingTaxCertificatesController : ControllerBase
     {
         try
         {
+            if (dto.InvoiceSettlements == null || dto.InvoiceSettlements.Count == 0)
+                return BadRequest(new { message = "AP withholding preview requires invoice settlement evidence. A client-entered taxable base is not authoritative." });
             return Ok(await _certificateService.CalculateApWithholdingAsync(dto, cancellationToken));
         }
         catch (InvalidOperationException ex)

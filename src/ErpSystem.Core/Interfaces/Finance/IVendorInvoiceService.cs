@@ -14,6 +14,14 @@ namespace ErpSystem.Core.Interfaces.Finance;
 /// </summary>
 public interface IVendorInvoiceService
 {
+    /// <summary>
+    /// Creates or returns the one canonical AP draft for a tenant-owned lease schedule line.
+    /// It never submits, approves, posts, or pays the invoice.
+    /// </summary>
+    Task<VendorInvoiceDto> CreateLeaseInstallmentDraftAsync(
+        Guid leaseId,
+        Guid scheduleLineId,
+        CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ProcurementInvoiceReceiptDto>> GetAutoInvoiceReceiptsAsync(Guid businessPartnerId, CancellationToken cancellationToken = default);
     Task<VendorInvoiceDto> CreateAutoInvoiceAsync(ProcurementAutoInvoiceRequestDto request, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<VendorInvoiceReceiptLinkDto>> GetReceiptLinksAsync(Guid invoiceId, CancellationToken cancellationToken = default);

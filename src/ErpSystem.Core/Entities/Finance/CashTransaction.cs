@@ -146,6 +146,8 @@ public class CashTransaction : BaseEntity
     public string? CancellationReason { get; set; }
 
     public Guid? JournalEntryId { get; set; }
+    public Guid? SourceBookAuthorityId { get; set; }
+    public virtual FinanceSourceBookAuthority? SourceBookAuthority { get; set; }
 
     public DateTime? PostedDate { get; set; }
 

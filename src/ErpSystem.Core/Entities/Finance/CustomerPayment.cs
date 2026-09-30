@@ -161,6 +161,8 @@ public class CustomerPayment : BusinessEntity
 
     // GL Posting
     public Guid? JournalEntryId { get; set; }
+    public Guid? SourceBookAuthorityId { get; set; }
+    public virtual FinanceSourceBookAuthority? SourceBookAuthority { get; set; }
 
     /// <summary>
     /// Durable lineage for a controlled posted-receipt reversal. The original receipt, journal,

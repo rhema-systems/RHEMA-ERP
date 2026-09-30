@@ -278,6 +278,343 @@ public sealed class BankingSettlementReleaseGateTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-BankingSettlement")]
     [Trait("Category", "CashBank")]
+    public async Task BaseBookDeposit_ShouldPostTwentyFourThousandOnce_AndConfirmationMustNotRepost()
+    {
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        var approverId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        var receipt = SeedLiquidityEntry(
+            setup,
+            LiquidityEntryType.CustomerReceipt,
+            LiquidityEntryDirection.Increase,
+            24_000m);
+        db.LiquidityAccountEntries.Add(receipt);
+        await db.SaveChangesAsync();
+        var workflow = CreateWorkflow();
+        var maker = CreateBankingService(db, tenantId, makerId, workflow);
+        var approver = CreateBankingService(db, tenantId, approverId, workflow);
+        var deposit = await maker.CreateDepositAsync(CreateDepositRequest(setup, receipt));
+        await maker.SubmitDepositAsync(deposit.Id);
+
+        var posted = await approver.ApproveDepositAsync(deposit.Id);
+        var retried = await approver.PostDepositAsync(deposit.Id);
+        var journal = await db.JournalEntries.Include(item => item.Transactions)
+            .SingleAsync(item => item.Id == posted.JournalEntryId);
+
+        retried.JournalEntryId.Should().Be(posted.JournalEntryId);
+        journal.BookClassification.Should().Be("BASE");
+        journal.Transactions.Should().HaveCount(2);
+        journal.Transactions.Single(item => item.AccountId == setup.BankGlAccount.Id)
+            .DebitAmount.Should().Be(24_000m);
+        journal.Transactions.Single(item => item.AccountId == setup.HoldingGlAccount.Id)
+            .CreditAmount.Should().Be(24_000m);
+
+        await approver.ConfirmDepositAsync(posted.Id, new ConfirmBankDepositDto
+        {
+            BankConfirmationReference = "ACK-24000",
+            BankConfirmationDate = posted.DepositDate,
+            RowVersion = posted.RowVersion
+        });
+        (await db.JournalEntries.CountAsync(item =>
+            item.SourceDocumentType == "BankDepositBatch" && item.SourceDocumentId == posted.Id)).Should().Be(1);
+        (await db.Set<CashTransaction>().CountAsync(item =>
+            item.TransactionType == CashTransactionType.Deposit && item.BankAccountId == setup.BankAccount.Id))
+            .Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData(RateApprovalStatus.Approved, true)]
+    [InlineData(RateApprovalStatus.AutoApproved, true)]
+    [InlineData(RateApprovalStatus.Rejected, false)]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank-FX")]
+    public async Task ForeignCurrencyDeposit_ShouldRequireApprovedRateEvidence_AndKeepGhsFunctionalCurrency(
+        RateApprovalStatus approvalStatus,
+        bool shouldPost)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        var receipt = SeedLiquidityEntry(
+            setup,
+            LiquidityEntryType.CustomerReceipt,
+            LiquidityEntryDirection.Increase,
+            2_400m);
+        var rate = ConfigureUsdDepositEvidence(db, setup, receipt, approvalStatus);
+        db.LiquidityAccountEntries.Add(receipt);
+        await db.SaveChangesAsync();
+        var workflow = CreateWorkflow();
+        var maker = CreateBankingService(db, tenantId, Guid.NewGuid(), workflow);
+        var approver = CreateBankingService(db, tenantId, Guid.NewGuid(), workflow);
+        var deposit = await maker.CreateDepositAsync(CreateDepositRequest(setup, receipt));
+        await maker.SubmitDepositAsync(deposit.Id);
+
+        if (!shouldPost)
+        {
+            var rejected = () => approver.ApproveDepositAsync(deposit.Id);
+            await rejected.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*rejected or inconsistent foreign-exchange evidence*");
+            (await db.JournalEntries.CountAsync(item =>
+                item.SourceDocumentType == "BankDepositBatch" && item.SourceDocumentId == deposit.Id)).Should().Be(0);
+            return;
+        }
+
+        var posted = await approver.ApproveDepositAsync(deposit.Id);
+        var journal = await db.JournalEntries.Include(item => item.Transactions)
+            .SingleAsync(item => item.Id == posted.JournalEntryId);
+        journal.BookClassification.Should().Be("BASE");
+        journal.IsMultiCurrency.Should().BeTrue();
+        journal.TotalDebitAmount.Should().Be(24_000m);
+        journal.Transactions.Should().OnlyContain(item => item.FunctionalCurrencyCode == "GHS");
+        journal.Transactions.Should().OnlyContain(item => item.TransactionCurrency == "USD");
+        journal.Transactions.Should().OnlyContain(item => item.ExchangeRateId == rate.Id);
+        var cash = await db.Set<CashTransaction>().SingleAsync(item => item.Id == posted.CashTransactionId);
+        cash.Amount.Should().Be(2_400m);
+        cash.BaseAmount.Should().Be(24_000m);
+        cash.ExchangeRateId.Should().Be(rate.Id);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank-FX")]
+    public async Task ForeignCurrencyDeposit_ShouldRejectAmbiguousOrInvalidAccountRatePolicy(
+        bool duplicatePolicy)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        setup.Settings.DirectionalExchangeRatePolicyEnabled = true;
+        var receipt = SeedLiquidityEntry(
+            setup,
+            LiquidityEntryType.CustomerReceipt,
+            LiquidityEntryDirection.Increase,
+            2_400m);
+        ConfigureUsdDepositEvidence(db, setup, receipt, RateApprovalStatus.Approved);
+        var bankPolicy = db.AccountCurrencyLinks.Local.Single(link =>
+            link.AccountId == setup.BankGlAccount.Id && link.LinkedCurrencyCode == "USD");
+        if (duplicatePolicy)
+        {
+            db.AccountCurrencyLinks.Add(new AccountCurrencyLink
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                AccountId = setup.BankGlAccount.Id,
+                LinkedCurrencyCode = "USD",
+                TransactionRateType = "Daily",
+                TransactionQuoteSide = ExchangeRateQuoteSide.Mid,
+                IsActive = true,
+                EffectiveDate = new DateTime(2026, 1, 1),
+                CreatedByUserId = Guid.NewGuid(),
+                CreatedDate = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "seed"
+            });
+        }
+        else
+        {
+            bankPolicy.TransactionRateType = "999";
+        }
+        db.LiquidityAccountEntries.Add(receipt);
+        await db.SaveChangesAsync();
+        var workflow = CreateWorkflow();
+        var maker = CreateBankingService(db, tenantId, Guid.NewGuid(), workflow);
+        var approver = CreateBankingService(db, tenantId, Guid.NewGuid(), workflow);
+        var deposit = await maker.CreateDepositAsync(CreateDepositRequest(setup, receipt));
+        await maker.SubmitDepositAsync(deposit.Id);
+
+        var act = () => approver.ApproveDepositAsync(deposit.Id);
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(duplicatePolicy
+                ? "*multiple active currency policies*"
+                : "*invalid transaction rate type*");
+        (await db.JournalEntries.CountAsync(item =>
+            item.SourceDocumentType == "BankDepositBatch" && item.SourceDocumentId == deposit.Id)).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank-FX")]
+    public async Task ForeignCurrencyDeposit_ShouldRejectUndefinedRateApprovalStatus()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        var receipt = SeedLiquidityEntry(
+            setup,
+            LiquidityEntryType.CustomerReceipt,
+            LiquidityEntryDirection.Increase,
+            2_400m);
+        var sourceRate = ConfigureUsdDepositEvidence(
+            db, setup, receipt, RateApprovalStatus.Approved);
+        sourceRate.IsActive = false;
+        db.ExchangeRates.Add(new ExchangeRate
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 0.1m, InverseRate = 10m,
+            EffectiveDate = new DateTime(2026, 7, 1),
+            RateType = ExchangeRateType.Daily, QuoteSide = ExchangeRateQuoteSide.Mid,
+            IsActive = true, RateSource = "Undefined approval test rate",
+            ApprovalStatus = (RateApprovalStatus)0,
+            CreatedByUserId = Guid.NewGuid(), CreatedDate = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        });
+        db.LiquidityAccountEntries.Add(receipt);
+        await db.SaveChangesAsync();
+        var workflow = CreateWorkflow();
+        var maker = CreateBankingService(db, tenantId, Guid.NewGuid(), workflow);
+        var approver = CreateBankingService(db, tenantId, Guid.NewGuid(), workflow);
+        var deposit = await maker.CreateDepositAsync(CreateDepositRequest(setup, receipt));
+        await maker.SubmitDepositAsync(deposit.Id);
+
+        var act = () => approver.ApproveDepositAsync(deposit.Id);
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*No active approved exchange rate exists*");
+        (await db.JournalEntries.CountAsync(item =>
+            item.SourceDocumentType == "BankDepositBatch" && item.SourceDocumentId == deposit.Id)).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank-FX")]
+    public async Task ForeignReturnedCheque_ShouldRestoreHistoricalInvoiceCarrying_OnOriginalControlAccount()
+    {
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        var approverId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        var receipt = SeedChequeReceipt(db, setup, 2_400m);
+        var liquidity = db.LiquidityAccountEntries.Local.Single(item =>
+            item.Id == receipt.Payment.LiquidityAccountEntryId);
+        var receiptRate = ConfigureUsdDepositEvidence(
+            db, setup, liquidity, RateApprovalStatus.Approved);
+        receipt.Payment.CurrencyCode = "USD";
+        receipt.Payment.ExchangeRate = 10m;
+        receipt.Payment.ExchangeRateId = receiptRate.Id;
+        receipt.Invoice.CurrencyCode = "USD";
+        receipt.Invoice.ExchangeRate = 9m;
+        receipt.Invoice.BaseCurrencyAmount = 21_600m;
+        receipt.Allocation.PaymentCurrencyCode = "USD";
+        receipt.Allocation.InvoiceCurrencyCode = "USD";
+        receipt.Allocation.PaymentExchangeRateId = receiptRate.Id;
+        receipt.Allocation.PaymentExchangeRate = 10m;
+        receipt.Allocation.InvoiceSettlementExchangeRateId = receiptRate.Id;
+        receipt.Allocation.InvoiceSettlementExchangeRate = 10m;
+        receipt.Allocation.PaymentFunctionalAmount = 24_000m;
+        receipt.Allocation.SettlementFunctionalAmount = 24_000m;
+        setup.ArControlAccount.IsMultiCurrency = true;
+        db.AccountCurrencyLinks.Add(new AccountCurrencyLink
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AccountId = setup.ArControlAccount.Id,
+            LinkedCurrencyCode = "USD",
+            TransactionRateType = "Daily",
+            TransactionQuoteSide = ExchangeRateQuoteSide.Mid,
+            IsActive = true,
+            EffectiveDate = new DateTime(2026, 1, 1),
+            CreatedByUserId = Guid.NewGuid(),
+            CreatedDate = DateTime.UtcNow
+        });
+        setup.Settings.RealizedFxGainAccountId = setup.ExpenseAccount.Id;
+        setup.Settings.RealizedFxLossAccountId = setup.ExpenseAccount.Id;
+
+        var changedDefaultControl = SeedAccount(
+            tenantId, "AR-CURRENT-DEFAULT", AccountType.Asset, isControl: true, directPosting: false);
+        db.Accounts.Add(changedDefaultControl);
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(
+            db, tenantId, db.AccountingBooks.Local.Single(book => book.Code == "BASE"), changedDefaultControl);
+        setup.Settings.ControlAccountArId = changedDefaultControl.Id;
+
+        var returnRate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 1m / 11m, InverseRate = 11m,
+            EffectiveDate = new DateTime(2026, 7, 7),
+            RateType = ExchangeRateType.Daily, QuoteSide = ExchangeRateQuoteSide.Mid,
+            IsActive = true, RateSource = "Approved return rate",
+            ApprovalStatus = RateApprovalStatus.Approved,
+            ApprovedByUserId = approverId, ApprovalDate = DateTime.UtcNow,
+            CreatedByUserId = approverId, CreatedDate = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        };
+        db.ExchangeRates.Add(returnRate);
+        var originalFxJournal = SeedPostedJournal(
+            db, setup, "PaymentAllocation", receipt.Allocation.Id,
+            setup.ArControlAccount.Id, setup.ExpenseAccount.Id, 2_400m);
+        db.FxRealizedSettlements.Add(new FxRealizedSettlement
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, SourceModule = "AR",
+            SettlementDocumentType = nameof(CustomerPayment),
+            SettlementDocumentId = receipt.Payment.Id,
+            SettlementAllocationId = receipt.Allocation.Id,
+            InvoiceDocumentType = "CustomerInvoice", InvoiceDocumentId = receipt.Invoice.Id,
+            ControlAccountId = setup.ArControlAccount.Id,
+            TransactionCurrency = "USD", FunctionalCurrencyCode = "GHS",
+            SettledForeignAmount = 2_400m,
+            PaymentCurrencyCode = "USD", PaymentCurrencyAmount = 2_400m,
+            PaymentExchangeRateId = receiptRate.Id, PaymentExchangeRate = 10m,
+            HistoricalExchangeRate = 9m, SettlementExchangeRate = 10m,
+            SettlementExchangeRateId = receiptRate.Id,
+            HistoricalFunctionalAmount = 21_600m,
+            SettlementFunctionalAmount = 24_000m,
+            GainLossAmount = 2_400m, GainLossType = "Gain",
+            GainLossAccountId = setup.ExpenseAccount.Id,
+            JournalEntryId = originalFxJournal.Id, PostingEventId = Guid.NewGuid(),
+            SettlementDate = receipt.Payment.PaymentDate, PostedAt = DateTime.UtcNow,
+            Status = "Posted", IdempotencyKey = $"fx-test-{receipt.Allocation.Id:N}",
+            CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        });
+        await db.SaveChangesAsync();
+
+        var workflow = CreateWorkflow();
+        var maker = CreateBankingService(db, tenantId, makerId, workflow);
+        var approver = CreateBankingService(db, tenantId, approverId, workflow);
+        var deposit = await maker.CreateDepositAsync(CreateDepositRequest(setup, liquidity));
+        await maker.SubmitDepositAsync(deposit.Id);
+        var postedDeposit = await approver.ApproveDepositAsync(deposit.Id);
+        var returned = await maker.CreateReturnedChequeAsync(new CreateReturnedChequeCaseDto
+        {
+            CustomerPaymentId = receipt.Payment.Id,
+            BankDepositBatchId = postedDeposit.Id,
+            BankAccountId = setup.BankAccount.Id,
+            ReturnDate = new DateTime(2026, 7, 7),
+            BankReference = "BANK-RETURN-FX",
+            ReturnReason = "Insufficient funds",
+            ChargeTreatment = ReturnedChequeChargeTreatment.BankChargeExpense
+        });
+        var evidence = SeedEvidence(db, tenantId, makerId, "returned-cheque-fx.png");
+        await db.SaveChangesAsync();
+        await maker.LinkReturnedChequeAttachmentAsync(returned.Id, new LinkBankingAttachmentDto
+        {
+            FileUploadRecordId = evidence.Id,
+            DocumentType = "Bank Return Advice",
+            IsPrimaryEvidence = true
+        });
+        await maker.SubmitReturnedChequeAsync(returned.Id);
+
+        var postedReturn = await approver.ApproveReturnedChequeAsync(returned.Id);
+        var journal = await db.JournalEntries.Include(item => item.Transactions)
+            .SingleAsync(item => item.Id == postedReturn.JournalEntryId);
+        journal.Transactions.Where(item => item.AccountId == setup.ArControlAccount.Id)
+            .Sum(item => item.DebitAmount - item.CreditAmount).Should().Be(21_600m);
+        journal.Transactions.Should().NotContain(item => item.AccountId == changedDefaultControl.Id);
+        journal.Transactions.Where(item => item.AccountId == setup.BankGlAccount.Id)
+            .Should().ContainSingle().Which.CreditAmount.Should().Be(26_400m);
+        journal.Transactions.Where(item => item.AccountId == setup.ExpenseAccount.Id)
+            .Sum(item => item.DebitAmount - item.CreditAmount).Should().Be(4_800m);
+        journal.Transactions.Should().OnlyContain(item => item.FunctionalCurrencyCode == "GHS");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank")]
     public async Task DepositConfirmation_ShouldRejectInvalidLifecycleDateAndDuplicateBankReference()
     {
         var tenantId = Guid.NewGuid();
@@ -399,16 +736,17 @@ public sealed class BankingSettlementReleaseGateTests
         var approverId = Guid.NewGuid();
         await using var db = CreateContext();
         var setup = await SeedSetupAsync(db, tenantId);
-        var receipt = SeedChequeReceipt(db, setup, amount: 100m);
+        var receipt = SeedChequeReceipt(db, setup, amount: 24_000m);
         Account? discountAccount = null;
         if (originalDiscount)
         {
             discountAccount = SeedAccount(tenantId, "ORIGINAL-DISCOUNT", AccountType.Expense);
             db.Accounts.Add(discountAccount);
             FinancePostingAuthorityFixture.SeedEnabledBookMappings(
-                db, tenantId, db.AccountingBooks.Local.Single(book => book.TenantId == tenantId && book.Code == "IFRS"), discountAccount);
+                db, tenantId, db.AccountingBooks.Local.Single(book => book.TenantId == tenantId && book.Code == "BASE"), discountAccount);
             receipt.Allocation.DiscountAmount = 10m;
-            receipt.Invoice.TotalAmount = receipt.Invoice.SubTotal = receipt.Invoice.PaidAmount = 110m;
+            receipt.Allocation.SettlementFunctionalAmount += 10m;
+            receipt.Invoice.TotalAmount = receipt.Invoice.SubTotal = receipt.Invoice.PaidAmount = 24_010m;
             var journal = db.JournalEntries.Local.Single(entry => entry.Id == receipt.Payment.JournalEntryId);
             var controlLine = journal.Transactions.Single(line => line.CreditAmount > 0m);
             controlLine.CreditAmount += 10m;
@@ -431,7 +769,7 @@ public sealed class BankingSettlementReleaseGateTests
             setup,
             LiquidityEntryType.CustomerReceipt,
             LiquidityEntryDirection.Increase,
-            100m,
+            24_000m,
             nameof(CustomerPayment),
             receipt.Payment.Id);
         db.LiquidityAccountEntries.Add(queueEntry);
@@ -451,8 +789,8 @@ public sealed class BankingSettlementReleaseGateTests
             ReturnDate = postedDeposit.DepositDate.AddDays(1),
             BankReference = "BANK-RETURN-001",
             ReturnReason = "Insufficient funds",
-            BankChargeAmount = 5m,
-            ChargeTreatment = ReturnedChequeChargeTreatment.CustomerRecoverable,
+            BankChargeAmount = 100m,
+            ChargeTreatment = ReturnedChequeChargeTreatment.BankChargeExpense,
             DrawerBank = "Drawer Bank"
         });
         var duplicate = () => maker.CreateReturnedChequeAsync(new CreateReturnedChequeCaseDto
@@ -484,8 +822,8 @@ public sealed class BankingSettlementReleaseGateTests
         var postedReturn = await approver.ApproveReturnedChequeAsync(returned.Id, "Return advice verified");
 
         postedReturn.Status.Should().Be(ReturnedChequeCaseStatus.Posted);
-        postedReturn.ReturnedAmount.Should().Be(100m);
-        postedReturn.CustomerRecoverableChargeAmount.Should().Be(5m);
+        postedReturn.ReturnedAmount.Should().Be(24_000m);
+        postedReturn.ExpenseChargeAmount.Should().Be(100m);
         var payment = await db.Set<CustomerPayment>().SingleAsync(item => item.Id == receipt.Payment.Id);
         payment.Status.Should().Be("Bounced");
         payment.AllocatedAmount.Should().Be(0m);
@@ -497,8 +835,16 @@ public sealed class BankingSettlementReleaseGateTests
         var bankDebit = await db.Set<CashTransaction>().SingleAsync(transaction =>
             transaction.Id == postedReturn.ReturnCashTransactionId);
         bankDebit.TransactionType.Should().Be(CashTransactionType.ReturnedCheque);
-        bankDebit.Amount.Should().Be(105m);
-        setup.BankAccount.CurrentBalance.Should().Be(-5m);
+        bankDebit.Amount.Should().Be(24_100m);
+        (await db.BankAccounts.AsNoTracking().SingleAsync(item => item.Id == setup.BankAccount.Id))
+            .CurrentBalance.Should().Be(-100m);
+        var returnJournal = await db.JournalEntries.Include(item => item.Transactions)
+            .SingleAsync(item => item.Id == postedReturn.JournalEntryId);
+        returnJournal.BookClassification.Should().Be("BASE");
+        returnJournal.Transactions.Where(item => item.AccountId == setup.BankGlAccount.Id)
+            .Should().ContainSingle().Which.CreditAmount.Should().Be(24_100m);
+        returnJournal.Transactions.Where(item => item.AccountId == setup.ExpenseAccount.Id)
+            .Should().ContainSingle().Which.DebitAmount.Should().Be(100m);
         if (originalDiscount)
             (await db.AccountTransactions.Where(line => line.AccountId == discountAccount!.Id && line.CreditAmount > 0m).ToListAsync())
                 .Should().ContainSingle().Which.CreditAmount.Should().Be(10m);
@@ -528,7 +874,7 @@ public sealed class BankingSettlementReleaseGateTests
         };
         var book = new AccountingBook
         {
-            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "BASE", Name = "Tenant primary book",
             Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
             LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
             IsDefault = true, IsActive = true, AllowsPosting = true
@@ -610,7 +956,7 @@ public sealed class BankingSettlementReleaseGateTests
         db.LiquidityAccounts.Add(holding);
         db.Set<FinanceSettings>().Add(settings);
         await db.SaveChangesAsync();
-        return new BankingSetup(tenantId, period, bank, bankGl, holding, holdingGl, arControl, expense, settings);
+        return new BankingSetup(db, tenantId, period, bank, bankGl, holding, holdingGl, arControl, expense, settings);
     }
 
     private static BankingSettlementService CreateBankingService(
@@ -741,7 +1087,9 @@ public sealed class BankingSettlementReleaseGateTests
         decimal amount,
         string sourceDocumentType = "TestSource",
         Guid? sourceDocumentId = null)
-        => new()
+    {
+        var resolvedSourceId = sourceDocumentId ?? Guid.NewGuid();
+        var entry = new LiquidityAccountEntry
         {
             Id = Guid.NewGuid(),
             TenantId = setup.TenantId,
@@ -753,11 +1101,21 @@ public sealed class BankingSettlementReleaseGateTests
             Amount = amount,
             Currency = "GHS",
             SourceDocumentType = sourceDocumentType,
-            SourceDocumentId = sourceDocumentId ?? Guid.NewGuid(),
+            SourceDocumentId = resolvedSourceId,
             ReferenceNumber = $"REF-{Guid.NewGuid():N}"[..16],
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
         };
+        SeedPostedJournal(
+            setup.Context,
+            setup,
+            sourceDocumentType,
+            resolvedSourceId,
+            direction == LiquidityEntryDirection.Increase ? setup.HoldingGlAccount.Id : setup.ExpenseAccount.Id,
+            direction == LiquidityEntryDirection.Increase ? setup.ExpenseAccount.Id : setup.HoldingGlAccount.Id,
+            amount);
+        return entry;
+    }
 
     private static CreateBankDepositDto CreateDepositRequest(
         BankingSetup setup,
@@ -810,7 +1168,7 @@ public sealed class BankingSettlementReleaseGateTests
         Guid creditAccountId,
         decimal amount)
     {
-        var book = db.AccountingBooks.Local.Single(item => item.TenantId == setup.TenantId && item.Code == "IFRS");
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == setup.TenantId && item.Code == "BASE");
         var journal = new JournalEntry
         {
             Id = Guid.NewGuid(),
@@ -830,7 +1188,7 @@ public sealed class BankingSettlementReleaseGateTests
             PostingStatus = "Posted",
             ApprovalStatus = "Approved",
             PostingDate = new DateTime(2026, 7, 6),
-            BookClassification = "IFRS",
+            BookClassification = "BASE",
             AccountingBookId = book.Id,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
@@ -843,10 +1201,12 @@ public sealed class BankingSettlementReleaseGateTests
             AccountId = debitAccountId,
             TransactionDate = journal.EntryDate,
             DebitAmount = amount,
+            TransactionCurrency = "GHS",
+            TransactionDebitAmount = amount,
             FunctionalCurrencyCode = "GHS",
             FiscalPeriodId = setup.Period.Id,
             PostingStatus = "Posted",
-            BookClassification = "IFRS",
+            BookClassification = "BASE",
             AccountingBookId = book.Id,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
@@ -859,17 +1219,92 @@ public sealed class BankingSettlementReleaseGateTests
             AccountId = creditAccountId,
             TransactionDate = journal.EntryDate,
             CreditAmount = amount,
+            TransactionCurrency = "GHS",
             TransactionCreditAmount = amount,
             FunctionalCurrencyCode = "GHS",
             FiscalPeriodId = setup.Period.Id,
             PostingStatus = "Posted",
-            BookClassification = "IFRS",
+            BookClassification = "BASE",
             AccountingBookId = book.Id,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
         });
         db.JournalEntries.Add(journal);
         return journal;
+    }
+
+    private static ExchangeRate ConfigureUsdDepositEvidence(
+        ApplicationDbContext db,
+        BankingSetup setup,
+        LiquidityAccountEntry entry,
+        RateApprovalStatus approvalStatus)
+    {
+        setup.BankAccount.Currency = "USD";
+        setup.HoldingAccount.Currency = "USD";
+        setup.BankGlAccount.IsMultiCurrency = true;
+        setup.HoldingGlAccount.IsMultiCurrency = true;
+        entry.Currency = "USD";
+        var actor = Guid.NewGuid();
+        foreach (var account in new[] { setup.BankGlAccount, setup.HoldingGlAccount })
+        {
+            db.AccountCurrencyLinks.Add(new AccountCurrencyLink
+            {
+                Id = Guid.NewGuid(),
+                TenantId = setup.TenantId,
+                AccountId = account.Id,
+                LinkedCurrencyCode = "USD",
+                TransactionRateType = "Daily",
+                TransactionQuoteSide = ExchangeRateQuoteSide.Mid,
+                IsActive = true,
+                EffectiveDate = new DateTime(2026, 1, 1),
+                CreatedByUserId = actor,
+                CreatedDate = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "seed"
+            });
+        }
+        var rate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(),
+            TenantId = setup.TenantId,
+            BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = "USD",
+            Rate = 0.1m,
+            InverseRate = 10m,
+            EffectiveDate = new DateTime(2026, 7, 1),
+            RateType = ExchangeRateType.Daily,
+            QuoteSide = ExchangeRateQuoteSide.Mid,
+            IsActive = true,
+            RateSource = "Approved test rate",
+            ApprovalStatus = approvalStatus,
+            ApprovedByUserId = approvalStatus == RateApprovalStatus.Approved ? actor : null,
+            ApprovalDate = approvalStatus == RateApprovalStatus.Approved ? DateTime.UtcNow : null,
+            CreatedByUserId = actor,
+            CreatedDate = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        db.ExchangeRates.Add(rate);
+        var sourceJournal = db.JournalEntries.Local.Single(item =>
+            item.SourceDocumentType == entry.SourceDocumentType && item.SourceDocumentId == entry.SourceDocumentId);
+        sourceJournal.TotalDebitAmount = 24_000m;
+        sourceJournal.TotalCreditAmount = 24_000m;
+        foreach (var line in sourceJournal.Transactions)
+        {
+            var isDebit = line.DebitAmount > 0m;
+            line.DebitAmount = isDebit ? 24_000m : 0m;
+            line.CreditAmount = isDebit ? 0m : 24_000m;
+            line.TransactionCurrency = "USD";
+            line.TransactionDebitAmount = isDebit ? 2_400m : 0m;
+            line.TransactionCreditAmount = isDebit ? 0m : 2_400m;
+            line.ForeignCurrencyAmount = 2_400m;
+            line.ExchangeRateId = rate.Id;
+            line.ExchangeRate = 10m;
+            line.ExchangeRateSource = rate.RateSource;
+            line.ExchangeRateDate = rate.EffectiveDate;
+            line.FunctionalCurrencyCode = "GHS";
+        }
+        return rate;
     }
 
     private static FileUploadRecord SeedEvidence(
@@ -982,6 +1417,8 @@ public sealed class BankingSettlementReleaseGateTests
             setup.HoldingGlAccount.Id,
             setup.ArControlAccount.Id,
             amount);
+        receiptJournal.Transactions.Single(line => line.AccountId == setup.ArControlAccount.Id)
+            .TransactionTag = "AR-Control";
         var payment = new CustomerPayment
         {
             Id = Guid.NewGuid(),
@@ -1003,6 +1440,24 @@ public sealed class BankingSettlementReleaseGateTests
             CreatedBy = "seed"
         };
         receiptJournal.SourceDocumentId = payment.Id;
+        var liquidityEntry = new LiquidityAccountEntry
+        {
+            Id = Guid.NewGuid(),
+            TenantId = setup.TenantId,
+            LiquidityAccountId = setup.HoldingAccount.Id,
+            EntryNumber = "LQE-CHEQUE-001",
+            EntryDate = payment.PaymentDate,
+            EntryType = LiquidityEntryType.CustomerReceipt,
+            Direction = LiquidityEntryDirection.Increase,
+            Amount = amount,
+            Currency = "GHS",
+            SourceDocumentType = nameof(CustomerPayment),
+            SourceDocumentId = payment.Id,
+            ReferenceNumber = payment.CheckNumber,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        payment.LiquidityAccountEntryId = liquidityEntry.Id;
         var allocation = new PaymentAllocation
         {
             Id = Guid.NewGuid(),
@@ -1010,6 +1465,13 @@ public sealed class BankingSettlementReleaseGateTests
             CustomerPaymentId = payment.Id,
             InvoiceId = invoice.Id,
             AllocatedAmount = amount,
+            PaymentCurrencyAmount = amount,
+            PaymentCurrencyCode = "GHS",
+            InvoiceCurrencyCode = "GHS",
+            PaymentExchangeRate = 1m,
+            InvoiceSettlementExchangeRate = 1m,
+            PaymentFunctionalAmount = amount,
+            SettlementFunctionalAmount = amount,
             AllocationDate = payment.PaymentDate,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
@@ -1018,10 +1480,12 @@ public sealed class BankingSettlementReleaseGateTests
         db.Invoices.Add(invoice);
         db.Set<CustomerPayment>().Add(payment);
         db.Set<PaymentAllocation>().Add(allocation);
+        db.LiquidityAccountEntries.Add(liquidityEntry);
         return new ChequeReceipt(payment, invoice, allocation);
     }
 
     private sealed record BankingSetup(
+        ApplicationDbContext Context,
         Guid TenantId,
         FiscalPeriod Period,
         BankAccount BankAccount,
