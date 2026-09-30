@@ -407,10 +407,11 @@ public partial class ProjectService
                     continue;
                 }
 
-                var demarcationReference = EstateLandDemarcationReference.Build(
-                    asset.AssetCode,
-                    demarcation.DemarcationNumber);
+                var demarcationReference = EstateLandDemarcationReference.DisplayReference(
+                    demarcation.ChildFixedAssetReference, asset.AssetCode, demarcation.DemarcationNumber);
                 var isAssigned = assignedLandReferences.Contains(demarcationReference)
+                    || assignedLandReferences.Contains(EstateLandDemarcationReference.Build(
+                        asset.AssetCode, demarcation.DemarcationNumber))
                     || (assetDemarcations.Count == 1
                         && new[] { asset.AssetCode, asset.ProjectCode, asset.Name, asset.Id.ToString() }
                             .Any(reference => !string.IsNullOrWhiteSpace(reference)
@@ -421,6 +422,8 @@ public partial class ProjectService
                 }
 
                 var matchesDemarcation = MatchesLandReference(demarcationReference, landReference)
+                    || MatchesLandReference(EstateLandDemarcationReference.Build(
+                        asset.AssetCode, demarcation.DemarcationNumber), landReference)
                     || MatchesLandReference(demarcation.Id.ToString(), landReference);
                 var matchesSingleWholeParcel = assetDemarcations.Count == 1
                     && (MatchesLandReference(asset.AssetCode, landReference)
@@ -481,8 +484,10 @@ public partial class ProjectService
                 .Any(reference => !string.IsNullOrWhiteSpace(reference)
                     && assignedLandReferences.Contains(reference.Trim()));
         var hasUnusedPortion = demarcations.Any(item =>
-            !assignedLandReferences.Contains(
-                EstateLandDemarcationReference.Build(asset.AssetCode, item.DemarcationNumber))
+            !assignedLandReferences.Contains(EstateLandDemarcationReference.DisplayReference(
+                item.ChildFixedAssetReference, asset.AssetCode, item.DemarcationNumber))
+            && !assignedLandReferences.Contains(EstateLandDemarcationReference.Build(
+                asset.AssetCode, item.DemarcationNumber))
             && !hasLegacyWholeParcelAssignment);
         return (
             demarcations.Count,
@@ -530,10 +535,11 @@ public partial class ProjectService
                     continue;
                 }
 
-                var demarcationReference = EstateLandDemarcationReference.Build(
-                    asset.AssetCode,
-                    demarcation.DemarcationNumber);
+                var demarcationReference = EstateLandDemarcationReference.DisplayReference(
+                    demarcation.ChildFixedAssetReference, asset.AssetCode, demarcation.DemarcationNumber);
                 var matchesDemarcation = MatchesLandReference(demarcationReference, normalizedReference)
+                    || MatchesLandReference(EstateLandDemarcationReference.Build(
+                        asset.AssetCode, demarcation.DemarcationNumber), normalizedReference)
                     || MatchesLandReference(demarcation.Id.ToString(), normalizedReference);
                 var matchesLegacyWholeParcel = assetDemarcations.Count == 1
                     && (MatchesLandReference(asset.AssetCode, normalizedReference)

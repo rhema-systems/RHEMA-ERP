@@ -122,10 +122,12 @@ public sealed class EstateSalesListingApplicationHandoffService(
 
         var listingReference = demarcation is null
             ? asset.AssetCode
-            : EstateLandDemarcationReference.Build(asset.AssetCode, demarcation.DemarcationNumber);
+            : EstateLandDemarcationReference.DisplayReference(
+                demarcation.ChildFixedAssetReference, asset.AssetCode, demarcation.DemarcationNumber);
         var listingName = demarcation is null
             ? asset.Name
-            : $"{asset.Name} - Parcel {demarcation.DemarcationNumber:000}";
+            : EstateLandDemarcationReference.DisplayReference(
+                demarcation.ChildFixedAssetReference, asset.AssetCode, demarcation.DemarcationNumber);
         var requestType = NormalizeRequestType(request.RequestType, demarcation?.ExternalListingType ?? asset.ExternalListingType);
         var requestLabel = requestType switch
         {

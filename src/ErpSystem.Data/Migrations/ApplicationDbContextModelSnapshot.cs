@@ -5399,6 +5399,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime>("StartDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<Guid?>("SupervisorEmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("SupervisorName")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
@@ -5429,6 +5432,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "RosterReference")
                         .IsUnique();
 
+                    b.HasIndex("TenantId", "SupervisorEmployeeId");
+
                     b.HasIndex("TenantId", "AttendanceStatus", "CompletionStatus");
 
                     b.HasIndex("TenantId", "PropertyReference", "PropertyUnit");
@@ -5450,6 +5455,14 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("BillingFrequency")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<decimal>("BillingQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<Guid>("BusinessPartnerId")
                         .HasColumnType("uniqueidentifier");
@@ -5484,12 +5497,21 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
+                    b.Property<DateTime?>("LastInvoiceDate")
+                        .HasColumnType("datetime2");
+
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("NextInvoiceDate")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("ProviderRateId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("SchedulePattern")
                         .HasMaxLength(160)
@@ -5524,6 +5546,10 @@ namespace ErpSystem.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("TenantId", "ContractId");
+
+                    b.HasIndex("TenantId", "ProviderRateId");
+
+                    b.HasIndex("TenantId", "BillingFrequency", "NextInvoiceDate");
 
                     b.HasIndex("TenantId", "BusinessPartnerId", "AssignmentStatus");
 
@@ -6191,6 +6217,10 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("EstateManagedAssetId");
 
                     b.HasIndex("ParentDemarcationId");
+
+                    b.HasIndex("TenantId", "ChildFixedAssetReference")
+                        .IsUnique()
+                        .HasFilter("[ChildFixedAssetReference] IS NOT NULL");
 
                     b.HasIndex("TenantId", "EstateManagedAssetId", "DemarcationNumber")
                         .IsUnique();
@@ -32205,14 +32235,17 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal?>("WithholdingTaxBaseFunctionalAmount")
                         .HasColumnType("decimal(18,2)");
 
-                    b.Property<Guid?>("WithholdingTaxStatutoryExchangeRateId")
-                        .HasColumnType("uniqueidentifier");
+                    b.Property<decimal>("WithholdingTaxFunctionalAmount")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal?>("WithholdingTaxStatutoryExchangeRate")
-                        .HasColumnType("decimal(18,6)");
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<DateTime?>("WithholdingTaxStatutoryExchangeRateDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("WithholdingTaxStatutoryExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("WithholdingTaxStatutoryExchangeRateReference")
                         .HasMaxLength(1000)
@@ -32221,9 +32254,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("WithholdingTaxStatutoryExchangeRateSource")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
-
-                    b.Property<decimal>("WithholdingTaxFunctionalAmount")
-                        .HasColumnType("decimal(18,2)");
 
                     b.HasKey("Id");
 
@@ -32237,10 +32267,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("VendorPaymentId");
 
-                    b.HasIndex("TenantId", "ApplicationPostingEventId");
+                    b.HasIndex("WithholdingTaxStatutoryExchangeRateId");
 
-                    b.HasIndex("TenantId", "WithholdingTaxStatutoryExchangeRateId")
-                        .HasFilter("[WithholdingTaxStatutoryExchangeRateId] IS NOT NULL");
+                    b.HasIndex("TenantId", "ApplicationPostingEventId");
 
                     b.HasIndex("TenantId", "OriginalAllocationId")
                         .IsUnique()
@@ -32248,6 +32277,9 @@ namespace ErpSystem.Data.Migrations
                         .HasFilter("[IsReversal] = 1 AND [OriginalAllocationId] IS NOT NULL");
 
                     b.HasIndex("TenantId", "PaymentReadinessControlEventId");
+
+                    b.HasIndex("TenantId", "WithholdingTaxStatutoryExchangeRateId")
+                        .HasFilter("[WithholdingTaxStatutoryExchangeRateId] IS NOT NULL");
 
                     b.ToTable("VendorPaymentAllocation", null, t =>
                         {
@@ -195212,11 +195244,6 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("ApplicationPostingEventId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("ErpSystem.Core.Entities.Finance.ExchangeRate", null)
-                        .WithMany()
-                        .HasForeignKey("WithholdingTaxStatutoryExchangeRateId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementControlEvent", "PaymentReadinessControlEvent")
                         .WithMany()
                         .HasForeignKey("PaymentReadinessControlEventId")
@@ -195239,6 +195266,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("VendorPaymentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ExchangeRate", null)
+                        .WithMany()
+                        .HasForeignKey("WithholdingTaxStatutoryExchangeRateId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("PaymentReadinessControlEvent");
 
