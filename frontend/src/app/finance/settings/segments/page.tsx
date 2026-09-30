@@ -40,6 +40,8 @@ function SegmentConfigurationContent() {
     const [editingSegment, setEditingSegment] = useState<SegmentStructure | null>(null);
     const [lookupValueToDelete, setLookupValueToDelete] = useState<SegmentLookupValue | null>(null);
     const [isDeletingLookupValue, setIsDeletingLookupValue] = useState(false);
+    const [segmentToDelete, setSegmentToDelete] = useState<SegmentStructure | null>(null);
+    const [isDeletingSegment, setIsDeletingSegment] = useState(false);
     const [valueFormError, setValueFormError] = useState<string | null>(null);
 
     // Reorder confirmation dialog state
@@ -370,6 +372,23 @@ function SegmentConfigurationContent() {
         }
     };
 
+    const handleDeleteSegment = async () => {
+        if (!segmentToDelete) return;
+        try {
+            setIsDeletingSegment(true);
+            await financeDataService.deleteSegmentStructure(segmentToDelete.id, segmentToDelete.rowVersion);
+            toast.success('Draft segment deleted');
+            if (selectedSegmentId === segmentToDelete.id) setSelectedSegmentId('');
+            setSegmentToDelete(null);
+            await loadData();
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Failed to delete segment');
+            await loadData();
+        } finally {
+            setIsDeletingSegment(false);
+        }
+    };
+
     const searchParams = useSearchParams();
     const tabParam = searchParams.get('tab');
     const [activeTab, setActiveTab] = useState(tabParam === 'values' ? 'values' : 'structure');
@@ -577,8 +596,19 @@ function SegmentConfigurationContent() {
                                         <Button variant="ghost" size="sm" onClick={() => handleEditSegment(segment)} disabled={!canManage || segment.lifecycleStatus === 'Frozen' || segment.lifecycleStatus === 'Retired'}>
                                             <Edit className="h-4 w-4" />
                                         </Button>
-                                        {canManage && segment.canActivate && <Button size="sm" onClick={() => transitionSegment(segment, 'activate')}>Activate</Button>}
+                                        {canManage && segment.lifecycleStatus === 'Draft' && <Button size="sm" onClick={() => transitionSegment(segment, 'activate')}>Activate</Button>}
                                         {canManage && segment.canFreeze && <Button size="sm" variant="outline" onClick={() => transitionSegment(segment, 'freeze')}>Freeze</Button>}
+                                        {canManage && segment.lifecycleStatus === 'Draft' && (segment.accountUsageCount ?? 0) === 0 && (
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="text-destructive hover:text-destructive"
+                                                onClick={() => setSegmentToDelete(segment)}
+                                                title="Delete unused draft segment"
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                        )}
                                     </div>
                                 </CardHeader>
                                 <CardContent>
@@ -840,6 +870,31 @@ function SegmentConfigurationContent() {
                         <AlertDialogCancel onClick={() => setPendingReorder(null)}>Cancel</AlertDialogCancel>
                         <AlertDialogAction onClick={handleReorderConfirm}>
                             Yes, Reorder Segments
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            {/* Draft Segment Delete Confirmation Dialog */}
+            <AlertDialog open={!!segmentToDelete} onOpenChange={(open) => !open && setSegmentToDelete(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Delete Draft Segment?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This permanently removes <strong>{segmentToDelete?.segmentName}</strong> ({segmentToDelete?.segmentCode}).
+                            Only an unused Draft segment can be deleted. Active, frozen, or account-used identity segments are preserved.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={isDeletingSegment}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            disabled={isDeletingSegment}
+                            onClick={(event) => {
+                                event.preventDefault();
+                                void handleDeleteSegment();
+                            }}
+                        >
+                            {isDeletingSegment ? 'Deleting...' : 'Delete Draft Segment'}
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>

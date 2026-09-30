@@ -118,25 +118,16 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             if (shouldCreateInitialRate && (!dto.InitialExchangeRate.HasValue || dto.InitialExchangeRate.Value <= 0))
                 throw new InvalidOperationException("Initial exchange rate must be greater than zero.");
 
-            var committed = false;
-            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-
-            try
+            Currency? currency = null;
+            await _unitOfWork.ExecuteInTransactionAsync(async operationToken =>
             {
-                if (dto.IsBaseCurrency)
-                {
-                    var existingBaseCurrency = await _unitOfWork.Repository<Currency>()
-                        .FirstOrDefaultAsync(c => c.TenantId == TenantId && c.IsBaseCurrency && !c.IsDeleted);
-
-                    if (existingBaseCurrency != null)
-                    {
-                        existingBaseCurrency.IsBaseCurrency = false;
-                        await _unitOfWork.Repository<Currency>().UpdateAsync(existingBaseCurrency);
-                    }
-                }
+                // Recheck inside the serializable, retryable transaction so concurrent requests
+                // cannot create the same tenant currency after the optimistic preflight above.
+                if (!await IsCodeUniqueAsync(currencyCode, null, operationToken))
+                    throw new InvalidOperationException($"Currency with code '{currencyCode}' already exists.");
 
                 var now = DateTime.UtcNow;
-                var currency = new Currency
+                currency = new Currency
                 {
                     Id = Guid.NewGuid(),
                     TenantId = TenantId,
@@ -152,7 +143,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                     DecimalSeparator = dto.DecimalSeparator,
                     ThousandsSeparator = dto.ThousandsSeparator,
                     DigitGrouping = dto.DigitGrouping,
-                    IsBaseCurrency = dto.IsBaseCurrency,
+                    IsBaseCurrency = false,
                     CurrencyClassification = dto.CurrencyClassification,
                     GeographicRegion = dto.GeographicRegion,
                     AutoRetrieveExchangeRate = dto.AutoRetrieveExchangeRate,
@@ -169,11 +160,11 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
 
                 if (shouldCreateInitialRate)
                 {
-                    // ExchangeRateService validates pair overlap and records audit/workflow.
-                    // Save the new currency inside this transaction first so that validation can see the target currency.
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    // Persist inside the same transaction so the exchange-rate validation can see
+                    // the new currency. The outer unit of work remains responsible for commit.
+                    await _unitOfWork.SaveChangesAsync(operationToken);
 
-                    var baseCurrencyCode = await ResolveInitialRateBaseCurrencyCodeAsync(currency.CurrencyCode, cancellationToken);
+                    var baseCurrencyCode = await ResolveInitialRateBaseCurrencyCodeAsync(currency.CurrencyCode, operationToken);
                     await _exchangeRateService.CreateExchangeRateAsync(new CreateExchangeRateDto
                     {
                         BaseCurrencyCode = baseCurrencyCode,
@@ -185,32 +176,12 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                         SourceReference = dto.InitialExchangeRateSourceReference,
                         IsActive = true,
                         ApprovalStatus = "Approved"
-                    }, cancellationToken);
+                    }, operationToken);
                 }
+            }, cancellationToken);
 
-                await _unitOfWork.CommitAsync(cancellationToken);
-                committed = true;
-
-                _logger.LogInformation("Currency {CurrencyCode} created by {User}", currency.CurrencyCode, UserName);
-
-                return MapToDto(currency);
-            }
-            catch
-            {
-                if (!committed)
-                {
-                    try
-                    {
-                        await _unitOfWork.RollbackAsync(cancellationToken);
-                    }
-                    catch (InvalidOperationException rollbackException)
-                    {
-                        _logger.LogDebug(rollbackException, "Currency creation rollback was skipped because no transaction was active.");
-                    }
-                }
-
-                throw;
-            }
+            _logger.LogInformation("Currency {CurrencyCode} created by {User}", currency!.CurrencyCode, UserName);
+            return MapToDto(currency);
         }
 
         public async Task<CurrencyDto> UpdateAsync(Guid id, UpdateCurrencyDto dto, CancellationToken cancellationToken = default)
