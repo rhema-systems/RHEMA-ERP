@@ -233,6 +233,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         }
         var taxableBase = RoundMoney(dto.TaxableBase);
         var knownContractBase = 0m;
+        var statutoryFxEvidence = new List<WhtStatutoryFxEvidenceDto>();
         if (invoiceIds.Count > 0)
         {
             var invoices = await _context.Set<VendorInvoice>().AsNoTracking().Where(invoice =>
@@ -257,10 +258,13 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
                 var settlement = settlements.Single(row => row.VendorInvoiceId == invoice.Id);
                 if (settlement.GrossSettlementAmount > invoice.TotalAmount)
                     throw new InvalidOperationException($"WHT settlement exceeds invoice '{invoice.InvoiceNumber}'.");
-                RequireGhsStatutorySource(invoice.CurrencyCode);
-                if (settlement.ExchangeRateId.HasValue)
-                    throw new InvalidOperationException("GHS WHT settlement must not specify a commercial FX rate. Statutory conversion requires separate governed evidence.");
-                taxableBase += ApWithholdingBasis.FunctionalBase(invoice, settlement.GrossSettlementAmount);
+                var evidence = await ResolveStatutoryFxEvidenceAsync(
+                    invoice,
+                    settlement.GrossSettlementAmount,
+                    paymentDate,
+                    cancellationToken);
+                taxableBase += evidence.GhsTaxableBaseAmount;
+                statutoryFxEvidence.Add(evidence);
             }
             taxableBase = RoundMoney(taxableBase);
         }
@@ -294,8 +298,12 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             {
                 if (string.IsNullOrWhiteSpace(invoice.WithholdingContractReference))
                     throw new InvalidOperationException($"Invoice '{invoice.InvoiceNumber}' lacks contract evidence for the supplier's WHT threshold scope.");
-                RequireGhsStatutorySource(invoice.CurrencyCode);
-                knownContractBase += ApWithholdingBasis.FunctionalBase(invoice, invoice.TotalAmount);
+                var evidence = await ResolveStatutoryFxEvidenceAsync(
+                    invoice,
+                    invoice.TotalAmount,
+                    invoice.InvoiceDate.Date,
+                    cancellationToken);
+                knownContractBase += evidence.GhsTaxableBaseAmount;
             }
             knownContractBase = RoundMoney(knownContractBase);
         }
@@ -331,10 +339,10 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
 
         var history = await cumulativeQuery.Include(row => row.VendorInvoice)
             .Include(row => row.VendorPayment).ToListAsync(cancellationToken);
-        foreach (var allocation in history)
+        foreach (var allocation in history.Where(row =>
+                     !string.Equals(row.VendorInvoice.CurrencyCode, "GHS", StringComparison.OrdinalIgnoreCase)))
         {
-            RequireGhsStatutorySource(allocation.VendorInvoice.CurrencyCode);
-            RequireGhsStatutorySource(allocation.VendorPayment.CurrencyCode);
+            RequireFrozenStatutoryFxEvidence(allocation);
         }
         if (history.Any(row => row.VendorPayment.PaymentDate.Date > paymentDate))
             throw new InvalidOperationException("Later posted WHT payments exist in this statutory scope. Use a governed tax correction instead of backdating the threshold calculation.");
@@ -392,14 +400,91 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             ContractReference = contractReference,
             SupplyCategory = dto.SupplyCategory.Value,
             StatutoryPeriodStart = fiscalYearStart,
-            StatutoryPeriodEnd = fiscalYearEnd.AddDays(-1)
+            StatutoryPeriodEnd = fiscalYearEnd.AddDays(-1),
+            StatutoryFxEvidence = statutoryFxEvidence
         };
     }
 
-    private static void RequireGhsStatutorySource(string currency)
+    private async Task<WhtStatutoryFxEvidenceDto> ResolveStatutoryFxEvidenceAsync(
+        VendorInvoice invoice,
+        decimal grossSettlementAmount,
+        DateTime recognitionDate,
+        CancellationToken cancellationToken)
     {
-        if (!string.Equals(currency?.Trim(), "GHS", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Foreign-currency WHT scope requires governed GHS statutory conversion evidence at the applicable Bank of Ghana inter-bank rate. Commercial settlement rates and invoice book values cannot substitute for that evidence. Finance must resolve this scope before settlement.");
+        var currency = NormalizeCurrency(invoice.CurrencyCode);
+        var nativeBase = RoundMoney(ApWithholdingBasis.FunctionalBase(invoice, grossSettlementAmount));
+        if (currency == "GHS")
+        {
+            return new WhtStatutoryFxEvidenceDto
+            {
+                VendorInvoiceId = invoice.Id,
+                CurrencyCode = currency,
+                GrossSettlementAmount = RoundMoney(grossSettlementAmount),
+                NetTaxableBaseAmount = nativeBase,
+                GhsTaxableBaseAmount = nativeBase,
+                ExchangeRateToGhs = 1m,
+                RecognitionDate = recognitionDate.Date
+            };
+        }
+
+        var date = recognitionDate.Date;
+        var rate = await _context.Set<ExchangeRate>().AsNoTracking()
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted && item.IsActive
+                && item.RateType == ExchangeRateType.GhanaStatutory
+                && item.QuoteSide == ExchangeRateQuoteSide.Mid
+                && item.EffectiveDate.Date == date
+                && item.Rate > 0m
+                && (item.ApprovalStatus == RateApprovalStatus.Approved
+                    || item.ApprovalStatus == RateApprovalStatus.AutoApproved)
+                && ((item.BaseCurrencyCode == "GHS" && item.TargetCurrencyCode == currency)
+                    || (item.BaseCurrencyCode == currency && item.TargetCurrencyCode == "GHS")))
+            .OrderByDescending(item => item.Priority)
+            .ThenByDescending(item => item.CreatedDate)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException(
+                $"No approved Bank of Ghana statutory {currency}/GHS rate exists for {date:yyyy-MM-dd}. Create and approve a Ghana statutory tax rate for the exact recognition date before settlement.");
+
+        if (!IsBankOfGhanaSource(rate.RateSource) || string.IsNullOrWhiteSpace(rate.APIResponseMetadata))
+        {
+            throw new InvalidOperationException(
+                $"The approved Ghana statutory rate for {currency}/GHS on {date:yyyy-MM-dd} lacks Bank of Ghana source evidence or a source reference.");
+        }
+
+        var factor = rate.BaseCurrencyCode == "GHS" ? rate.InverseRate : rate.Rate;
+        if (factor <= 0m)
+            throw new InvalidOperationException("The approved Ghana statutory rate has an invalid GHS conversion factor.");
+
+        return new WhtStatutoryFxEvidenceDto
+        {
+            VendorInvoiceId = invoice.Id,
+            CurrencyCode = currency,
+            GrossSettlementAmount = RoundMoney(grossSettlementAmount),
+            NetTaxableBaseAmount = nativeBase,
+            GhsTaxableBaseAmount = RoundMoney(nativeBase * factor),
+            ExchangeRateId = rate.Id,
+            ExchangeRateToGhs = factor,
+            RecognitionDate = date,
+            RateSource = rate.RateSource,
+            SourceReference = rate.APIResponseMetadata
+        };
+    }
+
+    private static bool IsBankOfGhanaSource(string? source)
+        => !string.IsNullOrWhiteSpace(source)
+           && (source.Contains("Bank of Ghana", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(source.Trim(), "BoG", StringComparison.OrdinalIgnoreCase));
+
+    private static void RequireFrozenStatutoryFxEvidence(VendorPaymentAllocation allocation)
+    {
+        if (!allocation.WithholdingTaxStatutoryExchangeRateId.HasValue
+            || allocation.WithholdingTaxStatutoryExchangeRate is not > 0m
+            || !allocation.WithholdingTaxStatutoryExchangeRateDate.HasValue
+            || !IsBankOfGhanaSource(allocation.WithholdingTaxStatutoryExchangeRateSource)
+            || string.IsNullOrWhiteSpace(allocation.WithholdingTaxStatutoryExchangeRateReference))
+        {
+            throw new InvalidOperationException(
+                "Posted foreign-currency WHT history lacks frozen Bank of Ghana statutory FX evidence. Finance must reconcile the historical statutory scope before another settlement.");
+        }
     }
 
     public async Task<IReadOnlyList<WhtRemittanceLiabilityDto>> GetUnremittedLiabilitiesAsync(
@@ -1031,23 +1116,25 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
 
     private async Task RequireStatutoryPaymentEvidenceAsync(VendorPayment payment, CancellationToken cancellationToken)
     {
-        RequireGhsStatutorySource(await ResolveFunctionalCurrencyAsync(cancellationToken));
-        RequireGhsStatutorySource(payment.CurrencyCode);
+        if (!string.Equals(await ResolveFunctionalCurrencyAsync(cancellationToken), "GHS", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Ghana WHT settlement currently requires GHS as the tenant functional currency.");
         var allocations = await _context.Set<VendorPaymentAllocation>().AsNoTracking()
             .Where(row => row.TenantId == TenantId && !row.IsDeleted && !row.IsReversal && row.VendorPaymentId == payment.Id)
-            .Select(row => new { row.WithholdingTaxBaseFunctionalAmount, row.VendorInvoice.TenantId, row.VendorInvoice.IsDeleted, row.VendorInvoice.CurrencyCode })
+            .Include(row => row.VendorInvoice)
             .ToListAsync(cancellationToken);
-        if (allocations.Count == 0 || allocations.Any(row => row.TenantId != TenantId || row.IsDeleted ||
+        if (allocations.Count == 0 || allocations.Any(row => row.VendorInvoice.TenantId != TenantId || row.VendorInvoice.IsDeleted ||
                 !row.WithholdingTaxBaseFunctionalAmount.HasValue))
             throw new InvalidOperationException("WHT issue/remittance requires frozen, tenant-owned statutory allocation evidence. Reconcile historical liabilities before issuing new evidence.");
-        foreach (var allocation in allocations)
-            RequireGhsStatutorySource(allocation.CurrencyCode);
+        foreach (var allocation in allocations.Where(row =>
+                     !string.Equals(row.VendorInvoice.CurrencyCode, "GHS", StringComparison.OrdinalIgnoreCase)))
+            RequireFrozenStatutoryFxEvidence(allocation);
         _ = ResolveTaxableBase(payment);
     }
 
     private async Task RequireStatutoryRemittanceEvidenceAsync(WithholdingTaxRemittance remittance, CancellationToken cancellationToken)
     {
-        RequireGhsStatutorySource(remittance.CurrencyCode);
+        if (!string.Equals(remittance.CurrencyCode, "GHS", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Ghana WHT remittances must be denominated in GHS.");
         var ids = remittance.Lines.Select(line => line.VendorPaymentId).Distinct().ToList();
         var payments = await _context.Set<VendorPayment>().AsNoTracking()
             .Where(payment => payment.TenantId == TenantId && !payment.IsDeleted && ids.Contains(payment.Id))

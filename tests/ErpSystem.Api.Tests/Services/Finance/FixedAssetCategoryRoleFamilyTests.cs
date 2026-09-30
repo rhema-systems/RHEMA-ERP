@@ -49,6 +49,59 @@ public sealed class FixedAssetCategoryRoleFamilyTests
     }
 
     [Fact]
+    public async Task CategoryUpdate_PersistsAndReturnsMaintenanceEligibility()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase($"fixed-asset-maintenance-update-{Guid.NewGuid():N}")
+                .Options);
+        var cost = AddAccount(db, tenantId, "1520", "Vehicle cost", AccountType.Asset);
+        var accumulated = AddAccount(db, tenantId, "1592", "Vehicle accumulated depreciation", AccountType.Asset);
+        var expense = AddAccount(db, tenantId, "7310", "Vehicle depreciation expense", AccountType.Expense);
+        var category = CategoryEntity(tenantId, "VEH", requiresMaintenance: false);
+        category.AssetAccountId = cost.Id;
+        category.AccumulatedDepreciationAccountId = accumulated.Id;
+        category.DepreciationExpenseAccountId = expense.Id;
+        category.DefaultMethod = DepreciationMethod.StraightLine;
+        category.DefaultUsefulLifeMonths = 60;
+        db.FixedAssetCategories.Add(category);
+        await db.SaveChangesAsync();
+
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(item => item.TenantId).Returns(tenantId);
+        currentUser.SetupGet(item => item.UserId).Returns(Guid.NewGuid().ToString());
+        currentUser.SetupGet(item => item.UserName).Returns("fixed.asset.accountant");
+        var service = new FixedAssetCategoryService(db, currentUser.Object);
+
+        var response = await service.UpdateAsync(category.Id, new UpdateFixedAssetCategoryDto
+        {
+            Code = category.Code,
+            Name = category.Name,
+            Description = "Maintenance-managed vehicle category",
+            RequiresMaintenance = true,
+            DefaultMethod = DepreciationMethod.StraightLine,
+            DefaultUsefulLifeMonths = 60,
+            DefaultResidualValuePercent = 10m,
+            AssetAccountId = cost.Id,
+            AccumulatedDepreciationAccountId = accumulated.Id,
+            DepreciationExpenseAccountId = expense.Id
+        });
+
+        response.RequiresMaintenance.Should().BeTrue();
+        response.DefaultResidualValuePercent.Should().Be(10m);
+        db.ChangeTracker.Clear();
+        var stored = await db.FixedAssetCategories.AsNoTracking()
+            .SingleAsync(item => item.Id == category.Id);
+        stored.RequiresMaintenance.Should().BeTrue();
+        stored.DefaultResidualValuePercent.Should().Be(10m);
+        var reloaded = await service.GetByIdAsync(category.Id);
+        reloaded.Should().NotBeNull();
+        reloaded!.RequiresMaintenance.Should().BeTrue();
+        reloaded.DefaultResidualValuePercent.Should().Be(10m);
+    }
+
+    [Fact]
     public async Task Categories_SelectDistinctAccountsFromRepeatableFixedAssetRoleFamilies()
     {
         var tenantId = Guid.NewGuid();

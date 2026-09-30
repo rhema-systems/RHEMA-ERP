@@ -891,6 +891,23 @@ public class VendorPaymentAllocation : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal? WithholdingTaxBaseFunctionalAmount { get; set; }
 
+    /// <summary>
+    /// Approved Bank of Ghana statutory rate used to convert this allocation's invoice-currency
+    /// WHT basis into GHS. Null for a native GHS allocation.
+    /// </summary>
+    public Guid? WithholdingTaxStatutoryExchangeRateId { get; set; }
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal? WithholdingTaxStatutoryExchangeRate { get; set; }
+
+    public DateTime? WithholdingTaxStatutoryExchangeRateDate { get; set; }
+
+    [MaxLength(100)]
+    public string? WithholdingTaxStatutoryExchangeRateSource { get; set; }
+
+    [MaxLength(1000)]
+    public string? WithholdingTaxStatutoryExchangeRateReference { get; set; }
+
     public DateTime AllocationDate { get; set; } = DateTime.UtcNow;
 
     [MaxLength(500)]

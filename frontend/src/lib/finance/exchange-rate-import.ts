@@ -32,6 +32,7 @@ const EXCHANGE_RATE_RATE_TYPES: ExchangeRateType[] = [
     'QuarterEnd',
     'YearEnd',
     'Fixed',
+    'GhanaStatutory',
 ];
 
 type ExchangeRateImportColumn =
@@ -87,7 +88,11 @@ const getImportColumn = (header: unknown): ExchangeRateImportColumn | null => {
 
 const toImportCell = (value: unknown) => {
     if (value instanceof Date) {
-        return value.toISOString().split('T')[0];
+        const year = value.getFullYear();
+        const month = String(value.getMonth() + 1).padStart(2, '0');
+        const day = String(value.getDate()).padStart(2, '0');
+        // Spreadsheet dates are civil dates, not instants. UTC conversion can move them a day.
+        return `${year}-${month}-${day}`;
     }
 
     return String(value ?? '').trim();
@@ -183,8 +188,9 @@ const normalizeOptionalBoolean = (
 
 export const buildExchangeRateTemplateCsv = (templateDate = new Date().toISOString().split('T')[0]) => {
     const templateRows = [
-        ['GHS', 'USD', '12.5000', templateDate, 'Daily', 'Manual', 'Bank of Ghana', `BOG-${templateDate}`, '', 'TRUE', 'Approved'],
-        ['GHS', 'EUR', '13.6000', templateDate, 'MonthEnd', 'Manual', 'Bank of Ghana', `BOG-${templateDate}`, '', 'TRUE', 'Approved'],
+        ['GHS', 'USD', '0.0800', templateDate, 'Daily', 'Manual', 'Bank of Ghana', `BOG-${templateDate}`, '', 'TRUE', 'Approved'],
+        ['GHS', 'EUR', '0.073529', templateDate, 'MonthEnd', 'Manual', 'Bank of Ghana', `BOG-${templateDate}`, '', 'TRUE', 'Approved'],
+        ['GHS', 'GBP', '0.063291', templateDate, 'GhanaStatutory', 'Bank of Ghana', 'Bank of Ghana', `BOG-INTERBANK-${templateDate}`, '', 'TRUE', 'Approved'],
     ];
 
     return [
@@ -204,7 +210,7 @@ export const parseExchangeRateImportFile = async (file: File): Promise<ParsedExc
         };
     }
 
-    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false, dateNF: 'yyyy-mm-dd', raw: lowerFileName.endsWith('.csv') });
     const firstSheetName = workbook.SheetNames[0];
     if (!firstSheetName) {
         return { rows: [], errors: ['The selected workbook does not contain any sheets.'] };
@@ -216,6 +222,7 @@ export const parseExchangeRateImportFile = async (file: File): Promise<ParsedExc
         defval: '',
         blankrows: false,
         raw: false,
+        dateNF: 'yyyy-mm-dd',
     });
 
     const headerIndex = sheetRows.findIndex((row) => row.some((cell) => toImportCell(cell) !== ''));
@@ -275,12 +282,21 @@ export const parseExchangeRateImportFile = async (file: File): Promise<ParsedExc
             rowErrors.push(`Row ${rowNumber}: rateSource cannot exceed 20 characters.`);
         }
 
+        if (rateType === 'GhanaStatutory') {
+            if (!/bank\s+of\s+ghana|\bbog\b/i.test(rateSource)) {
+                rowErrors.push(`Row ${rowNumber}: GhanaStatutory rateSource must identify Bank of Ghana.`);
+            }
+            if (!(parsedRow.sourceReference ?? '').trim()) {
+                rowErrors.push(`Row ${rowNumber}: GhanaStatutory sourceReference is required.`);
+            }
+        }
+
         if ((parsedRow.sourceName ?? '').length > 100) {
             rowErrors.push(`Row ${rowNumber}: sourceName cannot exceed 100 characters.`);
         }
 
-        if ((parsedRow.sourceReference ?? '').length > 100) {
-            rowErrors.push(`Row ${rowNumber}: sourceReference cannot exceed 100 characters.`);
+        if ((parsedRow.sourceReference ?? '').length > 1000) {
+            rowErrors.push(`Row ${rowNumber}: sourceReference cannot exceed 1000 characters.`);
         }
 
         const duplicateKey = [baseCurrencyCode, targetCurrencyCode, effectiveDate, rateType].join('|');

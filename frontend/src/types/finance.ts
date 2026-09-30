@@ -39,7 +39,8 @@ export type ExchangeRateType =
   | 'YearEnd'
   | 'Budget'
   | 'Fixed'
-  | 'Spot';
+  | 'Spot'
+  | 'GhanaStatutory';
 export type ExchangeRateQuoteSide = 'Mid' | 'Buying' | 'Selling';
 export type PeriodStatus = 'Future' | 'Open' | 'Closed' | 'Locked';
 export type RevaluationFrequency =

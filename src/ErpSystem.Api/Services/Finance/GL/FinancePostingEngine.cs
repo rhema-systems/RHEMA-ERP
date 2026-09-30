@@ -1619,6 +1619,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                     line.ExchangeRateId,
                     line.ExchangeRate,
                     ratePolicy,
+                    line.TransactionTag,
                     ratePolicySettings?.RequireExchangeRateOverrideApproval ?? true,
                     request,
                     cancellationToken);
@@ -2118,6 +2119,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         Guid? exchangeRateId,
         decimal? suppliedRate,
         ExchangeRatePolicy policy,
+        string? transactionTag,
         bool requireOverrideApproval,
         FinancePostingCommandDto request,
         CancellationToken cancellationToken)
@@ -2228,11 +2230,26 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             throw new InvalidOperationException("Exchange rate must be active and approved before posting.");
         }
 
+        // Ghana WHT is a GHS statutory liability measured at the exact-date Bank of Ghana
+        // reference rate, not at the commercial Daily rate used by the rest of the payment.
+        // Admit that rate only on the trusted AP vendor-payment WHT line; every other line and
+        // producer continues to use the ordinary policy/override approval boundary.
+        var isGovernedGhanaStatutoryWht =
+            string.Equals(request.SourceModule, "AP", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(request.SourceDocumentType, "VendorPayment", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(transactionTag, "AP-WHT", StringComparison.Ordinal) &&
+            rate.RateType == ExchangeRateType.GhanaStatutory &&
+            rate.QuoteSide == ExchangeRateQuoteSide.Mid &&
+            rate.EffectiveDate.Date == postingDate.Date &&
+            IsBankOfGhanaRateSource(rate.RateSource) &&
+            !string.IsNullOrWhiteSpace(rate.APIResponseMetadata);
+
         if (rate.RateType != policy.RateType || rate.QuoteSide != policy.QuoteSide)
         {
             // A reversal must reproduce the original immutable rate snapshot even
             // when the tenant's current policy has since changed.
-            if (!request.ReversalOfJournalEntryId.HasValue && !preservesHistoricalSourceMeasurement)
+            if (!request.ReversalOfJournalEntryId.HasValue && !preservesHistoricalSourceMeasurement &&
+                !isGovernedGhanaStatutoryWht)
             {
                 EnsureExchangeRateOverrideApproval(request, requireOverrideApproval);
                 policyOverrideUsed = true;
@@ -2255,6 +2272,11 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
 
         return new ExchangeRateSnapshot(rate.Id, functionalMultiplier, rate.RateSource, rate.EffectiveDate.Date, policyOverrideUsed);
     }
+
+    private static bool IsBankOfGhanaRateSource(string? source) =>
+        !string.IsNullOrWhiteSpace(source) &&
+        (source.Contains("Bank of Ghana", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(source.Trim(), "BoG", StringComparison.OrdinalIgnoreCase));
 
     private static ExchangeRateType ParseExchangeRateType(string? value, ExchangeRateType fallback)
     {

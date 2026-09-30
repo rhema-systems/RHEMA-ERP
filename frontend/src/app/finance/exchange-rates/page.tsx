@@ -26,6 +26,7 @@ const EXCHANGE_RATE_TYPE_OPTIONS: Array<{ value: ExchangeRateType; label: string
     { value: 'Budget', label: 'Budget' },
     { value: 'Fixed', label: 'Fixed' },
     { value: 'Spot', label: 'Spot' },
+    { value: 'GhanaStatutory', label: 'Ghana statutory tax - BoG reference' },
 ];
 const ENTRY_RATE_TYPE_OPTIONS = EXCHANGE_RATE_TYPE_OPTIONS.filter(
     option => option.value !== 'Budget' && option.value !== 'Spot'
@@ -497,10 +498,13 @@ export default function ExchangeRatesPage() {
                                         id="rate"
                                         type="number"
                                         step="0.0001"
-                                        placeholder="12.5000"
+                                        placeholder="0.0800"
                                         value={formData.rate}
                                         onChange={(e) => setFormData({ ...formData, rate: e.target.value })}
                                     />
+                                    <p className="text-xs text-muted-foreground">
+                                        Enter target currency per 1 base currency (for example, GHS/USD 0.0800 means GHS 1 = USD 0.08; the system retains the inverse automatically).
+                                    </p>
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="effectiveDate">Effective Date</Label>
@@ -515,7 +519,14 @@ export default function ExchangeRatesPage() {
                                     <Label htmlFor="rateType">Rate Type</Label>
                                     <Select
                                         value={formData.rateType}
-                                        onValueChange={(value: ExchangeRateType) => setFormData({ ...formData, rateType: value })}
+                                        onValueChange={(value: ExchangeRateType) => setFormData({
+                                            ...formData,
+                                            rateType: value,
+                                            quoteSide: value === 'GhanaStatutory' ? 'Mid' : formData.quoteSide,
+                                            rateSource: value === 'GhanaStatutory'
+                                                ? 'Bank of Ghana'
+                                                : formData.rateSource,
+                                        })}
                                     >
                                         <SelectTrigger id="rateType">
                                             <SelectValue />
@@ -529,7 +540,7 @@ export default function ExchangeRatesPage() {
                                         </SelectContent>
                                     </Select>
                                     <p className="text-xs text-muted-foreground">
-                                        Month End must use the calendar month-end date. Quarter End and Year End must match the configured fiscal calendar. Budget and Spot remain hidden until supported workflows exist.
+                                        Ghana statutory rates require Mid / Reference, Bank of Ghana as the source, and a source reference. Month End must use the calendar month-end date. Quarter End and Year End must match the configured fiscal calendar. Budget and Spot remain hidden until supported workflows exist.
                                     </p>
                                 </div>
                                 <div className="space-y-2">
@@ -537,6 +548,7 @@ export default function ExchangeRatesPage() {
                                     <Select
                                         value={formData.quoteSide}
                                         onValueChange={(value: ExchangeRateQuoteSide) => setFormData({ ...formData, quoteSide: value })}
+                                        disabled={formData.rateType === 'GhanaStatutory'}
                                     >
                                         <SelectTrigger id="quoteSide"><SelectValue /></SelectTrigger>
                                         <SelectContent>
@@ -545,7 +557,7 @@ export default function ExchangeRatesPage() {
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                    <p className="text-xs text-muted-foreground">Buying and selling are defined from the bank/provider perspective.</p>
+                                    <p className="text-xs text-muted-foreground">{formData.rateType === 'GhanaStatutory' ? 'Ghana statutory tax conversion always uses the BoG Mid / Reference rate.' : 'Buying and selling are defined from the bank/provider perspective.'}</p>
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="rateSource">Source</Label>
@@ -804,6 +816,9 @@ export default function ExchangeRatesPage() {
                                                                 value={formData.rate}
                                                                 onChange={(e) => setFormData({ ...formData, rate: e.target.value })}
                                                             />
+                                                            <p className="text-xs text-muted-foreground">
+                                                                Target currency per 1 base currency; the inverse is calculated automatically.
+                                                            </p>
                                                         </div>
                                                         <div className="space-y-2">
                                                             <Label htmlFor="edit-effectiveDate">Effective Date</Label>
@@ -819,7 +834,14 @@ export default function ExchangeRatesPage() {
                                                             <Label htmlFor="edit-rateType">Rate Type</Label>
                                                             <Select
                                                                 value={formData.rateType}
-                                                                onValueChange={(value: ExchangeRateType) => setFormData({ ...formData, rateType: value })}
+                                                                onValueChange={(value: ExchangeRateType) => setFormData({
+                                                                    ...formData,
+                                                                    rateType: value,
+                                                                    quoteSide: value === 'GhanaStatutory' ? 'Mid' : formData.quoteSide,
+                                                                    rateSource: value === 'GhanaStatutory'
+                                                                        ? 'Bank of Ghana'
+                                                                        : formData.rateSource,
+                                                                })}
                                                             >
                                                                 <SelectTrigger id="edit-rateType">
                                                                     <SelectValue />
@@ -844,6 +866,7 @@ export default function ExchangeRatesPage() {
                                                             <Select
                                                                 value={formData.quoteSide}
                                                                 onValueChange={(value: ExchangeRateQuoteSide) => setFormData({ ...formData, quoteSide: value })}
+                                                                disabled={formData.rateType === 'GhanaStatutory'}
                                                             >
                                                                 <SelectTrigger id="edit-quoteSide"><SelectValue /></SelectTrigger>
                                                                 <SelectContent>
