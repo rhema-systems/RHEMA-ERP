@@ -3145,8 +3145,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 var originalAccounts = await CustomerPostingAccountHistory.LoadAsync(
                     _unitOfWork, tenantId, payment.JournalEntryId, "CustomerPayment", payment.Id, cancellationToken);
                 var discountAccountId = originalAccounts?.Account("AR-Discount")
-                    ?? settings.DiscountAllowedAccountId
                     ?? customer.CustomerTermsDiscountsTakenAccountId
+                    ?? settings.DiscountAllowedAccountId
                     ?? throw new InvalidOperationException("Sales discounts allowed account is not configured for this tenant.");
                 await ResolveReceiptPostingAccountAsync(discountAccountId, "sales discount allowed account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
 
