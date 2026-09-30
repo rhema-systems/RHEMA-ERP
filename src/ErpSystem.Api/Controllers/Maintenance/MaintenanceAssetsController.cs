@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading.Tasks;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,13 +19,48 @@ public class MaintenanceAssetsController : ControllerBase
 {
     private readonly IMaintenanceAssetService _maintenanceAssetService;
     private readonly ILogger<MaintenanceAssetsController> _logger;
+    private readonly IMaintenanceAssetMappingService _assetMappingService;
+    private readonly ICurrentUserService _currentUserService;
 
     public MaintenanceAssetsController(
         IMaintenanceAssetService maintenanceAssetService,
+        IMaintenanceAssetMappingService assetMappingService,
+        ICurrentUserService currentUserService,
         ILogger<MaintenanceAssetsController> logger)
     {
         _maintenanceAssetService = maintenanceAssetService;
+        _assetMappingService = assetMappingService;
+        _currentUserService = currentUserService;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Returns the source-aware Finance, Estate and legacy asset options available to Job Cards.
+    /// </summary>
+    [HttpGet("selection-options")]
+    public async Task<ActionResult<IReadOnlyList<JobCardAssetOptionDto>>> GetSelectionOptions(
+        [FromQuery] string? searchTerm = null)
+    {
+        var assets = await _maintenanceAssetService.GetJobCardAssetOptionsAsync(searchTerm);
+        return Ok(assets);
+    }
+
+    /// <summary>
+    /// Creates or returns the unique Maintenance profile for an authoritative source asset.
+    /// Canonical Finance/Estate fields are not accepted from this endpoint.
+    /// </summary>
+    [HttpPost("source-profile")]
+    public async Task<ActionResult<object>> EnsureSourceProfile([FromBody] EnsureMaintenanceAssetProfileRequest request)
+    {
+        var tenantId = _currentUserService.TenantId
+            ?? throw new UnauthorizedAccessException("Tenant not found.");
+        var createdById = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
+        var profile = await _assetMappingService.ResolveOrCreateProfileAsync(
+            request.AssetSource,
+            request.SourceAssetId,
+            tenantId,
+            createdById);
+        return Ok(new { maintenanceAssetId = profile.Id });
     }
 
     /// <summary>
@@ -462,4 +499,13 @@ public class MaintenanceAssetsController : ControllerBase
         }
     }
 
+}
+
+public sealed class EnsureMaintenanceAssetProfileRequest
+{
+    [Required]
+    public JobCardAssetSource AssetSource { get; set; }
+
+    [Required]
+    public Guid SourceAssetId { get; set; }
 }

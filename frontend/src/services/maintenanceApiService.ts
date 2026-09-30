@@ -2,6 +2,9 @@ import { apiService } from './api.service';
 
 export interface Asset {
   id: string;
+  assetSource?: JobCardAssetSource;
+  sourceAssetId?: string;
+  isSourceControlled?: boolean;
   name: string;
   assetNumber: string;
   description?: string;
@@ -23,6 +26,26 @@ export interface Asset {
   warrantyEndDate?: string;
   warrantyStartDate?: string;
   isFleetAsset?: boolean;
+}
+
+export type JobCardAssetSource =
+  | 'LegacyMaintenanceAsset'
+  | 'FixedAsset'
+  | 'EstateManagedAsset';
+
+export interface JobCardAssetOption {
+  assetSource: JobCardAssetSource;
+  sourceAssetId: string;
+  maintenanceAssetId?: string;
+  assetCode: string;
+  assetName: string;
+  categoryOrPropertyType: string;
+  location?: string;
+  status: string;
+  description?: string;
+  serialNumber?: string;
+  acquisitionDate?: string;
+  currentValue?: number;
 }
 
 export interface WorkOrderType {
@@ -369,6 +392,28 @@ class MaintenanceApiService {
 
   async getAssetById(id: string): Promise<Asset> {
     return await apiService.request<Asset>(`/maintenance/assets/${id}`);
+  }
+
+  async getJobCardAssetOptions(searchTerm?: string): Promise<JobCardAssetOption[]> {
+    const params = new URLSearchParams();
+    if (searchTerm?.trim()) params.set('searchTerm', searchTerm.trim());
+    const query = params.toString();
+    return await apiService.request<JobCardAssetOption[]>(
+      `/maintenance/assets/selection-options${query ? `?${query}` : ''}`
+    );
+  }
+
+  async ensureSourceProfile(
+    assetSource: Exclude<JobCardAssetSource, 'LegacyMaintenanceAsset'>,
+    sourceAssetId: string
+  ): Promise<{ maintenanceAssetId: string }> {
+    return await apiService.request<{ maintenanceAssetId: string }>(
+      '/maintenance/assets/source-profile',
+      {
+        method: 'POST',
+        body: JSON.stringify({ assetSource, sourceAssetId }),
+      }
+    );
   }
 
   async getAvailableVehicles(): Promise<Asset[]> {

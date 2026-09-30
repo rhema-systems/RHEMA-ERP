@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Maintenance;
 
@@ -2064,6 +2065,9 @@ public class InventoryItemSummaryDto
 public class MaintenanceAssetDto
 {
     public Guid Id { get; set; }
+    public JobCardAssetSource AssetSource { get; set; }
+    public Guid SourceAssetId { get; set; }
+    public bool IsSourceControlled { get; set; }
     public string Name { get; set; } = string.Empty;
     public string AssetNumber { get; set; } = string.Empty;
     public string? Description { get; set; }
@@ -2114,6 +2118,9 @@ public class MaintenanceAssetDto
 public class MaintenanceAssetListDto
 {
     public Guid Id { get; set; }
+    public JobCardAssetSource AssetSource { get; set; }
+    public Guid SourceAssetId { get; set; }
+    public bool IsSourceControlled { get; set; }
     public string Name { get; set; } = string.Empty;
     public string AssetNumber { get; set; } = string.Empty;
     public string? Description { get; set; }

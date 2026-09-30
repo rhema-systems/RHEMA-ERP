@@ -767,7 +767,10 @@ public sealed class EhcMicrosoft365InboundEmailBackgroundService : BackgroundSer
             }
 
             var now = DateTime.UtcNow;
-            var uploaderId = ticketMessage.AuthorUserId ?? ticket.RequesterUserId;
+            // Public property enquiries can have no authenticated requester. An inbound email
+            // message is nevertheless resolved to an author user before attachments are saved.
+            var uploaderId = ticketMessage.AuthorUserId ?? ticket.RequesterUserId
+                ?? throw new InvalidOperationException("Inbound email attachment has no resolved uploader user.");
 
             db.FileUploadRecords.Add(new FileUploadRecord
             {

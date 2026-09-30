@@ -724,6 +724,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             // Enquiry, Helpdesk & Complaints (EHC) services
             services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IEhcTicketService, ErpSystem.Core.Services.Ehc.EhcTicketService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IPropertyEnquiryProspectService, ErpSystem.Api.Services.Ehc.PropertyEnquiryProspectService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IProspectDepositFinancePostingService, ErpSystem.Api.Services.Ehc.ProspectDepositFinancePostingService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IEhcProblemService, ErpSystem.Core.Services.Ehc.EhcProblemService>();
 
             // Enhanced maintenance workflow integration - NOW ENABLED
@@ -731,6 +733,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             // Maintenance asset service - NOW ENABLED
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetService, ErpSystem.Api.Services.Maintenance.MaintenanceAssetService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetMappingService, ErpSystem.Api.Services.Maintenance.MaintenanceAssetMappingService>();
 
             // Inventory repositories
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryItemRepository, ErpSystem.Data.Repositories.Inventory.InventoryItemRepository>();

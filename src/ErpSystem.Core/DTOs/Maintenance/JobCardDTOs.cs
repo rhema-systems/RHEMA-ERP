@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Maintenance;
 
@@ -19,6 +20,13 @@ public class CreateJobCardDto
 
     [Required]
     public Guid AssetId { get; set; }
+
+    /// <summary>
+    /// Source-aware clients should send AssetSource and SourceAssetId. AssetId remains accepted
+    /// for older clients and is interpreted as a legacy MaintenanceAsset identifier.
+    /// </summary>
+    public JobCardAssetSource AssetSource { get; set; } = JobCardAssetSource.LegacyMaintenanceAsset;
+    public Guid? SourceAssetId { get; set; }
 
     [Required]
     public Guid MaintenanceTypeId { get; set; }
@@ -134,6 +142,8 @@ public class JobCardListDto
     public string? Description { get; set; }
     public string? ProblemDescription { get; set; }
     public Guid AssetId { get; set; }
+    public JobCardAssetSource AssetSource { get; set; }
+    public Guid SourceAssetId { get; set; }
     public string AssetName { get; set; } = string.Empty;
     public string AssetCode { get; set; } = string.Empty;
     public Guid MaintenanceTypeId { get; set; }
@@ -171,6 +181,8 @@ public class JobCardDto
 
     // Asset Information
     public Guid AssetId { get; set; }
+    public JobCardAssetSource AssetSource { get; set; }
+    public Guid SourceAssetId { get; set; }
     public string AssetName { get; set; } = string.Empty;
     public string AssetCode { get; set; } = string.Empty;
     public string AssetType { get; set; } = string.Empty;
@@ -296,6 +308,25 @@ public class JobCardDto
     // Metadata
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Unified source-aware option returned to Job Card creation screens.
+/// </summary>
+public class JobCardAssetOptionDto
+{
+    public JobCardAssetSource AssetSource { get; set; }
+    public Guid SourceAssetId { get; set; }
+    public Guid? MaintenanceAssetId { get; set; }
+    public string AssetCode { get; set; } = string.Empty;
+    public string AssetName { get; set; } = string.Empty;
+    public string CategoryOrPropertyType { get; set; } = string.Empty;
+    public string? Location { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string? SerialNumber { get; set; }
+    public DateTime? AcquisitionDate { get; set; }
+    public decimal? CurrentValue { get; set; }
 }
 
 /// <summary>

@@ -33,6 +33,7 @@ public class JobCardService : IJobCardService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<JobCardService> _logger;
     private readonly IAppEventBus _appEventBus;
+    private readonly IMaintenanceAssetMappingService _assetMappingService;
 
     public JobCardService(
         IJobCardRepository jobCardRepository,
@@ -48,7 +49,8 @@ public class JobCardService : IJobCardService
         IAssetConditionService assetConditionService,
         IUnitOfWork unitOfWork,
         ILogger<JobCardService> logger,
-        IAppEventBus appEventBus)
+        IAppEventBus appEventBus,
+        IMaintenanceAssetMappingService assetMappingService)
     {
         _jobCardRepository = jobCardRepository;
         _workOrderService = workOrderService;
@@ -64,6 +66,7 @@ public class JobCardService : IJobCardService
         _unitOfWork = unitOfWork;
         _logger = logger;
         _appEventBus = appEventBus;
+        _assetMappingService = assetMappingService;
     }
 
     private static string NormalizeWorkOrderBillingType(string? value)
@@ -187,10 +190,11 @@ public class JobCardService : IJobCardService
     {
         try
         {
-            _logger.LogInformation("Creating new job card for asset {AssetId}", createDto.AssetId);
-
-            // Validate asset exists
-            var asset = await _assetRepository.GetByIdAsync(createDto.AssetId) ?? throw new ArgumentException($"Asset with ID {createDto.AssetId} not found");
+            var sourceAssetId = createDto.SourceAssetId ?? createDto.AssetId;
+            _logger.LogInformation(
+                "Creating new job card for {AssetSource} asset {SourceAssetId}",
+                createDto.AssetSource,
+                sourceAssetId);
             var currentUserIdString = _currentUserService.UserId;
             if (string.IsNullOrEmpty(currentUserIdString))
             {
@@ -199,6 +203,12 @@ public class JobCardService : IJobCardService
 
             var currentUserId = Guid.Parse(currentUserIdString);
             var tenantId = _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Tenant not found");
+
+            var asset = await _assetMappingService.ResolveOrCreateProfileAsync(
+                createDto.AssetSource,
+                sourceAssetId,
+                tenantId,
+                currentUserId);
 
             // Get the Employee ID from the current user's claims
             var currentEmployeeId = _currentUserService.EmployeeId;
@@ -221,7 +231,10 @@ public class JobCardService : IJobCardService
                 Title = createDto.Title,
                 Description = createDto.Description,
                 ProblemDescription = createDto.ProblemDescription,
-                AssetId = createDto.AssetId,
+                AssetId = asset.Id,
+                AssetSource = createDto.AssetSource,
+                FixedAssetId = createDto.AssetSource == JobCardAssetSource.FixedAsset ? sourceAssetId : null,
+                EstateManagedAssetId = createDto.AssetSource == JobCardAssetSource.EstateManagedAsset ? sourceAssetId : null,
                 MaintenanceTypeId = createDto.MaintenanceTypeId,
                 PriorityLevelId = createDto.PriorityLevelId,
                 CustomerBusinessPartnerId = createDto.CustomerBusinessPartnerId,
@@ -271,6 +284,8 @@ public class JobCardService : IJobCardService
                         ["Title"] = jobCard.Title ?? string.Empty,
                         ["Status"] = jobCard.JobCardStatus ?? string.Empty,
                         ["AssetId"] = jobCard.AssetId,
+                        ["AssetSource"] = jobCard.AssetSource.ToString(),
+                        ["SourceAssetId"] = sourceAssetId,
                         ["RequestedById"] = jobCard.RequestedById,
                         ["CreatedByUserId"] = currentUserId
                     }

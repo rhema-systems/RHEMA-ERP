@@ -117,6 +117,7 @@ export interface PropertyListingContext {
   listingType: string; currency: string; location?: string | null; price?: number | null;
   parentAssetId: string; demarcationId?: string | null; businessPartnerId?: string | null;
   businessPartnerName: string; contactName?: string | null; contactEmail?: string | null; contactPhone?: string | null; contactReference?: string | null;
+  alternativePhoneNumber?: string | null; preferredContactMethod?: string | null;
 }
 
 export interface EhcTicketDetail {

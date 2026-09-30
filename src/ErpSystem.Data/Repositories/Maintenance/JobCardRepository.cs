@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
@@ -93,7 +94,9 @@ public class JobCardRepository : IJobCardRepository
 
             if (filter.AssetId.HasValue)
             {
-                query = query.Where(j => j.AssetId == filter.AssetId.Value);
+                query = query.Where(j => j.AssetId == filter.AssetId.Value
+                    || j.FixedAssetId == filter.AssetId.Value
+                    || j.EstateManagedAssetId == filter.AssetId.Value);
             }
 
             if (filter.RequestedById.HasValue)
@@ -162,6 +165,9 @@ public class JobCardRepository : IJobCardRepository
 
         var jobCards = await query
             .Include(j => j.Asset)
+            .Include(j => j.FixedAsset)
+                .ThenInclude(asset => asset!.Category)
+            .Include(j => j.EstateManagedAsset)
             .Include(j => j.MaintenanceType)
             .Include(j => j.PriorityLevel)
             .Include(j => j.RequestedBy)
@@ -177,8 +183,22 @@ public class JobCardRepository : IJobCardRepository
                 Description = j.Description,
                 ProblemDescription = j.ProblemDescription,
                 AssetId = j.AssetId,
-                AssetName = j.Asset != null ? j.Asset.Name : "Unknown",
-                AssetCode = j.Asset != null ? j.Asset.AssetNumber : "N/A",
+                AssetSource = j.AssetSource,
+                SourceAssetId = j.AssetSource == JobCardAssetSource.FixedAsset && j.FixedAssetId.HasValue
+                    ? j.FixedAssetId.Value
+                    : j.AssetSource == JobCardAssetSource.EstateManagedAsset && j.EstateManagedAssetId.HasValue
+                        ? j.EstateManagedAssetId.Value
+                        : j.AssetId,
+                AssetName = j.FixedAsset != null
+                    ? j.FixedAsset.Name
+                    : j.EstateManagedAsset != null
+                        ? j.EstateManagedAsset.Name
+                        : j.Asset != null ? j.Asset.Name : "Unknown",
+                AssetCode = j.FixedAsset != null
+                    ? j.FixedAsset.AssetCode
+                    : j.EstateManagedAsset != null
+                        ? j.EstateManagedAsset.AssetCode
+                        : j.Asset != null ? j.Asset.AssetNumber : "N/A",
                 MaintenanceTypeId = j.MaintenanceTypeId,
                 MaintenanceType = j.MaintenanceType != null ? j.MaintenanceType.Name : "Unknown",
                 PriorityLevelId = j.PriorityLevelId,
@@ -227,6 +247,16 @@ public class JobCardRepository : IJobCardRepository
         var asset = await _context.MaintenanceAssets
             .Include(a => a.AssetCategory)
             .FirstOrDefaultAsync(a => a.Id == jobCard.AssetId);
+
+        var fixedAsset = jobCard.FixedAssetId.HasValue
+            ? await _context.FixedAssets
+                .Include(item => item.Category)
+                .FirstOrDefaultAsync(item => item.Id == jobCard.FixedAssetId.Value)
+            : null;
+        var estateAsset = jobCard.EstateManagedAssetId.HasValue
+            ? await _context.EstateManagedAssets
+                .FirstOrDefaultAsync(item => item.Id == jobCard.EstateManagedAssetId.Value)
+            : null;
 
         var maintenanceType = await _context.MaintenanceTypes
             .FirstOrDefaultAsync(m => m.Id == jobCard.MaintenanceTypeId);
@@ -289,10 +319,19 @@ public class JobCardRepository : IJobCardRepository
 
             // Asset Information
             AssetId = jobCard.AssetId,
-            AssetName = asset?.Name ?? "Unknown",
-            AssetCode = asset?.AssetNumber ?? "N/A",
-            AssetType = asset?.AssetCategory?.Name ?? asset?.AssetCategory?.AssetType ?? "N/A",
-            AssetLocation = asset?.Location ?? "N/A",
+            AssetSource = jobCard.AssetSource,
+            SourceAssetId = jobCard.FixedAssetId
+                ?? jobCard.EstateManagedAssetId
+                ?? jobCard.AssetId,
+            AssetName = fixedAsset?.Name ?? estateAsset?.Name ?? asset?.Name ?? "Unknown",
+            AssetCode = fixedAsset?.AssetCode ?? estateAsset?.AssetCode ?? asset?.AssetNumber ?? "N/A",
+            AssetType = fixedAsset?.Category?.Name
+                ?? estateAsset?.UnitType
+                ?? estateAsset?.AssetType.ToString()
+                ?? asset?.AssetCategory?.Name
+                ?? asset?.AssetCategory?.AssetType
+                ?? "N/A",
+            AssetLocation = fixedAsset?.Location ?? estateAsset?.Location ?? asset?.Location ?? "N/A",
 
             // Maintenance Details
             MaintenanceTypeId = jobCard.MaintenanceTypeId,
