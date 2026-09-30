@@ -12,6 +12,8 @@ public interface ICapitalProjectService
 
     // Status management
     Task<CapitalProjectDetailDto> UpdateStatusAsync(Guid id, UpdateProjectStatusDto dto);
+    Task<CapitalProjectDetailDto> SubmitForCapitalizationApprovalAsync(
+        Guid id, CancellationToken cancellationToken = default);
 
     // Cost line management (tracking only — no GL posting)
     Task<CapitalProjectDetailDto> PostCostToProjectAsync(Guid projectId, AddProjectCostDto dto);

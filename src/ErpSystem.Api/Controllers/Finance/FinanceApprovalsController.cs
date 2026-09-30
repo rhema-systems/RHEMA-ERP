@@ -876,9 +876,11 @@ public class FinanceApprovalsController : ControllerBase
         WorkflowInstance instance,
         CancellationToken cancellationToken)
     {
+        var cycle = await _db.FixedAssetCapitalizationCycles.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.Id == instance.EntityId && !item.IsDeleted, cancellationToken);
+        var assetId = cycle?.FixedAssetId ?? instance.EntityId;
         var asset = await _db.FixedAssets.AsNoTracking().SingleOrDefaultAsync(item =>
-            item.TenantId == tenantId && item.Id == instance.EntityId && !item.IsDeleted,
-            cancellationToken);
+            item.TenantId == tenantId && item.Id == assetId && !item.IsDeleted, cancellationToken);
         if (asset == null)
             return "The fixed asset no longer exists for this tenant.";
         if (asset.Status != FixedAssetStatus.PendingApproval)
@@ -886,6 +888,11 @@ public class FinanceApprovalsController : ControllerBase
         if (string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotJson) ||
             string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotHash))
             return "The fixed asset has no immutable capitalization journal snapshot. Return it to Draft and resubmit the exact posting proposal.";
+
+        if (cycle is not null && (cycle.WorkflowInstanceId != instance.Id ||
+            !cycle.SourceBookAuthorityId.HasValue || cycle.Status != "Submitted" ||
+            !string.Equals(cycle.ApprovalEvidenceHash, asset.CapitalizationApprovalSnapshotHash, StringComparison.Ordinal)))
+            return "The fixed-asset capitalization cycle does not match its exact workflow and frozen authority evidence.";
 
         var calculatedHash = Convert.ToHexString(SHA256.HashData(
             Encoding.UTF8.GetBytes(asset.CapitalizationApprovalSnapshotJson)));
@@ -1339,7 +1346,8 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("FixedAsset"))
         {
-            var item = await _db.FixedAssets.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+            var cycle = await _db.FixedAssetCapitalizationCycles.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+            var item = await _db.FixedAssets.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == (cycle != null ? cycle.FixedAssetId : entityId), cancellationToken);
             if (item == null)
                 return FinanceApprovalFacts.Empty;
 
@@ -2011,7 +2019,9 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("FixedAsset"))
         {
-            await UpdateIfFoundAsync(_db.FixedAssets, tenantId, entityId, item =>
+            var cycle = await _db.FixedAssetCapitalizationCycles.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+            var assetId = cycle?.FixedAssetId ?? entityId;
+            await UpdateIfFoundAsync(_db.FixedAssets, tenantId, assetId, item =>
             {
                 if (item.Status == FixedAssetStatus.PendingApproval)
                 {
@@ -2024,6 +2034,8 @@ public class FinanceApprovalsController : ControllerBase
                     item.UpdatedBy = _currentUserService.UserName ?? "system";
                 }
             }, cancellationToken);
+            if (cycle is not null) { cycle.Status = "Approved"; cycle.UpdatedAt = DateTime.UtcNow; }
+            if (cycle is not null) await _db.SaveChangesAsync(cancellationToken);
             await RecordFinanceWorkflowAuditAsync(
                 tenantId,
                 "FA",
@@ -2593,7 +2605,9 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("FixedAsset"))
         {
-            await UpdateIfFoundAsync(_db.FixedAssets, tenantId, entityId, item =>
+            var cycle = await _db.FixedAssetCapitalizationCycles.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+            var assetId = cycle?.FixedAssetId ?? entityId;
+            await UpdateIfFoundAsync(_db.FixedAssets, tenantId, assetId, item =>
             {
                 if (item.Status == FixedAssetStatus.PendingApproval)
                 {
@@ -2604,6 +2618,8 @@ public class FinanceApprovalsController : ControllerBase
                     item.UpdatedBy = _currentUserService.UserName ?? "system";
                 }
             }, cancellationToken);
+            if (cycle is not null) { cycle.Status = "Rejected"; cycle.UpdatedAt = DateTime.UtcNow; }
+            if (cycle is not null) await _db.SaveChangesAsync(cancellationToken);
             await RecordFinanceWorkflowAuditAsync(
                 tenantId,
                 "FA",

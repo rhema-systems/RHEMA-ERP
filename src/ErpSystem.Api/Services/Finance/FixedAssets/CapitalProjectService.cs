@@ -1,14 +1,17 @@
-using System.Data;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace ErpSystem.Api.Services.Finance.FixedAssets
 {
@@ -19,6 +22,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         private readonly IFixedAssetService _fixedAssetService;
         private readonly IFinancePostingEngine _postingEngine;
         private readonly IFixedAssetDimensionService _fixedAssetDimensions;
+        private readonly IWorkflowService? _workflowService;
+        private readonly IFinanceSourceBookAuthorityService? _sourceBookAuthority;
         private static readonly FinancePostingProducerContext SettlementProducer =
             new(FinanceDimensionRouteId.FinanceCapitalProjectSettlement);
 
@@ -27,13 +32,17 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             ICurrentUserService currentUser,
             IFixedAssetService fixedAssetService,
             IFinancePostingEngine postingEngine,
-            IFixedAssetDimensionService fixedAssetDimensions)
+            IFixedAssetDimensionService fixedAssetDimensions,
+            IWorkflowService? workflowService = null,
+            IFinanceSourceBookAuthorityService? sourceBookAuthority = null)
         {
             _context = context;
             _currentUser = currentUser;
             _fixedAssetService = fixedAssetService;
             _postingEngine = postingEngine;
             _fixedAssetDimensions = fixedAssetDimensions;
+            _workflowService = workflowService;
+            _sourceBookAuthority = sourceBookAuthority;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -156,6 +165,11 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
         public async Task<CapitalProjectDetailDto> PostCostToProjectAsync(Guid projectId, AddProjectCostDto dto)
         {
+            if (_sourceBookAuthority is null)
+                throw new InvalidOperationException("Capital-project source-book authority is not configured.");
+            await using var transaction = _context.Database.IsRelational()
+                ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable)
+                : null;
             var project = await GetProjectOrThrow(projectId);
 
             if (project.Status != ProjectStatus.InProgress)
@@ -163,6 +177,25 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
             if (dto.Amount <= 0)
                 throw new InvalidOperationException("Cost amount must be positive.");
+            if (!dto.SourceDocumentId.HasValue || dto.SourceDocumentId == Guid.Empty)
+                throw new InvalidOperationException("A capital-project cost requires an exact posted source document.");
+
+            var source = await ResolveCostSourcePostingAsync(dto, CancellationToken.None);
+            var authority = await _sourceBookAuthority.RetainExistingPostedOriginalAsync(
+                new FinanceSourceBookAuthorityFreezeRequest
+                {
+                    OriginModuleCode = FinanceModuleLockCatalog.ResolveOriginModuleCode(
+                        source.PostingEvent.SourceModule, source.PostingEvent.OriginModuleCode),
+                    SourceDocumentType = source.PostingEvent.SourceDocumentType,
+                    SourceDocumentId = source.PostingEvent.SourceDocumentId,
+                    PostingAction = source.PostingEvent.PostingAction,
+                    EffectiveDate = source.Journal.EntryDate.Date,
+                    TransactionCurrencyCode = source.PostingEvent.PrimaryTransactionCurrencyCode
+                        ?? source.PostingEvent.FunctionalCurrencyCode,
+                    FreezeStage = FinanceSourceBookAuthorityFreezeStages.LegacyPosted
+                },
+                source.Journal.Id,
+                source.PostingEvent.Id);
 
             var costLine = new ProjectCostLine
             {
@@ -171,6 +204,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 SourceDocumentType = dto.SourceDocumentType,
                 SourceDocumentId = dto.SourceDocumentId,
                 SourceDocumentReference = dto.SourceDocumentReference,
+                SourceFinancePostingEventId = source.PostingEvent.Id,
+                SourceBookAuthorityId = authority.AuthorityId,
                 Amount = dto.Amount,
                 TransactionDate = dto.TransactionDate,
                 Description = dto.Description,
@@ -184,7 +219,73 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             project.UpdatedBy = UserName;
 
             await SaveWithConcurrencyAsync();
+            if (transaction is not null)
+                await transaction.CommitAsync();
             return await GetByIdAsync(projectId) ?? throw new InvalidOperationException("Failed to post cost.");
+        }
+
+        public async Task<CapitalProjectDetailDto> SubmitForCapitalizationApprovalAsync(
+            Guid id, CancellationToken cancellationToken = default)
+        {
+            if (_workflowService is null || _sourceBookAuthority is null)
+                throw new InvalidOperationException("Capital-project workflow and source-book authority are required.");
+            await using var transaction = _context.Database.IsRelational()
+                ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+                : null;
+            var project = await _context.CapitalProjects.Include(item => item.CostLines)
+                .Include(item => item.SettlementRules)
+                .SingleOrDefaultAsync(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted,
+                    cancellationToken) ?? throw new KeyNotFoundException("Capital project not found.");
+            if (project.Status == ProjectStatus.PendingApproval &&
+                project.CapitalizationWorkflowInstanceId.HasValue &&
+                project.CapitalizationSourceBookAuthorityId.HasValue)
+            {
+                if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+                return await GetByIdAsync(id) ?? throw new InvalidOperationException("Capital project not found.");
+            }
+            if (project.Status is not (ProjectStatus.InProgress or ProjectStatus.OnHold))
+                throw new InvalidOperationException("Only an active capital project can be submitted for capitalization approval.");
+            if (project.CostLines.Count == 0 || project.CostLines.Any(item =>
+                    !item.SourceBookAuthorityId.HasValue || !item.SourceFinancePostingEventId.HasValue))
+                throw new InvalidOperationException("Every capital-project cost must retain exact posted source authority before submission.");
+            if (project.SettlementRules.Count == 0 ||
+                project.SettlementRules.Sum(item => item.AllocationPercentage) != 100m)
+                throw new InvalidOperationException("Capital-project settlement rules must total exactly 100% before submission.");
+
+            var evidenceHash = CapitalizationEvidenceHash(project);
+            project.Status = ProjectStatus.PendingApproval;
+            project.CapitalizationEvidenceHash = evidenceHash;
+            project.UpdatedAt = DateTime.UtcNow;
+            project.UpdatedBy = UserName;
+            await _context.SaveChangesAsync(cancellationToken);
+            var workflow = await _workflowService.StartApprovalWorkflowAsync("CapitalProject", project.Id);
+            if (!workflow.Success || !workflow.WorkflowInstanceId.HasValue)
+                throw new InvalidOperationException(workflow.Message ?? "Capital-project workflow could not be started.");
+
+            var origins = project.CostLines.Select(item => new FinanceSourceBookAuthorityOriginRequest
+            {
+                OriginAuthorityId = item.SourceBookAuthorityId!.Value,
+                Role = $"PROJECT_COST:{item.Id:N}"
+            }).ToArray();
+            var origin = await _sourceBookAuthority.RequireBoundOriginalAsync(origins[0].OriginAuthorityId, cancellationToken);
+            var frozen = await _sourceBookAuthority.FreezeInheritedAsync(
+                new FinanceSourceBookAuthorityFreezeRequest
+                {
+                    OriginModuleCode = FinanceModuleLockCatalog.Finance,
+                    SourceDocumentType = SettlementProducer.Definition.DocumentType,
+                    SourceDocumentId = project.Id,
+                    PostingAction = "Capitalize",
+                    EffectiveDate = DateTime.UtcNow.Date,
+                    TransactionCurrencyCode = origin.FunctionalCurrencyCode,
+                    FreezeStage = FinanceSourceBookAuthorityFreezeStages.Submitted,
+                    SourceWorkflowInstanceId = workflow.WorkflowInstanceId,
+                    SourceWorkflowEntityType = "CapitalProject"
+                }, origins, cancellationToken);
+            project.CapitalizationWorkflowInstanceId = workflow.WorkflowInstanceId;
+            project.CapitalizationSourceBookAuthorityId = frozen.AuthorityId;
+            await _context.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+            return await GetByIdAsync(id) ?? throw new InvalidOperationException("Capital project not found.");
         }
 
         public async Task<CapitalProjectDetailDto> RemoveCostFromProjectAsync(Guid projectId, Guid costLineId)
@@ -313,8 +414,37 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                         throw new InvalidOperationException(
                             $"Settlement rules total {totalAllocation}%. They must sum to exactly 100%.");
 
-                    var postingDate = DateTime.UtcNow.Date;
+                    if (_sourceBookAuthority is null || !project.CapitalizationWorkflowInstanceId.HasValue ||
+                        !project.CapitalizationSourceBookAuthorityId.HasValue ||
+                        string.IsNullOrWhiteSpace(project.CapitalizationEvidenceHash) ||
+                        !string.Equals(project.CapitalizationEvidenceHash, CapitalizationEvidenceHash(project), StringComparison.Ordinal))
+                        throw new InvalidOperationException("Capital-project approval evidence is missing or no longer matches the immutable cost and settlement plan.");
+                    var retainedAuthority = await _context.FinanceSourceBookAuthorities.AsNoTracking()
+                        .SingleOrDefaultAsync(item => item.TenantId == TenantId &&
+                            item.Id == project.CapitalizationSourceBookAuthorityId.Value && !item.IsDeleted,
+                            cancellationToken)
+                        ?? throw new InvalidOperationException("Capital-project frozen source-book authority was not found.");
+                    var frozen = await _sourceBookAuthority.RequireForPostingAsync(
+                        new FinanceSourceBookAuthorityFreezeRequest
+                        {
+                            OriginModuleCode = FinanceModuleLockCatalog.Finance,
+                            SourceDocumentType = SettlementProducer.Definition.DocumentType,
+                            SourceDocumentId = project.Id,
+                            PostingAction = "Capitalize",
+                            EffectiveDate = retainedAuthority.EffectiveDate,
+                            TransactionCurrencyCode = retainedAuthority.TransactionCurrencyCode,
+                            FreezeStage = FinanceSourceBookAuthorityFreezeStages.Authorized,
+                            SourceWorkflowInstanceId = project.CapitalizationWorkflowInstanceId,
+                            SourceWorkflowEntityType = "CapitalProject"
+                        }, cancellationToken);
+                    if (frozen.AuthorityId != project.CapitalizationSourceBookAuthorityId.Value)
+                        throw new InvalidOperationException("Capital-project posting did not resolve its retained exact authority.");
+                    var postingDate = frozen.EffectiveDate.Date;
                     var authority = await ResolveCapitalizationAuthorityAsync(project, postingDate, cancellationToken);
+                    if (authority.AccountingBookId != frozen.AccountingBookId ||
+                        !string.Equals(authority.AccountingBookCode, frozen.AccountingBookCode, StringComparison.Ordinal) ||
+                        !string.Equals(authority.FunctionalCurrencyCode, frozen.FunctionalCurrencyCode, StringComparison.Ordinal))
+                        throw new InvalidOperationException("Capital-project source evidence differs from the frozen exact-book authority.");
                     var postingLines = new List<FinancePostingLineDto>();
                     var createdAssets = new List<CreatedProjectAsset>();
                     var inheritedJournalBySourceLine = new Dictionary<Guid, Guid>();
@@ -409,6 +539,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                         SourceDocumentReference = project.ProjectCode,
                         Description = $"Capital project capitalization: {project.Name}",
                         PostingDate = postingDate,
+                        PostingAction = "Capitalize",
                         JournalType = "System Generated",
                         AccountingBookCode = authority.AccountingBookCode,
                         FunctionalCurrencyCode = authority.FunctionalCurrencyCode,
@@ -416,6 +547,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                         ReturnExistingOnDuplicate = true,
                         Lines = postingLines
                     }, SettlementProducer, cancellationToken);
+                    await _sourceBookAuthority.BindOriginalPostingAsync(
+                        frozen.AuthorityId, posting.PostingEventId, posting.JournalEntryId, cancellationToken);
                     var capitalizedAt = posting.PostingDate == default ? postingDate : posting.PostingDate.Date;
                     var representations = await ResolveCapitalizationRepresentationsAsync(
                         project, authority, posting, cancellationToken);
@@ -455,7 +588,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             CancellationToken cancellationToken)
         {
             if (project.CostLines.Count == 0 || project.CostLines.Any(line =>
-                    line.Amount <= 0m || !line.SourceDocumentId.HasValue || line.SourceDocumentId == Guid.Empty))
+                    line.Amount <= 0m || !line.SourceDocumentId.HasValue || line.SourceDocumentId == Guid.Empty ||
+                    !line.SourceFinancePostingEventId.HasValue || !line.SourceBookAuthorityId.HasValue))
                 throw new InvalidOperationException(
                     "Every capital-project cost requires positive, immutable source-document evidence.");
             if (project.CostLines.Sum(line => line.Amount) != project.TotalAccumulatedCost)
@@ -501,6 +635,14 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     ? query.Where(journal => journal.Id == group.Key.SourceDocumentId)
                     : query.Where(journal => journal.SourceDocumentId == group.Key.SourceDocumentId &&
                         journal.SourceDocumentType == group.Key.SourceDocumentType.ToString());
+                var sourceEventIds = group.Select(item => item.SourceFinancePostingEventId!.Value).Distinct().ToArray();
+                var exactEvents = await _context.FinancePostingEvents.AsNoTracking().Where(item =>
+                    item.TenantId == TenantId && sourceEventIds.Contains(item.Id) && !item.IsDeleted &&
+                    item.PostingStatus == "Posted" && item.JournalEntryId.HasValue).ToListAsync(cancellationToken);
+                if (exactEvents.Count != sourceEventIds.Length || exactEvents.Select(item => item.JournalEntryId).Distinct().Count() != 1)
+                    throw new InvalidOperationException("Capital-project cost evidence must retain exact, unambiguous posted events.");
+                var exactJournalId = exactEvents[0].JournalEntryId!.Value;
+                query = query.Where(item => item.Id == exactJournalId);
                 var journals = await query.Take(2).ToListAsync(cancellationToken);
                 if (journals.Count != 1)
                     throw new InvalidOperationException(
@@ -607,6 +749,39 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 functionalCurrency!,
                 dimensionAuthorityJournalId!.Value,
                 credits);
+        }
+
+        private async Task<CostSourcePosting> ResolveCostSourcePostingAsync(
+            AddProjectCostDto dto, CancellationToken cancellationToken)
+        {
+            var query = _context.JournalEntries.AsNoTracking().Where(item => item.TenantId == TenantId &&
+                !item.IsDeleted && !item.IsReversed && item.ReversalJournalEntryId == null &&
+                item.ReplicatedFromJournalEntryId == null && item.PostingStatus == "Posted");
+            query = dto.SourceDocumentType == ProjectCostSourceType.ManualJournal
+                ? query.Where(item => item.Id == dto.SourceDocumentId!.Value)
+                : query.Where(item => item.SourceDocumentId == dto.SourceDocumentId &&
+                    item.SourceDocumentType == dto.SourceDocumentType.ToString());
+            var journals = await query.Take(2).ToListAsync(cancellationToken);
+            if (journals.Count != 1)
+                throw new InvalidOperationException("Capital-project cost must resolve to exactly one unreversed primary posted journal.");
+            var journal = journals[0];
+            if (journal.EntryDate.Date != dto.TransactionDate.Date)
+                throw new InvalidOperationException("Capital-project cost date must equal the posted source accounting date.");
+            var events = await _context.FinancePostingEvents.AsNoTracking().Where(item =>
+                item.TenantId == TenantId && item.JournalEntryId == journal.Id && item.PostingStatus == "Posted" &&
+                !item.IsDeleted).Take(2).ToListAsync(cancellationToken);
+            if (events.Count != 1)
+                throw new InvalidOperationException("Capital-project cost source must retain exactly one primary posted event.");
+            return new CostSourcePosting(journal, events[0]);
+        }
+
+        private static string CapitalizationEvidenceHash(CapitalProject project)
+        {
+            var canonical = string.Join("|", project.CostLines.OrderBy(item => item.Id).Select(item =>
+                    $"C:{item.Id:N}:{item.SourceBookAuthorityId:N}:{item.SourceFinancePostingEventId:N}:{item.Amount:0.00}")) +
+                "|" + string.Join("|", project.SettlementRules.OrderBy(item => item.Id).Select(item =>
+                    $"R:{item.Id:N}:{item.TargetFixedAssetCategoryId:N}:{item.AllocationPercentage:0.00}:{item.ProposedAssetName}"));
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
         }
 
         private async Task ApplyProjectCapitalizationAsync(
@@ -885,6 +1060,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             JournalEntry Journal,
             AccountingBook Book,
             Guid PostingEventId);
+
+        private sealed record CostSourcePosting(JournalEntry Journal, FinancePostingEvent PostingEvent);
 
         // ── Helpers ──────────────────────────────────────────────────────
 

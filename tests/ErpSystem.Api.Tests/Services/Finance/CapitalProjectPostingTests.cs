@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -10,6 +11,8 @@ using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Moq;
+using System.Security.Cryptography;
+using System.Text;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
@@ -28,6 +31,9 @@ public sealed class CapitalProjectPostingTests
         var posting = Assert.Single(fixture.Postings);
         Assert.Equal("BASE", posting.AccountingBookCode);
         Assert.Equal("GHS", posting.FunctionalCurrencyCode);
+        Assert.Equal(fixture.SourceJournal.EntryDate.Date, posting.PostingDate.Date);
+        Assert.Equal(fixture.SourceJournal.EntryDate.Date, fixture.CapturedAuthorityRequest!.EffectiveDate.Date);
+        Assert.Equal(fixture.ProjectAuthorityId, fixture.BoundAuthorityId);
         Assert.True(posting.ReturnExistingOnDuplicate);
         Assert.Equal(10_000m, posting.Lines.Sum(line => line.DebitAmount));
         Assert.Equal(10_000m, posting.Lines.Sum(line => line.CreditAmount));
@@ -64,6 +70,25 @@ public sealed class CapitalProjectPostingTests
         Assert.Equal(1, fixture.CreatedAssetCount);
         Assert.Single(fixture.Context.FixedAssets);
         Assert.Equal(2, await fixture.Context.AssetTransactions.CountAsync());
+    }
+
+    [Fact]
+    public async Task Capitalization_submission_rejects_any_cost_without_exact_retained_authority()
+    {
+        await using var fixture = new Fixture();
+        fixture.Project.Status = ProjectStatus.InProgress;
+        fixture.Project.CapitalizationWorkflowInstanceId = null;
+        fixture.Project.CapitalizationSourceBookAuthorityId = null;
+        fixture.Project.CapitalizationEvidenceHash = null;
+        var cost = Assert.Single(fixture.Project.CostLines);
+        cost.SourceBookAuthorityId = null;
+        cost.SourceFinancePostingEventId = null;
+        await fixture.Context.SaveChangesAsync();
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.SubmitForCapitalizationApprovalAsync(fixture.Project.Id));
+
+        Assert.Contains("Every capital-project cost", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -198,12 +223,18 @@ public sealed class CapitalProjectPostingTests
         public Guid PostedJournalEntryId { get; } = Guid.NewGuid();
         public Guid ParallelPostedJournalEntryId { get; } = Guid.NewGuid();
         public Guid PostingEventId { get; } = Guid.NewGuid();
+        public Guid SourcePostingEventId { get; } = Guid.NewGuid();
+        public Guid SourceAuthorityId { get; } = Guid.NewGuid();
+        public Guid ProjectAuthorityId { get; } = Guid.NewGuid();
+        public Guid WorkflowInstanceId { get; } = Guid.NewGuid();
         public Guid ParallelPostingEventId { get; } = Guid.NewGuid();
         public List<FinancePostingRequestV2Dto> Postings { get; } = [];
         public FinanceSourceDocumentDimensionInputDto? CapturedDimensionInput { get; private set; }
         public IReadOnlyDictionary<Guid, Guid>? InheritedJournalBySourceLine { get; private set; }
         public int CreatedAssetCount { get; private set; }
         public bool EmitCapitalizationParallelReplica { get; set; } = true;
+        public FinanceSourceBookAuthorityFreezeRequest? CapturedAuthorityRequest { get; private set; }
+        public Guid? BoundAuthorityId { get; private set; }
 
         public Fixture()
         {
@@ -282,6 +313,8 @@ public sealed class CapitalProjectPostingTests
                 Id = Guid.NewGuid(), TenantId = _tenantId, CapitalProjectId = Project.Id,
                 SourceDocumentType = ProjectCostSourceType.ManualJournal,
                 SourceDocumentId = SourceJournal.Id, SourceDocumentReference = SourceJournal.ReferenceNumber,
+                SourceFinancePostingEventId = SourcePostingEventId,
+                SourceBookAuthorityId = SourceAuthorityId,
                 Amount = 10_000m, TransactionDate = SourceJournal.EntryDate
             });
             Project.SettlementRules.Add(new ProjectSettlementRule
@@ -290,8 +323,35 @@ public sealed class CapitalProjectPostingTests
                 TargetFixedAssetCategoryId = category.Id, TargetFixedAssetCategory = category,
                 ProposedAssetName = "Demo Building", AllocationPercentage = 100m
             });
+            Project.CapitalizationWorkflowInstanceId = WorkflowInstanceId;
+            Project.CapitalizationSourceBookAuthorityId = ProjectAuthorityId;
+            Project.CapitalizationEvidenceHash = ProjectEvidenceHash(Project);
+            var sourceEvent = new FinancePostingEvent
+            {
+                Id = SourcePostingEventId, TenantId = _tenantId, SourceModule = "GL",
+                OriginModuleCode = FinanceModuleLockCatalog.Finance,
+                SourceDocumentType = ProjectCostSourceType.ManualJournal.ToString(),
+                SourceDocumentId = SourceJournal.Id, SourceDocumentReference = SourceJournal.ReferenceNumber,
+                PostingAction = "Post", PostingStatus = "Posted", PostingDate = SourceJournal.EntryDate,
+                JournalEntryId = SourceJournal.Id, AccountingBookId = Book.Id,
+                BookClassification = Book.Code, FunctionalCurrencyCode = "GHS",
+                TotalDebitAmount = 10_000m, TotalCreditAmount = 10_000m
+            };
+            var projectAuthority = new FinanceSourceBookAuthority
+            {
+                Id = ProjectAuthorityId, TenantId = _tenantId,
+                OriginModuleCode = FinanceModuleLockCatalog.Finance,
+                SourceDocumentType = "CAPITALPROJECT", SourceDocumentId = Project.Id,
+                PostingAction = "Capitalize", AuthorityVersion = 1,
+                SourceWorkflowInstanceId = WorkflowInstanceId, SourceWorkflowEntityType = "CapitalProject",
+                FreezeStage = FinanceSourceBookAuthorityFreezeStages.Submitted,
+                EffectiveDate = SourceJournal.EntryDate.Date, AccountingBookId = Book.Id,
+                AccountingBookCode = Book.Code, FunctionalCurrencyCode = "GHS",
+                TransactionCurrencyCode = "GHS", SelectionBasis = FinanceSourceBookAuthoritySelectionBases.InheritedOriginal,
+                AuthorityFingerprint = new string('A', 64), FrozenAtUtc = DateTime.UtcNow
+            };
             Context.AddRange(Book, ParallelBook, DeltaBook, AssetAccount, CwcAccount, _offsetAccount,
-                category, SourceJournal, Project,
+                category, SourceJournal, sourceEvent, projectAuthority, Project,
                 new FinanceSettings { Id = Guid.NewGuid(), TenantId = _tenantId, BaseCurrency = "GHS" });
             Context.SaveChanges();
 
@@ -330,8 +390,41 @@ public sealed class CapitalProjectPostingTests
                     It.IsAny<FinancePostingProducerContext>(), It.IsAny<Guid>(), It.IsAny<DateTime>(),
                     It.IsAny<IReadOnlyList<FinancePostingLineDto>>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new FinanceSourceDocumentDimensionDto());
+            var sourceAuthority = new Mock<IFinanceSourceBookAuthorityService>();
+            var frozen = AuthorityResult(ProjectAuthorityId, Project.Id, WorkflowInstanceId, SourceJournal.EntryDate.Date);
+            var origin = AuthorityResult(SourceAuthorityId, SourceJournal.Id, null, SourceJournal.EntryDate.Date,
+                SourcePostingEventId, SourceJournal.Id);
+            sourceAuthority.Setup(service => service.RequireForPostingAsync(
+                    It.IsAny<FinanceSourceBookAuthorityFreezeRequest>(), It.IsAny<CancellationToken>()))
+                .Callback((FinanceSourceBookAuthorityFreezeRequest request, CancellationToken _) => CapturedAuthorityRequest = request)
+                .ReturnsAsync(frozen);
+            sourceAuthority.Setup(service => service.RequireBoundOriginalAsync(
+                    SourceAuthorityId, It.IsAny<CancellationToken>())).ReturnsAsync(origin);
+            sourceAuthority.Setup(service => service.BindOriginalPostingAsync(
+                    ProjectAuthorityId, It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .Callback((Guid authorityId, Guid _, Guid _, CancellationToken _) => BoundAuthorityId = authorityId)
+                .ReturnsAsync(frozen);
             Service = new CapitalProjectService(
-                Context, user.Object, fixedAssets.Object, engine.Object, dimensions.Object);
+                Context, user.Object, fixedAssets.Object, engine.Object, dimensions.Object,
+                new Mock<IWorkflowService>().Object, sourceAuthority.Object);
+        }
+
+        private FinanceSourceBookAuthorityResult AuthorityResult(
+            Guid authorityId, Guid sourceId, Guid? workflowId, DateTime effectiveDate,
+            Guid? postingEventId = null, Guid? journalId = null) => new(
+                authorityId, 1, FinanceModuleLockCatalog.Finance, "CAPITALPROJECT", sourceId,
+                "Capitalize", effectiveDate, FinanceSourceBookAuthorityFreezeStages.Authorized,
+                workflowId, workflowId.HasValue ? "CapitalProject" : string.Empty,
+                Book.Id, Book.Code, "GHS", "GHS", FinanceSourceBookAuthoritySelectionBases.InheritedOriginal,
+                new string('A', 64), postingEventId, journalId);
+
+        private static string ProjectEvidenceHash(CapitalProject project)
+        {
+            var canonical = string.Join("|", project.CostLines.OrderBy(item => item.Id).Select(item =>
+                    $"C:{item.Id:N}:{item.SourceBookAuthorityId:N}:{item.SourceFinancePostingEventId:N}:{item.Amount:0.00}")) +
+                "|" + string.Join("|", project.SettlementRules.OrderBy(item => item.Id).Select(item =>
+                    $"R:{item.Id:N}:{item.TargetFixedAssetCategoryId:N}:{item.AllocationPercentage:0.00}:{item.ProposedAssetName}"));
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
         }
 
         public void UseVendorInvoiceSource(bool includeParallelReplica)

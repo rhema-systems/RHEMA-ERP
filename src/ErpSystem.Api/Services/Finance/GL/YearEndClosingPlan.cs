@@ -107,4 +107,3 @@ internal sealed record YearEndClosingPlan(
         }
     }
 }
-
