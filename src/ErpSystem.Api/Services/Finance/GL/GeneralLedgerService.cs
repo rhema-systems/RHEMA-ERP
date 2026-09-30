@@ -10,6 +10,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Data;
 
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Api.Services.Finance;
@@ -29,6 +30,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly IFinancialStatementLayoutExecutionService? _statementLayoutExecutionService;
         private readonly FinanceDimensionReportingFilterService? _dimensionReportingFilters;
         private readonly IAccountSegmentIdentityService _segmentIdentityService;
+        private readonly IFinanceSourceBookAuthorityService? _sourceBookAuthority;
 
         public GeneralLedgerService(
             ApplicationDbContext context,
@@ -41,7 +43,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             IFinancePostingEngine financePostingEngine,
             IFinancialStatementLayoutExecutionService? statementLayoutExecutionService = null,
             FinanceDimensionReportingFilterService? dimensionReportingFilters = null,
-            IAccountSegmentIdentityService? segmentIdentityService = null)
+            IAccountSegmentIdentityService? segmentIdentityService = null,
+            IFinanceSourceBookAuthorityService? sourceBookAuthority = null)
         {
             _context = context;
             _reportingContext = reportingContext;
@@ -54,6 +57,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             _statementLayoutExecutionService = statementLayoutExecutionService;
             _dimensionReportingFilters = dimensionReportingFilters;
             _segmentIdentityService = segmentIdentityService ?? new ErpSystem.Api.Services.Finance.Segments.AccountSegmentIdentityService(context);
+            _sourceBookAuthority = sourceBookAuthority;
         }
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -2613,6 +2617,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                         || previous.RetainedEarningsAccountId != request.RetainedEarningsAccountId
                         || previous.ClosingNotes != notes || previous.Status != "Closed")
                         throw new InvalidOperationException("Year-end idempotency conflict. Reclosing a reopened year requires a new key.");
+                    if (previous.ClosingJournalEntryId.HasValue)
+                        await RequireBoundYearEndAuthorityAsync(previous, year.EndDate, "Post");
                     return YearEndResult(previous, year, "Existing book close returned.");
                 }
 
@@ -2673,9 +2679,17 @@ namespace ErpSystem.Api.Services.Finance.GL
                 };
                 _context.YearEndBookCloseCycles.Add(cycle);
                 await _context.SaveChangesAsync();
-                var (journalId, netIncome) = await TransferRetainedEarningsAsync(year, cycle);
+                var (postingEventId, journalId, netIncome) = await TransferRetainedEarningsAsync(year, cycle);
                 cycle.ClosingJournalEntryId = journalId;
                 cycle.NetIncomeTransferred = netIncome;
+                if (journalId.HasValue && postingEventId.HasValue)
+                {
+                    await RequireSourceBookAuthority().RetainExistingPostedOriginalAsync(
+                        BuildYearEndAuthorityRequest(cycle, year.EndDate, "Post",
+                            FinanceSourceBookAuthorityFreezeStages.LegacyPosted),
+                        journalId.Value,
+                        postingEventId.Value);
+                }
                 cycle.Status = "Closed";
                 await _context.SaveChangesAsync();
                 return YearEndResult(cycle, year, $"Book {book.Code} closed. Net income transferred: {netIncome:N2} {currency}.");
@@ -2697,6 +2711,14 @@ namespace ErpSystem.Api.Services.Finance.GL
                 {
                     if (cycle.ReopenReason != reason)
                         throw new InvalidOperationException("Year-end reopen retry conflicts with the retained reversal reason.");
+                    if (cycle.ReversalJournalEntryId.HasValue)
+                    {
+                        var reversalAuthority = await RequireBoundYearEndAuthorityAsync(
+                            cycle, year.EndDate, "Reverse", "YearEndCloseReversal");
+                        if (reversalAuthority.OriginalJournalEntryId != cycle.ReversalJournalEntryId)
+                            throw new InvalidOperationException(
+                                "The frozen book-reopen lineage does not match the retained reversal evidence.");
+                    }
                     return YearEndResult(cycle, year, "Existing book reopen returned.");
                 }
                 if (cycle.Status != "Closed")
@@ -2704,6 +2726,8 @@ namespace ErpSystem.Api.Services.Finance.GL
 
                 if (cycle.ClosingJournalEntryId.HasValue)
                 {
+                    var originalAuthority = await RequireBoundYearEndAuthorityAsync(
+                        cycle, year.EndDate, "Post");
                     var original = await _context.FinancePostingEvents
                         .Include(item => item.JournalEntry).ThenInclude(item => item!.Transactions)
                         .SingleOrDefaultAsync(item => item.TenantId == TenantId && item.SourceDocumentId == cycle.Id
@@ -2716,6 +2740,17 @@ namespace ErpSystem.Api.Services.Finance.GL
                         || journal.Transactions.Any(item => item.IsDeleted || item.AccountingBookId != cycle.AccountingBookId
                             || item.FunctionalCurrencyCode != cycle.FunctionalCurrencyCode))
                         throw new InvalidOperationException("The original book-close posting authority is inconsistent.");
+                    if (originalAuthority.OriginalFinancePostingEventId != original.Id ||
+                        originalAuthority.OriginalJournalEntryId != journal.Id)
+                        throw new InvalidOperationException("The frozen book-close lineage does not match the retained posting evidence.");
+                    var reversalAuthority = await RequireSourceBookAuthority().FreezeInheritedAsync(
+                        BuildYearEndAuthorityRequest(cycle, journal.EntryDate, "Reverse",
+                            FinanceSourceBookAuthorityFreezeStages.PrePost, "YearEndCloseReversal"),
+                        [new FinanceSourceBookAuthorityOriginRequest
+                        {
+                            OriginAuthorityId = originalAuthority.AuthorityId,
+                            Role = "ORIGINAL_YEAR_END_CLOSE"
+                        }]);
                     var reversal = await _financePostingEngine.PostYearEndAsync(new FinancePostingRequestV2Dto
                     {
                         SourceModule = "GL", SourceDocumentType = "YearEndCloseReversal", SourceDocumentId = cycle.Id,
@@ -2723,7 +2758,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                         ReversalReason = reason, ReversalType = "Manual", SourceDocumentReference = year.FiscalYearCode,
                         Description = $"Reopen {cycle.AccountingBookCode} / {year.FiscalYearName} / cycle {cycle.CycleNumber}",
                         PostingDate = journal.EntryDate, FiscalPeriodId = journal.FiscalPeriodId, JournalType = "Year-End Close Reversal",
-                        AccountingBookCode = original.BookClassification, FunctionalCurrencyCode = original.FunctionalCurrencyCode,
+                        AccountingBookCode = reversalAuthority.AccountingBookCode,
+                        FunctionalCurrencyCode = reversalAuthority.FunctionalCurrencyCode,
                         IdempotencyKey = $"GL:YearEndCloseReversal:{TenantId:N}:{cycle.AccountingBookId:N}:{cycle.Id:N}",
                         AllowPostingToClosedPeriod = true,
                         Lines = journal.Transactions.OrderBy(item => item.LineNumber).Select(item => new FinancePostingLineDto
@@ -2739,6 +2775,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                             Notes = reason, TransactionTag = "YearEndCloseReversal"
                         }).ToList()
                     }, cycle.Id);
+                    await RequireSourceBookAuthority().BindOriginalPostingAsync(
+                        reversalAuthority.AuthorityId, reversal.PostingEventId, reversal.JournalEntryId);
                     cycle.ReversalJournalEntryId = reversal.JournalEntryId;
                 }
                 cycle.Status = "Reopened";
@@ -2901,7 +2939,7 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance year-end lock.', 1;");
             };
         }
 
-        private async Task<(Guid? ClosingJournalEntryId, decimal NetIncome)> TransferRetainedEarningsAsync(
+        private async Task<(Guid? PostingEventId, Guid? ClosingJournalEntryId, decimal NetIncome)> TransferRetainedEarningsAsync(
             FiscalYear fiscalYear,
             YearEndBookCloseCycle cycle)
         {
@@ -2918,7 +2956,7 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance year-end lock.', 1;");
                 throw new InvalidOperationException("Retained earnings must have an enabled mapping in the selected accounting book.");
 
             var plan = await YearEndClosingPlan.BuildAsync(_context, cycle);
-            if (plan.Lines.Count == 0) return (null, 0m);
+            if (plan.Lines.Count == 0) return (null, null, 0m);
 
             var lastPeriod = fiscalYear.FiscalPeriods.Where(p => !p.IsDeleted
                 && p.StartDate.Date <= fiscalYear.EndDate.Date && p.EndDate.Date >= fiscalYear.EndDate.Date)
@@ -2947,7 +2985,45 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance year-end lock.', 1;");
 
             var postingResult = await _financePostingEngine.PostYearEndAsync(postingRequest, cycle.Id);
 
-            return (postingResult.JournalEntryId, plan.NetIncome);
+            return (postingResult.PostingEventId, postingResult.JournalEntryId, plan.NetIncome);
+        }
+
+        private IFinanceSourceBookAuthorityService RequireSourceBookAuthority() =>
+            _sourceBookAuthority ?? throw new InvalidOperationException(
+                "Finance source-book authority is not configured for year-end close and reopen.");
+
+        private static FinanceSourceBookAuthorityFreezeRequest BuildYearEndAuthorityRequest(
+            YearEndBookCloseCycle cycle,
+            DateTime effectiveDate,
+            string postingAction,
+            string freezeStage,
+            string sourceDocumentType = "YearEndClose") => new()
+        {
+            OriginModuleCode = FinanceModuleLockCatalog.Finance,
+            SourceDocumentType = sourceDocumentType,
+            SourceDocumentId = cycle.Id,
+            PostingAction = postingAction,
+            EffectiveDate = effectiveDate.Date,
+            TransactionCurrencyCode = cycle.FunctionalCurrencyCode,
+            FreezeStage = freezeStage
+        };
+
+        private async Task<FinanceSourceBookAuthorityResult> RequireBoundYearEndAuthorityAsync(
+            YearEndBookCloseCycle cycle,
+            DateTime effectiveDate,
+            string postingAction,
+            string sourceDocumentType = "YearEndClose")
+        {
+            var authority = await RequireSourceBookAuthority().RequireForPostingAsync(
+                BuildYearEndAuthorityRequest(cycle, effectiveDate, postingAction,
+                    FinanceSourceBookAuthorityFreezeStages.PrePost, sourceDocumentType));
+            var bound = await RequireSourceBookAuthority().RequireBoundOriginalAsync(authority.AuthorityId);
+            if (bound.AccountingBookId != cycle.AccountingBookId ||
+                !string.Equals(bound.AccountingBookCode, cycle.AccountingBookCode, StringComparison.Ordinal) ||
+                !string.Equals(bound.FunctionalCurrencyCode, cycle.FunctionalCurrencyCode, StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    "The retained year-end source-book authority conflicts with the exact close cycle.");
+            return bound;
         }
 
         #endregion

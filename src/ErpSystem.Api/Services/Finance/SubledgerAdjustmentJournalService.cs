@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
@@ -18,19 +19,22 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
     private readonly IDocumentNumberingService _documentNumberingService;
     private readonly IFinancePostingEngine _postingEngine;
     private readonly ITenantSettingsService _tenantSettingsService;
+    private readonly IFinanceSourceBookAuthorityService _sourceBookAuthority;
 
     public SubledgerAdjustmentJournalService(
         ApplicationDbContext context,
         ICurrentUserService currentUser,
         IDocumentNumberingService documentNumberingService,
         IFinancePostingEngine postingEngine,
-        ITenantSettingsService tenantSettingsService)
+        ITenantSettingsService tenantSettingsService,
+        IFinanceSourceBookAuthorityService sourceBookAuthority)
     {
         _context = context;
         _currentUser = currentUser;
         _documentNumberingService = documentNumberingService;
         _postingEngine = postingEngine;
         _tenantSettingsService = tenantSettingsService;
+        _sourceBookAuthority = sourceBookAuthority;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -74,7 +78,11 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
             ? await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken)
             : await _context.Database.BeginTransactionAsync(cancellationToken);
         var replay = await FindCustomerAdjustmentReplayAsync(dto, cancellationToken);
-        if (replay != null) return MapToDto(replay);
+        if (replay != null)
+        {
+            await RequireBoundAdjustmentAuthorityAsync(replay, cancellationToken);
+            return MapToDto(replay);
+        }
         var adjustment = await CreateAndPostCoreAsync(dto, null, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return MapToDto(adjustment);
@@ -250,6 +258,33 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
         _context.SubledgerAdjustmentJournals.Add(adjustment);
         await _context.SaveChangesAsync(cancellationToken);
 
+        var authorityRequest = BuildAuthorityRequest(adjustment);
+        FinanceSourceBookAuthorityResult authority;
+        if (originalAdjustment is null)
+        {
+            authority = await _sourceBookAuthority.FreezeInitialPrimaryAsync(
+                authorityRequest, cancellationToken);
+        }
+        else
+        {
+            var originalAuthority = await RequireBoundAdjustmentAuthorityAsync(
+                originalAdjustment, cancellationToken);
+            authority = await _sourceBookAuthority.FreezeInheritedAsync(
+                authorityRequest,
+                [new FinanceSourceBookAuthorityOriginRequest
+                {
+                    OriginAuthorityId = originalAuthority.AuthorityId,
+                    Role = "ORIGINAL_ADJUSTMENT"
+                }],
+                cancellationToken);
+        }
+        if (!string.Equals(authority.AccountingBookCode, accountingBookCode, StringComparison.Ordinal) ||
+            !string.Equals(authority.FunctionalCurrencyCode, baseCurrencyCode, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The frozen source-book authority conflicts with the adjustment's exact book or functional currency.");
+        }
+
         var postingResult = await PostJournalAsync(
             adjustment,
             controlAccount.Id,
@@ -257,6 +292,11 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
             counterparty.Name,
             baseCurrencyCode,
             accountingBookCode,
+            cancellationToken);
+        await _sourceBookAuthority.BindOriginalPostingAsync(
+            authority.AuthorityId,
+            postingResult.PostingEventId,
+            postingResult.JournalEntryId,
             cancellationToken);
         adjustment.JournalEntryId = postingResult.JournalEntryId;
         adjustment.UpdatedAt = DateTime.UtcNow;
@@ -274,6 +314,30 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
         var reloaded = await LoadAdjustmentAsync(adjustment.Id, asNoTracking: true, cancellationToken)
             ?? adjustment;
         return reloaded;
+    }
+
+    private static FinanceSourceBookAuthorityFreezeRequest BuildAuthorityRequest(
+        SubledgerAdjustmentJournal adjustment) => new()
+    {
+        OriginModuleCode = FinanceModuleLockCatalog.Finance,
+        SourceDocumentType = "SubledgerAdjustmentJournal",
+        SourceDocumentId = adjustment.Id,
+        PostingAction = adjustment.OriginalAdjustmentId.HasValue
+            ? "PostSubledgerAdjustmentJournalReversal"
+            : "PostSubledgerAdjustmentJournal",
+        EffectiveDate = adjustment.AdjustmentDate,
+        TransactionCurrencyCode = adjustment.CurrencyCode,
+        FreezeStage = FinanceSourceBookAuthorityFreezeStages.PrePost
+    };
+
+    private async Task<FinanceSourceBookAuthorityResult> RequireBoundAdjustmentAuthorityAsync(
+        SubledgerAdjustmentJournal adjustment,
+        CancellationToken cancellationToken)
+    {
+        var authority = await _sourceBookAuthority.RequireForPostingAsync(
+            BuildAuthorityRequest(adjustment), cancellationToken);
+        return await _sourceBookAuthority.RequireBoundOriginalAsync(
+            authority.AuthorityId, cancellationToken);
     }
 
     private async Task<FinancePostingResultDto> PostJournalAsync(

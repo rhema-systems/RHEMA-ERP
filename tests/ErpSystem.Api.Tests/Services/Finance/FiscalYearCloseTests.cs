@@ -181,6 +181,29 @@ public sealed class FiscalYearCloseTests
         reverse.Transactions.Should().OnlyContain(x => x.FunctionalCurrencyCode == "GHS" && x.AccountingBookId == f.Book.Id);
     }
 
+    [Fact]
+    public async Task ReopenRetry_RequiresBoundExactReversalAuthority()
+    {
+        var f = await FixtureWithPostedActivityAsync();
+        var closed = await f.GlService.CloseFiscalYearAsync(CloseRequest(f));
+        var request = new FiscalYearReopenRequestDto
+        {
+            AccountingBookId = f.Book.Id,
+            BookCloseCycleId = closed.BookCloseCycleId!.Value,
+            Reason = "Late supplier invoices require the year-end correction."
+        };
+        var reopened = await f.GlService.ReopenFiscalYearAsync(f.FiscalYear.Id, request);
+        var reversalEvent = await f.Db.FinancePostingEvents.SingleAsync(item =>
+            item.JournalEntryId == reopened.ReversalJournalEntryId);
+        reversalEvent.IsDeleted = true;
+        await f.Db.SaveChangesAsync();
+
+        await f.GlService.Invoking(service => service.ReopenFiscalYearAsync(f.FiscalYear.Id, request))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("SOURCE_BOOK_AUTHORITY_ORIGINAL_EVENT_INVALID*");
+        (await f.Db.YearEndBookCloseCycles.SingleAsync()).Status.Should().Be("Reopened");
+    }
+
     [Theory]
     [InlineData("Open")]
     [InlineData("MissingPeriodCoverage")]
@@ -581,6 +604,7 @@ public sealed class FiscalYearCloseTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
+        db.FinanceSettings.Add(new FinanceSettings { TenantId = tenantId, BaseCurrency = "GHS" });
         var book = new AccountingBook
         {
             Id = Guid.NewGuid(), TenantId = tenantId, Code = "BASE", Name = "Base Primary",
@@ -668,7 +692,8 @@ public sealed class FiscalYearCloseTests
             Mock.Of<IFiscalPeriodService>(),
             Mock.Of<IDocumentNumberingService>(),
             Mock.Of<IAccountingBookService>(),
-            BuildYearEndEngine(engine, mutateClose));
+            BuildYearEndEngine(engine, mutateClose),
+            sourceBookAuthority: new FinanceSourceBookAuthorityService(db, currentUser.Object));
 
         return new Fixture(db, glService, fiscalYear, revenue, expense, retainedEarnings, cash, book, period, engine);
     }
@@ -781,6 +806,7 @@ public sealed class FiscalYearCloseTests
     {
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
+        currentUser.SetupGet(x => x.IsAuthenticated).Returns(true);
         currentUser.SetupGet(x => x.Claims).Returns(new Dictionary<string, string>());
         currentUser.SetupGet(x => x.UserId).Returns(Guid.NewGuid().ToString());
         currentUser.SetupGet(x => x.UserName).Returns("year.closer");

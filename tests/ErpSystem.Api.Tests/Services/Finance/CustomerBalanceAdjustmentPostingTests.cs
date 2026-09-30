@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
@@ -216,6 +217,48 @@ public sealed class CustomerBalanceAdjustmentPostingTests
             numbering.SetReturnsDefault(Task.FromResult("AR-ADJ-TEST"));
             var settings = new Mock<ITenantSettingsService>();
             settings.Setup(s => s.GetBaseCurrencyAsync()).ReturnsAsync("GHS");
+            var authorities = new Dictionary<Guid, FinanceSourceBookAuthorityResult>();
+            FinanceSourceBookAuthorityResult Authority(FinanceSourceBookAuthorityFreezeRequest request)
+            {
+                var authorityId = FinanceSourceLineIdentity.Create(
+                    request.SourceDocumentId, $"SOURCE-BOOK-AUTHORITY-{request.PostingAction}");
+                var result = new FinanceSourceBookAuthorityResult(
+                    authorityId, 1, request.OriginModuleCode, request.SourceDocumentType,
+                    request.SourceDocumentId, request.PostingAction, request.EffectiveDate.Date,
+                    request.FreezeStage, request.SourceWorkflowInstanceId, string.Empty, Book.Id, "BASE", "GHS",
+                    request.TransactionCurrencyCode, FinanceSourceBookAuthoritySelectionBases.DefaultPrimary,
+                    $"AUTHORITY-{authorityId:N}", null, null);
+                authorities[authorityId] = result;
+                return result;
+            }
+            var sourceBookAuthority = new Mock<IFinanceSourceBookAuthorityService>();
+            sourceBookAuthority.Setup(service => service.FreezeInitialPrimaryAsync(
+                    It.IsAny<FinanceSourceBookAuthorityFreezeRequest>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((FinanceSourceBookAuthorityFreezeRequest request, CancellationToken _) => Authority(request));
+            sourceBookAuthority.Setup(service => service.FreezeInheritedAsync(
+                    It.IsAny<FinanceSourceBookAuthorityFreezeRequest>(),
+                    It.IsAny<IReadOnlyCollection<FinanceSourceBookAuthorityOriginRequest>>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((FinanceSourceBookAuthorityFreezeRequest request,
+                    IReadOnlyCollection<FinanceSourceBookAuthorityOriginRequest> _, CancellationToken _) => Authority(request));
+            sourceBookAuthority.Setup(service => service.RequireForPostingAsync(
+                    It.IsAny<FinanceSourceBookAuthorityFreezeRequest>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((FinanceSourceBookAuthorityFreezeRequest request, CancellationToken _) => Authority(request));
+            sourceBookAuthority.Setup(service => service.RequireBoundOriginalAsync(
+                    It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid authorityId, CancellationToken _) => authorities[authorityId]);
+            sourceBookAuthority.Setup(service => service.BindOriginalPostingAsync(
+                    It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid authorityId, Guid eventId, Guid journalId, CancellationToken _) =>
+                {
+                    var bound = authorities[authorityId] with
+                    {
+                        OriginalFinancePostingEventId = eventId,
+                        OriginalJournalEntryId = journalId
+                    };
+                    authorities[authorityId] = bound;
+                    return bound;
+                });
             Book = new AccountingBook
             {
                 Id = Guid.NewGuid(), TenantId = _tenant, Code = "BASE", Name = "Primary base book",
@@ -279,7 +322,8 @@ public sealed class CustomerBalanceAdjustmentPostingTests
                 AdjustmentType=balance < 0 ? "Credit" : "Debit", Amount=Math.Abs(balance), BaseCurrencyAmount=Math.Abs(balance),
                 CurrencyCode="GHS", ExchangeRate=1, ContraAccountId=Expense.Id, JournalEntryId=Guid.NewGuid(), Reason="Existing posted balance" });
             Context.SaveChanges();
-            Service = new(Context, user.Object, numbering.Object, engine.Object, settings.Object);
+            Service = new(Context, user.Object, numbering.Object, engine.Object, settings.Object,
+                sourceBookAuthority.Object);
         }
         private Account Account(AccountType type, bool control) => new() { Id=Guid.NewGuid(), TenantId=_tenant, AccountName=type.ToString(), AccountCode=Guid.NewGuid().ToString(), AccountNumber=Guid.NewGuid().ToString(), CurrencyCode="GHS", AccountType=type, Status=AccountStatus.Active, AllowDirectPosting=!control, IsControlAccount=control };
         public CreateSubledgerAdjustmentJournalDto Request(string purpose, string direction) => new() { RequestId=Guid.NewGuid(), Module="AR", Purpose=purpose, BusinessPartnerId=Customer.Id, ContraAccountId=purpose == "Writeoff" ? Expense.Id : Revenue.Id, AdjustmentType=direction, Amount=25, CurrencyCode="GHS", ExchangeRate=1, AdjustmentDate=new DateTime(2026,9,25), Reason="Customer balance correction" };
