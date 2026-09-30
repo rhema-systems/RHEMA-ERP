@@ -4,8 +4,9 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { CheckCircle2, Lock, RotateCcw, Scale, TriangleAlert, XCircle } from 'lucide-react';
+import { CheckCircle2, Lock, RotateCcw, Scale, ShieldAlert, TriangleAlert, XCircle } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -28,15 +29,26 @@ import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate } from '@/lib/hr/attendance-format';
 import { appraisalAppealService } from '@/services/hr/appeals.service';
-import type { AppraisalAppealStatus, CriterionScoreModification } from '@/types/hr/appeals';
+import {
+  formatActualAgainstTarget,
+  formatCriterionScore,
+  type AppraisalAppealStatus,
+  type CriterionScoreModification,
+} from '@/types/hr/appeals';
+import type { CriterionScoringMethod } from '@/types/hr/appraisal-run';
 
 /**
  * HR's adjudication of one appeal.
  *
- * **The screen shows one of two things**, depending on where the appeal is. Before a remand it
+ * **The screen shows one of three things**, depending on where the appeal is. Before a remand it
  * is the review: the contested items with all three evaluation legs side by side, and the three
  * decisions. After a remand it is the comparison: what the manager scored before against what
- * they scored on re-evaluation, and a final Uphold/Reject.
+ * they scored on re-evaluation, and a final Uphold/Reject. Once decided it is the record: the
+ * decision, who made it, and what moved (closure D-37 — a decided appeal opened to an error).
+ *
+ * **Every kind of row** (closure C6, C9): a competency, a KPI or one of the employee's goals, named
+ * and weighted from the appraisal's snapshot. A measured row's score is its achievement %, with the
+ * actual against the target beside it; HR's new score on it restates that percentage (D-22).
  *
  * **Remand is not a verdict.** The appraisal stays under appeal; a snapshot of the manager's
  * evaluation is frozen for the comparison, the evaluation reopens until a re-evaluation deadline,
@@ -46,8 +58,12 @@ import type { AppraisalAppealStatus, CriterionScoreModification } from '@/types/
  *
  * **Score changes depend on the cycle, not on HR's judgement.** `hrCanModifyScores` comes from
  * the settings profile the cycle runs on; when it is false the server refuses modifications, so
- * the fields are not offered. Changes go only with *Uphold*, each with a justification HR writes
- * (C4) — the server refuses a rejection or a remand that carries any.
+ * the fields are not offered. Changes go only with *Uphold*, only on a contested row, each with a
+ * justification HR writes (C4) — the server refuses a rejection or a remand that carries any.
+ *
+ * **An officer party to the appeal acts on none of it** (D-35): the appellant, the author of the
+ * contested evaluation, the appellant's line manager. The page says so rather than offering
+ * buttons the server refuses.
  */
 type Decision = Extract<AppraisalAppealStatus, 'Upheld' | 'Rejected' | 'Remanded'>;
 
@@ -220,7 +236,13 @@ export default function AppealReviewPage() {
 
   const data = review.data;
   const isFinal = data.status === 'Upheld' || data.status === 'Rejected';
-  const canDecide = data.status === 'Submitted' || data.status === 'UnderReview';
+  // D-35: an officer party to the appeal acts on none of it.
+  const party = !!data.partyToAppealReason;
+  const canDecide = !party && (data.status === 'Submitted' || data.status === 'UnderReview');
+  const overallMoved =
+    data.originalOverallScore != null &&
+    data.overallScore != null &&
+    Number(data.originalOverallScore) !== Number(data.overallScore);
 
   return (
     <div className="space-y-6 p-6">
@@ -230,7 +252,7 @@ export default function AppealReviewPage() {
         backHref="/hr/performance/appeals"
         actions={
           <div className="flex items-center gap-2">
-            {data.status === 'Submitted' && (
+            {data.status === 'Submitted' && !party && (
               <Button variant="outline" onClick={() => pickUp.mutate()} disabled={pickUp.isPending}>
                 <Scale className="mr-2 h-4 w-4" />
                 {pickUp.isPending ? 'Picking up…' : 'Pick up'}
@@ -255,9 +277,22 @@ export default function AppealReviewPage() {
         </span>
       </div>
 
+      {party && (
+        <Alert variant="destructive">
+          <ShieldAlert className="h-4 w-4" />
+          <AlertTitle>You cannot act on this appeal</AlertTitle>
+          <AlertDescription>{data.partyToAppealReason}</AlertDescription>
+        </Alert>
+      )}
+
       <MetricTiles
         tiles={[
-          { label: 'Self', value: fmt(data.selfEvaluationScore) },
+          {
+            label: 'Self',
+            value: fmt(data.selfEvaluationScore),
+            // A draft — one HR waived — is not read (B2).
+            hint: data.selfEvaluationSubmitted ? undefined : 'No submitted self-evaluation',
+          },
           { label: 'Peers', value: fmt(data.peerEvaluationScore) },
           { label: 'Manager', value: fmt(data.managerEvaluationScore) },
           { label: 'Overall', value: fmt(data.overallScore) },
@@ -273,15 +308,48 @@ export default function AppealReviewPage() {
         </CardContent>
       </Card>
 
+      {/* ── The record of a decided appeal (D-37) ───────────────────────────── */}
       {isFinal && (
-        <Alert>
-          <Lock className="h-4 w-4" />
-          <AlertTitle>Decided</AlertTitle>
-          <AlertDescription>
-            This appeal is final and the scores are locked. It is kept here for the record; the
-            employee can see the outcome on their own appraisal.
-          </AlertDescription>
-        </Alert>
+        <>
+          <Alert>
+            <Lock className="h-4 w-4" />
+            <AlertTitle>Decided</AlertTitle>
+            <AlertDescription>
+              This appeal is final and the scores are locked. It is kept here for the record; the
+              employee can see the outcome on their own appraisal.
+            </AlertDescription>
+          </Alert>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">
+                {data.status === 'Upheld' ? 'Upheld' : 'Rejected'}
+                {data.resolvedDate ? ` on ${formatDate(data.resolvedDate)}` : ''}
+                {data.reviewedByName ? ` by ${data.reviewedByName}` : ''}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="flex flex-wrap gap-8">
+                <div>
+                  <div className="text-muted-foreground">Overall appealed</div>
+                  <div className="text-lg tabular-nums">{fmt(data.originalOverallScore)}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Overall now</div>
+                  <div className="text-lg font-medium tabular-nums">{fmt(data.overallScore)}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Moved by the appeal</div>
+                  <div className="text-lg">
+                    {data.originalOverallScore == null ? '—' : overallMoved ? 'Yes' : 'No'}
+                  </div>
+                </div>
+              </div>
+              <div className="whitespace-pre-wrap">
+                {data.resolutionNotes || 'No notes were recorded.'}
+              </div>
+            </CardContent>
+          </Card>
+        </>
       )}
 
       {isRemanded && (
@@ -306,7 +374,7 @@ export default function AppealReviewPage() {
         </Alert>
       )}
 
-      {isRemanded && postRemand.data && (postRemand.data.canExtend || postRemand.data.canDecide) && (
+      {isRemanded && !party && postRemand.data && (postRemand.data.canExtend || postRemand.data.canDecide) && (
         <div className="flex flex-wrap justify-end gap-2">
           {postRemand.data.canExtend && (
             <Button variant="outline" onClick={() => setExtendOpen(true)}>
@@ -369,17 +437,29 @@ export default function AppealReviewPage() {
                     {postRemand.data.criteriaComparisons.map((c) => (
                       <TableRow key={c.criterionKey}>
                         <TableCell>
-                          <div className="font-medium">{c.itemName}</div>
+                          <CriterionLabel name={c.itemName} kind={c.itemType} section={c.sectionName} />
                           {c.appealReason && (
                             <div className="text-xs text-muted-foreground">{c.appealReason}</div>
                           )}
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">{c.weight}</TableCell>
+                        <TableCell className="text-right tabular-nums">{c.weight}%</TableCell>
                         <TableCell className="text-right tabular-nums">
-                          {fmt(c.preRemandScore)}
+                          <ScoreCell
+                            score={c.preRemandScore}
+                            method={c.scoringMethod}
+                            actual={c.preRemandActualValue}
+                            target={c.targetValue}
+                            unit={c.unit}
+                          />
                         </TableCell>
                         <TableCell className="text-right tabular-nums font-medium">
-                          {fmt(c.postRemandScore)}
+                          <ScoreCell
+                            score={c.postRemandScore}
+                            method={c.scoringMethod}
+                            actual={c.postRemandActualValue}
+                            target={c.targetValue}
+                            unit={c.unit}
+                          />
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {c.scoreDifference != null && c.scoreDifference !== 0 ? (
@@ -391,8 +471,11 @@ export default function AppealReviewPage() {
                               }
                             >
                               {c.scoreDifference > 0 ? '+' : ''}
-                              {c.scoreDifference}
+                              {Number(c.scoreDifference.toFixed(2))}
+                              {c.scoringMethod === 'Measured' ? ' pts' : ''}
                             </span>
+                          ) : c.scoreChanged ? (
+                            <span className="text-xs text-muted-foreground">actual moved</span>
                           ) : (
                             <span className="text-muted-foreground">—</span>
                           )}
@@ -412,7 +495,7 @@ export default function AppealReviewPage() {
             </CardContent>
           </Card>
 
-          {postRemand.data.canDecide && (
+          {postRemand.data.canDecide && !party && (
             <div className="flex justify-end">
               <Button onClick={() => setFinalOpen(true)}>
                 <CheckCircle2 className="mr-2 h-4 w-4" />
@@ -445,9 +528,10 @@ export default function AppealReviewPage() {
                     <TableRow>
                       <TableHead>Criterion</TableHead>
                       <TableHead className="text-right">Weight</TableHead>
+                      <TableHead className="text-right">When appealed</TableHead>
                       <TableHead className="text-right">Self</TableHead>
                       <TableHead className="text-right">Peers</TableHead>
-                      <TableHead className="text-right">Manager</TableHead>
+                      <TableHead className="text-right">{isFinal ? 'Manager, final' : 'Manager'}</TableHead>
                       <TableHead className="text-right">Weighted</TableHead>
                       {data.hrCanModifyScores && canDecide && (
                         <TableHead className="w-64">New score</TableHead>
@@ -455,65 +539,95 @@ export default function AppealReviewPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {data.appealedCriteria.map((c) => (
-                      <TableRow key={c.appealItemId}>
-                        <TableCell className="max-w-xs">
-                          <div className="font-medium">{c.itemName}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            <span className="font-medium">Their reason:</span> {c.appealReason}
-                          </div>
-                          {c.managerComments && (
+                    {data.appealedCriteria.map((c) => {
+                      const measured = c.scoringMethod === 'Measured';
+                      return (
+                        <TableRow key={c.appealItemId}>
+                          <TableCell className="max-w-xs">
+                            <CriterionLabel name={c.itemName} kind={c.itemType} section={c.sectionName} />
+                            {measured && c.targetValue != null && (
+                              <div className="text-xs text-muted-foreground">
+                                {formatActualAgainstTarget(null, c.targetValue, c.unit)}
+                              </div>
+                            )}
                             <div className="mt-1 text-xs text-muted-foreground">
-                              <span className="font-medium">Manager:</span> {c.managerComments}
+                              <span className="font-medium">Their reason:</span> {c.appealReason}
                             </div>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">{c.weight}</TableCell>
-                        <TableCell className="text-right tabular-nums">{fmt(c.selfScore)}</TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {fmt(c.peerAverageScore)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">
-                          {fmt(c.managerScore)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {fmt(c.finalWeightedScore)}
-                        </TableCell>
-                        {data.hrCanModifyScores && canDecide && (
-                          <TableCell>
-                            <div className="space-y-2">
-                              <Input
-                                type="number"
-                                min={0}
-                                max={100}
-                                placeholder="Leave blank to keep"
-                                value={scoreEdits[c.criterionKey] ?? ''}
-                                onChange={(e) =>
-                                  setScoreEdits({
-                                    ...scoreEdits,
-                                    [c.criterionKey]: e.target.value,
-                                  })
-                                }
-                                aria-label={`New score for ${c.itemName}`}
-                              />
-                              {scoreEdits[c.criterionKey]?.trim() && (
+                            {c.managerComments && (
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                <span className="font-medium">Manager:</span> {c.managerComments}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">{c.weight}%</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">
+                            {formatCriterionScore(c.scoreWhenAppealed, c.scoringMethod)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            <ScoreCell
+                              score={c.selfScore}
+                              method={c.scoringMethod}
+                              actual={c.selfActualValue}
+                            />
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {formatCriterionScore(c.peerAverageScore, c.scoringMethod)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums font-medium">
+                            <ScoreCell
+                              score={c.managerScore}
+                              method={c.scoringMethod}
+                              actual={c.managerActualValue}
+                            />
+                            {c.achievementOverridden && (
+                              <div className="text-xs font-normal text-amber-700 dark:text-amber-400">
+                                restated
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {fmt(c.managerWeightedScore)}
+                          </TableCell>
+                          {data.hrCanModifyScores && canDecide && (
+                            <TableCell>
+                              <div className="space-y-2">
                                 <Input
-                                  placeholder="Justification (required)"
-                                  value={justifications[c.criterionKey] ?? ''}
+                                  type="number"
+                                  min={0}
+                                  max={c.scaleTop}
+                                  placeholder={
+                                    measured
+                                      ? 'Achievement %, blank to keep'
+                                      : `0–${c.scaleTop}, blank to keep`
+                                  }
+                                  value={scoreEdits[c.criterionKey] ?? ''}
                                   onChange={(e) =>
-                                    setJustifications({
-                                      ...justifications,
+                                    setScoreEdits({
+                                      ...scoreEdits,
                                       [c.criterionKey]: e.target.value,
                                     })
                                   }
-                                  aria-label={`Justification for ${c.itemName}`}
+                                  aria-label={`New score for ${c.itemName}`}
                                 />
-                              )}
-                            </div>
-                          </TableCell>
-                        )}
-                      </TableRow>
-                    ))}
+                                {scoreEdits[c.criterionKey]?.trim() && (
+                                  <Input
+                                    placeholder="Justification (required)"
+                                    value={justifications[c.criterionKey] ?? ''}
+                                    onChange={(e) =>
+                                      setJustifications({
+                                        ...justifications,
+                                        [c.criterionKey]: e.target.value,
+                                      })
+                                    }
+                                    aria-label={`Justification for ${c.itemName}`}
+                                  />
+                                )}
+                              </div>
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -565,7 +679,9 @@ export default function AppealReviewPage() {
             <DialogDescription>
               {decision === 'Remanded'
                 ? "The manager's evaluation reopens until a deadline, and a snapshot of it is frozen for the comparison. Nothing is decided until they re-submit — or the deadline passes, when you can extend it or decide on the original scores."
-                : 'This is final. The employee is notified and can read your notes on their outcome page.'}
+                : decision === 'Upheld' && modifications.length === 0
+                  ? 'This is final, and no score changes: the employee is told the appeal was upheld and that their scores stand. They can read your notes on their outcome page.'
+                  : 'This is final. The employee is notified and can read your notes on their outcome page.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -727,4 +843,46 @@ export default function AppealReviewPage() {
 
 function fmt(value?: number | null): string {
   return value != null ? Number(value).toFixed(1) : '—';
+}
+
+/** A row's name, its kind and its section. */
+function CriterionLabel({ name, kind, section }: { name: string; kind: string; section?: string | null }) {
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">{name}</span>
+        <Badge variant="secondary">{kind}</Badge>
+      </div>
+      {section && <div className="text-xs text-muted-foreground">{section}</div>}
+    </div>
+  );
+}
+
+/** A leg's score as the row is scored: a rated score, or a measured row's achievement % over its actual. */
+function ScoreCell({
+  score,
+  method,
+  actual,
+  target,
+  unit,
+}: {
+  score?: number | null;
+  method: CriterionScoringMethod;
+  actual?: number | null;
+  target?: number | null;
+  unit?: string | null;
+}) {
+  // With the target, the whole reading; without it (it sits under the criterion's name), the actual.
+  const detail =
+    method !== 'Measured' || actual == null
+      ? null
+      : target != null
+        ? formatActualAgainstTarget(actual, target, unit)
+        : `actual ${Number(actual).toLocaleString()}${unit ? ` ${unit}` : ''}`;
+  return (
+    <>
+      <div>{formatCriterionScore(score, method)}</div>
+      {detail && <div className="text-xs font-normal text-muted-foreground">{detail}</div>}
+    </>
+  );
 }

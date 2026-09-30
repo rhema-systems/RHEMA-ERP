@@ -47,8 +47,11 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    two-actor rule, D-36 two slices) and lane C's *source check* block. ~~Slice **C-a** (the
    machine)~~ **Done 2026-09-30** (`run-final-appeals.mjs` 209/209 twice; regression 2089/2098; lane
    C's C-a State block — P-71 fixed, and the `AppealReevaluationWindowDays` flip B7 left to lane C is
-   in its d34). **Slice C-b** (the reads: KPI and goal rows on the appeal page, C9, the honest
-   outcome) is next.
+   in its d34). ~~Slice **C-b** (the reads)~~ **Done 2026-09-30** (source-checked first: § 1f D-37 a
+   decided appeal opens, D-38 each item's score kept at the filing; `run-final-appeals.mjs` 397/397
+   twice; regression 2309/2318; lane C's C-b State block — read its refinements: HR's changes go
+   only on a contested row, and one score per row across the reads). **Lane C is complete; lane D is
+   next.**
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -134,6 +137,13 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | D-35 | **Who may handle an appeal.** Nothing stops an HR officer picking up, deciding or finalising their own appeal, or one against an evaluation they wrote | **The two-actor rule, both ways**: refused on their own appraisal, and where they wrote the contested evaluation or are the appellant's line manager (who would re-evaluate). Another HR officer or an administrator handles it | C4, C7 |
 | D-36 | **Lane C's size.** The check found seven defects beyond the rows — about 2.5–3 days | **Two slices, each built, verified and staged on its own.** **C-a** the machine: C1, C2, C3, C4, C5, C7, C8, D-34, D-35 and HR's decision page, which the new doors need. **C-b** the reads: C6 (KPI and goal rows appealable on the page), C9, the honest outcome, HR's review without a self draft, the guide's ch. 33. New suite `run-final-appeals.mjs`, grown by each | Lane C |
 
+### 1f. Decisions from slice C-b's source check — settled with the user, 2026-09-30
+
+| # | Question | Decision (2026-09-30) | Affects |
+|---|---|---|---|
+| D-37 | **A decided appeal on HR's desk.** The queue's *Decided* tab links **View** to the appeal page, whose read refuses an Upheld or Rejected appeal — every decided appeal opens to an error, and the page's own *Decided* state is unreachable | **Open it read-only**: the review read answers for a decided appeal and carries the decision — who, when, the notes, the overall before → after; the page offers no action | C-b |
+| D-38 | **What an appeal remembers of each item.** The status page's *Original score* is the manager's *current* score: after an upheld change it shows the new score, and during a remand the manager's re-scoring | **Record each appealed item's score at filing** on the appeal item (`AppraisalAppealItem.OriginalScore`, never written until now — no migration): a rated row's score on its scale, a measured row's achievement %. The status and outcome pages show *was → now* per item; appeals filed before it fall back to the remand snapshot, or "—" | C-b |
+
 ---
 
 ## 2. Lane status
@@ -144,7 +154,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | P | Privacy and access *(new — the review)* | 2 days | D-26 (P18 only) | ☑ 2026-09-29 — 339/339 twice; staged |
 | B | One gate evaluator (B1 first); settings enforced or removed | 3.5 days (+1, D-33) | D-32, D-33 | ☑ 2026-09-29. B1 — 256/256 twice; B3–B5 with it; B1 enforces nine of the fourteen settings. B2's rest and B6–B8 in two slices (D-33): B-v — 246/246 twice; B-w — 363/363 twice (the suite holds both), regression 1877/1886; staged. The tolerance moved to batch 2 (D-32); `AppealReevaluationWindowDays`' flip is lane C's |
 | L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ☑ 2026-09-29 — L-a 157/157 twice; L-b 244/244 twice; L-c 261/261 twice (one suite holds L-b and L-c); staged |
-| C | One appeal machine | 2 days (+0.5–1, D-36) | D-22, D-34, D-35, D-36 | ◐ source-checked 2026-09-29; C10 was batch 1's. Two slices (D-36): C-a ☑ 2026-09-30 — 209/209 twice, regression 2089/2098; staged. C-b ☐ (C6, C9, the outcome's wording) |
+| C | One appeal machine | 2 days (+0.5–1, D-36) | D-22, D-34, D-35, D-36, D-37, D-38 | ☑ **complete 2026-09-30**; C10 was batch 1's. Two slices (D-36): C-a ☑ — 209/209 twice, regression 2089/2098, committed effb567f5. C-b ☑ — source-checked (§ 1f D-37, D-38), `run-final-appeals.mjs` 397/397 twice, regression 2309/2318; staged |
 | D | Peer nomination and evaluation integrity | 1 day | — | ☐ |
 | E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | 4 days | D-10, D-14, D-17, D-20 | ☐ |
 | F | Recommendations, proposals, probation, PIP chain, segregation of duties | 2.5 days | D-12, D-19; **F1 waits on D-18** (the finish plan's lane 9) | ☐ |
@@ -1493,7 +1503,7 @@ things show:
       the remand snapshot (needs `AppraisalCriterionScoreSnapshot.ActualValue` — batch 1;
       `CreateManagerEvaluationSnapshotAsync` :2083-2096 writes it); `Upheld` keeps the re-evaluation;
       outcome text matches (:3837 is false today).
-- [ ] C6 *(L-b: goal rows are appealable through the API, by their snapshot row.)* KPI items appealable again (the majority of the score): the appeal page lists KPI and goal
+- [x] C6 *(C-b — see its State block.)* *(L-b: goal rows are appealable through the API, by their snapshot row.)* KPI items appealable again (the majority of the score): the appeal page lists KPI and goal
       rows, and a modification is the achievement-% override of D-22 — not an `ActualValue` change;
       remove the "deprecated" hard-empties (PAS :2836, :3398, :3673, :3877).
 - [x] C7 *(B1's `CanFileAppeal`, and C-a.)* Appeal on a Governance appraisal refused; resolution never bypasses HR sign-off;
@@ -1501,7 +1511,7 @@ things show:
 - [x] C8 *(C-a.)* **P-50:** submitted appeal items must belong to this appraisal's snapshot and be in the
       appealable list. Today `TemplateItemId` is copied as sent (PAS :2910-2921; the legacy writer
       :334 likewise).
-- [ ] C9 **P-49 is worse than recorded.** HR's appeal review sets `Weight = 0` on every row
+- [x] C9 *(C-b — and the peers' average and the weighted column, never set.)* **P-49 is worse than recorded.** HR's appeal review sets `Weight = 0` on every row
       (PAS :3319, since 2d8781248); it reads from the snapshot instead.
       `GetAppealReviewDataAsync` never loads `Items.TemplateItem` (PAS :3237-3239, :3305-3308), so
       the criterion names built at :3317 are probably blank. Probe first, then fix.
@@ -1605,7 +1615,7 @@ ways, D-36 two slices.
       a remand refused where there is no manager evaluation; HR's decision page — the waiting state
       with its deadline, *Extend* and the lapse decision, a
       justification it does not invent, score changes sent only with *Uphold*.
-- [ ] **Slice C-b — the reads (D-36).** C6 KPI and goal rows appealable on the page (one list of
+- [x] **Slice C-b — the reads (D-36).** *(2026-09-30 — the C-b State block below; D-37, D-38 in § 1f.)* C6 KPI and goal rows appealable on the page (one list of
       appealable rows, keyed by criterion) and named on the status, review, post-remand and outcome
       reads; the dead KPI DTOs gone; C9 HR's review names and weights from the snapshot; the outcome
       says whether the scores moved; HR's review reads no self draft; the guide's ch. 33.
@@ -1679,6 +1689,140 @@ ways, D-36 two slices.
 - Demo: every one of APC2026's 107 phases byte-identical to the snapshot after B-w; UAT holds no open or
   remanded appeal (15 upheld, 25 rejected), so nothing waits on the new rules. The guide's ch. 33 walk
   keeps its recommended ending (uphold); a remand is now a working, longer ending.
+
+**C-b source check (2026-09-30, after C-a; line numbers as of `effb567f5`).** Row by row:
+- **C6, the appeal page — live.** The list is built from rows whose template item has a competency
+  (PAS :2478); KPIs are hard-empty (:2474) and a goal row is never listed. The page sends a template item
+  only, so it could not send a goal row. **Demo:** Efua is offered Communication 84 and Teamwork 82; C6
+  adds Sales Target Achievement (104 against 100 — 100 %) and Project Delivery Timeliness (restated to
+  88 %).
+- **C6, the status read — live, and worse than recorded.** Every template item is typed *Competency*
+  (:2844); a KPI's name falls through to **"Item"** — the template item is never loaded (:2845) — and its
+  target and actual read null. **Demo:** Cynthia Sarpong's status page reads "Item", "—".
+- **C6, post-remand — names right, measured rows compare nothing.** Before and after are `NumericScore`
+  (:3486, :3490): a KPI or measured goal row whose actual moved 80 → 90 reads "— → —", and the DTO's
+  `ScoreChanged` says unchanged.
+- **C6, the outcome — measured rows show no score.** `FinalScore` is `NumericScore` (:3806): Cynthia's two
+  KPIs read "—". The appealed-items list calls a competency and a KPI alike "Criterion:" (:3778).
+- **C6, the dead KPI DTOs — five classes, not one:** `AppealableKpiDto`, `AppealedKpiReviewDto`,
+  `KpiScoreModificationDto`, `KpiScoreComparisonDto`, `FinalKpiScoreDto`; the lists and fields that carry
+  them (`AppealableKpis`, `AppealedKpis`, `KpiModifications`, `KpiComparisons`, `FinalKpiScores`,
+  `AppealItemSubmissionDto.EmployeeKpiTargetId`); the manager context's `AppealedKpiIds` (:1752); their
+  TypeScript twins. No reader. The manager's page already marks KPI and goal rows by criterion key.
+- **C9 — confirmed.** `Weight = 0` (:3052); every competency or KPI name blank (the template item is
+  never loaded, :2963). **And two columns HR's page shows are never set** — *Peers* reads "—" and
+  *Weighted* 0.0 on every row. The guide's walk (ch. 33 step 8) narrates "five numbers" on the row; a KPI
+  row shows none of them (the manager's input is an actual; the column reads `NumericScore`).
+- **The honest outcome — live.** Every upheld appeal "adjusted the scores" (:3755). **Demo:** Cynthia's
+  appeal was upheld at 87 → 87, `AdjustedScore` null, and her outcome says her scores were adjusted. The
+  status page's *Score now* tile reads "—" and "Unchanged so far" after a final decision.
+- **HR's review reads a self draft — confirmed** (the per-criterion query has no submitted filter,
+  :3032); the read asks no visibility rule at all.
+- **The guide:** Rule 9 ("…and nothing else", :320), ch. 33 step 3 ("Not the KPIs"), step 8 (the five
+  numbers), P-47, P-49, P-50 and the L-b/L-c notes. The demo pack's runbooks do not narrate it.
+
+**Beyond the rows:**
+1. **The status read leaks the re-evaluation during a remand.** It shows the manager's *current* score
+   on each appealed item, guarded by the breakdown switch alone — no release rule. C-a made the remand
+   reopen the manager's form, so the appellant watches the re-scoring (drafts included) that the release
+   rule withholds everywhere else.
+2. **HR cannot open a decided appeal** — the review read refuses Upheld and Rejected (:2971); the queue's
+   *Decided* tab links there. UAT holds 81 decided appeals, Cynthia's among them, which P-50 offers to
+   open in the demo (D-37).
+3. **An HR officer who is the appellant reads HR's review of their own appeal as the desk.**
+4. The submit resolves a pair of ids by the snapshot row and ignores a template item that names another
+   row; the forms refuse such a pair since L-c, and the new page sends pairs.
+
+Settled the same day (§ 1f): D-37 a decided appeal opens read-only; D-38 each appealed item's score is
+recorded at filing. C-b stays one slice (D-36), about 2 days.
+
+**C-b State (2026-09-30): DONE — built, verified on UAT, staged.** No migration. What exists now:
+- **One description of a row for every appeal read** — `PerformanceAppraisalService.AppealRows.cs`:
+  `LoadAppealCriteriaAsync` describes each criterion from the appraisal's snapshot (the live template for
+  a key an older appraisal's snapshot does not hold) — its kind (*Competency*, *KPI*, *Goal*, or
+  *Question* for a template item that is neither), how it is scored, its name, its section and the
+  section's weight, its weight within the section, its scale top, and a measured row's target and unit —
+  in the forms' order; and reads every score as **one number: a rated row's score on its scale, a
+  measured row's achievement %** (the actual against the target, or the percentage calibration or an
+  appeal restated it to — D-22), with the actual beside it.
+- **The appeal page (C6)** — `AppealableCriteria`, every criterion the manager's submitted evaluation
+  scored, in one list keyed by criterion: the list the submit accepts (C8). The page groups it by section
+  and sends each row back by both its ids, as the forms do.
+- **The status, post-remand and outcome reads (C6)** — each row typed and named (a KPI read "Competency",
+  "Item"); a measured row compared and shown by its achievement over its actual (every KPI scored by its
+  actual read "—", and a re-evaluated actual read unchanged); the outcome's contested items by kind
+  (*"KPI: …"*).
+- **What an appeal remembers (D-38)** — each appealed item's score at the filing, in
+  `AppraisalAppealItem.OriginalScore` (never written until now). The status shows *when you appealed*
+  and, once decided, *now*; the outcome *was → now* on each contested row; HR's review *when appealed*.
+  An appeal filed before it falls back to the remand snapshot, else "—".
+- **HR's review (C9)** — names, weights and scale tops from the snapshot; every leg on the row's own terms;
+  **the peers' average and the weighted contribution**, never set; **the visibility rule** (B-v) for its
+  reader — no self-evaluation draft on the desk, an appellant who holds the desk reads as the appraisee;
+  `PartyToAppealReason` when the reader may not act (D-35). **A decided appeal opens (D-37)**, with its
+  officer, date, notes and the overall appealed against the overall now.
+- **The status no longer leaks a remand** — the scores as they stand (and *Score now*) are withheld while
+  the manager re-evaluates; the score when appealed stays. `ResolvedDate` only once decided.
+- **The honest outcome** — *"upheld and your appraisal was re-scored: your overall score moved from 75 to
+  85.5"*, *"upheld, but no score was changed: your overall score stays at 75"*, *"not upheld. The
+  original scores stand: your overall score is 75"*; `ScoresChangedAfterAppeal` is the overall or a
+  contested row.
+- **The dead KPI surface is gone** — five DTO classes, seven properties, `AppealedKpiIds` and their
+  TypeScript twins; `ItemWeightsAsync` and `CriterionName(CriterionScore)` lost their callers and went.
+- **The screens** — the appeal form by section with each row's kind, weight and score as scored; the
+  status's *When you appealed / Now* with the remand's withholding; the outcome's final scores with their
+  actuals and *was → now*; HR's page with the named, weighted rows, the peers, the weighted column, a
+  KPI's actual, a new-score input bounded by the row's scale (a KPI's an achievement %), the decided
+  record, and no buttons for a party.
+
+**Where the build refines the rows** (each deliberate; say if one should go back):
+1. **HR's score changes go only on a contested criterion** (422 otherwise). C4 let an upheld appeal
+   restate any criterion of the appraisal; HR's page offered the contested rows alone, and D-38's
+   *was → now* covers only those.
+2. **The submit refuses a pair of ids naming two rows** (400), as the forms have since L-c; the snapshot
+   row decided and the template item was ignored.
+3. **One score per row across the reads** — `PreRemandScore`, `PostRemandScore`, `SelfScore`,
+   `ManagerScore` and the outcome's `FinalScore` became that one number (decimal); they were a
+   `NumericScore`, which a measured row holds only when restated. A rated row reads as before.
+4. **"Changed on appeal" is read, not written** — the kept score against the final one, after the
+   decision; `AppraisalAppealItem.ScoreAdjusted` stays unused (residual register).
+5. **A row's weight is its weight within its section, with the section beside it** — as the forms show
+   them — not its share of the whole form.
+6. **The status withholds by the release rule** — C-a's `Appealed => !remanded`, which the status read
+   never asked; found by this slice's source check (*beyond the rows* 1).
+7. **The goal-row half of C6 is asserted in the goal-KPI suite** (s4, s5), where goal rows are built; the
+   appeals fixture has no goals section.
+
+**Verified** (Staging API on `ErpSystemDB_UAT`, the final build):
+- `run-final-appeals.mjs` **397/397, then 397/397**, and a third time inside the regression (C-a's 209 and
+  C-b's 188) — the first run's 2 misses
+  were my expectation of the kept score's text (the model maps `OriginalScore` as decimal(18,4), not the
+  entity's (5,2); the values were right). Every number exact: 80 % kept at filing, 80 → 90 on the
+  re-evaluated KPI, 75 → 85.5, 72 → 75.75 with a peer at 60, 75 unchanged on the upheld-with-no-change.
+- Regression (`run-all.mjs`, thirteen suites): interim reviews 133/133, attachments 65/65, slice C 52/52,
+  slice D 22/22, **slice E 17/26 — the same 9 stale**, gates 32/32, lane A 182/182, lane P 337/337, lane
+  B1 256/256, lane L-a 157/157, **lanes L-b/L-c 296/296** (264 + 32: the goal-row half of C6 in s4 and s5 —
+  the appeal page lists both goals, a goal row's score when appealed, its weight and the manager's 60 % on
+  HR's review, the outcome's *was → now* and wording, the post-remand comparison of a measured goal
+  70 → 90), **lane B2 363/363** (its three appeal-page checks follow C6's list — the KPI row is in it),
+  **lane C 397/397**. **2309/2318** — C-a's 2089/2098 plus exactly the 220 new; no assertion lost.
+- API log: no error from an appeal endpoint — only UAT's missing SMTP, defect #23's payroll-profile FK and
+  the five-minutely HR/Identity reconciliation.
+- Frontend: scoped `tsc` over the 7 touched files and the 3 that read their types (HR's queue, the
+  manager's team page, the appraisal-run service), 0 errors — the 3 errors planted in a probe file were
+  all reported; ESLint clean on the 7. Not browser-walked.
+- Demo (no score moves — C-b changes reads): every one of APC2026's 107 phases byte-identical before
+  and after the regression, on the C-b build. The demo's one appeal
+  (Cynthia Sarpong, upheld) **opens on HR's desk** — read as the desk after the build: *Project Delivery
+  Timeliness*, a KPI in *Key Performance Indicators*, weight 50, the manager's 92 % on an actual of 92
+  against 100, her own 96 %, peers "—" (peers do not score KPIs), overall 87 → 87, *when appealed* "—"
+  (filed before D-38, no remand to recall it); it answered 400. By the paths the suite proves (b2), her
+  outcome now reads *"upheld, but no score was changed: your overall score stays at 87"* (it said her
+  scores were adjusted) and her status *KPI · Project Delivery Timeliness* (*Competency · Item*). Efua's
+  appeal page offers four rows (Rule 9) — from SQL, not read as her (a persona login writes to UAT).
+  The guide's ch. 33 walk: step 3's narration rewritten (it told the room KPIs cannot be appealed), step 8's
+  five numbers now on the screen (Self 90, Peers 82, Manager 84, weight 50, weighted 16.8 — two showed),
+  step 11 names the outcome's wording; the recommended ending (uphold) stands.
 
 ### Lane D — Peer nomination and evaluation integrity
 
@@ -2490,6 +2634,11 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | Two writers of the talent-pool rating cache: the appraisal sync, and the documented "latest confirmed `TalentReviewRating`" rule | `SuccessionPlanningEntities.cs:680-692` | K (succession's owner) |
 | `PreCalibrationScore` null when HR's advance auto-submits a manager draft | AWS ManagerEvaluation arm | H3 |
 | Slice E's 9 definition assertions stale on UAT (seeded names; no `preventInitiatorApproval`) | `run-sliceE.mjs:18-31, :84-88` | F3 / S |
+| *Added by lane C-b (2026-09-30):* | | |
+| `AppraisalAppealItem.ScoreAdjusted` and `.ResolutionNotes` never written — "changed on appeal" is read from the kept score | `PerformanceEntities.cs` (appeal item) | J |
+| An upheld change's justification is appended to the manager's criterion `Notes`, rewriting the manager's comment; the appeal item's `ResolutionNotes` is the natural home | `ResolveAppealAsync` (the modifications loop) | J |
+| `AppraisalAppealItem.OriginalScore` declares `decimal(5,2)`; the model maps `decimal(18,4)` (a model-wide decimal rule) — harmless, the attribute misleads | entity; model snapshot | J |
+| The C-b screens (appeal form, status, outcome, HR's review) not browser-walked | 5 pages | K |
 
 ---
 

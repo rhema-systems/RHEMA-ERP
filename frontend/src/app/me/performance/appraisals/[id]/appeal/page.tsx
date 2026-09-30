@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import { Gavel, Info, Send, TriangleAlert } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -16,12 +17,22 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { useToast } from '@/hooks/use-toast';
 import { appraisalAppealService } from '@/services/hr/appeals.service';
+import {
+  formatActualAgainstTarget,
+  formatCriterionScore,
+  type AppealableCriterion,
+} from '@/types/hr/appeals';
 
 /**
  * The employee's appeal form.
  *
  * An appeal is per-criterion, not per-appraisal: each contested item carries its own reason, and
  * at least one is required. The overall reason is context on top of that, not a substitute.
+ *
+ * **Every criterion the manager scored can be contested** (closure C6) — a competency, a KPI, or
+ * one of the employee's own goals — listed by section as the forms show them. A measured row shows
+ * the manager's actual against the target and the achievement it gave; a rated row the score on its
+ * own scale. The page offered competencies only, though the demo's one appeal was against a KPI.
  *
  * ⚠ There is **one appeal per appraisal, ever**. The server refuses a second one, so this is a
  * single shot — the copy says so before the submit rather than after the refusal.
@@ -37,6 +48,7 @@ export default function FileAppealPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  // Keyed by criterion — a goal row has no template item.
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [overallReason, setOverallReason] = useState('');
@@ -48,16 +60,32 @@ export default function FileAppealPage() {
     retry: false,
   });
 
+  const criteria = useMemo(() => data?.appealableCriteria ?? [], [data]);
+
+  // The rows by section, in the order the server sends them (the forms' order).
+  const sections = useMemo(() => {
+    const groups: { name: string; weight?: number | null; rows: AppealableCriterion[] }[] = [];
+    for (const row of criteria) {
+      const name = row.sectionName ?? 'Other criteria';
+      const last = groups[groups.length - 1];
+      if (last && last.name === name) last.rows.push(row);
+      else groups.push({ name, weight: row.sectionWeight, rows: [row] });
+    }
+    return groups;
+  }, [criteria]);
+
+  // Each row by both ids it has, as the forms send theirs: a template row by its template item and
+  // snapshot row, a goal row by its snapshot row alone.
   const appealedItems = useMemo(
     () =>
-      Object.entries(selected)
-        .filter(([, checked]) => checked)
-        .map(([templateItemId]) => ({
-          templateItemId,
-          employeeKpiTargetId: null,
-          reason: reasons[templateItemId]?.trim() ?? '',
+      criteria
+        .filter((row) => selected[row.criterionKey])
+        .map((row) => ({
+          templateItemId: row.templateItemId ?? null,
+          criterionConfigId: row.criterionConfigId ?? null,
+          reason: reasons[row.criterionKey]?.trim() ?? '',
         })),
-    [selected, reasons],
+    [criteria, selected, reasons],
   );
 
   const incomplete = appealedItems.some((item) => !item.reason);
@@ -119,7 +147,7 @@ export default function FileAppealPage() {
         tiles={[
           { label: 'Final score', value: data.finalScore != null ? data.finalScore.toFixed(1) : '—' },
           { label: 'Grade', value: data.finalGrade ?? '—' },
-          { label: 'Items you can contest', value: data.appealableCompetencies.length },
+          { label: 'Items you can contest', value: criteria.length },
         ]}
       />
 
@@ -147,77 +175,112 @@ export default function FileAppealPage() {
             <CardHeader>
               <CardTitle className="text-base">What are you contesting?</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-6">
               {!data.scoreBreakdownShown && (
                 <p className="text-sm text-muted-foreground">
                   This cycle shows you the final result, not each criterion&apos;s score. You can
                   still name the criteria you want reconsidered and say why.
                 </p>
               )}
-              {data.appealableCompetencies.length === 0 ? (
+              {criteria.length === 0 ? (
                 <EmptyState
                   icon={Gavel}
                   title="No scored items to contest"
                   description="Your manager's evaluation has no scored criteria on it, so there is nothing itemised to appeal."
                 />
               ) : (
-                data.appealableCompetencies.map((item) => {
-                  const checked = !!selected[item.templateItemId];
-                  return (
-                    <div
-                      key={item.templateItemId}
-                      className="space-y-3 rounded-lg border p-4"
-                    >
-                      <div className="flex items-start gap-3">
-                        <Checkbox
-                          id={`item-${item.templateItemId}`}
-                          checked={checked}
-                          onCheckedChange={(v) =>
-                            setSelected({ ...selected, [item.templateItemId]: v === true })
-                          }
-                          className="mt-1"
-                        />
-                        <div className="flex-1">
-                          <Label
-                            htmlFor={`item-${item.templateItemId}`}
-                            className="text-sm font-medium"
-                          >
-                            {item.itemName}
-                          </Label>
-                          {item.description && (
-                            <p className="mt-1 text-xs text-muted-foreground">{item.description}</p>
-                          )}
-                          <p className="mt-1 text-xs text-muted-foreground tabular-nums">
-                            {/* The cycle may show the overall only (closure B2): then the server
-                                sends the item without the manager's score. */}
-                            {data.scoreBreakdownShown ? `Scored ${item.numericScore ?? '—'} · ` : ''}
-                            weight {item.weight}
-                            {data.scoreBreakdownShown && item.weightedScore != null
-                              ? ` · contributes ${item.weightedScore.toFixed(1)}`
-                              : ''}
-                          </p>
-                        </div>
-                      </div>
-
-                      {checked && (
-                        <div className="space-y-2 pl-7">
-                          <Label htmlFor={`reason-${item.templateItemId}`}>
-                            Why this score is wrong
-                          </Label>
-                          <Textarea
-                            id={`reason-${item.templateItemId}`}
-                            rows={3}
-                            value={reasons[item.templateItemId] ?? ''}
-                            onChange={(e) =>
-                              setReasons({ ...reasons, [item.templateItemId]: e.target.value })
-                            }
-                            placeholder="Point to what you did and where the evidence is. Required."
-                          />
-                        </div>
+                sections.map((section) => (
+                  <div key={section.name} className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-semibold">{section.name}</h3>
+                      {section.weight != null && (
+                        <Badge variant="outline">Weight {section.weight}%</Badge>
                       )}
                     </div>
-                  );
-                })
+                    {section.rows.map((item) => {
+                      const checked = !!selected[item.criterionKey];
+                      const measured = item.scoringMethod === 'Measured';
+                      const against = measured
+                        ? formatActualAgainstTarget(item.actualValue, item.targetValue, item.unit)
+                        : null;
+                      return (
+                        <div key={item.criterionKey} className="space-y-3 rounded-lg border p-4">
+                          <div className="flex items-start gap-3">
+                            <Checkbox
+                              id={`item-${item.criterionKey}`}
+                              checked={checked}
+                              onCheckedChange={(v) =>
+                                setSelected({ ...selected, [item.criterionKey]: v === true })
+                              }
+                              className="mt-1"
+                            />
+                            <div className="flex-1 space-y-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Label
+                                  htmlFor={`item-${item.criterionKey}`}
+                                  className="text-sm font-medium"
+                                >
+                                  {item.itemName}
+                                </Label>
+                                <Badge variant="secondary">{item.itemType}</Badge>
+                                <Badge variant="outline">Weight {item.weight}%</Badge>
+                              </div>
+                              {item.description && (
+                                <p className="text-xs text-muted-foreground">{item.description}</p>
+                              )}
+                              {/* The cycle may show the overall only (closure B2): then the server
+                                  sends the item without the manager's score. */}
+                              {data.scoreBreakdownShown ? (
+                                <p className="text-xs text-muted-foreground tabular-nums">
+                                  {measured
+                                    ? `Measured: ${against ?? 'no actual recorded'} — achievement ${formatCriterionScore(item.score, item.scoringMethod)}`
+                                    : `Your manager scored ${formatCriterionScore(item.score, item.scoringMethod)} of ${item.scaleTop}`}
+                                  {item.weightedScore != null
+                                    ? ` · contributes ${Number(item.weightedScore).toFixed(1)}`
+                                    : ''}
+                                </p>
+                              ) : (
+                                measured &&
+                                item.targetValue != null && (
+                                  <p className="text-xs text-muted-foreground tabular-nums">
+                                    {formatActualAgainstTarget(null, item.targetValue, item.unit)}
+                                  </p>
+                                )
+                              )}
+                              {data.scoreBreakdownShown && item.achievementOverridden && (
+                                <p className="text-xs text-amber-700 dark:text-amber-400">
+                                  The achievement was restated by calibration, not read from the
+                                  actual.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {checked && (
+                            <div className="space-y-2 pl-7">
+                              <Label htmlFor={`reason-${item.criterionKey}`}>
+                                {measured ? 'Why this result is wrong' : 'Why this score is wrong'}
+                              </Label>
+                              <Textarea
+                                id={`reason-${item.criterionKey}`}
+                                rows={3}
+                                value={reasons[item.criterionKey] ?? ''}
+                                onChange={(e) =>
+                                  setReasons({ ...reasons, [item.criterionKey]: e.target.value })
+                                }
+                                placeholder={
+                                  measured
+                                    ? 'What the figure should be, and where the record of it is. Required.'
+                                    : 'Point to what you did and where the evidence is. Required.'
+                                }
+                              />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))
               )}
             </CardContent>
           </Card>

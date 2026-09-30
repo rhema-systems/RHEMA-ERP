@@ -53,8 +53,10 @@ reminder sweep today — it is not one of lane 10's eleven — and its lane H bu
 L-b, L-c), all merged upstream in round 4 (PR #278); then the rest of lane B on hrdev — B2 in two
 slices (B-v visibility, B-w write paths with B6 and B8), so **lane B is complete** (every appraisal
 setting now does what it says; the KPI tolerance moved to batch 2). **Lane C**, the appeal machine,
-is in two slices: C-a (2026-09-30) made the remand work, the decisions honest and HR's two-actor rule;
-**next: C-b**, what an appeal may name on the page and how its reads name it. The closure plan's START
+is complete in two slices (2026-09-30): C-a made the remand work, the decisions honest and HR's
+two-actor rule; C-b opened the page to every scored criterion (KPIs and goals), made every appeal read
+name and score its rows on their own terms, kept each item's score at the filing, and let HR open a
+decided appeal. **Next: lane D**, peer nomination and evaluation integrity. The closure plan's START
 HERE block and § 2 carry the live state.
 
 ▶ **Lane 11 (added 2026-09-25): probation is not absence.** About 1,800 long-serving staff on the

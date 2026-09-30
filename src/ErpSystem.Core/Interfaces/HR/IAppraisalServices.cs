@@ -118,7 +118,12 @@ public interface IPerformanceAppraisalService
     
     // HR/Manager actions
     Task<List<AppealListItemDto>> GetAppealsListAsync(Guid? cycleId = null, AppraisalAppealStatus? status = null, CancellationToken cancellationToken = default);
-    Task<AppealReviewDto> GetAppealReviewDataAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// HR's review of an appeal — a decided one too, read-only (D-37). <paramref name="viewerEmployeeId"/>
+    /// is the reader: the visibility rule decides what of each leg they see (B2), and the two-actor
+    /// rule whether they may act (D-35).
+    /// </summary>
+    Task<AppealReviewDto> GetAppealReviewDataAsync(Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default);
     /// <summary>Moves a Submitted appeal to UnderReview and records who picked it up.</summary>
     Task<AppraisalAppealDto> BeginAppealReviewAsync(Guid appraisalId, Guid reviewerId, CancellationToken cancellationToken = default);
     Task ResolveAppealAsync(Guid appraisalId, ResolveAppealDto resolveDto, Guid reviewerId, CancellationToken cancellationToken = default);

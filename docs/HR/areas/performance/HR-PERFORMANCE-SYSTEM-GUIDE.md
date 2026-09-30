@@ -12,6 +12,11 @@ and HR's appeal decision handle goal rows; and Appendix C, whose Rule 8 row had 
 **And for lane C, slice C-a** (the appeal machine, 2026-09-30): chapters 29 and 33 and Appendices C
 and E — the remand works (P-71 fixed), HR can extend its deadline or decide once it lapses, a
 rejection restores the original, and HR does not decide an appeal it is party to.
+**And for lane C, slice C-b** (the appeal reads, 2026-09-30): Rule 9 and chapter 33 — every criterion
+the manager scored can be appealed on the page, KPIs and goals included; every appeal screen names,
+weighs and scores each row on its own terms (a KPI by its actual against its target); each item keeps
+what it scored when the appeal was filed; HR's review shows the peers and the weights and opens a
+decided appeal; and the outcome says whether a score moved (P-47, P-49 and P-50 fixed).
 **The database was rebuilt on 2026-09-29**: Rule 2, Rule 9, the demo tables and the Efua arithmetic give its figures (Efua 88.56, Cynthia 87.00, Efua's appeal window to 6 October). The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
 **Seventh in the series**, after Recruitment, Employees, Leave, Attendance & Time, Company Schedule and Staff Travel.
 
@@ -317,16 +322,23 @@ by employee name, never by appraisal number.
 
 ---
 
-### Rule 9 — An appeal can contest a **competency only**, and the appeal window is not enforced
+### Rule 9 — An appeal can contest **any criterion the manager scored**, inside the appeal window
 
-* **KPI items are not appealable.** The service builds the appealable list from competency scores
-  alone; KPI appeals were deprecated when employee KPI targets became employee goals. So when Efua
-  opens her appeal form she is offered **Communication (84)** and **Teamwork (82)**, and nothing else.
-  That is arguably right — a KPI is a measurement, a competency score is a judgement, and it is
-  judgements people appeal.
-* **`appealWindowDays` (7 on this profile) is not checked.** Eligibility is "the appraisal is Completed
-  and has not been appealed before". The window is displayed policy, not enforced policy. Do not point
-  at the number and say the system closes the window.
+* **Every scored criterion is appealable** — a competency, a KPI, or one of the employee's own goals.
+  When Efua opens her appeal form she is offered four, by section as her form shows them:
+  **Sales Target Achievement** (her actual 104 against a target of 100 — 100 %), **Project Delivery
+  Timeliness** (restated by calibration to 88 %), **Communication (84)** and **Teamwork (82)**. A KPI is
+  contested on its figure — what was achieved, or how it was counted; a competency on the judgement.
+* **The window is enforced** — *Appeal window (days)*, 7 on this profile, counted from the employee's
+  acknowledgment (below).
+
+> **Changed 2026-09-30** (performance closure lane C, slice C-b). **This rule read "a competency
+> only"**: the appeal page offered competencies alone, though the API took a KPI appeal (Cynthia
+> Sarpong's is one) and, since lane L-b, a goal. The page now lists every criterion the manager's
+> evaluation scored; the rest of chapter 33 follows.
+>
+> What the rule said before B1 fixed the window: *"`appealWindowDays` (7 on this profile) is not
+> checked. Eligibility is 'the appraisal is Completed and has not been appealed before'."*
 
 The upside is large: **Efua can file a real appeal live**, because her appraisal is Completed and
 unappealed. That is **🔴 LIVE WRITE 13**, and it is the strongest five minutes in Part V.
@@ -337,8 +349,8 @@ unappealed. That is **🔴 LIVE WRITE 13**, and it is the strongest five minutes
 > *My Appraisals* read one rule. **Efua acknowledged on 29 September 2026 (the day the database was
 > rebuilt), so LIVE WRITE 13 works until 6 October 2026**; after that her appeal is refused — *"The
 > appeal window closed on 6 Oct 2026…"* — until the database is rebuilt, which acknowledges it afresh.
-> Book 0's evening-before rebuild keeps the demo inside the window. The competency-only half of this
-> rule stands (closure lane C).
+> Book 0's evening-before rebuild keeps the demo inside the window. (The competency-only half of this
+> rule went with closure lane C-b — above.)
 
 ---
 
@@ -4217,7 +4229,10 @@ until the final conversation is held, unless the switch lets it go first.
 An employee contesting a finalised appraisal. Three things make it worth demonstrating:
 
 * **An appeal is per criterion, not per appraisal.** Each contested item carries its own reason, and at
-  least one is required. The overall reason is context on top of that, not a substitute.
+  least one is required. The overall reason is context on top of that, not a substitute. **Any
+  criterion the manager scored can be contested** — a competency, a KPI or one of the employee's goals
+  (Rule 9) — and every screen of the appeal shows it on its own terms: a KPI by its actual against its
+  target and the achievement that gave, a competency by its score.
 * **There is one appeal per appraisal, ever.** The server refuses a second, so the form says so before
   the submit rather than after the refusal.
 * **Remand is not a verdict.** `Upheld` and `Rejected` are final — the appraisal returns to Completed and
@@ -4236,15 +4251,24 @@ Three tiles — **Final score · Grade · Items you can contest** — then:
 
 * A red banner when you cannot appeal, carrying the server's own reason, written for the employee
 * **"One appeal per appraisal"** warning
-* **"What are you contesting?"** — a card per appealable item, each with a checkbox, the manager's score,
-  and a **required** reason box: *"Point to what you did and where the evidence is. Required."*
+* **"What are you contesting?"** — every criterion the manager scored, grouped by section as on her form
+  (*Key Performance Indicators · Weight 60%*, *Core Competencies · Weight 40%*). A card per criterion,
+  each with a checkbox, its kind (**KPI**, **Competency** or **Goal**), its weight within the section,
+  and what the manager scored: a KPI as *"Measured: 104 against a target of 100 % — achievement 100 %"*,
+  with *"The achievement was restated by calibration"* where the panel moved it; a competency as
+  *"Your manager scored 84 of 100"*; and what it contributes. Ticked, a **required** reason box — for a
+  competency *"Point to what you did and where the evidence is. Required."*, for a KPI *"What the figure
+  should be, and where the record of it is. Required."*
 * **"Anything else HR should know"** — optional overall context
 * A **Submit appeal** button that refuses until at least one item is selected
 
 ### 👁 The employee's status page (`appeal-status`)
-Live from submission to verdict. Three tiles — **Score before the appeal · Score now · Items
-contested** — then *What you said*, *Items you contested* (Item · Your reason · Original score), and
-**HR's response**, whose wording carries the distinction that matters:
+Live from submission to verdict. Three tiles — **Score when you appealed · Score now · Items
+contested** — then *What you said*, *Items you contested* (Item, with its kind and section · Your reason
+· **When you appealed** · and, once decided, **Now** with *Changed by the appeal* or *Unchanged*), and
+**HR's response**. Each item's score when appealed is kept at the filing, so it stays what she appealed
+against whatever happens next. While the manager re-evaluates on a remand, the scores as they stand —
+and *Score now* — are withheld until HR decides. The wording carries the distinction that matters:
 
 | State | What the page says |
 |---|---|
@@ -4261,11 +4285,18 @@ number.
 
 ### 👁 HR's adjudication page
 * Header with **Pick up** *(Submitted → UnderReview, stamping the reviewer)* and **Open appraisal**
-* Four tiles — Self · Peers · Manager · Overall
+* Four tiles — Self · Peers · Manager · Overall. *Self* reads a submitted self-evaluation only: a
+  draft — one HR waived to move the appraisal on — shows as *No submitted self-evaluation*
 * **What the employee says**
-* **The contested items**, as a table with **all three evaluation legs side by side**: Criterion ·
-  Weight · **Self** · **Peers** · **Manager** · Weighted — and, *only when the cycle allows it*, a **New
-  score** column with a justification field
+* **The contested items**, as a table with **all three evaluation legs side by side**: Criterion (with
+  its kind and section) · Weight · **When appealed** · **Self** · **Peers** · **Manager** · Weighted —
+  and, *only when the cycle allows it*, a **New score** column with a justification field. A KPI's cell
+  is its achievement % over its actual; its new score is an achievement %, a competency's a score on its
+  own scale. Scores change only on the contested rows
+* An officer party to the appeal — the appellant, the author of the contested evaluation, the
+  appellant's line manager — sees *"You cannot act on this appeal"* with the reason, and no buttons
+* **Once decided, the page is the record**: *Decided*, the decision with its date and officer, the
+  notes, and the overall appealed against the overall now — the queue's *Decided* tab opens it
 * Where it does not: a lock banner — *"The settings profile **Standard Annual Appraisal** does not let HR
   change scores while resolving an appeal. To change a score, remand the appeal and let the manager
   re-evaluate."* *(Since closure C-a the advice holds: a remand reopens the manager's evaluation. It was
@@ -4278,18 +4309,24 @@ number.
   the original scores**
 * After the re-evaluation, a **Before and after the remand** comparison — the overall appealed, the
   overall after re-evaluation, the manager's total before → after, and a per-criterion table with
-  Before · After · Δ · Appealed — and a single **Final decision**: *Uphold* keeps the re-evaluation,
-  *Reject* restores the scores from before the remand
+  Before · After · Δ · Appealed (a KPI's achievement over its actual, before and after) — and a single
+  **Final decision**: *Uphold* keeps the re-evaluation, *Reject* restores the scores from before the
+  remand
 
 ### ▶ Walk it
 
 1. In **window B** as `staff` *(Efua)*, open her appraisal and press **File an appeal**.
 2. Read the three tiles and the one-appeal warning.
-3. Point at the two items on offer.
+3. Point at the four items on offer, section by section.
 
-   💬 *"Two things she can contest: Communication, which her manager scored eighty-four, and Teamwork,
-   which he scored eighty-two. Not the KPIs — those are measurements, and the number either was or was
-   not achieved. What you appeal is a judgement."*
+   💬 *"Everything her manager scored is on offer. Her two KPIs, which are measured — sales, where she
+   beat her target, and delivery timeliness, which the calibration panel restated to eighty-eight per
+   cent. And her two competencies — Communication, which her manager scored eighty-four, and Teamwork,
+   eighty-two. A KPI she would contest on the figure: what was achieved, or how it was counted. A
+   competency on the judgement. She is going to contest a judgement."*
+
+   *(Since closure C-b, 2026-09-30. The page offered the two competencies alone, and this line told the
+   room KPIs could not be appealed — though the demo's other appeal, Cynthia Sarpong's, is a KPI's.)*
 
 4. 🔴 **LIVE WRITE 13 — file it.** Tick **Communication**. Reason:
 
@@ -4321,6 +4358,10 @@ number.
    not adjudicating on a feeling — it is looking at a disagreement with all three views of it on one
    line."*
 
+   On Efua's Communication row: Self **90**, Peers **82** (her two peers' 84 and 80), Manager **84** —
+   84 when she appealed — weight **50 %** of the competencies, contributing **16.8**. *(Since closure C-b:
+   the row showed a blank name, Peers "—", a weight of 0 and a weighted 0.0 — two of the five numbers.)*
+
 9. Point at the **Scores are locked on this cycle** banner.
 
    💬 *"And I cannot simply change it. This year's policy says HR may not modify scores while resolving
@@ -4343,7 +4384,16 @@ number.
     before the reset (Appendix E, row 13).
 
 11. Switch back to `staff` and show **appeal-outcome**: HR's decision, her own words, and the final
-    scores with the contested one marked.
+    scores with the contested one marked. On the recommended ending it reads *"Your appeal was upheld,
+    but no score was changed: your overall score stays at 88.56"*, and Communication shows **84 when
+    she appealed, 84 final — unchanged**.
+
+    💬 *"Upheld is not the same as re-scored, and the page says which. HR agreed she was
+    under-credited, on a policy that does not let HR change a score; if it should move, the remand is
+    the route. Either way she is told exactly what happened to her number."*
+
+    *(Since closure C-b: an upheld appeal said "your appraisal scores were adjusted after review" whether
+    or not one had moved — the demo's own appeal was upheld at 87 → 87 and said so.)*
 
 ### ⚙ Behind the page
 
@@ -4352,14 +4402,14 @@ most one appeal per appraisal, so the appeal id is never a path parameter.
 
 | Control | Endpoint |
 |---|---|
-| Can I appeal? | `GET …/{id}/appeal-page-data` — check `canAppeal`; `cannotAppealReason` is written for the employee to read |
-| File | `POST …/{id}/submit-appeal` — at least one appealed item, each a criterion the manager scored on this appraisal, once; or 400 *(since C-a: a template item was stored as sent — C8)* |
-| Follow it | `GET …/{id}/appeal-status` |
-| Final outcome | `GET …/{id}/appeal-outcome` — **400 until Upheld or Rejected**, because a remand is a process state, not a verdict |
+| Can I appeal? | `GET …/{id}/appeal-page-data` — check `canAppeal`; `cannotAppealReason` is written for the employee to read; `appealableCriteria` is every criterion the manager scored — KPI, competency, goal — each with its kind, section, weight and the manager's score on its own terms *(since C-b: competencies only — C6)* |
+| File | `POST …/{id}/submit-appeal` — at least one appealed item, each a criterion the manager scored on this appraisal, once, named by its template item or its snapshot row (or both, naming one row); or 400. Each item keeps what it scored at the filing *(C8 since C-a; the pair rule and the kept score since C-b — D-38)* |
+| Follow it | `GET …/{id}/appeal-status` — each item's kind, its score when appealed and, once decided, now; the scores as they stand are withheld while a remand is open *(since C-b: a KPI read "Competency"/"Item", and the page showed the manager's re-scoring)* |
+| Final outcome | `GET …/{id}/appeal-outcome` — **400 until Upheld or Rejected**, because a remand is a process state, not a verdict; the message says whether a score moved *(since C-b)* |
 | HR queue | `GET …/appeals?cycleId=&status=` — **HR only** |
-| HR review | `GET …/{id}/appeal-review` — carries `hrCanModifyScores` from the cycle's profile |
+| HR review | `GET …/{id}/appeal-review` — carries `hrCanModifyScores` from the cycle's profile; names, weights and every leg from the snapshot, no self draft; a decided appeal answers too, with its decision; `partyToAppealReason` when the reader may not act *(since C-b: blank names, weight 0, no peers — C9; a decided appeal answered 400 — D-37)* |
 | Pick up | `POST …/{id}/begin-appeal-review` — 403 for an officer party to the appeal *(D-35)* |
-| Decide | `POST …/{id}/resolve-appeal` — Upheld, Rejected or Remanded, on an appeal not yet remanded; score changes only with Upheld; 422 otherwise, 403 for a party *(C4, D-35)* |
+| Decide | `POST …/{id}/resolve-appeal` — Upheld, Rejected or Remanded, on an appeal not yet remanded; score changes only with Upheld, only on a contested criterion; 422 otherwise, 403 for a party *(C4, D-35; contested-only since C-b)* |
 | Where the remand stands, and the comparison | `GET …/{id}/post-remand-review` — while the manager re-evaluates: the deadline, whether it has passed, `canDecide` / `canExtend`; after: the comparison |
 | Extend the deadline | `POST …/{id}/extend-remand` — a later day and a reason, while the manager has not re-evaluated *(D-34)* |
 | Post-remand decision | `POST …/{id}/finalize-post-remand-appeal` — Upheld or Rejected, once the manager has re-evaluated or the deadline has passed (422 before); *Rejected*, or any decision after a lapse, restores the scores from before the remand — a calibrated overall included *(C3, C5, D-34 — it waited for nothing and kept the current scores, P-71)* |
@@ -4378,18 +4428,35 @@ query string, which let anyone read anyone's appeal.
 > an upheld appeal's new score is sent by the row's snapshot row, and the before-and-after comparison
 > and the employee's outcome page list goal rows as they do criteria. Only an appeal made through the
 > API can name a goal row until lane C6 widens the appeal page.
+>
+> **Changed 2026-09-30** (performance closure lane C, slice C-b). **The appeal page lists every
+> criterion the manager scored**, goal rows and KPIs included, and sends each back by its snapshot row.
+> Every appeal read shows a row the same way — its kind, its section and weight, and one score: a rated
+> row's on its scale, a measured row's achievement % beside its actual and target (a KPI read "—"
+> wherever its actual was the score). Each appealed item keeps what it scored at the filing (D-38), so
+> the status and the outcome say *was → now*; the status withholds the scores as they stand while a
+> remand is open. HR's review names and weighs its rows from the snapshot, shows the peers' average and
+> the weighted contribution, reads no self-evaluation draft, and opens a decided appeal (D-37). The
+> outcome says whether a score moved.
 
 ### ⚠ Known gaps
-**P-47.** **KPI items are not appealable** (Rule 9) — `appealableKpis` is always empty.
+**P-47.** ~~**KPI items are not appealable** (Rule 9) — `appealableKpis` is always empty.~~ **Fixed
+2026-09-30** (closure lane C, slice C-b): the page lists every criterion the manager scored, KPIs and
+goals included (Rule 9).
 **P-48.** ~~**The appeal window is not enforced** (Rule 9).~~ **Fixed 2026-09-29** (closure lane B1):
 the submit refuses outside the window — counted from the acknowledgment — or with appeals off, and
 the appeal page's *can appeal* and *My Appraisals* read the same rule.
-**P-49.** The `Weight` column on the appeal review reads from the appraisal's frozen snapshot; where a
-snapshot row is missing it falls back to **0**.
-**P-50.** The one pre-existing appeal — Cynthia Sarpong's — was filed **against a KPI item** through the
-API, which does not validate against the appealable list the form builds. It is therefore an appeal the
-UI could not have produced. Open it if you want to show a decided appeal; do not use it to explain the
-form.
+**P-49.** ~~The `Weight` column on the appeal review reads from the appraisal's frozen snapshot; where
+a snapshot row is missing it falls back to **0**.~~ **Fixed 2026-09-30** (closure lane C, slice C-b):
+it read 0 on every row, and a competency's or KPI's name blank; both come from the snapshot now, with
+the peers' average and the weighted contribution, which were never set.
+**P-50.** ~~The one pre-existing appeal — Cynthia Sarpong's — was filed **against a KPI item** through
+the API, which does not validate against the appealable list the form builds. It is therefore an appeal
+the UI could not have produced.~~ **Fixed 2026-09-30** (closure lanes C-a and C-b): the submit checks
+the list (C8) and the page offers KPIs, so her appeal is one the form can produce. To show a decided
+appeal, open it from the Appeals queue's **Decided** tab — it opened to an error until C-b (D-37):
+**Project Delivery Timeliness**, a KPI, 92 against a target of 100; upheld at 87 → 87, and her outcome
+says no score was changed. Filed before appeals kept each item's score, it shows *When appealed* as "—".
 
 ---
 
@@ -5284,13 +5351,13 @@ mislabelled soft-skill switch (P-69) and an unenforced goal minimum (P-70). The 
 | # | Gap |
 |---|---|
 | ~~**P-40**~~ | ~~A per-criterion calibration adjustment on a **KPI item** writes `NumericScore`, which a KPI is not scored from — so it changes nothing~~ — **fixed 2026-09-29** (every item adjustment now reaches the score) |
-| **P-47** | **KPI items are not appealable** — `appealableKpis` is always empty |
+| ~~**P-47**~~ | ~~**KPI items are not appealable** — `appealableKpis` is always empty~~ — **fixed 2026-09-30** (closure lane C-b; Rule 9): every criterion the manager scored is on the page |
 | ~~**P-48**~~ | ~~The **appeal window is not enforced**; eligibility is "Completed and unappealed"~~ — **fixed 2026-09-29** (closure lane B1; Rule 9) |
 | ~~**P-71**~~ | ~~**A remand is a dead end** *(found 2026-09-29, lane L-b)*. It snapshots the manager's evaluation and re-opens the appraisal, but leaves the manager's evaluation marked submitted, so every save of the re-evaluation is refused; the post-remand decision does not wait for one, and *Rejected* keeps the current scores rather than the snapshot's.~~ **Fixed 2026-09-30** (closure lane C, slice C-a): the remand reopens the evaluation until its deadline (HR can extend it), the final decision waits for the re-evaluation or the deadline, and *Rejected* restores the original |
 | **P-28** | **Journal entry dates are ignored** on create; the server stamps the creation date |
 | **P-55** | PIP goal **status and progress supplied at creation are not honoured** |
 | ~~**P-6**~~ | ~~Overall grade bands are **not validated against each other**; overlaps resolve to whichever is found first~~ — **fixed 2026-09-29** (refused at save) |
-| **P-49** | The appeal review's Weight column falls back to **0** where a snapshot row is missing |
+| ~~**P-49**~~ | ~~The appeal review's Weight column falls back to **0** where a snapshot row is missing~~ — **fixed 2026-09-30** (closure lane C-b): it was 0 on every row; weights and names come from the snapshot |
 | **P-13** | Generation **skips** anyone who already has an appraisal, and cannot repair a bad one |
 
 ### Design decisions that read like gaps
@@ -5315,7 +5382,7 @@ mislabelled soft-skill switch (P-69) and an unenforced goal minimum (P-70). The 
 | **P-35 / P-36** | Every self-evaluation and peer evaluation is already submitted, so those forms open read-only |
 | **P-38** | Seven of `head.dev`'s eight reports have no goals and no evaluations |
 | **P-42** | Only 76 of 107 appraisals are calibrated |
-| **P-50** | The one existing appeal was filed against a **KPI**, which the UI could not have produced |
+| ~~**P-50**~~ | ~~The one existing appeal was filed against a **KPI**, which the UI could not have produced~~ — **fixed 2026-09-30** (closure lanes C-a, C-b): the submit checks the list and the page offers KPIs |
 | **P-52** | Every recommendation is already Actioned, so two of the three tabs are empty |
 | **P-53** | Three salary proposals have no figure — intended, but say so if you skip LIVE WRITE 14 |
 | **P-56** | The PIP has **8** review meetings where it should have 2 (duplicates from repeated data builds) |

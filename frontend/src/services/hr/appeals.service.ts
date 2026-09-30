@@ -75,8 +75,10 @@ class AppraisalAppealService {
   }
 
   /**
-   * Everything needed to rule: the appealed items with all three evaluation legs, the scores,
-   * and `hrCanModifyScores` from the cycle's settings profile.
+   * Everything needed to rule: the appealed items — competency, KPI or goal rows — with all three
+   * evaluation legs, the scores, and `hrCanModifyScores` from the cycle's settings profile. A decided
+   * appeal answers too, with its decision, for the record (closure D-37); `partyToAppealReason` says
+   * when the reader may not act on it (D-35).
    */
   getAppealReview(appraisalId: string): Promise<AppealReview> {
     return apiService.get<AppealReview>(`${this.baseUrl}/${appraisalId}/appeal-review`);

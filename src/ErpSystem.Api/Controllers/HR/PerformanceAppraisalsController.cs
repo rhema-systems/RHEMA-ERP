@@ -1524,7 +1524,10 @@ public class PerformanceAppraisalsController : ControllerBase
     }
 
     /// <summary>
-    /// Get comprehensive appeal review data for HR resolution
+    /// HR's review of an appeal — and, once decided, its record, read-only (performance closure D-37:
+    /// a decided appeal answered 400, so the queue's Decided tab opened to an error). The reader is
+    /// passed on: what they see of each evaluation is the visibility rule's, and whether they may act
+    /// the two-actor rule's.
     /// </summary>
     [HttpGet("{id:guid}/appeal-review")]
     [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
@@ -1532,7 +1535,7 @@ public class PerformanceAppraisalsController : ControllerBase
     {
         try
         {
-            var reviewData = await _appraisalService.GetAppealReviewDataAsync(id, cancellationToken);
+            var reviewData = await _appraisalService.GetAppealReviewDataAsync(id, _currentUserService.EmployeeId, cancellationToken);
             return Ok(reviewData);
         }
         catch (ArgumentException ex)

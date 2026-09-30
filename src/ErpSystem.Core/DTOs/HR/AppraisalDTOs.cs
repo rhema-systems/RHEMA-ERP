@@ -506,13 +506,27 @@ public class AppealStatusViewDto
     public string? ResolutionNotes { get; set; }
     
     // Scores
+    /// <summary>The overall the appeal was filed against.</summary>
     public decimal? OriginalScore { get; set; }
+    /// <summary>The new overall when the decision moved it; null when it did not, or before the decision (A5).</summary>
     public decimal? AdjustedScore { get; set; }
     public bool HasScoreAdjustment => OriginalScore.HasValue && AdjustedScore.HasValue && OriginalScore != AdjustedScore;
 
     /// <summary>
-    /// The appealed items carry the manager's score and actual. False when the profile shows the
-    /// employee only the overall (<c>ShowScoreBreakdownToEmployee</c> off — performance closure B2).
+    /// The overall now — null while it is withheld: during a remand the manager's re-evaluation is
+    /// provisional until HR decides (the release rule, P2 and C3).
+    /// </summary>
+    public decimal? CurrentOverallScore { get; set; }
+
+    /// <summary>
+    /// The appraisal's outcome is released to the employee. False while a remand is open: the items'
+    /// scores now (<see cref="AppealedItemViewDto.CurrentScore"/>) are withheld until HR decides.
+    /// </summary>
+    public bool OutcomeReleased { get; set; }
+
+    /// <summary>
+    /// The appealed items carry the manager's scores. False when the profile shows the employee only
+    /// the overall (<c>ShowScoreBreakdownToEmployee</c> off — performance closure B2).
     /// </summary>
     public bool ScoreBreakdownShown { get; set; } = true;
 
@@ -521,19 +535,46 @@ public class AppealStatusViewDto
 }
 
 /// <summary>
-/// Individual appealed item for viewing
+/// One appealed item, as the appellant follows it (performance closure C6): what it is, what it
+/// scored when the appeal was filed, and what it scores now.
 /// </summary>
 public class AppealedItemViewDto
 {
     public Guid ItemId { get; set; }
-    public string ItemType { get; set; } = string.Empty; // "KPI" or "Competency"
+    /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
+    public Guid CriterionKey { get; set; }
+    public Guid? TemplateItemId { get; set; }
+    public Guid? CriterionConfigId { get; set; }
+    /// <summary><c>Competency</c>, <c>KPI</c>, <c>Goal</c> or <c>Question</c>. Every template item read "Competency".</summary>
+    public string ItemType { get; set; } = string.Empty;
+    /// <summary>Measured against a target, or rated on the row's own scale.</summary>
+    public CriterionScoringMethod ScoringMethod { get; set; }
     public string ItemName { get; set; } = string.Empty;
+    public string? SectionName { get; set; }
+    /// <summary>The row's weight within its section, as the forms show it.</summary>
+    public int? Weight { get; set; }
     public string Reason { get; set; } = string.Empty;
-    
-    // Original evaluation details
+
+    /// <summary>
+    /// What the manager scored the item when the appeal was filed (D-38): a rated row's score on its
+    /// scale, a measured row's achievement %. Null when the profile hides the breakdown, or — on an
+    /// appeal filed before it was kept, with no remand to recall it — not known.
+    /// </summary>
     public decimal? OriginalScore { get; set; }
+
+    /// <summary>What it scores now, on the same terms. Null while withheld (a remand) or hidden (the breakdown).</summary>
+    public decimal? CurrentScore { get; set; }
+
+    /// <summary>After the decision: whether the appeal moved the item's score. Null before it, or when either side is not known.</summary>
+    public bool? ScoreChanged { get; set; }
+
+    /// <summary>A measured row's target; null on a rated row.</summary>
     public decimal? TargetValue { get; set; }
+    public string? Unit { get; set; }
+    /// <summary>A measured row's actual now, beside <see cref="CurrentScore"/>; withheld and hidden with it.</summary>
     public decimal? ActualValue { get; set; }
+    /// <summary>The measured row's achievement was restated by calibration or an appeal rather than read from its actual (D-22).</summary>
+    public bool AchievementOverridden { get; set; }
 }
 
 /// <summary>
@@ -2238,11 +2279,11 @@ public class ManagerEvaluationContextDto
     public DateTime? AppealRemandedDate { get; set; }
     public DateTime? AppealRemandDeadline { get; set; }
     public bool IsRemandDeadlineExceeded { get; set; }
-    public List<Guid> AppealedKpiIds { get; set; } = new();
 
     /// <summary>
     /// The appealed criteria's keys — the template item for a template row, the snapshot row for a
-    /// goal row (lane L). Named for the template item it held before goal rows existed.
+    /// goal row (lane L) — KPI rows among them. Named for the template item it held before goal rows
+    /// existed. (<c>AppealedKpiIds</c>, always empty since employee KPI targets went, was removed in C6.)
     /// </summary>
     public List<Guid> AppealedTemplateItemIds { get; set; } = new();
     
@@ -2843,36 +2884,50 @@ public class AppealPageDataDto
     /// </summary>
     public bool ScoreBreakdownShown { get; set; } = true;
 
-    public List<AppealableKpiDto> AppealableKpis { get; set; } = new();
-    public List<AppealableCompetencyDto> AppealableCompetencies { get; set; } = new();
+    /// <summary>
+    /// Every criterion the manager's submitted evaluation scored — competency, KPI and goal rows, in
+    /// the forms' order — the list the submit accepts (C8). Performance closure C6: it offered
+    /// competencies only, and a separate KPI list that was always empty.
+    /// </summary>
+    public List<AppealableCriterionDto> AppealableCriteria { get; set; } = new();
 }
 
 /// <summary>
-/// Appealable KPI item
+/// One criterion an employee may appeal (performance closure C6). Sent back on the appeal by
+/// <see cref="CriterionConfigId"/> — and <see cref="TemplateItemId"/> too on a template row, as the
+/// forms send their rows.
 /// </summary>
-public class AppealableKpiDto
+public class AppealableCriterionDto
 {
-    public Guid EmployeeKpiTargetId { get; set; }
-    public string KpiName { get; set; } = string.Empty;
-    public string? Description { get; set; }
-    public decimal? TargetValue { get; set; }
-    public decimal? ActualValue { get; set; }
-    public decimal? AchievementPercentage { get; set; }
-    public string? Unit { get; set; }
-    public int Weight { get; set; }
-    public decimal? WeightedScore { get; set; }
-}
-
-/// <summary>
-/// Appealable competency/criterion item
-/// </summary>
-public class AppealableCompetencyDto
-{
-    public Guid TemplateItemId { get; set; }
+    /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
+    public Guid CriterionKey { get; set; }
+    /// <summary>Null on a goal row.</summary>
+    public Guid? TemplateItemId { get; set; }
+    public Guid? CriterionConfigId { get; set; }
+    /// <summary><c>Competency</c>, <c>KPI</c>, <c>Goal</c> or <c>Question</c>.</summary>
+    public string ItemType { get; set; } = string.Empty;
+    public CriterionScoringMethod ScoringMethod { get; set; }
     public string ItemName { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public int? NumericScore { get; set; }
+    public string? SectionName { get; set; }
+    /// <summary>The section's weight on the form, as scored (A0).</summary>
+    public int? SectionWeight { get; set; }
+    /// <summary>The row's weight within its section, as scored (A12).</summary>
     public int Weight { get; set; }
+    /// <summary>The top of the row's own scale: its highest grade band, or 100 for a measured row's achievement %.</summary>
+    public decimal ScaleTop { get; set; }
+    /// <summary>A measured row's target; null on a rated row.</summary>
+    public decimal? TargetValue { get; set; }
+    public string? Unit { get; set; }
+
+    // The manager's score — withheld when the profile shows the employee only the overall (B2).
+    /// <summary>A rated row's score on its scale, a measured row's achievement %.</summary>
+    public decimal? Score { get; set; }
+    /// <summary>A measured row's actual.</summary>
+    public decimal? ActualValue { get; set; }
+    /// <summary>The measured row's achievement was restated by calibration or an appeal rather than read from its actual (D-22).</summary>
+    public bool AchievementOverridden { get; set; }
+    /// <summary>What the row contributes to the manager's evaluation: its achievement × its share of the whole form.</summary>
     public decimal? WeightedScore { get; set; }
 }
 
@@ -2900,12 +2955,10 @@ public class AppealItemSubmissionDto
 
     /// <summary>
     /// The snapshot row appealed. A goal row has no template item and is named only by this
-    /// (lane L3); a template row may be named by either.
+    /// (lane L3); a template row may be named by either, or both — which must then name one row.
     /// </summary>
     public Guid? CriterionConfigId { get; set; }
 
-    public Guid? EmployeeKpiTargetId { get; set; }
-    
     [Required]
     [MaxLength(2000)]
     public string Reason { get; set; } = string.Empty;
@@ -2937,24 +2990,44 @@ public class AppealReviewDto
     public DateOnly CycleStartDate { get; set; }
     public DateOnly CycleEndDate { get; set; }
     
-    // Appraisal scores
+    // Appraisal scores — what this reader may see of each leg (AppraisalVisibility, B2): the desk
+    // reads a self-evaluation only once it is submitted, and every submitted peer.
     public decimal? SelfEvaluationScore { get; set; }
+    /// <summary>The employee submitted a self-evaluation. A draft — one HR waived — is not read here.</summary>
+    public bool SelfEvaluationSubmitted { get; set; }
     public decimal? PeerEvaluationScore { get; set; }
     public decimal? ManagerEvaluationScore { get; set; }
-    public decimal OverallScore { get; set; }
-    
+    /// <summary>The overall now. Null only for an appellant reading their own appeal while a remand withholds it.</summary>
+    public decimal? OverallScore { get; set; }
+
     // Settings that control HR actions
     public bool HRCanModifyScores { get; set; }
     public Guid AppraisalSettingsId { get; set; }
     public string AppraisalSettingsName { get; set; } = string.Empty;
-    
+
+    /// <summary>
+    /// Why the reader may not act on this appeal — they are its appellant, wrote the contested
+    /// evaluation, or are the appellant's line manager (D-35) — or null. The page offers no action then.
+    /// </summary>
+    public string? PartyToAppealReason { get; set; }
+
+    // The decision, once made (D-37: a decided appeal opens read-only; the read refused it). A remand
+    // records its reasoning here too.
+    public string? ReviewedByName { get; set; }
+    public DateTime? ResolvedDate { get; set; }
+    public string? ResolutionNotes { get; set; }
+    /// <summary>The overall the appeal was filed against.</summary>
+    public decimal? OriginalOverallScore { get; set; }
+    /// <summary>The new overall when the decision moved it; null when it did not (A5).</summary>
+    public decimal? AdjustedScore { get; set; }
+
     // Appealed items with full evaluation details
     public List<AppealedCriterionReviewDto> AppealedCriteria { get; set; } = new();
-    public List<AppealedKpiReviewDto> AppealedKpis { get; set; } = new();
 }
 
 /// <summary>
-/// Appealed soft skill/competency criterion for review
+/// One appealed criterion on HR's review — competency, KPI or goal row (performance closure C6, C9):
+/// named and weighted from the snapshot, with every leg's score on the row's own terms.
 /// </summary>
 public class AppealedCriterionReviewDto
 {
@@ -2964,62 +3037,48 @@ public class AppealedCriterionReviewDto
     public Guid? CriterionConfigId { get; set; }
     /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
     public Guid CriterionKey { get; set; }
+    /// <summary><c>Competency</c>, <c>KPI</c>, <c>Goal</c> or <c>Question</c>.</summary>
+    public string ItemType { get; set; } = string.Empty;
+    public CriterionScoringMethod ScoringMethod { get; set; }
     public string ItemName { get; set; } = string.Empty;
     public string ItemDescription { get; set; } = string.Empty;
+    public string? SectionName { get; set; }
+    /// <summary>The row's weight within its section, from the snapshot (C9: it was 0 on every row).</summary>
     public decimal Weight { get; set; }
+    /// <summary>The top of a new score on this row: its highest grade band, or 100 — a measured row's new score is an achievement % (D-22).</summary>
+    public decimal ScaleTop { get; set; }
+    /// <summary>A measured row's target; null on a rated row.</summary>
+    public decimal? TargetValue { get; set; }
+    public string? Unit { get; set; }
     public string AppealReason { get; set; } = string.Empty;
-    
-    // Original evaluation scores
-    public int? SelfScore { get; set; }
-    public decimal? PeerAverageScore { get; set; }
-    public int? ManagerScore { get; set; }
-    
-    // Weighted scores
-    public decimal? SelfWeightedScore { get; set; }
-    public decimal? PeerWeightedScore { get; set; }
-    public decimal? ManagerWeightedScore { get; set; }
-    public decimal FinalWeightedScore { get; set; }
-    
-    // Supporting evidence
-    public string? ManagerComments { get; set; }
-    public string? SelfComments { get; set; }
-}
 
-/// <summary>
-/// Appealed KPI for review
-/// </summary>
-public class AppealedKpiReviewDto
-{
-    public Guid AppealItemId { get; set; }
-    public Guid EmployeeKpiTargetId { get; set; }
-    public string KpiName { get; set; } = string.Empty;
-    public string KpiDescription { get; set; } = string.Empty;
-    public decimal Weight { get; set; }
-    public string AppealReason { get; set; } = string.Empty;
-    
-    // KPI target details
-    public decimal TargetValue { get; set; }
-    public decimal? ActualValue { get; set; }
-    public string MeasurementUnit { get; set; } = string.Empty;
-    
-    // Evaluation scores
+    /// <summary>What the manager scored it when the appeal was filed (D-38); null when not known.</summary>
+    public decimal? ScoreWhenAppealed { get; set; }
+
+    // Each leg's score: a rated row's score on its scale, a measured row's achievement % — with the
+    // actual behind it. A self draft is not read (B2).
     public decimal? SelfScore { get; set; }
+    public decimal? SelfActualValue { get; set; }
+    /// <summary>The submitted peers' average, on the same terms (C9: it was never set).</summary>
     public decimal? PeerAverageScore { get; set; }
     public decimal? ManagerScore { get; set; }
-    
-    // Weighted scores
+    public decimal? ManagerActualValue { get; set; }
+    /// <summary>The manager's measured score was restated by calibration or an appeal rather than read from the actual (D-22).</summary>
+    public bool AchievementOverridden { get; set; }
+
+    // Weighted scores: the row's achievement × its share of the whole form
     public decimal? SelfWeightedScore { get; set; }
-    public decimal? PeerWeightedScore { get; set; }
+    /// <summary>What the row contributes to the manager's evaluation — the contribution under appeal.</summary>
     public decimal? ManagerWeightedScore { get; set; }
-    public decimal FinalWeightedScore { get; set; }
-    
+
     // Supporting evidence
     public string? ManagerComments { get; set; }
     public string? SelfComments { get; set; }
 }
 
 /// <summary>
-/// Score modification for criterion during appeal resolution
+/// A score HR restates on an upheld appeal — on one of the criteria the appeal contests (C-b). A
+/// measured row's new score is an achievement % (D-22), not a new actual.
 /// </summary>
 public class CriterionScoreModificationDto
 {
@@ -3027,20 +3086,7 @@ public class CriterionScoreModificationDto
     public Guid? TemplateItemId { get; set; }
     public Guid? CriterionConfigId { get; set; }
     public int NewScore { get; set; }
-    
-    [Required]
-    [MaxLength(1000)]
-    public string Justification { get; set; } = string.Empty;
-}
 
-/// <summary>
-/// Score modification for KPI during appeal resolution
-/// </summary>
-public class KpiScoreModificationDto
-{
-    public Guid EmployeeKpiTargetId { get; set; }
-    public decimal NewActualValue { get; set; }
-    
     [Required]
     [MaxLength(1000)]
     public string Justification { get; set; } = string.Empty;
@@ -3062,9 +3108,9 @@ public class ResolveAppealDto
     [MaxLength(4000)]
     public string ResolutionNotes { get; set; } = string.Empty;
     
-    // Optional score modifications (only if HRCanModifyScores = true)
+    // Optional score modifications (only with Upheld, only if HRCanModifyScores = true, only on a
+    // contested criterion). A KPI or goal row is restated here too, by its achievement % (D-22).
     public List<CriterionScoreModificationDto>? CriteriaModifications { get; set; }
-    public List<KpiScoreModificationDto>? KpiModifications { get; set; }
 }
 
 /// <summary>
@@ -3113,9 +3159,8 @@ public class PostRemandReviewDto
     public string OverallAppealReason { get; set; } = string.Empty;
     public string HRRemandJustification { get; set; } = string.Empty;
 
-    // Score comparisons
+    // Score comparisons — every criterion the manager scored, KPI and goal rows among them (C6)
     public List<CriterionScoreComparisonDto> CriteriaComparisons { get; set; } = new();
-    public List<KpiScoreComparisonDto> KpiComparisons { get; set; } = new();
 
     // Overall score comparison: the overall the appeal was filed against, and the overall now
     public decimal PreRemandOverallScore { get; set; }
@@ -3129,7 +3174,10 @@ public class PostRemandReviewDto
 }
 
 /// <summary>
-/// Comparison of criterion scores before and after remand
+/// One criterion before the remand and after the re-evaluation — competency, KPI or goal row
+/// (performance closure C6). A score is a rated row's score on its scale or a measured row's
+/// achievement %, with the actual behind it: a measured row compared <c>NumericScore</c>, which it
+/// holds only when restated, so a KPI whose actual moved read "— → —" and unchanged.
 /// </summary>
 public class CriterionScoreComparisonDto
 {
@@ -3138,61 +3186,35 @@ public class CriterionScoreComparisonDto
     public Guid? CriterionConfigId { get; set; }
     /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
     public Guid CriterionKey { get; set; }
+    /// <summary><c>Competency</c>, <c>KPI</c>, <c>Goal</c> or <c>Question</c>.</summary>
+    public string ItemType { get; set; } = string.Empty;
+    public CriterionScoringMethod ScoringMethod { get; set; }
     public string ItemName { get; set; } = string.Empty;
     public string ItemDescription { get; set; } = string.Empty;
+    public string? SectionName { get; set; }
     public decimal Weight { get; set; }
+    /// <summary>A measured row's target; null on a rated row.</summary>
+    public decimal? TargetValue { get; set; }
+    public string? Unit { get; set; }
     public bool WasAppealed { get; set; }
     public string? AppealReason { get; set; }
-    
-    // Pre-remand (from snapshot)
-    public int? PreRemandScore { get; set; }
-    public decimal? PreRemandWeightedScore { get; set; }
-    public string? PreRemandComments { get; set; }
-    
-    // Post-remand (current manager evaluation)
-    public int? PostRemandScore { get; set; }
-    public decimal? PostRemandWeightedScore { get; set; }
-    public string? PostRemandComments { get; set; }
-    
-    // Change indicators
-    public bool ScoreChanged => PreRemandScore != PostRemandScore;
-    public int? ScoreDifference => PostRemandScore.HasValue && PreRemandScore.HasValue 
-        ? PostRemandScore.Value - PreRemandScore.Value 
-        : null;
-}
 
-/// <summary>
-/// Comparison of KPI scores before and after remand
-/// </summary>
-public class KpiScoreComparisonDto
-{
-    public Guid EmployeeKpiTargetId { get; set; }
-    public string KpiName { get; set; } = string.Empty;
-    public string KpiDescription { get; set; } = string.Empty;
-    public decimal Weight { get; set; }
-    public bool WasAppealed { get; set; }
-    public string? AppealReason { get; set; }
-    
-    // Target details
-    public decimal TargetValue { get; set; }
-    public string MeasurementUnit { get; set; } = string.Empty;
-    
     // Pre-remand (from snapshot)
+    public decimal? PreRemandScore { get; set; }
     public decimal? PreRemandActualValue { get; set; }
-    public decimal? PreRemandAchievementPercent { get; set; }
     public decimal? PreRemandWeightedScore { get; set; }
     public string? PreRemandComments { get; set; }
-    
+
     // Post-remand (current manager evaluation)
+    public decimal? PostRemandScore { get; set; }
     public decimal? PostRemandActualValue { get; set; }
-    public decimal? PostRemandAchievementPercent { get; set; }
     public decimal? PostRemandWeightedScore { get; set; }
     public string? PostRemandComments { get; set; }
-    
-    // Change indicators
-    public bool ScoreChanged => PreRemandActualValue != PostRemandActualValue;
-    public decimal? ActualValueDifference => PostRemandActualValue.HasValue && PreRemandActualValue.HasValue 
-        ? PostRemandActualValue.Value - PreRemandActualValue.Value 
+
+    // Change indicators — the score or, on a measured row, the actual behind it
+    public bool ScoreChanged => PreRemandScore != PostRemandScore || PreRemandActualValue != PostRemandActualValue;
+    public decimal? ScoreDifference => PostRemandScore.HasValue && PreRemandScore.HasValue
+        ? PostRemandScore.Value - PreRemandScore.Value
         : null;
 }
 
@@ -3248,12 +3270,17 @@ public class EmployeeAppealOutcomeDto
     // Employee's Original Appeal
     public DateTime AppealSubmittedDate { get; set; }
     public string EmployeeAppealReason { get; set; } = "";
+    /// <summary>The contested criteria, each as "&lt;kind&gt;: &lt;name&gt;" — "KPI: …", "Competency: …", "Goal: …" (a KPI read "Criterion: …").</summary>
     public List<string> AppealedItems { get; set; } = new();
-    
+
     // HR Final Decision
     public string HRFinalNotes { get; set; } = "";
+    /// <summary>
+    /// The outcome in words, saying whether the appeal moved a score (C-b). An upheld appeal said the
+    /// scores "were adjusted" whether or not anything had moved.
+    /// </summary>
     public string OutcomeMessage { get; set; } = "";
-    
+
     // Final Scores
     public decimal FinalOverallScore { get; set; }
     /// <summary>The overall score the appeal was filed against; null on appeals filed before it was kept.</summary>
@@ -3265,13 +3292,15 @@ public class EmployeeAppealOutcomeDto
     /// performance closure B2); the list is then empty.
     /// </summary>
     public bool ScoreBreakdownShown { get; set; } = true;
+    /// <summary>Every criterion the manager scored — competency, KPI and goal rows, in the forms' order.</summary>
     public List<FinalCriterionScoreDto> FinalCriteriaScores { get; set; } = new();
-    public List<FinalKpiScoreDto> FinalKpiScores { get; set; } = new();
-    
+
     // Change Indicators
+    /// <summary>The appeal moved the overall, or a score it contested (D-38).</summary>
     public bool ScoresChangedAfterAppeal { get; set; }
 }
 
+/// <summary>One criterion on the appeal's outcome — competency, KPI or goal row (performance closure C6).</summary>
 public class FinalCriterionScoreDto
 {
     /// <summary>Null on a goal row (lane L3).</summary>
@@ -3279,14 +3308,30 @@ public class FinalCriterionScoreDto
     public Guid? CriterionConfigId { get; set; }
     /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
     public Guid CriterionKey { get; set; }
+    /// <summary><c>Competency</c>, <c>KPI</c>, <c>Goal</c> or <c>Question</c>.</summary>
+    public string ItemType { get; set; } = "";
+    public CriterionScoringMethod ScoringMethod { get; set; }
     public string ItemName { get; set; } = "";
     public string ItemDescription { get; set; } = "";
-    public int? FinalScore { get; set; }
+    public string? SectionName { get; set; }
+    /// <summary>
+    /// A rated row's score on its scale, a measured row's achievement %. A measured row read its
+    /// <c>NumericScore</c>, so a KPI scored by its actual read "—".
+    /// </summary>
+    public decimal? FinalScore { get; set; }
+    /// <summary>A measured row's actual, and its target; null on a rated row.</summary>
+    public decimal? FinalActualValue { get; set; }
+    public decimal? TargetValue { get; set; }
+    public string? Unit { get; set; }
     public decimal FinalWeightedScore { get; set; }
     public int Weight { get; set; }
     public string ManagerComments { get; set; } = "";
     public bool WasAppealed { get; set; }
-    /// <summary>A KPI whose achievement calibration or an appeal restated to <see cref="FinalScore"/> percent (D-22, A14).</summary>
+    /// <summary>On a contested row: what it scored when the appeal was filed (D-38); null when not known.</summary>
+    public decimal? ScoreWhenAppealed { get; set; }
+    /// <summary>On a contested row: whether the appeal moved it. Null on a row not contested, or when not known.</summary>
+    public bool? ChangedOnAppeal { get; set; }
+    /// <summary>A measured row whose achievement calibration or an appeal restated to <see cref="FinalScore"/> percent (D-22, A14).</summary>
     public bool AchievementOverridden { get; set; }
 }
 
@@ -5537,21 +5582,6 @@ public class UpdatePipGoalDto : UpdateDtoBase
     [MaxLength(2000)]
     public string? ProgressNotes { get; set; }
 }
-public class FinalKpiScoreDto
-{
-    public Guid EmployeeKpiTargetId { get; set; }
-    public string KpiName { get; set; } = "";
-    public string KpiDescription { get; set; } = "";
-    public decimal TargetValue { get; set; }
-    public decimal? FinalActualValue { get; set; }
-    public decimal FinalAchievementPercent { get; set; }
-    public decimal FinalWeightedScore { get; set; }
-    public int Weight { get; set; }
-    public string MeasurementUnit { get; set; } = "";
-    public string ManagerComments { get; set; } = "";
-    public bool WasAppealed { get; set; }
-}
-
 // ============================================================
 // AppraisalEvaluationSnapshot (read-only — immutable audit snapshot)
 // ============================================================

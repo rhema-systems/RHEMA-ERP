@@ -580,8 +580,7 @@ export interface ManagerEvaluationContext {
   appealRemandedDate?: string | null;
   appealRemandDeadline?: string | null;
   isRemandDeadlineExceeded: boolean;
-  appealedKpiIds: string[];
-  /** The appealed criteria's keys — compare with `criterionKey` (a goal row's is its snapshot row). */
+  /** The appealed criteria's keys, KPI rows among them — compare with `criterionKey` (a goal row's is its snapshot row). */
   appealedTemplateItemIds: string[];
   managerEvaluatorEvaluationId?: string | null;
   isManagerEvaluationSubmitted: boolean;
