@@ -20,6 +20,7 @@ public sealed record EstateFacilityDutyRosterDto(
     string ShiftStart,
     string ShiftEnd,
     string? SupervisorName,
+    Guid? SupervisorEmployeeId,
     string? ToolsIssued,
     string? SuppliesIssued,
     Guid? InventoryIssueVoucherId,
@@ -54,6 +55,7 @@ public sealed class UpsertEstateFacilityDutyRosterDto
     public string ShiftStart { get; set; } = "08:00";
     public string ShiftEnd { get; set; } = "17:00";
     public string? SupervisorName { get; set; }
+    public Guid? SupervisorEmployeeId { get; set; }
     public string? ToolsIssued { get; set; }
     public string? SuppliesIssued { get; set; }
     public Guid? InventoryIssueVoucherId { get; set; }

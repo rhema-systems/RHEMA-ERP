@@ -2,13 +2,21 @@
 
 import Link from 'next/link';
 import React from 'react';
-import { Banknote, Building2, ExternalLink, FileText, RefreshCw, Search } from 'lucide-react';
+import { Banknote, Building2, ExternalLink, FileText, MoreHorizontal, RefreshCw, Search } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
@@ -20,22 +28,29 @@ import {
   type FacilitiesProviderAssignmentRequest,
   type FacilitiesProviderInvoice,
   type FacilitiesProviderOption,
+  type FacilitiesProviderRate,
 } from '@/services/estate-facilities.service';
 import { FacilitiesDutyLookup } from './FacilitiesDutyLookup';
 import { FacilitiesProviderRates } from './FacilitiesProviderRates';
 
 const PAGE_SIZE = 20;
 const todayInputValue = () => new Date().toISOString().slice(0, 10);
+const billingFrequencies = ['OnDemand', 'Weekly', 'Monthly', 'Quarterly', 'SemiAnnual', 'Annual'];
 
 const emptyAssignmentForm = (): FacilitiesProviderAssignmentRequest => ({
   estateManagedAssetId: '',
   contractId: null,
+  providerRateId: null,
   serviceScope: '',
   serviceArea: '',
   assignmentStatus: 'Active',
   effectiveFrom: todayInputValue(),
   effectiveTo: '',
   schedulePattern: '',
+  billingFrequency: 'Monthly',
+  billingQuantity: 1,
+  nextInvoiceDate: todayInputValue(),
+  lastInvoiceDate: '',
   supervisorName: '',
   slaReference: '',
   notes: '',
@@ -49,6 +64,21 @@ export function expiringProviderContracts(provider: FacilitiesProviderOption, to
     const days = Math.round((end.getTime() - current) / 86_400_000);
     return Number.isFinite(days) && days >= 0 && days <= 30;
   });
+}
+
+function supplierInvoiceHref(provider: FacilitiesProviderOption | null, assignment?: FacilitiesProviderAssignment) {
+  if (!provider) return '/procurement/supplier-invoices/create';
+  const params = new URLSearchParams({ businessPartnerId: provider.id });
+  if (assignment?.providerRateCurrency) params.set('currencyCode', assignment.providerRateCurrency);
+  if (assignment?.providerRate != null) params.set('unitPrice', String(assignment.providerRate));
+  if (assignment?.billingQuantity != null) params.set('quantity', String(assignment.billingQuantity || 1));
+  if (assignment) {
+    const facility = [assignment.assetCode, assignment.assetName].filter(Boolean).join(' - ');
+    const details = [assignment.serviceScope, assignment.serviceArea, facility].filter(Boolean).join(' | ');
+    params.set('lineDescription', details || 'Facilities provider service');
+    params.set('notes', `Facilities provider assignment${facility ? `: ${facility}` : ''}`);
+  }
+  return `/procurement/supplier-invoices/create?${params.toString()}`;
 }
 
 export function FacilitiesProviderRegister() {
@@ -65,6 +95,7 @@ export function FacilitiesProviderRegister() {
   const [assignmentProvider, setAssignmentProvider] = React.useState<FacilitiesProviderOption | null>(null);
   const [invoices, setInvoices] = React.useState<FacilitiesProviderInvoice[]>([]);
   const [assignments, setAssignments] = React.useState<FacilitiesProviderAssignment[]>([]);
+  const [assignmentRates, setAssignmentRates] = React.useState<FacilitiesProviderRate[]>([]);
   const [assignmentForm, setAssignmentForm] = React.useState<FacilitiesProviderAssignmentRequest>(emptyAssignmentForm);
   const [assignmentAssetLabel, setAssignmentAssetLabel] = React.useState('');
   const [invoiceLoading, setInvoiceLoading] = React.useState(false);
@@ -90,6 +121,7 @@ export function FacilitiesProviderRegister() {
   const openAssignments = async (provider: FacilitiesProviderOption) => {
     setAssignmentProvider(provider);
     setAssignments([]);
+    setAssignmentRates([]);
     setAssignmentForm({
       ...emptyAssignmentForm(),
       contractId: provider.contracts[0]?.id ?? null,
@@ -98,7 +130,12 @@ export function FacilitiesProviderRegister() {
     setAssignmentError(null);
     setAssignmentLoading(true);
     try {
-      setAssignments(await estateFacilitiesService.getProviderAssignments(provider.id));
+      const [providerAssignments, providerRates] = await Promise.all([
+        estateFacilitiesService.getProviderAssignments(provider.id),
+        estateFacilitiesService.getProviderRates(provider.id),
+      ]);
+      setAssignments(providerAssignments);
+      setAssignmentRates(providerRates);
     } catch {
       setAssignmentError('Unable to load provider assignments.');
     } finally {
@@ -114,7 +151,12 @@ export function FacilitiesProviderRegister() {
       await estateFacilitiesService.createProviderAssignment(assignmentProvider.id, {
         ...assignmentForm,
         contractId: assignmentForm.contractId || null,
+        providerRateId: assignmentForm.providerRateId || null,
         effectiveTo: assignmentForm.effectiveTo || null,
+        billingFrequency: assignmentForm.billingFrequency || null,
+        billingQuantity: assignmentForm.billingQuantity || 1,
+        nextInvoiceDate: assignmentForm.nextInvoiceDate || null,
+        lastInvoiceDate: assignmentForm.lastInvoiceDate || null,
       });
       setAssignments(await estateFacilitiesService.getProviderAssignments(assignmentProvider.id));
       setAssignmentForm({
@@ -184,7 +226,7 @@ export function FacilitiesProviderRegister() {
               <TableHead>Active contracts</TableHead>
               <TableHead>Rating</TableHead>
               <TableHead>Contact</TableHead>
-              <TableHead className="w-12"><span className="sr-only">Open</span></TableHead>
+              <TableHead className="w-12"><span className="sr-only">Actions</span></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -209,24 +251,47 @@ export function FacilitiesProviderRegister() {
                 )) : '-'}</TableCell>
                 <TableCell>{provider.performanceRating == null ? '-' : provider.performanceRating.toFixed(1)}</TableCell>
                 <TableCell>{provider.phone || provider.email || '-'}</TableCell>
-                <TableCell>
-                  <Button size="icon" variant="ghost" title={`View rates for ${provider.partnerName}`}
-                    aria-label={`View rates for ${provider.partnerName}`} onClick={() => setRateProvider(provider)}>
-                    <Banknote className="h-4 w-4" />
-                  </Button>
-                  <Button size="icon" variant="ghost" title={`Assign ${provider.partnerName} to a facility`}
-                    aria-label={`Assign ${provider.partnerName} to a facility`} onClick={() => void openAssignments(provider)}>
-                    <Building2 className="h-4 w-4" />
-                  </Button>
-                  <Button size="icon" variant="ghost" title={`View invoices for ${provider.partnerName}`}
-                    aria-label={`View invoices for ${provider.partnerName}`} onClick={() => void openInvoices(provider)}>
-                    <FileText className="h-4 w-4" />
-                  </Button>
-                  {hasAnyPermission(['procurement.records.read']) ? (
-                    <Button size="icon" variant="ghost" asChild title={`View ${provider.partnerName}`}>
-                      <Link href={`/procurement/business-partners/${provider.id}`} aria-label={`View ${provider.partnerName}`}><ExternalLink className="h-4 w-4" /></Link>
-                    </Button>
-                  ) : null}
+                <TableCell className="text-right">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button size="icon" variant="ghost" title={`Actions for ${provider.partnerName}`}
+                        aria-label={`Actions for ${provider.partnerName}`}>
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                      <DropdownMenuItem onClick={() => setRateProvider(provider)}>
+                        <Banknote className="mr-2 h-4 w-4" />
+                        Rates
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => void openAssignments(provider)}>
+                        <Building2 className="mr-2 h-4 w-4" />
+                        Assign facility
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link href={supplierInvoiceHref(provider)}>
+                          <FileText className="mr-2 h-4 w-4" />
+                          Raise supplier invoice
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => void openInvoices(provider)}>
+                        <FileText className="mr-2 h-4 w-4" />
+                        View supplier invoices
+                      </DropdownMenuItem>
+                      {hasAnyPermission(['procurement.records.read']) ? (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem asChild>
+                            <Link href={`/procurement/business-partners/${provider.id}`}>
+                              <ExternalLink className="mr-2 h-4 w-4" />
+                              Details
+                            </Link>
+                          </DropdownMenuItem>
+                        </>
+                      ) : null}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </TableCell>
               </TableRow>
             ))}
@@ -304,6 +369,28 @@ export function FacilitiesProviderRegister() {
                 </Select>
               </div>
               <div className="grid gap-2">
+                <Label htmlFor="provider-assignment-rate">Provider rate</Label>
+                <Select value={assignmentForm.providerRateId || 'none'} onValueChange={(value) => {
+                  const selectedRate = assignmentRates.find((rate) => rate.id === value);
+                  setAssignmentForm((current) => ({
+                    ...current,
+                    providerRateId: value === 'none' ? null : value,
+                    contractId: selectedRate?.contractId ?? current.contractId,
+                    serviceScope: current.serviceScope || selectedRate?.serviceName || '',
+                  }));
+                }}>
+                  <SelectTrigger id="provider-assignment-rate"><SelectValue placeholder="Select service rate" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No rate selected</SelectItem>
+                    {assignmentRates.map((rate) => (
+                      <SelectItem key={rate.id} value={rate.id}>
+                        {rate.serviceName} - {rate.currency} {rate.rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} / {rate.unitOfMeasure}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
                 <Label htmlFor="provider-assignment-scope">Service scope</Label>
                 <Input id="provider-assignment-scope" value={assignmentForm.serviceScope}
                   onChange={(event) => setAssignmentForm((current) => ({ ...current, serviceScope: event.target.value }))}
@@ -353,6 +440,28 @@ export function FacilitiesProviderRegister() {
                     onChange={(event) => setAssignmentForm((current) => ({ ...current, supervisorName: event.target.value }))} />
                 </div>
               </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="provider-assignment-frequency">Billing frequency</Label>
+                  <Select value={assignmentForm.billingFrequency || 'OnDemand'} onValueChange={(value) => setAssignmentForm((current) => ({ ...current, billingFrequency: value }))}>
+                    <SelectTrigger id="provider-assignment-frequency"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {billingFrequencies.map((frequency) => <SelectItem key={frequency} value={frequency}>{frequency}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="provider-assignment-quantity">Billing quantity</Label>
+                  <Input id="provider-assignment-quantity" type="number" min="0.0001" step="0.0001"
+                    value={assignmentForm.billingQuantity ?? 1}
+                    onChange={(event) => setAssignmentForm((current) => ({ ...current, billingQuantity: Number(event.target.value) || 1 }))} />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="provider-assignment-next-invoice">Next invoice</Label>
+                  <Input id="provider-assignment-next-invoice" type="date" value={assignmentForm.nextInvoiceDate || ''}
+                    onChange={(event) => setAssignmentForm((current) => ({ ...current, nextInvoiceDate: event.target.value }))} />
+                </div>
+              </div>
               <div className="grid gap-2">
                 <Label htmlFor="provider-assignment-notes">Notes</Label>
                 <Textarea id="provider-assignment-notes" value={assignmentForm.notes || ''}
@@ -365,18 +474,42 @@ export function FacilitiesProviderRegister() {
             <div className="max-h-[70vh] overflow-auto rounded-md border">
               <Table>
                 <TableHeader><TableRow>
-                  <TableHead>Facility</TableHead><TableHead>Scope</TableHead><TableHead>Contract</TableHead><TableHead>Status</TableHead><TableHead>Dates</TableHead>
+                  <TableHead>Facility</TableHead><TableHead>Scope</TableHead><TableHead>Billing</TableHead><TableHead>Contract</TableHead><TableHead>Status</TableHead><TableHead>Dates</TableHead><TableHead className="w-12"><span className="sr-only">Invoice</span></TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
-                  {assignmentLoading ? <TableRow><TableCell colSpan={5}>Loading assignments...</TableCell></TableRow>
-                    : assignments.length === 0 ? <TableRow><TableCell colSpan={5}>No facility assignments yet.</TableCell></TableRow>
+                  {assignmentLoading ? <TableRow><TableCell colSpan={7}>Loading assignments...</TableCell></TableRow>
+                    : assignments.length === 0 ? <TableRow><TableCell colSpan={7}>No facility assignments yet.</TableCell></TableRow>
                       : assignments.map((assignment) => (
                         <TableRow key={assignment.id}>
                           <TableCell><div className="font-medium">{assignment.assetCode || '-'}</div><div className="text-xs text-muted-foreground">{assignment.assetName || assignment.assetLocation || '-'}</div></TableCell>
                           <TableCell><div>{assignment.serviceScope}</div>{assignment.serviceArea ? <div className="text-xs text-muted-foreground">{assignment.serviceArea}</div> : null}</TableCell>
+                          <TableCell>
+                            <div>{assignment.billingFrequency || 'On demand'}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {assignment.providerRate != null && assignment.providerRateCurrency
+                                ? `${assignment.billingQuantity || 1} x ${assignment.providerRateCurrency} ${assignment.providerRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+                                : 'No rate linked'}
+                            </div>
+                            {assignment.nextInvoiceDate ? <div className="text-xs text-muted-foreground">next {new Date(assignment.nextInvoiceDate).toLocaleDateString()}</div> : null}
+                          </TableCell>
                           <TableCell>{assignment.contractNumber || '-'}</TableCell>
                           <TableCell><Badge variant={assignment.assignmentStatus === 'Active' ? 'default' : 'secondary'}>{assignment.assignmentStatus}</Badge></TableCell>
                           <TableCell><span className="text-xs">{new Date(assignment.effectiveFrom).toLocaleDateString()} {assignment.effectiveTo ? `- ${new Date(assignment.effectiveTo).toLocaleDateString()}` : 'onward'}</span></TableCell>
+                          <TableCell className="text-right">
+                            {assignment.providerRate ? (
+                              <Button size="icon" variant="ghost" asChild title="Raise supplier invoice">
+                                <Link href={supplierInvoiceHref(assignmentProvider, assignment)}>
+                                  <FileText className="h-4 w-4" />
+                                  <span className="sr-only">Raise supplier invoice</span>
+                                </Link>
+                              </Button>
+                            ) : (
+                              <Button size="icon" variant="ghost" disabled title="Link a provider rate first">
+                                <FileText className="h-4 w-4" />
+                                <span className="sr-only">Link a provider rate first</span>
+                              </Button>
+                            )}
+                          </TableCell>
                         </TableRow>
                       ))}
                 </TableBody>

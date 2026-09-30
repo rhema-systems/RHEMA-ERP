@@ -123,6 +123,11 @@ export function VendorInvoiceFormPage({
   const preselectedSupplierId = searchParams.get('businessPartnerId');
   const defaultOpeningBalance = false;
   const preselectedPurchaseOrderId = searchParams.get('purchaseOrderId');
+  const prefilledLineDescription = searchParams.get('lineDescription') || '';
+  const prefilledQuantity = Number(searchParams.get('quantity') || 1);
+  const prefilledUnitPrice = Number(searchParams.get('unitPrice') || 0);
+  const prefilledCurrencyCode = (searchParams.get('currencyCode') || 'GHS').trim().toUpperCase();
+  const prefilledNotes = searchParams.get('notes') || '';
   const { toast } = useToast();
   const { currentTenantCode } = useTenant();
   const exchangeRateRequestId = useRef(0);
@@ -399,7 +404,7 @@ export function VendorInvoiceFormPage({
       paymentTermId: '',
       apAccountId: '',
       expenseAccountId: '',
-      currencyCode: 'GHS',
+      currencyCode: prefilledCurrencyCode || 'GHS',
       exchangeRate: 1.0,
       exchangeRateId: undefined,
       exchangeRateDate: new Date(),
@@ -407,14 +412,14 @@ export function VendorInvoiceFormPage({
       isOpeningBalance: defaultOpeningBalance,
       withholdingTaxId: 'none',
       withholdingTaxRate: 0,
-      notes: '',
+      notes: prefilledNotes,
       lineItems: [
         {
           sourceLineId: crypto.randomUUID(),
           lineItemType: 'Expense',
-          description: '',
-          quantity: 1,
-          unitPrice: 0,
+          description: prefilledLineDescription,
+          quantity: Number.isFinite(prefilledQuantity) && prefilledQuantity > 0 ? prefilledQuantity : 1,
+          unitPrice: Number.isFinite(prefilledUnitPrice) && prefilledUnitPrice > 0 ? prefilledUnitPrice : 0,
           discountPercentage: 0,
           taxGroupId: 'none',
         },

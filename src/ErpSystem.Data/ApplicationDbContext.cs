@@ -10583,6 +10583,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(item => new { item.TenantId, item.AttendanceStatus, item.CompletionStatus });
             entity.HasIndex(item => new { item.TenantId, item.LinkedMaintenanceReference });
             entity.HasIndex(item => new { item.TenantId, item.LinkedComplaintReference });
+            entity.HasIndex(item => new { item.TenantId, item.SupervisorEmployeeId });
         });
 
         builder.Entity<EstateFacilityDutyAttendance>(entity =>
@@ -10604,9 +10605,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<EstateFacilityProviderAssignment>(entity =>
         {
             entity.ToTable("EstateFacilityProviderAssignments");
+            entity.Property(item => item.BillingQuantity).HasPrecision(18, 4);
             entity.HasIndex(item => new { item.TenantId, item.BusinessPartnerId, item.AssignmentStatus });
             entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId, item.AssignmentStatus });
             entity.HasIndex(item => new { item.TenantId, item.ContractId });
+            entity.HasIndex(item => new { item.TenantId, item.ProviderRateId });
+            entity.HasIndex(item => new { item.TenantId, item.BillingFrequency, item.NextInvoiceDate });
         });
 
         builder.Entity<LandAcquisitionNote>(entity =>

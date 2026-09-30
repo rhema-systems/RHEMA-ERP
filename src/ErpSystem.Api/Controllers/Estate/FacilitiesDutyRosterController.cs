@@ -386,9 +386,48 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         var now = DateTime.UtcNow;
         if (!IsScheduledOn(item, now.Date))
             return BadRequest(new { success = false, message = "This staff duty is not scheduled for today." });
-        item.AttendanceStatus = TrimOrDefault(request.AttendanceStatus, "Present");
-        item.CompletionStatus = TrimOrDefault(request.CompletionStatus, "Completed");
-        item.QualityStatus = TrimOrDefault(request.QualityStatus, "Pending inspection");
+        var attendanceStatus = TrimOrDefault(request.AttendanceStatus, "Present");
+        var completionStatus = TrimOrDefault(request.CompletionStatus, "Completed");
+        var qualityStatus = TrimOrDefault(request.QualityStatus, "Pending inspection");
+        if (IsInspectionDecision(qualityStatus))
+        {
+            if (item.SupervisorEmployeeId is null)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "Assign a supervisor from HR before inspection can be marked."
+                });
+            }
+
+            if (_currentUserService.EmployeeId is not { } employeeId
+                || employeeId == Guid.Empty
+                || employeeId != item.SupervisorEmployeeId.Value)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    success = false,
+                    message = "Only the assigned supervisor can mark this inspection."
+                });
+            }
+
+            var wasCompleted = string.Equals(item.AttendanceStatus, "Present", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(item.CompletionStatus, "Completed", StringComparison.OrdinalIgnoreCase);
+            var remainsCompleted = string.Equals(attendanceStatus, "Present", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(completionStatus, "Completed", StringComparison.OrdinalIgnoreCase);
+            if (!wasCompleted && !remainsCompleted)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "Inspection can only be marked after the duty is present and completed."
+                });
+            }
+        }
+
+        item.AttendanceStatus = attendanceStatus;
+        item.CompletionStatus = completionStatus;
+        item.QualityStatus = qualityStatus;
         item.LinkedMaintenanceReference = TrimToNull(request.LinkedMaintenanceReference) ?? item.LinkedMaintenanceReference;
         item.LinkedComplaintReference = TrimToNull(request.LinkedComplaintReference) ?? item.LinkedComplaintReference;
         item.LastAttendanceAt = now;
@@ -462,6 +501,19 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
             request.EmployeeProfileId = await _db.PayrollEmployeeProfiles.AsNoTracking()
                 .Where(profile => profile.TenantId == tenantId && !profile.IsDeleted && profile.EmployeeId == employee.Id)
                 .Select(profile => (Guid?)profile.Id).FirstOrDefaultAsync(cancellationToken);
+        }
+
+        if (request.SupervisorEmployeeId is { } supervisorEmployeeId)
+        {
+            var supervisor = await _db.Employees.AsNoTracking()
+                .Where(row => row.TenantId == tenantId && !row.IsDeleted && row.IsActive
+                    && row.Id == supervisorEmployeeId)
+                .Select(row => new { row.Id, row.FirstName, row.MiddleName, row.LastName })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (supervisor is null) return "Select an active supervisor from HR.";
+
+            request.SupervisorName = string.Join(" ", new[] { supervisor.FirstName, supervisor.MiddleName, supervisor.LastName }
+                .Where(part => !string.IsNullOrWhiteSpace(part)));
         }
 
         if (!string.IsNullOrWhiteSpace(request.PropertyReference))
@@ -539,6 +591,7 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         item.ShiftStart = TrimOrDefault(request.ShiftStart, "08:00");
         item.ShiftEnd = TrimOrDefault(request.ShiftEnd, "17:00");
         item.SupervisorName = TrimToNull(request.SupervisorName);
+        item.SupervisorEmployeeId = request.SupervisorEmployeeId;
         item.ToolsIssued = TrimToNull(request.ToolsIssued);
         item.SuppliesIssued = TrimToNull(request.SuppliesIssued);
         item.InventoryIssueVoucherId = request.InventoryIssueVoucherId;
@@ -580,6 +633,11 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.ServiceAreaName))
         {
             return "Service area, apartment, unit, floor, or route is required.";
+        }
+
+        if (request.SupervisorEmployeeId is null)
+        {
+            return "Select the supervisor from HR employees.";
         }
 
         if (request.EndDate is not null && request.StartDate.Date > request.EndDate.Value.Date)
@@ -658,6 +716,7 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
             item.ShiftStart,
             item.ShiftEnd,
             item.SupervisorName,
+            item.SupervisorEmployeeId,
             item.ToolsIssued,
             item.SuppliesIssued,
             item.InventoryIssueVoucherId,
@@ -682,6 +741,10 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
 
     private static string? TrimToNull(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static bool IsInspectionDecision(string qualityStatus)
+        => string.Equals(qualityStatus, "Passed inspection", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(qualityStatus, "Failed inspection", StringComparison.OrdinalIgnoreCase);
 
     private static string? MergeNotes(string? existingNotes, string? newNotes)
     {

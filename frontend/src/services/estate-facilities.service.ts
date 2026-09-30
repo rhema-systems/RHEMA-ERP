@@ -106,12 +106,21 @@ export interface FacilitiesProviderAssignment {
   contractId?: string | null;
   contractNumber?: string | null;
   contractTitle?: string | null;
+  providerRateId?: string | null;
+  providerRateServiceName?: string | null;
+  providerRateUnitOfMeasure?: string | null;
+  providerRate?: number | null;
+  providerRateCurrency?: string | null;
   serviceScope: string;
   serviceArea?: string | null;
   assignmentStatus: string;
   effectiveFrom: string;
   effectiveTo?: string | null;
   schedulePattern?: string | null;
+  billingFrequency?: string | null;
+  billingQuantity: number;
+  nextInvoiceDate?: string | null;
+  lastInvoiceDate?: string | null;
   supervisorName?: string | null;
   slaReference?: string | null;
   notes?: string | null;
@@ -122,12 +131,17 @@ export interface FacilitiesProviderAssignment {
 export interface FacilitiesProviderAssignmentRequest {
   estateManagedAssetId: string;
   contractId?: string | null;
+  providerRateId?: string | null;
   serviceScope: string;
   serviceArea?: string | null;
   assignmentStatus: string;
   effectiveFrom: string;
   effectiveTo?: string | null;
   schedulePattern?: string | null;
+  billingFrequency?: string | null;
+  billingQuantity?: number | null;
+  nextInvoiceDate?: string | null;
+  lastInvoiceDate?: string | null;
   supervisorName?: string | null;
   slaReference?: string | null;
   notes?: string | null;
@@ -307,6 +321,7 @@ export interface EstateFacilityDutyRosterItem {
   shiftStart: string;
   shiftEnd: string;
   supervisorName?: string | null;
+  supervisorEmployeeId?: string | null;
   toolsIssued?: string | null;
   suppliesIssued?: string | null;
   inventoryIssueVoucherId?: string | null;
@@ -341,6 +356,7 @@ export interface UpsertEstateFacilityDutyRosterRequest {
   shiftStart: string;
   shiftEnd: string;
   supervisorName?: string | null;
+  supervisorEmployeeId?: string | null;
   toolsIssued?: string | null;
   suppliesIssued?: string | null;
   inventoryIssueVoucherId?: string | null;

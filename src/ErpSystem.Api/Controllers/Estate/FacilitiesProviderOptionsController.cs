@@ -15,6 +15,16 @@ public sealed class FacilitiesProviderOptionsController(
     ApplicationDbContext db,
     ICurrentUserService currentUser) : ControllerBase
 {
+    private static readonly HashSet<string> BillingFrequencies = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "OnDemand",
+        "Weekly",
+        "Monthly",
+        "Quarterly",
+        "SemiAnnual",
+        "Annual"
+    };
+
     [HttpGet]
     public async Task<IActionResult> Get(CancellationToken cancellationToken)
     {
@@ -299,6 +309,20 @@ public sealed class FacilitiesProviderOptionsController(
                 return BadRequest("Active assignment dates must fall within the active provider contract.");
         }
 
+        if (request.ProviderRateId is { } providerRateId)
+        {
+            var rate = await db.EstateFacilityProviderRates.AsNoTracking().FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId && item.Id == providerRateId && !item.IsDeleted
+                && item.BusinessPartnerId == providerId && item.IsActive,
+                cancellationToken);
+            if (rate is null) return BadRequest("Select an active provider rate for this provider.");
+            if (request.ContractId.HasValue && rate.ContractId.HasValue && rate.ContractId != request.ContractId)
+                return BadRequest("The selected provider rate belongs to a different contract.");
+            if (rate.EffectiveFrom.Date > (request.EffectiveTo?.Date ?? DateTime.MaxValue.Date)
+                || request.EffectiveFrom.Date > (rate.EffectiveTo?.Date ?? DateTime.MaxValue.Date))
+                return BadRequest("Assignment dates must overlap the selected provider rate.");
+        }
+
         if (string.IsNullOrWhiteSpace(request.ServiceScope) || request.ServiceScope.Trim().Length > 160)
             return BadRequest("Enter a service scope.");
         if (request.EffectiveFrom == default)
@@ -307,6 +331,11 @@ public sealed class FacilitiesProviderOptionsController(
             return BadRequest("End date cannot be before start date.");
         if (request.AssignmentStatus is not ("Active" or "Suspended" or "Ended"))
             return BadRequest("Assignment status must be Active, Suspended, or Ended.");
+        if (!string.IsNullOrWhiteSpace(request.BillingFrequency)
+            && !BillingFrequencies.Contains(request.BillingFrequency.Trim()))
+            return BadRequest("Billing frequency must be OnDemand, Weekly, Monthly, Quarterly, SemiAnnual, or Annual.");
+        if (request.BillingQuantity is <= 0 or > 99999999999999.9999m)
+            return BadRequest("Billing quantity must be positive.");
 
         return null;
     }
@@ -327,12 +356,17 @@ public sealed class FacilitiesProviderOptionsController(
     {
         assignment.EstateManagedAssetId = request.EstateManagedAssetId;
         assignment.ContractId = request.ContractId;
+        assignment.ProviderRateId = request.ProviderRateId;
         assignment.ServiceScope = request.ServiceScope.Trim();
         assignment.ServiceArea = TrimToNull(request.ServiceArea);
         assignment.AssignmentStatus = request.AssignmentStatus.Trim();
         assignment.EffectiveFrom = request.EffectiveFrom.Date;
         assignment.EffectiveTo = request.EffectiveTo?.Date;
         assignment.SchedulePattern = TrimToNull(request.SchedulePattern);
+        assignment.BillingFrequency = TrimToNull(request.BillingFrequency);
+        assignment.BillingQuantity = request.BillingQuantity ?? 1m;
+        assignment.NextInvoiceDate = request.NextInvoiceDate?.Date;
+        assignment.LastInvoiceDate = request.LastInvoiceDate?.Date;
         assignment.SupervisorName = TrimToNull(request.SupervisorName);
         assignment.SlaReference = TrimToNull(request.SlaReference);
         assignment.Notes = TrimToNull(request.Notes);
@@ -353,11 +387,16 @@ public sealed class FacilitiesProviderOptionsController(
         var assetIds = assignments.Select(item => item.EstateManagedAssetId).Distinct().ToList();
         var contractIds = assignments.Where(item => item.ContractId.HasValue)
             .Select(item => item.ContractId!.Value).Distinct().ToList();
+        var rateIds = assignments.Where(item => item.ProviderRateId.HasValue)
+            .Select(item => item.ProviderRateId!.Value).Distinct().ToList();
         var assets = await db.EstateManagedAssets.AsNoTracking()
             .Where(item => item.TenantId == tenantId && assetIds.Contains(item.Id))
             .ToDictionaryAsync(item => item.Id, cancellationToken);
         var contracts = await db.Contracts.AsNoTracking()
             .Where(item => item.TenantId == tenantId && contractIds.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
+        var rates = await db.EstateFacilityProviderRates.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && rateIds.Contains(item.Id))
             .ToDictionaryAsync(item => item.Id, cancellationToken);
 
         return assignments.Select(item =>
@@ -365,6 +404,8 @@ public sealed class FacilitiesProviderOptionsController(
             assets.TryGetValue(item.EstateManagedAssetId, out var asset);
             var contract = item.ContractId is { } contractId && contracts.TryGetValue(contractId, out var found)
                 ? found : null;
+            var rate = item.ProviderRateId is { } rateId && rates.TryGetValue(rateId, out var foundRate)
+                ? foundRate : null;
             return (object)new
             {
                 item.Id,
@@ -377,12 +418,21 @@ public sealed class FacilitiesProviderOptionsController(
                 item.ContractId,
                 ContractNumber = contract?.ContractNumber,
                 ContractTitle = contract?.ContractTitle,
+                item.ProviderRateId,
+                ProviderRateServiceName = rate?.ServiceName,
+                ProviderRateUnitOfMeasure = rate?.UnitOfMeasure,
+                ProviderRate = rate?.Rate,
+                ProviderRateCurrency = rate?.Currency,
                 item.ServiceScope,
                 item.ServiceArea,
                 item.AssignmentStatus,
                 item.EffectiveFrom,
                 item.EffectiveTo,
                 item.SchedulePattern,
+                item.BillingFrequency,
+                item.BillingQuantity,
+                item.NextInvoiceDate,
+                item.LastInvoiceDate,
                 item.SupervisorName,
                 item.SlaReference,
                 item.Notes,
@@ -403,12 +453,17 @@ public sealed record ProviderRateRequest(Guid? ContractId, string ServiceName,
 public sealed record ProviderAssignmentRequest(
     Guid EstateManagedAssetId,
     Guid? ContractId,
+    Guid? ProviderRateId,
     string ServiceScope,
     string? ServiceArea,
     string AssignmentStatus,
     DateTime EffectiveFrom,
     DateTime? EffectiveTo,
     string? SchedulePattern,
+    string? BillingFrequency,
+    decimal? BillingQuantity,
+    DateTime? NextInvoiceDate,
+    DateTime? LastInvoiceDate,
     string? SupervisorName,
     string? SlaReference,
     string? Notes);

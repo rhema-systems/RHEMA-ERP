@@ -307,8 +307,8 @@ const SUITABILITY_CAPTURE_FIELDS: WorkspaceField[] = [
     'Steep Slope',
     'Hilly',
   ]),
-  field('hasAccessRoad', 'Has Access Road', 'check'),
-  field('hasUtilities', 'Has Utilities', 'check'),
+  field('hasAccessRoad', 'Existing Access Road Observed', 'check'),
+  field('hasUtilities', 'Existing Utilities Observed', 'check'),
   field('siteAccessRoute', 'Site Access Route'),
   field('drainageCondition', 'Drainage Condition', 'select', [
     'Good',
@@ -327,9 +327,9 @@ const SUITABILITY_CAPTURE_FIELDS: WorkspaceField[] = [
   field('planningSchemeReference', 'Planning Scheme Reference'),
   field('isFloodProne', 'Flood Prone', 'check'),
   field('planningCompatible', 'Planning Compatible', 'check'),
-  field('accessConfirmed', 'Access Confirmed', 'check'),
+  field('accessConfirmed', 'Legal / Planning Access Confirmed', 'check'),
   field('environmentalClearance', 'Environmental Clearance', 'check'),
-  field('utilityAvailability', 'Utility Availability', 'check'),
+  field('utilityAvailability', 'Utility Service Availability Confirmed', 'check'),
   field('encumbranceObserved', 'Encumbrance Observed On Site', 'check'),
 ];
 
@@ -900,13 +900,14 @@ const WORKSPACE_SECTIONS: Partial<
     {
       title: 'Physical inspection',
       description:
-        'Record the inspection officer, date, soil, terrain, access, drainage, and current occupation.',
+        'Record the inspection officer, date, soil, terrain, observed road access, visible utilities, drainage, and current occupation.',
       keys: [
         'inspectionDate',
         'inspectionOfficer',
         'soilType',
         'topography',
         'hasAccessRoad',
+        'hasUtilities',
         'siteAccessRoute',
         'drainageCondition',
         'existingDevelopment',
@@ -915,13 +916,12 @@ const WORKSPACE_SECTIONS: Partial<
     {
       title: 'Planning and constraints',
       description:
-        'Confirm planning compatibility, zoning, access, utilities, environmental status, flooding, and encumbrances.',
+        'Confirm planning compatibility, zoning, legal access, service availability, environmental status, flooding, and encumbrances.',
       keys: [
         'zoningClassification',
         'planningSchemeReference',
         'planningCompatible',
         'accessConfirmed',
-        'hasUtilities',
         'environmentalClearance',
         'utilityAvailability',
         'isFloodProne',
