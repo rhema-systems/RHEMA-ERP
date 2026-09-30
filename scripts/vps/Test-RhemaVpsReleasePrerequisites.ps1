@@ -17,6 +17,37 @@ foreach ($token in @(
         throw "Release migration discovery check is missing: $token"
     }
 }
+
+# Execute the real discovery guard against every active migration, rather than
+# merely checking that the guard's source exists. Load only its pure functions;
+# never invoke the deployment script's build, database or service actions.
+$RepositoryRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$parseTokens = $null
+$parseErrors = $null
+$deployAst = [Management.Automation.Language.Parser]::ParseInput($deploy, [ref]$parseTokens, [ref]$parseErrors)
+if ($parseErrors.Count) { throw 'Deployment script does not parse.' }
+foreach ($functionName in @('Assert-True', 'Get-LocalMigrationIds', 'Assert-MigrationDiscovery')) {
+    $functionNode = $deployAst.Find({
+        param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionNode) { throw "Deployment function is missing: $functionName" }
+    Invoke-Expression $functionNode.Extent.Text
+}
+Assert-MigrationDiscovery
+$migrationIds = @(Get-LocalMigrationIds)
+if ($migrationIds.Count -eq 0) { throw 'Active migration inventory is empty.' }
+foreach ($id in $migrationIds) {
+    $migrationPath = Join-Path $RepositoryRoot "src\ErpSystem.Data\Migrations\$id.cs"
+    $metadata = Get-Content -LiteralPath $migrationPath -Raw
+    $designerPath = Join-Path $RepositoryRoot "src\ErpSystem.Data\Migrations\$id.Designer.cs"
+    if (Test-Path -LiteralPath $designerPath) { $metadata += Get-Content -LiteralPath $designerPath -Raw }
+    if (-not $metadata.Contains('DbContext(typeof(ApplicationDbContext))')) {
+        throw "Active EF migration lacks ApplicationDbContext discovery metadata: $id"
+    }
+}
+Write-Output "PASS: all $($migrationIds.Count) active migrations have migration ID and database-context discovery metadata."
+
 foreach ($token in @(
         "'ci', '--include=dev', '--no-audit', '--no-fund'",
         'Frontend locked-dependency restore failed',

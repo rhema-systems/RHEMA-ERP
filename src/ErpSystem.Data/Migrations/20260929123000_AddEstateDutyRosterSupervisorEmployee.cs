@@ -1,10 +1,13 @@
 using System;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace ErpSystem.Data.Migrations
 {
+    [DbContext(typeof(ApplicationDbContext))]
+    [Migration("20260929123000_AddEstateDutyRosterSupervisorEmployee")]
     public partial class AddEstateDutyRosterSupervisorEmployee : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder)
