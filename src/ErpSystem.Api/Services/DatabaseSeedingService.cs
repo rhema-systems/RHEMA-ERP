@@ -449,6 +449,8 @@ namespace ErpSystem.Web.Services
             await EnsureEstateAcquisitionWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring Estate SOP example workflows are seeded...");
             await EnsureEstateSopWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring Property Management listing workflow is seeded...");
+            await EnsurePropertyManagementListingWorkflowSeededAsync();
             _logger.LogInformation("Ensuring Planning procedure workflows are seeded...");
             await EnsurePlanningProcedureWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring HR workflows are seeded...");
@@ -838,6 +840,69 @@ namespace ErpSystem.Web.Services
             {
                 _logger.LogError(ex, "Failed to seed Estate land acquisition workflows");
             }
+        }
+
+        private async Task EnsurePropertyManagementListingWorkflowSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    await EnsureEstateSopWorkflowDefinitionSeededAsync(tenant.Id, GetPropertyManagementListingWorkflowSeedSpec());
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed Property Management listing workflow");
+            }
+        }
+
+        private static EstateSopWorkflowSeedSpec GetPropertyManagementListingWorkflowSeedSpec()
+        {
+            const string entityType = "EstatePropertyManagementListingApplication";
+            const string documentType = "PropertyManagementListingEvidence";
+
+            return new EstateSopWorkflowSeedSpec(
+                entityType,
+                entityType,
+                "Property Management Listing Application",
+                "Estate review and approval of property and demarcated-land sale, rental, and lease applications received from Sales.",
+                [
+                    Stage("Estate intake review", WorkflowStepType.Manual, "Estate Officer",
+                        ["Customer and property listing references are verified", "Completed Sales opportunity and agreed transaction are recorded"],
+                        ["customerValidationStatus", "listingValidationStatus", "salesPaymentReference"]),
+                    Stage("Commercial and availability review", WorkflowStepType.Manual, "Property Manager",
+                        ["Availability and reservation position are confirmed", "Commercial review outcome is recorded"],
+                        ["availabilityCheck", "commercialReviewStatus", "premiumChargeAmount"]),
+                    Stage("Estate decision and agreement", WorkflowStepType.Approval, "Estate Manager",
+                        ["Management decision is recorded", "Agreement is generated for the approved request"],
+                        ["decisionStatus", "generatedAgreementReference"]),
+                    Stage("Legal agreement review", WorkflowStepType.Manual, "Legal Officer",
+                        ["Generated agreement is lodged with Legal", "Legal approval is recorded on the Estate case"],
+                        ["legalAgreementReviewReference", "legalAgreementReviewStatus"]),
+                    Stage("Customer agreement execution", WorkflowStepType.Manual, "Estate Officer",
+                        ["Customer signed agreement is received", "Internal approval and digital signature are complete"],
+                        ["signedAgreementReference", "agreementExecutionStatus", "finalSignedAgreementReference"]),
+                    Stage("Payment, billing and Finance check", WorkflowStepType.Manual, "Finance User",
+                        ["Sales payment and Estate balance are checked", "Finance invoice, payment, or rent billing readiness is recorded"],
+                        ["salePaymentCheckStatus", "billingStartStatus", "billingStartDate"]),
+                    Stage("Legal conveyance or lease follow-up", WorkflowStepType.Manual, "Legal Officer",
+                        ["Sale conveyance and registration is completed where applicable", "Rental move-in and billing readiness is confirmed where applicable"],
+                        ["legalConveyanceStatus", "moveInEffectiveStatus"]),
+                    Stage("Estate completion", WorkflowStepType.Approval, "Estate Manager",
+                        ["Customer outcome is recorded", "Estate application closeout is complete"],
+                        ["applicationStatus", "ownershipTransferStatus"])
+                ]);
+
+            static EstateSopWorkflowStepSeed Stage(
+                string name,
+                WorkflowStepType type,
+                string role,
+                IReadOnlyList<string> checks,
+                IReadOnlyList<string> fields)
+                => new(name, type, role, string.Join(" ", checks), checks, [],
+                    "property-management-listing", documentType, FieldKeys: fields);
         }
 
         private async Task EnsureLegalProcedureWorkflowsSeededAsync()
@@ -1916,8 +1981,8 @@ namespace ErpSystem.Web.Services
             const string TaskActionType = "legal-property-agreement-review";
             const string DocumentType = "LegalAgreementReviewEvidence";
 
-            return
-            [
+            var specs = new List<EstateSopWorkflowSeedSpec>
+            {
                 new(
                     "LegalPropertyAgreementReview",
                     "LegalPropertyAgreementReview",
@@ -1961,7 +2026,32 @@ namespace ErpSystem.Web.Services
                                 "Head of Legal signed agreement"
                             ])
                     ])
-            ];
+            };
+
+            var catalog = new ErpSystem.Core.Services.Legal.LegalProcedureCatalogService();
+            foreach (var procedure in catalog.GetProcedures().Where(item =>
+                         item.EntityType != "LegalPropertyAgreementReview"))
+            {
+                var workspace = catalog.GetProcedureWorkspace(procedure.EntityType)!;
+                specs.Add(new EstateSopWorkflowSeedSpec(
+                    procedure.EntityType,
+                    procedure.EntityType,
+                    $"Legal Procedure - {procedure.Title}",
+                    $"Default Legal procedure workflow for {procedure.Title}.",
+                    workspace.Stages.Select(stage => new EstateSopWorkflowStepSeed(
+                        stage.Name,
+                        stage.Owner is "Head of Legal" or "Managing Director"
+                            ? WorkflowStepType.Approval
+                            : WorkflowStepType.Manual,
+                        stage.Owner,
+                        string.Join(" ", stage.Checklist),
+                        stage.Checklist,
+                        [],
+                        "legal-procedure",
+                        "LegalProcedureEvidence")).ToList()));
+            }
+
+            return specs;
 
             static EstateSopWorkflowStepSeed LegalStep(
                 string name,

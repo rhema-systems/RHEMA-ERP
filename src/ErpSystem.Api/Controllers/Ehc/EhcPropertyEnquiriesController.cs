@@ -23,6 +23,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
 
     private IQueryable<ErpSystem.Core.Entities.Ehc.EhcTicket> Query() => db.EhcTickets.AsNoTracking()
         .Where(t => t.TenantId == currentUser.TenantId && !t.IsDeleted && t.TicketType == EhcTicketType.Enquiry
+            && t.Status != EhcTicketStatus.New
             && t.PropertyListingContextJson != null
             && t.AssignedOrganizationUnitId != null
             && t.AssignedOrganizationUnit != null

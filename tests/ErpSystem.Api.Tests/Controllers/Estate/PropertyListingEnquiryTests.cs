@@ -290,7 +290,7 @@ public sealed class PropertyListingEnquiryTests
     }
 
     [Fact]
-    public async Task ListingApplicationUsesManualStagesWhenNoPublishedWorkflowExists()
+    public async Task ListingApplicationRequiresPublishedWorkflow()
     {
         await using var db = Database();
         var currentUser = User();
@@ -313,7 +313,7 @@ public sealed class PropertyListingEnquiryTests
             Mock.Of<IJobCardService>(),
             Mock.Of<IEhcTicketService>());
 
-        var created = await procedures.CreateCaseAsync(new CreateProcedureCaseRequest(
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => procedures.CreateCaseAsync(new CreateProcedureCaseRequest(
             "PropertyManagement",
             "EstatePropertyManagementListingApplication",
             "Purchase enquiry - Parcel Two",
@@ -328,20 +328,10 @@ public sealed class PropertyListingEnquiryTests
                 ["listingReference"] = "LAND-002-PORTION-002",
                 ["requestType"] = "Sale",
                 ["currency"] = "GHS"
-            }));
+            })));
 
-        Assert.False(created.UsesConfiguredWorkflow);
-        Assert.Null(created.WorkflowInstanceId);
-        Assert.Equal("Estate intake review", created.CurrentStageName);
-        Assert.True(created.CanEditCurrentStage);
-        Assert.Contains("customerValidationStatus", created.CurrentStageFieldKeys);
-        var manualStages = new PropertyManagementProcedureCatalogService()
-            .GetProcedureWorkspace("EstatePropertyManagementListingApplication")!.Stages;
-        Assert.Equal(Enumerable.Range(0, manualStages.Count), await db.ProcedureCaseChecklistItems
-            .Select(item => item.StageIndex)
-            .Distinct()
-            .OrderBy(item => item)
-            .ToArrayAsync());
+        Assert.Contains("Publish a workflow", error.Message);
+        Assert.False(await db.ProcedureCases.AnyAsync());
         Assert.DoesNotContain(workflow.Invocations, item => item.Method.Name == nameof(IWorkflowEngine.StartWorkflowAsync));
     }
 
