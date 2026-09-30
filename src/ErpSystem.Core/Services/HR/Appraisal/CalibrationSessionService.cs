@@ -31,8 +31,11 @@ public class CalibrationSessionService : ICalibrationSessionService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CalibrationSessionService> _logger;
 
+    private readonly IGenericRepository<AppraisalCycle> _cycleRepository;
+
     public CalibrationSessionService(
         IGenericRepository<CalibrationSession> sessionRepository,
+        IGenericRepository<AppraisalCycle> cycleRepository,
         IGenericRepository<CalibrationParticipant> participantRepository,
         IGenericRepository<CalibrationRatingAdjustment> adjustmentRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
@@ -50,6 +53,7 @@ public class CalibrationSessionService : ICalibrationSessionService
         ILogger<CalibrationSessionService> logger)
     {
         _sessionRepository = sessionRepository;
+        _cycleRepository = cycleRepository;
         _participantRepository = participantRepository;
         _adjustmentRepository = adjustmentRepository;
         _appraisalRepository = appraisalRepository;
@@ -77,6 +81,13 @@ public class CalibrationSessionService : ICalibrationSessionService
             throw new InvalidOperationException("No tenant is associated with the current user.");
         return tenantId;
     }
+
+    /// <summary>
+    /// A panel sits on a running cycle's appraisals (performance closure E-d2b, D-59): refused unless the cycle is Open.
+    /// An unknown cycle, or another tenant's, is not found — creating a session checked neither.
+    /// </summary>
+    private Task EnsureCycleOpenAsync(Guid cycleId, string action, CancellationToken cancellationToken)
+        => AppraisalLiveCycle.EnsureCycleOpenAsync(_cycleRepository.GetQueryable(), GetTenantId(), cycleId, action, cancellationToken);
 
     // A calibration session owned by another tenant is reported as missing rather than forbidden, so the
     // endpoints do not confirm that the id exists elsewhere.
@@ -169,6 +180,8 @@ public class CalibrationSessionService : ICalibrationSessionService
     /// </summary>
     public async Task<CalibrationSessionDto> CreateAsync(CreateCalibrationSessionDto createDto, Guid? facilitatorId, CancellationToken cancellationToken = default)
     {
+        await EnsureCycleOpenAsync(createDto.AppraisalCycleId, "A calibration session cannot be set up", cancellationToken);
+
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         entity.Status = CalibrationStatus.Pending;
@@ -205,6 +218,9 @@ public class CalibrationSessionService : ICalibrationSessionService
         if (rescoped && entity.Status != CalibrationStatus.Pending)
             throw new InvalidOperationException(
                 "A session's scope is fixed once it is open: every appraisal in it is linked to it. Cancel it and set up another.");
+
+        if (updateDto.AppraisalCycleId != entity.AppraisalCycleId)
+            await EnsureCycleOpenAsync(updateDto.AppraisalCycleId, "The session cannot move to that cycle", cancellationToken);
 
         updateDto.UpdateEntity(entity);
         await _sessionRepository.UpdateAsync(entity);
@@ -267,6 +283,8 @@ public class CalibrationSessionService : ICalibrationSessionService
 
         if (entity.Status != CalibrationStatus.Pending)
             throw new InvalidOperationException($"Only a pending session is opened. This one is {entity.Status}.");
+
+        await EnsureCycleOpenAsync(entity.AppraisalCycleId, "The calibration session cannot be opened", cancellationToken);
 
         entity.Status = CalibrationStatus.InProgress;
         entity.StartedDate = DateTime.UtcNow;
@@ -481,6 +499,7 @@ public class CalibrationSessionService : ICalibrationSessionService
     {
         var session = await GetOwnedSessionAsync(sessionId);
         EnsureSitting(session, "recorded");
+        await EnsureCycleOpenAsync(session.AppraisalCycleId, "An adjustment cannot be recorded", cancellationToken);
 
         // The appraisal has to be one this session actually covers — otherwise a session for one
         // department could quietly restate a score in another.
@@ -718,6 +737,7 @@ public class CalibrationSessionService : ICalibrationSessionService
             throw new ArgumentException("Rating adjustment not found in this session.");
 
         EnsureSitting(session, "changed");
+        await EnsureCycleOpenAsync(session.AppraisalCycleId, "The adjustment cannot be changed", cancellationToken);
 
         if (dto.PerformanceAppraisalId != entity.PerformanceAppraisalId)
             throw new InvalidOperationException(
@@ -753,6 +773,7 @@ public class CalibrationSessionService : ICalibrationSessionService
             throw new ArgumentException("Rating adjustment not found in this session.");
 
         EnsureSitting(session, "removed");
+        await EnsureCycleOpenAsync(session.AppraisalCycleId, "The adjustment cannot be removed", cancellationToken);
 
         await _adjustmentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -904,6 +925,8 @@ public class CalibrationSessionService : ICalibrationSessionService
 
         if (session.Status != CalibrationStatus.Completed)
             throw new InvalidOperationException("Adjustments can only be applied to a completed session.");
+
+        await EnsureCycleOpenAsync(session.AppraisalCycleId, "The panel's ratings cannot be committed", cancellationToken);
 
         var scoped = await GetScopedAppraisalsAsync(session, cancellationToken);
         if (scoped.Count == 0)

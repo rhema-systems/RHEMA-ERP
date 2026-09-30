@@ -26,6 +26,15 @@ public sealed record AppraisalGateFacts
 {
     public required Guid AppraisalId { get; init; }
     public required AppraisalStatus Status { get; init; }
+
+    /// <summary>
+    /// The appraisal's cycle: a gated write is refused unless it is Open (<see cref="AppraisalLiveCycle"/>, performance
+    /// closure E-d2b). The step itself does not read it — where an appraisal stands is the same on any cycle.
+    /// </summary>
+    public required AppraisalCycleStatus CycleStatus { get; init; }
+
+    public string? CycleName { get; init; }
+
     public AppraisalAppealStatus? CurrentAppealStatus { get; init; }
 
     /// <summary><c>AppealRemandedDate</c> is set: the manager owes a re-evaluation.</summary>
@@ -431,12 +440,13 @@ public static class AppraisalGates
         => steps.Any(step => StepOf(step) == StepOf(block.Step));
 
     /// <summary>
-    /// Refuses <paramref name="action"/> unless the appraisal is at one of <paramref name="steps"/>:
-    /// throws <see cref="AppraisalGateException"/> naming the step it is at and why.
+    /// Refuses <paramref name="action"/> unless the appraisal's cycle is Open (E-d2b, D-59) and the appraisal is at one
+    /// of <paramref name="steps"/>: throws <see cref="AppraisalGateException"/> naming the step it is at and why.
     /// </summary>
     public static AppraisalGateBlock EnsureAt(
         AppraisalGateFacts f, AppraisalSettings s, string action, params AppraisalSubStatus[] steps)
     {
+        AppraisalLiveCycle.EnsureOpen(f.CycleStatus, f.CycleName, action);
         var block = Resolve(f, s);
         if (Check(block, steps)) return block;
         throw new AppraisalGateException(block.Step, Refusal(action, block));

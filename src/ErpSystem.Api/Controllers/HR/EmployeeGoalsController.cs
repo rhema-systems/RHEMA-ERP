@@ -685,6 +685,11 @@ public class EmployeeGoalsController : ControllerBase
         {
             return Forbid();
         }
+        catch (InvalidOperationException ex)
+        {
+            // A goal whose cycle is not open (performance closure E-d2b) — a rule, answered 422.
+            return BusinessRuleRejected(ex, "updating a progress entry");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating progress entry {EntryId} for goal {GoalId}", entryId, goalId);
@@ -716,6 +721,11 @@ public class EmployeeGoalsController : ControllerBase
         catch (UnauthorizedAccessException)
         {
             return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A goal whose cycle is not open (performance closure E-d2b) — a rule, answered 422.
+            return BusinessRuleRejected(ex, "deleting a progress entry");
         }
         catch (Exception ex)
         {

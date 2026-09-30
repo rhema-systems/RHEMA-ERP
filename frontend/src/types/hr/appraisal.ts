@@ -677,9 +677,11 @@ export interface TemplateCoverageBreakdown {
 /**
  * Another cycle of the same type and year competing for some of the same employees.
  *
- * Only `blocksOpening` entries actually refuse an open — those are the ones already running.
- * A draft cycle appraises nobody, so it is reported here as a heads-up while it is still cheap
- * to re-scope, rather than stopping someone at the moment they try to open.
+ * Only `blocksOpening` entries actually refuse an open — those are the ones already running — and,
+ * once this cycle is open, they refuse generation for the people they share (performance closure
+ * D-60; an Open one also counts whoever already holds an appraisal in it). A draft cycle appraises
+ * nobody, so it is reported here as a heads-up while it is still cheap to re-scope, rather than
+ * stopping someone at the moment they try to open.
  */
 export interface CycleScopeOverlap {
   cycleId: string;
@@ -692,7 +694,9 @@ export interface CycleScopeOverlap {
 
 /**
  * A dry run of generation. Nothing is written. `isGenerationSafe` is the single thing to
- * check before generating: it is true only when nobody is uncovered and nothing conflicts.
+ * check before generating: it is true only when the cycle is open, nobody is uncovered, nothing
+ * conflicts and nobody is already covered by another open cycle of the same type and year —
+ * `generationBlockedBy` says which (performance closure E-d2b).
  */
 export interface CoveragePreview {
   cycleId: string;
@@ -704,6 +708,8 @@ export interface CoveragePreview {
   excludedCount: number;
   coveragePercentage: number;
   isGenerationSafe: boolean;
+  /** Why generation would be refused, in the order it checks; empty when it would go through. */
+  generationBlockedBy: string[];
   hasActiveTemplates: boolean;
   hasActiveTargets: boolean;
   pageNumber: number;

@@ -264,35 +264,10 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             .FirstOrDefaultAsync(cancellationToken);
     }
 
-    public async Task<PerformanceAppraisalDto> CreateAsync(CreatePerformanceAppraisalDto createDto, CancellationToken cancellationToken = default)
-    {
-        // ── Data integrity: one appraisal per employee per cycle ──────────────
-        var tenantId = GetTenantId();
-        var duplicate = await _appraisalRepository.ExistsAsync(
-            a => a.TenantId == tenantId
-              && a.EmployeeId == createDto.EmployeeId
-              && a.AppraisalCycleId == createDto.AppraisalCycleId);
-
-        if (duplicate)
-            throw new InvalidOperationException(
-                "An appraisal already exists for this employee in the specified cycle. " +
-                "Only one appraisal per employee per cycle is permitted.");
-
-        var entity = createDto.ToEntity();
-        entity.TenantId = tenantId;
-
-        entity.AppraisalNumber = await GenerateAppraisalNumberAsync(createDto.Year, cancellationToken);
-        entity.Status = AppraisalStatus.Draft;
-
-        await _appraisalRepository.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Performance appraisal created successfully: {appraisalId}", entity.Id);
-
-        // Re-read so the response carries the employee and cycle names. Mapping the tracked
-        // entity returns blanks: it was created from a DTO and never loaded with includes.
-        return await GetByIdAsync(entity.Id, cancellationToken);
-    }
+    // ⚠ The raw create (POST api/PerformanceAppraisals) was removed in performance closure E-d2b (D-20, D-44). It
+    // checked nothing — not the cycle, not the employee — took no template, criterion snapshot or evaluations, and
+    // answered a duplicate with a 500. No screen called it; generation, on an Open cycle, is the only way an appraisal
+    // comes to exist (AppraisalCycleService.GenerateAppraisalsAsync).
 
     /// <summary>
     /// Removes an appraisal generated for someone who should not have had one — only before anything
@@ -458,6 +433,8 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         if (updateDto.EndDate <= updateDto.StartDate)
             throw new InvalidOperationException("The appraisal's end date must be after its start date.");
 
+        await EnsureCycleOpenAsync(entity.Id, "The appraisal's dates cannot be corrected", cancellationToken);
+
         updateDto.UpdateEntity(entity);
 
         await _appraisalRepository.UpdateAsync(entity);
@@ -480,6 +457,10 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 
         AppraisalLifecycle.EnsureRawTransition(entity.Status, statusDto.Status, entity.OverallScore.HasValue);
 
+        // Opening a Draft appraisal is work on it, so its cycle must be Open (E-d2b); closing a Completed one is not.
+        if (statusDto.Status == AppraisalStatus.Active)
+            await EnsureCycleOpenAsync(entity.Id, "The appraisal cannot be opened", cancellationToken);
+
         entity.Status = statusDto.Status;
 
         await _appraisalRepository.UpdateAsync(entity);
@@ -490,13 +471,13 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         return true;
     }
 
-    private async Task<string> GenerateAppraisalNumberAsync(int year, CancellationToken cancellationToken)
-    {
-        var count = await TenantAppraisalQuery().Where(p => p.Year == year)
-                                            .CountAsync(cancellationToken);
-
-        return $"APR-{year}-{(count + 1):D5}";
-    }
+    /// <summary>
+    /// The live-cycle rule for a write on this appraisal (performance closure E-d2b, D-59): refused unless its cycle is
+    /// Open, naming the cycle.
+    /// </summary>
+    private Task EnsureCycleOpenAsync(Guid appraisalId, string action, CancellationToken cancellationToken)
+        => AppraisalLiveCycle.EnsureAppraisalCycleOpenAsync(
+            _appraisalRepository.GetQueryable(), GetTenantId(), appraisalId, action, cancellationToken);
 
     // ⚠ The raw evaluator-evaluation and criterion-score CRUD (add/read/update/delete, eight routes)
     // was removed in performance closure lane P1 (2026-09-29). No screen called it; its read handed
@@ -516,6 +497,9 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 
         if (appraisal.Status == AppraisalStatus.Withdrawn)
             throw new InvalidOperationException("This appraisal was withdrawn from its cycle, so it takes no response.");
+
+        AppraisalLiveCycle.EnsureOpen(appraisal.AppraisalCycle.Status, appraisal.AppraisalCycle.CycleName,
+            "A response cannot be added to this appraisal");
 
         // Gate: employee responses must be enabled in settings.
         if (appraisal.AppraisalCycle?.AppraisalSettings?.AllowEmployeeResponse == false)
@@ -622,6 +606,8 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         if (!appraisalExists)
             throw new ArgumentException("Performance appraisal not found");
 
+        await EnsureCycleOpenAsync(appraisalId, "A file cannot be attached to this appraisal", cancellationToken);
+
         var entity = new AppraisalAttachment
         {
             TenantId               = tenantId,
@@ -700,6 +686,8 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             or AppraisalStatus.Withdrawn or AppraisalStatus.Appealed)
             throw new InvalidOperationException(
                 "This appraisal is complete, so its attachments are part of the record and cannot be removed.");
+
+        await EnsureCycleOpenAsync(appraisalId, "This attachment cannot be removed", cancellationToken);
 
         var me = _currentUser.EmployeeId;
         var isUploader = me is Guid uploader && uploader == entity.UploadedById;
@@ -911,9 +899,11 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             .FirstOrDefault(e => e.EvaluatorRole == EvaluatorRole.Self);
 
         bool isSelfEvaluationSubmitted = selfEvaluation?.SubmittedDate.HasValue ?? false;
-        // Editable if not submitted and status is Open or SelfEvaluation
-        bool isEditable = !isSelfEvaluationSubmitted && 
-            (appraisal.Status == AppraisalStatus.Active || appraisal.Status == AppraisalStatus.Draft);
+        // Editable if not submitted, the appraisal is Draft or Active, and its cycle is Open — the save refuses a cycle
+        // that is not (performance closure E-d2b), so the form does not offer it.
+        bool isEditable = !isSelfEvaluationSubmitted &&
+            (appraisal.Status == AppraisalStatus.Active || appraisal.Status == AppraisalStatus.Draft) &&
+            appraisal.AppraisalCycle != null && AppraisalLiveCycle.IsLive(appraisal.AppraisalCycle.Status);
         
         // Get soft skill self-rating flag
         bool allowSelfSoftSkillRating = appraisal.AppraisalCycle?.AppraisalSettings?.AllowSelfSoftSkillRating ?? false;
@@ -966,6 +956,10 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         // Validate employee
         if (appraisal.EmployeeId != saveDto.EmployeeId)
             return new SelfEvaluationResultDto { Success = false, Message = "Employee mismatch" };
+
+        // The appraisal's work is done while its cycle is Open (performance closure E-d2b) — drafts included.
+        AppraisalLiveCycle.EnsureOpen(appraisal.AppraisalCycle.Status, appraisal.AppraisalCycle.CycleName,
+            saveDto.IsDraft ? "The self-evaluation cannot be saved" : "The self-evaluation cannot be submitted");
 
         // Check if editable
         var existingSelfEval = appraisal.EvaluatorEvaluations
@@ -1722,11 +1716,13 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         var remandDeadlinePassed = remandOpen
             && appraisal.AppealRemandDeadline is DateTime remandDue && DateTime.UtcNow > remandDue;
         bool isManagerEvaluationSubmitted = (managerEvaluation?.SubmittedDate.HasValue ?? false) && !remandOpen;
-        // Editable if manager has not yet submitted and appraisal is in an active workflow state
-        bool isEditable = remandOpen
-            ? !remandDeadlinePassed
-            : !isManagerEvaluationSubmitted &&
-              (appraisal.Status == AppraisalStatus.Active || appraisal.Status == AppraisalStatus.Draft);
+        // Editable if manager has not yet submitted and appraisal is in an active workflow state — on an Open cycle,
+        // which the save requires (performance closure E-d2b).
+        bool isEditable = (remandOpen
+                ? !remandDeadlinePassed
+                : !isManagerEvaluationSubmitted &&
+                  (appraisal.Status == AppraisalStatus.Active || appraisal.Status == AppraisalStatus.Draft))
+            && appraisal.AppraisalCycle != null && AppraisalLiveCycle.IsLive(appraisal.AppraisalCycle.Status);
 
         // B2: the employee's self-evaluation reaches the manager's form once it is submitted — never
         // as a draft (P12) — and then only as the profile allows: ShowSelfScoreToManager, or the
@@ -1836,6 +1832,11 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         var settings = appraisal.AppraisalCycle?.AppraisalSettings;
         if (settings == null)
             throw new InvalidOperationException("Appraisal settings not found");
+
+        // The appraisal's work is done while its cycle is Open (performance closure E-d2b) — drafts and a remanded
+        // re-evaluation included.
+        AppraisalLiveCycle.EnsureOpen(appraisal.AppraisalCycle!.Status, appraisal.AppraisalCycle.CycleName,
+            saveDto.IsDraft ? "The manager evaluation cannot be saved" : "The manager evaluation cannot be submitted");
 
         // Every score on its item's own scale (drafts and submissions alike) — A11.
         var scaleError = await _scores.ValidateItemScoresAsync(appraisal.Id, saveDto.ItemScores, cancellationToken);
@@ -2585,6 +2586,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         // alone — EnableAppeals and AppealWindowDays reached only the list, which measured the
         // window from the end of the cycle.
         var state = await _lifecycle.GetStateAsync(appraisal.Id, cancellationToken);
+        AppraisalLiveCycle.EnsureOpen(state.Facts.CycleStatus, state.Facts.CycleName, "An appeal cannot be filed");
         var (mayAppeal, cannotAppealReason, _) = AppraisalGates.CanFileAppeal(state.Facts, state.Settings, DateTime.UtcNow);
         if (!mayAppeal)
             throw new AppraisalGateException(state.SubStatus, cannotAppealReason!);
@@ -3214,6 +3216,9 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 
         await EnsureNotPartyToAppealAsync(appraisal, reviewerId, "decide", cancellationToken);
 
+        AppraisalLiveCycle.EnsureOpen(appraisal.AppraisalCycle!.Status, appraisal.AppraisalCycle.CycleName,
+            "The appeal cannot be decided");
+
         var decision = resolveDto.ResolutionDecision.Value;
         var settings = appraisal.AppraisalCycle?.AppraisalSettings;
         if (settings == null)
@@ -3440,6 +3445,8 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 
         await EnsureNotPartyToAppealAsync(appraisal, reviewerId, "pick up", cancellationToken);
 
+        await EnsureCycleOpenAsync(appraisalId, "The appeal cannot be picked up", cancellationToken);
+
         appeal.Status = AppraisalAppealStatus.UnderReview;
         appeal.ReviewedById = reviewerId;
         appraisal.CurrentAppealStatus = AppraisalAppealStatus.UnderReview;
@@ -3653,6 +3660,8 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 
         await EnsureNotPartyToAppealAsync(appraisal, reviewerId, "decide", cancellationToken);
 
+        await EnsureCycleOpenAsync(appraisalId, "The appeal cannot be decided", cancellationToken);
+
         var managerEval = await TenantEvaluationQuery()
             .Where(e => e.AppraisalId == appraisalId && e.EvaluatorRole == EvaluatorRole.Manager)
             .FirstOrDefaultAsync(cancellationToken)
@@ -3745,6 +3754,9 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             throw new InvalidOperationException("This appeal is not waiting on a re-evaluation, so there is no deadline to extend.");
 
         await EnsureNotPartyToAppealAsync(appraisal, reviewerId, "extend", cancellationToken);
+
+        AppraisalLiveCycle.EnsureOpen(appraisal.AppraisalCycle.Status, appraisal.AppraisalCycle.CycleName,
+            "The re-evaluation deadline cannot be moved");
 
         if (extendDto.NewDeadline is not DateOnly newDay)
             throw new InvalidOperationException("Give the new deadline.");
@@ -3956,6 +3968,9 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         var settings = appraisal.AppraisalCycle?.AppraisalSettings;
         if (settings == null)
             throw new InvalidOperationException("Appraisal cycle settings not found.");
+
+        AppraisalLiveCycle.EnsureOpen(appraisal.AppraisalCycle!.Status, appraisal.AppraisalCycle.CycleName,
+            "The appraisal cannot go to HR's review");
 
         // Check if HR review is required
         if (!settings.RequireHRReview)
@@ -4640,6 +4655,8 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         // Where a return may be made: governance, HR's sign-off not given, and not in front of a
         // sitting panel — at HR's review, or waiting for calibration under AfterCalibration.
         var state = await _lifecycle.GetStateAsync(appraisalId, cancellationToken);
+        AppraisalLiveCycle.EnsureOpen(state.Facts.CycleStatus, state.Facts.CycleName,
+            "This appraisal cannot be returned to its manager");
         var returnable = appraisal.Status == AppraisalStatus.Governance
             && !state.Facts.HrApproved
             && state.SubStatus is AppraisalSubStatus.PendingHRReview or AppraisalSubStatus.HRReviewInProgress

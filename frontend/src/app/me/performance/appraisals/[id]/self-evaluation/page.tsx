@@ -230,8 +230,8 @@ export default function SelfEvaluationPage() {
           <TriangleAlert className="h-4 w-4" />
           <AlertTitle>This appraisal is not open for your self-evaluation</AlertTitle>
           <AlertDescription>
-            Either the cycle has moved past the self-evaluation step, or goal setting is still
-            outstanding.
+            The cycle has moved past the self-evaluation step, goal setting is still outstanding,
+            or the cycle is not open.
           </AlertDescription>
         </Alert>
       )}

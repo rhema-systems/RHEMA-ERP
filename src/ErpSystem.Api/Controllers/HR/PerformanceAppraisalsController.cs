@@ -212,33 +212,9 @@ public class PerformanceAppraisalsController : ControllerBase
         }
     }
 
-    /// <summary>
-    /// Create a new performance appraisal
-    /// </summary>
-    [HttpPost]
-    [ProducesResponseType(typeof(PerformanceAppraisalDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
-    public async Task<IActionResult> Create([FromBody] CreatePerformanceAppraisalDto createDto)
-    {
-        try
-        {
-            if (!ModelState.IsValid)
-                return BadRequest(ModelState);
-
-            var response = await _appraisalService.CreateAsync(createDto);
-            return Ok(response);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating performance appraisal");
-            return StatusCode(500, "An error occurred while creating the performance appraisal");
-        }
-    }
+    // POST api/PerformanceAppraisals (the raw create) went in performance closure E-d2b (D-20, D-44): no screen called
+    // it, it took no template, snapshot or evaluations, and it checked neither the cycle nor the employee. An appraisal
+    // is generated, on an Open cycle: POST api/AppraisalCycle/{id}/generate-appraisals.
 
     /// <summary>
     /// Update an existing performance appraisal

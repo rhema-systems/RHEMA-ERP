@@ -85,6 +85,13 @@ public class EmployeeGoalService : IEmployeeGoalService
             .Include(g => g.Manager);
     }
 
+    /// <summary>
+    /// Goals are set and moved while their cycle is Open (performance closure E-d2b, D-59): a Draft cycle has not
+    /// begun — its open tells staff their goals are due — and a Closed one's goals are the year's record.
+    /// </summary>
+    private Task EnsureCycleOpenAsync(Guid cycleId, string action, CancellationToken cancellationToken)
+        => AppraisalLiveCycle.EnsureCycleOpenAsync(_cycleRepository.GetQueryable(), GetTenantId(), cycleId, action, cancellationToken);
+
     /// <summary>Loads the AppraisalSettings for a cycle (1:1), or null if none is configured.</summary>
     private async Task<AppraisalSettings?> GetSettingsForCycleAsync(Guid cycleId, CancellationToken cancellationToken)
     {
@@ -221,6 +228,8 @@ public class EmployeeGoalService : IEmployeeGoalService
         if (!cycleExists)
             throw new ArgumentException("Appraisal cycle not found.");
 
+        await EnsureCycleOpenAsync(createDto.AppraisalCycleId, "The goal cannot be set", cancellationToken);
+
         // Enforce the configured per-cycle goal ceiling (AppraisalSettings.MaxGoalsPerEmployee).
         var settings = await GetSettingsForCycleAsync(createDto.AppraisalCycleId, cancellationToken);
         if (settings?.MaxGoalsPerEmployee is int maxGoals && maxGoals > 0)
@@ -263,6 +272,8 @@ public class EmployeeGoalService : IEmployeeGoalService
 
         if (GoalSetRules.IsLocked(entity.IsLocked, entity.Status))
             throw new InvalidOperationException("This goal is locked and cannot be edited.");
+
+        await EnsureCycleOpenAsync(entity.AppraisalCycleId, "The goal cannot be edited", cancellationToken);
 
         // Decision D-30. A goal's owner and cycle are fixed when it is created — an edit could
         // move a goal into a colleague's set — and its appraisal link is the server's, so the
@@ -314,6 +325,8 @@ public class EmployeeGoalService : IEmployeeGoalService
 
         if (entity.IsLocked)
             throw new InvalidOperationException("Locked goals cannot be deleted.");
+
+        await EnsureCycleOpenAsync(entity.AppraisalCycleId, "The goal cannot be removed", cancellationToken);
 
         await _goalRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -463,6 +476,8 @@ public class EmployeeGoalService : IEmployeeGoalService
         if (!LiveExecutionStatuses.Contains(goal.Status))
             throw new InvalidOperationException("Progress entries can only be added to approved, on-track, in-progress, or at-risk goals.");
 
+        await EnsureCycleOpenAsync(goal.AppraisalCycleId, "Progress cannot be recorded on this goal", cancellationToken);
+
         var entity = dto.ToEntity();
         entity.TenantId = tenantId;
         entity.EmployeeGoalId = goalId;
@@ -532,6 +547,7 @@ public class EmployeeGoalService : IEmployeeGoalService
             throw new ArgumentException("Progress entry not found.");
 
         EnsureMayAmendProgressEntry(entity, goal, actorEmployeeId, actorIsDesk);
+        await EnsureCycleOpenAsync(goal.AppraisalCycleId, "The progress entry cannot be changed", cancellationToken);
         dto.UpdateEntity(entity);
         await _progressRepository.UpdateAsync(entity);
 
@@ -565,6 +581,7 @@ public class EmployeeGoalService : IEmployeeGoalService
             throw new ArgumentException("Progress entry not found.");
 
         EnsureMayAmendProgressEntry(entity, goal, actorEmployeeId, actorIsDesk);
+        await EnsureCycleOpenAsync(goal.AppraisalCycleId, "The progress entry cannot be removed", cancellationToken);
 
         await _progressRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -597,6 +614,8 @@ public class EmployeeGoalService : IEmployeeGoalService
         if (await _goalRows.IsScoredAsync(goalId, cancellationToken))
             throw new InvalidOperationException(
                 "This goal has been scored in its appraisal, so it cannot be unlocked.");
+
+        await EnsureCycleOpenAsync(entity.AppraisalCycleId, "The goal cannot be unlocked", cancellationToken);
 
         entity.IsLocked = false;
         entity.LockedDate = null;

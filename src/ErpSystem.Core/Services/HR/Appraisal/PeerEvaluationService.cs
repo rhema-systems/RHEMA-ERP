@@ -226,7 +226,10 @@ public class PeerEvaluationService : IPeerEvaluationService
             // One query per collection: as a single twelve-way join it needed a memory grant a
             // loaded server could not give, and timed out reading back every peer save.
             .AsSplitQuery()
-            .FirstOrDefaultAsync(e => e.Id == evaluationId && e.EvaluatorId == evaluatorId, cancellationToken);
+            // A peer's own evaluation only (performance closure D-62): the self and manager rows are read by their
+            // own forms.
+            .FirstOrDefaultAsync(e => e.Id == evaluationId && e.EvaluatorId == evaluatorId
+                                   && e.EvaluatorRole == EvaluatorRole.Peer, cancellationToken);
 
         if (evaluation == null)
         {
@@ -278,11 +281,14 @@ public class PeerEvaluationService : IPeerEvaluationService
             .Include(e => e.Appraisal)
                 .ThenInclude(a => a.Employee)
             .Include(e => e.CriterionScores)
-            .FirstOrDefaultAsync(e => e.Id == saveDto.EvaluationId && e.EvaluatorId == evaluatorId, cancellationToken);
+            // A peer's own evaluation only (performance closure D-62). It matched on the id and the evaluator, so the
+            // appraisee's self-evaluation or the manager's evaluation could be written here, past their own forms' rules.
+            .FirstOrDefaultAsync(e => e.Id == saveDto.EvaluationId && e.EvaluatorId == evaluatorId
+                                   && e.EvaluatorRole == EvaluatorRole.Peer, cancellationToken);
 
         if (evaluation == null)
         {
-            throw new InvalidOperationException("Evaluation not found or access denied.");
+            throw new KeyNotFoundException("Evaluation not found or access denied.");
         }
 
         if (evaluation.SubmittedDate.HasValue)
@@ -388,11 +394,14 @@ public class PeerEvaluationService : IPeerEvaluationService
                     .ThenInclude(cc => cc.TemplateItem)
                         .ThenInclude(ti => ti!.Competency)
             .Include(e => e.CriterionScores)
-            .FirstOrDefaultAsync(e => e.Id == evaluationId && e.EvaluatorId == evaluatorId, cancellationToken);
+            // A peer's own evaluation only (performance closure D-62): the submission of a self or manager evaluation
+            // through this route skipped their gates, and — where peers may not score KPIs — deleted that row's KPI scores.
+            .FirstOrDefaultAsync(e => e.Id == evaluationId && e.EvaluatorId == evaluatorId
+                                   && e.EvaluatorRole == EvaluatorRole.Peer, cancellationToken);
 
         if (evaluation == null)
         {
-            throw new InvalidOperationException("Evaluation not found or access denied.");
+            throw new KeyNotFoundException("Evaluation not found or access denied.");
         }
 
         if (evaluation.SubmittedDate.HasValue)

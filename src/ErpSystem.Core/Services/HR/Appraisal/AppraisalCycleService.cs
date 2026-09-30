@@ -104,6 +104,19 @@ public class AppraisalCycleService : IAppraisalCycleService
             _targetRepository.GetQueryable(), _employeeRepository.GetQueryable(), _organizationUnitRepository.GetQueryable(),
             GetTenantId(), cycleId, cancellationToken);
 
+    /// <summary>
+    /// The other Open cycles of this one's type and year that already cover any of these people — in their scope, or
+    /// holding an unwithdrawn appraisal for them (D-60). The open asks it of the scope; generation of the people it
+    /// would create.
+    /// </summary>
+    private Task<List<AppraisalCycleOverlap>> FindOpenOverlapsAsync(
+        AppraisalCycle cycle, IReadOnlyCollection<Guid> employeeIds, CancellationToken cancellationToken)
+        => AppraisalCycleScope.FindOpenOverlapsAsync(
+            cycle, employeeIds,
+            _cycleRepository.GetQueryable(), _targetRepository.GetQueryable(), _employeeRepository.GetQueryable(),
+            _organizationUnitRepository.GetQueryable(), _appraisalRepository.GetQueryable(),
+            GetTenantId(), cancellationToken);
+
     /// <inheritdoc />
     public async Task<IEnumerable<AppraisalCalendarEventDto>> GetCalendarAsync(Guid cycleId, CancellationToken cancellationToken = default)
     {
@@ -467,7 +480,6 @@ public class AppraisalCycleService : IAppraisalCycleService
     public async Task<bool> OpenCycleAsync(OpenAppraisalCycleDto openDto, Guid openedById, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCycleAsync(openDto.CycleId);
-        var tenantId = GetTenantId();
 
         if (entity.OpenedDate.HasValue)
         {
@@ -475,38 +487,22 @@ public class AppraisalCycleService : IAppraisalCycleService
         }
 
         // Scope-aware overlap check: block opening if any employee is already covered by another
-        // open cycle of the same type and year. Skipped while the targets reach nobody yet.
+        // open cycle of the same type and year — in its scope, or holding an appraisal there (D-60).
+        // Nothing to check while the targets reach nobody yet; generation asks again of whoever it creates.
+        //
+        // Only a cycle that is actually running reserves its people. A Draft appraises
+        // nobody, may never be opened at all, and blocking on one forced the user to go
+        // and delete somebody else's half-finished cycle before they could open theirs.
+        // Draft overlaps are still reported — as an advisory on the coverage preview —
+        // so the early warning survives without the hard block.
         var thisScope = await ResolveScopeAsync(entity.Id, cancellationToken);
-        if (thisScope.InScope.Count > 0)
+        var overlaps = await FindOpenOverlapsAsync(entity, thisScope.InScope, cancellationToken);
+        if (overlaps.Count > 0)
         {
-            // Only a cycle that is actually running reserves its people. A Draft appraises
-            // nobody, may never be opened at all, and blocking on one forced the user to go
-            // and delete somebody else's half-finished cycle before they could open theirs.
-            // Draft overlaps are still reported — as an advisory on the coverage preview —
-            // so the early warning survives without the hard block.
-            var siblingCycles = await _cycleRepository.GetQueryable()
-                .Where(c => c.TenantId == tenantId &&
-                            c.Id != entity.Id &&
-                            c.AppraisalType == entity.AppraisalType &&
-                            c.Year == entity.Year &&
-                            c.Status == AppraisalCycleStatus.Open)
-                .ToListAsync(cancellationToken);
-
-            var conflictDescriptions = new List<string>();
-            foreach (var sibling in siblingCycles)
-            {
-                var siblingScope = await ResolveScopeAsync(sibling.Id, cancellationToken);
-                var overlapCount = thisScope.InScope.Count(siblingScope.InScope.Contains);
-                if (overlapCount > 0)
-                    conflictDescriptions.Add($"'{sibling.CycleName}' ({overlapCount} shared employee(s))");
-            }
-
-            if (conflictDescriptions.Any())
-            {
-                throw new InvalidOperationException(
-                    $"Cannot open this cycle — its employee scope overlaps with: {string.Join(", ", conflictDescriptions)}. " +
-                    "Adjust the target groups so each employee is covered by only one active cycle.");
-            }
+            throw new InvalidOperationException(
+                "Cannot open this cycle — its employee scope overlaps with: " +
+                $"{string.Join(", ", overlaps.Select(o => $"'{o.CycleName}' ({o.Shared.Count} shared employee(s))"))}. " +
+                "Adjust the target groups so each employee is covered by only one active cycle.");
         }
 
         // Update cycle status — generation happens separately via GenerateAppraisalsAsync
@@ -639,12 +635,14 @@ public class AppraisalCycleService : IAppraisalCycleService
     }
 
     /// <summary>
-    /// Generates appraisal instances for all employees in scope.
-    /// Can be called on Draft or Open cycles — blocked only on Closed.
-    /// This allows HR to generate (and review) appraisals before officially opening the cycle.
-    /// Scope comes from <see cref="AppraisalCycleScope"/>, the rule the coverage preview reads.
-    /// Assigns the resolved template to each appraisal. Throws if any employee has
-    /// a template conflict or no template — run the Coverage Preview first to fix issues.
+    /// Generates appraisal instances for all employees in scope, on an Open cycle only (performance closure E-d2b,
+    /// D-43): HR opens the cycle, checks the coverage preview, then generates. It ran on Draft cycles by design ("to
+    /// review appraisals before opening"), so a cycle could be generated, worked on and deleted without ever being
+    /// opened — or its open's overlap check, and its notice, skipped altogether.
+    /// Scope comes from <see cref="AppraisalCycleScope"/>, the rule the coverage preview reads. Refused when anyone it
+    /// would create is already covered by another Open cycle of the same type and year (D-60). Assigns the resolved
+    /// template to each appraisal. Throws if any employee has a template conflict or no template — run the Coverage
+    /// Preview first to fix issues.
     /// </summary>
     public async Task<(int Created, int EvaluationsCreated, int ReviewEventsCreated)> GenerateAppraisalsAsync(
         Guid cycleId, Guid generatedById, CancellationToken cancellationToken = default)
@@ -654,6 +652,10 @@ public class AppraisalCycleService : IAppraisalCycleService
 
         if (cycle.Status == AppraisalCycleStatus.Closed)
             throw new InvalidOperationException("Cannot generate appraisals for a closed cycle.");
+        if (!AppraisalLiveCycle.IsLive(cycle.Status))
+            throw new InvalidOperationException(
+                "Appraisals are generated once the cycle is open: open it first — the open checks that nobody in scope " +
+                "is already in another open cycle of the same type and year, and tells them the cycle has begun.");
 
         var settings = await GetOwnedSettingsAsync(cycle.AppraisalSettingsId);
 
@@ -706,6 +708,29 @@ public class AppraisalCycleService : IAppraisalCycleService
             .Include(e => e.OrganizationLevel)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+
+        // ── 4b. Nobody gets a second appraisal of this type and year (D-60). The open checked the scope it had then;
+        //        a target added since, or a person who moved posts after another cycle generated theirs, is caught here. ──
+        var overlaps = await FindOpenOverlapsAsync(cycle, pendingIds, cancellationToken);
+        if (overlaps.Count > 0)
+        {
+            var nameOf = employees.ToDictionary(e => e.Id, e => $"{e.FullName} ({e.EmployeeNumber})");
+            var shared = overlaps.SelectMany(o => o.Shared).Distinct().Count();
+            var described = overlaps.Select(o =>
+            {
+                var people = o.Shared
+                    .Select(id => nameOf.GetValueOrDefault(id, id.ToString()))
+                    .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var shown = string.Join(", ", people.Take(10));
+                var more = people.Count > 10 ? $" and {people.Count - 10} more" : string.Empty;
+                return $"'{o.CycleName}' — {shown}{more}";
+            });
+            throw new InvalidOperationException(
+                $"Cannot generate appraisals — {shared} of the people still to be appraised " +
+                $"{(shared == 1 ? "is" : "are")} already covered by another open cycle of the same type and year: " +
+                $"{string.Join("; ", described)}. Exclude them from this cycle, or close the other cycle, and generate again.");
+        }
 
         var conflicts   = new List<string>();
         var noTemplates = new List<string>();

@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -63,6 +64,13 @@ public class CheckInService : ICheckInService
             throw new InvalidOperationException("No tenant is associated with the current user.");
         return tenantId;
     }
+
+    /// <summary>
+    /// A check-in's goal update moves the goal, and a goal is moved while its cycle is Open (performance closure
+    /// E-d2b, D-59). The check-in itself is not held to it: a conversation can outlive or precede a running cycle.
+    /// </summary>
+    private Task EnsureGoalCycleOpenAsync(Guid cycleId, string action, CancellationToken cancellationToken)
+        => AppraisalLiveCycle.EnsureCycleOpenAsync(_cycleRepository.GetQueryable(), GetTenantId(), cycleId, action, cancellationToken);
 
     // A check-in owned by another tenant is reported as missing rather than forbidden, so the endpoints do
     // not confirm that the id exists elsewhere.
@@ -277,6 +285,8 @@ public class CheckInService : ICheckInService
         if (goal == null || goal.TenantId != tenantId || goal.EmployeeId != checkIn.EmployeeId)
             throw new ArgumentException("Employee goal not found.");
 
+        await EnsureGoalCycleOpenAsync(goal.AppraisalCycleId, "The goal cannot be updated through this check-in", cancellationToken);
+
         var entity = dto.ToEntity();
         entity.TenantId = tenantId;
         entity.CheckInId = checkInId;
@@ -316,6 +326,8 @@ public class CheckInService : ICheckInService
         if (entity == null)
             throw new ArgumentException("Goal update not found.");
 
+        await EnsureGoalCycleOpenAsync(entity.EmployeeGoal.AppraisalCycleId, "The goal update cannot be changed", cancellationToken);
+
         dto.UpdateEntity(entity);
         await _goalUpdateRepository.UpdateAsync(entity);
 
@@ -340,6 +352,13 @@ public class CheckInService : ICheckInService
 
         if (entity == null)
             throw new ArgumentException("Goal update not found.");
+
+        var goalCycleId = await _goalRepository.GetQueryable()
+            .Where(g => g.Id == entity.EmployeeGoalId && g.TenantId == tenantId)
+            .Select(g => (Guid?)g.AppraisalCycleId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (goalCycleId is Guid cycleId)
+            await EnsureGoalCycleOpenAsync(cycleId, "The goal update cannot be removed", cancellationToken);
 
         await _goalUpdateRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

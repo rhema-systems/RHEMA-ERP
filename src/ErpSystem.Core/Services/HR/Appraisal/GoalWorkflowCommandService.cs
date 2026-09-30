@@ -124,6 +124,24 @@ public sealed class GoalWorkflowCommandService : IGoalWorkflowCommandService
         return tenantId;
     }
 
+    /// <summary>
+    /// Goals are set and moved while their cycle is Open (performance closure E-d2b, D-59): refused as an invalid
+    /// transition (422), naming the cycle. A Draft cycle has not begun — the open is what tells staff their goals are
+    /// due — and a Closed one's goals are the year's record.
+    /// </summary>
+    private async Task EnsureCycleOpenAsync(Guid cycleId, string action, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var cycle = await _cycleRepo.GetQueryable()
+            .Where(c => c.Id == cycleId && c.TenantId == tenantId)
+            .Select(c => new { c.Status, c.CycleName })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (cycle != null && !AppraisalLiveCycle.IsLive(cycle.Status))
+            throw new GoalWorkflowException(
+                GoalWorkflowFailureReason.InvalidTransition,
+                AppraisalLiveCycle.Refusal(cycle.Status, cycle.CycleName, action));
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     //  Set of statuses from which a Lock is permitted.
     //  Explicit allowlist beats a fragile enum-value numeric comparison.
@@ -164,6 +182,7 @@ public sealed class GoalWorkflowCommandService : IGoalWorkflowCommandService
                 "You can only submit goals that belong to you.");
 
         // ── Invariant checks ─────────────────────────────────────────────
+        await EnsureCycleOpenAsync(goal.AppraisalCycleId, "The goal cannot be submitted", cancellationToken);
         EnsureNotLocked(goal);
 
         // The cycle's profile decides whether the manager approves goals at all
@@ -269,6 +288,7 @@ public sealed class GoalWorkflowCommandService : IGoalWorkflowCommandService
         ValidateManagerAccess(goal, managerId);
 
         // ── Invariant checks ─────────────────────────────────────────────
+        await EnsureCycleOpenAsync(goal.AppraisalCycleId, "The goal cannot be approved", cancellationToken);
         EnsureNotLocked(goal);
 
         // ── Status check ─────────────────────────────────────────────────
@@ -362,6 +382,7 @@ public sealed class GoalWorkflowCommandService : IGoalWorkflowCommandService
         ValidateManagerAccess(goal, managerId);
 
         // ── Invariant checks ─────────────────────────────────────────────
+        await EnsureCycleOpenAsync(goal.AppraisalCycleId, "The goal cannot be sent back", cancellationToken);
         EnsureNotLocked(goal);
 
         // ── Status check ─────────────────────────────────────────────────
@@ -441,6 +462,7 @@ public sealed class GoalWorkflowCommandService : IGoalWorkflowCommandService
         // ── Invariant checks ─────────────────────────────────────────────
         // EnsureNotLocked also distinguishes the "already locked" case from
         // a normal forbidden-transition case, giving a clearer message.
+        await EnsureCycleOpenAsync(goal.AppraisalCycleId, "The goal cannot be locked", cancellationToken);
         EnsureNotLocked(goal);
 
         // ── Status check ─────────────────────────────────────────────────
@@ -507,6 +529,12 @@ public sealed class GoalWorkflowCommandService : IGoalWorkflowCommandService
             ?? throw new GoalWorkflowException(
                    GoalWorkflowFailureReason.GoalNotFound,
                    $"Appraisal cycle {appraisalCycleId} was not found.");
+
+        // Goals are set and moved while their cycle is Open (performance closure E-d2b).
+        if (!AppraisalLiveCycle.IsLive(cycle.Status))
+            throw new GoalWorkflowException(
+                GoalWorkflowFailureReason.InvalidTransition,
+                AppraisalLiveCycle.Refusal(cycle.Status, cycle.CycleName, "The goal set cannot be locked"));
 
         var goals = await _goalRepo.GetQueryable()
             .Where(g => g.TenantId == tenantId

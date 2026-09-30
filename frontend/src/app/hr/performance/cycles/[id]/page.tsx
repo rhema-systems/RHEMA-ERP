@@ -79,9 +79,10 @@ import { OrganizationUnitPickerField } from '@/components/hr/common/Organization
  *               template or a tie between two equally-specific ones shows up.
  *   Generate  — only once coverage is clean, because generation refuses on a gap or a conflict.
  *
- * Opening the cycle sits before all of that and is checked separately: an employee may be
- * covered by only one open cycle of the same type and year, and the refusal names the
- * cycles that overlap.
+ * Opening the cycle sits between the set-up and generation, and is checked separately: an employee
+ * may be covered by only one open cycle of the same type and year, and the refusal names the
+ * cycles that overlap. Generation runs on an open cycle only and asks the same of whoever it
+ * would create (performance closure E-d2b, D-43 and D-60).
  */
 const day = (value?: string | null) => value?.slice(0, 10) ?? '—';
 
@@ -324,7 +325,9 @@ export default function AppraisalCycleDetailPage() {
 
   const isDraft = cycle.status === 'Draft';
   const isClosed = cycle.status === 'Closed';
-  const canGenerate = !isClosed;
+  // Generation runs on an open cycle only (performance closure E-d2b): the open checks nobody in
+  // scope is in another open cycle of the type and year, and tells them the cycle has begun.
+  const canGenerate = cycle.status === 'Open';
 
   return (
     <div className="space-y-6 p-6">
@@ -403,13 +406,22 @@ export default function AppraisalCycleDetailPage() {
             <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
             <div className="space-y-1 text-sm">
               <p className="font-medium">Generation would be refused</p>
-              <p className="text-muted-foreground">
-                {!coverage.hasActiveTargets
-                  ? 'No active target groups — nobody is in scope yet.'
-                  : !coverage.hasActiveTemplates
-                    ? 'No active template assignments — there is no form to score anyone on.'
-                    : `${coverage.employeesWithoutTemplate} employee(s) resolve to no template and ${coverage.conflictCount} have a tie between two equally-specific ones. The Coverage tab lists who.`}
-              </p>
+              {/* The server's reasons, in the order generation checks them (performance closure E-d2b). */}
+              {(coverage.generationBlockedBy ?? []).length > 0 ? (
+                <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
+                  {coverage.generationBlockedBy.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-muted-foreground">
+                  {!coverage.hasActiveTargets
+                    ? 'No active target groups — nobody is in scope yet.'
+                    : !coverage.hasActiveTemplates
+                      ? 'No active template assignments — there is no form to score anyone on.'
+                      : `${coverage.employeesWithoutTemplate} employee(s) resolve to no template and ${coverage.conflictCount} have a tie between two equally-specific ones. The Coverage tab lists who.`}
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -830,9 +842,10 @@ export default function AppraisalCycleDetailPage() {
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base">Competing cycles</CardTitle>
                     <CardDescription>
-                      Other cycles of the same type and year that cover some of the same people.
-                      A cycle that is already running blocks this one from opening; a draft does
-                      not, but is worth re-scoping before it becomes one.
+                      Other cycles of the same type and year that cover some of the same people — a
+                      running one also counts whoever already holds an appraisal in it. A cycle that
+                      is already running blocks this one from opening, and from generating for the
+                      people it shares; a draft does not, but is worth re-scoping before it becomes one.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -853,7 +866,11 @@ export default function AppraisalCycleDetailPage() {
                         <div className="flex items-center gap-2">
                           <StatusBadge status={humanizeEnum(o.status)} />
                           <Badge variant={o.blocksOpening ? 'destructive' : 'outline'}>
-                            {o.blocksOpening ? 'Blocks opening' : 'Advisory'}
+                            {o.blocksOpening
+                              ? isDraft
+                                ? 'Blocks opening'
+                                : 'Blocks generation'
+                              : 'Advisory'}
                           </Badge>
                         </div>
                       </div>
@@ -1168,7 +1185,7 @@ export default function AppraisalCycleDetailPage() {
             : action === 'close'
               ? 'Every appraisal must be finished — completed, or withdrawn if it will not be — and every appeal window lapsed; the server refuses the close and says what is left. The completed appraisals are closed with the cycle, and its targets and exclusions no longer change. This cannot be undone.'
               : action === 'generate'
-                ? 'Creates the appraisal records for everyone in scope. Refused if anyone has no template or a template conflict — check the Coverage tab first.'
+                ? 'Creates the appraisal records for everyone in scope who has none yet. Refused if anyone has no template or a template conflict, or is already covered by another open cycle of the same type and year — check the Coverage tab first.'
                 : 'Raises an in-app notification for every phase that is overdue or closing soon, to everyone in scope. Repeat-safe: identical unread reminders are skipped.'
         }
         confirmText={

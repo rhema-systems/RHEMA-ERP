@@ -21,6 +21,7 @@ public class CycleCoverageService : ICycleCoverageService
     private readonly IGenericRepository<AppraisalCycleTemplate> _cycleTemplateRepo;
     private readonly IGenericRepository<Employee> _employeeRepo;
     private readonly IGenericRepository<OrganizationUnit> _orgUnitRepo;
+    private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepo;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<CycleCoverageService> _logger;
 
@@ -30,6 +31,7 @@ public class CycleCoverageService : ICycleCoverageService
         IGenericRepository<AppraisalCycleTemplate> cycleTemplateRepo,
         IGenericRepository<Employee> employeeRepo,
         IGenericRepository<OrganizationUnit> orgUnitRepo,
+        IGenericRepository<PerformanceAppraisal> appraisalRepo,
         ICurrentUserProvider currentUserProvider,
         ILogger<CycleCoverageService> logger)
     {
@@ -38,6 +40,7 @@ public class CycleCoverageService : ICycleCoverageService
         _cycleTemplateRepo = cycleTemplateRepo;
         _employeeRepo = employeeRepo;
         _orgUnitRepo = orgUnitRepo;
+        _appraisalRepo = appraisalRepo;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
@@ -109,11 +112,27 @@ public class CycleCoverageService : ICycleCoverageService
         var includedIds = scope.InScope;
         var excludedIds = excludedWithReasons.Keys.ToHashSet();
 
-        result.ScopeOverlaps = await ComputeScopeOverlapsAsync(cycle, includedIds, tenantId, cancellationToken);
+        // Generation's own overlap rule (D-60): other Open cycles of the type and year covering these people.
+        var openOverlaps = await AppraisalCycleScope.FindOpenOverlapsAsync(
+            cycle, includedIds,
+            _cycleRepo.GetQueryable(), _targetRepo.GetQueryable(), _employeeRepo.GetQueryable(),
+            _orgUnitRepo.GetQueryable(), _appraisalRepo.GetQueryable(), tenantId, cancellationToken);
+        result.ScopeOverlaps = await ComputeScopeOverlapsAsync(cycle, includedIds, openOverlaps, tenantId, cancellationToken);
+
+        // Why generation would be refused, in the order it checks (performance closure E-d2b): the cycle's status first.
+        if (!AppraisalLiveCycle.IsLive(cycle.Status))
+            result.GenerationBlockedBy.Add(cycle.Status == AppraisalCycleStatus.Closed
+                ? "The cycle is closed."
+                : "The cycle has not been opened — appraisals are generated once it is open.");
 
         // Pre-flight: bail early if the cycle isn't configured yet
         if (!result.HasActiveTemplates || !result.HasActiveTargets || rawIds.Count == 0)
         {
+            result.GenerationBlockedBy.Add(!result.HasActiveTargets
+                ? "No active target groups — nobody is in scope yet."
+                : !result.HasActiveTemplates
+                    ? "No active template assignments — there is no form to score anyone on."
+                    : "The target groups reach nobody.");
             result.IsGenerationSafe = false;
             result.TotalTargetedEmployees = 0;
             result.PageNumber = pageNumber;
@@ -187,7 +206,26 @@ public class CycleCoverageService : ICycleCoverageService
         result.CoveragePercentage = nonExcludedCount > 0
             ? Math.Round((decimal)result.EmployeesWithTemplate / nonExcludedCount * 100, 1)
             : 0m;
-        result.IsGenerationSafe = result.EmployeesWithoutTemplate == 0 && result.ConflictCount == 0;
+
+        // Generation creates only who has no appraisal here yet, so the overlap refuses only for them (D-60).
+        var alreadyGenerated = await _appraisalRepo.GetQueryable()
+            .Where(a => a.TenantId == tenantId && a.AppraisalCycleId == cycleId)
+            .Select(a => a.EmployeeId)
+            .ToListAsync(cancellationToken);
+        var pending = includedIds.Except(alreadyGenerated).ToHashSet();
+        var blocking = openOverlaps.Where(o => o.Shared.Overlaps(pending)).ToList();
+
+        if (result.EmployeesWithoutTemplate > 0)
+            result.GenerationBlockedBy.Add($"{result.EmployeesWithoutTemplate} employee(s) resolve to no template.");
+        if (result.ConflictCount > 0)
+            result.GenerationBlockedBy.Add(
+                $"{result.ConflictCount} employee(s) have a tie between two equally-specific templates.");
+        if (blocking.Count > 0)
+            result.GenerationBlockedBy.Add(
+                $"{blocking.SelectMany(o => o.Shared).Where(pending.Contains).Distinct().Count()} of the people still to " +
+                "be appraised are already covered by another open cycle of the same type and year: " +
+                $"{string.Join(", ", blocking.Select(o => $"'{o.CycleName}'"))}.");
+        result.IsGenerationSafe = result.GenerationBlockedBy.Count == 0;
 
         // ──────────────────────────────────────────────────────────────
         // 7. Template breakdown (always full, not paged)
@@ -213,18 +251,30 @@ public class CycleCoverageService : ICycleCoverageService
     /// <summary>
     /// Other cycles of the same type and year competing for these employees.
     ///
-    /// Opening is refused only by the Open ones — that is what
-    /// <c>AppraisalCycleService.OpenCycleAsync</c> enforces. Drafts are reported too but
+    /// Opening — and generation — are refused only by the Open ones, which come from the rule
+    /// <c>AppraisalCycleService</c> enforces (<see cref="AppraisalCycleScope.FindOpenOverlapsAsync"/>: the scope, or an
+    /// appraisal already held there). Drafts are reported too but
     /// marked as non-blocking, so a clash with a colleague's half-built cycle is visible here
     /// while it is still cheap to fix, instead of stopping someone at the moment they open.
     /// </summary>
     private async Task<List<CycleScopeOverlapDto>> ComputeScopeOverlapsAsync(
         AppraisalCycle cycle,
         HashSet<Guid> includedIds,
+        IReadOnlyList<AppraisalCycleOverlap> openOverlaps,
         Guid tenantId,
         CancellationToken cancellationToken)
     {
-        var overlaps = new List<CycleScopeOverlapDto>();
+        var overlaps = openOverlaps
+            .Select(o => new CycleScopeOverlapDto
+            {
+                CycleId = o.CycleId,
+                CycleCode = o.CycleCode,
+                CycleName = o.CycleName,
+                Status = AppraisalCycleStatus.Open,
+                SharedEmployeeCount = o.Shared.Count,
+                BlocksOpening = true,
+            })
+            .ToList();
         if (includedIds.Count == 0) return overlaps;
 
         var siblings = await _cycleRepo.GetQueryable()
@@ -232,7 +282,7 @@ public class CycleCoverageService : ICycleCoverageService
                      && c.Id != cycle.Id
                      && c.AppraisalType == cycle.AppraisalType
                      && c.Year == cycle.Year
-                     && c.Status != AppraisalCycleStatus.Closed
+                     && c.Status == AppraisalCycleStatus.Draft
                      && !c.IsDeleted)
             .ToListAsync(cancellationToken);
 
@@ -252,7 +302,7 @@ public class CycleCoverageService : ICycleCoverageService
                 CycleName = sibling.CycleName,
                 Status = sibling.Status,
                 SharedEmployeeCount = shared,
-                BlocksOpening = sibling.Status == AppraisalCycleStatus.Open,
+                BlocksOpening = false,
             });
         }
 

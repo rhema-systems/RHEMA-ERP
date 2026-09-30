@@ -59,6 +59,17 @@ public class DeadlineEnforcementController : ControllerBase
 
             return Ok(result);
         }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A cycle that is not open, among others (performance closure E-d2b) — a rule, answered 422 with its
+            // message; it answered 500.
+            _logger.LogWarning(ex, "Advance-overdue refused for cycle {CycleId}", cycleId);
+            return UnprocessableEntity(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error enforcing deadlines for cycle {CycleId}", cycleId);
@@ -143,6 +154,11 @@ public class DeadlineEnforcementController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            // An HR officer's own appraisal — the two-actor rule (performance closure D-62).
+            return StatusCode(403, new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {

@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -88,15 +89,21 @@ public class PeerNominationService : IPeerNominationService
     /// Whether nominations may be made, changed or decided on this appraisal: in Employee mode while
     /// it is Draft or Active, in Manager mode until it is completed or closed — and never once it is
     /// withdrawn (performance closure E-d1), which Manager mode let through: an approval there created
-    /// a peer evaluation on an appraisal no one would finish, and asked the peer to write it.
+    /// a peer evaluation on an appraisal no one would finish, and asked the peer to write it. Only on an
+    /// Open cycle (E-d2b). The caller loads the appraisal's cycle.
     /// </summary>
     private static bool NominationsEditable(PerformanceAppraisal appraisal, AppraisalSettings settings)
-        => settings.PeerNominationMode == PeerNominationMode.Employee
-            ? appraisal.Status is AppraisalStatus.Active or AppraisalStatus.Draft
-            : appraisal.Status is not (AppraisalStatus.Completed or AppraisalStatus.Closed or AppraisalStatus.Withdrawn);
+        => appraisal.AppraisalCycle != null && AppraisalLiveCycle.IsLive(appraisal.AppraisalCycle.Status)
+            && (settings.PeerNominationMode == PeerNominationMode.Employee
+                ? appraisal.Status is AppraisalStatus.Active or AppraisalStatus.Draft
+                : appraisal.Status is not (AppraisalStatus.Completed or AppraisalStatus.Closed or AppraisalStatus.Withdrawn));
 
     private static void EnsureNominationsEditable(PerformanceAppraisal appraisal, AppraisalSettings settings)
     {
+        // The appraisal's work is done while its cycle is Open (performance closure E-d2b).
+        AppraisalLiveCycle.EnsureOpen(appraisal.AppraisalCycle.Status, appraisal.AppraisalCycle.CycleName,
+            "Peer nominations cannot be changed");
+
         if (NominationsEditable(appraisal, settings)) return;
 
         if (appraisal.Status == AppraisalStatus.Withdrawn)

@@ -268,18 +268,7 @@ public static class AppraisalMappingExtensions
         };
     }
 
-    public static PerformanceAppraisal ToEntity(this CreatePerformanceAppraisalDto dto)
-    {
-        return new PerformanceAppraisal
-        {
-            EmployeeId = dto.EmployeeId,
-            Year = dto.Year,
-            AppraisalCycleId = dto.AppraisalCycleId,
-            StartDate = dto.StartDate,
-            EndDate = dto.EndDate,
-            Status = AppraisalStatus.Draft
-        };
-    }
+    // The raw create's ToEntity went with it in performance closure E-d2b (D-20): generation builds each appraisal.
 
     /// <summary>
     /// Applies a header correction. <b>Three fields on the DTO are deliberately ignored.</b>

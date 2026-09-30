@@ -21,6 +21,7 @@ namespace ErpSystem.Core.Services.HR;
 public class AppraisalWorkflowService : IAppraisalWorkflowService
 {
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
+    private readonly IGenericRepository<AppraisalCycle> _cycleRepository;
     private readonly IGenericRepository<EvaluatorEvaluation> _evalRepository;
     private readonly IGenericRepository<AppraisalHRReview> _hrReviewRepository;
     private readonly IGenericRepository<AppraisalConversation> _conversationRepository;
@@ -37,6 +38,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
 
     public AppraisalWorkflowService(
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
+        IGenericRepository<AppraisalCycle> cycleRepository,
         IGenericRepository<EvaluatorEvaluation> evalRepository,
         IGenericRepository<AppraisalHRReview> hrReviewRepository,
         IGenericRepository<AppraisalConversation> conversationRepository,
@@ -55,6 +57,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         _goalRows             = goalRows;
         _peerNominations      = peerNominations;
         _appraisalRepository  = appraisalRepository;
+        _cycleRepository      = cycleRepository;
         _evalRepository       = evalRepository;
         _hrReviewRepository   = hrReviewRepository;
         _conversationRepository = conversationRepository;
@@ -127,6 +130,11 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         var from = appraisal.Status;
         AppraisalLifecycle.EnsureRawTransition(from, newStatus, appraisal.OverallScore.HasValue);
 
+        // Opening a Draft appraisal is work on it, so its cycle must be Open (E-d2b); closing a Completed one is not.
+        if (newStatus == AppraisalStatus.Active)
+            await AppraisalLiveCycle.EnsureAppraisalCycleOpenAsync(
+                _appraisalRepository.GetQueryable(), GetTenantId(), appraisalId, "The appraisal cannot be opened", cancellationToken);
+
         appraisal.Status = newStatus;
 
         await _appraisalRepository.UpdateAsync(appraisal);
@@ -157,6 +165,10 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     {
         var r = role.ToLowerInvariant();
         var facts = state.Facts;
+
+        // Nobody writes on an appraisal whose cycle is not Open (performance closure E-d2b): every write refuses it.
+        if (!AppraisalLiveCycle.IsLive(facts.CycleStatus))
+            return false;
 
         // A remanded appeal is the manager's to re-evaluate and HR's to decide, whatever the status.
         if (facts.Remanded && facts.CurrentAppealStatus == AppraisalAppealStatus.Remanded)
@@ -221,6 +233,16 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         var state = await _lifecycle.GetStateAsync(appraisalId, ct);
         var previousMajorStatus = state.Facts.Status;
         var previousSubStatus   = state.SubStatus;
+
+        // The two-actor rule (performance closure D-62): an HR officer does not advance their own appraisal — waive its
+        // steps, approve its goals, submit its evaluations for them. The sign-off, the return and the correction
+        // already refused them (E-a); the advance did not.
+        if (advancedByEmployeeId != Guid.Empty && advancedByEmployeeId == state.EmployeeId)
+            throw new UnauthorizedAccessException(
+                "You cannot advance your own appraisal: another HR officer or an administrator does.");
+
+        // The advance does the step's work for the appraisal, so its cycle must be Open (E-d2b).
+        AppraisalLiveCycle.EnsureOpen(state.Facts.CycleStatus, state.Facts.CycleName, "HR cannot advance this appraisal");
 
         // Guard: terminal and appeal states cannot be advanced — appeals move by their own decisions.
         if (previousSubStatus is AppraisalSubStatus.Completed
@@ -572,6 +594,11 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         var result = new DeadlineEnforcementResult();
 
         var tenantId = GetTenantId();
+
+        // The sweep advances appraisals, so its cycle must be Open (performance closure E-d2b).
+        await AppraisalLiveCycle.EnsureCycleOpenAsync(
+            _cycleRepository.GetQueryable(), tenantId, cycleId, "Overdue appraisals cannot be advanced", ct);
+
         var appraisals = await _appraisalRepository
             .GetQueryable(a => a.TenantId == tenantId
                             && a.AppraisalCycleId == cycleId
@@ -606,6 +633,17 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
             // Only act on a configured, already-passed deadline.
             if (deadline is null || deadline.Value >= today)
                 continue;
+
+            // The two-actor rule (D-62): the officer running the sweep does not advance their own appraisal.
+            if (appraisal.EmployeeId == advancedByEmployeeId)
+            {
+                _logger.LogInformation(
+                    "Advance-overdue for cycle {CycleId} left appraisal {AppraisalId} alone: it is the officer's own",
+                    cycleId, appraisal.Id);
+                result.Messages.Add(
+                    $"{appraisal.AppraisalNumber ?? appraisal.Id.ToString()}: skipped (your own appraisal — another HR officer advances it)");
+                continue;
+            }
 
             try
             {

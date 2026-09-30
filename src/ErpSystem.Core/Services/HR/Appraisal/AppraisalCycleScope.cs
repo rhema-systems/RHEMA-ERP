@@ -45,6 +45,12 @@ public sealed class AppraisalCycleScopeResolution
 }
 
 /// <summary>
+/// Another Open cycle of the same type and year that already covers some of the people asked about: in its scope, or
+/// holding an unwithdrawn appraisal for them (<see cref="AppraisalCycleScope.FindOpenOverlapsAsync"/>).
+/// </summary>
+public sealed record AppraisalCycleOverlap(Guid CycleId, string CycleCode, string CycleName, HashSet<Guid> Shared);
+
+/// <summary>
 /// The one reading of who a cycle covers (performance closure E-c). Generation, the open's overlap
 /// check, the in-scope list (the open notice, the deadline reminders, <c>GET {id}/employees</c>), the
 /// progress page's excluded count, each target's live count and the coverage preview all resolve
@@ -130,6 +136,63 @@ public static class AppraisalCycleScope
         var excluded = await ExcludedAsync(exclusions, covered, employees, units, tenantId, cancellationToken);
 
         return new AppraisalCycleScopeResolution(byTarget, covered, excluded);
+    }
+
+    /// <summary>
+    /// The other Open cycles of <paramref name="cycle"/>'s type and year that already cover any of
+    /// <paramref name="employeeIds"/> — in their scope, or holding an unwithdrawn appraisal for them (performance closure
+    /// D-60). A person is appraised by one running cycle of a type and year: the open refuses a cycle that overlaps one,
+    /// and generation refuses to create a second appraisal. The appraisal half catches what the scope cannot see — a
+    /// person who moved to another post after the other cycle generated theirs.
+    /// </summary>
+    public static async Task<List<AppraisalCycleOverlap>> FindOpenOverlapsAsync(
+        AppraisalCycle cycle,
+        IReadOnlyCollection<Guid> employeeIds,
+        IQueryable<AppraisalCycle> cycles,
+        IQueryable<AppraisalCycleTarget> targets,
+        IQueryable<Employee> employees,
+        IQueryable<OrganizationUnit> units,
+        IQueryable<PerformanceAppraisal> appraisals,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var overlaps = new List<AppraisalCycleOverlap>();
+        if (employeeIds.Count == 0) return overlaps;
+        var asked = employeeIds.ToHashSet();
+
+        var siblings = await cycles
+            .AsNoTracking()
+            .Where(c => c.TenantId == tenantId
+                     && c.Id != cycle.Id
+                     && c.AppraisalType == cycle.AppraisalType
+                     && c.Year == cycle.Year
+                     && c.Status == AppraisalCycleStatus.Open)
+            .OrderBy(c => c.CycleName).ThenBy(c => c.Id)
+            .Select(c => new { c.Id, c.CycleCode, c.CycleName })
+            .ToListAsync(cancellationToken);
+        if (siblings.Count == 0) return overlaps;
+
+        var siblingIds = siblings.Select(s => s.Id).ToList();
+        var held = (await appraisals
+                .AsNoTracking()
+                .Where(a => a.TenantId == tenantId
+                         && siblingIds.Contains(a.AppraisalCycleId)
+                         && asked.Contains(a.EmployeeId)
+                         && a.Status != AppraisalStatus.Withdrawn)
+                .Select(a => new { a.AppraisalCycleId, a.EmployeeId })
+                .ToListAsync(cancellationToken))
+            .ToLookup(a => a.AppraisalCycleId, a => a.EmployeeId);
+
+        foreach (var sibling in siblings)
+        {
+            var scope = await ResolveCycleAsync(targets, employees, units, tenantId, sibling.Id, cancellationToken);
+            var shared = asked.Where(scope.InScope.Contains).ToHashSet();
+            shared.UnionWith(held[sibling.Id]);
+            if (shared.Count > 0)
+                overlaps.Add(new AppraisalCycleOverlap(sibling.Id, sibling.CycleCode, sibling.CycleName, shared));
+        }
+
+        return overlaps;
     }
 
     /// <summary>

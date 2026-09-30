@@ -206,6 +206,11 @@ public class CalibrationSessionsController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // A cycle that is not open (performance closure E-d2b) — a rule, answered 422; it answered 500.
+            return BusinessRuleRejected(ex, "creating a calibration session");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating calibration session");

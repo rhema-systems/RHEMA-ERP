@@ -305,6 +305,11 @@ public class AppraisalConversationsController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // A cycle that is not open (performance closure E-d2b) — a rule, answered 422.
+            return BusinessRuleRejected(ex, "deleting a conversation");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting appraisal conversation {Id}", id);

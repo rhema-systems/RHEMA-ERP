@@ -380,24 +380,8 @@ public class WithdrawAppraisalDto
     public string Reason { get; set; } = string.Empty;
 }
 
-public class CreatePerformanceAppraisalDto : CreateDtoBase
-{
-    [Required]
-    public Guid AppraisalCycleId { get; set; }
-
-    [Required]
-    public Guid EmployeeId { get; set; }
-
-    [Required]
-    [Range(2000, 2100)]
-    public int Year { get; set; }
-    
-    [Required]
-    public DateOnly StartDate { get; set; }
-    
-    [Required]
-    public DateOnly EndDate { get; set; }
-}
+// CreatePerformanceAppraisalDto went with the raw create in performance closure E-d2b (D-20): an appraisal is
+// generated, on an Open cycle.
 
 /// <summary>
 /// HR's correction of a generated appraisal's window — its year and dates — and nothing else
@@ -5845,8 +5829,15 @@ public class CoveragePreviewDto
     /// <summary>Covered / Total * 100, rounded to 1 decimal place.</summary>
     public decimal CoveragePercentage { get; set; }
 
-    /// <summary>True only when EmployeesWithoutTemplate == 0 and ConflictCount == 0.</summary>
+    /// <summary>
+    /// True only when generation would go through: the cycle is Open (performance closure E-d2b), nobody resolves to no
+    /// template or to a tie, and nobody it would create is already covered by another open cycle of the same type and
+    /// year (D-60). <see cref="GenerationBlockedBy"/> says why not.
+    /// </summary>
     public bool IsGenerationSafe { get; set; }
+
+    /// <summary>Why generation would be refused, in the order it checks; empty when it would go through.</summary>
+    public List<string> GenerationBlockedBy { get; set; } = new();
 
     /// <summary>False if no active template assignments exist for the cycle.</summary>
     public bool HasActiveTemplates { get; set; }
@@ -5863,9 +5854,10 @@ public class CoveragePreviewDto
     public List<TemplateCoverageBreakdownDto> TemplateBreakdown { get; set; } = new();
 
     /// <summary>
-    /// Other cycles of the same type and year whose scope overlaps this one's.
+    /// Other cycles of the same type and year whose scope overlaps this one's — for an Open one, also whoever
+    /// already holds an appraisal there (D-60).
     ///
-    /// Advisory only — opening is refused solely by the Open / InProgress entries, because a
+    /// Advisory only for a Draft entry — opening, and generation, are refused solely by the Open entries, because a
     /// Draft cycle appraises nobody and may never be opened. Draft entries are reported here
     /// so the clash is visible while there is still time to re-scope, rather than surfacing
     /// as a refusal at the moment someone tries to open.
@@ -5881,7 +5873,10 @@ public class CycleScopeOverlapDto
     public string CycleName { get; set; } = string.Empty;
     public AppraisalCycleStatus Status { get; set; }
     public int SharedEmployeeCount { get; set; }
-    /// <summary>True when this overlap would refuse an attempt to open the cycle.</summary>
+    /// <summary>
+    /// True when this overlap would refuse an attempt to open the cycle — the other cycle is Open — and so, once this
+    /// one is open, generation for the people it shares (D-60).
+    /// </summary>
     public bool BlocksOpening { get; set; }
 }
 

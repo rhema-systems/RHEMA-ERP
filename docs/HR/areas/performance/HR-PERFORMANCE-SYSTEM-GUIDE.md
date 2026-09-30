@@ -46,6 +46,14 @@ and its completed appraisals close with it; a cycle is deleted only while nothin
 points at it, and the set-up goes with it, and only the Admin tier sees *Delete* (P-12 fixed);
 reminders go only to an open cycle; the dashboard opens on the open cycle with the most appraisals;
 and the cycle's actions answer a refusal with a 422 that says why.
+**And for lane E, slice E-d2b** (the live cycle, 2026-09-30): § 1.4 and chapters 14, 28 and 38 — an
+appraisal's work, the employee's goals and the calibration panels move only while their cycle is open (a
+draft cycle is still being set up, a closed one is the year's record), and the forms read not editable
+otherwise; appraisals are generated once the cycle is open, and generation refuses anyone another open
+cycle of the same type and year already covers or appraises, naming them; the coverage preview says why
+it would refuse; the raw create is gone; the peer's routes take a peer's evaluation only; HR does not
+advance their own appraisal, and the deadline sweep leaves it alone. The other chapters' walks run on
+APC2026, which is open, so they read as before.
 **The database was rebuilt on 2026-09-29**: Rule 2, Rule 9, the demo tables and the Efua arithmetic give its figures (Efua 88.56, Cynthia 87.00, Efua's appeal window to 6 October). The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
 **Seventh in the series**, after Recruitment, Employees, Leave, Attendance & Time, Company Schedule and Staff Travel.
 
@@ -492,7 +500,13 @@ Enums serialise as their **member names**, so what you see on screen is what the
 **`AppraisalCycleStatus`** — `Draft` → `Open` → `Closed`, moved only by the open and close actions (a
 cycle is always created as a Draft, whatever a request says). Only a cycle that has never been opened can
 be deleted; a closed cycle refuses every edit. *(`InProgress` went on 2026-09-30, performance closure
-D-14: only the demo seeder ever wrote it, and the demo cycle was moved to Open.)*
+D-14: only the demo seeder ever wrote it, and the demo cycle was moved to Open.)* **The appraisal's work
+happens while its cycle is `Open`** (since 2026-09-30, slice E-d2b): appraisals are generated only then,
+and every write on an appraisal (the forms, nominations, HR's review, the return, the advance, the
+acknowledgment, responses, appeals, conversations, review events, date corrections, attachments), on the
+employee's goals and on a calibration panel is refused on a draft or closed cycle, naming it. A withdrawal
+and a removal still go through — they end the work — and so do the records that outlive or precede a
+running cycle: outcomes, PIPs, proposals, development plans, the journal, check-ins, unit and company goals.
 
 **`AppraisalStatus`** (the record's own coarse lifecycle) — `Draft`, `Active`, `Governance`,
 `Appealed`, `Completed`, `Closed`. Everything between opening and HR sign-off is `Active`; the
@@ -1828,7 +1842,7 @@ Opening the cycle sits before all of that and is checked separately.
 | Button | Shown when | What it does |
 |---|---|---|
 | **Open cycle** | Draft only | *(absent here — the cycle is already open)* |
-| **Generate appraisals** | any non-Closed cycle | Creates the appraisal records for everyone in scope |
+| **Generate appraisals** | an **open** cycle only (since 2026-09-30, slice E-d2b — it was offered on a draft too) | Creates the appraisal records for everyone in scope who has none yet. **Refused when anyone it would create is already covered by another open cycle of the same type and year** — in that cycle's scope, or holding an appraisal there — the message naming the cycle and the people |
 | **Send reminders** | open, not closed | Raises an in-app notice for every phase overdue or closing soon, to everyone in scope |
 | **Close cycle** | open, not closed | Irreversible; a closed cycle refuses every edit. **Refused while the cycle's work is unfinished** — any appraisal not started, in progress, in governance or under appeal, or any completed one still inside its appeal window; the message counts what is left, or names the day the last window closes. Its completed appraisals close with it |
 
@@ -1841,8 +1855,10 @@ Opening the cycle sits before all of that and is checked separately.
 | **Without a template** | **0** | Blocks generation until zero |
 | **Template conflicts** | **0** | Two templates tied at the same priority |
 
-Below them, an amber card appears **only** when generation would be refused. On this database it does
-not appear — coverage is clean.
+Below them, an amber card appears **only** when generation would be refused, and lists why (since
+2026-09-30): the cycle not open, people with no template, ties, or people another open cycle of the year
+already covers. On this database it does not appear — APC2026 is open and coverage is clean. On a
+**draft** cycle it always appears: generation waits for the open.
 
 ### 👁 Tab 1 — Overview
 Two cards. **Cycle**: code, type, year, period, settings profile, status, opened (date + by whom),
@@ -1986,14 +2002,14 @@ order."* Columns: **Date · Event · Phase · Kind**, where Kind is *Deadline* o
 | Element | Endpoint | Table |
 |---|---|---|
 | Header + Overview | `GET api/AppraisalCycle/{id}` | `AppraisalCycles` |
-| Tiles + Coverage tab | `GET …/{id}/coverage-preview` | read-only simulation; `isGenerationSafe` is the single flag to check |
+| Tiles + Coverage tab | `GET …/{id}/coverage-preview` | read-only simulation; `isGenerationSafe` is the single flag to check, and `generationBlockedBy` says why not (since 2026-09-30, slice E-d2b: it read template gaps and ties only, so it said *safe* for a draft or an overlap generation refuses) |
 | Progress tab | `GET …/{id}/progress` | not fetched at all while the cycle is Draft |
 | Calendar tab | `GET …/{id}/calendar` | derived, never stored |
 | Targets | `GET/POST/PUT/DELETE …/{cycleId}/targets[/{id}]` | `AppraisalCycleTargets` |
 | Exclusions | `…/api/AppraisalCycleTarget/{targetId}/exclusions` | `AppraisalCycleTargetExclusions` |
 | Template assignments | `api/AppraisalCycleTemplates` (`by-cycle`, `bulk-assign`, `resolve/{cycle}/{employee}`) | `AppraisalCycleTemplates` |
-| **Open cycle** | `POST …/{id}/open` | 422 (400 until 2026-09-30) when another open cycle of the same type and year covers any of the same employees — **and the message names them**. Also notifies everyone in scope: the people a generation would appraise (since 2026-09-30 — it also reached leavers, inactive targets and anyone holding a post a template names) |
-| **Generate appraisals** | `POST …/{id}/generate-appraisals` | creates `PerformanceAppraisals`, **takes the criterion snapshot**, creates the self and manager evaluator records and the review events. **Skips anyone who already has an appraisal in the cycle** |
+| **Open cycle** | `POST …/{id}/open` | 422 (400 until 2026-09-30) when another open cycle of the same type and year covers any of the same employees — in its scope, or (since slice E-d2b) holding an appraisal there — **and the message names them**. Also notifies everyone in scope: the people a generation would appraise (since 2026-09-30 — it also reached leavers, inactive targets and anyone holding a post a template names) |
+| **Generate appraisals** | `POST …/{id}/generate-appraisals` | creates `PerformanceAppraisals`, **takes the criterion snapshot**, creates the self and manager evaluator records and the review events. **Skips anyone who already has an appraisal in the cycle**. **Since 2026-09-30 (slice E-d2b): an open cycle only** (a draft generated, skipping the open's overlap check and its notice), and a 422 when anyone it would create is in the scope of another open cycle of the same type and year, or holds an unwithdrawn appraisal in one — naming the cycle and the people, and creating no one. The open checked the scope it had then; a target added since, or a person who moved posts after another cycle generated theirs, is caught here. It is the only way an appraisal comes to exist: the raw `POST api/PerformanceAppraisals` is gone |
 | **Send reminders** | `POST …/{id}/deadline-reminders` | repeat-safe — an identical unread reminder is skipped rather than duplicated. **An open cycle only** — a 422 for a draft or a closed one (a closed cycle's were sent until 2026-09-30) |
 | **Close cycle** | `POST …/{id}/close` | **since 2026-09-30 (slice E-d2a)**: a 422 while any appraisal is Draft, Active, in governance or under appeal (*"…unfinished: 2 not started (Draft) and 1 in progress (Active)"*), or any Completed one is inside its appeal window (*"…the last one closes on 7 Oct 2026"*); then every Completed appraisal moves to **Closed** in the same save — one with no score as it stands. It used to read no appraisal: it closed whatever was in the cycle, cut the open appeal windows, and left the appraisals Completed. An appraisal that will not be finished is withdrawn first (chapter 31) |
 
@@ -3590,8 +3606,8 @@ first.
 | Control | Endpoint |
 |---|---|
 | My queue | `GET api/PeerEvaluations/me` — evaluator from the token; **there is no way to open somebody else's form** |
-| Load one | `GET api/PeerEvaluations/{id}` |
-| Draft | `POST api/PeerEvaluations/{id}/draft` — **422 once submitted** |
+| Load one | `GET api/PeerEvaluations/{id}` — a peer's evaluation only: since 2026-09-30 (slice E-d2b) any other evaluation id answers 404 on all three routes; before, the appraisee's own self-evaluation or the manager's could be loaded, saved and submitted here, past their own gates |
+| Draft | `POST api/PeerEvaluations/{id}/draft` — **422 once submitted**, and while the cycle is not open |
 | Submit | `POST api/PeerEvaluations/{id}/submit` — everything required must be scored; **422 names how many are outstanding** |
 
 **Peer nominations** live on the appraisal, not here: `…/peer-nominations/batch` to nominate,
@@ -5278,8 +5294,8 @@ resolved.
 
 | Control | Endpoint |
 |---|---|
-| Sweep | `POST api/DeadlineEnforcement/enforce/{cycleId}` — **honours `autoLockOnDeadline`**; check `autoLockEnabled` on the result and say so, rather than reporting a successful no-op |
-| Advance one | `POST api/DeadlineEnforcement/advance/{appraisalId}` — `targetSubStatus` optional |
+| Sweep | `POST api/DeadlineEnforcement/enforce/{cycleId}` — **honours `autoLockOnDeadline`**; check `autoLockEnabled` on the result and say so, rather than reporting a successful no-op. Since 2026-09-30 (slice E-d2b) an **open** cycle only (422 otherwise, 404 for an unknown one), and it leaves the officer's own appraisal for another officer — the result's messages say which |
+| Advance one | `POST api/DeadlineEnforcement/advance/{appraisalId}` — `targetSubStatus` optional. Since slice E-d2b: **403 on the officer's own appraisal** (another HR officer or an administrator advances it), and 422 while its cycle is not open |
 
 Both sit on **`HR.Performance.Write`**, and the advancing officer comes from the token and is written to
 the audit log.

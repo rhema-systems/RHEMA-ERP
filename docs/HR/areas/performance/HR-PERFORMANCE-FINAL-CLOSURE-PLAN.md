@@ -73,9 +73,13 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    close waits for finished work and lapsed appeal windows, D-57 any work blocks a delete, D-58 the dashboard's
    default cycle). ~~Slice **E-d2a** (the cycle's own rules)~~ **Done 2026-09-30** (`run-final-lifecycle.mjs`
    601/601 twice; regression 3104/3113; lane E's E-d2a State block — the close, the delete, reminders, the default
-   cycle, 422s; and the harness's minute-long pauses traced to the API's rate limiter). **Slice E-d2b (the live
-   cycle) is next** — source-check it first (its questions are in the lane E slice list), and read § 5's *Added by
-   lane E-c*, *E-d1* and *E-d2a* rows.
+   cycle, 422s; and the harness's minute-long pauses traced to the API's rate limiter). ~~Slice **E-d2b** (the live
+   cycle)~~ **Done 2026-09-30** (source-checked first: § 1l D-59–D-65; `run-final-lifecycle.mjs` 706/706 twice;
+   regression 3226/3235; lane E's E-d2b State block — generation and an appraisal's work, goals and panels on an Open
+   cycle only, the overlap at generation, the raw create gone; every suite now opens and tears down its cycles).
+   **Slice E-e (templates and settings) is next** — source-check it first, and read § 5's *Added by lane E-c* to
+   *E-d2b* rows. **Before any more harness runs on UAT, read § 5's first E-d2b row** — the harness's template
+   approvals notify every harness login, eight demo personas included (a UAT clean-up waits on the user's go).
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -216,6 +220,18 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | D-57 | **What stops a delete.** Only an opened cycle was refused, and the delete removed the cycle row alone | **Any work**: never once opened (as today), and refused while anything but its configuration points at it — appraisals (withdrawn included), goals, calibration sessions, check-ins, journal entries, review events, development plans — naming them; its targets, exclusions and template links are removed with it | E-d2a |
 | D-58 | **The HR dashboard's default cycle** — the most recently updated Open cycle, so a harness or trial cycle left Open displaces the real one | **The Open cycle with the most appraisals in play**, then the most recently opened | E-d2a |
 
+### 1l. Decisions from slice E-d2b's source check — settled with the user, 2026-09-30
+
+| # | Question | Decision (2026-09-30) | Affects |
+|---|---|---|---|
+| D-59 | **Which writes need an Open cycle** (D-43 said "every evaluation write"; no write in the module read the cycle's status) | **The appraisal's work, the employee's goals and the calibration panels.** Every write on an appraisal or its children — the three forms (their goal assessments inside), nominations, HR's review and sign-off, the return, HR's advance and the deadline sweep, the acknowledgment, both response routes, appeals, conversations, review events, the date correction, the raw Draft → Active, the appraisal's attachments; the employee's goals (create, edit, delete, submit, approve, send back, lock, lock the set, unlock, progress, and a check-in's goal updates); calibration sessions (create, open, adjustments, commit). **Left as they are:** withdrawal and removal (HR can still clear an appraisal stranded on a cycle that is not open), closing a Completed appraisal, and the records that outlive or precede a running cycle — outcomes, PIPs, proposals, development plans, the journal, check-ins themselves, unit and company goals. The forms read not editable on a cycle that is not open | E-d2b |
+| D-60 | **The overlap check at generation** — it ran only at the open, skipped when the targets reached nobody, and never again | **Refused, naming them**: generation refuses when anyone it would create is in the scope of another Open cycle of the same type and year, **or already holds an unwithdrawn appraisal in one**; the 422 names the cycle(s) and the people, and nothing is created — HR excludes them or closes the other cycle. The coverage preview's *safe to generate* says the same, and reads false while the cycle is not Open | E-d2b |
+| D-61 | **The harness's teardown** — `withdrawAndClose` cannot finish a signed-off appraisal, one under appeal, or a Completed one inside its appeal window | **API first, SQL for the rest**: one `setup.mjs` helper every suite runs in a `finally` — withdraw what HR can through the API; then, by SQL and on the suite's own rows only, withdraw what the API will not and lapse the appeal windows; then close through the API and assert it (one check per suite). A never-opened scratch cycle is deleted. The close rule itself stays proven by the lifecycle suite's API-only E-d2a section | E-d2b, S8 |
+| D-62 | **Two defects beyond the rows**: (a) the peer detail, draft and submit load any evaluation the caller is the evaluator of — the appraisee's self-evaluation or the manager's evaluation can be submitted through `api/PeerEvaluations/{id}/submit`, past their own gates, and where peers may not score KPIs the submit deletes that row's KPI scores; (b) HR's audited advance has no two-actor check | **Both in E-d2b**: the peer routes take peer evaluations only (any other row answers 404); HR's advance refuses its appraisee (403), and the deadline sweep skips and logs an HR officer's own | E-d2b |
+| D-63 | **A0's proof** (`run-final-scoring`) — it re-weights template T2 through the API after generation, which the template lock refuses once T2's cycle is open | **Proved by SQL**: the API's refusal to re-weight T2 while its cycle is open is asserted, then T2's section weights are changed by SQL, the three checks run as before, and a `finally` restores them by SQL — which survives E-e's wider lock | E-d2b |
+| D-64 | **`buildFixture()`'s light and full cycles** — both Annual in one year, both appraising the same person: the overlap rule refuses the second | **The full cycle becomes a MidYear cycle** (the type drives nothing but the by-type list, the edit pin and the overlap rule); each cycle generates over a post only its appraisee holds (D-44) | E-d2b, S8 |
+| D-65 | **The raw create's probes** — W3 slice 10 asserts 403 for it (the deleted route answers 405), and hr-portal slice 5 hangs its fixtures off the tenant's first real post (so it has never run on UAT) | **W3's row asserts the route is gone** (404 or 405, as its removed-route row does; W3 still does not run on UAT — real staff). **hr-portal slice 5 mints its own post, generates over it, and runs once on UAT**; its probe drops the raw create | E-d2b, S8 |
+
 ---
 
 ## 2. Lane status
@@ -228,7 +244,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ☑ 2026-09-29 — L-a 157/157 twice; L-b 244/244 twice; L-c 261/261 twice (one suite holds L-b and L-c); staged |
 | C | One appeal machine | 2 days (+0.5–1, D-36) | D-22, D-34, D-35, D-36, D-37, D-38 | ☑ **complete 2026-09-30**; C10 was batch 1's. Two slices (D-36): C-a ☑ — 209/209 twice, regression 2089/2098, committed effb567f5. C-b ☑ — source-checked (§ 1f D-37, D-38), `run-final-appeals.mjs` 397/397 twice, regression 2309/2318; staged |
 | D | Peer nomination and evaluation integrity | 1 day (1.5–2, the source check) | D-39, D-40, D-41 | ☑ 2026-09-30 — source-checked (§ 1g); `run-final-nominations.mjs` 186/186 twice, regression 2496/2505; staged |
-| E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | ~12 days (D-42; was 4) | D-10, D-14, D-17, D-20, D-42–D-58 | ◐ source-checked 2026-09-30 (§ 1h); seven slices E-a…E-g. E-a ☑ (130/130 twice, regression 2631/2640), E-b ☑ (`run-final-lifecycle.mjs` 276/276 twice, regression 2777/2786), E-c ☑ (source-checked, § 1i; 391/391 twice, regression 2892/2901; D-14's migration on UAT), E-d split in two (§ 1j): E-d1 ☑ (542/542 twice, regression 3043/3052), E-d2 split in two (§ 1k): E-d2a ☑ (601/601 twice, regression 3104/3113); staged. E-d2b next |
+| E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | ~12 days (D-42; was 4) | D-10, D-14, D-17, D-20, D-42–D-58 | ◐ source-checked 2026-09-30 (§ 1h); seven slices E-a…E-g. E-a ☑ (130/130 twice, regression 2631/2640), E-b ☑ (`run-final-lifecycle.mjs` 276/276 twice, regression 2777/2786), E-c ☑ (source-checked, § 1i; 391/391 twice, regression 2892/2901; D-14's migration on UAT), E-d split in two (§ 1j): E-d1 ☑ (542/542 twice, regression 3043/3052), E-d2 split in two (§ 1k): E-d2a ☑ (601/601 twice, regression 3104/3113), E-d2b ☑ (source-checked, § 1l; 706/706 twice, regression 3226/3235); staged. E-e next |
 | F | Recommendations, proposals, probation, PIP chain, segregation of duties | 2.5 days | D-12, D-19; **F1 waits on D-18** (the finish plan's lane 9) | ☐ |
 | G | Notifications on the platform topics | 5 days | D-21, D-28 | ☐ |
 | H | Nightly sweep and the advance path | 2.5 days | D-16, D-21 | ☐ |
@@ -2371,7 +2387,8 @@ with each:
       nothing but its set-up points at it, and the set-up with it (D-57); reminders for an Open cycle only;
       the dashboard's default cycle (D-58); the cycle actions' 422s. Harness: `run-sliceD`/`run-sliceE`
       withdraw, then close.
-- [ ] **Slice E-d2b — the live cycle.** Generation and every evaluation write need an Open cycle (D-43),
+- [x] **Slice E-d2b — the live cycle.** *(2026-09-30 — the E-d2b source check and State blocks below; § 1l
+      D-59–D-65.)* Generation and every evaluation write need an Open cycle (D-43),
       generation runs the overlap check; the raw `POST` deleted (D-20, D-44). Harness: every suite opens
       and tears down its cycles — a teardown withdraws what is unfinished and waits out, or lapses, the
       appeal windows (`withdrawAndClose` in `setup.mjs` is the start); `buildFixture()` and `hr-portal`
@@ -2863,6 +2880,157 @@ and `run-sliceE` close through it and assert the close (+1 check each). `buildLi
 and cl2's last change back 30 days by SQL** to lapse LN's seven-day appeal windows — and closes it in a `finally` if
 the section dies; E-c's overlap refusal is now a 422. The demo pack's `060` comment names the 422. `api.mjs` logs
 any call over 10 s to stderr (`⏱ slow request`), so a run's log says where it waited.
+
+**E-d2b source check (2026-09-30, after E-d2a; line numbers as of `b363075ed`).** Three read-only surveys — every write
+route in the module, the harness's cycles, and the screens, demo pack and seeders — then every claim that decides the
+build read again in source; the user settled seven questions (§ 1l, D-59–D-65). What they found:
+- **UAT:** one cycle is not the harness's — APC2026, Open, 107 appraisals. The other 776 are `E2E` cycles: 726 Draft (689
+  holding appraisals, 1,232 of them) and 50 Closed (37 holding 111). An Open rule freezes harness rows only.
+- **Generation refused only a Closed cycle** (ACS :655), and its comment said so on purpose ("generate and review before
+  opening"); the controller's doc and the cycle list's already said *after opening*. The cycle page offered *Generate*
+  on a Draft (`canGenerate = !isClosed`, `cycles/[id]/page.tsx:327`); the guide's ch. 14 table said "any non-Closed
+  cycle" (:1831). No demo walk generates or writes on a Draft.
+- **The overlap check lived only in the open** (ACS :477-510), skipped when the targets reached nobody, and never ran
+  again: a target added to an open cycle, or a person moving posts mid-year, got a second appraisal of the same type and
+  year (§ 5's E-c row). The coverage preview's *safe to generate* read template gaps and conflicts only (CCS :190).
+- **No write in the module read the cycle's status** — only generation, the target and exclusion writes, reminders and the
+  cycle's own edits did. Six writes pass the step gate (the self and manager submissions, the peer draft and submission,
+  the acknowledgment, the sign-off); the rest check the appraisal's status their own way or not at all. The forms'
+  *editable* flags read the appraisal's status alone.
+- **The raw create** had no screen and no caller in `src/`; it checked nothing — not the cycle, not the employee — took no
+  template, snapshot or evaluations, and answered a duplicate with 500. Its callers: `buildFixture()` (seven suites and
+  `probe-lane3`), hr-portal slice 5 and its probe; W3 slice 10 asserted 403 for it, and would **fail** on the 405 the
+  deleted route answers (not pass vacuously). The only other writer of an appraisal row is the demo seeder (APC2026 and
+  the Rule 8 five, straight into the context).
+- **The harness:** only slice E and cycle CL opened before generating; every other closure cycle generated on a Draft
+  and stayed one. One pair would collide under the overlap rule — `buildFixture()`'s light and full cycles (both Annual,
+  one year, one person). A0 re-weights template T2 through the API after generation, which the template lock refuses
+  (409) once T2's cycle is open. The lifecycle suite asserted two states the rule makes unreachable: LG "a Draft with
+  appraisals" (:749) and WD "never opened, holding appraisals" (:1176-1180). `withdrawAndClose` cannot finish a
+  signed-off appraisal, one under appeal, or a Completed one inside its appeal window — and nearly every closure profile
+  has seven-day appeals on. hr-portal slice 5 hangs its fixtures off the tenant's first real post, so generating over
+  it would sweep real holders in.
+- **The demo pack:** `060` generates on APC2026 (Open — unchanged); its fallback, when APC2026 is missing, creates a Draft
+  and would now be refused. `061` and `062` write on APC2026 only.
+
+**Beyond the rows** (each verified in source): (1) **the peer routes write any evaluation the caller is the evaluator
+of** — the detail, draft and submit match on id and evaluator only (PES :281, :391; the assignment list alone filters
+`EvaluatorRole.Peer`), so the appraisee's self-evaluation or the manager's evaluation can be submitted through
+`api/PeerEvaluations/{id}/submit`, past the nomination count, the mid-year conversation gate, the narrative and
+recommendations, the hand-off to HR's review and the pre-calibration capture — and where peers may not score KPIs, the
+submit deletes that row's KPI scores (D-62); (2) **HR's advance has no two-actor check** (AWS :214) — E-a gave the rule to
+the sign-off, the return, the correction, the removal and the raw routes (D-62); (3) creating a calibration session
+validated nothing about its cycle, not even the tenant (the Open rule now reads it). Known already, left to their slices:
+the conversation delete checks nothing (E-f); nominations in Manager mode on a Governance or Appealed appraisal and an
+attachment on a withdrawn one (E-g); a cycle's template links are writable once it is closed (E-e).
+
+**E-d2b State (2026-09-30): DONE — built, verified on UAT, staged.** No migration. What exists now:
+- **The live-cycle rule (D-43, D-59)** — `AppraisalLiveCycle` (new): an appraisal's work is done while its cycle is Open.
+  Each guarded write names its action and the cycle — *"The self-evaluation cannot be saved: its cycle, Annual 2026, has
+  not been opened — an appraisal's work is done while its cycle is open."*, or *"… is closed."* — and answers 422. The step
+  gates read it first: `AppraisalGateFacts` carries the cycle's status and name from the lifecycle's one projection, and
+  `AppraisalGates.EnsureAt` refuses before any step rule, so the six gated writes (both submissions, the peer draft and
+  submission, the acknowledgment, the sign-off) answer the cycle first.
+- **What it covers** — on the appraisal: the self and manager forms (save and submit, their goal assessments inside), every
+  nomination change, the hand-off to HR's review, the return, HR's advance, the acknowledgment and the sign-off, both
+  response routes, the appeal (file, pick up, decide, move the re-evaluation deadline, finalise after a remand),
+  conversations (book, change, remove, mark held), review events (book, change, submit, complete, record progress, attach,
+  remove, remove an attachment, the interim finalise), the date correction, the raw Draft → Active (`PATCH {id}/status` and
+  the workflow `transition`), and the appraisal's attachments; the employee's goals — set, edit, remove, submit, approve,
+  send back, lock, lock the set, unlock, progress (add, change, remove) and a check-in's goal updates (add, change,
+  remove); calibration — set up, move to another cycle, open, adjustments (record, change, remove), commit. **Left alone**
+  (D-59): the withdrawal and the removal, closing a Completed appraisal, outcomes, PIPs, proposals, development plans, the
+  journal, check-ins themselves, unit and company goals.
+- **The forms read not editable** on a cycle that is not open — the self and manager contexts' `isEditable` and the
+  workflow's `IsEditableByRole` fold the cycle in; the self-evaluation page's banner names it among the reasons.
+- **Generation (D-60)** — on an Open cycle only: a Closed one is refused as before, a Draft with *"Appraisals are generated
+  once the cycle is open: open it first — …"*. Then the overlap, over whoever it would create: anyone in the scope of
+  another Open cycle of the same type and year, **or holding an unwithdrawn appraisal in one**, refuses the whole
+  generation (422), naming each cycle and up to ten people (*"and N more"*); nothing is created. One reading,
+  `AppraisalCycleScope.FindOpenOverlapsAsync`, serves the open, generation and the coverage preview — so the open now
+  reads held appraisals too.
+- **The coverage preview** — `GenerationBlockedBy`: generation's refusals in its own order (the cycle's status; no targets,
+  no templates, or targets that reach nobody; no template; ties; the overlap over the people still to be appraised,
+  naming the cycles). *Safe to generate* is "no reasons", so it reads false while the cycle is not Open.
+- **The raw create is gone (D-20, D-44)** — `POST api/PerformanceAppraisals`, with its service method, numbering helper,
+  DTO and mapper; the route answers 405. Generation is the one door to an appraisal row (the demo seeder aside).
+- **Beyond the rows (D-62)** — the peer detail, draft and submit take peer evaluations only (any other row is 404); HR's
+  advance refuses its own appraisee (403, *"You cannot advance your own appraisal: another HR officer or an administrator
+  does."*) before the cycle rule; the deadline sweep runs on an Open cycle only (422; an unknown cycle 404) and leaves an
+  HR officer's own appraisal alone, logging it and saying so in its result. Creating a calibration session reads its cycle
+  — an unknown one, or another tenant's, is not found.
+- **422s** — ten routes that let the rule fall through to a 500 answer it 422: the conversation delete, the review event
+  delete and its attachment delete, the calibration create, the check-in's three goal-update routes, the goal's progress
+  change and removal, and the deadline sweep.
+- **The screens** — the cycle page offers *Generate* on an Open cycle only (it offered it on a Draft); its warning card
+  lists the preview's reasons; the competing-cycles badge reads *Blocks opening* on a Draft, *Blocks generation* on an
+  Open cycle, or *Advisory*; the generate dialog names the overlap refusal.
+
+**Where the build refines the rows** (each deliberate; say if one should go back):
+1. **The open reads held appraisals too** — D-60 names generation; one reading serves both, so a cycle cannot open over
+   someone another open cycle already appraises (a person who moved posts after its generation).
+2. **The preview says why** — D-60 asked that *safe to generate* agree with generation; `GenerationBlockedBy` lists the
+   reasons, and the cycle page shows them.
+3. **The cycle rule answers first** — before the step, the withdrawal and the appeal rules: on a closed cycle the refusal
+   names the cycle, not the step. E-d2a's appeal on closed CL now reads that refusal.
+4. **The self and manager forms read not editable; the peer form carries no such flag** and is refused on save (§ 5).
+5. **The calibration create validates its cycle** — it validated nothing, not even the tenant (the source check's third
+   item beyond the rows).
+6. **The sweep's skip is visible** — D-62 asked for a log line; the result's messages carry it too, so HR sees which
+   appraisal it left for another officer.
+7. **hr-portal slice 5 mints its own unit as well as its posts** — D-65 named a post; a unit of its own keeps its manager
+   chain and its org reads off real staff too.
+
+**Verified** (Staging API on `ErpSystemDB_UAT`, the build; no pending migration, history 105):
+- `run-final-lifecycle.mjs` **704/706 on its first run**: two of the suite's own checks asserted what E-d2b changes —
+  E-c's *ec-scope* expected *safe to generate* on the Draft EC (it now asserts the exact reasons: not opened, and that
+  alone), and E-d2a's appeal on closed CL expected the completed-appraisal text (the cycle's refusal answers first).
+  Each rewritten one for one; then **706/706, and 706/706 again in the regression**. E-d2b's 107 checks — generation on
+  an open cycle (5), the overlap in all its arms (24), the raw create gone (3), the writes on a cycle that is not open
+  and the ones left alone (57), the peer routes (6), HR's advance and the sweep (10), the team summary now that WD and WX
+  run (2) — plus the run's teardown (1); three of E-d2a's WD checks moved into it (601 + 108 − 3 = 706): WD now opens
+  before it generates, so its never-opened-with-appraisals arm runs against LD, planted back to Draft by SQL. Each E-d2b check asserts what the old code did
+  not do — it generated on a Draft, ran no overlap at generation, wrote on any cycle, took any evaluation on the peer
+  routes and let HR advance their own — established by reading the old code, not by running the old build.
+- Regression (`run-all.mjs`, fifteen suites, about six minutes): interim reviews 134/134, attachments 66/66, slice C
+  53/53, **slice D 27/27**, **slice E 19/28 — the same 9 stale**, gates 33/33, lane A 188/188, lane P 339/339, lane B1
+  257/257, lane L-a 158/158, lanes L-b/L-c 297/297, lane B2 364/364, lane C 398/398, lane D 187/187, **lane E 706/706**.
+  **3226/3235** — E-d2a's 3104/3113 plus one teardown check in each of the fourteen other suites, the lifecycle suite's
+  105, and **three of slice D's criteria checks that had never run**: they are conditional on the appraisal carrying
+  criteria, and the raw-created one never did (the generated one does). No assertion lost.
+- hr-portal slice 5 **48/48 on UAT** — its first run there: its cycle appraised only the employee it minted, in the unit
+  it minted, and ended Closed.
+- After the runs: only APC2026 is Open, no cycle is at 3, the default profile is *Standard Annual Appraisal*, and the
+  run's 74 harness cycles are Closed.
+- API log: no request answered 5xx (793 responses logged, every one a 4xx refusal). Otherwise UAT's missing SMTP (2,403
+  failed sends), defect #23's payroll-profile FK (231 fixture employees), the HR/Identity reconciliation's one demo
+  employee with two eligible logins (TDC/00052, three runs), and the platform's notification clean-up failing its bulk
+  `UPDATE` 11 times in 1.5–5 s under the run's notification load. Six template submissions took 10–15 s; **each wrote
+  some 1,800 notification rows** — its "Approval Required", in-app and by email, to 907 logins, eight demo personas
+  among them: § 5's first E-d2b row. The log scan found it; E-d2b's code did not cause it (its rows go back to UAT's
+  rebuild on 2026-09-29).
+- Frontend: scoped `tsc` over the three changed files, 0 errors — the probe file's planted errors were reported; ESLint
+  clean. Not browser-walked.
+- Demo: APC2026 captured on the E-d2a build before any run, on this build before its runs, and after them all — its
+  107 phases, calendar, progress, in-scope list (102), targets, HR dashboard, default cycle and review desk (107 rows)
+  byte-identical across the three; the coverage preview identical row for row (103), its one change the new
+  `generationBlockedBy: []` (APC2026 is Open and safe to generate). What the screens show differently: *Generate* on an
+  Open cycle only (APC2026's page is unchanged), the warning card's reasons, the competing-cycles badge, the generate
+  dialog and the self-evaluation banner. The guide's § 1.4 and chapters 14, 28 and 38 say so.
+
+**Harness changes in the slice:** `setup.mjs` gains D-61's teardown — `tearDown(cycleIds, tokens)` in every suite's
+`finally`: it withdraws, as the admin, what HR can through the API; then, by SQL on the run's own rows, withdraws what the
+API will not and moves the Completed appraisals' appeal anchors back 60 days; then closes each cycle through the API (a
+never-opened scratch cycle is deleted) and asserts the lot — one check per suite. Every builder opens its cycles
+(`openCycles`); `buildFixture()` generates over a post only its subject holds (template TI) instead of raw-creating, and
+its full cycle is MidYear (D-64); `buildLifecycleFixture()` adds E-d2b's posts, staff and tokens, profile LD (auto-lock on)
+and cycles OA, OB, OC and LD. All fifteen `run-*.mjs` run inside `try`/`finally`. `run-final-lifecycle.mjs` gains
+E-d2b's section; E-c's *ec-scope* and *ec-update* and E-d2a's *ed-close* and *ed-delete* are rewritten where the rule
+changed what they can reach. `run-final-scoring.mjs` proves A0 by SQL (D-63): it asserts the 409 lock, re-weights T2 by
+SQL and restores it in a `finally`. W3 slice 10's raw-create row is a gone-check (404 or 405; not run — real staff).
+hr-portal: `setup.mjs` gains `mintHarnessPlace` (a unit and posts of its own) and `mintActors` options; `run-slice5.mjs`
+generates over its own post; `probe-slice5.mjs` is retired (its fixture raw-created the appraisal). The demo pack's `060`
+opens the Draft its fallback creates before generating.
 
 ### Lane F — Recommendations, proposals, probation, PIP chain, segregation of duties
 
@@ -3545,7 +3713,7 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | `GET api/AppraisalCycleTarget/type/{type}` has no caller, and now resolves a live count for each cycle it lists | `AppraisalCycleTargetController` | J |
 | ~~The progress page's *Targeted* is the count of appraisals, not the scope (APC2026: 107 against 102 — the five Rule 8 appraisals)~~ | `GetCycleProgressAsync` | E — done in lane E-d1, 2026-09-30 (*Targeted* reads the scope, 102; *Appraisals* 107 and *Withdrawn* beside it) |
 | An exclusion may name no scope at all, and then leaves out nobody; nothing refuses it | `AddExclusionAsync` | E-g |
-| Opening a cycle with no targets skips the overlap check, and a target added to an open cycle is never checked | `OpenCycleAsync` | E-d2b (generation runs the overlap check) |
+| ~~Opening a cycle with no targets skips the overlap check, and a target added to an open cycle is never checked~~ | `OpenCycleAsync` | E-d2b — done in lane E-d2b, 2026-09-30 (generation runs the overlap check over whoever it would create — in another open cycle's scope, or holding an unwithdrawn appraisal there, D-60 — and the open reads held appraisals too) |
 | The E-c screens (the cycle list's edit dialog, the target dialog, the Coverage and Progress tabs) not browser-walked | 2 pages | K |
 | *Added by lane E-d1 (2026-09-30):* | | |
 | HR's advance approves a pending nomination whose peer has left — the nomination and the explicit approval refuse one; the advance's approval path does not check | `StageApprovalAsync` (the advance) | E-g |
@@ -3556,7 +3724,7 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | A staff movement's `BasedOnAppraisalId` is taken unchecked — the tenant, the employee, a withdrawn appraisal | `StaffMovement` (mapper :352, :387) | J |
 | The employee's own response route answers a rule with 400 and a bare string; HR's answers 422 with `{ message }` | `PerformanceAppraisalsMeController.AddMyResponse` | J |
 | The withdrawal tells no one — the appraisee and the manager (lane G's list has it) | `AppraisalWithdrawalService` | G |
-| The manager's team-cycle summary lists Open cycles only, so the harness's Draft withdrawal cycles cannot check its counts | `GetTeamAppraisalCyclesAsync` | E-d2b (its cycles open) |
+| ~~The manager's team-cycle summary lists Open cycles only, so the harness's Draft withdrawal cycles cannot check its counts~~ | `GetTeamAppraisalCyclesAsync` | E-d2b — done in lane E-d2b, 2026-09-30 (WD and WX open before they generate; the lifecycle suite's ed2b-team reads their rows counting the in-play appraisals alone) |
 | ~~The HR dashboard loads its collections in one query~~: SQL Server sized its sort at ~2 GB on every fresh compile, asked for the per-query maximum (~716 MB) and used under 1 MB; with workspace memory busy it queued for the grant (`RESOURCE_SEMAPHORE`) past the 30 s timeout — a 500 for a three-appraisal cycle, 13 s cold on APC2026 | `BuildDashboardAsync` | E — done in lane E-d1, 2026-09-30 (split queries; found by E-d1's first lifecycle run) |
 | The split dashboard's queries still ask much more memory than they use — the root query's ideal grant is ~274 MB (it pulls every column of three employees per row), the five collection queries' 89–118 MB, for a few KB of rows; first calls 2.3 s on APC2026, 0.25 s on a small cycle | `BuildDashboardAsync` (entity includes) | J / § 7 (project the columns the dashboard reads) |
 | The HR review desk's unfiltered list (every appraisal with both its employees' wide rows) timed out once at the API's first start, then answered in about a second | `GetHRReviewListAsync` | J / § 7 (measure its grant as E-d1 did the dashboard's) |
@@ -3564,10 +3732,19 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | No probe of the new withdraw route in the permissions sweep | `hr-w3-permissions/run-slice10-performance.mjs` | S8 |
 | The E-d1 screens (HR's review page — Withdraw and its banner; the cycle's Participation card; the employee record's appraisals; the phase rail) not browser-walked | 5 files | K |
 | *Added by lane E-d2a (2026-09-30):* | | |
-| UAT's harness cycles closed before D-56 — 26, every one `E2E` — hold 78 unfinished appraisals, and the 551 never-opened harness Drafts that hold appraisals can no longer be deleted through the API (D-57); only a SQL purge clears them | UAT (harness data) | S8 (teardown and purge) |
+| UAT's harness cycles closed before D-56 — 26, every one `E2E` — hold 78 unfinished appraisals, and the 551 never-opened harness Drafts that hold appraisals can no longer be deleted through the API (D-57); only a SQL purge clears them. *Since E-d2b* their appraisals take no write at all (a cycle that is not open refuses every one; a withdrawal and a removal still go through), and every harness run tears its own cycles down (D-61), so the pile stops growing | UAT (harness data) | S8 (teardown and purge) |
 | The cycle list offers *Delete* on a never-opened Draft that holds work — the list does not know what points at a cycle; the server refuses it, naming the work | `cycles/page.tsx` | I |
 | A cycle cannot close before its last appeal window lapses: there is no waiver for an employee who will not appeal | `CloseCycleAsync` | kept (D-56) |
 | The E-d2a screens (the cycle list's *Delete*, the close dialog's text, the analytics page's *Send reminders*) not browser-walked | 3 pages | K |
+| *Added by lane E-d2b (2026-09-30):* | | |
+| **The harness's appraisal-template approvals notify every harness login on UAT, and eight demo personas with them.** Each submission's "Approval Required" goes, in-app and as a queued email, to every holder of the HR or Manager role — 907 logins, 898 of them harness-minted (`@e2e.local`). The suites mint logins every run and never deactivate them (2,460 on UAT, 1,832 minted on 2026-09-30), so each run notifies more than the last: 9,843 in-app rows on 2026-09-29, 112,139 on 2026-09-30 — some 1,800 rows per submission, and the regression's template submissions take 10–15 s. **The nine other logins holding either role** — eight demo personas (`hr.head`, `md.tdc`, `gm.ops`, `head.dev`, `head.estate`, `sales.manager`, `property.manager`, `authorised.signatory`) and the seeded `manager` — each hold 249 unread approvals of harness templates (every one `E2E …` or portal slice 5's) and 18 of PIPs; `hr.head` 498 and 40. UAT's Notifications table holds 279,064 rows; 69,867 emails wait Pending and 56,585 Failed (no SMTP) — all to `@e2e.local`, `@demo.tdc.local` or `@example.com`, except 198 to a seeded `…@default.com` login, a real domain. Found by E-d2b's log scan; it began before E-d2b and not from its code | UAT (harness data), `dev-harness` | S8 — the teardown deactivates the logins a run mints; a UAT clean-up (the personas' harness notifications, the dead email queue) on the user's go |
+| The peer's evaluation form carries no *editable* flag — on a cycle that is not open its save and submission answer 422 with no read-only form first (the self and manager forms read not editable) | `PeerEvaluationDetailDto`, `peer-reviews/[id]/page.tsx` | I |
+| The goal screens' cycle picker (`CycleSelect`) lists every cycle, draft and closed ones included; a goal set or moved on one is refused, naming the cycle | `CycleSelect.tsx` | I (offer open cycles for new goals) |
+| hr-portal's other slices still hang their actors off the tenant's first real post (`readReferenceData`); slice 5 alone mints its own unit and posts (`mintHarnessPlace`) | `dev-harness/hr-portal/setup.mjs` | S8 |
+| `hr-w3-permissions/run-slice10-performance.mjs` edited for E-d2b (the raw create's row is a gone-check), not run — real staff | dev-harness | S8 |
+| `hr-portal/probe-slice5.mjs` retired: its fixture raw-created the appraisal; it stops where that write was | dev-harness | S8 |
+| No suite runs the deadline sweep with `AutoLockOnDeadline` off — the lifecycle suite's LD proves it on | `AdvanceOverdueAppraisalsAsync` | B7 / S |
+| The E-d2b screens (the cycle page's *Generate* on an open cycle only, its warning card's reasons and competing-cycles badge; the self-evaluation banner) not browser-walked | 2 pages | K |
 
 ---
 

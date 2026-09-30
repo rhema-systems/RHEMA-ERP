@@ -104,6 +104,11 @@ public class PeerEvaluationsController : ControllerBase
             var result = await _peerEvaluationService.SavePeerEvaluationDraftAsync(saveDto, evaluatorId, cancellationToken);
             return Ok(result);
         }
+        catch (KeyNotFoundException ex)
+        {
+            // No such evaluation, not yours, or not a peer's (performance closure D-62) — none confirms the id exists.
+            return NotFound(new { message = ex.Message });
+        }
         catch (InvalidOperationException ex)
         {
             return BusinessRuleRejected(ex, "saving the peer evaluation draft");
@@ -131,6 +136,11 @@ public class PeerEvaluationsController : ControllerBase
         {
             var result = await _peerEvaluationService.SubmitPeerEvaluationAsync(evaluationId, evaluatorId, cancellationToken);
             return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            // No such evaluation, not yours, or not a peer's (performance closure D-62) — none confirms the id exists.
+            return NotFound(new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {

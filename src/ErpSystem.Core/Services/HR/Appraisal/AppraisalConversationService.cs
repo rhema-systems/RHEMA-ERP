@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -89,6 +90,11 @@ public class AppraisalConversationService : IAppraisalConversationService
             throw new InvalidOperationException(
                 "This appraisal was withdrawn from its cycle, so it holds no more conversations.");
     }
+
+    /// <summary>The appraisal's work is done while its cycle is Open (performance closure E-d2b, D-59).</summary>
+    private Task EnsureCycleOpenAsync(Guid appraisalId, string action, CancellationToken cancellationToken)
+        => AppraisalLiveCycle.EnsureAppraisalCycleOpenAsync(
+            _appraisalRepository.GetQueryable(), GetTenantId(), appraisalId, action, cancellationToken);
 
     private IQueryable<AppraisalConversation> BaseQuery
     {
@@ -194,13 +200,15 @@ public class AppraisalConversationService : IAppraisalConversationService
         // back as a conversation about nobody.
         var appraisal = await _appraisalRepository
             .GetQueryable(a => a.Id == createDto.AppraisalId && a.TenantId == tenantId)
-            .Select(a => new { a.Id, a.EmployeeId, a.AppraisalNumber, a.Status })
+            .Select(a => new { a.Id, a.EmployeeId, a.AppraisalNumber, a.Status, CycleStatus = a.AppraisalCycle.Status, a.AppraisalCycle.CycleName })
             .FirstOrDefaultAsync(cancellationToken);
         if (appraisal == null)
             throw new ArgumentException("Appraisal not found.");
         if (appraisal.Status == AppraisalStatus.Withdrawn)
             throw new InvalidOperationException(
                 "This appraisal was withdrawn from its cycle, so it holds no more conversations.");
+        // The appraisal's work is done while its cycle is Open (performance closure E-d2b).
+        AppraisalLiveCycle.EnsureOpen(appraisal.CycleStatus, appraisal.CycleName, "A conversation cannot be booked");
 
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
@@ -236,6 +244,7 @@ public class AppraisalConversationService : IAppraisalConversationService
         if (entity.IsCompleted)
             throw new InvalidOperationException("Cannot update a completed conversation.");
         await EnsureAppraisalNotWithdrawnAsync(entity.AppraisalId, cancellationToken);
+        await EnsureCycleOpenAsync(entity.AppraisalId, "The conversation cannot be changed", cancellationToken);
 
         if (updateDto.Type is not ConversationType type || !Enum.IsDefined(type))
             throw new InvalidOperationException(
@@ -264,6 +273,8 @@ public class AppraisalConversationService : IAppraisalConversationService
     {
         var entity = await GetOwnedAsync(id);
 
+        await EnsureCycleOpenAsync(entity.AppraisalId, "The conversation cannot be removed", cancellationToken);
+
         await _conversationRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Appraisal conversation deleted: {Id}", id);
@@ -279,6 +290,7 @@ public class AppraisalConversationService : IAppraisalConversationService
         if (entity.IsCompleted)
             throw new InvalidOperationException("Conversation is already completed.");
         await EnsureAppraisalNotWithdrawnAsync(entity.AppraisalId, cancellationToken);
+        await EnsureCycleOpenAsync(entity.AppraisalId, "The conversation cannot be marked held", cancellationToken);
 
         entity.IsCompleted = true;
         entity.HeldDate = DateTime.UtcNow;
