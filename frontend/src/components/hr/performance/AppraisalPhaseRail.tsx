@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, Circle, Loader2 } from 'lucide-react';
+import { Ban, Check, Circle, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   APPRAISAL_PHASE_LABELS,
@@ -8,6 +8,7 @@ import {
   type AppraisalPhase,
 } from '@/types/hr/appraisal-run';
 import type { AppraisalSettings } from '@/types/hr/appraisal';
+import type { AppraisalSubStatus } from '@/types/hr/outcomes';
 
 /**
  * Where an appraisal is, as a rail.
@@ -23,13 +24,28 @@ import type { AppraisalSettings } from '@/types/hr/appraisal';
  */
 export function AppraisalPhaseRail({
   phase,
+  subStatus,
   settings,
   className,
 }: {
   phase?: AppraisalPhase | null;
+  /**
+   * The step within the phase. A withdrawn appraisal (performance closure E-d1) reports the
+   * `Closed` phase, which would draw every step before it as done; it is shown as withdrawn instead.
+   */
+  subStatus?: AppraisalSubStatus | null;
   settings?: AppraisalSettings | null;
   className?: string;
 }) {
+  if (subStatus === 'Withdrawn') {
+    return (
+      <p className={cn('flex items-center gap-1.5 text-sm text-muted-foreground', className)}>
+        <Ban className="h-4 w-4" />
+        Withdrawn from the cycle — it went no further, and takes no more steps.
+      </p>
+    );
+  }
+
   const steps = orderFor(settings).filter((p) => appliesTo(p, settings));
   const currentIndex = phase ? steps.indexOf(phase) : -1;
 

@@ -49,13 +49,7 @@ public static class AppraisalRelease
     /// </summary>
     public static void WithholdOutcome(PerformanceAppraisalDto dto)
     {
-        dto.OverallScore = null;
-        dto.AdjustedScore = null;
-        dto.PreCalibrationScore = null;
-        dto.CalibratedOverallScore = null;
-        dto.OverallGradeDefinitionId = null;
-        dto.RankInPosition = null;
-        dto.RankInUnit = null;
+        WithholdScores(dto);
 
         dto.RecommendPromotion = false;
         dto.RecommendIncrement = false;
@@ -71,5 +65,21 @@ public static class AppraisalRelease
         dto.AreasForImprovement = null;
         dto.TrainingNeeds = null;
         dto.CareerAspirations = null;
+    }
+
+    /// <summary>
+    /// Every score, the grade and the ranks. On its own, for a withdrawn appraisal (performance
+    /// closure E-d1): its numbers are not a result, whoever reads it, while what was written stays
+    /// readable as the record of how far it got.
+    /// </summary>
+    public static void WithholdScores(PerformanceAppraisalDto dto)
+    {
+        dto.OverallScore = null;
+        dto.AdjustedScore = null;
+        dto.PreCalibrationScore = null;
+        dto.CalibratedOverallScore = null;
+        dto.OverallGradeDefinitionId = null;
+        dto.RankInPosition = null;
+        dto.RankInUnit = null;
     }
 }

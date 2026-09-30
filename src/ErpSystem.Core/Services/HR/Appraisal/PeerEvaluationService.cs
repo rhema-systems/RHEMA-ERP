@@ -153,7 +153,11 @@ public class PeerEvaluationService : IPeerEvaluationService
                     .ThenInclude(emp => emp.OrganizationUnit)
             .Include(e => e.Appraisal)
                 .ThenInclude(a => a.AppraisalCycle)
-            .Where(e => e.EvaluatorId == evaluatorId && e.EvaluatorRole == EvaluatorRole.Peer)
+            // A withdrawn appraisal's unsubmitted evaluations are asked of no one (performance closure
+            // E-d1): they sat in the queue as "N peer reviews are waiting on you". A submitted one
+            // stays, as the peer's record of what they wrote.
+            .Where(e => e.EvaluatorId == evaluatorId && e.EvaluatorRole == EvaluatorRole.Peer
+                        && (e.Appraisal.Status != AppraisalStatus.Withdrawn || e.SubmittedDate != null))
             .OrderByDescending(e => e.Id)
             .ToListAsync(cancellationToken);
 

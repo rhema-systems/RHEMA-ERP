@@ -77,6 +77,19 @@ public class AppraisalConversationService : IAppraisalConversationService
         return entity;
     }
 
+    /// <summary>
+    /// A withdrawn appraisal holds no more conversations (performance closure E-d1): the ones held
+    /// stay as its history, and the rest leave the manager's diary.
+    /// </summary>
+    private async Task EnsureAppraisalNotWithdrawnAsync(Guid appraisalId, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        if (await _appraisalRepository.GetQueryable(a => a.Id == appraisalId && a.TenantId == tenantId)
+                .AnyAsync(a => a.Status == AppraisalStatus.Withdrawn, cancellationToken))
+            throw new InvalidOperationException(
+                "This appraisal was withdrawn from its cycle, so it holds no more conversations.");
+    }
+
     private IQueryable<AppraisalConversation> BaseQuery
     {
         get
@@ -124,11 +137,15 @@ public class AppraisalConversationService : IAppraisalConversationService
     /// list the moment its date passed. The one thing a manager needs from this screen is the
     /// meeting they were supposed to hold last week; a diary that only shows the future hides
     /// exactly the rows that need action.</para>
+    ///
+    /// <para>A withdrawn appraisal's unheld conversations are not outstanding (performance closure
+    /// E-d1): no one will hold them.</para>
     /// </summary>
     public async Task<IEnumerable<AppraisalConversationDto>> GetScheduledByManagerAsync(Guid managerId, CancellationToken cancellationToken = default)
     {
         var entities = await BaseQuery
-            .Where(c => (c.ScheduledById == managerId || c.ConductedById == managerId) && !c.IsCompleted)
+            .Where(c => (c.ScheduledById == managerId || c.ConductedById == managerId) && !c.IsCompleted
+                        && c.Appraisal.Status != AppraisalStatus.Withdrawn)
             .OrderBy(c => c.ScheduledDate)
             .ToListAsync(cancellationToken);
         return entities.ToDtoList();
@@ -177,10 +194,13 @@ public class AppraisalConversationService : IAppraisalConversationService
         // back as a conversation about nobody.
         var appraisal = await _appraisalRepository
             .GetQueryable(a => a.Id == createDto.AppraisalId && a.TenantId == tenantId)
-            .Select(a => new { a.Id, a.EmployeeId, a.AppraisalNumber })
+            .Select(a => new { a.Id, a.EmployeeId, a.AppraisalNumber, a.Status })
             .FirstOrDefaultAsync(cancellationToken);
         if (appraisal == null)
             throw new ArgumentException("Appraisal not found.");
+        if (appraisal.Status == AppraisalStatus.Withdrawn)
+            throw new InvalidOperationException(
+                "This appraisal was withdrawn from its cycle, so it holds no more conversations.");
 
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
@@ -215,6 +235,7 @@ public class AppraisalConversationService : IAppraisalConversationService
 
         if (entity.IsCompleted)
             throw new InvalidOperationException("Cannot update a completed conversation.");
+        await EnsureAppraisalNotWithdrawnAsync(entity.AppraisalId, cancellationToken);
 
         if (updateDto.Type is not ConversationType type || !Enum.IsDefined(type))
             throw new InvalidOperationException(
@@ -257,6 +278,7 @@ public class AppraisalConversationService : IAppraisalConversationService
 
         if (entity.IsCompleted)
             throw new InvalidOperationException("Conversation is already completed.");
+        await EnsureAppraisalNotWithdrawnAsync(entity.AppraisalId, cancellationToken);
 
         entity.IsCompleted = true;
         entity.HeldDate = DateTime.UtcNow;

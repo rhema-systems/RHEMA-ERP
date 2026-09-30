@@ -64,8 +64,13 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    submitted after the panel closed, and the grid says what a commit would take). ~~Slice **E-c** (cycle
    rules and D-14)~~ **Done 2026-09-30** (source-checked first: § 1i D-47–D-50; `run-final-lifecycle.mjs`
    391/391 twice; lane E's E-c State block — one scope rule, `AppraisalCycleScope`, and one door for
-   targets; D-14's data migration applied to UAT, so APC2026 is Open). **Slice E-d (Withdrawn, the close
-   and the live cycle) is next** — read § 5's *Added by lane E-c* rows first: two of them are E-d's.
+   targets; D-14's data migration applied to UAT, so APC2026 is Open). Slice E-d was source-checked on
+   2026-09-30 and split in two — § 1j (D-51 two slices, D-52 withdraw only before final, D-53 no undo until
+   lane N, D-54 both exits). ~~Slice **E-d1** (Withdrawn)~~ **Done 2026-09-30** (`run-final-lifecycle.mjs`
+   542/542 twice; regression 3043/3052; lane E's E-d1 State block — HR's withdraw action and both exits, every read
+   leaving a withdrawn appraisal out and every write refusing it; and the HR dashboard's load split, found by
+   its first run). **Slice E-d2 (the close and the live cycle) is next** — source-check it first (its
+   questions are in the lane E slice list), and read § 5's *Added by lane E-c* and *E-d1* rows.
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -184,6 +189,15 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | D-48 | **How far the one scope rule goes.** Three copies: generation and the open's overlap check, the in-scope list (the open notice, the reminders, `GET {id}/employees`), and the coverage preview | **One resolver for all of them** (`AppraisalCycleScope`) — the excluded count and the live counts included — proven by APC2026's coverage preview matching field for field, and by new suite checks | E-c |
 | D-49 | **A target's ids against its type.** The dialog sends the level a unit was picked under, so every unit target from the screen was refused ("exactly one id"); the server never matched the id to the type | **Keep the id the type names and clear the others** (the dialog's own hint); refuse a missing, unknown or other-tenant scope, or an unknown type | E-c |
 | D-50 | **The pin on a Draft cycle that already has appraisals** (generation ran on Draft cycles until E-d; UAT holds hundreds of harness ones) | **Settings profile, year and type are fixed once the cycle is opened *or* has appraisals; the period once it has appraisals.** Name, code and phase deadlines stay editable | E-c |
+
+### 1j. Decisions from slice E-d's source check — settled with the user, 2026-09-30
+
+| # | Question | Decision (2026-09-30) | Affects |
+|---|---|---|---|
+| D-51 | **E-d's size.** The source check found about 45 reads that would count a withdrawn appraisal, and all fifteen suites generating on Draft cycles by design (D-43's Open rule and the close's appeal windows rework every one) | **Two slices, each built, verified and staged on its own: E-d1 Withdrawn** — the action, the exit hooks, every reader; then **E-d2 the close and the live cycle** — the close, delete and generation rules, the Open rule for writes, the raw create's removal, every suite opening and tearing down its cycles. E-d2's own questions are asked at its source check | Lane E |
+| D-52 | **Withdrawing a final appraisal.** A Governance appraisal HR has signed off is final, and its rating is already published to the talent pools | **Only before it is final**: from Draft, Active, or Governance before the sign-off. A leaver's signed-off appraisal stands — HR's audited advance takes it past the acknowledgment — and the exit hooks leave it, saying so | E-d1 |
+| D-53 | **Undoing a withdrawal.** Generation skips anyone who already has an appraisal in the cycle, so a mistaken withdrawal cannot be regenerated | **Later: a reinstate joins D-17's audited reopen in lane N**, which builds the history both write to. E-d1 has no undo | E-d1, N |
+| D-54 | **Which exits withdraw.** D-10 named the separation's completion; the direct termination route terminates anyone with no separation in flight | **Both exits** — each applies the exit in `EmployeeService`, so one hook covers both | E-d1 |
 
 ---
 
@@ -326,7 +340,8 @@ Line numbers are as of 2026-09-28.
 18. **Goals set before generation are invisible to the appraisal.** A goal links to an appraisal only
     if the appraisal exists when the goal is created (EGS :221-229); generation never back-links.
 19. **An appraisal cannot be withdrawn** (D-10). E1 and E2 as first written made a cycle with one
-    leaver impossible to close.
+    leaver impossible to close. *(Done in lane E-d1, 2026-09-30: HR's withdraw action and both exits —
+    D-52 to D-54; the close that relies on it is E-d2's.)*
 20. **Snapshot-less appraisals have two live sources and no repair.** Generation swallows snapshot
     failures (`AppraisalCycleService.cs:1366-1377`), and the raw create never snapshots
     (PAS :269-297). This is P-13, and the cause of Rule 8.
@@ -2066,9 +2081,10 @@ not HR's; offered for the cross-module register). No suite was affected.
         a live cycle is Open, and APC2026 is Open.)*
       - **`AcknowledgeAppraisalAsync`** reads HR sign-off from `AppraisalHRReview` (manual advance
         writes that, AWS :550-560) and accepts comments.
-      - **Withdrawn** per D-10: an HR action with a reason; `SeparationService.CompleteSeparationAsync`
+      - ~~**Withdrawn** per D-10: an HR action with a reason; `SeparationService.CompleteSeparationAsync`
         (:1240) withdraws the leaver's open appraisal; a withdrawn appraisal leaves every score,
-        denominator and close check.
+        denominator and close check.~~ *E-d1 — both exits (D-54), before the appraisal is final (D-52);
+        the close check is E-d2's.*
 - [ ] E2 **Cycle:** *(E-c did every bullet but the close and the Draft generation, which are E-d's.)*
       - ~~Create ignores the body `Status` (MAP :942).~~ *E-c.*
       - ~~Update refuses a settings-profile swap once `OpenedDate` is set (:353), and a year/type
@@ -2215,7 +2231,7 @@ Row by row:
     B1 accepts a Draft appraisal's first save on purpose (its refinement 9); that stands.
   - *Acknowledgment:* reading the sign-off **done** (B1); comments **live** (the DTO carries the employee
     id only — demo `061:312` sends comments, dropped).
-  - *Withdrawn (D-10):* **live.** Batch 1 and B1 gave it a member, columns and a gate step; nothing writes
+  - *Withdrawn (D-10):* **live** *(written since E-d1)*. Batch 1 and B1 gave it a member, columns and a gate step; nothing writes
     it, and the separation touches no appraisal. Readers that would count one: the HR dashboard
     (`HRCycleDashboardQueryService` :122-136 and what it feeds), the cycle's progress denominators (ACS
     :1028, :1055-1061), the manager's team summary and list, the HR review list, the employee trend, the
@@ -2327,13 +2343,18 @@ with each:
       duplicate-scope check on update, refused on a Closed cycle; the *Individual employee* target goes
       (D-44); `CalculateExcludedEmployees`; the scope resolver's auto-discovery and inactive targets; the
       dead `CreateAppraisalInstancesAsync`.
-- [ ] **Slice E-d — Withdrawn, the close and the live cycle.** The withdraw action (a reason, the actor,
-      from Draft, Active or Governance; a calibration seat released); the separation hook; every reader
-      leaves a withdrawn appraisal out; the close refused while anything is unfinished or an appeal window
-      is open, Completed → Closed through the lifecycle; a cycle with appraisals cannot be deleted;
-      generation and every evaluation write need an Open cycle (D-43), generation runs the overlap check;
-      the raw `POST` deleted (D-20, D-44). Harness: every suite opens and tears down its cycles;
-      `buildFixture()` and `hr-portal` slice 5 generate; `run-sliceD`/`run-sliceE`'s closes.
+- [x] **Slice E-d1 — Withdrawn.** *(2026-09-30 — the E-d source check and E-d1 State blocks below; § 1j
+      D-51–D-54: E-d split in two.)* The withdraw action (a reason, the actor, from Draft, Active or
+      Governance before it is final; a calibration seat released); both exits withdraw the leaver's
+      unfinished appraisals (D-54); every reader leaves a withdrawn appraisal out, and every write on it is
+      refused.
+- [ ] **Slice E-d2 — the close and the live cycle.** The close refused while anything is unfinished or an
+      appeal window is open, Completed → Closed through the lifecycle; a cycle with appraisals cannot be
+      deleted; generation and every evaluation write need an Open cycle (D-43), generation runs the overlap
+      check; the raw `POST` deleted (D-20, D-44). Harness: every suite opens and tears down its cycles;
+      `buildFixture()` and `hr-portal` slice 5 generate; `run-sliceD`/`run-sliceE`'s closes. Its own
+      questions at its source check (D-51): a scoreless Completed appraisal at the close, which writes need
+      Open, what blocks a delete, the teardown's appeal windows, the dashboard's default cycle.
 - [ ] **Slice E-e — templates and settings.** The lock: any appraisal on the template, or an Open cycle
       assigned; a structural edit recalls an Approved template to Draft, and edits wait while
       PendingApproval; generation re-checks Approved; a template assigned to a cycle cannot be deleted; the
@@ -2632,6 +2653,106 @@ gains E-c's 115 checks: it opens EC and closes it in a `finally` (a harness cycl
 dashboard's default), and removes its three scratch cycles and the bait template. No other suite or demo scenario
 changed: every fixture target is a one-id Position target, `run-sliceD` edits deadlines only, and `060`'s nested
 unit target and flat exclusion pass the new rules.
+
+**E-d source check (2026-09-30, after E-c; line numbers as of `62fbbf29c`).** Three surveys — the close, delete,
+generation and the raw create; the harness; every read of an appraisal — then the user split the slice (§ 1j,
+D-51–D-54). What they found:
+- **Withdrawn had no writer.** The member, its three columns and its gate step existed (batch 1, B1); no service
+  set it, no route or DTO carried it, and neither exit touched an appraisal. About **45 reads counted a withdrawn
+  appraisal**: every figure of the HR dashboard (its unit breakdown counted one as overdue; its average, histogram
+  and attention list read its score and flags), the cycle's progress denominators and bottlenecks, the in-scope
+  list (so the open notice and every phase reminder), the manager's team summary (as *Pending*) and list, the HR
+  review desk (as *Not started*) and its reviewer load, the calibration scope (grid, links, adjustments, matrix),
+  the peer queue and pending nominations, the outcome worklist and its approval (approving created PIPs, pay
+  reviews and succession enrolments), the manager's diary and interim reviews, the employee trend, succession
+  search and fit, the talent-rating suggestion, award triggers and PIP create/prepare. About thirty already left
+  it out through the gates' `Withdrawn` step or a status list. **Manager mode let one take nominations** (anything
+  short of Completed or Closed).
+- **The close reads no appraisal**, the appeal window is enforced only at filing, a cycle delete is a soft delete
+  that leaves every child row, generation runs on Draft cycles with no overlap check, no evaluation write checks
+  the cycle, and the raw create has no screen but ten harness callers — E-d2's (D-51).
+- **The harness is built on Draft cycles**: every closure suite generates on one by design, and the closes in
+  `run-sliceD`/`run-sliceE` would be refused — also E-d2's.
+- UAT held no withdrawn appraisal (377 Draft, 117 Active, 75 Governance, 7 Appealed, 400 Completed, 10 Closed).
+
+**E-d1 State (2026-09-30): DONE — built, verified on UAT, staged.** No migration (batch 1 made the columns). What
+exists now:
+- **The action** — `POST api/PerformanceAppraisals/{id}/withdraw { reason }` (`AppraisalWithdrawalService`, HR
+  write): 400 without a reason, 403 to the appraisee's own HR officer (the two-actor rule) and to anyone without
+  the HR write permission, 404 for an unknown appraisal, 422 when it is already withdrawn, past governance, or
+  **final** (D-52: signed off, and committed by the panel when the cycle calibrates — the settle's own
+  `IsFinal`). It records the reason (≤ 1,000), the actor from the token (null when none) and the date; frees a
+  seat at a panel that has not calibrated it (a committed calibration keeps its link); and **dismisses the
+  outcomes proposed on it** — Proposed, or Approved and not yet actioned — with a note.
+- **The lifecycle** — Draft, Active and Governance → Withdrawn in the one table; the raw status routes still
+  refuse it, naming the action.
+- **Both exits (D-54)** — `EmployeeService.TerminateEmployeeAsync` and `ApplySeparationOutcomeAsync` stage the
+  leaver's unfinished appraisals as withdrawn in the exit's own save (*"Left the organisation on {date}: …"* —
+  the termination's reason and notes, or the separation's number, type and date); a final one stands and the
+  exit logs it (D-52).
+- **Every read leaves it out** — the list in the source check above, each read changed at its source; the
+  progress page's *Targeted* is now the scope, with *Appraisals* (in play) and *Withdrawn* beside it; the
+  dashboard's feed records each withdrawal with its reason and actor.
+- **History keeps it** — the appraisal's own reads (by id, by employee, the lists), HR's review and the trend
+  show it labelled Withdrawn with its reason and actor, and **without its scores, grade or ranks, for every
+  reader** (`AppraisalRelease.WithholdScores`) — the row keeps them.
+- **Every write on it is refused** — outcomes, conversations, review events (and their evidence), responses (HR's
+  route answered 500), HR review, the advance, PIPs, nominations in either mode, a new goal's link, the goal rows'
+  rebuild; the sign-off, the return, the forms, a correction and a removal already were.
+- **A peer who has left** is refused at the nomination and again at the approval (lane D's § 5 row).
+- **The HR dashboard's load is split** — found by this slice's first run (the § 5 row).
+- **The screens** — HR's review page: *Withdraw* with a reason dialog (the employee can read the reason), shown
+  when the server would take it (`CanWithdraw` on the review read), and a red banner once withdrawn, whose
+  outcome panel is read-only; the employee's own appraisal page says it was withdrawn, when and why; the phase
+  rail says a withdrawn appraisal went no further (it drew every step done); the cycle's *Participation* card;
+  the employee record's appraisals show the reason; the dashboard's feed description.
+
+**Where the build refines the rows** (each deliberate; say if one should go back):
+1. **The withdrawal dismisses the open outcomes** — without it a withdrawn appraisal's proposals sat on the
+   worklist, and an approved-but-failed one could be re-dispatched.
+2. **Unheld conversations and open review events are not cancelled** — refused, and off every queue;
+   `AppraisalReviewStatus.Cancelled` has no writer, and bringing it to life is E-f's call (§ 5).
+3. **Targeted reads the scope** (E-c's § 5 row) — the demo's reads 102 where it read 107.
+4. **The appraisee can read the reason** — the dialog tells HR so.
+5. **The in-scope list drops withdrawn appraisees**, so the open notice and the reminders skip them.
+6. **The dashboard's split** — a pre-existing defect, fixed here because this slice's checks read the dashboard.
+
+**Verified** (Staging API on `ErpSystemDB_UAT`, the final build):
+- `run-final-lifecycle.mjs` **542/542, then 542/542** on the final build — E-a's 130, E-b's 146, E-c's 115 and
+  E-d1's 151. On the first build the first run was 538/542 (the four dashboard reads, each timed out waiting for
+  its memory grant) and the second 542/542 (by then the grant had been adjusted down); the dashboard was split
+  and the final build run twice, with a read-only DMV monitor seeing no blocked or grant-waiting request. Apart
+  from the paired positives, each E-d1 check asserts something the old code did not do — nothing wrote
+  Withdrawn, and each read and write was read in the old source.
+- Regression (`run-all.mjs`, fifteen suites): interim reviews 133/133, attachments 65/65, slice C 52/52, slice D 22/22,
+  **slice E 17/26 — the same 9 stale**, gates 32/32, lane P 338/338, lane B1 256/256, lane L-a 157/157, lanes L-b/L-c
+  296/296, lane C 397/397, lane D 186/186, **lane E 542/542**. **Lane A stopped at its first manager form and lane B2
+  lost 13 checks to the same read timing out (five times, each a 500 after 30 s)** — the manager's evaluation form
+  queuing for a ~523 MB memory grant while the platform's notification clean-up held locks and memory (§ 5's rows;
+  cross-module defect #33). Rerun alone, as the harness does for a stall, **lane A 187/187 and lane B2 363/363**.
+  **3043/3052** — E-c's 2892/2901 plus exactly the 151 new; no assertion lost. Afterwards only APC2026 is Open, the
+  default profile is *Standard Annual Appraisal*, no cycle is at 3, and the thirty withdrawn appraisals are all the
+  harness's (six per lifecycle run).
+- API log: the only 5xx are those five; the rule refusals logged as warnings. Otherwise UAT's missing SMTP,
+  defect #23's payroll-profile FK (222 fixture employees), the five-minutely HR/Identity reconciliation, and the
+  platform notification clean-up's failed `UPDATE`s (now #33).
+- Frontend: scoped `tsc` over the review, team-appraisal, own-appraisal, cycle and analytics pages, the phase
+  rail, the employee record's tabs, the appraisal types and the appraisal service, 0 errors — the 5 errors
+  planted in three probe runs were all reported; ESLint clean. Not browser-walked.
+- Demo: APC2026 captured before any run (with the E-d1 build) and after them all — its 107 phases, calendar, coverage
+  preview, targets, in-scope list (102), HR dashboard and HR review desk (107 rows) byte-identical, the split build
+  included. What the screens show differently: the Progress tab's **Targeted reads 102** (it read 107) beside
+  **Appraisals 107** and **Withdrawn 0**; HR's review page offers **Withdraw** on appraisals not yet final; the
+  analytics page loads in about 2 s cold (it took 13 s, or timed out). The guide's chapters 14, 31 and 37 say so.
+
+**Harness changes in the slice:** `buildLifecycleFixture()` gains cycles WD and WX (LG's profile) and WP (a new
+Manager-mode peer profile, WP), positions WD, WP and WX, three staff with logins (wd1–wd3) and four without
+(wp1, x1–x3 — the leavers: never a login's holder). `run-final-lifecycle.mjs` gains E-d1's section: it
+terminates x1 and x2 through `POST api/hr/Employees/{id}/terminate` as the admin, raises x3's separation and
+**sets it at SettlementApproved by SQL** before completing it through the route (the clearance, settlement and
+Internal Audit's review are area 9b's, proven by hr-separation's suites), and reads `tools/api-uat.log` for the
+exit's log line (the suite needs the API started by `tools/start-api-uat.ps1`). The lifecycle, appeals and
+nominations suites now set their exit code, so `run-all` counts their failures.
 
 ### Lane F — Recommendations, proposals, probation, PIP chain, segregation of duties
 
@@ -2933,7 +3054,9 @@ Group 3 — screens for server-supported actions, and controls for this plan's n
       `minValue`, `maxValue` (`me/performance/goals/page.tsx:140-153`).
 - [ ] **New controls** (an endpoint without a control is not a feature):
       - "Lock goal set" on the manager's team goals (L2).
-      - "Withdraw appraisal", with a reason, on the HR review and the cycle's appraisal list (D-10).
+      - ~~"Withdraw appraisal", with a reason, on the HR review~~ *(E-d1)* and the cycle's appraisal list
+        (D-10) — the cycle page has no appraisal list; the HR review desk, the employee record and the
+        dashboard's feed reach the review page.
       - "Reassign manager" on the HR review (M2).
       - "Reopen to HR review" per D-17.
       - "Rebuild snapshot" (E12).
@@ -3289,7 +3412,7 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | The C-b screens (appeal form, status, outcome, HR's review) not browser-walked | 5 pages | K |
 | *Added by lane D (2026-09-30):* | | |
 | `PeerNomination.ApprovedByManagerId` is never written — no approval path records who approved (the manager, Manager mode, HR's advance; the advance's log row names HR) | `StageApprovalAsync` | J |
-| A nominated peer is checked to exist in the tenant, not to be employed — a leaver can be nominated | `EnsurePeersMayBeNominatedAsync` | E (with D-10's withdrawn state) |
+| ~~A nominated peer is checked to exist in the tenant, not to be employed — a leaver can be nominated~~ | `EnsurePeersMayBeNominatedAsync` | E — done in lane E-d1, 2026-09-30 (a peer who has left is refused at the nomination and again at the approval; HR's advance is E-d1's row below) |
 | `GET PeerNomination/peer/{id}` and `pending/{id}` have no screen (D-41 kept them, approved only) | `PeerNominationController` | I |
 | The lane D screens (nomination panel, peer feedback, the peer's list and form) not browser-walked | 4 files | K |
 | `hr-portal/run-slice5.mjs` and `hr-w3-permissions/run-slice10-performance.mjs` edited for lane D, not run | dev-harness | S8 |
@@ -3310,10 +3433,26 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | A cycle's code can still change after generation; its appraisals' numbers carry the code they were generated under | `UpdateAsync`, `GenerateAppraisalNumber` | J (numbering) |
 | The coverage preview resolves every other cycle of the same type and year for its overlap card — on UAT some 450 harness Drafts, two queries each, per preview | `ComputeScopeOverlapsAsync` | S8 (teardown) / § 7 item 8 |
 | `GET api/AppraisalCycleTarget/type/{type}` has no caller, and now resolves a live count for each cycle it lists | `AppraisalCycleTargetController` | J |
-| The progress page's *Targeted* is the count of appraisals, not the scope (APC2026: 107 against 102 — the five Rule 8 appraisals) | `GetCycleProgressAsync` | E-d (with Withdrawn's denominators) |
+| ~~The progress page's *Targeted* is the count of appraisals, not the scope (APC2026: 107 against 102 — the five Rule 8 appraisals)~~ | `GetCycleProgressAsync` | E — done in lane E-d1, 2026-09-30 (*Targeted* reads the scope, 102; *Appraisals* 107 and *Withdrawn* beside it) |
 | An exclusion may name no scope at all, and then leaves out nobody; nothing refuses it | `AddExclusionAsync` | E-g |
 | Opening a cycle with no targets skips the overlap check, and a target added to an open cycle is never checked | `OpenCycleAsync` | E-d (generation runs the overlap check) |
 | The E-c screens (the cycle list's edit dialog, the target dialog, the Coverage and Progress tabs) not browser-walked | 2 pages | K |
+| *Added by lane E-d1 (2026-09-30):* | | |
+| HR's advance approves a pending nomination whose peer has left — the nomination and the explicit approval refuse one; the advance's approval path does not check | `StageApprovalAsync` (the advance) | E-g |
+| Manager mode takes nominations on a Governance or an Appealed appraisal ("until it is completed or closed"); only Withdrawn was added | `NominationsEditable` | E-g |
+| A leaver's appraisal waiting only for the acknowledgment, in a cycle without HR review, is not final by the settle's rule (no sign-off), so the exit withdraws it — though its outcome was already released to the employee | `AppraisalScoreService.IsFinal` against `AppraisalRelease.IsReleased` | E-g (one reading of "final") |
+| A withdrawn appraisal's unheld conversations and open review events stay as rows — refused, and off every queue — not cancelled; `AppraisalReviewStatus.Cancelled` has no writer | `AppraisalConversationService`, `AppraisalReviewEventService` | E-f |
+| An attachment can still be added to a withdrawn appraisal (the add checks nothing; the delete refuses) | `PerformanceAppraisalService.AddAttachmentAsync` | E-g |
+| A staff movement's `BasedOnAppraisalId` is taken unchecked — the tenant, the employee, a withdrawn appraisal | `StaffMovement` (mapper :352, :387) | J |
+| The employee's own response route answers a rule with 400 and a bare string; HR's answers 422 with `{ message }` | `PerformanceAppraisalsMeController.AddMyResponse` | J |
+| The withdrawal tells no one — the appraisee and the manager (lane G's list has it) | `AppraisalWithdrawalService` | G |
+| The manager's team-cycle summary lists Open cycles only, so the harness's Draft withdrawal cycles cannot check its counts | `GetTeamAppraisalCyclesAsync` | E-d2 (its cycles open) |
+| ~~The HR dashboard loads its collections in one query~~: SQL Server sized its sort at ~2 GB on every fresh compile, asked for the per-query maximum (~716 MB) and used under 1 MB; with workspace memory busy it queued for the grant (`RESOURCE_SEMAPHORE`) past the 30 s timeout — a 500 for a three-appraisal cycle, 13 s cold on APC2026 | `BuildDashboardAsync` | E — done in lane E-d1, 2026-09-30 (split queries; found by E-d1's first lifecycle run) |
+| The split dashboard's queries still ask much more memory than they use — the root query's ideal grant is ~274 MB (it pulls every column of three employees per row), the five collection queries' 89–118 MB, for a few KB of rows; first calls 2.3 s on APC2026, 0.25 s on a small cycle | `BuildDashboardAsync` (entity includes) | J / § 7 (project the columns the dashboard reads) |
+| The HR review desk's unfiltered list (every appraisal with both its employees' wide rows) timed out once at the API's first start, then answered in about a second | `GetHRReviewListAsync` | J / § 7 (measure its grant as E-d1 did the dashboard's) |
+| **The manager's evaluation form's read is one query of 19 joins that asks SQL Server for ~523 MB on a fresh compile and uses 648 KB.** In E-d1's regression it queued for that grant past 30 s five times — lane A stopped at its first manager form, lane B2 lost 13 checks — while the platform's 30-second notification clean-up held locks and memory (cross-module defect #33). The same family as the dashboard's; the calibration session's participant read also queued. The harness memory's "transient stall" is this | `GetManagerEvaluationContextAsync` | § 7 / J — a memory-grant sweep: split or project each heavy read, measuring each as E-d1 did |
+| No probe of the new withdraw route in the permissions sweep | `hr-w3-permissions/run-slice10-performance.mjs` | S8 |
+| The E-d1 screens (HR's review page — Withdraw and its banner; the cycle's Participation card; the employee record's appraisals; the phase rail) not browser-walked | 5 files | K |
 
 ---
 

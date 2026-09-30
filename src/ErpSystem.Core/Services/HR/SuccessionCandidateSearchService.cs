@@ -119,7 +119,9 @@ public class SuccessionCandidateSearchService : ISuccessionCandidateSearchServic
             .ToDictionary(g => g.Key, g => g.ToDictionary(x => x.SkillId, x => (int)x.SkillLevel));
 
         var latestAppraisal = (await _appraisals.GetQueryable()
-                .Where(a => a.TenantId == tenantId && empIds.Contains(a.EmployeeId) && !a.IsDeleted && a.OverallScore != null)
+                .Where(a => a.TenantId == tenantId && empIds.Contains(a.EmployeeId) && !a.IsDeleted && a.OverallScore != null
+                            // A withdrawn appraisal has no result (performance closure E-d1).
+                            && a.Status != ErpSystem.Core.Enums.AppraisalStatus.Withdrawn)
                 .Select(a => new { a.EmployeeId, a.Year, a.OverallScore })
                 .ToListAsync(cancellationToken))
             .GroupBy(a => a.EmployeeId)
@@ -261,7 +263,9 @@ public class SuccessionCandidateSearchService : ISuccessionCandidateSearchServic
 
         // ── 5. Latest appraisal per employee ───────────────────────────────────────
         var latestAppraisal = (await _appraisals.GetQueryable()
-                .Where(a => a.TenantId == tenantId && empIds.Contains(a.EmployeeId) && !a.IsDeleted && a.OverallScore != null)
+                .Where(a => a.TenantId == tenantId && empIds.Contains(a.EmployeeId) && !a.IsDeleted && a.OverallScore != null
+                            // A withdrawn appraisal has no result (performance closure E-d1).
+                            && a.Status != ErpSystem.Core.Enums.AppraisalStatus.Withdrawn)
                 .Select(a => new { a.EmployeeId, a.Year, a.OverallScore })
                 .ToListAsync(cancellationToken))
             .GroupBy(a => a.EmployeeId)

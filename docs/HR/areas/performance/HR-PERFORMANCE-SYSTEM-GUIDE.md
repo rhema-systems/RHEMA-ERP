@@ -35,6 +35,11 @@ only when a commit would take someone; a session can be cancelled, which release
 deleting one now does; *Mark convened* is gone — opening stamps the start; the facilitator is whoever
 creates and opens the session; an open session's scope is fixed; an adjustment stays on what it restated;
 and the grid's *Calibrated* column reads the appraisal's settled score (P-41 fixed).
+**And for lane E, slice E-d1** (Withdrawn, 2026-09-30): chapters 14, 31 and 37 — HR's review page can
+withdraw an appraisal, with a reason, until it is final; leaving withdraws the leaver's unfinished
+appraisals; a withdrawn appraisal leaves every count, queue and list and takes no more work, and stays
+on the record without a score; the cycle's *Targeted* reads its scope, beside *Appraisals* and
+*Withdrawn*; the dashboard's feed records withdrawals, and the dashboard no longer times out.
 **The database was rebuilt on 2026-09-29**: Rule 2, Rule 9, the demo tables and the Efua arithmetic give its figures (Efua 88.56, Cynthia 87.00, Efua's appeal window to 6 October). The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
 **Seventh in the series**, after Recruitment, Employees, Leave, Attendance & Time, Company Schedule and Staff Travel.
 
@@ -1902,10 +1907,13 @@ Three cards:
 * **Deadline risks** — the five year-end phases only, banded by the profile's risk days, each row
   showing phase, date, relative time and a severity badge (or **Overdue**).
 * **Bottlenecks** — where the cycle is actually stuck, with a count per category.
-* **Participation** — Targeted · Excluded · Not started self-evaluation · Managers over workload ·
-  and the target breakdown by level / unit / position. *Targeted* is the count of appraisals (107);
-  *Excluded* is how many of the targets' staff an exclusion leaves out — **1**, the MD (it read 0 until
-  2026-09-30, slice E-c).
+* **Participation** — Targeted · Excluded · Appraisals · Withdrawn · Not started self-evaluation ·
+  Managers over workload · and the target breakdown by level / unit / position. *Targeted* is the scope
+  — the active staff the targets reach, less the excluded: **102** (it read the count of appraisals, 107,
+  until 2026-09-30, slice E-d1); *Excluded* is how many of the targets' staff an exclusion leaves out —
+  **1**, the MD (it read 0 until slice E-c); *Appraisals* is the appraisals in play — **107**, the five
+  Rule 8 fixtures included — and every bar above is out of them; *Withdrawn* counts those taken out of
+  the cycle (chapter 31), **0** here, which no other figure on the tab includes.
 
 ### 👁 Tab 6 — Interim reviews
 HR's org-wide view of the cycle's checkpoints. Four tiles — **Checkpoints 107**, **Not started 102**,
@@ -4097,11 +4105,12 @@ HR review *Not started*.
 
 ### 👁 On the detail page
 
-**Header:** the employee's name, `position · organisation unit · cycle`, a status badge, and four
+**Header:** the employee's name, `position · organisation unit · cycle`, a status badge, and five
 actions:
 
 | Button | When | What it does |
 |---|---|---|
+| **Withdraw** | Draft, Active, or governance **before the appraisal is final** — and not on your own | Takes the appraisal out of its cycle, with a reason the employee can read (since 2026-09-30). It leaves every count and queue, no one can write to it again, what was written stays on the page without a score, and outcomes proposed on it are dismissed. **No undo from here** |
 | **Correct dates** | not finalised | Amends the window — the year and the dates — **nothing else**; refused once the appraisal is final |
 | **Remove** | only while nothing in it counts — Draft, or Active with nothing submitted — **and only with `HR.Performance.Admin`** | Removes an appraisal generated against somebody who should not have been in scope. **Hidden for `hr.head`**, and on this page nearly always (an appraisal reaches HR's review once its manager has submitted) |
 | **Return to manager** | manager evaluation complete, in governance, before the sign-off, no panel sitting | Reopens it; a calibrated appraisal is calibrated again |
@@ -4216,6 +4225,7 @@ you type something.
 | Assign HR reviewer | `POST …/{id}/progress-to-hr-review` — a repair route, offered only when no reviewer was resolved at submission time |
 | Correct dates | `PUT api/PerformanceAppraisals/{id}` — the year and the dates; **422** once final |
 | Remove | `DELETE api/PerformanceAppraisals/{id}` — **`HR.Performance.Admin`**; **422** once anything in it counts |
+| **Withdraw** | `POST …/{id}/withdraw { reason }` — HR write; **400** without a reason, **403** on your own appraisal, **422** once it is final (Completed, Closed, Appealed, or signed off in governance) or already withdrawn |
 
 **The 422s Finalise can answer**, in the order they are checked: self evaluation outstanding · manager
 evaluation outstanding · fewer than the minimum peer reviews · **the calibration gate** *(Rule 3 — the
@@ -4260,6 +4270,19 @@ policy rather than on being the named reviewer. Worth knowing; not worth mention
 > *calculate score* route, which restated finished scores, is gone; `GET …/{id}/score-preview` shows
 > what the settle would store and writes nothing. When the employee's acknowledgment carries a note, the
 > finalised banner shows it.
+
+> **Changed 2026-09-30** (performance closure lane E, slice E-d1). **An appraisal can be withdrawn** —
+> taken out of its cycle for someone who left, or should not be appraised this year. Nothing wrote the
+> Withdrawn status before, so a leaver's appraisal waited in its cycle for evaluations no one would write,
+> counted in every figure. **Withdraw** takes a reason, records who and when, and is offered from Draft,
+> Active, or governance until HR's sign-off (and the panel's commit, where the cycle calibrates): a final
+> appraisal's result stands. A withdrawn appraisal leaves this queue, the manager's team list, diary and
+> interim reviews, the peer queue, the calibration grid, the cycle's progress and the dashboard's counts;
+> every write on it is refused. It stays on the employee's record and on this page — a red banner with the
+> reason, who withdrew it and when; its scores and grade are not shown to anyone, though they stay on the
+> record; the phase rail says it went no further. **Leaving withdraws it too**: a direct termination or a
+> separation completing withdraws the leaver's unfinished appraisals in the same save — a signed-off one
+> stands, and HR's advance takes it past the acknowledgment. There is no reinstate yet (closure lane N).
 
 ### ⚠ Known gaps
 **P-43.** ~~**Finalise is not disabled by the calibration gate** (Rule 3).~~ **Fixed 2026-09-29**
@@ -5089,7 +5112,7 @@ score** · **Needs attention**.
 | **Scores** | **Grade distribution** and **Rating distribution**, as horizontal bars |
 | **By unit** | **Unit · Head · Appraisals · Complete · Overdue · Avg score · Calibration** |
 | **Outcomes** | *What managers asked for* — six counters: Award · Promotion · Increment · Training · Improvement plan · Termination. Then four streams with links out: **Recommendations · Salary review proposals · Employment action proposals · Improvement plans**, and a *Recommendations by type* chart |
-| **Activity** | What has happened — acknowledgments, advances, appeals |
+| **Activity** | What has happened — withdrawals (with the reason and who made them), acknowledgments, advances, appeals |
 | **Employee trend** | One person's overall score across cycles, with a picker |
 
 **And the Needs attention list**, which is the actionable part: **Employee · Unit · Manager · Reason ·
@@ -5169,6 +5192,13 @@ Stuck at · Score · Action** — where *Action* is a **Nudge** button. The reas
 > phase rail shows and a refused write names, with the same reason; goals are counted by employee and
 > cycle, so a goal agreed before generation counts. *Goal Setting* is still most of APC2026 — most
 > staff have no agreed goals — as it was.
+
+> **Changed 2026-09-30** (performance closure lane E, slice E-d1). **A withdrawn appraisal is out of every
+> figure** — the tiles, the stages and deadlines, the scores, each unit's row (it counted as *overdue*), the
+> outcome counters and the attention list — and the *Activity* tab records its withdrawal. And **the page
+> loads its appraisals in separate queries**: as one, it asked SQL Server for some 700 MB of working memory
+> on a fresh start and could wait past the 30-second timeout for it — a 500 even for a small cycle, 13
+> seconds cold on APC2026 (2 now).
 
 ### ⚠ Known gaps
 **P-58.** With four scored appraisals the distributions are a single bar. Honest, but not impressive —

@@ -358,8 +358,11 @@ public class AppraisalScoreService : IAppraisalScoreService
     /// <para>⚠ The calibration condition came with B1, which made <c>HRReviewTiming</c> real: with
     /// HR's review before calibration, a sign-off is not the last word, and the sign-off published
     /// the pre-calibration score to the talent pools.</para>
+    ///
+    /// <para>The withdrawal reads it too (performance closure E-d1, D-52): a final appraisal is not
+    /// withdrawn. It needs <c>HRReviews</c> and the cycle's <c>AppraisalSettings</c> loaded.</para>
     /// </summary>
-    private static bool IsFinal(PerformanceAppraisal appraisal)
+    internal static bool IsFinal(PerformanceAppraisal appraisal)
         => appraisal.Status is AppraisalStatus.Completed or AppraisalStatus.Closed
            || (appraisal.Status == AppraisalStatus.Governance
                && appraisal.AppealRemandedDate == null

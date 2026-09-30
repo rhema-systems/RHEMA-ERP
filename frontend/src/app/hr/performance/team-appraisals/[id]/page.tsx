@@ -287,7 +287,7 @@ export default function ManagerEvaluationPage() {
 
       <Card>
         <CardContent className="p-4">
-          <AppraisalPhaseRail phase={phase?.phase} settings={context.settings} />
+          <AppraisalPhaseRail phase={phase?.phase} subStatus={phase?.subStatus} settings={context.settings} />
         </CardContent>
       </Card>
 

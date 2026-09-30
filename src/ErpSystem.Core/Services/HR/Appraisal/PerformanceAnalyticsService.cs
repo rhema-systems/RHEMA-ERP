@@ -139,7 +139,10 @@ public class PerformanceAnalyticsService : IPerformanceAnalyticsService
                     a.AppealRemandedDate != null,
                     settings?.RequireCalibration ?? false,
                     settings?.RequireHRReview ?? false);
-                var score = released || !viewerIsSubject ? a.OverallScore : null;
+                // A withdrawn appraisal stays on the line as a gap, labelled by its status: its
+                // score is no result, whoever reads it (performance closure E-d1).
+                var score = a.Status == AppraisalStatus.Withdrawn ? null
+                    : released || !viewerIsSubject ? a.OverallScore : null;
 
                 return new PerformanceTrendPointDto
                 {

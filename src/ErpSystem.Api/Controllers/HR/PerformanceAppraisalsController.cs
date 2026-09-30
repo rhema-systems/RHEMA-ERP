@@ -21,6 +21,7 @@ public class PerformanceAppraisalsController : ControllerBase
 {
     private readonly IPerformanceAppraisalService _appraisalService;
     private readonly IPeerNominationService _peerNominationService;
+    private readonly IAppraisalWithdrawalService _withdrawals;
     private readonly ICurrentUserService _currentUserService;
     private readonly IHrControlledDocumentService _hrDocuments;
     private readonly ICentralDocumentRepositoryFileService _centralDocuments;
@@ -31,6 +32,7 @@ public class PerformanceAppraisalsController : ControllerBase
     public PerformanceAppraisalsController(
         IPerformanceAppraisalService appraisalService,
         IPeerNominationService peerNominationService,
+        IAppraisalWithdrawalService withdrawals,
         ICurrentUserService currentUserService,
         IHrControlledDocumentService hrDocuments,
         ICentralDocumentRepositoryFileService centralDocuments,
@@ -40,6 +42,7 @@ public class PerformanceAppraisalsController : ControllerBase
     {
         _appraisalService = appraisalService;
         _peerNominationService = peerNominationService;
+        _withdrawals = withdrawals;
         _currentUserService = currentUserService;
         _hrDocuments = hrDocuments;
         _centralDocuments = centralDocuments;
@@ -455,6 +458,12 @@ public class PerformanceAppraisalsController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // The service's rules — responses switched off for the cycle, a withdrawn appraisal
+            // (performance closure E-d1) — answered 500 through the catch-all below.
+            return BusinessRuleRejected(ex, "adding an employee response");
         }
         catch (Exception ex)
         {
@@ -1403,6 +1412,48 @@ public class PerformanceAppraisalsController : ControllerBase
         {
             _logger.LogError(ex, "Error returning appraisal {Id} to manager", id);
             return StatusCode(500, "An error occurred while returning the appraisal");
+        }
+    }
+
+    /// <summary>
+    /// Withdraws an appraisal from its cycle, with a reason (performance closure E-d1, D-10): from
+    /// Draft, Active, or Governance before it is final (D-52). A withdrawn appraisal leaves every
+    /// count and keeps what was written, without a score. Not the appraisee's own (403).
+    /// </summary>
+    [HttpPost("{id:guid}/withdraw")]
+    [ProducesResponseType(typeof(PerformanceAppraisalDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
+    public async Task<IActionResult> Withdraw(Guid id, [FromBody] WithdrawAppraisalDto dto, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _withdrawals.WithdrawAsync(id, dto.Reason, cancellationToken);
+            return Ok(await _appraisalService.GetByIdAsync(id, cancellationToken));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "withdrawing the appraisal");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error withdrawing appraisal {Id}", id);
+            return StatusCode(500, "An error occurred while withdrawing the appraisal");
         }
     }
 

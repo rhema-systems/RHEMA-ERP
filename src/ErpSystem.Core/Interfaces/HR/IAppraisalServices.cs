@@ -615,6 +615,32 @@ public interface IAppraisalLifecycleService
 
 #endregion
 
+#region Appraisal withdrawal (performance closure E-d1)
+
+/// <summary>
+/// Takes an appraisal out of its cycle without a result (D-10): from Draft, Active, or Governance
+/// before it is final (D-52), with a reason, the actor and the date.
+/// </summary>
+public interface IAppraisalWithdrawalService
+{
+    /// <summary>
+    /// HR's withdraw action. Throws <see cref="ArgumentException"/> without a reason,
+    /// <see cref="KeyNotFoundException"/> for an appraisal not in the tenant,
+    /// <see cref="UnauthorizedAccessException"/> on the officer's own appraisal (the two-actor rule),
+    /// and <see cref="InvalidOperationException"/> when it is withdrawn already, past governance, or final.
+    /// </summary>
+    Task WithdrawAsync(Guid appraisalId, string reason, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The exit's hook (D-54): withdraws the leaver's unfinished appraisals on the caller's unit of
+    /// work, <b>without saving</b>, so they go in the exit's own save. A final one is left, and logged.
+    /// Returns how many it withdrew.
+    /// </summary>
+    Task<int> StageLeaverWithdrawalsAsync(Guid tenantId, Guid employeeId, DateTime exitDate, string? detail, CancellationToken cancellationToken = default);
+}
+
+#endregion
+
 #region Salary Review Proposals (Theme 11)
 
 public interface ISalaryReviewProposalService

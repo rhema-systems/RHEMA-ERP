@@ -225,6 +225,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                 a.AppraisalCycle.AppraisalSettings.RequireCalibration,
                 a.AppraisalCycle.AppraisalSettings.RequireHRReview,
                 HrApproved = a.HRReviews.Any(r => !r.IsDeleted && r.ReviewCompletedDate != null && r.IsApproved),
+                WithdrawnByName = a.WithdrawnBy != null ? a.WithdrawnBy.FirstName + " " + a.WithdrawnBy.LastName : null,
             })
             .ToDictionaryAsync(x => x.Id, cancellationToken);
 
@@ -236,6 +237,13 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 
             if (!row.OutcomeReleased && viewer is Guid me && me == row.EmployeeId)
                 AppraisalRelease.WithholdOutcome(row);
+
+            // A withdrawn appraisal is kept as history, without its numbers (performance closure E-d1).
+            if (f is not null && f.Status == AppraisalStatus.Withdrawn)
+            {
+                AppraisalRelease.WithholdScores(row);
+                row.WithdrawnByName ??= f.WithdrawnByName;
+            }
         }
 
         return rows;
@@ -505,6 +513,9 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             .FirstOrDefaultAsync(a => a.Id == appraisalId, cancellationToken);
         if (appraisal == null)
             throw new ArgumentException("Performance appraisal not found");
+
+        if (appraisal.Status == AppraisalStatus.Withdrawn)
+            throw new InvalidOperationException("This appraisal was withdrawn from its cycle, so it takes no response.");
 
         // Gate: employee responses must be enabled in settings.
         if (appraisal.AppraisalCycle?.AppraisalSettings?.AllowEmployeeResponse == false)
@@ -1572,7 +1583,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             .Include(c => c.PerformanceAppraisals)
                 .ThenInclude(a => a.EvaluatorEvaluations)
             .Where(c => c.Status == AppraisalCycleStatus.Open)
-            .Where(c => c.PerformanceAppraisals.Any(a => a.Employee.ManagerId == managerId))
+            .Where(c => c.PerformanceAppraisals.Any(a => a.Employee.ManagerId == managerId && a.Status != AppraisalStatus.Withdrawn))
             .OrderByDescending(c => c.StartDate)
             .ToListAsync(cancellationToken);
 
@@ -1580,7 +1591,10 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 
         foreach (var cycle in cycles)
         {
-            var teamAppraisals = cycle.PerformanceAppraisals.Where(a => a.Employee.ManagerId == managerId).ToList();
+            // A withdrawn appraisal is not the manager's to do (performance closure E-d1): it counted
+            // as pending, since pending was whatever was neither evaluated nor started.
+            var teamAppraisals = cycle.PerformanceAppraisals
+                .Where(a => a.Employee.ManagerId == managerId && a.Status != AppraisalStatus.Withdrawn).ToList();
             
             var totalEmployees = teamAppraisals.Count;
             var evaluatedCount = teamAppraisals.Count(a => 
@@ -1619,7 +1633,8 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             .Include(a => a.Employee)
                 .ThenInclude(e => e.OrganizationUnit)
             .Include(a => a.EvaluatorEvaluations)
-            .Where(a => a.AppraisalCycleId == cycleId && a.Employee.ManagerId == managerId)
+            .Where(a => a.AppraisalCycleId == cycleId && a.Employee.ManagerId == managerId
+                     && a.Status != AppraisalStatus.Withdrawn)
             .OrderBy(a => a.Employee.FirstName)
             .ThenBy(a => a.Employee.LastName)
             .ToListAsync(cancellationToken);
@@ -3935,6 +3950,9 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         if (appraisal == null)
             throw new ArgumentException($"Appraisal with ID '{appraisalId}' not found.");
 
+        if (appraisal.Status == AppraisalStatus.Withdrawn)
+            throw new InvalidOperationException("This appraisal was withdrawn from its cycle, so it goes to no HR review.");
+
         var settings = appraisal.AppraisalCycle?.AppraisalSettings;
         if (settings == null)
             throw new InvalidOperationException("Appraisal cycle settings not found.");
@@ -4054,8 +4072,10 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         }
 
         var candidateIds = hrCandidates.Select(c => c.Id).ToList();
+        // An open review on a withdrawn appraisal is no one's work (performance closure E-d1).
         var openLoads = await TenantEvaluationQuery()
-            .Where(ev => ev.EvaluatorRole == EvaluatorRole.HR && ev.SubmittedDate == null && candidateIds.Contains(ev.EvaluatorId))
+            .Where(ev => ev.EvaluatorRole == EvaluatorRole.HR && ev.SubmittedDate == null && candidateIds.Contains(ev.EvaluatorId)
+                      && ev.Appraisal.Status != AppraisalStatus.Withdrawn)
             .GroupBy(ev => ev.EvaluatorId)
             .Select(g => new { EvaluatorId = g.Key, Count = g.Count() })
             .ToListAsync(cancellationToken);
@@ -4098,6 +4118,8 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             .Include(a => a.CriterionConfigs)
             // The HR sign-off record, for the release rule (P2).
             .Include(a => a.HRReviews)
+            // Who withdrew it, for the page's banner (performance closure E-d1).
+            .Include(a => a.WithdrawnBy)
             .AsSplitQuery()
             .FirstOrDefaultAsync(a => a.Id == appraisalId, cancellationToken);
 
@@ -4248,8 +4270,10 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             ManagerScore = view.ManagerScores ? managerEvaluation?.TotalScore : null,
             PeerScore = !view.PeerScores ? null
                 : peerEvaluations.Any() ? peerEvaluations.Where(e => e.SubmittedDate.HasValue).Average(e => e.TotalScore) : null,
-            FinalScore = withholdOutcome ? null : appraisal.OverallScore,
-            FinalGrade = withholdOutcome ? null : await GradeNameAsync(appraisal.OverallGradeDefinitionId, cancellationToken),
+            // A withdrawn appraisal has no result, whoever reads it (performance closure E-d1).
+            FinalScore = withholdOutcome || appraisal.Status == AppraisalStatus.Withdrawn ? null : appraisal.OverallScore,
+            FinalGrade = withholdOutcome || appraisal.Status == AppraisalStatus.Withdrawn ? null
+                : await GradeNameAsync(appraisal.OverallGradeDefinitionId, cancellationToken),
             // The HR sign-off, not the appraisal's status: an appraisal whose cycle requires an
             // employee acknowledgment stays in Governance after HR has finalised it.
             IsFinalized = hrEvaluation?.SubmittedDate.HasValue == true || appraisal.Status == AppraisalStatus.Completed,
@@ -4262,7 +4286,15 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             IsRemandedAppeal = appraisal.AppealRemandedDate.HasValue,
             AppealRemandedDate = appraisal.AppealRemandedDate,
             AppealRemandDeadline = appraisal.AppealRemandDeadline,
-            IsRemandDeadlineExceeded = appraisal.AppealRemandDeadline.HasValue && DateTime.UtcNow > appraisal.AppealRemandDeadline.Value
+            IsRemandDeadlineExceeded = appraisal.AppealRemandDeadline.HasValue && DateTime.UtcNow > appraisal.AppealRemandDeadline.Value,
+            // Withdrawal (performance closure E-d1): the record of it, and whether the desk may make it
+            // — the appraisee may not (the two-actor rule), nor anyone once the appraisal is final.
+            WithdrawnReason = appraisal.WithdrawnReason,
+            WithdrawnDate = appraisal.WithdrawnDate,
+            WithdrawnByName = appraisal.WithdrawnBy?.FullName,
+            CanWithdraw = !isAppraiseeViewing
+                && appraisal.Status is AppraisalStatus.Draft or AppraisalStatus.Active or AppraisalStatus.Governance
+                && !AppraisalScoreService.IsFinal(appraisal),
         };
     }
 
@@ -4347,6 +4379,9 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             .Include(a => a.EvaluatorEvaluations)
                 // Without this the "finalised by" column can only be a placeholder.
                 .ThenInclude(e => e.Evaluator)
+            // HR's queue is the work still to do; a withdrawn appraisal is not in it (performance
+            // closure E-d1) — it was listed as not started, or as finalised once signed off.
+            .Where(a => a.Status != AppraisalStatus.Withdrawn)
             .AsQueryable();
 
         // Filter by cycle if specified

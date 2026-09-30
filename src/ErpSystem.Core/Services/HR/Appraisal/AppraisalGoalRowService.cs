@@ -94,9 +94,11 @@ public sealed class AppraisalGoalRowService : IAppraisalGoalRowService
     {
         var tenantId = GetTenantId();
 
-        // The employee's appraisals in the cycle with a goals section on their template.
+        // The employee's appraisals in the cycle with a goals section on their template — not a
+        // withdrawn one, whose goals section is the record of how far it got (performance closure E-d1).
         var appraisals = await _appraisalRepository.GetQueryable()
             .Where(a => a.TenantId == tenantId && a.EmployeeId == employeeId && a.AppraisalCycleId == cycleId
+                     && a.Status != AppraisalStatus.Withdrawn
                      && a.Template != null
                      && a.Template.Sections.Any(s => !s.IsDeleted && s.Kind == AppraisalSectionKind.EmployeeGoals))
             .Select(a => new

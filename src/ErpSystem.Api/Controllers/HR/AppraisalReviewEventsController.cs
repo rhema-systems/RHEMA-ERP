@@ -624,6 +624,10 @@ public class AppraisalReviewEventsController : ControllerBase
             if (ex is ArgumentException)
                 return NotFound(new { message = ex.Message });
 
+            // A withdrawn appraisal's review events take no more evidence (performance closure E-d1).
+            if (ex is InvalidOperationException rule)
+                return BusinessRuleRejected(rule, "adding an attachment to a review event");
+
             _logger.LogError(ex, "Error adding attachment to review event {EventId}", eventId);
             return StatusCode(500, "An error occurred while adding the attachment");
         }

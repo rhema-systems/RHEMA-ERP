@@ -1905,6 +1905,44 @@ Drop the redundant filters in a follow-up migration, or declare `HasFilter` on t
 intentional. `has-pending-model-changes` will not surface this: the snapshot follows the model,
 not the SQL.
 
+## 33. Platform — the 90-day notification clean-up runs every 30 seconds, as a bulk UPDATE over the whole table (2026-09-30)
+
+**Owner:** Platform (notifications — `NotificationDispatcherBackgroundService`,
+`UnifiedNotificationService.CleanupExpiredNotificationsAsync`).
+**Severity:** medium — no data is wrong, but it takes locks and query memory that every other
+request competes for. **Found:** HR performance closure, slice E-d1's regression on UAT.
+
+### What is broken
+
+`ArchiveExpiredNotificationsAsync` runs on every dispatch cycle — `Notifications:DispatchIntervalSeconds`,
+30 seconds by default — and ends by calling `CleanupExpiredNotificationsAsync`, which soft-deletes
+notifications older than **90 days** with one `ExecuteUpdateAsync` over `Notifications`. A 90-day
+rule needs a daily run, not one every 30 seconds.
+
+### What was proven
+
+- The API's log shows the clean-up **53 times in one hour**, each *"Deleted 0 expired notifications"*:
+  UAT holds 151,116 notifications, none older than 90 days, so every run scans the table to change
+  nothing.
+- A read-only monitor of `sys.dm_exec_requests` during a harness run (2 s samples, 18:04–18:30):
+  the clean-up's `UPDATE` **blocked notification inserts** (`LCK_M_IX`, up to several seconds, 23
+  samples), and **waited in SQL Server's memory-grant queue itself** (`RESOURCE_SEMAPHORE`, 31
+  samples); it failed once. Every request that raises a notification waits behind it.
+- In the same window, heavy reads elsewhere waited for memory grants too, and HR's manager
+  evaluation form timed out at 30 s five times — its own defect (HR's, recorded in the performance
+  closure plan's § 5), made likelier by a table-wide `UPDATE` every half minute.
+
+### What it blocks
+
+Nothing outright; it degrades every request that writes a notification, and adds to the memory
+pressure that times out large reads.
+
+### What a fix needs
+
+Run the clean-up on its own daily schedule (or at most hourly), not inside the 30-second dispatch
+loop; and index `Notifications (IsDeleted, CreatedAt)` so the `WHERE CreatedAt < @cutoff` finds its
+rows without a scan.
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

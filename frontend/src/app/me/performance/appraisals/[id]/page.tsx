@@ -122,6 +122,10 @@ export default function MyAppraisalDetailPage() {
   const requiresNomination =
     settings?.requirePeerReviews === true && settings.peerNominationMode === 'Employee';
 
+  // Taken out of the cycle by HR, or by leaving (performance closure E-d1): it asks nothing more of
+  // anyone and has no result. The reason is HR's, and it is the employee's to read.
+  const withdrawn = context?.status === 'Withdrawn';
+
   // The appraisee sees their own outcome only once it is released to them (performance closure
   // P2) — HR has finalised, and any calibration the cycle requires is done. Before that the server
   // sends their copy of the HR review without the manager's evaluation, the scores or the grade.
@@ -166,10 +170,12 @@ export default function MyAppraisalDetailPage() {
         value: outcomeReady && hrReview?.finalScore != null
           ? Number(hrReview.finalScore).toFixed(1)
           : '—',
-        hint: outcomeReady ? (hrReview?.finalGrade ?? undefined) : 'Available after HR sign-off',
+        hint: withdrawn
+          ? 'Withdrawn — no result'
+          : outcomeReady ? (hrReview?.finalGrade ?? undefined) : 'Available after HR sign-off',
       },
     ];
-  }, [context, hrReview, settings, outcomeReady]);
+  }, [context, hrReview, settings, outcomeReady, withdrawn]);
 
   if (isLoading) {
     return (
@@ -220,9 +226,23 @@ export default function MyAppraisalDetailPage() {
 
       <Card>
         <CardContent className="p-4">
-          <AppraisalPhaseRail phase={phase?.phase} settings={settings} />
+          <AppraisalPhaseRail phase={phase?.phase} subStatus={phase?.subStatus} settings={settings} />
         </CardContent>
       </Card>
+
+      {withdrawn && (
+        <Alert>
+          <TriangleAlert className="h-4 w-4" />
+          <AlertTitle>
+            This appraisal was withdrawn from the cycle
+            {hrReview?.withdrawnDate ? ` on ${formatDate(hrReview.withdrawnDate)}` : ''}
+          </AlertTitle>
+          <AlertDescription>
+            {hrReview?.withdrawnReason ? `${hrReview.withdrawnReason} ` : ''}
+            It asks nothing more of you and has no result; what was written stays on your record.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {canAcknowledge && (
         <Alert>

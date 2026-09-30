@@ -210,6 +210,20 @@ export interface PerformanceAppraisal extends AuditFields {
   appealRemandedDate?: string | null;
   appealRemandDeadline?: string | null;
   isRemandDeadlineExceeded: boolean;
+  /**
+   * Set once the appraisal is withdrawn from its cycle (performance closure E-d1). A withdrawn
+   * appraisal comes back without its score, grade or ranks, for every reader.
+   */
+  withdrawnReason?: string | null;
+  withdrawnDate?: string | null;
+  withdrawnById?: string | null;
+  withdrawnByName?: string | null;
+}
+
+/** HR's withdraw action (performance closure E-d1). */
+export interface WithdrawAppraisalRequest {
+  /** Required; at most 1,000 characters. */
+  reason: string;
 }
 
 /**
@@ -935,6 +949,15 @@ export interface HRReview {
   appealRemandedDate?: string | null;
   appealRemandDeadline?: string | null;
   isRemandDeadlineExceeded: boolean;
+  /** Set once the appraisal is withdrawn from its cycle (performance closure E-d1). */
+  withdrawnReason?: string | null;
+  withdrawnDate?: string | null;
+  withdrawnByName?: string | null;
+  /**
+   * HR may withdraw it: Draft, Active, or Governance before it is final (D-52), and not the
+   * reader's own appraisal. The server decides again on the write.
+   */
+  canWithdraw: boolean;
 }
 
 export interface HRReviewListItem {

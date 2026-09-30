@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
-import { CheckCircle2, Clock, Loader2, Pencil, RotateCcw, Trash2, TriangleAlert, Undo2 } from 'lucide-react';
+import { Ban, CheckCircle2, Clock, Loader2, Pencil, RotateCcw, Trash2, TriangleAlert, Undo2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -51,6 +51,11 @@ import type { EvaluationSummary } from '@/types/hr/appraisal-run';
  *   • **Return to manager** reopens the manager's evaluation and puts the appraisal back to
  *     Active. Remarks are mandatory — they are the whole message the manager gets.
  *
+ * **Withdraw** takes the appraisal out of its cycle with a reason (performance closure E-d1) —
+ * someone who left, or should not have been appraised — from Draft, Active, or Governance before it
+ * is final. It leaves every count and queue; what was written stays on this page without a score.
+ * A leaver's appraisal is withdrawn by the exit itself.
+ *
  * The precondition panel is the important part of this screen. Finalising with a leg
  * outstanding is refused with 422, so what is missing is shown before the button is pressed
  * rather than as an error afterwards.
@@ -87,6 +92,8 @@ export default function HRReviewDetailPage() {
   const [headerOpen, setHeaderOpen] = useState(false);
   const [header, setHeader] = useState({ year: '', startDate: '', endDate: '' });
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawReason, setWithdrawReason] = useState('');
 
   const openHeader = () => {
     if (!appraisal) return;
@@ -185,6 +192,23 @@ export default function HRReviewDetailPage() {
       toast({ title: 'Could not return', description: e.message, variant: 'destructive' }),
   });
 
+  const withdraw = useMutation({
+    mutationFn: () =>
+      performanceAppraisalService.withdraw(appraisalId, { reason: withdrawReason.trim() }),
+    onSuccess: () => {
+      toast({
+        title: 'Appraisal withdrawn',
+        description: 'It is out of the cycle: no count or queue includes it any more.',
+      });
+      setWithdrawOpen(false);
+      setWithdrawReason('');
+      queryClient.invalidateQueries({ queryKey: ['hr', 'appraisal-record', appraisalId] });
+      refresh();
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Could not withdraw', description: e.message, variant: 'destructive' }),
+  });
+
   /**
    * Repair route for an appraisal that reached HR with no reviewer assigned — normally the
    * manager's submission does this. Offered only when it is actually needed.
@@ -245,6 +269,9 @@ export default function HRReviewDetailPage() {
       phase?.subStatus === 'HRReviewInProgress' ||
       phase?.subStatus === 'PendingCalibration');
 
+  // Out of its cycle (performance closure E-d1): a record, not a work item.
+  const withdrawn = data.status === 'Withdrawn';
+
   const outstanding = [
     !data.isSelfEvaluationComplete && 'the employee has not submitted a self-evaluation',
     !data.isManagerEvaluationComplete && 'the manager has not submitted their evaluation',
@@ -262,7 +289,18 @@ export default function HRReviewDetailPage() {
         actions={
           <div className="flex items-center gap-2">
             <StatusBadge status={humanizeEnum(data.status)} />
-            {!data.isFinalized && (
+            {/*
+              Offered while the server would take it: Draft, Active, or Governance before the
+              appraisal is final, and not on the reader's own (canWithdraw). A signed-off appraisal
+              awaiting calibration is not final yet, so this sits outside the sign-off block below.
+            */}
+            {data.canWithdraw && (
+              <Button variant="ghost" onClick={() => setWithdrawOpen(true)}>
+                <Ban className="mr-2 h-4 w-4" />
+                Withdraw
+              </Button>
+            )}
+            {!data.isFinalized && !withdrawn && (
               <>
                 {/*
                   ⚠ Correcting the WINDOW only. Regenerating the cycle is not an alternative — it
@@ -311,11 +349,24 @@ export default function HRReviewDetailPage() {
 
       <Card>
         <CardContent className="p-4">
-          <AppraisalPhaseRail phase={phase?.phase} />
+          <AppraisalPhaseRail phase={phase?.phase} subStatus={phase?.subStatus} />
         </CardContent>
       </Card>
 
-      {data.isFinalized ? (
+      {withdrawn ? (
+        <Alert variant="destructive">
+          <Ban className="h-4 w-4" />
+          <AlertTitle>
+            Withdrawn from the cycle {formatDate(data.withdrawnDate)}
+            {data.withdrawnByName ? ` by ${data.withdrawnByName}` : ''}
+          </AlertTitle>
+          <AlertDescription>
+            {data.withdrawnReason ? `${data.withdrawnReason} ` : ''}
+            No count or queue includes it, and it takes no more work. What was written stays below
+            as the record of how far it got, without a score.
+          </AlertDescription>
+        </Alert>
+      ) : data.isFinalized ? (
         <Alert>
           <CheckCircle2 className="h-4 w-4" />
           <AlertTitle>
@@ -365,7 +416,7 @@ export default function HRReviewDetailPage() {
         </Alert>
       )}
 
-      {!data.isFinalized && data.isManagerEvaluationComplete && data.status !== 'Governance' && (
+      {!data.isFinalized && !withdrawn && data.isManagerEvaluationComplete && data.status !== 'Governance' && (
         <Card className="border-dashed">
           <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
             <span className="text-muted-foreground">
@@ -405,7 +456,7 @@ export default function HRReviewDetailPage() {
           {
             label: 'Final',
             value: data.finalScore != null ? Number(data.finalScore).toFixed(1) : '—',
-            hint: data.finalGrade ?? 'Computed on finalisation',
+            hint: withdrawn ? 'Withdrawn — no result' : data.finalGrade ?? 'Computed on finalisation',
             tone: 'success',
           },
         ]}
@@ -444,7 +495,12 @@ export default function HRReviewDetailPage() {
           proposal or employment action downstream.
         */}
         <TabsContent value="outcomes" className="mt-4">
-          <OutcomeRecommendationsPanel appraisalId={appraisalId} allowDecide />
+          {/* A withdrawn appraisal takes no outcome: its open ones were dismissed with it (E-d1). */}
+          <OutcomeRecommendationsPanel
+            appraisalId={appraisalId}
+            allowPropose={!withdrawn}
+            allowDecide={!withdrawn}
+          />
         </TabsContent>
       </Tabs>
 
@@ -566,7 +622,8 @@ export default function HRReviewDetailPage() {
             <DialogDescription>
               For an appraisal generated against somebody who should not have been in scope. It
               takes the self-evaluation, peer reviews and scores with it, and regenerating the cycle
-              will not bring them back. Nothing else removes an appraisal.
+              will not bring them back. Nothing else removes an appraisal — one that has been
+              worked on is withdrawn instead, and kept.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -578,6 +635,46 @@ export default function HRReviewDetailPage() {
             >
               {removeAppraisal.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Remove it
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={withdrawOpen} onOpenChange={setWithdrawOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Withdraw {data.employeeName}&rsquo;s appraisal?</DialogTitle>
+            <DialogDescription>
+              It leaves the cycle: no progress figure, dashboard, queue or reminder includes it, and
+              no one can write to it again. What was written is kept, without a score; proposed
+              outcomes on it are dismissed. It cannot be undone from here.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="withdraw-reason">Why it is withdrawn</Label>
+            <Textarea
+              id="withdraw-reason"
+              rows={4}
+              maxLength={1000}
+              value={withdrawReason}
+              onChange={(e) => setWithdrawReason(e.target.value)}
+              placeholder="For example: on extended leave for the whole period."
+            />
+            <p className="text-xs text-muted-foreground">
+              The employee can read this reason on their appraisal. {withdrawReason.length}/1000
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWithdrawOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => withdraw.mutate()}
+              disabled={!withdrawReason.trim() || withdraw.isPending}
+            >
+              {withdraw.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Withdraw
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -769,8 +769,13 @@ export interface AppraisalCycleProgress {
   peerEvaluationProgress: ProgressMetric;
   managerEvaluationProgress: ProgressMetric;
   hrReviewProgress: ProgressMetric;
+  /** The scope: active staff the active targets reach, less the excluded (performance closure E-d1). */
   totalEmployeesTargeted: number;
   totalEmployeesExcluded: number;
+  /** The cycle's appraisals in play — every progress denominator (E-d1). */
+  totalAppraisals: number;
+  /** Appraisals withdrawn from the cycle, which no other figure includes (E-d1). */
+  totalWithdrawn: number;
   targetBreakdown: TargetBreakdown;
   employeesNotStartedSelfEvaluation: number;
   peerReviewsPendingPastMidpoint: number;

@@ -487,6 +487,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAppraisalScoreService, AppraisalScoreService>();
         // The appraisal pipeline's one gate evaluator, and the status it implies (performance closure lane B1).
         services.AddScoped<IAppraisalLifecycleService, AppraisalLifecycleService>();
+        // An appraisal out of its cycle without a result: HR's action and the leaver's exit (performance closure E-d1).
+        services.AddScoped<IAppraisalWithdrawalService, AppraisalWithdrawalService>();
         // An appraisal's goals section: one snapshot row per locked goal (performance closure lane L-b).
         services.AddScoped<IAppraisalGoalRowService, AppraisalGoalRowService>();
         services.AddScoped<IAppraisalOutcomeService, AppraisalOutcomeService>();

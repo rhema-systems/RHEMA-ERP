@@ -1076,6 +1076,9 @@ export default function AppraisalCycleDetailPage() {
                 <CardContent className="grid grid-cols-2 gap-x-6 md:grid-cols-4">
                   <InfoRow label="Targeted" value={progress.totalEmployeesTargeted} />
                   <InfoRow label="Excluded" value={progress.totalEmployeesExcluded} />
+                  {/* The appraisals in play, and those taken out of the cycle (E-d1). */}
+                  <InfoRow label="Appraisals" value={progress.totalAppraisals} />
+                  <InfoRow label="Withdrawn" value={progress.totalWithdrawn} />
                   <InfoRow
                     label="Not started self-evaluation"
                     value={progress.employeesNotStartedSelfEvaluation}

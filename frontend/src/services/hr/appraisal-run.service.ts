@@ -36,6 +36,7 @@ import type {
   UpdateCheckIn,
   UpdateCheckInGoalUpdate,
   ViewSubmittedEvaluation,
+  WithdrawAppraisalRequest,
 } from '@/types/hr/appraisal-run';
 
 /**
@@ -287,6 +288,16 @@ class PerformanceAppraisalService {
    */
   returnToManager(appraisalId: string, data: ReturnAppraisal): Promise<HRReview> {
     return apiService.post<HRReview>(`${this.baseUrl}/${appraisalId}/return-to-manager`, data);
+  }
+
+  /**
+   * Takes the appraisal out of its cycle, with a reason (performance closure E-d1): from Draft,
+   * Active, or Governance before it is final — 422 otherwise, 403 on your own appraisal, 400
+   * without a reason. It leaves every count and queue; what was written stays, without a score.
+   * There is no undo yet (D-53).
+   */
+  withdraw(appraisalId: string, data: WithdrawAppraisalRequest): Promise<PerformanceAppraisal> {
+    return apiService.post<PerformanceAppraisal>(`${this.baseUrl}/${appraisalId}/withdraw`, data);
   }
 
   // ── Employee acknowledgment ──────────────────────────────────────────────────────

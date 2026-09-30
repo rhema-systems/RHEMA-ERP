@@ -94,6 +94,12 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
         if (appraisal == null)
             throw new ArgumentException($"Performance appraisal with ID '{dto.PerformanceAppraisalId}' not found.");
 
+        // A withdrawn appraisal has no result to act on (performance closure E-d1); the withdrawal
+        // dismissed whatever was proposed on it.
+        if (appraisal.Status == AppraisalStatus.Withdrawn)
+            throw new InvalidOperationException(
+                "This appraisal was withdrawn from its cycle, so no outcome is proposed on it.");
+
         // A recommendation is the front half of a promotion, a demotion or a termination — the
         // handler turns an approved one into a real intake record. Anyone authenticated could
         // previously raise one against anyone's appraisal.

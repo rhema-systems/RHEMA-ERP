@@ -8,8 +8,11 @@ namespace ErpSystem.Core.Services.HR.Appraisal;
 /// — and the gates' sync (B1) would have been a third.
 /// </summary>
 /// <remarks>
-/// Withdrawn is not here yet: withdrawing takes a reason, an actor and a date (D-10), which the raw
-/// status routes that read this table cannot carry. Lane E adds it with its own action.
+/// Withdrawn is reached from Draft, Active and Governance by the withdrawal alone
+/// (<c>AppraisalWithdrawalService</c>, performance closure E-d1): withdrawing takes a reason, an
+/// actor and a date (D-10), which the raw status routes cannot carry, so
+/// <see cref="EnsureRawTransition"/> refuses it. A final appraisal — Completed, Closed, Appealed, or
+/// signed off in governance — is not withdrawn (D-52): its result stands.
 /// </remarks>
 public static class AppraisalLifecycle
 {
@@ -17,17 +20,20 @@ public static class AppraisalLifecycle
         new Dictionary<AppraisalStatus, HashSet<AppraisalStatus>>
         {
             // Draft → Active: opened for the employee, or first worked on.
-            [AppraisalStatus.Draft] = [AppraisalStatus.Active],
+            // Draft → Withdrawn: the appraisee left, or should not have been in the cycle.
+            [AppraisalStatus.Draft] = [AppraisalStatus.Active, AppraisalStatus.Withdrawn],
 
             // Active → Governance: the manager has submitted and a governance step follows.
             // Active → Completed: nothing follows the manager's evaluation.
             // Active → Appealed: rare edge case guard.
-            [AppraisalStatus.Active] = [AppraisalStatus.Governance, AppraisalStatus.Completed, AppraisalStatus.Appealed],
+            // Active → Withdrawn: the appraisee left mid-cycle.
+            [AppraisalStatus.Active] = [AppraisalStatus.Governance, AppraisalStatus.Completed, AppraisalStatus.Appealed, AppraisalStatus.Withdrawn],
 
             // Governance → Completed: the last governance step is behind it.
             // Governance → Appealed: an appeal lodged in governance.
             // Governance → Active: HR returns it to the manager.
-            [AppraisalStatus.Governance] = [AppraisalStatus.Completed, AppraisalStatus.Appealed, AppraisalStatus.Active],
+            // Governance → Withdrawn: before it is final (not once signed off).
+            [AppraisalStatus.Governance] = [AppraisalStatus.Completed, AppraisalStatus.Appealed, AppraisalStatus.Active, AppraisalStatus.Withdrawn],
 
             // Completed → Appealed: the employee appeals. Completed → Closed: HR closes the record.
             [AppraisalStatus.Completed] = [AppraisalStatus.Appealed, AppraisalStatus.Closed],
@@ -98,7 +104,7 @@ public static class AppraisalLifecycle
         AppraisalStatus.Closed when from == AppraisalStatus.Appealed =>
             "HR decides the appeal first; the Completed appraisal is then closed.",
         AppraisalStatus.Withdrawn =>
-            "withdrawing takes a reason and records who withdrew it.",
+            "withdrawing takes a reason and records who withdrew it — HR's withdraw action does it.",
         _ => "the status routes open a Draft appraisal and close a Completed one.",
     };
 

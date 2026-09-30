@@ -151,6 +151,30 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         return entity;
     }
 
+    /// <summary>
+    /// A withdrawn appraisal's review events take no more work (performance closure E-d1): its
+    /// completed events stay as history, and the rest are left where they stood.
+    /// </summary>
+    private async Task EnsureAppraisalNotWithdrawnAsync(Guid appraisalId, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var withdrawn = await _appraisalRepository
+            .GetQueryable(a => a.Id == appraisalId && a.TenantId == tenantId)
+            .AnyAsync(a => a.Status == AppraisalStatus.Withdrawn, cancellationToken);
+
+        if (withdrawn)
+            throw new InvalidOperationException(
+                "This appraisal was withdrawn from its cycle, so its review events take no more work.");
+    }
+
+    /// <summary>
+    /// What the review lists show of a withdrawn appraisal: its completed events, as history. Its
+    /// open ones waited on the manager's and the employee's lists for work nobody would do.
+    /// </summary>
+    private static IQueryable<AppraisalReviewEvent> WithoutWithdrawnOpenEvents(IQueryable<AppraisalReviewEvent> query)
+        => query.Where(e => e.Appraisal.Status != AppraisalStatus.Withdrawn
+                         || e.Status == AppraisalReviewStatus.Completed);
+
     // ─── Settings-driven review gates (Phase 2B) ──────────────────────────────
 
     /// <summary>Loads the AppraisalSettings governing a review event (via its cycle), or null.</summary>
@@ -255,6 +279,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
             throw new InvalidOperationException("This review event is not configured as a full appraisal.");
         if (ev.Status == AppraisalReviewStatus.Completed)
             throw new InvalidOperationException("This review event is already completed.");
+        await EnsureAppraisalNotWithdrawnAsync(ev.PerformanceAppraisalId, cancellationToken);
 
         var tenantId = GetTenantId();
 
@@ -370,7 +395,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
     public async Task<IEnumerable<AppraisalReviewEventDto>> GetForEmployeeAsync(
         Guid employeeId, Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
-        var query = BaseQuery.Where(e => e.Appraisal.EmployeeId == employeeId);
+        var query = WithoutWithdrawnOpenEvents(BaseQuery.Where(e => e.Appraisal.EmployeeId == employeeId));
         if (cycleId.HasValue)
             query = query.Where(e => e.AppraisalCycleId == cycleId.Value);
 
@@ -381,7 +406,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
     public async Task<IEnumerable<AppraisalReviewEventDto>> GetForManagerAsync(
         Guid managerId, Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
-        var query = BaseQuery.Where(e => e.Appraisal.Employee.ManagerId == managerId);
+        var query = WithoutWithdrawnOpenEvents(BaseQuery.Where(e => e.Appraisal.Employee.ManagerId == managerId));
         if (cycleId.HasValue)
             query = query.Where(e => e.AppraisalCycleId == cycleId.Value);
 
@@ -416,12 +441,15 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         // list while reading correctly on the appraisal's own.
         var appraisal = await _appraisalRepository
             .GetQueryable(a => a.Id == createDto.PerformanceAppraisalId && a.TenantId == tenantId)
-            .Select(a => new { a.Id, a.AppraisalCycleId })
+            .Select(a => new { a.Id, a.AppraisalCycleId, a.Status })
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw new ArgumentException($"Appraisal with ID '{createDto.PerformanceAppraisalId}' not found.");
 
         if (appraisal.AppraisalCycleId != createDto.AppraisalCycleId)
             throw new InvalidOperationException("The review event's cycle must be the cycle the appraisal belongs to.");
+        if (appraisal.Status == AppraisalStatus.Withdrawn)
+            throw new InvalidOperationException(
+                "This appraisal was withdrawn from its cycle, so it takes no new review event.");
 
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
@@ -440,6 +468,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
         if (entity.Status == AppraisalReviewStatus.Completed)
             throw new InvalidOperationException("Cannot update a completed review event.");
+        await EnsureAppraisalNotWithdrawnAsync(entity.PerformanceAppraisalId, cancellationToken);
 
         updateDto.UpdateEntity(entity);
         await _reviewEventRepository.UpdateAsync(entity);
@@ -469,6 +498,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
             throw new InvalidOperationException("Review event is already completed.");
         if (entity.Status == AppraisalReviewStatus.EmployeeSubmitted)
             throw new InvalidOperationException("Employee has already submitted this review event.");
+        await EnsureAppraisalNotWithdrawnAsync(entity.PerformanceAppraisalId, cancellationToken);
 
         // Gate: require goal progress updates at the review when configured.
         var submitSettings = await GetSettingsForEventAsync(eventId, cancellationToken);
@@ -494,6 +524,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
         if (entity.Status == AppraisalReviewStatus.Completed)
             throw new InvalidOperationException("Review event is already completed.");
+        await EnsureAppraisalNotWithdrawnAsync(entity.PerformanceAppraisalId, cancellationToken);
 
         // Gates: employee self-assessment + goal progress updates when configured.
         var settings = await GetSettingsForEventAsync(eventId, cancellationToken);
@@ -526,6 +557,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
         if (ev.Status == AppraisalReviewStatus.Completed)
             throw new InvalidOperationException("This review event is closed; progress can no longer be recorded against it.");
+        await EnsureAppraisalNotWithdrawnAsync(ev.PerformanceAppraisalId, cancellationToken);
 
         var goals = await GetScorableGoalsAsync(ev, new[] { dto.EmployeeGoalId }, cancellationToken);
         var goal = goals[dto.EmployeeGoalId];
@@ -593,7 +625,8 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         CancellationToken cancellationToken = default,
         Guid? fileUploadRecordId = null, Guid? documentRecordId = null, Guid? documentVersionId = null)
     {
-        await GetOwnedReviewEventAsync(eventId, cancellationToken);
+        var ev = await GetOwnedReviewEventAsync(eventId, cancellationToken);
+        await EnsureAppraisalNotWithdrawnAsync(ev.PerformanceAppraisalId, cancellationToken);
 
         var tenantId = GetTenantId();
         var entity = new AppraisalAttachment

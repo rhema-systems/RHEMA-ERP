@@ -241,11 +241,13 @@ public class EmployeeGoalService : IEmployeeGoalService
 
         // The appraisal link is the server's: this employee's appraisal in this cycle, if one
         // exists yet. It used to be taken from the payload whenever one was sent, so a goal could
-        // be linked to any appraisal — someone else's included (decision D-30).
+        // be linked to any appraisal — someone else's included (decision D-30). Not a withdrawn
+        // one (performance closure E-d1): it takes no more goals.
         var appraisal = await _appraisalRepository.FirstOrDefaultAsync(
             a => a.TenantId == tenantId
               && a.EmployeeId == entity.EmployeeId
-              && a.AppraisalCycleId == entity.AppraisalCycleId);
+              && a.AppraisalCycleId == entity.AppraisalCycleId
+              && a.Status != AppraisalStatus.Withdrawn);
         entity.PerformanceAppraisalId = appraisal?.Id;
 
         await _goalRepository.AddAsync(entity);

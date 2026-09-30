@@ -157,9 +157,11 @@ public class AppraisalCycleService : IAppraisalCycleService
         Add(cycle.EmployeeAcknowledgeDeadline, "Employee acknowledgment deadline", "Deadline", "Acknowledgment");
         Add(cycle.FinalConversationDeadline, "Final conversation deadline", "Deadline", "Final Conversation");
 
-        // Review events (Custom frequency / generated)
+        // Review events (Custom frequency / generated). A withdrawn appraisal's open events are not
+        // on the calendar: no one will hold them (performance closure E-d1).
         var reviewEvents = await _reviewEventRepository.GetQueryable()
-            .Where(r => r.TenantId == tenantId && r.AppraisalCycleId == cycleId)
+            .Where(r => r.TenantId == tenantId && r.AppraisalCycleId == cycleId
+                        && (r.Appraisal.Status != AppraisalStatus.Withdrawn || r.Status == AppraisalReviewStatus.Completed))
             .ToListAsync(cancellationToken);
         foreach (var re in reviewEvents)
             events.Add(new AppraisalCalendarEventDto
@@ -937,10 +939,13 @@ public class AppraisalCycleService : IAppraisalCycleService
 
         var settings = cycle.AppraisalSettings;
 
-        // Get all appraisals for this cycle with evaluations
-        var appraisals = await _appraisalRepository.GetQueryable()
+        // The cycle's appraisals. A withdrawn one is out of the cycle (performance closure E-d1): it
+        // leaves the phase, every progress denominator and the bottlenecks, and is counted on its
+        // own. Its unsubmitted evaluations read as work no one had started.
+        var all = await _appraisalRepository.GetQueryable()
             .Where(a => a.TenantId == tenantId && a.AppraisalCycleId == cycleId)
             .ToListAsync(cancellationToken);
+        var appraisals = all.Where(a => a.Status != AppraisalStatus.Withdrawn).ToList();
 
         var appraisalIds = appraisals.Select(a => a.Id).ToList();
 
@@ -950,6 +955,7 @@ public class AppraisalCycleService : IAppraisalCycleService
 
         // Calculate progress metrics
         var totalAppraisals = appraisals.Count;
+        var scope = await ResolveScopeAsync(cycleId, cancellationToken);
 
         var progress = new AppraisalCycleProgressDto
         {
@@ -981,10 +987,14 @@ public class AppraisalCycleService : IAppraisalCycleService
             ManagerEvaluationProgress = CalculateEvaluationProgress(evaluations, EvaluatorRole.Manager, totalAppraisals, settings?.RequireManagerEvaluation ?? true),
             HRReviewProgress = CalculateEvaluationProgress(evaluations, EvaluatorRole.HR, totalAppraisals, settings?.RequireHRReview ?? false),
 
-            // Participation coverage. Excluded: the staff the active targets cover whom an exclusion
-            // leaves out (it was always 0).
-            TotalEmployeesTargeted = totalAppraisals,
-            TotalEmployeesExcluded = (await ResolveScopeAsync(cycleId, cancellationToken)).Excluded.Count,
+            // Participation coverage. Targeted: the staff the active targets reach, less those an
+            // exclusion leaves out — the scope, which read the appraisal count (APC2026: 107 against
+            // a scope of 102, E-d1). Excluded: those an exclusion leaves out (it was always 0).
+            // Appraisals: the ones in play; Withdrawn: those taken out of the cycle.
+            TotalEmployeesTargeted = scope.InScope.Count,
+            TotalEmployeesExcluded = scope.Excluded.Count,
+            TotalAppraisals = totalAppraisals,
+            TotalWithdrawn = all.Count - totalAppraisals,
             TargetBreakdown = await CalculateTargetBreakdown(cycleId, cancellationToken)
         };
 
@@ -1208,12 +1218,23 @@ public class AppraisalCycleService : IAppraisalCycleService
     /// open notice and the deadline reminders are addressed to them. It also took in everyone holding a
     /// post any active template was scoped to, tenant-wide, and read inactive targets and leavers
     /// (performance closure E-c).
+    ///
+    /// <para>Less anyone whose appraisal in the cycle was withdrawn (E-d1): the cycle no longer
+    /// appraises them, and every phase reminder still reached them.</para>
     /// </summary>
     public async Task<IEnumerable<Guid>> GetEmployeesInScopeAsync(Guid cycleId, CancellationToken cancellationToken = default)
     {
         await GetOwnedCycleAsync(cycleId);
         var scope = await ResolveScopeAsync(cycleId, cancellationToken);
-        return scope.InScope.ToList();
+
+        var tenantId = GetTenantId();
+        var withdrawn = (await _appraisalRepository.GetQueryable()
+                .Where(a => a.TenantId == tenantId && a.AppraisalCycleId == cycleId && a.Status == AppraisalStatus.Withdrawn)
+                .Select(a => a.EmployeeId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+
+        return scope.InScope.Where(id => !withdrawn.Contains(id)).ToList();
     }
 }
 

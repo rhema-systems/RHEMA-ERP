@@ -657,8 +657,8 @@ export default function PerformanceAnalyticsPage() {
                     Recent activity
                   </CardTitle>
                   <CardDescription>
-                    Manual pipeline advances, acknowledgments, and appeals filed or resolved —
-                    newest first, capped at 30.
+                    Manual pipeline advances, withdrawals, acknowledgments, and appeals filed or
+                    resolved — newest first, capped at 30.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>

@@ -775,6 +775,10 @@ public class CalibrationSessionService : ICalibrationSessionService
     ///
     /// <para>Anything already adjusted or already linked to the session is unioned back in, so a
     /// row cannot vanish from the grid because someone was moved to another unit mid-cycle.</para>
+    ///
+    /// <para>A withdrawn appraisal is out of every session (performance closure E-d1), the union
+    /// included: its adjustments stay on record, but it left the grid, the matrix's counts and
+    /// average, the opening's links and the commit. Only the commit skipped it before.</para>
     /// </summary>
     private async Task<List<PerformanceAppraisal>> GetScopedAppraisalsAsync(
         CalibrationSession session, CancellationToken cancellationToken)
@@ -782,7 +786,8 @@ public class CalibrationSessionService : ICalibrationSessionService
         var tenantId = session.TenantId;
 
         var query = _appraisalRepository.GetQueryable()
-            .Where(a => a.TenantId == tenantId && a.AppraisalCycleId == session.AppraisalCycleId);
+            .Where(a => a.TenantId == tenantId && a.AppraisalCycleId == session.AppraisalCycleId
+                        && a.Status != AppraisalStatus.Withdrawn);
 
         if (session.OrganizationUnitId.HasValue)
         {
@@ -819,7 +824,7 @@ public class CalibrationSessionService : ICalibrationSessionService
         if (extraIds.Count > 0)
         {
             var extras = await _appraisalRepository.GetQueryable()
-                .Where(a => a.TenantId == tenantId && extraIds.Contains(a.Id))
+                .Where(a => a.TenantId == tenantId && extraIds.Contains(a.Id) && a.Status != AppraisalStatus.Withdrawn)
                 .Include(a => a.Employee)
                     .ThenInclude(e => e.Position)
                 .Include(a => a.Employee)

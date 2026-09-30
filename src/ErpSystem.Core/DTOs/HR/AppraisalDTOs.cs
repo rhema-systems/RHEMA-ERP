@@ -356,12 +356,28 @@ public class PerformanceAppraisalDto : BaseDto
     public string? EmployeeAcknowledgmentComments { get; set; }
     public bool HasAppeal { get; set; }
     public AppraisalAppealStatus? CurrentAppealStatus { get; set; }
-    
+
     // Appeal Remand Tracking
     public bool IsRemandedAppeal { get; set; }
     public DateTime? AppealRemandedDate { get; set; }
     public DateTime? AppealRemandDeadline { get; set; }
     public bool IsRemandDeadlineExceeded { get; set; }
+
+    // Withdrawal (D-10, performance closure E-d1) — set with Status = Withdrawn. A withdrawn
+    // appraisal's scores and grade are left off every reader's copy: they are not a result.
+    public string? WithdrawnReason { get; set; }
+    public DateTime? WithdrawnDate { get; set; }
+    /// <summary>The employee who withdrew it; null when no person did.</summary>
+    public Guid? WithdrawnById { get; set; }
+    public string? WithdrawnByName { get; set; }
+}
+
+/// <summary>Withdrawing an appraisal from its cycle (D-10): the reason is required, and kept.</summary>
+public class WithdrawAppraisalDto
+{
+    [Required]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
 }
 
 public class CreatePerformanceAppraisalDto : CreateDtoBase
@@ -1631,8 +1647,13 @@ public class AppraisalCycleProgressDto
     public ProgressMetricDto HRReviewProgress { get; set; } = new();
     
     // Participation Coverage
+    /// <summary>The scope: active staff the active targets reach, less the excluded (E-d1; it was the appraisal count).</summary>
     public int TotalEmployeesTargeted { get; set; }
     public int TotalEmployeesExcluded { get; set; }
+    /// <summary>The cycle's appraisals in play — every progress denominator (performance closure E-d1).</summary>
+    public int TotalAppraisals { get; set; }
+    /// <summary>Appraisals withdrawn from the cycle, which no count above includes (E-d1).</summary>
+    public int TotalWithdrawn { get; set; }
     public TargetBreakdownDto TargetBreakdown { get; set; } = new();
     
     // Bottlenecks & Risks
@@ -2618,6 +2639,17 @@ public class HRReviewDto
     public DateTime? AppealRemandedDate { get; set; }
     public DateTime? AppealRemandDeadline { get; set; }
     public bool IsRemandDeadlineExceeded { get; set; }
+
+    // Withdrawal (performance closure E-d1): set once the appraisal is taken out of its cycle.
+    public string? WithdrawnReason { get; set; }
+    public DateTime? WithdrawnDate { get; set; }
+    public string? WithdrawnByName { get; set; }
+
+    /// <summary>
+    /// HR may withdraw it: Draft, Active, or Governance before it is final (D-52). The page's
+    /// Withdraw button reads it; the server decides again on the write.
+    /// </summary>
+    public bool CanWithdraw { get; set; }
 }
 
 /// <summary>

@@ -119,7 +119,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             var settings = cycle.AppraisalSettings!;
 
             // 2. Load all appraisals for this cycle with selected navigations ──
-            var appraisals = await _appraisalRepo
+            var loaded = await _appraisalRepo
                 .GetQueryable(a => a.AppraisalCycleId == cycleId && a.TenantId == tenantId && !a.IsDeleted)
                 .Include(a => a.Employee)
                     .ThenInclude(e => e!.OrganizationUnit)
@@ -132,8 +132,23 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
                 .Include(a => a.HRReviews)
                 .Include(a => a.OverallGrade)
                 .Include(a => a.Appeals)
+                .Include(a => a.WithdrawnBy)
+                // ⚠ Split (performance closure E-d1): as one query, five collections joined to wide
+                // employee rows made a cross product SQL Server sized at ~2 GB of sort memory on every
+                // fresh compile — it asked for the per-query maximum (~716 MB) and used under 1 MB. When
+                // workspace memory was busy the query queued for that grant (RESOURCE_SEMAPHORE) past
+                // the 30 s timeout: the dashboard answered 500 for a cycle of three appraisals, and took
+                // 13 s cold on APC2026.
+                .AsSplitQuery()
                 .AsNoTracking()
                 .ToListAsync(ct);
+
+            // A withdrawn appraisal is out of the cycle (performance closure E-d1): it leaves every
+            // count, denominator and list below, and the activity feed records the withdrawal. It
+            // counted as overdue in its unit, kept its score in the average and the histogram, and
+            // kept its PIP and termination flags on the attention list.
+            var appraisals = loaded.Where(a => a.Status != AppraisalStatus.Withdrawn).ToList();
+            var withdrawn = loaded.Where(a => a.Status == AppraisalStatus.Withdrawn).ToList();
 
             // Where each appraisal is — the gates' answer, the one the write paths and the phase
             // endpoint give (B1). It resolved here from this load, whose goals were only those
@@ -175,9 +190,12 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             // came back with an empty Position — and which had no tenant predicate.
 
             // 7. Load recent manual-advance logs for the activity feed ────────────
+            // The feed is history, so it reads a withdrawn appraisal's advances too; the outcome
+            // pipeline counts only the appraisals in play.
             var appraisalIds = appraisals.Select(a => a.Id).ToHashSet();
+            var loadedIds = loaded.Select(a => a.Id).ToHashSet();
             var advanceLogs = await _advanceLogRepo
-                .GetQueryable(l => l.TenantId == tenantId && !l.IsDeleted && appraisalIds.Contains(l.PerformanceAppraisalId))
+                .GetQueryable(l => l.TenantId == tenantId && !l.IsDeleted && loadedIds.Contains(l.PerformanceAppraisalId))
                 .Include(l => l.AdvancedBy)
                 .Include(l => l.Appraisal)
                     .ThenInclude(a => a!.Employee)
@@ -222,7 +240,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
                 DepartmentBreakdown = BuildDepartmentBreakdown(appraisals, calibSessions,
                                          managerLookup, cycle.GoalSettingDeadline, today),
                 AttentionItems     = BuildAttentionItems(appraisals, subs, managerLookup, allGrades, cycle, today),
-                RecentActivity     = BuildActivity(appraisals, advanceLogs),
+                RecentActivity     = BuildActivity(appraisals, withdrawn, advanceLogs),
             };
 
             return dto;
@@ -876,9 +894,28 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
 
     private static List<HRCycleActivityItemDto> BuildActivity(
         List<PerformanceAppraisal>       appraisals,
+        List<PerformanceAppraisal>       withdrawn,
         List<AppraisalManualAdvanceLog>  advanceLogs)
     {
         var items = new List<HRCycleActivityItemDto>();
+
+        // Source 0: withdrawals (performance closure E-d1) — HR's action or the leaver's exit.
+        // ActionRequired until lane G gives the withdrawal its own notification type; the feed
+        // does not read the type.
+        foreach (var a in withdrawn.Where(w => w.WithdrawnDate.HasValue)
+                                   .OrderByDescending(w => w.WithdrawnDate)
+                                   .Take(15))
+        {
+            items.Add(new HRCycleActivityItemDto
+            {
+                Timestamp           = a.WithdrawnDate!.Value,
+                Description         = $"Appraisal withdrawn from the cycle. {a.WithdrawnReason?.Trim()}".TrimEnd(),
+                SubjectEmployeeName = a.Employee?.FullName,
+                ActorName           = a.WithdrawnBy?.FullName,
+                EventType           = AppraisalNotificationType.ActionRequired,
+                AppraisalId         = a.Id,
+            });
+        }
 
         // Source 1: manual-advance log entries
         foreach (var log in advanceLogs)

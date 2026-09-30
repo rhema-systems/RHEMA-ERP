@@ -32,6 +32,10 @@ public class EmployeeService : IEmployeeService
     // anything else that creates an employee through this service fire it here, once.
     private readonly IOrientationEnrollmentTriggerService _orientationTriggers;
 
+    // Performance closure E-d1 (D-54): both exits — the direct termination and a separation
+    // completing — withdraw the leaver's unfinished appraisals in the exit's own save.
+    private readonly IAppraisalWithdrawalService _appraisalWithdrawals;
+
     public EmployeeService(
         IEmployeeRepository employeeRepository,
         IOrganizationUnitRepository organizationUnitRepository,
@@ -48,9 +52,11 @@ public class EmployeeService : IEmployeeService
         IPositionNamedSetService namedSets,
         ILogger<EmployeeService> logger,
         IDisabilityTypeService disabilityTypes,
-        IOrientationEnrollmentTriggerService orientationTriggers)
+        IOrientationEnrollmentTriggerService orientationTriggers,
+        IAppraisalWithdrawalService appraisalWithdrawals)
     {
         _orientationTriggers = orientationTriggers;
+        _appraisalWithdrawals = appraisalWithdrawals;
         _currencies = currencies;
         _staffNumbers = staffNumbers;
         _payrollMembership = payrollMembership;
@@ -1105,6 +1111,16 @@ public class EmployeeService : IEmployeeService
             _currentUserProvider.UserId,
             note: employee.TerminationNotes,
             cancellationToken: cancellationToken);
+
+        // Performance closure E-d1 (D-54): the leaver's unfinished appraisals leave their cycles in
+        // this save; a final one stands (D-52).
+        await _appraisalWithdrawals.StageLeaverWithdrawalsAsync(
+            employee.TenantId,
+            employee.Id,
+            dto.TerminationDate,
+            string.Join(" — ", new[] { employee.TerminationReason?.ToString(), dto.TerminationNotes?.Trim() }
+                .Where(s => !string.IsNullOrWhiteSpace(s)).ToArray()),
+            cancellationToken);
 
         await _employeeRepository.UpdateAsync(employee);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -4014,6 +4030,11 @@ public class EmployeeService : IEmployeeService
             _currentUserProvider.UserId,
             note: notes,
             cancellationToken: cancellationToken);
+
+        // Performance closure E-d1 (D-54), as the direct path: the leaver's unfinished appraisals
+        // leave their cycles in this save; a final one stands (D-52).
+        await _appraisalWithdrawals.StageLeaverWithdrawalsAsync(
+            employee.TenantId, employee.Id, effectiveDate, notes, cancellationToken);
 
         await _employeeRepository.UpdateAsync(employee);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

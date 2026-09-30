@@ -344,11 +344,19 @@ public class PerformanceImprovementPlansController : ControllerBase
         if (hrOwnerId is Guid named && !await PipAccess.EmployeeHoldsDeskAsync(_db, tenantId, named, ct))
             return UnprocessableEntity(new { message = "The HR owner has to be an HR officer with an active login." });
 
-        // A plan raised off an appraisal is raised off one of this employee's.
-        if (req.AppraisalId is Guid appraisalId && appraisalId != Guid.Empty
-            && !await _db.Set<PerformanceAppraisal>().AsNoTracking()
-                .AnyAsync(a => a.Id == appraisalId && a.TenantId == tenantId && a.EmployeeId == req.EmployeeId, ct))
-            return BadRequest(new { message = "That appraisal is not this employee's." });
+        // A plan raised off an appraisal is raised off one of this employee's — and one still in its
+        // cycle: a withdrawn appraisal has no result to act on (performance closure E-d1).
+        if (req.AppraisalId is Guid appraisalId && appraisalId != Guid.Empty)
+        {
+            var source = await _db.Set<PerformanceAppraisal>().AsNoTracking()
+                .Where(a => a.Id == appraisalId && a.TenantId == tenantId && a.EmployeeId == req.EmployeeId)
+                .Select(a => new { a.Status })
+                .FirstOrDefaultAsync(ct);
+            if (source is null)
+                return BadRequest(new { message = "That appraisal is not this employee's." });
+            if (source.Status == AppraisalStatus.Withdrawn)
+                return UnprocessableEntity(new { message = "That appraisal was withdrawn from its cycle, so no plan is raised off it." });
+        }
 
         try
         {
@@ -726,11 +734,13 @@ public class PerformanceImprovementPlansController : ControllerBase
             // an appraisal shows what prompted it.
             if (appraisalId is Guid sourceAppraisalId)
             {
+                // Not a withdrawn one (performance closure E-d1): its score is no result.
                 var appraisal = await _db.Set<PerformanceAppraisal>()
                     .AsNoTracking()
                     .Where(a => a.Id == sourceAppraisalId
                              && a.TenantId == tenantId
-                             && a.EmployeeId == employeeId)
+                             && a.EmployeeId == employeeId
+                             && a.Status != AppraisalStatus.Withdrawn)
                     .Select(a => new
                     {
                         a.Id,
