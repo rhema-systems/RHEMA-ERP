@@ -65,6 +65,7 @@ public sealed class EstateUatLandSeederTests
         await estate.MarkReadyForProjectManagementAsync(asset.Id);
         var ready = await estate.GetProjectReadyLandDemarcationsAsync();
         ready.Should().ContainSingle(value => value.AssetId == asset.Id && value.DemarcationId == demarcation.Id);
+        ready.Single().LandReference.Should().Be(demarcation.ChildFixedAssetReference);
         (await db.EstateManagedAssets.SingleAsync()).IsPublishedToExternalPortal.Should().BeFalse();
         (await db.EstateLandDemarcations.SingleAsync()).IsPublishedToExternalPortal.Should().BeFalse();
     }

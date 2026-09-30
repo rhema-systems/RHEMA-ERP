@@ -7,7 +7,7 @@ import { externalEstateListingsService, type ExternalEstateListing } from '@/ser
 
 vi.mock('@/services/external-estate-listings.service', () => ({ externalEstateListingsService: { getEnquiryProfiles: vi.fn(), createEnquiry: vi.fn() } }));
 vi.mock('@/services/settings', () => ({ settingsService: { getPublicSecuritySettings: vi.fn().mockResolvedValue({ captchaEnabled: false }) } }));
-const listing = { id: 'listing-2', assetCode: 'LAND-002-PORTION-001', name: 'East Legon Parcel', externalListingType: 'Sale', externalListingCurrency: 'GHS', externalSalePrice: 1250000, location: 'Accra' } as ExternalEstateListing;
+const listing = { id: 'listing-2', assetCode: 'LAND-002-D001', name: 'LAND-002-D001', externalListingType: 'Sale', externalListingCurrency: 'GHS', externalSalePrice: 1250000, location: 'Accra' } as ExternalEstateListing;
 beforeEach(() => {
   vi.mocked(externalEstateListingsService.getEnquiryProfiles).mockResolvedValue([{ id: 'supplier-1', partnerName: 'Supplier Only Ltd', partnerType: 'Supplier' }]);
   vi.mocked(externalEstateListingsService.createEnquiry).mockReset();
@@ -21,8 +21,7 @@ const mount = () => {
 describe('Property enquiry dialog', () => {
   it('shows the selected property and supplier without submitting until a message is sent', async () => {
     const { onCreated } = mount();
-    expect(screen.getByText('East Legon Parcel')).toBeVisible();
-    expect(screen.getByText('LAND-002-PORTION-001')).toBeVisible();
+    expect(screen.getAllByText('LAND-002-D001')).toHaveLength(2);
     await screen.findByRole('option', { name: 'Supplier Only Ltd' });
     expect(externalEstateListingsService.createEnquiry).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Send enquiry' })).toBeDisabled();

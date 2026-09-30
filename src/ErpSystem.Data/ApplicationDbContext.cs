@@ -10764,6 +10764,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<EstateLandDemarcation>(entity =>
         {
             entity.ToTable("EstateLandDemarcations");
+            entity.HasIndex(item => new { item.TenantId, item.ChildFixedAssetReference })
+                .IsUnique()
+                .HasFilter("[ChildFixedAssetReference] IS NOT NULL");
             entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId, item.DemarcationNumber })
                 .IsUnique();
             entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId, item.ParentDemarcationId });

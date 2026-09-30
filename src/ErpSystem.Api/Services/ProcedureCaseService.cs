@@ -626,7 +626,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 .Where(item => item.TenantId == tenantId && !item.IsDeleted
                     && ((listingReference != null && item.AssetCode == listingReference)
                         || (propertyReference != null
-                            && (item.AssetCode == propertyReference || item.ProjectUnitCode == propertyReference))))
+                            && (item.AssetCode == propertyReference || item.ProjectUnitCode == propertyReference))
+                        || item.Demarcations.Any(parcel => !parcel.IsDeleted
+                            && (parcel.ChildFixedAssetReference == listingReference
+                                || parcel.ChildFixedAssetReference == propertyReference))))
                 .Select(item => (Guid?)item.Id)
                 .FirstOrDefaultAsync();
         }
@@ -4439,6 +4442,20 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         if (listingReference is null)
         {
             return false;
+        }
+
+        var childDemarcationId = await _db.EstateLandDemarcations
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.ChildFixedAssetReference == listingReference
+                && item.EstateManagedAsset.TenantId == tenantId
+                && !item.EstateManagedAsset.IsDeleted)
+            .Select(item => item.Id)
+            .FirstOrDefaultAsync();
+        if (childDemarcationId != Guid.Empty)
+        {
+            return await PublishDemarcationListingAsync(tenantId, childDemarcationId, now);
         }
 
         if (EstateLandDemarcationReference.TryParse(listingReference, out var assetCode, out var demarcationNumber))

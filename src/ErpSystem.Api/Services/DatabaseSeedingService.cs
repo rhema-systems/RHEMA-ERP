@@ -14,6 +14,7 @@ using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
+using ErpSystem.Core.Services.Estate;
 using ErpSystem.Core.Services.Projects;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
@@ -9010,6 +9011,11 @@ namespace ErpSystem.Web.Services
                         && !item.IsDeleted);
                     if (demarcation is not null)
                     {
+                        if (string.IsNullOrWhiteSpace(demarcation.ChildFixedAssetReference))
+                        {
+                            demarcation.ChildFixedAssetReference = EstateLandDemarcationReference.DisplayReference(
+                                null, asset.AssetCode, demarcationNumber);
+                        }
                         continue;
                     }
 
@@ -9023,6 +9029,9 @@ namespace ErpSystem.Web.Services
                         EstateManagedAssetId = asset.Id,
                         EstateManagedAsset = asset,
                         DemarcationNumber = demarcationNumber,
+                        ParentFixedAssetReference = asset.AssetCode,
+                        ChildFixedAssetReference = EstateLandDemarcationReference.DisplayReference(
+                            null, asset.AssetCode, demarcationNumber),
                         Description = $"{seed.ListingNotes} Demarcation {demarcationNumber} of {seed.DemarcationCount}.",
                         CreatedAt = now,
                         CreatedBy = "System"
