@@ -31,12 +31,17 @@ public sealed partial class FinanceSourceBookAuthorityService
         var book = await _db.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(item =>
             item.TenantId == TenantId && item.Id == authority.AccountingBookId && !item.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_BOOK_MISSING: retained book no longer exists.");
-        if (book.Code != authority.AccountingBookCode || NormalizeCurrency(book.FunctionalCurrencyCode) != authority.FunctionalCurrencyCode ||
-            requireActiveBook && (book.BookType != AccountingBookType.PrimaryFull ||
+        if (book.Code != authority.AccountingBookCode ||
+            requireActiveBook && (book.BookType is not (AccountingBookType.PrimaryFull or AccountingBookType.ParallelFull or AccountingBookType.Delta) ||
                 book.LifecycleStatus != AccountingBookLifecycleStatus.Active || !book.IsActive || !book.AllowsPosting))
             throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_BOOK_INVALID: retained exact book coordinate is invalid.");
-        if (requireActiveBook && await RequireFunctionalCurrencyAsync(cancellationToken) != authority.FunctionalCurrencyCode)
-            throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_FUNCTIONAL_CURRENCY_CHANGED: tenant evidence differs from frozen authority.");
+        var tenantFunctionalCurrency = await RequireFunctionalCurrencyAsync(cancellationToken);
+        var expectedFunctionalCurrency = await ResolveRetainedBookFunctionalCurrencyAsync(
+            book, requireActiveBook, cancellationToken);
+        if (expectedFunctionalCurrency != authority.FunctionalCurrencyCode)
+            throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_FUNCTIONAL_CURRENCY_CHANGED: book evidence differs from frozen authority.");
+        if (book.BookType == AccountingBookType.PrimaryFull && expectedFunctionalCurrency != tenantFunctionalCurrency)
+            throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_PRIMARY_CURRENCY_MISMATCH: Primary book and tenant currencies differ.");
         var origins = authority.Origins.Count != 0
             ? authority.Origins.ToList()
             : await _db.FinanceSourceBookAuthorityOrigins.AsNoTracking()
@@ -46,6 +51,31 @@ public sealed partial class FinanceSourceBookAuthorityService
             ? $"LEGACY:{authority.OriginalFinancePostingEventId:D}:{authority.OriginalJournalEntryId:D}" : null;
         if (Fingerprint(authority, origins, suffix) != authority.AuthorityFingerprint)
             throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_FINGERPRINT_INVALID: retained evidence failed integrity validation.");
+    }
+
+    private async Task<string> ResolveRetainedBookFunctionalCurrencyAsync(
+        AccountingBook book,
+        bool requireActiveBook,
+        CancellationToken cancellationToken)
+    {
+        if (book.BookType != AccountingBookType.Delta)
+            return NormalizeCurrency(book.FunctionalCurrencyCode);
+        if (!book.BaseAccountingBookId.HasValue)
+            throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_DELTA_BASE_INVALID: retained Delta book has no base book.");
+        var baseBook = await _db.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.TenantId == TenantId && item.Id == book.BaseAccountingBookId.Value && !item.IsDeleted,
+            cancellationToken)
+            ?? throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_DELTA_BASE_INVALID: retained Delta base book is unavailable.");
+        if (requireActiveBook && (baseBook.BookType is not (AccountingBookType.PrimaryFull or AccountingBookType.ParallelFull)
+            || baseBook.LifecycleStatus != AccountingBookLifecycleStatus.Active || !baseBook.IsActive || !baseBook.AllowsPosting))
+            throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_DELTA_BASE_INVALID: retained Delta base book is not active and postable.");
+        var baseFunctionalCurrency = NormalizeCurrency(baseBook.FunctionalCurrencyCode);
+        if (string.IsNullOrWhiteSpace(book.FunctionalCurrencyCode))
+            return baseFunctionalCurrency;
+        var deltaFunctionalCurrency = NormalizeCurrency(book.FunctionalCurrencyCode);
+        if (deltaFunctionalCurrency != baseFunctionalCurrency)
+            throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_DELTA_BASE_CURRENCY_MISMATCH: Delta and base-book currencies differ.");
+        return deltaFunctionalCurrency;
     }
 
     private async Task ValidateOriginalEvidenceAsync(FinanceSourceBookAuthority authority, CancellationToken cancellationToken)
@@ -120,7 +150,7 @@ public sealed partial class FinanceSourceBookAuthorityService
                 select new { Workflow = workflow, EntityTypeCode = entityType.Code, entityType.IsActive })
             .Take(2).ToListAsync(cancellationToken);
         if (rows.Count != 1 || rows[0].Workflow.EntityId != source.SourceDocumentId || !rows[0].IsActive ||
-            !SameNormalized(rows[0].EntityTypeCode, source.SourceDocumentType))
+            !SameNormalized(rows[0].EntityTypeCode, source.WorkflowEntityType))
             throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_WORKFLOW_INVALID: workflow must own the exact source identity and type.");
         var workflowEvidence = rows[0].Workflow;
         var completed = workflowEvidence.Status == WorkflowInstanceStatus.Completed && workflowEvidence.CompletedDate.HasValue;
@@ -174,7 +204,8 @@ public sealed partial class FinanceSourceBookAuthorityService
             TenantId = TenantId, OriginModuleCode = source.OriginModuleCode,
             SourceDocumentType = source.SourceDocumentType, SourceDocumentId = source.SourceDocumentId,
             PostingAction = source.PostingAction, AuthorityVersion = version, SupersedesAuthorityId = supersedesId,
-            SourceWorkflowInstanceId = source.WorkflowInstanceId, FreezeStage = source.FreezeStage,
+            SourceWorkflowInstanceId = source.WorkflowInstanceId, SourceWorkflowEntityType = source.WorkflowEntityType,
+            FreezeStage = source.FreezeStage,
             EffectiveDate = source.EffectiveDate, AccountingBookId = bookId, AccountingBookCode = bookCode,
             FunctionalCurrencyCode = functionalCurrency, TransactionCurrencyCode = source.TransactionCurrencyCode,
             SelectionBasis = selectionBasis, FrozenByUserId = frozenBy, FrozenAtUtc = frozenAt,
@@ -228,21 +259,25 @@ public sealed partial class FinanceSourceBookAuthorityService
         if (!FreezeStages.Contains(stage) && !(allowLegacyStage && stage == FinanceSourceBookAuthorityFreezeStages.LegacyPosted))
             throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_STAGE_INVALID: unsupported freeze stage.");
         if (request.SourceWorkflowInstanceId == Guid.Empty) throw new InvalidOperationException("Workflow instance id cannot be empty.");
+        var workflowEntityType = string.IsNullOrWhiteSpace(request.SourceWorkflowEntityType)
+            ? identity.SourceDocumentType
+            : FinancePreparedIdentityNormalizer.NormalizeValue(request.SourceWorkflowEntityType, "Workflow entity type");
         return new NormalizedSource(identity.OriginatingModuleCode, identity.SourceDocumentType, request.SourceDocumentId,
             identity.PostingAction, request.EffectiveDate.Date, NormalizeCurrency(request.TransactionCurrencyCode),
-            stage, request.SourceWorkflowInstanceId);
+            stage, request.SourceWorkflowInstanceId, workflowEntityType);
     }
 
     private static NormalizedSource ToSource(FinanceSourceBookAuthority authority) => new(
         authority.OriginModuleCode, authority.SourceDocumentType, authority.SourceDocumentId,
         authority.PostingAction, authority.EffectiveDate.Date, authority.TransactionCurrencyCode,
-        authority.FreezeStage, authority.SourceWorkflowInstanceId);
+        authority.FreezeStage, authority.SourceWorkflowInstanceId, authority.SourceWorkflowEntityType);
 
     private static void RequireSameSourceIdentity(FinanceSourceBookAuthority authority, NormalizedSource source, bool compareWorkflow)
     {
         if (authority.OriginModuleCode != source.OriginModuleCode || authority.SourceDocumentType != source.SourceDocumentType ||
             authority.SourceDocumentId != source.SourceDocumentId || authority.PostingAction != source.PostingAction ||
-            compareWorkflow && authority.SourceWorkflowInstanceId != source.WorkflowInstanceId)
+            compareWorkflow && (authority.SourceWorkflowInstanceId != source.WorkflowInstanceId ||
+                authority.SourceWorkflowEntityType != source.WorkflowEntityType))
             throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_IDENTITY_MISMATCH: request does not identify frozen source/workflow.");
     }
 
@@ -254,6 +289,7 @@ public sealed partial class FinanceSourceBookAuthorityService
         return Hash($"SOURCE-BOOK-AUTHORITY-V1|{authority.TenantId:D}|{authority.OriginModuleCode}|{authority.SourceDocumentType}|" +
             $"{authority.SourceDocumentId:D}|{authority.PostingAction}|{authority.AuthorityVersion}|{authority.SupersedesAuthorityId:D}|" +
             $"{authority.SourceWorkflowInstanceId:D}|{authority.FreezeStage}|{authority.EffectiveDate:yyyy-MM-dd}|" +
+            $"{authority.SourceWorkflowEntityType}|" +
             $"{authority.AccountingBookId:D}|{authority.AccountingBookCode}|{authority.FunctionalCurrencyCode}|" +
             $"{authority.TransactionCurrencyCode}|{authority.SelectionBasis}|{originEvidence}|{suffix}");
     }
@@ -287,13 +323,14 @@ public sealed partial class FinanceSourceBookAuthorityService
     private static FinanceSourceBookAuthorityResult Map(FinanceSourceBookAuthority item) => new(
         item.Id, item.AuthorityVersion, item.OriginModuleCode, item.SourceDocumentType, item.SourceDocumentId,
         item.PostingAction, item.EffectiveDate, item.FreezeStage, item.SourceWorkflowInstanceId,
+        item.SourceWorkflowEntityType,
         item.AccountingBookId, item.AccountingBookCode,
         item.FunctionalCurrencyCode, item.TransactionCurrencyCode, item.SelectionBasis,
         item.AuthorityFingerprint, item.OriginalFinancePostingEventId, item.OriginalJournalEntryId);
 
     private sealed record NormalizedSource(string OriginModuleCode, string SourceDocumentType,
         Guid SourceDocumentId, string PostingAction, DateTime EffectiveDate, string TransactionCurrencyCode,
-        string FreezeStage, Guid? WorkflowInstanceId);
+        string FreezeStage, Guid? WorkflowInstanceId, string WorkflowEntityType);
     private sealed record PrimaryCoordinate(Guid BookId, string BookCode, string FunctionalCurrency, string SelectionBasis);
     private sealed record OriginInput(Guid AuthorityId, string Role);
     private sealed record WorkflowApprovalEvidence(Guid StepInstanceId, Guid ApprovalId,

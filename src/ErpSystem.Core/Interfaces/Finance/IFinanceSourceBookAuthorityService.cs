@@ -10,6 +10,12 @@ public sealed class FinanceSourceBookAuthorityFreezeRequest
     public string TransactionCurrencyCode { get; init; } = string.Empty;
     public string FreezeStage { get; init; } = string.Empty;
     public Guid? SourceWorkflowInstanceId { get; init; }
+    /// <summary>
+    /// Exact workflow entity-type code retained by the workflow instance. This may differ from
+    /// the posting source document type (for example Invoice -> CustomerInvoice). When omitted,
+    /// the helper preserves the original exact-match behaviour and uses SourceDocumentType.
+    /// </summary>
+    public string? SourceWorkflowEntityType { get; init; }
 }
 
 public sealed class FinanceSourceBookAuthorityOriginRequest
@@ -28,6 +34,7 @@ public sealed record FinanceSourceBookAuthorityResult(
     DateTime EffectiveDate,
     string FreezeStage,
     Guid? SourceWorkflowInstanceId,
+    string SourceWorkflowEntityType,
     Guid AccountingBookId,
     string AccountingBookCode,
     string FunctionalCurrencyCode,

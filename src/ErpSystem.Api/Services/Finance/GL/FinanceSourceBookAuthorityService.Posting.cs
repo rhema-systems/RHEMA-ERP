@@ -1,4 +1,5 @@
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using Microsoft.EntityFrameworkCore;
@@ -67,8 +68,11 @@ public sealed partial class FinanceSourceBookAuthorityService
         var book = await _db.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(item =>
             item.TenantId == TenantId && item.Id == postingEvent.AccountingBookId && !item.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_LEGACY_BOOK_MISSING: accounting book was not found.");
-        if (!string.Equals(book.Code, postingEvent.BookClassification, StringComparison.Ordinal) ||
-            NormalizeCurrency(postingEvent.FunctionalCurrencyCode) != NormalizeCurrency(book.FunctionalCurrencyCode))
+        var bookFunctionalCurrency = await ResolveRetainedBookFunctionalCurrencyAsync(
+            book, requireActiveBook: true, cancellationToken);
+        if (book.LifecycleStatus != AccountingBookLifecycleStatus.Active || !book.IsActive || !book.AllowsPosting ||
+            !string.Equals(book.Code, postingEvent.BookClassification, StringComparison.Ordinal) ||
+            NormalizeCurrency(postingEvent.FunctionalCurrencyCode) != bookFunctionalCurrency)
             throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_LEGACY_BOOK_MISMATCH: event snapshot differs from exact book.");
         var retainedSource = source with
         {
@@ -170,7 +174,7 @@ public sealed partial class FinanceSourceBookAuthorityService
             ?? throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_REQUIRED: authority was not found.");
         if (!authority.OriginalFinancePostingEventId.HasValue || !authority.OriginalJournalEntryId.HasValue)
             throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_ORIGINAL_REQUIRED: original evidence is not bound.");
-        await ValidateRetainedCoordinateAsync(authority, false, cancellationToken);
+        await ValidateRetainedCoordinateAsync(authority, true, cancellationToken);
         await ValidateOriginalEvidenceAsync(authority, cancellationToken);
         return Map(authority);
     }

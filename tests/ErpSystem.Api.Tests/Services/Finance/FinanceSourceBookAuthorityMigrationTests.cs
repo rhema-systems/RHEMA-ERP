@@ -10,6 +10,26 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class FinanceSourceBookAuthorityMigrationTests
 {
     [Fact]
+    public void CallerBindingMigration_BackfillsWorkflowType_AndAddsTenantExactLinksWithGuardedDown()
+    {
+        var source = ReadMigration("src/ErpSystem.Data/Migrations/20260930000500_AddFinanceSourceBookAuthorityCallerBindings.cs");
+        source.Should().Contain("Migration(\"20260930000500_AddFinanceSourceBookAuthorityCallerBindings\")")
+            .And.Contain("SourceWorkflowEntityType")
+            .And.Contain("SET [SourceWorkflowEntityType]=[SourceDocumentType]")
+            .And.Contain("HASHBYTES('SHA2_256'")
+            .And.Contain("i.[SourceWorkflowEntityType]")
+            .And.Contain("AddCallerBinding(migrationBuilder, \"Invoices\")")
+            .And.Contain("AddCallerBinding(migrationBuilder, \"CustomerPayment\")")
+            .And.Contain("AddCallerBinding(migrationBuilder, \"CashTransaction\")")
+            .And.Contain("AddCallerBinding(migrationBuilder, \"VendorInvoice\")")
+            .And.Contain("principalColumns: new[] { \"TenantId\", \"Id\" }")
+            .And.Contain("ReferentialAction.Restrict")
+            .And.Contain("SOURCE_BOOK_AUTHORITY_CALLER_DOWN_BLOCKED")
+            .And.Contain("SOURCE_BOOK_AUTHORITY_WORKFLOW_TYPE_DOWN_BLOCKED");
+        source.Should().NotContain("AK_WorkflowInstances_TenantId_Id");
+    }
+
+    [Fact]
     public void Model_ExposesTenantExactKeys_OneWayEvidence_AndAppendOnlyOrigins()
     {
         using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -44,7 +64,7 @@ public sealed class FinanceSourceBookAuthorityMigrationTests
     [Fact]
     public void Migration_HasNoBackfill_AndGuardsTenantEvidenceMutationAndDown()
     {
-        var source = ReadMigration();
+        var source = ReadMigration("src/ErpSystem.Data/Migrations/20260930000400_FinanceSourceBookAuthority.cs");
         source.Should().Contain("Migration(\"20260930000400_FinanceSourceBookAuthority\")")
             .And.Contain("AK_FinanceSourceBookAuthorities_TenantId_Id")
             .And.Contain("IX_FinanceSourceBookAuthorities_SourceVersion")
@@ -72,9 +92,8 @@ public sealed class FinanceSourceBookAuthorityMigrationTests
             .And.NotContain("AK_WorkflowInstances_TenantId_Id");
     }
 
-    private static string ReadMigration()
+    private static string ReadMigration(string relative)
     {
-        const string relative = "src/ErpSystem.Data/Migrations/20260930000400_FinanceSourceBookAuthority.cs";
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
         {
             var path = Path.Combine(directory.FullName, relative.Replace('/', Path.DirectorySeparatorChar));

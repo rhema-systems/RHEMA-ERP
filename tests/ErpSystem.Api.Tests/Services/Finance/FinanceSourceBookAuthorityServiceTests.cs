@@ -16,6 +16,96 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class FinanceSourceBookAuthorityServiceTests
 {
     [Fact]
+    public async Task WorkflowType_MayDifferFromPostingType_ButMismatchIsRejectedAndRetained()
+    {
+        await using var db = Context();
+        var state = await SeedAsync(db);
+        var workflow = Workflow(state, WorkflowInstanceStatus.InProgress);
+        db.WorkflowInstances.Add(workflow);
+        await db.SaveChangesAsync();
+        var service = Service(db, state);
+        var request = Request(state, workflowId: workflow.Id,
+            stage: FinanceSourceBookAuthorityFreezeStages.Submitted,
+            sourceDocumentType: "CustomerInvoice", workflowEntityType: "Invoice");
+
+        var frozen = await service.FreezeInitialPrimaryAsync(request);
+        frozen.SourceDocumentType.Should().Be("CUSTOMERINVOICE");
+        frozen.SourceWorkflowEntityType.Should().Be("INVOICE");
+        workflow.Status = WorkflowInstanceStatus.Completed;
+        workflow.CompletedDate = DateTime.UtcNow;
+        AddWorkflowApprovalEvidence(db, state, workflow, Guid.NewGuid(), workflow.CompletedDate.Value.AddSeconds(-1));
+        await db.SaveChangesAsync();
+        (await service.RequireForPostingAsync(request)).AuthorityId.Should().Be(frozen.AuthorityId);
+
+        var mismatch = () => service.RequireForPostingAsync(Request(state, workflowId: workflow.Id,
+            stage: FinanceSourceBookAuthorityFreezeStages.Submitted,
+            sourceDocumentType: "CustomerInvoice", workflowEntityType: "Payment"));
+        await mismatch.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Theory]
+    [InlineData(AccountingBookType.ParallelFull, false)]
+    [InlineData(AccountingBookType.Delta, true)]
+    public async Task RetainedOriginal_AllowsActiveParallelAndDeltaCoordinates(
+        AccountingBookType type, bool usesBaseBook)
+    {
+        await using var db = Context();
+        var state = await SeedAsync(db);
+        var retainedBook = Book(state.TenantId,
+            type == AccountingBookType.ParallelFull ? "PAR_USD" : "DELTA_USD", false);
+        retainedBook.BookType = type;
+        retainedBook.FunctionalCurrencyCode = usesBaseBook ? null : "USD";
+        if (usesBaseBook)
+        {
+            var baseBook = Book(state.TenantId, "PAR_BASE", false);
+            baseBook.BookType = AccountingBookType.ParallelFull;
+            baseBook.FunctionalCurrencyCode = "USD";
+            retainedBook.BaseAccountingBookId = baseBook.Id;
+            db.AccountingBooks.Add(baseBook);
+        }
+        db.AccountingBooks.Add(retainedBook);
+        await db.SaveChangesAsync();
+        state = state with { Book = retainedBook };
+        var posting = await AddPostingAsync(db, state, state.SourceId, functionalCurrency: "USD");
+        var service = Service(db, state);
+
+        var retained = await service.RetainExistingPostedOriginalAsync(
+            Request(state, stage: FinanceSourceBookAuthorityFreezeStages.LegacyPosted),
+            posting.JournalId, posting.EventId);
+
+        retained.AccountingBookId.Should().Be(state.Book.Id);
+        retained.FunctionalCurrencyCode.Should().Be("USD");
+        (await service.RequireBoundOriginalAsync(retained.AuthorityId)).AuthorityId.Should().Be(retained.AuthorityId);
+    }
+
+    [Fact]
+    public async Task RetainedOriginal_RejectsInactiveNonPostableAndCurrencyTamperedBooks()
+    {
+        await using var db = Context();
+        var state = await SeedAsync(db);
+        var posting = await AddPostingAsync(db, state, state.SourceId);
+        var service = Service(db, state);
+        var retained = await service.RetainExistingPostedOriginalAsync(
+            Request(state, stage: FinanceSourceBookAuthorityFreezeStages.LegacyPosted),
+            posting.JournalId, posting.EventId);
+
+        state.Book.IsActive = false;
+        await db.SaveChangesAsync();
+        Func<Task> inactive = () => service.RequireBoundOriginalAsync(retained.AuthorityId);
+        await inactive.Should().ThrowAsync<InvalidOperationException>().WithMessage("*BOOK_INVALID*");
+        state.Book.IsActive = true;
+        state.Book.AllowsPosting = false;
+        await db.SaveChangesAsync();
+        Func<Task> nonPostable = () => service.RequireBoundOriginalAsync(retained.AuthorityId);
+        await nonPostable.Should().ThrowAsync<InvalidOperationException>().WithMessage("*BOOK_INVALID*");
+        state.Book.AllowsPosting = true;
+        state.Book.FunctionalCurrencyCode = "USD";
+        await db.SaveChangesAsync();
+        Func<Task> currencyTampered = () => service.RequireBoundOriginalAsync(retained.AuthorityId);
+        await currencyTampered.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
     public async Task InitialFreeze_UsesPerpetualDefaultPrimary_IgnoresRetiredDesignation_AndRetriesExactly()
     {
         await using var db = Context();
@@ -487,9 +577,10 @@ public sealed class FinanceSourceBookAuthorityServiceTests
 
     private static async Task<(Guid EventId, Guid JournalId)> AddPostingAsync(ApplicationDbContext db,
         State state, Guid sourceId, bool replica = false, int dateOffsetDays = 0, string journalSourceModule = "AR",
-        bool reversed = false)
+        bool reversed = false, string? functionalCurrency = null)
     {
         var postingDate = state.Date.AddDays(dateOffsetDays);
+        functionalCurrency ??= state.Book.FunctionalCurrencyCode ?? "GHS";
         var journal = new JournalEntry
         {
             TenantId = state.TenantId, JournalEntryNumber = $"JE-{Guid.NewGuid():N}", JournalType = "AR",
@@ -503,7 +594,7 @@ public sealed class FinanceSourceBookAuthorityServiceTests
         {
             TenantId = state.TenantId, SourceModule = "AR", SourceDocumentType = "Invoice", SourceDocumentId = sourceId,
             PostingAction = "Post", JournalEntryId = journal.Id, PostingStatus = "Posted", PostingDate = postingDate,
-            PostedAt = DateTime.UtcNow, FunctionalCurrencyCode = "GHS", PrimaryTransactionCurrencyCode = "GHS",
+            PostedAt = DateTime.UtcNow, FunctionalCurrencyCode = functionalCurrency, PrimaryTransactionCurrencyCode = "GHS",
             BookClassification = state.Book.Code, AccountingBookId = state.Book.Id
         };
         db.JournalEntries.Add(journal);
@@ -550,11 +641,13 @@ public sealed class FinanceSourceBookAuthorityServiceTests
 
     private static FinanceSourceBookAuthorityFreezeRequest Request(State state, Guid? sourceId = null,
         string currency = "GHS", Guid? workflowId = null,
-        string stage = FinanceSourceBookAuthorityFreezeStages.PrePost, DateTime? effectiveDate = null) => new()
+        string stage = FinanceSourceBookAuthorityFreezeStages.PrePost, DateTime? effectiveDate = null,
+        string sourceDocumentType = "Invoice", string? workflowEntityType = null) => new()
     {
-        OriginModuleCode = "FIN", SourceDocumentType = "Invoice", SourceDocumentId = sourceId ?? state.SourceId,
+        OriginModuleCode = "FIN", SourceDocumentType = sourceDocumentType, SourceDocumentId = sourceId ?? state.SourceId,
         PostingAction = "Post", EffectiveDate = effectiveDate ?? state.Date, TransactionCurrencyCode = currency,
-        FreezeStage = stage, SourceWorkflowInstanceId = workflowId
+        FreezeStage = stage, SourceWorkflowInstanceId = workflowId,
+        SourceWorkflowEntityType = workflowEntityType
     };
 
     private static FinanceSourceBookAuthorityService Service(ApplicationDbContext db, State state)

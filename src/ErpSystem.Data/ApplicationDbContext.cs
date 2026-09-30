@@ -1701,6 +1701,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(e => e.ExchangeRateId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.TenantId, e.ExchangeRateId });
+            entity.HasIndex(e => new { e.TenantId, e.SourceBookAuthorityId });
+            entity.HasOne(e => e.SourceBookAuthority)
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.SourceBookAuthorityId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
@@ -1783,6 +1789,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.TenantId, e.PaymentMethodId });
+            entity.HasIndex(e => new { e.TenantId, e.SourceBookAuthorityId });
+            entity.HasOne(e => e.SourceBookAuthority)
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.SourceBookAuthorityId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             // Specialised cutover facts are intentionally linked to their controlled opening batch.
             // This index keeps evidence validation and settlement-read-model rebuilds tenant-local.
             entity.HasIndex(e => new { e.TenantId, e.OpeningBalanceBatchId })
@@ -5600,6 +5612,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.JournalEntryId });
             entity.HasIndex(e => new { e.TenantId, e.ApprovalStatus });
             entity.HasIndex(e => new { e.TenantId, e.WorkflowInstanceId });
+            entity.HasIndex(e => new { e.TenantId, e.SourceBookAuthorityId });
             entity.HasIndex(e => new { e.TenantId, e.ReversalOfCashTransactionId });
             entity.HasIndex(e => new { e.TenantId, e.ReversalCashTransactionId });
             entity.HasIndex(e => new { e.TenantId, e.ReversalJournalEntryId });
@@ -5644,6 +5657,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(ct => ct.JournalEntry)
                 .WithMany()
                 .HasForeignKey(ct => ct.JournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(ct => ct.SourceBookAuthority)
+                .WithMany()
+                .HasForeignKey(ct => new { ct.TenantId, ct.SourceBookAuthorityId })
+                .HasPrincipalKey(authority => new { authority.TenantId, authority.Id })
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(ct => ct.ExchangeRateRecord)

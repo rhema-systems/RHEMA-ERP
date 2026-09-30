@@ -17,6 +17,7 @@ public sealed class FinanceSourceBookAuthority : TenantEntity
     public int AuthorityVersion { get; set; } = 1;
     public Guid? SupersedesAuthorityId { get; set; }
     public Guid? SourceWorkflowInstanceId { get; set; }
+    [MaxLength(100)] public string SourceWorkflowEntityType { get; set; } = string.Empty;
     [MaxLength(30)] public string FreezeStage { get; set; } = string.Empty;
     public DateTime EffectiveDate { get; set; }
     public Guid AccountingBookId { get; set; }
