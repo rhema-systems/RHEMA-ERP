@@ -61,8 +61,12 @@ nomination is what it says it is and changes only its date and instructions; a r
 room for another; approval — the manager's, a Manager-mode nomination's, HR's advance past the step —
 always creates the peer's form and tells them; the peer sees the nomination's due date and
 instructions; and in Manager mode with anonymous reviews the appraisee sees counts, not names.
-**Next: lane E**, the lifecycle guards. The closure plan's START HERE block and § 2 carry the live
-state.
+**Lane E**, the lifecycle guards, was source-checked the same day and found about three times its
+estimate — twelve days, built in seven slices. Slice E-a is built: a date correction no longer blanks
+the manager's recommendations; a raw status change can no longer complete an appraisal nobody signed
+off; a return to the manager is made before the sign-off and takes the calibration with it; HR does not
+act on their own appraisal. **Next: slice E-b**, calibration. The closure plan's START HERE block and
+§ 2 carry the live state.
 
 ▶ **Lane 11 (added 2026-09-25): probation is not absence.** About 1,800 long-serving staff on the
 demo database are on probation, because the employee import has no confirmation date. Two code sites

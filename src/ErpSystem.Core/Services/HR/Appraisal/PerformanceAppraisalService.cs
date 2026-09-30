@@ -183,15 +183,22 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         return _criterionScoreRepository.GetQueryable().Where(cs => cs.TenantId == tenantId);
     }
 
+    // POST {id}/calculate-score went in performance closure E-a: it settled with no status check and
+    // published a final appraisal's score, so it restated a finalised score and moved the talent-pool
+    // rating (against D-13). No screen called it. GET {id}/score-preview reads the same arithmetic
+    // and writes nothing (IAppraisalScoreService.PreviewAsync).
+
     /// <summary>
-    /// Settles the overall score. A delegate kept for the calculate-score route: the arithmetic,
-    /// the grade and the talent-pool publish all live in <see cref="IAppraisalScoreService"/>, the
-    /// only writer of <c>OverallScore</c> (performance closure lane A).
+    /// The two-actor rule on HR's own appraisal (performance closure E-a): an HR officer who is the
+    /// appraisee is the appraisee, so the desk's actions on the appraisal — the sign-off, the return,
+    /// a correction, a removal, the raw status route — are another officer's. D-35 applied it to
+    /// appeals only.
     /// </summary>
-    public async Task<bool> CalculateOverallScoreAsync(Guid appraisalId, CancellationToken cancellationToken = default)
+    private void EnsureNotOwnAppraisal(PerformanceAppraisal appraisal, string action)
     {
-        await _scores.SettleAsync(appraisalId, AppraisalScoreChangeSource.Settle, publish: true, cancellationToken);
-        return true;
+        if (_currentUser.EmployeeId is Guid me && me != Guid.Empty && me == appraisal.EmployeeId)
+            throw new UnauthorizedAccessException(
+                $"You cannot {action} your own appraisal: another HR officer does.");
     }
 
     /// <summary>
@@ -279,9 +286,26 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
+    /// <summary>
+    /// Removes an appraisal generated for someone who should not have had one — only before anything
+    /// in it counts: Draft, or Active with no evaluation submitted (performance closure E-a). It
+    /// removed an appraisal at any stage, leaving its evaluations, goal links and any published
+    /// talent-pool rating behind.
+    /// </summary>
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAppraisalAsync(id, cancellationToken);
+        EnsureNotOwnAppraisal(entity, "remove");
+
+        var submitted = await TenantEvaluationQuery()
+            .AnyAsync(e => e.AppraisalId == id && e.SubmittedDate != null, cancellationToken);
+        var removable = entity.Status == AppraisalStatus.Draft
+            || (entity.Status == AppraisalStatus.Active && !submitted);
+        if (!removable)
+            throw new InvalidOperationException(
+                "An appraisal is removed only before anything in it counts — Draft, or Active with no " +
+                $"evaluation submitted. This one is {entity.Status}" +
+                (entity.Status == AppraisalStatus.Active ? ", with an evaluation submitted." : "."));
 
         await _appraisalRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -395,6 +419,13 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         };
     }
 
+    /// <summary>
+    /// Corrects a generated appraisal's window — its year and dates — and nothing else, before the
+    /// appraisal is final (performance closure E-a). The update copied the manager's narrative, the
+    /// five recommendation flags, the ranks, the next appraisal date and the peer count from the
+    /// body, and the HR review's <i>Correct dates</i> sends none of them, so every correction blanked
+    /// the manager's work.
+    /// </summary>
     public async Task<PerformanceAppraisalDto> UpdateAsync(UpdatePerformanceAppraisalDto updateDto, CancellationToken cancellationToken = default)
     {
         var entity = await TenantAppraisalQuery()
@@ -409,6 +440,16 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             throw new ArgumentException($"Performance appraisal with ID '{updateDto.Id}' not found.");
         }
 
+        EnsureNotOwnAppraisal(entity, "correct");
+
+        if (entity.Status is AppraisalStatus.Completed or AppraisalStatus.Closed
+            or AppraisalStatus.Appealed or AppraisalStatus.Withdrawn)
+            throw new InvalidOperationException(
+                $"An appraisal's dates are corrected before it is final: this one is {entity.Status}.");
+
+        if (updateDto.EndDate <= updateDto.StartDate)
+            throw new InvalidOperationException("The appraisal's end date must be after its start date.");
+
         updateDto.UpdateEntity(entity);
 
         await _appraisalRepository.UpdateAsync(entity);
@@ -419,23 +460,22 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         return await ForViewerAsync(entity.ToDto(), cancellationToken);
     }
 
+    /// <summary>
+    /// The raw status route: it opens a Draft appraisal or closes a Completed one with a score, and
+    /// nothing else — every other move is its owning action's (performance closure E-a,
+    /// <see cref="AppraisalLifecycle.EnsureRawTransition"/>).
+    /// </summary>
     public async Task<bool> UpdateStatusAsync(UpdateAppraisalStatusDto statusDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAppraisalAsync(statusDto.AppraisalId, cancellationToken);
+        EnsureNotOwnAppraisal(entity, "change the status of");
 
-        // The one lifecycle table (performance closure E1): this method kept an identical copy of
-        // the workflow service's, which B1's sync would have made a third.
-        AppraisalLifecycle.EnsureTransition(entity.Status, statusDto.Status);
+        AppraisalLifecycle.EnsureRawTransition(entity.Status, statusDto.Status, entity.OverallScore.HasValue);
 
         entity.Status = statusDto.Status;
 
         await _appraisalRepository.UpdateAsync(entity);
-
-        // Completed by any route settles and publishes in the same save (performance closure A7).
-        if (statusDto.Status == AppraisalStatus.Completed)
-            await _scores.SettleAsync(entity.Id, AppraisalScoreChangeSource.Settle, publish: true, cancellationToken);
-        else
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Appraisal status updated successfully: {Id}", statusDto.AppraisalId);
 
@@ -1011,202 +1051,198 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                 return new SelfEvaluationResultDto { Success = false, Message = evidenceError };
         }
 
-        try
-        {
-            // Create or update EvaluatorEvaluation
-            EvaluatorEvaluation evaluatorEvaluation;
+        // No blanket catch (performance closure E-a): it answered every failure — a database error
+        // included — with a 400 carrying the raw exception text, and logged nothing. A rule is a 422
+        // from the controller, anything else a logged 500.
+        // Create or update EvaluatorEvaluation
+        EvaluatorEvaluation evaluatorEvaluation;
 
+        if (existingSelfEval == null)
+        {
+            // Create new self-evaluation
+            var settings = appraisal.AppraisalCycle.AppraisalSettings;
+
+            evaluatorEvaluation = new EvaluatorEvaluation
+            {
+                TenantId = appraisal.TenantId,
+                AppraisalId = appraisal.Id,
+                EvaluatorId = saveDto.EmployeeId,
+                EvaluatorRole = EvaluatorRole.Self,
+                EvaluatorWeight = settings.SelfEvaluationWeight,
+                StartedDate = DateTime.UtcNow, // Set on first save (draft or submit)
+                // Not submitted yet: the submission is stamped in the save that carries its scores.
+                SubmittedDate = null
+            };
+
+            await _evaluatorEvaluationRepository.AddAsync(evaluatorEvaluation);
+        }
+        else
+        {
+            evaluatorEvaluation = existingSelfEval;
+
+            // Set StartedDate if not already set (in case first save was missed)
+            if (!evaluatorEvaluation.StartedDate.HasValue)
+            {
+                evaluatorEvaluation.StartedDate = DateTime.UtcNow;
+            }
+        }
+
+        // Save or update scores (KPI and competency items unified under ItemScores)
+        var scoredThisSave = new List<CriterionScore>();
+
+        if (saveDto.ItemScores.Any())
+        {
+            // Need to save changes first to get the evaluatorEvaluation.Id if it's new
             if (existingSelfEval == null)
             {
-                // Create new self-evaluation
-                var settings = appraisal.AppraisalCycle.AppraisalSettings;
-                
-                evaluatorEvaluation = new EvaluatorEvaluation
-                {
-                    TenantId = appraisal.TenantId,
-                    AppraisalId = appraisal.Id,
-                    EvaluatorId = saveDto.EmployeeId,
-                    EvaluatorRole = EvaluatorRole.Self,
-                    EvaluatorWeight = settings.SelfEvaluationWeight,
-                    StartedDate = DateTime.UtcNow, // Set on first save (draft or submit)
-                    SubmittedDate = saveDto.IsDraft ? null : DateTime.UtcNow
-                };
-                
-                await _evaluatorEvaluationRepository.AddAsync(evaluatorEvaluation);
-            }
-            else
-            {
-                evaluatorEvaluation = existingSelfEval;
-                
-                // Set StartedDate if not already set (in case first save was missed)
-                if (!evaluatorEvaluation.StartedDate.HasValue)
-                {
-                    evaluatorEvaluation.StartedDate = DateTime.UtcNow;
-                }
-                
-                if (!saveDto.IsDraft)
-                {
-                    evaluatorEvaluation.SubmittedDate = DateTime.UtcNow;
-                }
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
             }
 
-            // Save or update scores (KPI and competency items unified under ItemScores)
-            var scoredThisSave = new List<CriterionScore>();
-
-            if (saveDto.ItemScores.Any())
+            foreach (var itemInput in saveDto.ItemScores)
             {
-                // Need to save changes first to get the evaluatorEvaluation.Id if it's new
-                if (existingSelfEval == null)
+                // The criterion the input names — a template item, or a goal row's snapshot id.
+                var criterion = scoring.Resolve(itemInput)
+                    ?? throw new InvalidOperationException("An item on this form is not one of this appraisal's criteria.");
+
+                // Check if criterion score already exists
+                var existingScore = await FindScoreAsync(evaluatorEvaluation.Id, criterion, cancellationToken);
+
+                if (existingScore == null)
                 {
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
-                }
-
-                foreach (var itemInput in saveDto.ItemScores)
-                {
-                    // The criterion the input names — a template item, or a goal row's snapshot id.
-                    var criterion = scoring.Resolve(itemInput)
-                        ?? throw new InvalidOperationException("An item on this form is not one of this appraisal's criteria.");
-
-                    // Check if criterion score already exists
-                    var existingScore = await FindScoreAsync(evaluatorEvaluation.Id, criterion, cancellationToken);
-
-                    if (existingScore == null)
+                    // Create new criterion score
+                    var newScore = new CriterionScore
                     {
-                        // Create new criterion score
-                        var newScore = new CriterionScore
-                        {
-                            TenantId = appraisal.TenantId,
-                            EvaluatorEvaluationId = evaluatorEvaluation.Id,
-                            TemplateItemId = criterion.TemplateItemId,
-                            CriterionConfigId = criterion.CriterionConfigId,
-                            NumericScore = itemInput.NumericScore,
-                            ActualValue  = itemInput.ActualValue,
-                            Notes = itemInput.Notes,
-                            // B2: the form sent it and no save kept it.
-                            EvidenceLinks = itemInput.EvidenceLinks
-                        };
+                        TenantId = appraisal.TenantId,
+                        EvaluatorEvaluationId = evaluatorEvaluation.Id,
+                        TemplateItemId = criterion.TemplateItemId,
+                        CriterionConfigId = criterion.CriterionConfigId,
+                        NumericScore = itemInput.NumericScore,
+                        ActualValue  = itemInput.ActualValue,
+                        Notes = itemInput.Notes,
+                        // B2: the form sent it and no save kept it.
+                        EvidenceLinks = itemInput.EvidenceLinks
+                    };
 
-                        // Calculate WeightedScore immediately per spec
-                        await _scores.ScoreCriterionAsync(newScore, scoring, cancellationToken);
+                    // Calculate WeightedScore immediately per spec
+                    await _scores.ScoreCriterionAsync(newScore, scoring, cancellationToken);
 
-                        await _criterionScoreRepository.AddAsync(newScore);
-                        scoredThisSave.Add(newScore);
-                    }
-                    else
-                    {
-                        // Update existing score
-                        existingScore.CriterionConfigId ??= criterion.CriterionConfigId;
-                        existingScore.NumericScore = itemInput.NumericScore;
-                        existingScore.ActualValue  = itemInput.ActualValue;
-                        existingScore.Notes = itemInput.Notes;
-                        existingScore.EvidenceLinks = itemInput.EvidenceLinks;
-
-                        // Recalculate WeightedScore
-                        await _scores.ScoreCriterionAsync(existingScore, scoring, cancellationToken);
-
-                        await _criterionScoreRepository.UpdateAsync(existingScore);
-                        scoredThisSave.Add(existingScore);
-                    }
+                    await _criterionScoreRepository.AddAsync(newScore);
+                    scoredThisSave.Add(newScore);
                 }
-            }
-
-            // Calculate and set TotalScore only when submitting (not draft)
-            if (!saveDto.IsDraft)
-            {
-                // Need to reload the evaluator evaluation with all criterion scores to calculate TotalScore
-                var evalWithScores = await TenantEvaluationQuery()
-                    .Include(e => e.CriterionScores)
-                    .FirstOrDefaultAsync(e => e.Id == evaluatorEvaluation.Id, cancellationToken);
-                
-                if (evalWithScores != null && evalWithScores.CriterionScores.Any())
+                else
                 {
-                    // A weighted mean over what was scored, not a bare sum — see AppraisalScoring.
-                    evalWithScores.TotalScore = await _scores.ScoreEvaluatorAsync(
-                        evalWithScores.CriterionScores, scoring, cancellationToken);
-                    await _evaluatorEvaluationRepository.UpdateAsync(evalWithScores);
-                }
+                    // Update existing score
+                    existingScore.CriterionConfigId ??= criterion.CriterionConfigId;
+                    existingScore.NumericScore = itemInput.NumericScore;
+                    existingScore.ActualValue  = itemInput.ActualValue;
+                    existingScore.Notes = itemInput.Notes;
+                    existingScore.EvidenceLinks = itemInput.EvidenceLinks;
 
-                // The first save opens a Draft appraisal. Where it goes from there is the gates'
-                // call, made once this is saved (the sync below).
-                if (appraisal.Status == AppraisalStatus.Draft)
-                    appraisal.Status = AppraisalStatus.Active;
-            }
-            else
-            {
-                // Update status when saving as draft (from Open to SelfEvaluation)
-                var settings = appraisal.AppraisalCycle.AppraisalSettings;
-                var draftStatus = UpdateStatusOnDraft(appraisal.Status, EvaluatorRole.Self, settings);
-                if (draftStatus != appraisal.Status)
-                {
-                    appraisal.Status = draftStatus;
-                    await _appraisalRepository.UpdateAsync(appraisal);
+                    // Recalculate WeightedScore
+                    await _scores.ScoreCriterionAsync(existingScore, scoring, cancellationToken);
+
+                    await _criterionScoreRepository.UpdateAsync(existingScore);
+                    scoredThisSave.Add(existingScore);
                 }
             }
-
-            // Save custom question responses
-            if (saveDto.CustomQuestionResponses.Any())
-            {
-                foreach (var input in saveDto.CustomQuestionResponses)
-                {
-                    var existingResp = await _customQuestionResponseRepository.GetQueryable()
-                        .FirstOrDefaultAsync(r => r.PerformanceAppraisalId == appraisal.Id
-                                               && r.TemplateItemId == input.TemplateItemId,
-                                           cancellationToken);
-
-                    if (existingResp == null)
-                    {
-                        await _customQuestionResponseRepository.AddAsync(new AppraisalCustomQuestionResponse
-                        {
-                            TenantId = appraisal.TenantId,
-                            PerformanceAppraisalId = appraisal.Id,
-                            TemplateItemId         = input.TemplateItemId,
-                            ResponseText           = input.ResponseText,
-                            IsDraft                = saveDto.IsDraft,
-                            SubmittedDate          = saveDto.IsDraft ? null : DateTime.UtcNow
-                        });
-                    }
-                    else
-                    {
-                        existingResp.ResponseText  = input.ResponseText;
-                        existingResp.IsDraft        = saveDto.IsDraft;
-                        if (!saveDto.IsDraft)
-                            existingResp.SubmittedDate = DateTime.UtcNow;
-                        await _customQuestionResponseRepository.UpdateAsync(existingResp);
-                    }
-                }
-            }
-
-            // The employee's side of the year-end goal assessments, and the goal rows scored here
-            // mirrored into them (lane L3).
-            var assessmentError = await SaveGoalAssessmentsAsync(
-                appraisal, managerSide: false, saveDto.GoalAssessments, scoredThisSave, scoring, cancellationToken);
-            if (assessmentError != null)
-                return new SelfEvaluationResultDto { Success = false, Message = assessmentError };
-
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            if (!saveDto.IsDraft)
-            {
-                await _lifecycle.SyncAsync(appraisal.Id, cancellationToken: cancellationToken);
-                await NotifySelfEvaluationSubmittedAsync(appraisal, cancellationToken);
-            }
-
-            return new SelfEvaluationResultDto
-            {
-                Success = true,
-                Message = saveDto.IsDraft ? "Self-evaluation saved as draft" : "Self-evaluation submitted successfully",
-                EvaluatorEvaluationId = evaluatorEvaluation.Id,
-                SubmittedDate = evaluatorEvaluation.SubmittedDate
-            };
         }
-        catch (Exception ex)
+
+        // Calculate and set TotalScore only when submitting (not draft)
+        if (!saveDto.IsDraft)
         {
-            return new SelfEvaluationResultDto
+            // Need to reload the evaluator evaluation with all criterion scores to calculate TotalScore
+            var evalWithScores = await TenantEvaluationQuery()
+                .Include(e => e.CriterionScores)
+                .FirstOrDefaultAsync(e => e.Id == evaluatorEvaluation.Id, cancellationToken);
+
+            if (evalWithScores != null && evalWithScores.CriterionScores.Any())
             {
-                Success = false,
-                Message = $"Error saving self-evaluation: {ex.Message}"
-            };
+                // A weighted mean over what was scored, not a bare sum — see AppraisalScoring.
+                evalWithScores.TotalScore = await _scores.ScoreEvaluatorAsync(
+                    evalWithScores.CriterionScores, scoring, cancellationToken);
+                await _evaluatorEvaluationRepository.UpdateAsync(evalWithScores);
+            }
+
+            // The first save opens a Draft appraisal. Where it goes from there is the gates'
+            // call, made once this is saved (the sync below).
+            if (appraisal.Status == AppraisalStatus.Draft)
+                appraisal.Status = AppraisalStatus.Active;
         }
+        else
+        {
+            // Update status when saving as draft (from Open to SelfEvaluation)
+            var settings = appraisal.AppraisalCycle.AppraisalSettings;
+            var draftStatus = UpdateStatusOnDraft(appraisal.Status, EvaluatorRole.Self, settings);
+            if (draftStatus != appraisal.Status)
+            {
+                appraisal.Status = draftStatus;
+                await _appraisalRepository.UpdateAsync(appraisal);
+            }
+        }
+
+        // Save custom question responses
+        if (saveDto.CustomQuestionResponses.Any())
+        {
+            foreach (var input in saveDto.CustomQuestionResponses)
+            {
+                var existingResp = await _customQuestionResponseRepository.GetQueryable()
+                    .FirstOrDefaultAsync(r => r.PerformanceAppraisalId == appraisal.Id
+                                           && r.TemplateItemId == input.TemplateItemId,
+                                       cancellationToken);
+
+                if (existingResp == null)
+                {
+                    await _customQuestionResponseRepository.AddAsync(new AppraisalCustomQuestionResponse
+                    {
+                        TenantId = appraisal.TenantId,
+                        PerformanceAppraisalId = appraisal.Id,
+                        TemplateItemId         = input.TemplateItemId,
+                        ResponseText           = input.ResponseText,
+                        IsDraft                = saveDto.IsDraft,
+                        SubmittedDate          = saveDto.IsDraft ? null : DateTime.UtcNow
+                    });
+                }
+                else
+                {
+                    existingResp.ResponseText  = input.ResponseText;
+                    existingResp.IsDraft        = saveDto.IsDraft;
+                    if (!saveDto.IsDraft)
+                        existingResp.SubmittedDate = DateTime.UtcNow;
+                    await _customQuestionResponseRepository.UpdateAsync(existingResp);
+                }
+            }
+        }
+
+        // The employee's side of the year-end goal assessments, and the goal rows scored here
+        // mirrored into them (lane L3).
+        var assessmentError = await SaveGoalAssessmentsAsync(
+            appraisal, managerSide: false, saveDto.GoalAssessments, scoredThisSave, scoring, cancellationToken);
+        if (assessmentError != null)
+            return new SelfEvaluationResultDto { Success = false, Message = assessmentError };
+
+        // The submission is stamped last, in the save that carries its scores (performance closure
+        // E-a). A new self-evaluation is saved early for its id, and it used to be saved already
+        // submitted: a failure after that — an item that is not the appraisal's, a goal assessment
+        // refused — left a submitted self-evaluation with no scores, and every retry was refused as
+        // "already submitted".
+        if (!saveDto.IsDraft)
+            evaluatorEvaluation.SubmittedDate = DateTime.UtcNow;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        if (!saveDto.IsDraft)
+        {
+            await _lifecycle.SyncAsync(appraisal.Id, cancellationToken: cancellationToken);
+            await NotifySelfEvaluationSubmittedAsync(appraisal, cancellationToken);
+        }
+
+        return new SelfEvaluationResultDto
+        {
+            Success = true,
+            Message = saveDto.IsDraft ? "Self-evaluation saved as draft" : "Self-evaluation submitted successfully",
+            EvaluatorEvaluationId = evaluatorEvaluation.Id,
+            SubmittedDate = evaluatorEvaluation.SubmittedDate
+        };
     }
 
     /// <summary>
@@ -1797,6 +1833,17 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         bool isRemandedReevaluation = RemandOpen(
             appraisal, appraisal.EvaluatorEvaluations.FirstOrDefault(e => e.EvaluatorRole == EvaluatorRole.Manager));
 
+        // A draft belongs to an appraisal still being evaluated (performance closure E-a): Draft or
+        // Active, or a remanded re-evaluation. Only the submission was gated, so a draft created an
+        // evaluation and overwrote the narrative and the recommendations on a completed, closed or
+        // withdrawn appraisal. A submitted evaluation keeps its own refusal below.
+        var managerSubmitted = appraisal.EvaluatorEvaluations
+            .Any(e => e.EvaluatorRole == EvaluatorRole.Manager && e.SubmittedDate.HasValue);
+        if (!isRemandedReevaluation && !managerSubmitted
+            && appraisal.Status is not (AppraisalStatus.Draft or AppraisalStatus.Active))
+            throw new InvalidOperationException(
+                $"The manager evaluation cannot be saved: this appraisal is {appraisal.Status}.");
+
         // Strict sequence (decision 5, B1): the submission is the manager-evaluation step's — the
         // self-evaluation and the peer minimum in, as the cycle requires. Drafts can be saved at any
         // point; HR's audited advance is the way past a step that will not be completed. A remanded
@@ -2214,9 +2261,10 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
     #region Employee Actions
     
     /// <summary>
-    /// Employee acknowledges receipt of finalized appraisal
+    /// Employee acknowledges receipt of finalized appraisal, with an optional comment kept on the
+    /// appraisal (performance closure E-a — it took none, and only HR's advance ever wrote the column).
     /// </summary>
-    public async Task AcknowledgeAppraisalAsync(Guid appraisalId, Guid employeeId, CancellationToken cancellationToken = default)
+    public async Task AcknowledgeAppraisalAsync(Guid appraisalId, Guid employeeId, string? comments = null, CancellationToken cancellationToken = default)
     {
         var appraisal = await TenantAppraisalQuery()
             .Include(a => a.AppraisalCycle)
@@ -2242,6 +2290,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 
         appraisal.EmployeeAcknowledgedDate = DateTime.UtcNow;
         appraisal.EmployeeAcknowledged = true;
+        appraisal.EmployeeAcknowledgmentComments = string.IsNullOrWhiteSpace(comments) ? null : comments.Trim();
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -4426,6 +4475,15 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         if (appraisal == null)
             throw new ArgumentException($"Appraisal with ID '{appraisalId}' not found.");
 
+        EnsureNotOwnAppraisal(appraisal, "sign off");
+
+        // A sign-off is made in governance (performance closure E-a). The gates hold it to HR's review
+        // step; the status is checked as well, since the step alone did not say the manager's
+        // submission had moved the appraisal there.
+        if (appraisal.Status != AppraisalStatus.Governance)
+            throw new InvalidOperationException(
+                $"HR cannot sign this appraisal off: it is {appraisal.Status}, and a sign-off is made in governance.");
+
         // HR signs off at the HR-review step (B1, B4): every step before it behind the appraisal as
         // the cycle requires — the self-evaluation and the peer minimum only when required (they
         // were checked unconditionally), calibration first only under AfterCalibration (it was
@@ -4520,7 +4578,12 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
     }
 
     /// <summary>
-    /// Returns an appraisal to the manager for corrections, reopening their evaluation.
+    /// Returns an appraisal to its manager for corrections, reopening their evaluation — in
+    /// governance, before HR's sign-off, while no calibration panel is sitting on it (performance
+    /// closure E-a). It returned an appraisal from any status — a Completed or Closed one included,
+    /// the accidental reopen of D-17 — and kept its calibration. The manager re-evaluates, so the
+    /// panel's restatement goes with the evaluation it restated, and the appraisal is calibrated again
+    /// on the new one.
     /// </summary>
     /// <param name="reviewerId">The HR employee returning it — used only when no HR review record exists yet.</param>
     public async Task<HRReviewDto> ReturnToManagerAsync(Guid appraisalId, ReturnAppraisalDto dto, Guid? reviewerId = null, CancellationToken cancellationToken = default)
@@ -4537,18 +4600,41 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         if (string.IsNullOrWhiteSpace(dto.HRRemarks))
             throw new ArgumentException("HR remarks are required when returning to manager.");
 
+        EnsureNotOwnAppraisal(appraisal, "send back");
+
+        // Where a return may be made: governance, HR's sign-off not given, and not in front of a
+        // sitting panel — at HR's review, or waiting for calibration under AfterCalibration.
+        var state = await _lifecycle.GetStateAsync(appraisalId, cancellationToken);
+        var returnable = appraisal.Status == AppraisalStatus.Governance
+            && !state.Facts.HrApproved
+            && state.SubStatus is AppraisalSubStatus.PendingHRReview or AppraisalSubStatus.HRReviewInProgress
+                or AppraisalSubStatus.PendingCalibration;
+        if (!returnable)
+            throw new InvalidOperationException(
+                $"This appraisal cannot be returned to its manager: it is {appraisal.Status}, at {state.StepLabel}. " +
+                "HR returns an appraisal in governance, before the sign-off and while no calibration panel is sitting on it.");
+
         var hrEval = await EnsureHRReviewEvaluationAsync(appraisal, reviewerId, cancellationToken);
         var hrReviewRecord = await EnsureHRReviewRecordAsync(appraisal, hrEval.EvaluatorId, cancellationToken);
 
         hrEval.OverallNotes = dto.HRRemarks;
-        // The sign-off is explicitly not complete — leaving ReviewCompletedDate null keeps the
-        // computed phase on HRReview, which is where the appraisal actually is.
+        // The sign-off is explicitly not given — on the HR evaluation too, which the review page reads
+        // as "finalised" — and ReviewCompletedDate null keeps the computed phase on HR review.
+        hrEval.SubmittedDate = null;
         hrReviewRecord.IsApproved = false;
         hrReviewRecord.ReviewCompletedDate = null;
         hrReviewRecord.HRNotes = dto.HRRemarks;
 
-        // Return to Active so manager can revise evaluation
+        // Back to Active so the manager can revise the evaluation — a move the lifecycle table holds.
+        AppraisalLifecycle.EnsureTransition(appraisal.Status, AppraisalStatus.Active);
         appraisal.Status = AppraisalStatus.Active;
+
+        // The panel restated the evaluation the manager is about to revise: its restatement and its
+        // seat go, and the manager's new number is the one a panel captures next.
+        appraisal.IsCalibrated = false;
+        appraisal.CalibrationSessionId = null;
+        appraisal.CalibratedOverallScore = null;
+        appraisal.PreCalibrationScore = null;
 
         // Reopen manager evaluation (remove submitted date to allow edits)
         var managerEval = appraisal.EvaluatorEvaluations.FirstOrDefault(e => e.EvaluatorRole == EvaluatorRole.Manager);

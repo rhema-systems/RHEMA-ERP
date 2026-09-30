@@ -383,64 +383,24 @@ public class CreatePerformanceAppraisalDto : CreateDtoBase
     public DateOnly EndDate { get; set; }
 }
 
+/// <summary>
+/// HR's correction of a generated appraisal's window — its year and dates — and nothing else
+/// (performance closure E-a). It carried the whole record: the employee, the cycle, the status, the
+/// score, the ranks, the manager's narrative and recommendations and the peer count, and the HR
+/// review's <i>Correct dates</i> sends none of the manager's fields, so every correction blanked them.
+/// Anything else in a body is ignored.
+/// </summary>
 public class UpdatePerformanceAppraisalDto : UpdateDtoBase
 {
     [Required]
-    public Guid AppraisalCycleId { get; set; }
-
-    [Required]
-    public Guid EmployeeId { get; set; }
-
-    [Required]
     [Range(2000, 2100)]
     public int Year { get; set; }
-    
+
     [Required]
     public DateOnly StartDate { get; set; }
-    
+
     [Required]
     public DateOnly EndDate { get; set; }
-
-    public AppraisalStatus Status { get; set; }
-
-    public int PeerEvaluatorsCount { get; set; }
-
-    [Range(0, 100)]
-    public decimal? OverallScore { get; set; }
-
-    public int? RankInPosition { get; set; }
-    
-    public int? RankInUnit { get; set; }
-
-    [MaxLength(2000)]
-    public string? OverallComments { get; set; }
-
-    [MaxLength(2000)]
-    public string? StrengthsIdentified { get; set; }
-    
-    [MaxLength(2000)]
-    public string? AreasForImprovement { get; set; }
-    
-    [MaxLength(2000)]
-    public string? TrainingNeeds { get; set; }
-    
-    [MaxLength(2000)]
-    public string? CareerAspirations { get; set; }
-    
-    public bool RecommendPromotion { get; set; }
-    
-    public bool RecommendIncrement { get; set; }
-    
-    public bool RecommendTraining { get; set; }
-    
-    public bool RecommendPIP { get; set; }
-    
-    public bool RecommendTermination { get; set; }
-    
-    [MaxLength(2000)]
-    public string? RecommendationNotes { get; set; }
-
-    public DateOnly? NextAppraisalDate { get; set; }
 }
 
 public class UpdateAppraisalStatusDto
@@ -2867,7 +2827,12 @@ public class PeerCriterionScoreDto
 /// </summary>
 public class AcknowledgeAppraisalDto
 {
+    /// <summary>Ignored: the acknowledging employee is the caller.</summary>
     public Guid EmployeeId { get; set; }
+
+    /// <summary>The employee's comment on acknowledging, kept on the appraisal (performance closure E-a).</summary>
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
 }
 
 /// <summary>

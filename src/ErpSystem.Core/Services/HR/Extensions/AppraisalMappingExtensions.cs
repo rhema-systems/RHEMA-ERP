@@ -294,9 +294,9 @@ public static class AppraisalMappingExtensions
     /// forward-only state machine with per-transition preconditions — a plain edit that assigns
     /// Status walks around the whole of it.</para>
     ///
-    /// <para>They stay on the DTO rather than being removed, because the update is a REPLACE and a
-    /// caller sending the record back unchanged must not be rejected for including them. Ignoring
-    /// them is the behaviour; the DTO shape is unchanged.</para>
+    /// <para>They stayed on the DTO, ignored, so that a caller sending the record back unchanged was
+    /// not rejected for including them. Since performance closure E-a the DTO carries the window
+    /// alone — the serializer ignores a body's other members, so such a caller is still accepted.</para>
     ///
     /// <para><c>OverallScore</c> is ignored the same way (performance closure A6): the settle path
     /// (<c>AppraisalScoreService</c>) is its only writer, and HR restates a score only through
@@ -307,28 +307,13 @@ public static class AppraisalMappingExtensions
     /// </remarks>
     public static void UpdateEntity(this UpdatePerformanceAppraisalDto dto, PerformanceAppraisal entity)
     {
-        // entity.EmployeeId       — NOT assigned. See the remarks above.
-        // entity.AppraisalCycleId — NOT assigned.
-        // entity.Status           — NOT assigned; use UpdateStatusAsync, which enforces the transitions.
+        // The window only (performance closure E-a). The employee, the cycle, the status and the
+        // score were already left alone; the manager's narrative, the recommendations, the ranks, the
+        // next appraisal date and the peer count (a counter the approvals keep) now are too — a
+        // correction that sent none of them blanked them.
         entity.Year = dto.Year;
         entity.StartDate = dto.StartDate;
         entity.EndDate = dto.EndDate;
-        entity.PeerEvaluatorsCount = dto.PeerEvaluatorsCount;
-        // entity.OverallScore     — NOT assigned. See the remarks above.
-        entity.RankInPosition = dto.RankInPosition;
-        entity.RankInUnit = dto.RankInUnit;
-        entity.OverallComments = dto.OverallComments;
-        entity.StrengthsIdentified = dto.StrengthsIdentified;
-        entity.AreasForImprovement = dto.AreasForImprovement;
-        entity.TrainingNeeds = dto.TrainingNeeds;
-        entity.CareerAspirations = dto.CareerAspirations;
-        entity.RecommendPromotion = dto.RecommendPromotion;
-        entity.RecommendIncrement = dto.RecommendIncrement;
-        entity.RecommendTraining = dto.RecommendTraining;
-        entity.RecommendPIP = dto.RecommendPIP;
-        entity.RecommendTermination = dto.RecommendTermination;
-        entity.RecommendationNotes = dto.RecommendationNotes;
-        entity.NextAppraisalDate = dto.NextAppraisalDate;
     }
 
     public static List<PerformanceAppraisalDto> ToDtoList(this IEnumerable<PerformanceAppraisal> entities)

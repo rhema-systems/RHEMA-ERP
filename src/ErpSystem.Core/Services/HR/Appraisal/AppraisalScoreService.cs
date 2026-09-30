@@ -7,6 +7,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Linq.Expressions;
 
 namespace ErpSystem.Core.Services.HR.Appraisal;
 
@@ -522,22 +523,56 @@ public class AppraisalScoreService : IAppraisalScoreService
     {
         var tenantId = GetTenantId();
 
-        var targets = await _appraisalRepository.GetQueryable()
-            .Where(a => a.TenantId == tenantId
+        var targets = await LoadSettleTargetsAsync(a => a.TenantId == tenantId
                      && (a.Status == AppraisalStatus.Completed || a.Status == AppraisalStatus.Closed)
-                     && (cycleId == null || a.AppraisalCycleId == cycleId))
+                     && (cycleId == null || a.AppraisalCycleId == cycleId), cancellationToken);
+
+        var report = new AppraisalSettleDryRunReportDto { GeneratedAt = DateTime.UtcNow, CycleId = cycleId };
+        report.Rows.AddRange(await PreviewRowsAsync(tenantId, targets, cancellationToken));
+
+        report.Examined = report.Rows.Count;
+        report.Changed = report.Rows.Count(r => r.Changed);
+        return report;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The calculate-score route's read half (performance closure E-a): the route stored the settle
+    /// and published it, at any status. This computes the same number and writes nothing.
+    /// </remarks>
+    public async Task<AppraisalSettleDryRunRowDto> PreviewAsync(Guid appraisalId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        var targets = await LoadSettleTargetsAsync(a => a.TenantId == tenantId && a.Id == appraisalId, cancellationToken);
+        if (targets.Count == 0)
+            throw new ArgumentException($"Performance appraisal with ID '{appraisalId}' not found.");
+
+        return (await PreviewRowsAsync(tenantId, targets, cancellationToken))[0];
+    }
+
+    /// <summary>An appraisal a settle is previewed for, as the dry run lists it.</summary>
+    private sealed record SettleTarget(
+        Guid Id, string AppraisalNumber, Guid EmployeeId, string EmployeeName, string CycleName, AppraisalStatus Status);
+
+    private async Task<List<SettleTarget>> LoadSettleTargetsAsync(
+        Expression<Func<PerformanceAppraisal, bool>> filter, CancellationToken cancellationToken)
+        => await _appraisalRepository.GetQueryable()
+            .Where(filter)
             .OrderBy(a => a.AppraisalCycle.CycleName).ThenBy(a => a.AppraisalNumber)
-            .Select(a => new
-            {
+            .Select(a => new SettleTarget(
                 a.Id,
                 a.AppraisalNumber,
                 a.EmployeeId,
-                EmployeeName = a.Employee.FirstName + " " + a.Employee.LastName,
+                a.Employee.FirstName + " " + a.Employee.LastName,
                 a.AppraisalCycle.CycleName,
-                a.Status,
-            })
+                a.Status))
             .ToListAsync(cancellationToken);
 
+    /// <summary>What a settle would store for each target, beside what is stored — untracked, so nothing reaches a save.</summary>
+    private async Task<List<AppraisalSettleDryRunRowDto>> PreviewRowsAsync(
+        Guid tenantId, List<SettleTarget> targets, CancellationToken cancellationToken)
+    {
         var gradeNames = await _gradeDefinitionRepository.GetQueryable()
             .Where(g => g.TenantId == tenantId)
             .ToDictionaryAsync(g => g.Id, g => g.GradeName, cancellationToken);
@@ -551,7 +586,7 @@ public class AppraisalScoreService : IAppraisalScoreService
             .ToDictionary(g => g.Key, g => g.Select(m => m.LatestPerformanceRating).FirstOrDefault(r => r != null));
 
         var mapRating = await _ratingResolver.GetMapperAsync(cancellationToken);
-        var report = new AppraisalSettleDryRunReportDto { GeneratedAt = DateTime.UtcNow, CycleId = cycleId };
+        var rows = new List<AppraisalSettleDryRunRowDto>();
 
         foreach (var t in targets)
         {
@@ -581,11 +616,9 @@ public class AppraisalScoreService : IAppraisalScoreService
             };
             row.Changed = row.StoredScore != row.SettledScore || row.StoredGrade != row.SettledGrade;
 
-            report.Rows.Add(row);
+            rows.Add(row);
         }
 
-        report.Examined = report.Rows.Count;
-        report.Changed = report.Rows.Count(r => r.Changed);
-        return report;
+        return rows;
     }
 }

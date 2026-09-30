@@ -55,7 +55,11 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    the one path, D-40 counts only for the appraisee in Manager mode with anonymous reviews, D-41 a
    peer's reads list approved nominations only; `run-final-nominations.mjs` 186/186 twice;
    regression 2496/2505; lane D's State block — read its refinements and the harness changes
-   it made in other suites). **Lane D is complete; lane E is next.**
+   it made in other suites). **Lane D is complete.** Lane E was source-checked the same day — § 1h
+   (D-42 seven slices, D-43 an Open cycle, D-44 no Employee target, D-45 three columns to batch 2, D-46)
+   and lane E's *source check* block. ~~Slice **E-a** (the appraisal routes)~~ **Done 2026-09-30**
+   (`run-final-lifecycle.mjs` 130/130 twice; regression 2631/2640; lane E's E-a State block).
+   **Slice E-b (calibration) is next.**
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -156,6 +160,16 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | D-40 | **Anonymity in Manager mode.** The appraisee reads the peers the manager chose through the nomination reads (the summary, the list, a nomination by id); with one peer, the HR review's peer average is that person's score | **Counts only**: in Manager mode with anonymous reviews the appraisee's summary carries counts and statuses but no peer identity, and the list and by-id reads refuse the appraisee (403). Employee mode is unchanged — the appraisee chose the peers | D4, P |
 | D-41 | **A peer's own reads** (`PeerNomination/peer/{id}`, `pending/{id}`) list nominations never approved — rejected ones too, with the reason written for the appraisee | **Approved only, no rejection reason**; the routes stay | D1, P |
 
+### 1h. Decisions from lane E's source check — settled with the user, 2026-09-30
+
+| # | Question | Decision (2026-09-30) | Affects |
+|---|---|---|---|
+| D-42 | **Lane E's size.** The source check found some 12 days of code and harness rework, not 4 | **Seven slices, each built, verified and staged on its own, most severe first:** E-a the appraisal routes; E-b calibration; E-c cycle rules and D-14; E-d Withdrawn, the close, the live-cycle rule and the raw create's removal; E-e templates and settings; E-f goals, PIPs and conversations; E-g definitions, the rest of E10, E11 and E12. New suite `run-final-lifecycle.mjs`, grown by each | Lane E |
+| D-43 | **A live cycle.** Generation refuses only a Closed cycle, and no evaluation write checks the cycle at all | **Generation and every evaluation write require an Open cycle** (the plan's rule). Every closure suite opens its cycles and, at the end, withdraws what is unfinished and closes them — a suite that dies mid-run leaves an Open test cycle, which the HR dashboard can pick as its default, so teardown runs in a `finally` | E-d, S8 |
+| D-44 | **The raw create's replacement.** Deleting `POST /PerformanceAppraisals` (D-20) needs a way to generate one appraisal; an `Employee` target needs an `AppraisalCycleTarget.EmployeeId` column | **No migration**: the remaining fixtures (`buildFixture()`'s seven suites, `hr-portal` slice 5) take one position per case, as the closure fixtures do; the *Individual employee* target — offered by the form, resolved by nothing, used by no UAT row — goes, with its enum member (J's alternative) | E-c, E-d, J, S8 |
+| D-45 | **Three E10 items need columns:** who rejected or dismissed a recommendation; a store for interim review scores apart from goal progress; `OverallPeriodScore` shown or dropped | **Migration batch 2 / lane F**, beside that batch's decider and author columns; lane E carries them | F, batch 2 |
+| D-46 | The source check's other recommendations, taken as proposed | **D-17's reopen is built with lane N** (it writes the rating history N2 builds; lane E closes the accidental door). **An approved PIP's terms stay refused** — goal add and delete included — with no re-approval flow. **A settings profile is refused while any live appraisal uses it**, with a clone door. **Calibration gets a Cancel** (Pending or in progress), releasing its appraisals. **A Draft appraisal still takes its first save** (B1's refinement 9). **E11's negative cases run on a scratch database only**; **E12's repair runs on UAT's Rule 8 five only on the user's go** (S5) | E-a–E-g, N, S5 |
+
 ---
 
 ## 2. Lane status
@@ -168,7 +182,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ☑ 2026-09-29 — L-a 157/157 twice; L-b 244/244 twice; L-c 261/261 twice (one suite holds L-b and L-c); staged |
 | C | One appeal machine | 2 days (+0.5–1, D-36) | D-22, D-34, D-35, D-36, D-37, D-38 | ☑ **complete 2026-09-30**; C10 was batch 1's. Two slices (D-36): C-a ☑ — 209/209 twice, regression 2089/2098, committed effb567f5. C-b ☑ — source-checked (§ 1f D-37, D-38), `run-final-appeals.mjs` 397/397 twice, regression 2309/2318; staged |
 | D | Peer nomination and evaluation integrity | 1 day (1.5–2, the source check) | D-39, D-40, D-41 | ☑ 2026-09-30 — source-checked (§ 1g); `run-final-nominations.mjs` 186/186 twice, regression 2496/2505; staged |
-| E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | 4 days | D-10, D-14, D-17, D-20 | ☐ |
+| E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | ~12 days (D-42; was 4) | D-10, D-14, D-17, D-20, D-42–D-46 | ◐ source-checked 2026-09-30 (§ 1h); seven slices E-a…E-g. E-a ☑ — `run-final-lifecycle.mjs` 130/130 twice, regression 2631/2640; staged. E-b next |
 | F | Recommendations, proposals, probation, PIP chain, segregation of duties | 2.5 days | D-12, D-19; **F1 waits on D-18** (the finish plan's lane 9) | ☐ |
 | G | Notifications on the platform topics | 5 days | D-21, D-28 | ☐ |
 | H | Nightly sweep and the advance path | 2.5 days | D-16, D-21 | ☐ |
@@ -2147,6 +2161,253 @@ once (200). Specifically:
 - Correct dates still works, and `overallScore` in its body is ignored.
 - Snapshot repair gives a Rule 8 appraisal its snapshot.
 
+**Lane E source check (2026-09-30, after D; line numbers as of `6d9807840`).** Four read-only reviews
+over disjoint rows, then every claim that decides a build read again in source. **The lane is about three
+times the plan's four days** — some 11 days of code and harness rework — so it is built in slices (§ 1h).
+Row by row:
+- **E1 — the appraisal.**
+  - *One transition table:* **done** (B1's `AppraisalLifecycle`; the PAS copy is gone).
+  - *`calculate-score`:* **live, and worse than written.** It settles with no status check and publishes
+    whenever the appraisal is final (`AppraisalScoreService.SettleAsync` :454), so it restates a finalised
+    score and moves the talent-pool rating — against D-13's freeze. No screen or demo calls it; three
+    suites do (`run-final-scoring` :74, `run-final-gates` :249, `run-final-goalkpis` :374), settling in
+    mid-governance, where no lifecycle path settles.
+  - *`PUT /{id}`:* **live.** The mapping (MAP :308-332) still copies the five narrative fields, the five
+    `Recommend*` flags, `RecommendationNotes`, both ranks and `NextAppraisalDate`, and *Correct dates*
+    sends none of them (`appraisal-run.service.ts:301-311`): **every correction blanks the manager's
+    narrative and recommendations**. `PeerEvaluatorsCount` is a counter since lane D, so the narrowed PUT
+    takes the dates alone. `run-final-scoring.mjs:294` corrects a Completed appraisal.
+  - *Raw `POST`:* **live.** No screen or demo calls it; `buildFixture()` (seven suites), `hr-portal`
+    slice 5 and the W3 suite do. `AppraisalCycleTarget` has no `EmployeeId` (ACS :1548-1550, "no longer
+    stored"), no UAT target is of type Employee, and the target form offers *Individual employee*, which
+    resolves to nobody.
+  - *`PATCH /{id}/status` and the workflow `transition`:* **live.** Both allow the whole table:
+    Active→Completed settles and publishes an appraisal nobody signed off; →Appealed makes an appeal with
+    no appeal row; Appealed→Completed abandons an undecided appeal; Governance→Active skips the return's
+    resets; Completed→Closed needs no score. PATCH answers 500 to a refusal, the transition 400. Demo
+    `061:137` (dropped by S3) and `:366` (Draft→Active, which stays).
+  - *Finalise:* **done in substance** (B1 holds it to PendingHRReview; Governance itself is not checked).
+    *Return-to-manager:* **live** — it checks only the remarks and sets Active from **any** status (PAS
+    :4551, the accidental reopen of D-17), keeps `IsCalibrated`, the session and the calibrated overall,
+    keeps the HR evaluation's `SubmittedDate` (the page still reads *finalised*), leaves the
+    acknowledgment standing, and saves three times with no transaction.
+  - *Header update and delete:* **live** — no status check; both answer 500 to anything but a missing id.
+  - *Self, manager and peer writes:* **partly.** Self and peer are held to their steps (B1); the manager's
+    **draft** has no gate at all — it creates an evaluation and overwrites the narrative on a withdrawn or
+    closed-cycle appraisal. **No write checks the cycle**, and a cycle closes with Active appraisals in it.
+    B1 accepts a Draft appraisal's first save on purpose (its refinement 9); that stands.
+  - *Acknowledgment:* reading the sign-off **done** (B1); comments **live** (the DTO carries the employee
+    id only — demo `061:312` sends comments, dropped).
+  - *Withdrawn (D-10):* **live.** Batch 1 and B1 gave it a member, columns and a gate step; nothing writes
+    it, and the separation touches no appraisal. Readers that would count one: the HR dashboard
+    (`HRCycleDashboardQueryService` :122-136 and what it feeds), the cycle's progress denominators (ACS
+    :1028, :1055-1061), the manager's team summary and list, the HR review list, the employee trend, the
+    calibration grid, the peer queue and the close.
+- **E2 — the cycle.** Create stores the body's status (MAP :943; integers too): a cycle created Open skips
+  the overlap check and stays deletable. Update changes everything once opened — profile, year, type,
+  dates — and the overlap check runs only at the open. Close reads no appraisal. Generation refuses only
+  Closed: a Draft cycle generates without the overlap check and can then be deleted with its appraisals.
+  **D-14: UAT's APC2026 is back at InProgress** — the 2026-09-29 rebuild seeded it after batch 1, so § 6's
+  "moves APC2026 to Open" held only until then. Its readers: the open's overlap check, the template lock,
+  `CycleCoverageService`, `HRCycleDashboardQueryService`, PAS :1538, two TypeScript unions, two screens;
+  its writers: the seeder and the create body. The duplicate target CRUD: **the screens and demo 060 use
+  the cycle service's nested routes**, the harness the flat service — so the nested routes stay and
+  delegate. `CalculateExcludedEmployees` returns 0. `GetEmployeesInScopeAsync` is not the generation
+  scope (a half-wrong premise): it serves the open notification, the reminders and a route no screen
+  calls; beside it the dead `CreateAppraisalInstancesAsync` is the snapshot-swallowing copy.
+- **E3 — the settings profile:** **live**, and "allowed when Closed" would restate finished appraisals,
+  which read the profile live (visibility, the appeal window).
+- **E4 — the template:** a structural edit never resets `ApprovalStatus`, and edits run while
+  PendingApproval; generation never re-checks Approved; the lock covers Open/InProgress assignments only
+  (not a Draft cycle with appraisals, nor a Closed one), while the forms read the live template; a template
+  assigned to a Draft cycle can be deleted and generation still uses it; the editor's freeze (P-7) reads
+  any assignment. A0's snapshot: **done**.
+- **E5 — goals:** L-a did three bullets (the edit rules, re-parenting, the set lock's weights). Unlock
+  **partly** (Locked → Approved even with progress); "two lock paths" is a **wrong premise** (the
+  service's lock has no caller — dead, deleted instead); the dead Submit/Approve/Reject/Lock **live**; P-22
+  **live**; `GoalRiskEvaluator` rule 2 **live** — unreachable behind two pre-filters, and reaching it adds
+  every agreed goal behind schedule to the at-risk list (on the demo, every approved goal still at 0 %).
+- **E6 — calibration:** scoped to the step and re-settling Completed ones — **done** (A4, A7, B1).
+  **Idempotency live, and it undoes appeals**: re-committing the session re-applies its adjustments to a
+  Completed appraisal it adjusted (CSS :932-933, `adjustedHere`) — after an upheld appeal it rewrites the
+  manager's criterion (:989), restores the calibrated overall (:883), re-settles and publishes, and appends
+  the rationale again; the Commit button stays while any row is uncalibrated. The delete guard, the
+  session delete's release, `Cancelled`'s door, Start vs Open and P-41 **live**; the update's re-target
+  **partly** (confined to the session's scope).
+- **E7 — PIP:** writes to a closed plan **live** (and the meeting controller answers 500 to a refusal); the
+  Active-plan edit **done** (P5), though goal add, edit and delete still change an approved plan's terms;
+  numbering, meeting status (P-57: the column has no writer — on the rebuilt UAT every meeting reads
+  Scheduled) and P-55 **live**.
+- **E8 — conversations:** **the appraisee can create, edit, complete and delete their own**
+  (`CanAccessConversationAsync` admits `Appraisal.EmployeeId == me`, and the desk test comes first, so an
+  HR officer who is the appraisee writes theirs); **deleting a held gate conversation moves the appraisal
+  back** — the delete has no check and the gates read held conversations, so an appraisee can undo their
+  kick-off. `Type` and the scheduler, conductor and review-event ids are copied from the body on edit;
+  the held date is always today.
+- **E9 — definitions:** all eight **live**. Every delete is soft, so the Restrict keys never fire — and the
+  soft-delete filter then drops the rows that require the deleted definition from every query: delete a
+  grade in use and the template items' bands and the snapshots' bands vanish from generation and the
+  forms. None of the nine delete routes maps a refusal to 422. The cycle-target case is really E2's status
+  rule; the template-assignment delete unlocks a template that generated appraisals use.
+- **E10 — other:** two items done (P). `CloseAsync` stamps `ApprovedById` on a rejection — the entity has
+  no decider columns (**schema**). The self-evaluation's blanket catch returns raw exception text as a 400,
+  and **a first submit that fails part-way leaves a submitted self-evaluation with no scores**: it is saved
+  early, with `SubmittedDate`, to get its id (PAS :1032, :1061), so every retry is refused "already
+  submitted". Journal date and privacy (PATCH and PUT); check-in completion repeatable (demo `060:197`
+  relies on it); a plan deleted at any status (`run-final-privacy.mjs:532` relies on it); the interim
+  finalise's scores stored as each goal's latest progress (separating them is **schema**);
+  `OverallPeriodScore` neither shown nor dropped; P-5 → S1.
+- **E11:** built, never asserted. A negative case falls to the tenant-wide pool, which on UAT assigns and
+  notifies a real HR officer — positives on UAT, negatives only on a scratch database.
+- **E12:** bullet 1 is a **wrong premise** — the swallowing copy is the dead `CreateAppraisalInstancesAsync`;
+  live generation rolls back (ACS :679, :719-725). Bullet 2 **live**: no repair action; the Rule 8 five are
+  `APR-2026-001…005`; running it on UAT writes demo data (S5 — the user's go).
+
+**Beyond the rows**, the ones that matter most: (1) the re-commit that undoes an upheld appeal (E6);
+(2) the half-saved self-evaluation (E10); (3) the manager's ungated draft (E1); (4) HR's own appraisal —
+finalise, return and correct skip the two-actor rule (D-35 covered appeals), as do the conversation and
+goal-unlock desk paths; (5) a return leaves the acknowledgment standing; (6) the goal PUT copies
+`ProgressPercent` (progress with no entry), the goal delete refuses only a lock, goal link ids are
+unchecked; (7) a live calibration session can be re-scoped, and `FacilitatedById` comes from the body;
+(8) the PIP goal PUT is unvalidated (up to 999.99 %); (9) the assignment PUT re-points a template past its
+approval, and a target's type is never matched to its id; (10) unit-goal and journal edits re-point their
+author or subject; (11) a rejected or dismissed recommendation can be re-closed; (12) a goal sent twice to
+an interim finalise counts twice.
+
+**Demo and harness impact.** D-14 needs APC2026 moved to Open again (a data-only migration). The risk
+fix changes the demo's at-risk list. Demo pack: `060:39, :46` (the nested target routes — kept), `060:197`
+(completes a held check-in again — S3), `060:240` (PIP goal progress on a Draft plan — P-55), `061:137`
+(dropped), `061:249` (`/start`, folded into Open), `061:312` (acknowledgment comments, now kept). Harness:
+the three `calculate-score` suites; `buildFixture()`'s seven and `hr-portal` slice 5 if the raw create
+goes; every closure suite if generation needs an Open cycle (they generate on Draft cycles by design, 12
+call sites in 8 suites, and UAT holds 352 Draft harness cycles); `run-final-scoring`'s A0 freeze
+(:411-427) and :294; `run-final-settings` :639 (B8) and :672; `run-final-privacy` :215-219 (the grid's
+averages) and :532; `run-interim-reviews` :277-281; `run-sliceD` :121 and `run-sliceE` :161 (they close
+cycles with Draft appraisals).
+
+**Slices (D-42)** — each built, verified on UAT and staged on its own; `run-final-lifecycle.mjs` grows
+with each:
+- [x] **Slice E-a — the appraisal routes.** *(2026-09-30 — the E-a State block below.)* `calculate-score` deleted; `PUT /{id}` takes the dates alone
+      and is refused on a Completed, Closed, Appealed or Withdrawn appraisal; `PATCH /{id}/status` and the
+      workflow `transition` allow Draft→Active and Completed→Closed (with a score) only — a 422 naming the
+      owning action otherwise; return-to-manager held to HR's unsigned review in Governance, resetting the
+      calibration and the HR sign-off in one transaction; finalise checks Governance; delete only a Draft
+      appraisal, or an Active one with nothing submitted; the acknowledgment takes comments; the manager's
+      draft held to the appraisal's status; HR's own appraisal (finalise, return, correct, delete) refused
+      to its appraisee; the self-evaluation's submission saved whole or not at all, its blanket catch gone;
+      422s where the routes answered 500. Harness: the three `calculate-score` suites and
+      `run-final-scoring:294`; demo `061:137`.
+- [ ] **Slice E-b — calibration.** The commit skips what the session already calibrated (the appeal
+      undo); the adjustment delete guarded as the update is; the update pinned to its appraisal; a live
+      session's scope and facilitator pinned (`FacilitatedById` from the token); deleting a session
+      releases its appraisals, and a Cancel (Pending or in progress) does the same; *Start* folded into
+      Open (demo `061:249`); P-41 — the grid reads the settled and calibrated overall once committed.
+- [ ] **Slice E-c — cycle rules and D-14.** D-14 (the member, its readers, the seeder, a data-only
+      migration moving UAT's APC2026 to Open); create ignores the body's status; update refuses a profile,
+      year or type change once opened and a date change once appraisals exist; the target routes — the
+      nested ones delegate to the target service (the duplicate goes), the cycle pinned, the
+      duplicate-scope check on update, refused on a Closed cycle; the *Individual employee* target goes
+      (D-44); `CalculateExcludedEmployees`; the scope resolver's auto-discovery and inactive targets; the
+      dead `CreateAppraisalInstancesAsync`.
+- [ ] **Slice E-d — Withdrawn, the close and the live cycle.** The withdraw action (a reason, the actor,
+      from Draft, Active or Governance; a calibration seat released); the separation hook; every reader
+      leaves a withdrawn appraisal out; the close refused while anything is unfinished or an appeal window
+      is open, Completed → Closed through the lifecycle; a cycle with appraisals cannot be deleted;
+      generation and every evaluation write need an Open cycle (D-43), generation runs the overlap check;
+      the raw `POST` deleted (D-20, D-44). Harness: every suite opens and tears down its cycles;
+      `buildFixture()` and `hr-portal` slice 5 generate; `run-sliceD`/`run-sliceE`'s closes.
+- [ ] **Slice E-e — templates and settings.** The lock: any appraisal on the template, or an Open cycle
+      assigned; a structural edit recalls an Approved template to Draft, and edits wait while
+      PendingApproval; generation re-checks Approved; a template assigned to a cycle cannot be deleted; the
+      assignment PUT pinned; `IsLocked` and its reason on the template DTO, read by the editor (P-7). The
+      settings profile refused while any live appraisal uses it, with a clone door (D-46). Harness:
+      `run-final-scoring`'s A0 freeze, `run-final-settings` :639, :672.
+- [ ] **Slice E-f — goals, PIPs, conversations.** E5: the dead methods, unlock's status, P-22, the risk
+      pre-filters (the demo's at-risk list changes), the goal PUT's progress, the delete rule, link ids,
+      HR's own unlock. E7: writes to a closed plan and to an approved plan's goals refused (D-46), 422s,
+      numbering, meeting status (writers, DTO, a UAT backfill), P-55. E8: the write rule (the line
+      manager, the conductor or scheduler, the desk when not the subject — create included), `Type` and the
+      actor ids pinned, a held conversation not deleted, the held date.
+- [ ] **Slice E-g — definitions and the rest.** E9's eight guards and nine 422s; E10's no-schema items
+      (journal date and privacy, a check-in completed once with its held date pinned, a plan deleted only
+      as a Draft, a decided recommendation not re-closed, a goal counted once in an interim finalise);
+      E11's assertions (positives on UAT); E12's repair action (UAT's Rule 8 five on the user's go).
+      D-45's three items go to batch 2.
+
+**E-a State (2026-09-30): DONE — built, verified on UAT, staged.** No migration. What exists now:
+- **The raw status routes** — `AppraisalLifecycle.EnsureRawTransition`: `PATCH {id}/status` and the workflow
+  `transition` open a Draft appraisal and close a Completed one with a score; any other move is a 422 naming
+  the action that makes it (the manager's submission, the return, HR's decision on an appeal, the
+  employee's appeal, the last step or HR's advance, the withdrawal). They no longer settle or publish.
+- **`calculate-score` gone; `GET {id}/score-preview`** — the settle's arithmetic for one appraisal at any
+  status, as the A15 dry run's row (computed, calibrated, settled, grade and rating beside what is
+  stored), writing nothing; the desk's read, refused to the appraisee (`IAppraisalScoreService.PreviewAsync`
+  — the dry run and the preview share one row builder).
+- **The correction** — `UpdatePerformanceAppraisalDto` carries the year and the dates alone; refused once
+  Completed, Closed, Appealed or Withdrawn, or when the end is not after the start.
+- **The return** — in governance before the sign-off: at HR's review, or waiting for calibration while no
+  panel sits (under BeforeCalibration HR has signed by then, so not at all); it resets `IsCalibrated`, the
+  session, the calibrated overall and `PreCalibrationScore`, and the HR evaluation's submission, in one
+  save, through the lifecycle table.
+- **The sign-off** checks Governance as well as the step. **Removal** takes a Draft appraisal, or an Active
+  one with nothing submitted.
+- **The acknowledgment** keeps a comment (`AcknowledgeAppraisalDto.Comments` →
+  `EmployeeAcknowledgmentComments`), which HR's review shows as the *Acknowledgment note*.
+- **The manager's draft** is refused unless the appraisal is Draft or Active or its remand is open.
+- **The self-evaluation's submission** is stamped in the save that carries its scores; the blanket catch is
+  gone (a rule is a 422, anything else a logged 500).
+- **HR's own appraisal** — the sign-off, the return, a correction, a removal, the raw routes and the score
+  preview refuse its appraisee (403).
+- **422s** on the correction, the raw PATCH, the removal and the transition (they answered 500, or 400).
+- **The screens** — *Correct dates* without the peer count; *Remove* only while the appraisal is
+  removable; *Return to manager* only at a step it can be made from; the acknowledgment note on the
+  finalised banner.
+
+**Where the build refines the rows** (each deliberate; say if one should go back):
+1. **`calculate-score`'s read half stays, as `score-preview`** — the row deleted the route; the three suites
+   that settled mid-flow read the preview, and HR can see what a sign-off would store.
+2. **A return is also made while the appraisal waits for calibration** (AfterCalibration, before HR signs),
+   not only at HR's review; a sitting panel refuses it.
+3. **The correction takes the dates, not the peer count** — the count is the approvals' counter (lane D).
+4. **The two-actor rule covers the appraisee** — an HR officer who is the appraisee's line manager may
+   still sign it off; that is segregation of duties, F3's.
+5. **The acknowledgment's comment has no box on the employee's page** — the written response is the
+   employee's answer; the API keeps what a caller sends (the demo pack sends one) and HR's page shows it.
+6. **The return leaves the stored overall until the next settle** — the settle path is `OverallScore`'s only
+   writer; the remand does the same.
+7. **A return made while the appraisal waits for calibration opens HR's review record** (its remarks live
+   there), so the review later reads *in progress* — the same step.
+
+**Verified** (Staging API on `ErpSystemDB_UAT`, the final build):
+- `run-final-lifecycle.mjs` **130/130, then 130/130** (and a third time inside the regression) — the first
+  run's one miss was my expectation of the review's step after a return (*in progress*, refinement 7).
+- Regression (`run-all.mjs`, fifteen suites): interim reviews 133/133, attachments 65/65, slice C 52/52, slice D
+  22/22, **slice E 17/26 — the same 9 stale**, gates 32/32, **lane A 187/187** (+5, the harness changes below),
+  lane P 338/338, lane B1 256/256 (e8 reads the preview), lane L-a 157/157, lanes L-b/L-c 296/296 (s3 reads the
+  preview), lane B2 363/363, lane C 397/397 (its remands re-evaluate through the gated draft), lane D 186/186,
+  **lane E 130/130**. **2631/2640** — lane D's 2496/2505 plus exactly the 135 new; no assertion lost.
+- API log: no request answered 500; no error from an appraisal route — the refusals logged as rule warnings. Only
+  UAT's missing SMTP, defect #23's payroll-profile FK, the five-minutely HR/Identity reconciliation, and three
+  failures of the platform notification service's thirty-second clean-up (a bulk UPDATE of old
+  notifications) while slice E's suite was writing — the platform's, on no performance path.
+- Frontend: scoped `tsc` over the 2 touched files, the appraisal types and the employee's appraisal page,
+  0 errors — the 3 errors planted in a probe file were all reported; ESLint clean. Not browser-walked.
+- Demo: no score or step moves — every one of APC2026's 107 phases byte-identical before and after the
+  regression. The book's two live writes hold: chapter 31 signs Kwasi Danquah off at HR's review (in
+  governance — the new check passes) and chapter 32 acknowledges with the screen's empty note. HR's
+  review page changes: *Correct dates* without the peer count; *Remove* gone from a governance appraisal
+  (it was hidden from `hr.head` already); *Return to manager* enabled only at a step it can be made from
+  (Kwasi's, at HR's review, still is); an acknowledgment note on the finalised banner — no demo appraisal
+  carries one today (the demo pack's 061 sent one and it was dropped; a rebuild keeps it). The demo pack's
+  `061` opens drafts through the raw transition (Draft → Active — still allowed); its Governance → Active
+  fallback is gone.
+
+**Harness changes in the slice:** the three `calculate-score` suites read the preview — `run-final-scoring`
++5 → 187 (the correction moved before the sign-off, with the narrative and the peer count beside the
+score; a correction once Completed refused; the A0 stored score untouched by the preview),
+`run-final-gates` and `run-final-goalkpis` unchanged in count; the demo pack's `061` loses its Governance →
+Active fallback (it called the raw transition).
+
 ### Lane F — Recommendations, proposals, probation, PIP chain, segregation of duties
 
 - [ ] F1 Extend-Probation handler passes `CurrentUserProvider.EmployeeId` (refuse with a message
@@ -2805,6 +3066,11 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | `GET PeerNomination/peer/{id}` and `pending/{id}` have no screen (D-41 kept them, approved only) | `PeerNominationController` | I |
 | The lane D screens (nomination panel, peer feedback, the peer's list and form) not browser-walked | 4 files | K |
 | `hr-portal/run-slice5.mjs` and `hr-w3-permissions/run-slice10-performance.mjs` edited for lane D, not run | dev-harness | S8 |
+| *Added by lane E-a (2026-09-30):* | | |
+| An HR officer who is the appraisee's line manager may sign it off (the two-actor rule covers the appraisee) | `ApproveAndFinalizeAsync` | F3 |
+| HR's review page offers its actions to an HR officer reading their own appraisal; the server refuses them (403) | `hr-review/[id]/page.tsx` | I |
+| `probe-lane3-appraisals.mjs` still sends the old header (a probe, not in `run-all`) | dev-harness | S8 |
+| The E-a screens (HR's review page) not browser-walked | 1 page | K |
 
 ---
 

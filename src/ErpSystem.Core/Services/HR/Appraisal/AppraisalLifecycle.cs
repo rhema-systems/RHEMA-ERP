@@ -58,6 +58,51 @@ public static class AppraisalLifecycle
     }
 
     /// <summary>
+    /// The moves the raw status routes may make — <c>PATCH {id}/status</c> and the workflow's
+    /// <c>transition</c> (performance closure E-a): opening a Draft appraisal, and closing a Completed
+    /// one that has a score. Every other move belongs to the action that makes it, with what that
+    /// action checks and records. The routes allowed the whole table: an appraisal they moved to
+    /// Completed was settled and published with no sign-off, one moved to Appealed had no appeal
+    /// behind it, one moved back from governance skipped the return's resets, and an undecided appeal
+    /// could be walked to Completed.
+    /// </summary>
+    public static void EnsureRawTransition(AppraisalStatus from, AppraisalStatus to, bool hasScore)
+    {
+        if (from == AppraisalStatus.Draft && to == AppraisalStatus.Active) return;
+
+        if (from == AppraisalStatus.Completed && to == AppraisalStatus.Closed)
+        {
+            if (hasScore) return;
+            throw new InvalidOperationException(
+                "A Completed appraisal is closed once it has a score, and this one has none.");
+        }
+
+        throw new InvalidOperationException(
+            $"An appraisal is not moved from {from} to {to} by a status change: {OwnerOf(from, to)}");
+    }
+
+    /// <summary>Which action makes a move the raw routes refuse, for the refusal's text.</summary>
+    private static string OwnerOf(AppraisalStatus from, AppraisalStatus to) => to switch
+    {
+        AppraisalStatus.Governance =>
+            "it moves into governance when its manager submits the evaluation.",
+        AppraisalStatus.Active when from == AppraisalStatus.Governance =>
+            "HR returns it to the manager with the return action, which reopens the evaluation.",
+        AppraisalStatus.Completed when from == AppraisalStatus.Appealed =>
+            "HR's decision on the appeal completes it.",
+        AppraisalStatus.Completed =>
+            "it completes when its last step is done — the manager's submission, the calibration " +
+            "commit, HR's sign-off or the employee's acknowledgment — or through HR's audited advance.",
+        AppraisalStatus.Appealed =>
+            "the employee files an appeal.",
+        AppraisalStatus.Closed when from == AppraisalStatus.Appealed =>
+            "HR decides the appeal first; the Completed appraisal is then closed.",
+        AppraisalStatus.Withdrawn =>
+            "withdrawing takes a reason and records who withdrew it.",
+        _ => "the status routes open a Draft appraisal and close a Completed one.",
+    };
+
+    /// <summary>
     /// How far along the lifecycle a status is, for moving only forward: the gates' sync never
     /// moves an appraisal back (a Governance appraisal whose employee adds a draft goal is not sent
     /// back to Active). -1 for the states the sync leaves alone.

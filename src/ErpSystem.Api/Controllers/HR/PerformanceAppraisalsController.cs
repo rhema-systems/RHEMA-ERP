@@ -263,6 +263,14 @@ public class PerformanceAppraisalsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "correcting the appraisal's dates");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating performance appraisal with Id {AppraisalId}", id);
@@ -296,6 +304,15 @@ public class PerformanceAppraisalsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A move the raw route does not make names the action that makes it (E-a).
+            return BusinessRuleRejected(ex, "changing the appraisal's status");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating performance appraisal with Id {AppraisalId}", id);
@@ -304,27 +321,36 @@ public class PerformanceAppraisalsController : ControllerBase
     }
 
     /// <summary>
-    /// Calculate overall score for an appraisal
+    /// What the settle path would store for this appraisal now — the computed overall, a panel's
+    /// restatement, the settled overall, grade and rating — beside what is stored, writing nothing
+    /// (performance closure E-a). It replaced <c>POST {id}/calculate-score</c>, which stored the score
+    /// with no status check and published a final appraisal's rating to the talent pools, so it
+    /// restated finalised scores (against D-13). The desk's read, and not an appraisee's own.
     /// </summary>
-    [HttpPost("{id:guid}/calculate-score")]
-    [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
+    [HttpGet("{id:guid}/score-preview")]
+    [ProducesResponseType(typeof(AppraisalSettleDryRunRowDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
-    public async Task<IActionResult> CalculateOverallScore(Guid id)
+    public async Task<IActionResult> ScorePreview(
+        Guid id, [FromServices] IAppraisalScoreService scores, CancellationToken cancellationToken)
     {
+        // The two-actor rule: an HR officer's own appraisal is released to them as to any appraisee.
+        if (await IsOwnAppraisalAsync(id, cancellationToken))
+            return StatusCode(403, new { message = "You cannot preview your own appraisal's score: another HR officer does." });
+
         try
         {
-            var response = await _appraisalService.CalculateOverallScoreAsync(id);
-            return Ok(response);
+            return Ok(await scores.PreviewAsync(id, cancellationToken));
         }
         catch (ArgumentException ex)
         {
-            return NotFound(ex.Message);
+            return NotFound(new { message = ex.Message });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error calculating overall score for appraisal with Id {AppraisalId}", id);
-            return StatusCode(500, "An error occurred while calculating the overall score for the appraisal");
+            _logger.LogError(ex, "Error previewing the score of appraisal {AppraisalId}", id);
+            return StatusCode(500, "An error occurred while previewing the appraisal's score");
         }
     }
 
@@ -372,6 +398,14 @@ public class PerformanceAppraisalsController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "removing the appraisal");
         }
         catch (Exception ex)
         {
@@ -476,6 +510,20 @@ public class PerformanceAppraisalsController : ControllerBase
             .AsNoTracking()
             .Where(a => a.Id == appraisalId && a.TenantId == tenantId)
             .AnyAsync(a => a.EmployeeId == me || a.Employee.ManagerId == me, ct);
+    }
+
+    /// <summary>
+    /// The caller is this appraisal's appraisee — the two-actor rule on a desk read that is not the
+    /// appraisee's (performance closure E-a). The desk's writes apply it in the service.
+    /// </summary>
+    private async Task<bool> IsOwnAppraisalAsync(Guid appraisalId, CancellationToken ct)
+    {
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<PerformanceAppraisal>()
+            .AsNoTracking()
+            .AnyAsync(a => a.Id == appraisalId && a.TenantId == tenantId && a.EmployeeId == me, ct);
     }
 
     /// <summary>
@@ -1300,6 +1348,11 @@ public class PerformanceAppraisalsController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            // An HR officer does not sign off their own appraisal (E-a, the two-actor rule).
+            return StatusCode(403, new { message = ex.Message });
+        }
         catch (InvalidOperationException ex)
         {
             // "Self evaluation must be completed", "at least N peer reviews" and the rest are
@@ -1338,6 +1391,10 @@ public class PerformanceAppraisalsController : ControllerBase
                 ? BadRequest(new { message = ex.Message })
                 : NotFound(new { message = ex.Message });
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, new { message = ex.Message });
+        }
         catch (InvalidOperationException ex)
         {
             return BusinessRuleRejected(ex, "returning the appraisal to its manager");
@@ -1368,7 +1425,7 @@ public class PerformanceAppraisalsController : ControllerBase
 
         try
         {
-            await _appraisalService.AcknowledgeAppraisalAsync(id, employeeId);
+            await _appraisalService.AcknowledgeAppraisalAsync(id, employeeId, dto?.Comments);
             return Ok(new { message = "Appraisal acknowledged successfully" });
         }
         catch (ArgumentException ex)

@@ -85,7 +85,7 @@ export default function HRReviewDetailPage() {
   });
 
   const [headerOpen, setHeaderOpen] = useState(false);
-  const [header, setHeader] = useState({ year: '', startDate: '', endDate: '', peers: '' });
+  const [header, setHeader] = useState({ year: '', startDate: '', endDate: '' });
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const openHeader = () => {
@@ -94,7 +94,6 @@ export default function HRReviewDetailPage() {
       year: String(appraisal.year ?? ''),
       startDate: (appraisal.startDate ?? '').slice(0, 10),
       endDate: (appraisal.endDate ?? '').slice(0, 10),
-      peers: String(appraisal.peerEvaluatorsCount ?? 0),
     });
     setHeaderOpen(true);
   };
@@ -106,7 +105,6 @@ export default function HRReviewDetailPage() {
         year: Number(header.year),
         startDate: header.startDate,
         endDate: header.endDate,
-        peerEvaluatorsCount: Number(header.peers),
       });
     },
     onSuccess: () => {
@@ -232,6 +230,21 @@ export default function HRReviewDetailPage() {
     );
   }
 
+  // Removal is for an appraisal nothing in it has counted yet — Draft, or Active with nothing
+  // submitted — and a return is made in governance before the sign-off, while no calibration panel
+  // is sitting on it (performance closure E-a). The server refuses the rest with a 422.
+  const removable =
+    appraisal?.status === 'Draft' ||
+    (appraisal?.status === 'Active' &&
+      !data.isSelfEvaluationComplete &&
+      !data.isManagerEvaluationComplete &&
+      !(data.completedPeerReviews > 0));
+  const returnable =
+    data.status === 'Governance' &&
+    (phase?.subStatus === 'PendingHRReview' ||
+      phase?.subStatus === 'HRReviewInProgress' ||
+      phase?.subStatus === 'PendingCalibration');
+
   const outstanding = [
     !data.isSelfEvaluationComplete && 'the employee has not submitted a self-evaluation',
     !data.isManagerEvaluationComplete && 'the manager has not submitted their evaluation',
@@ -267,16 +280,18 @@ export default function HRReviewDetailPage() {
                   Admin-tier, and gated rather than shown-and-refused: an HR-role caller gets a 403,
                   which the lane-3 probe established rather than assumed.
                 */}
-                <PermissionGate permissions={['HR.Performance.Admin']}>
-                  <Button variant="ghost" onClick={() => setDeleteOpen(true)}>
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Remove
-                  </Button>
-                </PermissionGate>
+                {removable && (
+                  <PermissionGate permissions={['HR.Performance.Admin']}>
+                    <Button variant="ghost" onClick={() => setDeleteOpen(true)}>
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Remove
+                    </Button>
+                  </PermissionGate>
+                )}
                 <Button
                   variant="outline"
                   onClick={() => setReturnOpen(true)}
-                  disabled={!data.isManagerEvaluationComplete}
+                  disabled={!data.isManagerEvaluationComplete || !returnable}
                 >
                   <Undo2 className="mr-2 h-4 w-4" />
                   Return to manager
@@ -311,6 +326,8 @@ export default function HRReviewDetailPage() {
             {data.employeeAcknowledgedDate
               ? `The employee acknowledged it on ${formatDate(data.employeeAcknowledgedDate)}.`
               : 'Waiting for the employee to acknowledge it.'}
+            {appraisal?.employeeAcknowledgmentComments &&
+              ` Acknowledgment note: “${appraisal.employeeAcknowledgmentComments}”`}
             {data.hrRemarks && ` Remarks: ${data.hrRemarks}`}
           </AlertDescription>
         </Alert>
@@ -498,9 +515,10 @@ export default function HRReviewDetailPage() {
           <DialogHeader>
             <DialogTitle>Correct this appraisal&rsquo;s dates</DialogTitle>
             <DialogDescription>
-              The window the appraisal covers, and how many peers it expects. Who it is for and
-              which cycle it belongs to cannot be changed here — an appraisal raised against the
-              wrong person is removed and regenerated, not moved onto somebody else.
+              The window the appraisal covers, and nothing else — the evaluations, the manager&rsquo;s
+              narrative and the scores are not changed here. Who it is for and which cycle it belongs
+              to cannot be changed either: an appraisal raised against the wrong person is removed
+              and regenerated, not moved onto somebody else.
             </DialogDescription>
           </DialogHeader>
 
@@ -510,13 +528,6 @@ export default function HRReviewDetailPage() {
               <Input
                 id="ap-year" type="number" value={header.year}
                 onChange={(e) => setHeader((h) => ({ ...h, year: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ap-peers">Peer evaluators</Label>
-              <Input
-                id="ap-peers" type="number" min={0} value={header.peers}
-                onChange={(e) => setHeader((h) => ({ ...h, peers: e.target.value }))}
               />
             </div>
             <div className="space-y-2">

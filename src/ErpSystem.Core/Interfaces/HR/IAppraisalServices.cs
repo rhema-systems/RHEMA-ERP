@@ -63,7 +63,7 @@ public interface IPerformanceAppraisalService
     Task<PerformanceAppraisalDto> UpdateAsync(UpdatePerformanceAppraisalDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> UpdateStatusAsync(UpdateAppraisalStatusDto statusDto, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<bool> CalculateOverallScoreAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+    // CalculateOverallScoreAsync went in performance closure E-a: IAppraisalScoreService.PreviewAsync reads the same arithmetic and stores nothing.
     Task<bool> ProgressToHRReviewAsync(Guid appraisalId, CancellationToken cancellationToken = default);
 
     // The raw EvaluatorEvaluation / CriterionScore CRUD was removed in performance closure lane P1:
@@ -111,7 +111,8 @@ public interface IPerformanceAppraisalService
     Task<HRReviewDto> ReturnToManagerAsync(Guid appraisalId, ReturnAppraisalDto dto, Guid? reviewerId = null, CancellationToken cancellationToken = default);
     
     // Employee actions
-    Task AcknowledgeAppraisalAsync(Guid appraisalId, Guid employeeId, CancellationToken cancellationToken = default);
+    /// <summary>The employee acknowledges their appraisal; <paramref name="comments"/> is kept on it (E-a).</summary>
+    Task AcknowledgeAppraisalAsync(Guid appraisalId, Guid employeeId, string? comments = null, CancellationToken cancellationToken = default);
     Task<AppealPageDataDto> GetAppealPageDataAsync(Guid appraisalId, Guid employeeId, CancellationToken cancellationToken = default);
     Task<AppraisalAppealDto> SubmitAppealAsync(SubmitAppealDto submitDto, Guid employeeId, CancellationToken cancellationToken = default);
     Task<AppealStatusViewDto> GetAppealStatusAsync(Guid appraisalId, Guid employeeId, CancellationToken cancellationToken = default);
@@ -569,6 +570,13 @@ public interface IAppraisalScoreService
     /// stored. Read-only — nothing is written.
     /// </summary>
     Task<AppraisalSettleDryRunReportDto> DryRunAsync(Guid? cycleId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// What a settle would store for one appraisal now, at any status, beside what is stored — the
+    /// dry run's row (performance closure E-a, replacing the calculate-score route). Read-only.
+    /// Throws <see cref="ArgumentException"/> when the appraisal is not in the tenant.
+    /// </summary>
+    Task<AppraisalSettleDryRunRowDto> PreviewAsync(Guid appraisalId, CancellationToken cancellationToken = default);
 }
 
 #endregion

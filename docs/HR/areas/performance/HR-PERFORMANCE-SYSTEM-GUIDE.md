@@ -23,6 +23,11 @@ nomination leaves room for another; in *Manager* mode the manager's nominations 
 HR's advance past the step asks the peers; the peer reads the nomination's due date and
 instructions; with anonymous reviews in *Manager* mode the appraisee sees counts, not names; and
 *Peer feedback* lists every criterion a peer scored, weighted.
+**And for lane E, slice E-a** (the appraisal routes, 2026-09-30): chapters 31 and 32 — *Correct dates*
+changes the window alone, and only before the appraisal is final; *Remove* only before anything in it
+counts; *Return to manager* only before the sign-off, taking the calibration with it; the raw status
+routes open a Draft appraisal and close a Completed one, nothing else; HR does not act on their own
+appraisal; the acknowledgment keeps a comment.
 **The database was rebuilt on 2026-09-29**: Rule 2, Rule 9, the demo tables and the Efua arithmetic give its figures (Efua 88.56, Cynthia 87.00, Efua's appeal window to 6 October). The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
 **Seventh in the series**, after Recruitment, Employees, Leave, Attendance & Time, Company Schedule and Staff Travel.
 
@@ -4005,7 +4010,10 @@ is visible from the queue rather than only after opening a record.
   talent records**. Where it lands depends on the cycle: `Governance` when an acknowledgment is
   required — the employee closes it out — or `Completed` when one is not.
 * **Return to manager** reopens the manager's evaluation and puts the appraisal back to `Active`.
-  **Remarks are mandatory**: they are the whole message the manager gets.
+  **Remarks are mandatory**: they are the whole message the manager gets. It is made **before the
+  sign-off** — at HR's review, or while the appraisal waits for a calibration panel that has not sat —
+  and a calibrated appraisal loses its calibration with it: the panel restated the evaluation now being
+  revised, so the appraisal is calibrated again on the new one.
 
 ### 👁 On the queue
 
@@ -4035,9 +4043,9 @@ actions:
 
 | Button | When | What it does |
 |---|---|---|
-| **Correct dates** | not finalised | Amends the window and the peer count — **nothing else** |
-| **Remove** | not finalised, **and only with `HR.Performance.Admin`** | Removes an appraisal generated against somebody who should not have been in scope. **Hidden for `hr.head`** |
-| **Return to manager** | manager evaluation complete | Reopens it |
+| **Correct dates** | not finalised | Amends the window — the year and the dates — **nothing else**; refused once the appraisal is final |
+| **Remove** | only while nothing in it counts — Draft, or Active with nothing submitted — **and only with `HR.Performance.Admin`** | Removes an appraisal generated against somebody who should not have been in scope. **Hidden for `hr.head`**, and on this page nearly always (an appraisal reaches HR's review once its manager has submitted) |
+| **Return to manager** | manager evaluation complete, in governance, before the sign-off, no panel sitting | Reopens it; a calibrated appraisal is calibrated again |
 | **Finalise** | self + manager + minimum peers are in | Signs it off |
 
 **The phase rail.**
@@ -4145,10 +4153,10 @@ you type something.
 | Detail | `GET …/{id}/hr-review` |
 | Phase | `GET api/AppraisalWorkflow/{id}/phase` |
 | **Finalise** | `POST …/{id}/approve` — writes the HR review record **and** the HR evaluator record, sets the status and settles the score in one transaction (calibrated overall first, else the submitted legs), then syncs the talent rating after the commit |
-| **Return** | `POST …/{id}/return-to-manager` — remarks required |
+| **Return** | `POST …/{id}/return-to-manager` — remarks required; **422** after the sign-off, once final, or while a panel sits |
 | Assign HR reviewer | `POST …/{id}/progress-to-hr-review` — a repair route, offered only when no reviewer was resolved at submission time |
-| Correct dates | `PUT api/PerformanceAppraisals/{id}` |
-| Remove | `DELETE api/PerformanceAppraisals/{id}` — **`HR.Performance.Admin`** |
+| Correct dates | `PUT api/PerformanceAppraisals/{id}` — the year and the dates; **422** once final |
+| Remove | `DELETE api/PerformanceAppraisals/{id}` — **`HR.Performance.Admin`**; **422** once anything in it counts |
 
 **The 422s Finalise can answer**, in the order they are checked: self evaluation outstanding · manager
 evaluation outstanding · fewer than the minimum peer reviews · **the calibration gate** *(Rule 3 — the
@@ -4160,8 +4168,9 @@ organisation unit containing "HR". On this database Kwasi's assigned reviewer is
 Akpene Amoah — and `hr.head` can still finalise, because the endpoint is gated on the HR **write**
 policy rather than on being the named reviewer. Worth knowing; not worth mentioning on stage.
 
-> **Why *Correct dates* refuses to move an appraisal between people.** The route is a replace and its
-> DTO marks the cycle, the employee and the status as required — but **the server ignores all three**.
+> **Why *Correct dates* refuses to move an appraisal between people.** The route was a replace and its
+> DTO marked the cycle, the employee and the status as required — but **the server ignored all three**,
+> and since closure lane E-a it takes the window alone.
 > Until it did, a "correction" could move an appraisal, with its goals, self-evaluation and scores, onto
 > a different person, into a different cycle, and walk it Draft → Completed straight past the
 > forward-only state machine. The dialog says it plainly: *"An appraisal raised against the wrong person
@@ -4178,10 +4187,26 @@ policy rather than on being the named reviewer. Worth knowing; not worth mention
 > completed appraisals a required final conversation still held. The employee is told when the sign-off
 > releases the outcome to them, not while a panel may still restate it.
 
+> **Changed 2026-09-30** (performance closure lane E, slice E-a). **Correct dates changes the window
+> and nothing else** — it used to take the whole record back, and since the page sends none of the
+> manager's fields, **every correction blanked the manager's comments, strengths, development points
+> and all five recommendation flags**; it is refused once the appraisal is final. **Return to manager**
+> is made before the sign-off, in governance, and never while a panel sits — it used to reopen an
+> appraisal from **any** status, a Completed or Closed one included, keeping its calibration and HR's
+> sign-off. **Remove** takes an appraisal only while nothing in it counts. **HR does not act on their own
+> appraisal**: the sign-off, the return, a correction and the raw status routes answer 403 to its
+> appraisee — another HR officer does. The raw status routes (`PATCH …/{id}/status`, `POST
+> AppraisalWorkflow/{id}/transition`) open a Draft appraisal and close a Completed one with a score, and
+> nothing else — they could complete an appraisal nobody signed off, and publish its score. The unused
+> *calculate score* route, which restated finished scores, is gone; `GET …/{id}/score-preview` shows
+> what the settle would store and writes nothing. When the employee's acknowledgment carries a note, the
+> finalised banner shows it.
+
 ### ⚠ Known gaps
 **P-43.** ~~**Finalise is not disabled by the calibration gate** (Rule 3).~~ **Fixed 2026-09-29**
 (closure lane B1/B4): the button reads the gates.
-**P-44.** Finalising **cannot be undone** from the UI. There is no un-finalise.
+**P-44.** Finalising **cannot be undone** from the UI. There is no un-finalise — an audited reopen
+comes with closure lane N (D-17). Since lane E-a the return can no longer reopen one by accident.
 **P-45.** *Remove* is the only route that deletes an appraisal, and it is Admin-tier — established by
 probe, not assumed, which is why the control is permission-gated rather than shown and refused.
 
@@ -4200,6 +4225,10 @@ three answer 422 or 403 rather than failing quietly.
 
 Alongside it, if the cycle allows it, the employee may record a **written response** that sits with the
 appraisal.
+
+*(Since closure lane E-a the acknowledgment itself can carry a short note, kept on the appraisal and
+shown on HR's review page. This screen sends none — the written response below is the employee's
+answer; the demo pack's acknowledgments send one.)*
 
 ### ▶ Walk it
 

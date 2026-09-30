@@ -86,13 +86,15 @@ public class AppraisalWorkflowController : ControllerBase
     }
 
     /// <summary>
-    /// Enforce lifecycle transition rules and change the appraisal status.
-    /// Throws if the requested transition is not permitted from the current status.
+    /// The raw status route: opens a Draft appraisal (Draft → Active) or closes a Completed one that
+    /// has a score (Completed → Closed). Any other move is refused with a 422 naming the action that
+    /// makes it (performance closure E-a).
     /// </summary>
     [HttpPost("{appraisalId:guid}/transition")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Transition(Guid appraisalId, [FromBody] AppraisalStatus newStatus, CancellationToken cancellationToken = default)
     {
@@ -105,9 +107,15 @@ public class AppraisalWorkflowController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, new { message = ex.Message });
+        }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { message = ex.Message });
+            // A rule, answered as every appraisal rule is (it was a 400).
+            _logger.LogWarning(ex, "Appraisal {AppraisalId}: transition to {NewStatus} refused", appraisalId, newStatus);
+            return UnprocessableEntity(new { message = ex.Message });
         }
         catch (Exception ex)
         {

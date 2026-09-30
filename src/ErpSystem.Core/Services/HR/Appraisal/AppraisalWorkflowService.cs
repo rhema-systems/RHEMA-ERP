@@ -32,6 +32,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     private readonly IPeerNominationService _peerNominations;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ICurrentUserService _currentUser;
     private readonly ILogger<AppraisalWorkflowService> _logger;
 
     public AppraisalWorkflowService(
@@ -47,8 +48,10 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         IPeerNominationService peerNominations,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        ICurrentUserService currentUser,
         ILogger<AppraisalWorkflowService> logger)
     {
+        _currentUser          = currentUser;
         _goalRows             = goalRows;
         _peerNominations      = peerNominations;
         _appraisalRepository  = appraisalRepository;
@@ -103,6 +106,12 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     // ────────────────────────────────────────────────────────────────────────
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// The raw status route: it opens a Draft appraisal or closes a Completed one with a score, and
+    /// nothing else — every other move is its owning action's (performance closure E-a,
+    /// <see cref="AppraisalLifecycle.EnsureRawTransition"/>). It allowed the whole table, and settled
+    /// and published an appraisal it moved to Completed.
+    /// </remarks>
     public async Task TransitionAsync(
         Guid appraisalId,
         AppraisalStatus newStatus,
@@ -110,18 +119,18 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     {
         var appraisal = await GetOwnedAppraisalAsync(appraisalId, cancellationToken);
 
+        // The two-actor rule: an HR officer does not move their own appraisal.
+        if (_currentUser.EmployeeId is Guid me && me != Guid.Empty && me == appraisal.EmployeeId)
+            throw new UnauthorizedAccessException(
+                "You cannot change the status of your own appraisal: another HR officer does.");
+
         var from = appraisal.Status;
-        AppraisalLifecycle.EnsureTransition(from, newStatus);
+        AppraisalLifecycle.EnsureRawTransition(from, newStatus, appraisal.OverallScore.HasValue);
 
         appraisal.Status = newStatus;
 
         await _appraisalRepository.UpdateAsync(appraisal);
-
-        // Completed by any route settles and publishes in the same save (performance closure A7).
-        if (newStatus == AppraisalStatus.Completed)
-            await _scores.SettleAsync(appraisalId, AppraisalScoreChangeSource.Settle, publish: true, cancellationToken);
-        else
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
             "Appraisal {AppraisalId} transitioned from {From} → {To}.",
