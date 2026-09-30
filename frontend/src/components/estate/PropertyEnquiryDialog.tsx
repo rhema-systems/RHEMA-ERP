@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import ReCAPTCHA from 'react-google-recaptcha';
+import { PublicCaptchaChallenge, type PublicCaptchaChallengeHandle } from '@/components/security/PublicCaptchaChallenge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -30,7 +30,7 @@ export function PropertyEnquiryDialog({ listing, onClose, onCreated, publicMode 
   const [busy, setBusy] = useState(false);
   const [submissionId] = useState(() => crypto.randomUUID());
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
-  const captcha = useRef<ReCAPTCHA>(null);
+  const captcha = useRef<PublicCaptchaChallengeHandle>(null);
   const { data: security, isLoading: securityLoading, isError: securityError } = useQuery({
     queryKey: ['security', 'public'], queryFn: () => settingsService.getPublicSecuritySettings(),
   });
@@ -92,14 +92,14 @@ export function PropertyEnquiryDialog({ listing, onClose, onCreated, publicMode 
     } finally { setBusy(false); }
   };
   return <Dialog open onOpenChange={open => { if (!open && !busy) onClose(); }}>
-    <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl" onInteractOutside={e => { if (busy) e.preventDefault(); }} onEscapeKeyDown={e => { if (busy) e.preventDefault(); }}>
+    <DialogContent className="max-h-[90vh] overflow-y-auto text-foreground sm:max-w-xl" onInteractOutside={e => { if (busy) e.preventDefault(); }} onEscapeKeyDown={e => { if (busy) e.preventDefault(); }}>
       <DialogHeader>
         <DialogTitle>Enquire about this property</DialogTitle>
         <DialogDescription>Send your questions to Sales and Marketing.</DialogDescription>
       </DialogHeader>
-      <div className="rounded-md border bg-slate-50 p-4 space-y-1">
+      <div className="rounded-md border bg-muted p-4 space-y-1">
         <p className="font-semibold">{listing.name}</p>
-        <p className="text-sm text-slate-600">{listing.assetCode}</p>
+        <p className="text-sm text-muted-foreground">{listing.assetCode}</p>
         <p className="text-sm">{listing.location || 'Location not specified'}</p>
         <p className="text-sm">{listingLabel} · {formattedPrice}{chargeCadence}</p>
       </div>
@@ -122,16 +122,16 @@ export function PropertyEnquiryDialog({ listing, onClose, onCreated, publicMode 
         </div>
       </div> : profiles.length > 0 ? <div className="space-y-2">
         <Label htmlFor="enquiry-partner">Business partner</Label>
-        <select id="enquiry-partner" className="w-full rounded-md border p-2" value={partnerId} onChange={e => setPartnerId(e.target.value)} disabled={busy}>
+        <select id="enquiry-partner" className="w-full rounded-md border bg-background p-2 text-foreground" value={partnerId} onChange={e => setPartnerId(e.target.value)} disabled={busy}>
           {profiles.map(p => <option key={p.id} value={p.id}>{p.partnerName}</option>)}
         </select>
-      </div> : !profilesLoading ? <p className="text-sm text-slate-600">Your signed-in portal contact details will be included.</p> : null}
+      </div> : !profilesLoading ? <p className="text-sm text-muted-foreground">Your signed-in portal contact details will be included.</p> : null}
       <div className="space-y-2">
         <Label htmlFor="property-enquiry-message">Your enquiry</Label>
         <Textarea id="property-enquiry-message" value={message} onChange={e => setMessage(e.target.value)} maxLength={4000} rows={5} disabled={busy} placeholder="What would you like to know about this property?" />
-        <p className="text-xs text-slate-500">{message.length}/4,000 characters</p>
+        <p className="text-xs text-muted-foreground">{message.length}/4,000 characters</p>
       </div>
-      {security?.captchaEnabled && security.captchaSiteKey ? <ReCAPTCHA ref={captcha} sitekey={security.captchaSiteKey} onChange={setCaptchaToken} onExpired={() => setCaptchaToken(null)} /> : null}
+      {security && <PublicCaptchaChallenge id="property-enquiry-captcha" ref={captcha} enabled={security.captchaEnabled} provider={security.captchaProvider} recaptchaSiteKey={security.recaptchaSiteKey} hCaptchaSiteKey={security.hCaptchaSiteKey} onChange={setCaptchaToken} />}
       {(error || securityError) && <Alert variant="destructive"><AlertDescription>{error || 'Could not load the enquiry security settings. Please try again.'}</AlertDescription></Alert>}
       <DialogFooter>
         <Button variant="outline" onClick={onClose} disabled={busy}>Cancel</Button>

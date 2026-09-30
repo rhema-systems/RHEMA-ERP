@@ -28,6 +28,24 @@ public class SalesSaleableSourceDto
     public DateTime? UpdatedAt { get; set; }
 }
 
+public sealed class SalesSaleableSourceAdapterDefinitionDto
+{
+    public string AdapterKey { get; set; } = string.Empty;
+    public IReadOnlyCollection<SalesSaleableSourceFilterDefinitionDto> Filters { get; set; }
+        = Array.Empty<SalesSaleableSourceFilterDefinitionDto>();
+}
+
+public sealed class SalesSaleableSourceFilterDefinitionDto
+{
+    public string Field { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string ValueType { get; set; } = "text";
+    public bool IsRequired { get; set; }
+    public string? DefaultValue { get; set; }
+    public string? HelpText { get; set; }
+    public IReadOnlyCollection<string> Options { get; set; } = Array.Empty<string>();
+}
+
 public class SalesSaleableItemDto
 {
     public Guid SourceId { get; set; }

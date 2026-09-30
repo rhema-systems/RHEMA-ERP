@@ -6,6 +6,7 @@ namespace ErpSystem.Core.Interfaces.Sales;
 public interface ISalesSetupService
 {
     Task<IReadOnlyCollection<SalesSaleableSourceDto>> GetSaleableSourcesAsync(bool includeInactive = false);
+    Task<IReadOnlyCollection<SalesSaleableSourceAdapterDefinitionDto>> GetSaleableSourceAdapterDefinitionsAsync();
     Task<IReadOnlyCollection<SalesSaleableItemDto>> SearchSaleableItemsAsync(Guid sourceId, string? search = null, int take = 50);
     Task<SalesSaleableSourceDto> CreateSaleableSourceAsync(UpsertSalesSaleableSourceDto dto);
     Task<SalesSaleableSourceDto> UpdateSaleableSourceAsync(Guid id, UpsertSalesSaleableSourceDto dto);
@@ -17,5 +18,6 @@ public interface ISalesSetupService
 public interface ISalesSaleableSourceAdapter
 {
     string AdapterKey { get; }
+    IReadOnlyCollection<SalesSaleableSourceFilterDefinitionDto> FilterDefinitions => [];
     Task<IReadOnlyCollection<SalesSaleableItemDto>> SearchItemsAsync(SalesSaleableSource source, string? search = null, int take = 50);
 }

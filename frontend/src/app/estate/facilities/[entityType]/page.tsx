@@ -109,6 +109,7 @@ const defaultDutyRosterForm = (): UpsertEstateFacilityDutyRosterRequest => ({
   shiftStart: '08:00',
   shiftEnd: '17:00',
   supervisorName: '',
+  supervisorEmployeeId: null,
   toolsIssued: '',
   suppliesIssued: '',
   inventoryIssueVoucherId: null,
@@ -780,6 +781,7 @@ export default function FacilitiesProcedureWorkspacePage() {
       defaultDutyRosterForm()
     );
   const [selectedDutyStaff, setSelectedDutyStaff] = React.useState<FacilitiesStaffOption | null>(null);
+  const [selectedDutySupervisor, setSelectedDutySupervisor] = React.useState<FacilitiesStaffOption | null>(null);
   const [selectedDutyProperty, setSelectedDutyProperty] = React.useState<FacilitiesPropertyOption | null>(null);
   const [selectedDutyUnit, setSelectedDutyUnit] = React.useState<FacilitiesUnitOption | null>(null);
   const [dutyRosterError, setDutyRosterError] = React.useState<string | null>(
@@ -840,6 +842,11 @@ export default function FacilitiesProcedureWorkspacePage() {
       return;
     }
 
+    if (!dutyRosterForm.supervisorEmployeeId) {
+      setDutyRosterError('Select a supervisor from HR employees.');
+      return;
+    }
+
     try {
       setIsSavingDutyRoster(true);
       const request = {
@@ -850,6 +857,7 @@ export default function FacilitiesProcedureWorkspacePage() {
         dayPattern: dutyRosterForm.dayPattern?.trim() || null,
         endDate: dutyRosterForm.endDate?.trim() || null,
         supervisorName: dutyRosterForm.supervisorName?.trim() || null,
+        supervisorEmployeeId: dutyRosterForm.supervisorEmployeeId || null,
         toolsIssued: dutyRosterForm.toolsIssued?.trim() || null,
         suppliesIssued: dutyRosterForm.suppliesIssued?.trim() || null,
         checklist: dutyRosterForm.checklist?.trim() || null,
@@ -869,6 +877,7 @@ export default function FacilitiesProcedureWorkspacePage() {
       await loadDutyRoster();
       setDutyRosterForm(defaultDutyRosterForm());
       setSelectedDutyStaff(null);
+      setSelectedDutySupervisor(null);
       setSelectedDutyProperty(null);
       setSelectedDutyUnit(null);
       setEditingDutyId(null);
@@ -889,6 +898,14 @@ export default function FacilitiesProcedureWorkspacePage() {
       department: null,
       position: null,
     });
+    setSelectedDutySupervisor(item.supervisorName ? {
+      id: item.supervisorEmployeeId || item.supervisorName,
+      employeeProfileId: null,
+      employeeNumber: '',
+      staffName: item.supervisorName,
+      department: null,
+      position: null,
+    } : null);
     setSelectedDutyUnit(item.propertyUnit ? {
       id: item.id,
       assetCode: item.propertyUnit,
@@ -922,6 +939,7 @@ export default function FacilitiesProcedureWorkspacePage() {
       shiftStart: item.shiftStart,
       shiftEnd: item.shiftEnd,
       supervisorName: item.supervisorName,
+      supervisorEmployeeId: item.supervisorEmployeeId || null,
       toolsIssued: item.toolsIssued,
       suppliesIssued: item.suppliesIssued,
       inventoryIssueVoucherId: item.inventoryIssueVoucherId,
@@ -957,6 +975,33 @@ export default function FacilitiesProcedureWorkspacePage() {
       );
     } catch (error) {
       setDutyRosterError(error instanceof Error ? error.message : 'Unable to update duty attendance.');
+    }
+  };
+
+  const recordDutyInspection = async (
+    item: EstateFacilityDutyRosterItem,
+    passed: boolean
+  ) => {
+    setDutyRosterError(null);
+    try {
+      const updated = await estateFacilitiesService.updateDutyAttendance(
+        item.id,
+        {
+          attendanceStatus: 'Present',
+          completionStatus: 'Completed',
+          qualityStatus: passed ? 'Passed inspection' : 'Failed inspection',
+          linkedMaintenanceReference: item.linkedMaintenanceReference || null,
+          linkedComplaintReference: item.linkedComplaintReference || null,
+          notes: passed
+            ? 'Supervisor inspection passed.'
+            : 'Supervisor inspection failed; follow-up required.',
+        }
+      );
+      setDutyRosterItems((current) =>
+        current.map((row) => (row.id === updated.id ? updated : row))
+      );
+    } catch (error) {
+      setDutyRosterError(error instanceof Error ? error.message : 'Unable to mark duty inspection.');
     }
   };
 
@@ -1552,14 +1597,29 @@ export default function FacilitiesProcedureWorkspacePage() {
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="duty-supervisor">Supervisor</Label>
-                  <Input
+                  <FacilitiesDutyLookup<FacilitiesStaffOption>
                     id="duty-supervisor"
-                    value={dutyRosterForm.supervisorName || ''}
-                    onChange={(event) =>
-                      updateDutyRosterForm('supervisorName', event.target.value)
-                    }
-                    placeholder="Facilities supervisor"
+                    label="Supervisor"
+                    selectedLabel={selectedDutySupervisor
+                      ? `${selectedDutySupervisor.staffName}${selectedDutySupervisor.employeeNumber ? ` (${selectedDutySupervisor.employeeNumber})` : ''}`
+                      : undefined}
+                    search={estateFacilitiesService.searchDutyStaff}
+                    describe={(staff) => ({
+                      title: `${staff.staffName} (${staff.employeeNumber})`,
+                      detail: [staff.department, staff.position].filter(Boolean).join(' / '),
+                    })}
+                    onSelect={(staff) => {
+                      setSelectedDutySupervisor(staff);
+                      setDutyRosterForm((current) => ({
+                        ...current,
+                        supervisorEmployeeId: staff.id,
+                        supervisorName: staff.staffName,
+                      }));
+                    }}
                   />
+                  {selectedDutySupervisor?.department || selectedDutySupervisor?.position ? (
+                    <p className="text-xs text-muted-foreground">{[selectedDutySupervisor.department, selectedDutySupervisor.position].filter(Boolean).join(' / ')}</p>
+                  ) : null}
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="duty-maintenance">Maintenance ref.</Label>
@@ -1638,7 +1698,7 @@ export default function FacilitiesProcedureWorkspacePage() {
                   <Button type="submit" disabled={isSavingDutyRoster}>
                     {isSavingDutyRoster ? 'Saving duty...' : editingDutyId ? 'Save duty' : 'Add duty roster'}
                   </Button>
-                  {editingDutyId ? <Button type="button" variant="outline" onClick={() => { setEditingDutyId(null); setDutyRosterForm(defaultDutyRosterForm()); }}>Cancel edit</Button> : null}
+                  {editingDutyId ? <Button type="button" variant="outline" onClick={() => { setEditingDutyId(null); setDutyRosterForm(defaultDutyRosterForm()); setSelectedDutyStaff(null); setSelectedDutySupervisor(null); setSelectedDutyProperty(null); setSelectedDutyUnit(null); }}>Cancel edit</Button> : null}
                   <Button
                     type="button"
                     variant="outline"
@@ -1696,6 +1756,9 @@ export default function FacilitiesProcedureWorkspacePage() {
                             {new Date(item.startDate).toLocaleDateString()} |{' '}
                             {item.shiftStart} - {item.shiftEnd}
                           </div>
+                          <div className="text-sm text-muted-foreground">
+                            Supervisor: {item.supervisorName || 'Not assigned'}
+                          </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <Badge variant="secondary">
@@ -1737,6 +1800,28 @@ export default function FacilitiesProcedureWorkspacePage() {
                         >
                           Mark absent
                         </Button>
+                        {item.qualityStatus === 'Pending inspection' ? (
+                          <>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void recordDutyInspection(item, true)}
+                              disabled={dutyRosterDate !== todayInputValue()}
+                            >
+                              Pass inspection
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void recordDutyInspection(item, false)}
+                              disabled={dutyRosterDate !== todayInputValue()}
+                            >
+                              Fail inspection
+                            </Button>
+                          </>
+                        ) : null}
                       </div>
                     </div>
                   ))}

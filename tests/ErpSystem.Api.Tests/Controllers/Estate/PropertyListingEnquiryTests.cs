@@ -8,6 +8,7 @@ using ErpSystem.Core.DTOs.Ehc;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Procedures;
@@ -21,6 +22,7 @@ using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Core.Interfaces.Workflow;
 using ErpSystem.Core.Services.Estate;
+using ErpSystem.Core.Services.Sales;
 using ErpSystem.Core.Services.Legal;
 using ErpSystem.Core.Services.Planning;
 using ErpSystem.Data;
@@ -200,6 +202,202 @@ public sealed class PropertyListingEnquiryTests
     }
 
     [Fact]
+    public async Task LandSalesSourceReturnsOnlyPublishedDemarcationsThatMatchConfiguredFilters()
+    {
+        await using var db = Database();
+        var asset = Asset();
+        asset.IsPublishedToExternalPortal = false;
+        var sale = new EstateLandDemarcation
+        {
+            TenantId = tenantId,
+            EstateManagedAsset = asset,
+            EstateManagedAssetId = asset.Id,
+            DemarcationNumber = 1,
+            Description = "Published sale plot",
+            BoundaryCoordinates = "[]",
+            BoundaryVerified = true,
+            IsPublishedToExternalPortal = true,
+            ExternalListingStatus = "Published",
+            ExternalListingType = "Sale",
+            ExternalListingCurrency = "GHS",
+            ExternalSalePrice = 300000m
+        };
+        var rent = new EstateLandDemarcation
+        {
+            TenantId = tenantId,
+            EstateManagedAsset = asset,
+            EstateManagedAssetId = asset.Id,
+            DemarcationNumber = 2,
+            Description = "Published rental plot",
+            BoundaryCoordinates = "[]",
+            BoundaryVerified = true,
+            IsPublishedToExternalPortal = true,
+            ExternalListingStatus = "Published",
+            ExternalListingType = "Rent",
+            ExternalListingCurrency = "GHS",
+            ExternalMonthlyRent = 2000m
+        };
+        var unpublished = new EstateLandDemarcation
+        {
+            TenantId = tenantId,
+            EstateManagedAsset = asset,
+            EstateManagedAssetId = asset.Id,
+            DemarcationNumber = 3,
+            Description = "Draft sale plot",
+            BoundaryCoordinates = "[]",
+            BoundaryVerified = true,
+            IsPublishedToExternalPortal = false,
+            ExternalListingStatus = "Draft",
+            ExternalListingType = "Sale",
+            ExternalListingCurrency = "GHS"
+        };
+        db.AddRange(asset, sale, rent, unpublished);
+        await db.SaveChangesAsync();
+        using var unit = new UnitOfWork(db);
+        var user = new Mock<ICurrentUserProvider>();
+        user.SetupGet(item => item.TenantId).Returns(tenantId);
+        var adapter = new LandManagementSaleableSourceAdapter(unit, user.Object);
+        var source = new SalesSaleableSource
+        {
+            TenantId = tenantId,
+            Code = "LAND_MANAGEMENT",
+            DisplayName = "Land Management",
+            SourceType = "LandManagement",
+            AdapterKey = "land-management",
+            IsActive = true,
+            AllowSalesOrders = true,
+            AllowSalesAgreements = true,
+            SettingsJson = "{\"filters\":[{\"field\":\"externalListingType\",\"value\":\"Sale\"}]}"
+        };
+
+        var results = await adapter.SearchItemsAsync(source);
+
+        var result = Assert.Single(results);
+        Assert.Equal(sale.Id.ToString(), result.SourceItemId);
+        Assert.Equal("LAND-002-PORTION-001", result.PropertyReference);
+        Assert.Equal(300000m, result.EstimatedValue);
+        Assert.DoesNotContain(results, item => item.SourceItemId == rent.Id.ToString());
+        Assert.DoesNotContain(results, item => item.SourceItemId == unpublished.Id.ToString());
+    }
+
+    [Fact]
+    public async Task PropertyEnquiryLoadsPaymentOnlyFromMatchingCustomerAndLandSalesOrder()
+    {
+        await using var db = Database();
+        var requester = new ApplicationUser
+        {
+            Id = userId,
+            TenantId = tenantId,
+            UserName = "buyer.contact",
+            FirstName = "Buyer",
+            LastName = "Contact"
+        };
+        var structure = new OrganizationStructure { TenantId = tenantId, Name = "TDC structure", Code = "TDC", IsActive = true };
+        var level = new OrganizationLevel { TenantId = tenantId, StructureId = structure.Id, OrganizationStructure = structure, Name = "Department", Code = "DEPT", LevelNumber = 3, IsActive = true };
+        var sales = new OrganizationUnit { TenantId = tenantId, OrganizationLevelId = level.Id, OrganizationLevel = level, Name = "Marketing", Code = "UNIT-MKT", Path = "/TDC/MKT", IsActive = true };
+        var partner = new BusinessPartner { TenantId = tenantId, PartnerCode = "CUS-001", PartnerName = "Buyer One", PartnerType = "Customer", IsActive = true, ApprovalStatus = "Approved" };
+        var otherPartner = new BusinessPartner { TenantId = tenantId, PartnerCode = "CUS-002", PartnerName = "Buyer Two", PartnerType = "Customer", IsActive = true, ApprovalStatus = "Approved" };
+        var listingId = Guid.NewGuid();
+        var ticket = new EhcTicket
+        {
+            TenantId = tenantId,
+            TicketNumber = "EHC-SALES-001",
+            RequesterUserId = requester.Id,
+            TicketType = EhcTicketType.Enquiry,
+            Status = EhcTicketStatus.Acknowledged,
+            Description = "I want this plot",
+            AssignedOrganizationUnitId = sales.Id,
+            PropertyListingContextJson = JsonSerializer.Serialize(new EhcPropertyListingContextDto(
+                "estate-public-listing", listingId, "LAND-002-PORTION-002", "Parcel Two", "Sale", "GHS", "Accra", 1250000m,
+                Guid.NewGuid(), listingId, partner.Id, partner.PartnerName, null, null, null))
+        };
+        var invoice = new Invoice
+        {
+            TenantId = tenantId,
+            InvoiceNumber = "INV-001",
+            BusinessPartnerId = partner.Id,
+            BusinessPartnerRoleId = Guid.NewGuid(),
+            BusinessPartnerArProfileVersionId = Guid.NewGuid(),
+            BusinessPartnerCode = partner.PartnerCode,
+            CustomerName = partner.PartnerName,
+            InvoiceDate = DateTime.UtcNow.Date,
+            TotalAmount = 1250000m,
+            PaidAmount = 400000m,
+            CurrencyCode = "GHS"
+        };
+        var order = new SalesOrder
+        {
+            TenantId = tenantId,
+            DocumentNumber = "SO-001",
+            BusinessPartnerId = partner.Id,
+            CustomerName = partner.PartnerName,
+            PropertyReference = "LAND-002-PORTION-002",
+            OrderStatus = SalesOrderStatus.Closed,
+            TotalAmount = 1250000m,
+            Currency = "GHS",
+            InvoiceId = invoice.Id
+        };
+        var otherOrder = new SalesOrder
+        {
+            TenantId = tenantId,
+            DocumentNumber = "SO-OTHER",
+            BusinessPartnerId = otherPartner.Id,
+            CustomerName = otherPartner.PartnerName,
+            PropertyReference = "LAND-002-PORTION-002",
+            OrderStatus = SalesOrderStatus.Closed,
+            TotalAmount = 999999m,
+            Currency = "GHS"
+        };
+        var payment = new CustomerPayment
+        {
+            TenantId = tenantId,
+            PaymentNumber = "RCT-001",
+            BusinessPartnerId = partner.Id,
+            BusinessPartnerRoleId = Guid.NewGuid(),
+            BusinessPartnerArProfileVersionId = Guid.NewGuid(),
+            BusinessPartnerCode = partner.PartnerCode,
+            BusinessPartnerName = partner.PartnerName,
+            PaymentDate = DateTime.UtcNow.Date,
+            TotalAmount = 400000m,
+            AllocatedAmount = 400000m,
+            CurrencyCode = "GHS",
+            TransactionReference = "BANK-REF-001",
+            Status = "Approved"
+        };
+        var allocation = new PaymentAllocation
+        {
+            TenantId = tenantId,
+            CustomerPaymentId = payment.Id,
+            InvoiceId = invoice.Id,
+            AllocatedAmount = 400000m,
+            PaymentCurrencyAmount = 400000m,
+            InvoiceCurrencyCode = "GHS",
+            PaymentCurrencyCode = "GHS"
+        };
+        var closedAt = DateTime.UtcNow.AddDays(-1);
+        var history = new SalesOrderStatusHistory
+        {
+            TenantId = tenantId,
+            SalesOrderId = order.Id,
+            ToStatus = SalesOrderStatus.Closed,
+            ChangedAt = closedAt
+        };
+        db.AddRange(requester, structure, level, sales, partner, otherPartner, ticket, invoice, order, otherOrder, payment, allocation, history);
+        await db.SaveChangesAsync();
+        var controller = new EhcPropertyEnquiriesController(db, User().Object, Mock.Of<IEhcTicketService>(), Mock.Of<IEstateSalesListingApplicationHandoffService>());
+
+        var result = Assert.IsType<OkObjectResult>(await controller.GetEstateHandoff(ticket.Id, default));
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(result.Value));
+        var salesOrder = document.RootElement.GetProperty("data").GetProperty("salesOrder");
+
+        Assert.Equal(order.Id, salesOrder.GetProperty("id").GetGuid());
+        Assert.Equal("SO-001", salesOrder.GetProperty("reference").GetString());
+        Assert.Equal(400000m, salesOrder.GetProperty("amountPaid").GetDecimal());
+        Assert.Equal("BANK-REF-001", salesOrder.GetProperty("paymentReference").GetString());
+        Assert.Equal(closedAt.Date, salesOrder.GetProperty("completedAt").GetDateTime().Date);
+    }
+
+    [Fact]
     public async Task EstateHandoffRequiresClosedWonOpportunity()
     {
         await using var db = Database();
@@ -290,7 +488,7 @@ public sealed class PropertyListingEnquiryTests
     }
 
     [Fact]
-    public async Task ListingApplicationUsesManualStagesWhenNoPublishedWorkflowExists()
+    public async Task ListingApplicationRequiresPublishedWorkflow()
     {
         await using var db = Database();
         var currentUser = User();
@@ -313,7 +511,7 @@ public sealed class PropertyListingEnquiryTests
             Mock.Of<IJobCardService>(),
             Mock.Of<IEhcTicketService>());
 
-        var created = await procedures.CreateCaseAsync(new CreateProcedureCaseRequest(
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => procedures.CreateCaseAsync(new CreateProcedureCaseRequest(
             "PropertyManagement",
             "EstatePropertyManagementListingApplication",
             "Purchase enquiry - Parcel Two",
@@ -328,20 +526,10 @@ public sealed class PropertyListingEnquiryTests
                 ["listingReference"] = "LAND-002-PORTION-002",
                 ["requestType"] = "Sale",
                 ["currency"] = "GHS"
-            }));
+            })));
 
-        Assert.False(created.UsesConfiguredWorkflow);
-        Assert.Null(created.WorkflowInstanceId);
-        Assert.Equal("Estate intake review", created.CurrentStageName);
-        Assert.True(created.CanEditCurrentStage);
-        Assert.Contains("customerValidationStatus", created.CurrentStageFieldKeys);
-        var manualStages = new PropertyManagementProcedureCatalogService()
-            .GetProcedureWorkspace("EstatePropertyManagementListingApplication")!.Stages;
-        Assert.Equal(Enumerable.Range(0, manualStages.Count), await db.ProcedureCaseChecklistItems
-            .Select(item => item.StageIndex)
-            .Distinct()
-            .OrderBy(item => item)
-            .ToArrayAsync());
+        Assert.Contains("Publish a workflow", error.Message);
+        Assert.False(await db.ProcedureCases.AnyAsync());
         Assert.DoesNotContain(workflow.Invocations, item => item.Method.Name == nameof(IWorkflowEngine.StartWorkflowAsync));
     }
 

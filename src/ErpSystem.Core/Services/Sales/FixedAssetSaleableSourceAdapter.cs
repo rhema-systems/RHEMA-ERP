@@ -22,6 +22,16 @@ public class FixedAssetSaleableSourceAdapter : ISalesSaleableSourceAdapter
 
     public string AdapterKey => "asset-register";
 
+    public IReadOnlyCollection<SalesSaleableSourceFilterDefinitionDto> FilterDefinitions { get; } =
+    [
+        new() { Field = "status", DisplayName = "Asset status" },
+        new() { Field = "categoryName", DisplayName = "Asset category" },
+        new() { Field = "categoryId", DisplayName = "Category ID" },
+        new() { Field = "assetCode", DisplayName = "Asset code" },
+        new() { Field = "serialNumber", DisplayName = "Serial number" },
+        new() { Field = "name", DisplayName = "Asset name" }
+    ];
+
     public async Task<IReadOnlyCollection<SalesSaleableItemDto>> SearchItemsAsync(
         SalesSaleableSource source,
         string? search = null,

@@ -54,6 +54,7 @@ public sealed class FacilitiesDutyRosterScheduleTests
         var tenantId = Guid.NewGuid();
         var voucherId = Guid.NewGuid();
         var itemId = Guid.NewGuid();
+        var supervisorId = Guid.NewGuid();
         await using var db = new ApplicationDbContext(
             new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options, tenantId);
@@ -65,6 +66,11 @@ public sealed class FacilitiesDutyRosterScheduleTests
         {
             Id = Guid.NewGuid(), TenantId = tenantId, EmployeeNumber = "CL-001",
             FirstName = "Ama", LastName = "Cleaner", IsActive = true
+        });
+        db.Employees.Add(new Employee
+        {
+            Id = supervisorId, TenantId = tenantId, EmployeeNumber = "SUP-001",
+            FirstName = "Kofi", LastName = "Supervisor", IsActive = true
         });
         db.EstateManagedAssets.Add(new EstateManagedAsset
         {
@@ -91,6 +97,7 @@ public sealed class FacilitiesDutyRosterScheduleTests
         {
             EmployeeNumber = "CL-001", StaffName = "Cleaner", PropertyReference = "SITE-1",
             ServiceAreaName = "Lobby", StartDate = DateTime.UtcNow.Date,
+            SupervisorEmployeeId = supervisorId,
             InventoryIssueVoucherId = voucherId, SuppliesIssued = "User-entered value"
         }, CancellationToken.None);
 
@@ -137,6 +144,7 @@ public sealed class FacilitiesDutyRosterScheduleTests
         {
             EmployeeNumber = "CL-001", StaffName = "Cleaner", PropertyReference = "SITE-1",
             ServiceAreaName = "Block A",
+            SupervisorEmployeeId = Guid.NewGuid(),
             Frequency = "Daily",
             DayPattern = "Mon-Fri",
             ShiftStart = "17:00",
@@ -200,6 +208,41 @@ public sealed class FacilitiesDutyRosterScheduleTests
     }
 
     [Fact]
+    public async Task OnlyAssignedSupervisorCanMarkCompletedDutyInspection()
+    {
+        var tenantId = Guid.NewGuid();
+        var supervisorId = Guid.NewGuid();
+        var actingEmployeeId = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options, tenantId);
+        var roster = new EstateFacilityDutyRoster
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, RosterReference = "FAC-DR-INSPECT",
+            StaffName = "Cleaner", ServiceAreaName = "Lobby", StartDate = DateTime.UtcNow.Date,
+            SupervisorEmployeeId = supervisorId
+        };
+        db.EstateFacilityDutyRosters.Add(roster);
+        await db.SaveChangesAsync();
+        var user = new Mock<ICurrentUserService>();
+        user.SetupGet(item => item.TenantId).Returns(tenantId);
+        user.SetupGet(item => item.EmployeeId).Returns(() => actingEmployeeId);
+        var controller = new FacilitiesDutyRosterController(db, user.Object);
+
+        (await controller.UpdateAttendance(roster.Id, new UpdateEstateFacilityDutyAttendanceDto(), CancellationToken.None))
+            .Should().BeOfType<OkObjectResult>();
+        var inspection = new UpdateEstateFacilityDutyAttendanceDto { QualityStatus = "Passed inspection" };
+        (await controller.UpdateAttendance(roster.Id, inspection, CancellationToken.None))
+            .Should().BeOfType<ObjectResult>().Which.StatusCode.Should().Be(403);
+        (await db.EstateFacilityDutyRosters.SingleAsync()).QualityStatus.Should().Be("Pending inspection");
+
+        actingEmployeeId = supervisorId;
+        (await controller.UpdateAttendance(roster.Id, inspection, CancellationToken.None))
+            .Should().BeOfType<OkObjectResult>();
+        (await db.EstateFacilityDutyRosters.SingleAsync()).QualityStatus.Should().Be("Passed inspection");
+    }
+
+    [Fact]
     public async Task StaffLookup_ReturnsOnlyActiveEmployeesFromCurrentTenant()
     {
         var tenantId = Guid.NewGuid();
@@ -247,6 +290,7 @@ public sealed class FacilitiesDutyRosterScheduleTests
     public async Task SavingDuty_UsesHrNameAndRejectsUnitFromAnotherProject()
     {
         var tenantId = Guid.NewGuid();
+        var supervisorId = Guid.NewGuid();
         await using var db = new ApplicationDbContext(
             new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options, tenantId);
@@ -254,6 +298,11 @@ public sealed class FacilitiesDutyRosterScheduleTests
         {
             Id = Guid.NewGuid(), TenantId = tenantId, EmployeeNumber = "CL-001",
             FirstName = "Ama", LastName = "Cleaner", IsActive = true
+        });
+        db.Employees.Add(new Employee
+        {
+            Id = supervisorId, TenantId = tenantId, EmployeeNumber = "SUP-001",
+            FirstName = "Kofi", LastName = "Supervisor", IsActive = true
         });
         db.EstateManagedAssets.AddRange(
             new EstateManagedAsset { Id = Guid.NewGuid(), TenantId = tenantId, AssetCode = "SITE-1", Name = "Site One", ProjectCode = "PROJECT-A" },
@@ -263,7 +312,7 @@ public sealed class FacilitiesDutyRosterScheduleTests
         var request = new UpsertEstateFacilityDutyRosterDto
         {
             EmployeeNumber = "CL-001", StaffName = "Wrong Name", PropertyReference = "SITE-1",
-            PropertyUnit = "UNIT-2", ServiceAreaName = "Common area"
+            PropertyUnit = "UNIT-2", ServiceAreaName = "Common area", SupervisorEmployeeId = supervisorId
         };
 
         var rejected = await controller.CreateRosterItem(request, CancellationToken.None);

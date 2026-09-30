@@ -72,6 +72,21 @@ export interface SalesSaleableItemDto {
   hasActiveAllocation: boolean;
 }
 
+export interface SalesSaleableSourceFilterDefinitionDto {
+  field: string;
+  displayName: string;
+  valueType: 'text' | 'boolean' | 'select' | string;
+  isRequired: boolean;
+  defaultValue?: string;
+  helpText?: string;
+  options: string[];
+}
+
+export interface SalesSaleableSourceAdapterDefinitionDto {
+  adapterKey: string;
+  filters: SalesSaleableSourceFilterDefinitionDto[];
+}
+
 export interface UpsertSalesSaleableSourceDto {
   code: string;
   displayName: string;
@@ -97,6 +112,10 @@ const endpoint = '/sales/setup/saleable-sources';
 export const salesSetupService = {
   getSaleableSources(includeInactive = false) {
     return apiService.get<SalesSaleableSourceDto[]>(endpoint, { includeInactive });
+  },
+
+  getSaleableSourceAdapters() {
+    return apiService.get<SalesSaleableSourceAdapterDefinitionDto[]>('/sales/setup/saleable-source-adapters');
   },
 
   searchSaleableItems(sourceId: string, search?: string, take = 50) {

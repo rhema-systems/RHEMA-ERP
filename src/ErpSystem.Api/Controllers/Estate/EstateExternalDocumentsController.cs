@@ -1490,6 +1490,36 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return BadRequest(new { success = false, message = "Unsupported Estate service request type." });
         }
 
+        if (!string.IsNullOrWhiteSpace(request.PropertyReference))
+        {
+            var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+            var userId = GetUserId();
+            if (tenantId == Guid.Empty || userId is null)
+            {
+                return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+            }
+
+            var customerIds = await PortalCustomers(tenantId, userId.Value)
+                .Select(customer => customer.Id)
+                .ToListAsync(cancellationToken);
+            var propertyReference = request.PropertyReference.Trim();
+            var ownsProperty = await _db.EstateManagedAssets.AsNoTracking().AnyAsync(asset =>
+                asset.TenantId == tenantId
+                && !asset.IsDeleted
+                && asset.CustomerBusinessPartnerId.HasValue
+                && customerIds.Contains(asset.CustomerBusinessPartnerId.Value)
+                && (asset.Status == EstateManagedAssetStatus.Reserved
+                    || asset.Status == EstateManagedAssetStatus.Leased
+                    || asset.Status == EstateManagedAssetStatus.Occupied
+                    || asset.Status == EstateManagedAssetStatus.Sold)
+                && (asset.ProjectUnitCode == propertyReference || asset.AssetCode == propertyReference),
+                cancellationToken);
+            if (!ownsProperty)
+            {
+                return BadRequest(new { success = false, message = "Select a property linked to your account." });
+            }
+        }
+
         var reference = BuildExternalReference("PORTAL");
         var applicantName = string.IsNullOrWhiteSpace(request.ApplicantName)
             ? _currentUserService.UserName

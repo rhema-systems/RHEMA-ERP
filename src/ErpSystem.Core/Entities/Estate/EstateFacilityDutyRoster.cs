@@ -52,6 +52,8 @@ public sealed class EstateFacilityDutyRoster : TenantEntity
     [MaxLength(200)]
     public string? SupervisorName { get; set; }
 
+    public Guid? SupervisorEmployeeId { get; set; }
+
     [MaxLength(500)]
     public string? ToolsIssued { get; set; }
 

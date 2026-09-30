@@ -466,6 +466,88 @@ public partial class DatabaseSeedingServiceTests
             module.TenantId == tenant.Id && module.ModuleName == "Project Management")).Should().Be(1);
     }
 
+    [Fact]
+    public async Task PropertyManagementListingWorkflowSeeder_ShouldPublishOnceForEachActiveTenant()
+    {
+        await using var context = CreateContext();
+        var tenants = new[]
+        {
+            new Tenant { Id = Guid.NewGuid(), Name = "Estate One", Code = "EST1", Status = TenantStatus.Active,
+                ContactEmail = "estate-one@test.local", CreatedAt = DateTime.UtcNow, CreatedBy = "Tests" },
+            new Tenant { Id = Guid.NewGuid(), Name = "Estate Two", Code = "EST2", Status = TenantStatus.Active,
+                ContactEmail = "estate-two@test.local", CreatedAt = DateTime.UtcNow, CreatedBy = "Tests" }
+        };
+        context.Tenants.AddRange(tenants);
+        await context.SaveChangesAsync();
+
+        var service = new DatabaseSeedingService(context, CreateUserManager(), CreateRoleManager(),
+            NullLogger<DatabaseSeedingService>.Instance, CreateEnvironment());
+        var seedMethod = typeof(DatabaseSeedingService).GetMethod(
+            "EnsurePropertyManagementListingWorkflowSeededAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        seedMethod.Should().NotBeNull();
+
+        await ((Task)seedMethod!.Invoke(service, null)!).ConfigureAwait(false);
+        await ((Task)seedMethod.Invoke(service, null)!).ConfigureAwait(false);
+
+        var definitions = await context.WorkflowDefinitions
+            .Include(item => item.EntityType)
+            .Include(item => item.Steps)
+            .Where(item => item.EntityType.Code == "EstatePropertyManagementListingApplication")
+            .ToListAsync();
+        definitions.Should().HaveCount(tenants.Length);
+        definitions.Select(item => item.TenantId).Should().BeEquivalentTo(tenants.Select(item => item.Id));
+        definitions.Should().OnlyContain(item => item.IsActive
+            && item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published
+            && item.PublishedAt.HasValue
+            && item.Steps.Count == 8);
+        definitions.Should().OnlyContain(item => item.Steps.OrderBy(step => step.Order)
+            .Select(step => step.Name)
+            .SequenceEqual(new[]
+            {
+                "Estate intake review", "Commercial and availability review",
+                "Estate decision and agreement", "Legal agreement review",
+                "Customer agreement execution", "Payment, billing and Finance check",
+                "Legal conveyance or lease follow-up", "Estate completion"
+            }));
+    }
+
+    [Fact]
+    public async Task LegalProcedureWorkflowSeeder_ShouldCoverEveryCatalogProcedure()
+    {
+        await using var context = CreateContext();
+        var tenant = new Tenant { Id = Guid.NewGuid(), Name = "Legal Tenant", Code = "LEGAL",
+            Status = TenantStatus.Active, ContactEmail = "legal@test.local",
+            CreatedAt = DateTime.UtcNow, CreatedBy = "Tests" };
+        context.Tenants.Add(tenant);
+        await context.SaveChangesAsync();
+
+        var service = new DatabaseSeedingService(context, CreateUserManager(), CreateRoleManager(),
+            NullLogger<DatabaseSeedingService>.Instance, CreateEnvironment());
+        var seedMethod = typeof(DatabaseSeedingService).GetMethod(
+            "EnsureLegalProcedureWorkflowsSeededAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        seedMethod.Should().NotBeNull();
+        await ((Task)seedMethod!.Invoke(service, null)!).ConfigureAwait(false);
+        await ((Task)seedMethod.Invoke(service, null)!).ConfigureAwait(false);
+
+        var catalog = new ErpSystem.Core.Services.Legal.LegalProcedureCatalogService();
+        var definitions = await context.WorkflowDefinitions
+            .Include(item => item.EntityType)
+            .Include(item => item.Steps)
+            .Where(item => item.TenantId == tenant.Id)
+            .ToListAsync();
+        definitions.Should().HaveCount(catalog.GetProcedures().Count);
+        definitions.Select(item => item.EntityType.Code).Should().BeEquivalentTo(
+            catalog.GetProcedures().Select(item => item.EntityType));
+        definitions.Should().OnlyContain(item => item.IsActive
+            && item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published
+            && item.Steps.Count > 0);
+        foreach (var definition in definitions)
+        {
+            definition.Steps.OrderBy(step => step.Order).Select(step => step.Name).Should().Equal(
+                catalog.GetProcedureWorkspace(definition.EntityType.Code)!.Stages.Select(stage => stage.Name));
+        }
+    }
+
     private static readonly ServiceProvider WorkflowSeedTestServices = new ServiceCollection()
         .AddEntityFrameworkInMemoryDatabase().BuildServiceProvider();
 

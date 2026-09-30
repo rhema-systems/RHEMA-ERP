@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ErpSystem.Api.Services.Estate;
 using ErpSystem.Core.DTOs.Ehc;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Ehc;
 using ErpSystem.Core.Enums;
@@ -23,6 +24,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
 
     private IQueryable<ErpSystem.Core.Entities.Ehc.EhcTicket> Query() => db.EhcTickets.AsNoTracking()
         .Where(t => t.TenantId == currentUser.TenantId && !t.IsDeleted && t.TicketType == EhcTicketType.Enquiry
+            && t.Status != EhcTicketStatus.New
             && t.PropertyListingContextJson != null
             && t.AssignedOrganizationUnitId != null
             && t.AssignedOrganizationUnit != null
@@ -75,6 +77,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
                 item.EstateListingApplicationCaseId,
                 item.EstateListingApplicationReference,
                 item.EstateListingApplicationHandedOffAt,
+                item.PropertyListingContextJson,
                 Opportunity = item.CrmOpportunity == null ? null : new
                 {
                     item.CrmOpportunity.Id,
@@ -87,6 +90,21 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
             })
             .SingleOrDefaultAsync(cancellationToken);
         if (ticket is null) return NotFound();
+
+        EhcPropertyListingContextDto? property = null;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(ticket.PropertyListingContextJson))
+            {
+                property = JsonSerializer.Deserialize<EhcPropertyListingContextDto>(ticket.PropertyListingContextJson);
+            }
+        }
+        catch (JsonException)
+        {
+            // The ticket remains readable even if a historical snapshot is malformed.
+        }
+
+        var linkedSalesOrder = await FindLinkedSalesOrderAsync(property, cancellationToken);
 
         var estateCase = ticket.EstateListingApplicationCaseId is not { } estateCaseId || estateCaseId == Guid.Empty
             ? null
@@ -102,6 +120,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
             {
                 ticket.CrmOpportunityId,
                 opportunity = ticket.Opportunity,
+                salesOrder = linkedSalesOrder,
                 estateCase,
                 estateHandoffReference = ticket.EstateListingApplicationReference,
                 ticket.EstateListingApplicationHandedOffAt,
@@ -111,6 +130,121 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
                     && estateCase is null
             }
         });
+    }
+
+    private async Task<object?> FindLinkedSalesOrderAsync(
+        EhcPropertyListingContextDto? property,
+        CancellationToken cancellationToken)
+    {
+        if (property?.BusinessPartnerId is not { } businessPartnerId
+            || businessPartnerId == Guid.Empty
+            || string.IsNullOrWhiteSpace(property.ListingReference))
+        {
+            return null;
+        }
+
+        var orders = await db.SalesOrders.AsNoTracking()
+            .Where(order => order.TenantId == currentUser.TenantId
+                && !order.IsDeleted
+                && order.BusinessPartnerId == businessPartnerId
+                && order.PropertyReference != null
+                && order.OrderStatus != SalesOrderStatus.Cancelled
+                && order.OrderStatus != SalesOrderStatus.Rejected)
+            .Select(order => new
+            {
+                order.Id,
+                order.DocumentNumber,
+                order.PropertyReference,
+                order.OrderStatus,
+                order.TotalAmount,
+                order.Currency,
+                order.InvoiceId,
+                order.CreatedAt,
+                order.UpdatedAt
+            })
+            .ToArrayAsync(cancellationToken);
+
+        var order = orders
+            .Where(item => string.Equals(
+                item.PropertyReference?.Trim(),
+                property.ListingReference.Trim(),
+                StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(item => item.OrderStatus == SalesOrderStatus.Closed)
+            .ThenByDescending(item => item.CreatedAt)
+            .FirstOrDefault();
+        if (order is null)
+        {
+            return null;
+        }
+
+        var invoice = order.InvoiceId is not { } invoiceId
+            ? null
+            : await db.Invoices.AsNoTracking()
+                .Where(item => item.Id == invoiceId
+                    && item.TenantId == currentUser.TenantId
+                    && !item.IsDeleted
+                    && item.BusinessPartnerId == businessPartnerId)
+                .Select(item => new
+                {
+                    item.Id,
+                    item.InvoiceNumber,
+                    item.PaidAmount,
+                    item.CurrencyCode
+                })
+                .SingleOrDefaultAsync(cancellationToken);
+
+        var payment = invoice is null
+            ? null
+            : await (from allocation in db.Set<PaymentAllocation>().AsNoTracking()
+                     join receipt in db.Set<CustomerPayment>().AsNoTracking()
+                         on allocation.CustomerPaymentId equals receipt.Id
+                     where allocation.TenantId == currentUser.TenantId
+                         && allocation.InvoiceId == invoice.Id
+                         && !allocation.IsDeleted
+                         && !allocation.IsReversal
+                         && receipt.TenantId == currentUser.TenantId
+                         && receipt.BusinessPartnerId == businessPartnerId
+                         && !receipt.IsDeleted
+                         && receipt.ReversedAt == null
+                         && receipt.Status != "Cancelled"
+                         && receipt.Status != "Bounced"
+                     orderby receipt.PaymentDate descending, allocation.AllocationDate descending
+                     select new
+                     {
+                         receipt.PaymentNumber,
+                         receipt.TransactionReference,
+                         receipt.PaymentDate
+                     })
+                .FirstOrDefaultAsync(cancellationToken);
+
+        DateTime? completedAt = null;
+        if (order.OrderStatus == SalesOrderStatus.Closed)
+        {
+            completedAt = await db.SalesOrderStatusHistories.AsNoTracking()
+                .Where(item => item.TenantId == currentUser.TenantId
+                    && item.SalesOrderId == order.Id
+                    && !item.IsDeleted
+                    && item.ToStatus == SalesOrderStatus.Closed)
+                .OrderByDescending(item => item.ChangedAt)
+                .Select(item => (DateTime?)item.ChangedAt)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? order.UpdatedAt
+                ?? order.CreatedAt;
+        }
+
+        return new
+        {
+            id = order.Id,
+            reference = order.DocumentNumber,
+            status = order.OrderStatus.ToString(),
+            agreedAmount = order.TotalAmount,
+            amountPaid = invoice?.PaidAmount ?? 0m,
+            currency = invoice?.CurrencyCode ?? order.Currency,
+            completedAt,
+            invoiceReference = invoice?.InvoiceNumber,
+            paymentReference = payment?.TransactionReference ?? payment?.PaymentNumber,
+            paymentDate = payment?.PaymentDate
+        };
     }
 
     [HttpPost("{id:guid}/estate-handoff")]
