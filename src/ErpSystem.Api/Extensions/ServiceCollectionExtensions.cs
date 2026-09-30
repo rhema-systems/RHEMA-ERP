@@ -2827,10 +2827,29 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
         public static IServiceCollection AddErpSystemRateLimiting(
             this IServiceCollection services,
-            IHostEnvironment environment)
+            IHostEnvironment environment,
+            IConfiguration? configuration = null)
         {
-            var anonymousAuthPermitLimit = environment.IsDevelopment() ? 120 : 30;
-            var authPolicyPermitLimit = environment.IsDevelopment() ? 120 : 10;
+            // Optional overrides — RateLimiting:AnonymousAuthPermitLimit, :AuthPermitLimit,
+            // :ExternalPermitLimit and :InternalPermitLimit, requests a minute — for an API under automated
+            // test only. The HR performance harness sets them for the API it starts: its suites run one call
+            // after another, and spent most of a run queued for the next window. Unset (every other
+            // environment), each limit is exactly its default below. Each one loosens the brute-force and
+            // abuse protection it names, so a start with any of them set says so in the log.
+            int Limit(string key, int defaultLimit)
+            {
+                var configured = configuration?.GetValue<int?>($"RateLimiting:{key}");
+                if (configured is not > 0) return defaultLimit;
+                Log.Warning(
+                    "Rate limit RateLimiting:{Key} overridden by configuration: {Configured} a minute (default {Default})",
+                    key, configured.Value, defaultLimit);
+                return configured.Value;
+            }
+
+            var anonymousAuthPermitLimit = Limit("AnonymousAuthPermitLimit", environment.IsDevelopment() ? 120 : 30);
+            var authPolicyPermitLimit = Limit("AuthPermitLimit", environment.IsDevelopment() ? 120 : 10);
+            var externalPermitLimit = Limit("ExternalPermitLimit", 90);
+            var internalPermitLimit = Limit("InternalPermitLimit", 300);
 
             services.AddRateLimiter(rateLimiterOptions =>
             {
@@ -2928,7 +2947,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                             partitionKey: $"external:{userId}",
                             factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                             {
-                                PermitLimit = 90,
+                                PermitLimit = externalPermitLimit,
                                 Window = TimeSpan.FromMinutes(1),
                                 QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
                                 QueueLimit = 10
@@ -2941,7 +2960,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                         partitionKey: $"internal:{internalUserId}",
                         factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                         {
-                            PermitLimit = 300,
+                            PermitLimit = internalPermitLimit,
                             Window = TimeSpan.FromMinutes(1),
                             QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
                             QueueLimit = 50

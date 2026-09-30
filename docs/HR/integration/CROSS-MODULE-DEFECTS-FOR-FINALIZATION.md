@@ -1939,6 +1939,10 @@ rule needs a daily run, not one every 30 seconds.
   in that window. It was the only blocking the monitor saw. UAT's unsent notifications are claimed
   200 at a time every 31 s, each failing at once for want of SMTP settings (8,110 failures in the
   run's 34-minute log).
+- **Once the harness's rate-limit waits were lifted (the same evening), it was the slowest thing left:**
+  every workflow submit that raises notifications took 11–13 s — five template submits and a PIP
+  submit, 6 of 6, in a regression whose other calls answered in well under a second. The monitor had
+  caught one such insert waiting on the claim query's range lock for about 10 s (`LCK_M_RIn_NL`).
 
 ### What it blocks
 

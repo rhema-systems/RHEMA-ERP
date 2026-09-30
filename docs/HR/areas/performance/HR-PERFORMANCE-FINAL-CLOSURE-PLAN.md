@@ -87,7 +87,10 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
 the user runs builds — never `dotnet build`; stop `ErpSystem.Api` by command line before the user
 builds; migrations are scaffolded by the user and rewritten as guarded SQL; the harness lives at
 `D:\Rhema\TDC ERPS\dev-harness\hr-performance\` outside the repo (Staging + JWT key + UAT connection
-string, two HR users, clamd stub for uploads — see its README); **UAT is the demo database, so no
+string, two HR users, clamd stub for uploads — see its README; start the API with its
+`tools/start-api-uat.ps1`, which raises the API's rate limits for that process through the optional
+`RateLimiting:*` settings, 2026-09-30 — the regression now takes about 5 minutes; it took 22, 17 of them queued at
+the limiter); **UAT is the demo database, so no
 fixture may resolve to real staff** (lane S8); never `python -`; PowerShell bulk edits mangle UTF-8;
 a suite that dies at a gate keeps its recorded count — read the failure list; **a demo-pack scenario
 or harness suite that a lane's new rule breaks is fixed in that lane's slice** (lane S), or the next
@@ -2836,8 +2839,8 @@ before the user split the slice (§ 1k, D-55–D-58):
   Afterwards only APC2026 is Open, the default profile is *Standard Annual Appraisal*, and no cycle is at 3.
 - **The pauses are the rate limiter.** `api.mjs` now logs any call over 10 s: 22 in the regression — 21 of 29–57 s
   (logins, employee and user creates, two dashboard reads, an appraisal read), **every one ending 29–31 s past a
-  minute**: the API's fixed-window limiter (300 requests a minute per signed-in user, 10 logins a minute per IP outside
-  Development — queued, not refused). The 22nd, a template's submit-for-approval at 10 s, sat behind the only block a
+  minute**: the API's fixed-window limiter (outside Development, 10 logins a minute per IP and 90 requests a minute to
+  each local-account user — 300 to an LDAP one; every harness user is local — queued, not refused). The 22nd, a template's submit-for-approval at 10 s, sat behind the only block a
   read-only monitor (2 s samples) saw in the run: the platform notification dispatcher's claim query holding a range
   lock over a notification insert for ~3 s (added to cross-module defect #33). No memory-grant wait.
 - API log: no request answered 5xx; the rule refusals logged as warnings. Otherwise UAT's missing SMTP, defect #23's
