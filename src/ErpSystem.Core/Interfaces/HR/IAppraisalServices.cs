@@ -62,8 +62,6 @@ public interface IPerformanceAppraisalService
     Task<PerformanceAppraisalDto> CreateAsync(CreatePerformanceAppraisalDto createDto, CancellationToken cancellationToken = default);
     Task<PerformanceAppraisalDto> UpdateAsync(UpdatePerformanceAppraisalDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> UpdateStatusAsync(UpdateAppraisalStatusDto statusDto, CancellationToken cancellationToken = default);
-    Task<AppraisalAppealDto> FileAppealAsync(CreateAppraisalAppealDto appealDto, CancellationToken cancellationToken = default);
-    Task<bool> ResolveAppealAsync(ResolveAppraisalAppealDto resolveDto, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
     Task<bool> CalculateOverallScoreAsync(Guid appraisalId, CancellationToken cancellationToken = default);
     Task<bool> ProgressToHRReviewAsync(Guid appraisalId, CancellationToken cancellationToken = default);
@@ -128,7 +126,9 @@ public interface IPerformanceAppraisalService
     // Post-remand HR final decision
     Task<PostRemandReviewDto> GetPostRemandReviewDataAsync(Guid appraisalId, CancellationToken cancellationToken = default);
     Task FinalizePostRemandAppealAsync(Guid appraisalId, PostRemandFinalDecisionDto decisionDto, Guid reviewerId, CancellationToken cancellationToken = default);
-    
+    /// <summary>Moves a remand's re-evaluation deadline while the manager has not re-evaluated (D-34).</summary>
+    Task ExtendRemandDeadlineAsync(Guid appraisalId, ExtendRemandDeadlineDto extendDto, Guid reviewerId, CancellationToken cancellationToken = default);
+
     // Employee appeal outcome view
     Task<EmployeeAppealOutcomeDto> GetEmployeeAppealOutcomeAsync(Guid appraisalId, Guid employeeId, CancellationToken cancellationToken = default);
 }

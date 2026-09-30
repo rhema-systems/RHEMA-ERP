@@ -469,33 +469,9 @@ public class AppraisalAppealDto : BaseDto
     public List<AppraisalAppealItemDto> Items { get; set; } = new();
 }
 
-public class CreateAppraisalAppealDto : CreateDtoBase
-{
-    [Required]
-    public Guid PerformanceAppraisalId { get; set; }
-
-    [Required]
-    [MaxLength(2000)]
-    public string AppealReason { get; set; } = string.Empty;
-
-    public List<CreateAppraisalAppealItemDto> Items { get; set; } = new();
-}
-
-public class UpdateAppraisalAppealDto : UpdateDtoBase
-{
-    [Required]
-    public Guid PerformanceAppraisalId { get; set; }
-
-    [Required]
-    [MaxLength(2000)]
-    public string AppealReason { get; set; } = string.Empty;
-
-    [Required]
-    public AppraisalAppealStatus Status { get; set; }
-
-    [MaxLength(2000)]
-    public string? ResolutionNotes { get; set; }
-}
+// The legacy appeal DTOs — CreateAppraisalAppealDto, UpdateAppraisalAppealDto, their item DTOs,
+// ResolveAppraisalAppealDto and ResolveAppealItemDto — went with the legacy pair (performance
+// closure C1). An appeal is filed with SubmitAppealDto and decided with ResolveAppealDto.
 
 public class AppraisalAppealItemDto : BaseDto
 {
@@ -509,18 +485,6 @@ public class AppraisalAppealItemDto : BaseDto
     public string? ResolutionNotes { get; set; }
     public bool? ScoreAdjusted { get; set; }
     public decimal? OriginalScore { get; set; }
-}
-
-public class CreateAppraisalAppealItemDto : CreateDtoBase
-{
-    [Required]
-    public Guid AppraisalAppealId { get; set; }
-
-    public Guid? TemplateItemId { get; set; }
-
-    [Required]
-    [MaxLength(2000)]
-    public string Reason { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -587,58 +551,6 @@ public class AppealListItemDto
     public DateTime SubmittedDate { get; set; }
     public int AppealedItemsCount { get; set; }
     public AppraisalAppealStatus Status { get; set; }
-}
-
-public class UpdateAppraisalAppealItemDto : UpdateDtoBase
-{
-    [Required]
-    public Guid AppraisalAppealId { get; set; }
-
-    public Guid? TemplateItemId { get; set; }
-
-    [Required]
-    [MaxLength(2000)]
-    public string Reason { get; set; } = string.Empty;
-
-    [MaxLength(2000)]
-    public string? ResolutionNotes { get; set; }
-
-    public bool? ScoreAdjusted { get; set; }
-}
-
-public class ResolveAppraisalAppealDto
-{
-    [Required]
-    public Guid AppealId { get; set; }
-
-    [Required]
-    [MaxLength(2000)]
-    public string ResolutionNotes { get; set; } = string.Empty;
-
-    [Required]
-    public AppraisalAppealStatus Status { get; set; }
-
-    /// <summary>
-    /// Optional override score to apply to the appraisal when the appeal is upheld.
-    /// When provided and the appeal status is <see cref="AppraisalAppealStatus.Upheld"/>,
-    /// this value is persisted as <see cref="PerformanceAppraisal.AdjustedScore"/>.
-    /// Leave null if no score change is warranted.
-    /// </summary>
-    [Range(0, 100)]
-    public decimal? AdjustedScore { get; set; }
-
-    public List<ResolveAppealItemDto> ItemResolutions { get; set; } = new();
-}
-
-public class ResolveAppealItemDto
-{
-    [Required]
-    public Guid AppealItemId { get; set; }
-
-    [MaxLength(2000)]
-    public string? ResolutionNotes { get; set; }
-
-    public bool? ScoreAdjusted { get; set; }
 }
 
 public class EvaluatorEvaluationDto : BaseDto
@@ -3139,8 +3051,12 @@ public class KpiScoreModificationDto
 /// </summary>
 public class ResolveAppealDto
 {
+    /// <summary>
+    /// Upheld, Rejected or Remanded (C4). Nullable so a body without one is refused — [Required] on
+    /// a non-nullable enum is a no-op, and a missing decision arrived as 0.
+    /// </summary>
     [Required]
-    public AppraisalAppealStatus ResolutionDecision { get; set; }
+    public AppraisalAppealStatus? ResolutionDecision { get; set; }
     
     [Required]
     [MaxLength(4000)]
@@ -3179,20 +3095,34 @@ public class PostRemandReviewDto
     // Appeal timeline
     public DateTime AppealSubmittedDate { get; set; }
     public DateTime AppealRemandedDate { get; set; }
-    public DateTime AppealRemandDeadline { get; set; }
+    /// <summary>The re-evaluation deadline while the manager owes it; null once they have re-evaluated.</summary>
+    public DateTime? AppealRemandDeadline { get; set; }
     public DateTime? ManagerReevaluationDate { get; set; }
-    
+
+    // Where the remand stands (performance closure C3, D-34)
+    /// <summary>The manager has not re-evaluated yet; the comparison waits for it.</summary>
+    public bool AwaitingReevaluation { get; set; }
+    /// <summary>The deadline has passed without a re-evaluation.</summary>
+    public bool DeadlinePassed { get; set; }
+    /// <summary>HR can make the final decision: the manager has re-evaluated, or the deadline passed without it.</summary>
+    public bool CanDecide { get; set; }
+    /// <summary>HR can move the deadline: the manager has not re-evaluated.</summary>
+    public bool CanExtend { get; set; }
+
     // Appeal summary
     public string OverallAppealReason { get; set; } = string.Empty;
     public string HRRemandJustification { get; set; } = string.Empty;
-    
+
     // Score comparisons
     public List<CriterionScoreComparisonDto> CriteriaComparisons { get; set; } = new();
     public List<KpiScoreComparisonDto> KpiComparisons { get; set; } = new();
-    
-    // Overall score comparison
+
+    // Overall score comparison: the overall the appeal was filed against, and the overall now
     public decimal PreRemandOverallScore { get; set; }
     public decimal PostRemandOverallScore { get; set; }
+    // The manager's total before the remand, and after the re-evaluation
+    public decimal? PreRemandManagerScore { get; set; }
+    public decimal? PostRemandManagerScore { get; set; }
     
     // Settings
     public bool HRCanModifyScores { get; set; }
@@ -3271,12 +3201,28 @@ public class KpiScoreComparisonDto
 /// </summary>
 public class PostRemandFinalDecisionDto
 {
+    /// <summary>Upheld or Rejected. Nullable so a body without one is refused (see ResolveAppealDto).</summary>
     [Required]
-    public AppraisalAppealStatus FinalDecision { get; set; } // Must be Upheld or Rejected
-    
+    public AppraisalAppealStatus? FinalDecision { get; set; }
+
     [Required]
     [MaxLength(4000)]
     public string HRFinalNotes { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// HR moves a remand's re-evaluation deadline (performance closure D-34) — while the manager has
+/// not re-evaluated, to a later day. The manager is told, with the reason.
+/// </summary>
+public class ExtendRemandDeadlineDto
+{
+    /// <summary>The new last day for the re-evaluation; the deadline is the end of that day (UTC).</summary>
+    [Required]
+    public DateOnly? NewDeadline { get; set; }
+
+    [Required]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
 }
 
 /// <summary>

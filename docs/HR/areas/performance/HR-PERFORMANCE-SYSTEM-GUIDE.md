@@ -9,6 +9,9 @@ goals — and, found on the way, the remand's dead end (P-71: chapters 29 and 33
 **And for lane L-c** (the screens): § 1.4; chapter 8's section kind, and P-8, now fixed; the *Lock
 set* button in chapters 18 and 19; chapters 27–31 and 33, where the forms, calibration, the sign-off
 and HR's appeal decision handle goal rows; and Appendix C, whose Rule 8 row had borrowed P-8's number.
+**And for lane C, slice C-a** (the appeal machine, 2026-09-30): chapters 29 and 33 and Appendices C
+and E — the remand works (P-71 fixed), HR can extend its deadline or decide once it lapses, a
+rejection restores the original, and HR does not decide an appeal it is party to.
 **The database was rebuilt on 2026-09-29**: Rule 2, Rule 9, the demo tables and the Efua arithmetic give its figures (Efua 88.56, Cynthia 87.00, Efua's appeal window to 6 October). The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
 **Seventh in the series**, after Recruitment, Employees, Leave, Attendance & Time, Company Schedule and Staff Travel.
 
@@ -3570,9 +3573,10 @@ where the two evaluation columns read **Outstanding / Draft saved / Not started 
 
 > **Submitting is one-way and does more than save.** It assigns the HR reviewer, moves the appraisal to
 > **Governance**, and locks every later write. HR's **return to manager** at the sign-off (chapter 31)
-> is the only route back: it clears the submission first. ⚠ An appeal **remand does not** (P-71) — the
-> guide said it did. That is why it sits behind a confirmation and why draft-saving is the prominent
-> action.
+> is the only route back: it clears the submission first. An appeal **remand** reopens it too, until the
+> remand's deadline, keeping the original submission on record *(since closure C-a, 2026-09-30 — it
+> reopened nothing, P-71)*; the re-submission goes to HR for the appeal's final decision, not back into
+> sign-off. That is why it sits behind a confirmation and why draft-saving is the prominent action.
 
 **The phase rail**, then banners: *Re-evaluation after an appeal* (with the appealed items highlighted
 and the remand deadline), or *Submitted <date> — This evaluation is locked. HR can return it to you if
@@ -4218,8 +4222,14 @@ An employee contesting a finalised appraisal. Three things make it worth demonst
   the submit rather than after the refusal.
 * **Remand is not a verdict.** `Upheld` and `Rejected` are final — the appraisal returns to Completed and
   the appellant is notified. `Remanded` is a process state: it **freezes a snapshot** of the manager's
-  evaluation, rolls the appraisal back to `Active`, sets a re-evaluation deadline, and notifies the
-  manager. The final call then happens on the post-remand screen.
+  evaluation, **reopens that evaluation** until a re-evaluation deadline, and notifies the manager; the
+  appraisal stays under appeal, and the employee sees no score until HR decides. The final call happens
+  on the post-remand screen once the manager has re-submitted — or once the deadline has passed without
+  it — and a *Rejected* there restores the scores from before the remand. *(Since closure C-a,
+  2026-09-30: the remand used to roll the appraisal back to `Active` and reopen nothing — P-71.)*
+* **HR does not judge an appeal it is party to.** An HR officer cannot pick up, decide, extend or
+  finalise an appeal on their own appraisal, or one against an evaluation they wrote or would re-evaluate
+  as the employee's manager (403) — another HR officer does (closure D-35).
 
 ### 👁 The employee's appeal form
 Three tiles — **Final score · Grade · Items you can contest** — then:
@@ -4258,11 +4268,18 @@ number.
   score** column with a justification field
 * Where it does not: a lock banner — *"The settings profile **Standard Annual Appraisal** does not let HR
   change scores while resolving an appeal. To change a score, remand the appeal and let the manager
-  re-evaluate."* ⚠ **Do not take its advice on stage** — a remand is a dead end until lane C3 (P-71).
-* Three buttons: **Send back to the manager** · **Reject the appeal** · **Uphold the appeal**
-* After a remand, a **Before and after the remand** comparison — pre- and post-remand overall, and a
-  per-criterion table with Before · After · Δ · Appealed — and a single **Final decision** of Upheld or
-  Rejected
+  re-evaluate."* *(Since closure C-a the advice holds: a remand reopens the manager's evaluation. It was
+  a dead end — P-71.)*
+* Three buttons: **Send back to the manager** · **Reject the appeal** · **Uphold the appeal**. New scores
+  go only with *Uphold*, each with a justification HR writes; the dialog says so when scores are typed
+  and another decision is chosen.
+* While the manager re-evaluates: a **With the manager** banner with the deadline, **Extend the
+  deadline** (a new day and a reason the manager reads), and — once the deadline has passed — **Decide on
+  the original scores**
+* After the re-evaluation, a **Before and after the remand** comparison — the overall appealed, the
+  overall after re-evaluation, the manager's total before → after, and a per-criterion table with
+  Before · After · Δ · Appealed — and a single **Final decision**: *Uphold* keeps the re-evaluation,
+  *Reject* restores the scores from before the remand
 
 ### ▶ Walk it
 
@@ -4319,10 +4336,11 @@ number.
       understated and a note to that effect goes on the file.`
     * **Or reject it** — *Reject the appeal*, with your reasons. The original score stands.
 
-    **Recommended: uphold.** It closes the loop inside the session. ⚠ **Do not remand it** (P-71): a
-    remand re-opens the appraisal but not Kwasi Danquah's evaluation, so he cannot re-score it, and the
-    only way out is HR's post-remand decision. If a remand does happen, finish it in the same sitting
-    (Appendix E, row 13).
+    **Recommended: uphold.** It closes the loop inside the session. *A remand works since closure C-a
+    (it was a dead end, P-71), but it is the long ending*: Kwasi Danquah re-scores the communication
+    item in window B (**Team Appraisals → Efua Seidu**, which opens for him until the deadline), then
+    HR makes the final decision on the before-and-after comparison. If a remand is left open, decide it
+    before the reset (Appendix E, row 13).
 
 11. Switch back to `staff` and show **appeal-outcome**: HR's decision, her own words, and the final
     scores with the contested one marked.
@@ -4335,15 +4353,16 @@ most one appeal per appraisal, so the appeal id is never a path parameter.
 | Control | Endpoint |
 |---|---|
 | Can I appeal? | `GET …/{id}/appeal-page-data` — check `canAppeal`; `cannotAppealReason` is written for the employee to read |
-| File | `POST …/{id}/submit-appeal` — at least one appealed item, or 400 |
+| File | `POST …/{id}/submit-appeal` — at least one appealed item, each a criterion the manager scored on this appraisal, once; or 400 *(since C-a: a template item was stored as sent — C8)* |
 | Follow it | `GET …/{id}/appeal-status` |
 | Final outcome | `GET …/{id}/appeal-outcome` — **400 until Upheld or Rejected**, because a remand is a process state, not a verdict |
 | HR queue | `GET …/appeals?cycleId=&status=` — **HR only** |
 | HR review | `GET …/{id}/appeal-review` — carries `hrCanModifyScores` from the cycle's profile |
-| Pick up | `POST …/{id}/begin-appeal-review` |
-| Decide | `POST …/{id}/resolve-appeal` |
-| Post-remand comparison | `GET …/{id}/post-remand-review` |
-| Post-remand decision | `POST …/{id}/finalize-post-remand-appeal` — Upheld or Rejected only. ⚠ It does **not** wait for a re-evaluation — the remand never re-opened the manager's evaluation — and *Rejected* keeps the current scores rather than restoring the snapshot's (P-71) |
+| Pick up | `POST …/{id}/begin-appeal-review` — 403 for an officer party to the appeal *(D-35)* |
+| Decide | `POST …/{id}/resolve-appeal` — Upheld, Rejected or Remanded, on an appeal not yet remanded; score changes only with Upheld; 422 otherwise, 403 for a party *(C4, D-35)* |
+| Where the remand stands, and the comparison | `GET …/{id}/post-remand-review` — while the manager re-evaluates: the deadline, whether it has passed, `canDecide` / `canExtend`; after: the comparison |
+| Extend the deadline | `POST …/{id}/extend-remand` — a later day and a reason, while the manager has not re-evaluated *(D-34)* |
+| Post-remand decision | `POST …/{id}/finalize-post-remand-appeal` — Upheld or Rejected, once the manager has re-evaluated or the deadline has passed (422 before); *Rejected*, or any decision after a lapse, restores the scores from before the remand — a calibrated overall included *(C3, C5, D-34 — it waited for nothing and kept the current scores, P-71)* |
 
 **The appellant's three reads resolve the employee from the token.** They used to take it from the
 query string, which let anyone read anyone's appeal.
@@ -5267,7 +5286,7 @@ mislabelled soft-skill switch (P-69) and an unenforced goal minimum (P-70). The 
 | ~~**P-40**~~ | ~~A per-criterion calibration adjustment on a **KPI item** writes `NumericScore`, which a KPI is not scored from — so it changes nothing~~ — **fixed 2026-09-29** (every item adjustment now reaches the score) |
 | **P-47** | **KPI items are not appealable** — `appealableKpis` is always empty |
 | ~~**P-48**~~ | ~~The **appeal window is not enforced**; eligibility is "Completed and unappealed"~~ — **fixed 2026-09-29** (closure lane B1; Rule 9) |
-| **P-71** | **A remand is a dead end** *(found 2026-09-29, lane L-b)*. It snapshots the manager's evaluation and re-opens the appraisal, but leaves the manager's evaluation marked submitted, so every save of the re-evaluation is refused; the post-remand decision does not wait for one, and *Rejected* keeps the current scores rather than the snapshot's. Fixed in lane C (C3, C5) — decided 2026-09-29; until then, uphold or reject, never remand |
+| ~~**P-71**~~ | ~~**A remand is a dead end** *(found 2026-09-29, lane L-b)*. It snapshots the manager's evaluation and re-opens the appraisal, but leaves the manager's evaluation marked submitted, so every save of the re-evaluation is refused; the post-remand decision does not wait for one, and *Rejected* keeps the current scores rather than the snapshot's.~~ **Fixed 2026-09-30** (closure lane C, slice C-a): the remand reopens the evaluation until its deadline (HR can extend it), the final decision waits for the re-evaluation or the deadline, and *Rejected* restores the original |
 | **P-28** | **Journal entry dates are ignored** on create; the server stamps the creation date |
 | **P-55** | PIP goal **status and progress supplied at creation are not honoured** |
 | ~~**P-6**~~ | ~~Overall grade bands are **not validated against each other**; overlaps resolve to whichever is found first~~ — **fixed 2026-09-29** (refused at save) |
@@ -5359,7 +5378,7 @@ either accept it or rebuild the demonstration database.
 | **10** | 31 | **Finalised Kwasi Danquah's appraisal** | **Cannot.** There is no un-finalise |
 | **11** | 32 | Recorded his written response | **Cannot** from the UI |
 | **12** | 32 | He acknowledged it | **Cannot** |
-| **13** | 33 | Efua filed an appeal | **Resolve it in the same sitting** (Upheld or Rejected) — that returns her appraisal to Completed. ⚠ **Do not remand it** (P-71): her appraisal drops back to `Active`, her manager cannot re-score it, and only HR's post-remand decision — which does not wait for him — returns it to Completed. If a remand happens, make that decision (*Rejected*) in the same sitting |
+| **13** | 33 | Efua filed an appeal | **Resolve it in the same sitting** (Upheld or Rejected) — that returns her appraisal to Completed. If it was remanded, finish the remand: Kwasi Danquah re-evaluates (or the deadline passes), then HR's final decision returns it to Completed — *Rejected* restores the scores she appealed |
 | **14** | 35 | Set 4% on her salary proposal | Editable only while *Proposed* — clear it **before** you submit, or it locks |
 | **15** | 35 | Submitted that proposal | **Recall** it from the same screen |
 | **16** | 35 | `md.tdc` approved it | **Cannot** — but you can leave it Approved rather than marking it applied |

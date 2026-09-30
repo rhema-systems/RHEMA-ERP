@@ -1128,67 +1128,8 @@ public static class AppraisalMappingExtensions
 
     #endregion
 
-    #region AppraisalAppeal
-
-    public static AppraisalAppealDto ToDto(this AppraisalAppeal entity)
-    {
-        return new AppraisalAppealDto
-        {
-            Id = entity.Id,
-            TenantId = entity.TenantId,
-            PerformanceAppraisalId = entity.PerformanceAppraisalId,
-            AppraisalNumber = entity.PerformanceAppraisal?.AppraisalNumber ?? string.Empty,
-            EmployeeId = entity.EmployeeId,
-            EmployeeName = entity.Employee?.FullName ?? string.Empty,
-            SubmittedDate = entity.SubmittedDate,
-            AppealReason = entity.AppealReason,
-            Status = entity.Status,
-            ReviewedById = entity.ReviewedById,
-            ReviewerName = entity.Reviewer?.FullName,
-            ResolutionNotes = entity.ResolutionNotes,
-            ResolvedDate = entity.ResolvedDate,
-            Items = entity.Items?.Select(i => i.ToDto()).ToList() ?? new List<AppraisalAppealItemDto>(),
-            CreatedAt = entity.CreatedAt,
-            CreatedBy = entity.CreatedBy ?? string.Empty,
-            UpdatedAt = entity.UpdatedAt,
-            UpdatedBy = entity.UpdatedBy
-        };
-    }
-
-    public static List<AppraisalAppealDto> ToDtoList(this IEnumerable<AppraisalAppeal> entities)
-    {
-        return entities.Select(e => e.ToDto()).ToList();
-    }
-
-    #endregion
-
-    #region AppraisalAppealItem
-
-    public static AppraisalAppealItemDto ToDto(this AppraisalAppealItem entity)
-    {
-        return new AppraisalAppealItemDto
-        {
-            Id = entity.Id,
-            TenantId = entity.TenantId,
-            AppraisalAppealId = entity.AppraisalAppealId,
-            TemplateItemId = entity.TemplateItemId,
-            TemplateItemName = entity.TemplateItem?.Competency?.CriteriaName ?? entity.TemplateItem?.KpiDefinition?.KpiName,
-            Reason = entity.Reason,
-            ResolutionNotes = entity.ResolutionNotes,
-            ScoreAdjusted = entity.ScoreAdjusted,
-            CreatedAt = entity.CreatedAt,
-            CreatedBy = entity.CreatedBy ?? string.Empty,
-            UpdatedAt = entity.UpdatedAt,
-            UpdatedBy = entity.UpdatedBy
-        };
-    }
-
-    public static List<AppraisalAppealItemDto> ToDtoList(this IEnumerable<AppraisalAppealItem> entities)
-    {
-        return entities.Select(e => e.ToDto()).ToList();
-    }
-
-    #endregion
+    // The AppraisalAppeal and AppraisalAppealItem mappers went with the legacy filer, their only
+    // caller (performance closure C1). The appeal endpoints build their DTOs where they read.
 
     #region AppraisalTemplate
 

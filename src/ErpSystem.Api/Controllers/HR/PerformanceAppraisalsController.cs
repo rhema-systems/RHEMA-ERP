@@ -351,77 +351,9 @@ public class PerformanceAppraisalsController : ControllerBase
         }
     }
 
-    /// <summary>
-    /// File an appeal for an appraisal
-    /// </summary>
-    [HttpPost("{id:guid}/appeal")]
-    [ProducesResponseType(typeof(AppraisalAppealDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
-    public async Task<IActionResult> FileAppeal(Guid id, [FromBody] CreateAppraisalAppealDto appealDto)
-    {
-        try
-        {
-            if (id != appealDto.PerformanceAppraisalId)
-            {
-                return BadRequest("ID mismatch");
-            }
-
-            if (!ModelState.IsValid)
-                return BadRequest(ModelState);
-
-            var response = await _appraisalService.FileAppealAsync(appealDto);
-            return Ok(response);
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error filing appraisal appeal for appraisal with Id {AppraisalId}", id);
-            return StatusCode(500, "An error occurred while filing appraisal appeal");
-        }
-    }
-
-    /// <summary>
-    /// Resolve an appraisal appeal
-    /// </summary>
-    [HttpPost("appeal/{appealId:guid}/resolve")]
-    [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
-    public async Task<IActionResult> ResolveAppeal(Guid appealId, [FromBody] ResolveAppraisalAppealDto resolveDto)
-    {
-        try
-        {
-            if (appealId != resolveDto.AppealId)
-            {
-                return BadRequest("ID mismatch");
-            }
-
-            if (!ModelState.IsValid)
-                return BadRequest(ModelState);
-
-            var response = await _appraisalService.ResolveAppealAsync(resolveDto);
-            return Ok(response);
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(ex.Message);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error resolving appraisal appeal with Id {AppealId}", appealId);
-            return StatusCode(500, "An error occurred while resolving appraisal appeal");
-        }
-    }
+    // ⚠ POST {id}/appeal and POST appeal/{appealId}/resolve — the legacy appeal pair — were removed in
+    // performance closure C1: the one filed an appeal past every rule, the other set any status and
+    // AdjustedScore on any appeal. No screen called either. submit-appeal and resolve-appeal below.
 
     /// <summary>
     /// Delete a performance appraisal
@@ -1639,6 +1571,11 @@ public class PerformanceAppraisalsController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            // The two-actor rule (performance closure D-35): not on an appeal the officer is party to.
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
         catch (InvalidOperationException ex)
         {
             return BusinessRuleRejected(ex, "picking up the appeal for review");
@@ -1655,13 +1592,12 @@ public class PerformanceAppraisalsController : ControllerBase
     /// </summary>
     [HttpPost("{id:guid}/resolve-appeal")]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
-    public async Task<ActionResult> ResolveAppeal(Guid id, [FromBody] ResolveAppealDto resolveDto, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> ResolveAppeal(Guid id, [FromBody] ResolveAppealDto resolveDto, CancellationToken cancellationToken = default)
     {
+        if (!TryGetEmployeeId(out var reviewerId, out var problem)) return problem!;
+
         try
         {
-            var reviewerId = _currentUserService.EmployeeId
-                ?? throw new UnauthorizedAccessException("Employee record not linked to current user");
-            
             await _appraisalService.ResolveAppealAsync(id, resolveDto, reviewerId, cancellationToken);
             return Ok(new { message = "Appeal resolved successfully" });
         }
@@ -1669,9 +1605,15 @@ public class PerformanceAppraisalsController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            // The two-actor rule (performance closure D-35): not on an appeal the officer is party to.
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { message = ex.Message });
+            // A decision the appeal cannot take (C4) — answered 422 like every gated appraisal write.
+            return BusinessRuleRejected(ex, "deciding the appeal");
         }
         catch (Exception ex)
         {
@@ -1712,13 +1654,12 @@ public class PerformanceAppraisalsController : ControllerBase
     /// </summary>
     [HttpPost("{id:guid}/finalize-post-remand-appeal")]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
-    public async Task<ActionResult> FinalizePostRemandAppeal(Guid id, [FromBody] PostRemandFinalDecisionDto decisionDto, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> FinalizePostRemandAppeal(Guid id, [FromBody] PostRemandFinalDecisionDto decisionDto, CancellationToken cancellationToken = default)
     {
+        if (!TryGetEmployeeId(out var reviewerId, out var problem)) return problem!;
+
         try
         {
-            var reviewerId = _currentUserService.EmployeeId
-                ?? throw new UnauthorizedAccessException("Employee record not linked to current user");
-            
             await _appraisalService.FinalizePostRemandAppealAsync(id, decisionDto, reviewerId, cancellationToken);
             return Ok(new { message = "Appeal finalized successfully" });
         }
@@ -1726,14 +1667,59 @@ public class PerformanceAppraisalsController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            // The two-actor rule (performance closure D-35).
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { message = ex.Message });
+            // Not decidable yet (the re-evaluation is due and the deadline has not passed), or not
+            // remanded — answered 422 like every gated appraisal write.
+            return BusinessRuleRejected(ex, "finalising the appeal after the remand");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error finalizing post-remand appeal for appraisal {Id}", id);
             return StatusCode(500, "An error occurred while finalizing the appeal");
+        }
+    }
+
+    /// <summary>
+    /// Move a remand's re-evaluation deadline (performance closure D-34): while the manager has not
+    /// re-evaluated, to a later day — before the deadline or after it has passed. The manager is told.
+    /// </summary>
+    [HttpPost("{id:guid}/extend-remand")]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ExtendRemand(Guid id, [FromBody] ExtendRemandDeadlineDto extendDto, CancellationToken cancellationToken = default)
+    {
+        if (!TryGetEmployeeId(out var reviewerId, out var problem)) return problem!;
+
+        try
+        {
+            await _appraisalService.ExtendRemandDeadlineAsync(id, extendDto, reviewerId, cancellationToken);
+            return Ok(new { message = "The re-evaluation deadline was moved" });
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "extending the remand deadline");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error extending the remand deadline for appraisal {Id}", id);
+            return StatusCode(500, "An error occurred while extending the deadline");
         }
     }
 

@@ -42,9 +42,13 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    (visibility)~~ **Done 2026-09-29** (`run-final-settings.mjs` 246/246 twice; lane B's B-v State
    block — one visibility rule, `AppraisalVisibility`, on every read of an evaluation). ~~Slice
    **B-w**~~ **Done 2026-09-29** (363/363 twice; regression 1877/1886; lane B's B-w State block —
-   read its refinements and *B7 — where each flip lives*). **Lanes A, P, B and L are complete; lane
-   C (one appeal machine) is next** — source-check it first, as B2–B8 were. It carries P-71, the
-   remand's dead end, and the `AppealReevaluationWindowDays` flip B7 left to it.
+   read its refinements and *B7 — where each flip lives*). **Lanes A, P, B and L are complete.**
+   Lane C (one appeal machine) was source-checked on 2026-09-29 — § 1e (D-34 lapsed remands, D-35 the
+   two-actor rule, D-36 two slices) and lane C's *source check* block. ~~Slice **C-a** (the
+   machine)~~ **Done 2026-09-30** (`run-final-appeals.mjs` 209/209 twice; regression 2089/2098; lane
+   C's C-a State block — P-71 fixed, and the `AppealReevaluationWindowDays` flip B7 left to lane C is
+   in its d34). **Slice C-b** (the reads: KPI and goal rows on the appeal page, C9, the honest
+   outcome) is next.
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -122,6 +126,14 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | D-32 | **`KpiDefinition.TolerancePercent`.** At the seeded 5 %, four of the five demo tracks' scores move (Kwasi Danquah's sign-off in Book 3; Efua Seidu, Cynthia Sarpong and Kojo Fiadzo on the next rebuild — five submitted KPI rows sit 2–4 % under target). The criterion snapshot keeps a KPI's target, floor and ceiling (A12) but not its tolerance, so a live read would let a later edit of the definition restate scores | **Defer to batch 2** (lane F): a tolerance column on `PerformanceAppraisalCriterionConfigs`, captured at generation like the target, read by `KpiAchievementPercent`. The demo numbers are re-baselined once, then. B2–B8 ships with no migration | B2, F (batch 2), S |
 | D-33 | **Lane B2–B8's size.** The source check widened the visibility rows (four more reads, two pre-sign-off leaks) and found `RequireEvidence` with no door and its links dropped — about three days | **Two slices, each built, verified and staged on its own.** **B-v** visibility: one rule for what a reader of an appraisal may see, applied on every read — the three flags and the two leaks. **B-w** write paths: goal approval, the mid-year's move, the conversation type, peer KPI scores, the soft-skill label, evidence, B6, B8. The new settings suite grows with each; B7's flips land across both | Lane B |
 
+### 1e. Decisions from lane C's source check — settled with the user, 2026-09-29
+
+| # | Question | Decision (2026-09-29) | Affects |
+|---|---|---|---|
+| D-34 | **A lapsed remand.** Once C3 reopens the manager's evaluation, a manager who misses the re-evaluation deadline is refused, and HR's final decision waits for a re-evaluation that cannot come | **HR may extend the deadline, and once it has passed may decide without the re-evaluation**: the pre-remand scores are restored (a manager's draft discarded) and HR records Upheld or Rejected | C3, C5 |
+| D-35 | **Who may handle an appeal.** Nothing stops an HR officer picking up, deciding or finalising their own appeal, or one against an evaluation they wrote | **The two-actor rule, both ways**: refused on their own appraisal, and where they wrote the contested evaluation or are the appellant's line manager (who would re-evaluate). Another HR officer or an administrator handles it | C4, C7 |
+| D-36 | **Lane C's size.** The check found seven defects beyond the rows — about 2.5–3 days | **Two slices, each built, verified and staged on its own.** **C-a** the machine: C1, C2, C3, C4, C5, C7, C8, D-34, D-35 and HR's decision page, which the new doors need. **C-b** the reads: C6 (KPI and goal rows appealable on the page), C9, the honest outcome, HR's review without a self draft, the guide's ch. 33. New suite `run-final-appeals.mjs`, grown by each | Lane C |
+
 ---
 
 ## 2. Lane status
@@ -132,7 +144,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | P | Privacy and access *(new — the review)* | 2 days | D-26 (P18 only) | ☑ 2026-09-29 — 339/339 twice; staged |
 | B | One gate evaluator (B1 first); settings enforced or removed | 3.5 days (+1, D-33) | D-32, D-33 | ☑ 2026-09-29. B1 — 256/256 twice; B3–B5 with it; B1 enforces nine of the fourteen settings. B2's rest and B6–B8 in two slices (D-33): B-v — 246/246 twice; B-w — 363/363 twice (the suite holds both), regression 1877/1886; staged. The tolerance moved to batch 2 (D-32); `AppealReevaluationWindowDays`' flip is lane C's |
 | L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ☑ 2026-09-29 — L-a 157/157 twice; L-b 244/244 twice; L-c 261/261 twice (one suite holds L-b and L-c); staged |
-| C | One appeal machine | 2 days | D-22 | ☐ |
+| C | One appeal machine | 2 days (+0.5–1, D-36) | D-22, D-34, D-35, D-36 | ◐ source-checked 2026-09-29; C10 was batch 1's. Two slices (D-36): C-a ☑ 2026-09-30 — 209/209 twice, regression 2089/2098; staged. C-b ☐ (C6, C9, the outcome's wording) |
 | D | Peer nomination and evaluation integrity | 1 day | — | ☐ |
 | E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | 4 days | D-10, D-14, D-17, D-20 | ☐ |
 | F | Recommendations, proposals, probation, PIP chain, segregation of duties | 2.5 days | D-12, D-19; **F1 waits on D-18** (the finish plan's lane 9) | ☐ |
@@ -1461,22 +1473,22 @@ things show:
 
 ### Lane C — One appeal machine
 
-- [ ] C1 Delete legacy `FileAppealAsync` (:311-353), `ResolveAppealAsync(ResolveAppraisalAppealDto)`
+- [x] C1 *(C-a.)* Delete legacy `FileAppealAsync` (:311-353), `ResolveAppealAsync(ResolveAppraisalAppealDto)`
       (:453-500), interface members (`IAppraisalServices.cs:64-65`), controller actions
       (`PerformanceAppraisalsController.cs:334-404`), their DTOs and FE types. No FE caller.
-- [ ] C2 `GetLatestAppealAsync` (newest by `SubmittedDate`) replaces the four unordered lookups;
+- [x] C2 *(C-a — `LatestAppealQuery`; the index was batch 1's.)* `GetLatestAppealAsync` (newest by `SubmittedDate`) replaces the four unordered lookups;
       one open appeal per appraisal (enforced by C10's index, not only a check).
-- [ ] C3 *(Confirmed live by L-b — P-71 in the guide; decided 2026-09-29 to wait for this lane.)*
+- [x] C3 *(C-a — see its refinements.)* *(Confirmed live by L-b — P-71 in the guide; decided 2026-09-29 to wait for this lane.)*
       Remand **keeps `Status=Appealed`** (finding: Active made it a normal pipeline row), clears
       the manager's `SubmittedDate` and `CalibratedOverallScore`, sets the remand dates; the manager's
       remand re-evaluation settles (`publish:false`), stays Appealed with `CurrentAppealStatus=Remanded`,
       clears `AppealRemandDeadline`, notifies HR; `GetManagerEvaluationContextAsync` :2256
       `isEditable` gains the remand case; the manager's screen shows the remand deadline.
-- [ ] C4 `ResolveAppealAsync`: `Rejected` with `CriteriaModifications` → 422; `Upheld` mods write
+- [x] C4 *(C-a.)* `ResolveAppealAsync`: `Rejected` with `CriteriaModifications` → 422; `Upheld` mods write
       `NumericScore` (D-22, typed like calibration, validated per A11), clear `CalibratedOverallScore`,
       settle; both end Completed + publish. Justification required server-side (FE :105 substitutes
       text today).
-- [ ] C5 *(L-b: the remand snapshot now writes `ActualValue` and `CriterionConfigId`, and the
+- [x] C5 *(C-a — and a calibrated overall with it.)* *(L-b: the remand snapshot now writes `ActualValue` and `CriterionConfigId`, and the
       comparison pairs by criterion key — restore by that key.)* `FinalizePostRemandAppealAsync`: `Rejected` restores `NumericScore/ActualValue/Notes` from
       the remand snapshot (needs `AppraisalCriterionScoreSnapshot.ActualValue` — batch 1;
       `CreateManagerEvaluationSnapshotAsync` :2083-2096 writes it); `Upheld` keeps the re-evaluation;
@@ -1484,16 +1496,16 @@ things show:
 - [ ] C6 *(L-b: goal rows are appealable through the API, by their snapshot row.)* KPI items appealable again (the majority of the score): the appeal page lists KPI and goal
       rows, and a modification is the achievement-% override of D-22 — not an `ActualValue` change;
       remove the "deprecated" hard-empties (PAS :2836, :3398, :3673, :3877).
-- [ ] C7 Appeal on a Governance appraisal refused; resolution never bypasses HR sign-off;
+- [x] C7 *(B1's `CanFileAppeal`, and C-a.)* Appeal on a Governance appraisal refused; resolution never bypasses HR sign-off;
       `HRCanModifyScores` stays the guard.
-- [ ] C8 **P-50:** submitted appeal items must belong to this appraisal's snapshot and be in the
+- [x] C8 *(C-a.)* **P-50:** submitted appeal items must belong to this appraisal's snapshot and be in the
       appealable list. Today `TemplateItemId` is copied as sent (PAS :2910-2921; the legacy writer
       :334 likewise).
 - [ ] C9 **P-49 is worse than recorded.** HR's appeal review sets `Weight = 0` on every row
       (PAS :3319, since 2d8781248); it reads from the snapshot instead.
       `GetAppealReviewDataAsync` never loads `Items.TemplateItem` (PAS :3237-3239, :3305-3308), so
       the criterion names built at :3317 are probably blank. Probe first, then fix.
-- [ ] C10 One open appeal per appraisal becomes a filtered unique index (batch 1).
+- [x] C10 *(Batch 1: `UX_AppraisalAppeal_OneOpenPerAppraisal`.)* One open appeal per appraisal becomes a filtered unique index (batch 1).
 
 **Assertion** (`run-final-appeals.mjs`):
 - `POST /{id}/appeal` → 404.
@@ -1503,6 +1515,170 @@ things show:
 - Finalise `Rejected` → manager scores equal pre-remand and `adjustedScore` null.
 - `Upheld` → `adjustedScore == overallScore != originalOverallScore`; both end Completed.
 - HR's appeal review carries real weights and criterion names.
+
+**Lane C source check (2026-09-29, after B-w; line numbers as of `bd4941f71`).** Row by row:
+- **C1 live.** `FileAppealAsync` (PAS :304) and the legacy `ResolveAppealAsync` (:446) sit behind
+  `POST {id}/appeal` and `POST appeal/{appealId}/resolve` (controller :357-420, the performance write
+  policy). No frontend, harness or demo-pack caller. The legacy resolve sets any status and
+  `AdjustedScore` on any appeal — a back door past every rule below.
+- **C2 live, and narrower than written.** Four lookups take any appeal of the appraisal: status
+  (:2675), HR's review (:2832), the resolve (:2954), the pick-up (:3137); the other four order by
+  `SubmittedDate`. Since B1 an appraisal takes one appeal ever (`CanFileAppeal` refuses on
+  `HasAppeal`), so only legacy data holds two.
+- **C3 live (P-71).** The remand sets `Active` (:3065) and never clears the manager's `SubmittedDate`,
+  so the manager's save answers "already been submitted" (:1936) — its own comment says a remand
+  clears it. The re-evaluation branch (:2061), unreachable, would set `Governance` and tell the
+  employee, not HR. **The gates already read a remanded appraisal as an appeal row** (`AppraisalGates`
+  :216 → *AppealUnderReview*, mapped to `Appealed`), and batch 1 moved remanded `Active` rows back to
+  `Appealed`; the stored status contradicts the evaluator the moment a remand happens. Two things
+  follow: `AppraisalRelease` counts `Appealed` as released, so keeping `Appealed` through a remand
+  needs `!remanded` there (P2's rule withholds the provisional re-evaluation); and the visibility facts
+  read "the manager has submitted", so a reopened evaluation would re-hide the self entries the
+  manager has already seen. **The manager's screens already carry the remand** — the list badge, the
+  banner with the deadline, the appealed rows marked (`team-appraisals/[id]` :177-371); only
+  `isEditable` (:1763, not submitted and Active/Draft) keeps the form shut.
+- **C4 live, and worse.** A `Rejected` or `Remanded` decision **with modifications applies them** and
+  settles, so a rejected appeal can move the score. The decision is not validated (`[Required]` on a
+  non-nullable enum is a no-op): `Submitted` or `UnderReview` is stored as a "resolution" with a
+  resolved date. **A remanded appeal can be decided again through `resolve-appeal`**, skipping the
+  re-evaluation and the post-remand decision. Done since lane A: each modification on the item's own
+  scale (A11), a KPI's as an achievement % (D-22), the calibrated overall cleared, settle + publish,
+  Completed. The server requires a justification per modification; HR's page sends *"Adjusted on
+  appeal"* when the box is empty (:107), and sends typed scores with any decision.
+- **C5 live.** `Rejected` keeps the current scores (:3363-3365), which after C3 would be the
+  re-evaluation. The snapshot already keeps `ActualValue` and the snapshot row (L-b). **The finalise's
+  re-evaluation check (:3348) is vacuous** — `SubmittedDate` is never cleared, so HR can finalise with
+  no re-evaluation; the goal-KPI suite's s5 reaches its decision that way. A rejected remand must also
+  bring back a calibrated overall, which the re-evaluation clears (its source is the newest overall
+  `CalibrationRatingAdjustment`).
+- **C6 live.** The appeal page offers competencies only (:2365); the status page labels a KPI
+  *Competency* and names it *Item* (:2693-2720); the review, post-remand and outcome reads carry
+  "deprecated" empties (:3020, :3307, :3540); the manager's `AppealedKpiIds` is always empty;
+  `KpiScoreModificationDto` is dead (its frontend type is not). The API accepts a KPI appeal the page
+  cannot offer — **the demo's one appeal (Cynthia Sarpong, `061`) and lane A's `a1` are both KPI
+  appeals** (P-50).
+- **C7 mostly done.** B1's `CanFileAppeal` refuses anything but a Completed appraisal inside the
+  window with appeals on; A made `HRCanModifyScores` the guard. Left: C1's back door and C4's second
+  decision on a remand.
+- **C8 half done.** A goal row is checked against the appraisal (L3); a template item named directly
+  is stored as sent (:2478), and nothing checks the appealable list.
+- **C9 live — confirmed without a probe.** `Weight = 0` (:2921). The names: the review never loads the
+  template item (:2832-2835), and only goal rows carry a label (`AppraisalGoalRowService` :173), so
+  **every competency or KPI appeal reads with a blank name** on HR's review.
+- **C10 done** in batch 1: `UX_AppraisalAppeal_OneOpenPerAppraisal` (Status 1–3, not deleted).
+
+**Beyond the rows:**
+1. **A lapsed remand is the next dead end.** Once C3 reopens the evaluation, a manager who misses the
+   deadline is refused, and HR's final decision waits for a re-evaluation that cannot come (D-34).
+2. **HR's appeal writes have no two-actor check.** An HR officer can pick up, decide and finalise their
+   own appeal, or one against an evaluation they wrote. (Only the HR bundle holds
+   `HR.Performance.Write`, so a line manager cannot.)
+3. **HR's page asks for the post-remand review while it waits**, and the server refuses it until the
+   re-evaluation, so the page never shows the due date it was written to show (:255-264).
+4. **HR's review shows a self score from a draft** — a self-evaluation HR waived. B-v's desk rule
+   missed this read.
+5. **The outcome says an upheld appeal adjusted the scores whether or not it did** (:3480). The demo's
+   appeal and the guide's recommended ending (ch. 33) are upheld without a change, on a profile where
+   HR may not change scores.
+6. **A remand on a profile with no manager evaluation** fails at the snapshot with a generic 400.
+   *(Corrected at C-a's first run: this row also said a re-evaluation window of 0 set a remand's
+   deadline in the past — the profile's DTOs hold both appeal windows to 1–30 days, so 0 never
+   arrives. The check C-a first added for it was unreachable and was removed.)*
+7. **The re-evaluation tells the employee** "your manager has completed your evaluation", not HR.
+
+**Demo and harness impact.** `061`'s KPI appeal becomes one the page can produce; its "upheld" reads
+honestly. The guide's ch. 33 walk tells the room KPIs cannot be appealed — C6 changes that narration;
+its recommended ending (uphold, no change) stands. Suites: the goal-KPI suite's s5 finalises with no
+re-evaluation and must re-evaluate first; the settings suite's three `appealableCompetencies` checks
+follow C6's list; lane A's `a1` stays valid.
+
+Settled the same night (§ 1e): D-34 extend or decide on a lapsed remand, D-35 the two-actor rule both
+ways, D-36 two slices.
+
+- [x] **Slice C-a — the appeal machine (D-36).** *(2026-09-30 — the C-a State block below.)* C1 the legacy pair deleted; C2 one latest-appeal
+      read; C4 a decision is Upheld, Rejected or Remanded, on an open appeal that is not remanded, and
+      only Upheld carries score changes; C3 the remand keeps `Appealed`, reopens the manager's form
+      until its deadline, the release rule withholds while remanded, the re-evaluation stays
+      `Appealed`, re-settles unpublished and tells HR; C5 `Rejected` restores the pre-remand scores and
+      a calibrated overall; D-34 an extension door and a decision after the lapse; D-35 on the pick-up,
+      the decisions and the extension; C8 every appealed item one of this appraisal's scored criteria;
+      a remand refused where there is no manager evaluation; HR's decision page — the waiting state
+      with its deadline, *Extend* and the lapse decision, a
+      justification it does not invent, score changes sent only with *Uphold*.
+- [ ] **Slice C-b — the reads (D-36).** C6 KPI and goal rows appealable on the page (one list of
+      appealable rows, keyed by criterion) and named on the status, review, post-remand and outcome
+      reads; the dead KPI DTOs gone; C9 HR's review names and weights from the snapshot; the outcome
+      says whether the scores moved; HR's review reads no self draft; the guide's ch. 33.
+
+**C-a State (2026-09-30): DONE — built, verified on UAT, staged.** No migration. What exists now:
+- **The legacy pair is gone (C1)** — `FileAppealAsync`, the legacy `ResolveAppealAsync`, their routes, six
+  DTOs (two already had no caller) and the four appeal mappers they alone used.
+- **One latest-appeal read (C2)** — `LatestAppealQuery` (newest by `SubmittedDate`) behind the status,
+  HR's review, the decision and the pick-up.
+- **The decision (C4)** — `ResolveAppealDto.ResolutionDecision` nullable and `[Required]`; the service
+  takes Upheld, Rejected or Remanded, on an appeal that is neither decided nor remanded; score changes
+  only with Upheld (a rejection or a remand carrying one is refused before the profile is asked). The
+  decision's refusals answer 422, like every gated appraisal write (they were 400).
+- **The remand (C3)** — stays **Appealed**; refused where no manager evaluation was submitted; the
+  manager's evaluation **reopens** (`RemandOpen`: remanded, and the manager has not submitted since) —
+  the save accepts writes, the form is editable until the deadline and does not read as submitted,
+  the team list agrees. The re-evaluation stays Appealed, clears the deadline and a calibrated
+  overall, re-settles unpublished, and tells the appeal's reviewer (it told the employee). The release
+  rule withholds a remanded appraisal (`Appealed => !remanded`), and the gate's reason says whose move
+  it is — "the manager re-evaluates by …" or "HR decides the appeal".
+- **The final decision (C5, D-34)** — waits for the re-evaluation or a passed deadline (it checked a
+  submission date nothing cleared); *Rejected* — or either decision after a lapse — restores the
+  pre-remand scores (`RestorePreRemandScoresAsync`: inputs from the snapshot, rows added since removed,
+  the total, the goal assessments re-mirrored) and a calibrated overall; `POST {id}/extend-remand` moves
+  the deadline to a later day with a reason, and tells the manager. The post-remand review answers
+  while the manager re-evaluates (`awaitingReevaluation`, `deadlinePassed`, `canDecide`, `canExtend`)
+  and compares like with like (the overall appealed against the overall now; the manager's totals
+  apart — it set the manager's total beside the overall).
+- **The two-actor rule (D-35)** — `EnsureNotPartyToAppealAsync` on the pick-up, the decision, the
+  extension and the final decision: not the appellant, not the author of the manager evaluation, not
+  the appellant's line manager (403).
+- **What an appeal may name (C8)** — a criterion the manager's submitted evaluation scored on this
+  appraisal (`AppealableCriterionKeysAsync`), once, by either id; a template item named directly was
+  stored as sent.
+- **HR's decision page** — the waiting state with its deadline (it could not read it), *Extend the
+  deadline*, *Decide on the original scores* after a lapse, a justification HR must write (it sent
+  "Adjusted on appeal"), score changes sent only with *Uphold*, and dialogs that say what each
+  decision does to the scores. The manager's page tells a re-submitted remand from an open one.
+
+**Where the build refines the rows** (each deliberate; say if one should go back):
+1. **The remand keeps the manager's submission date** — C3 said clear it. "Reopened" is read from
+   the dates (remanded, and not re-submitted since), so a lapsed remand closes on the original record
+   and a re-evaluation's date says when it came.
+2. **The calibrated overall is cleared at the re-evaluation, not the remand** — so a lapsed remand
+   leaves it untouched; a rejection after a re-evaluation brings it back, recognised from the appeal's
+   `OriginalOverallScore` (nothing moves the scores between the filing and the remand).
+3. **A lapsed remand decided *Upheld* keeps the original scores too** — the appeal is recorded as
+   upheld, with nothing re-scored; the dialog says so. (The honest outcome text is C-b's.)
+4. **The release rule changed with the status** — a remanded appraisal was withheld as Active or
+   Governance; kept Appealed, it needed `!remanded`, or the provisional re-evaluation reached the
+   employee.
+5. **Found at the first run:** row 6 of the source check was half wrong — the profile's DTOs hold the
+   re-evaluation window to 1–30 days — and the check C-a first added for it was unreachable; removed
+   before the final build.
+
+**Verified** (Staging API on `ErpSystemDB_UAT`, the final build):
+- `run-final-appeals.mjs` (new) **209/209, then 209/209**, and a third time inside the regression —
+  c1, c8, c4, d35, c3, c5 (with a calibrated overall on its own cycle), d34 (the deadline planted in
+  the past by SQL), b6c. Every number exact: 75, 85.5 after a re-evaluation, 75 and 60 restored, the
+  manager's rows read back by SQL.
+- Regression (`run-all.mjs`, thirteen suites): interim reviews 133/133, attachments 65/65, slice C
+  52/52, slice D 22/22, **slice E 17/26 — the same 9 stale**, gates 32/32, lane A 182/182, lane P
+  337/337, lane B1 256/256, lane L-a 157/157, **lanes L-b/L-c 264/264** (261 + 3: s5 now waits for the
+  re-evaluation — "awaiting" first, then the manager re-scores goal 1 at 90 %, and the rejection restores
+  70; its restatement refusal answers 422, was 400), lane B2 363/363, lane C 209/209. **2089/2098.**
+- API log: no exception from a C-a path — UAT's missing SMTP, defect #23's payroll-profile FK (138, one
+  per fixture employee), the five-minutely HR/Identity reconciliation, and one run of the platform
+  notification cleanup that failed and carried on.
+- Frontend: scoped `tsc` over the 4 touched files and 5 that read the appeal types, 0 errors (three
+  errors planted in a probe file were all caught); ESLint clean on the 4.
+- Demo: every one of APC2026's 107 phases byte-identical to the snapshot after B-w; UAT holds no open or
+  remanded appeal (15 upheld, 25 rejected), so nothing waits on the new rules. The guide's ch. 33 walk
+  keeps its recommended ending (uphold); a remand is now a working, longer ending.
 
 ### Lane D — Peer nomination and evaluation integrity
 

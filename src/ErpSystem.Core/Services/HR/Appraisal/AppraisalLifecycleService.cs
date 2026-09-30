@@ -103,6 +103,7 @@ public class AppraisalLifecycleService : IAppraisalLifecycleService
         public AppraisalStatus Status { get; set; }
         public AppraisalAppealStatus? CurrentAppealStatus { get; set; }
         public bool Remanded { get; set; }
+        public DateTime? RemandDeadline { get; set; }
         public bool HasAppeal { get; set; }
         public bool IsCalibrated { get; set; }
         public bool CalibrationStarted { get; set; }
@@ -173,6 +174,7 @@ public class AppraisalLifecycleService : IAppraisalLifecycleService
                 Status = a.Status,
                 CurrentAppealStatus = a.CurrentAppealStatus,
                 Remanded = a.AppealRemandedDate != null,
+                RemandDeadline = a.AppealRemandDeadline,
                 HasAppeal = a.HasAppeal,
                 IsCalibrated = a.IsCalibrated,
                 // In a session that is still sitting. A link to a session that has been committed,
@@ -236,6 +238,7 @@ public class AppraisalLifecycleService : IAppraisalLifecycleService
                 Status = row.Status,
                 CurrentAppealStatus = row.CurrentAppealStatus,
                 Remanded = row.Remanded,
+                RemandDeadline = row.RemandDeadline,
                 HasAppeal = row.HasAppeal,
                 IsCalibrated = row.IsCalibrated,
                 CalibrationStarted = row.CalibrationStarted,

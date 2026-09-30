@@ -10,9 +10,11 @@
  *   - **Upheld** — HR agrees. Final. Scores may have been changed first.
  *   - **Rejected** — HR confirms the original scores. Final.
  *   - **Remanded** — HR sends it back to the manager to re-evaluate. Not a verdict: the
- *     appraisal rolls back to Active, a snapshot of the manager's evaluation is frozen for the
- *     before/after comparison, and a deadline is set. Once the manager re-submits, HR makes a
- *     *final* decision on the post-remand review screen (Upheld or Rejected only).
+ *     appraisal stays under appeal, a snapshot of the manager's evaluation is frozen for the
+ *     before/after comparison, the manager's evaluation reopens, and a deadline is set (HR can
+ *     extend it). Once the manager re-submits — or the deadline passes without it — HR makes a
+ *     *final* decision on the post-remand review screen (Upheld or Rejected only; Rejected
+ *     restores the scores from before the remand).
  *
  * Whether HR may change scores while resolving is `hrCanModifyScores` on the cycle's settings
  * profile, and it is reported on the review payload — do not offer the score fields when it is
@@ -245,9 +247,13 @@ export interface KpiScoreModification {
 }
 
 export interface ResolveAppeal {
-  /** `Upheld`, `Rejected` or `Remanded`. */
-  resolutionDecision: AppraisalAppealStatus;
+  /**
+   * `Upheld`, `Rejected` or `Remanded` — anything else is refused (422), as is a decision on an
+   * appeal already sent back to the manager (closure C4).
+   */
+  resolutionDecision: Extract<AppraisalAppealStatus, 'Upheld' | 'Rejected' | 'Remanded'>;
   resolutionNotes: string;
+  /** Only with `Upheld`: a rejection or a remand changes no score, and is refused with any (C4). */
   criteriaModifications?: CriterionScoreModification[] | null;
   kpiModifications?: KpiScoreModification[] | null;
 }
@@ -315,8 +321,20 @@ export interface PostRemandReview {
 
   appealSubmittedDate: string;
   appealRemandedDate: string;
-  appealRemandDeadline: string;
+  /** The re-evaluation deadline while the manager owes it; null once they have re-evaluated. */
+  appealRemandDeadline?: string | null;
   managerReevaluationDate?: string | null;
+
+  // Where the remand stands (closure C3, D-34). The read answers while the manager is still
+  // re-evaluating; the comparison is empty until they have.
+  /** The manager has not re-evaluated yet. */
+  awaitingReevaluation: boolean;
+  /** The deadline passed without a re-evaluation. */
+  deadlinePassed: boolean;
+  /** HR can decide: re-evaluated, or the deadline passed without it (on the original scores). */
+  canDecide: boolean;
+  /** HR can move the deadline: the manager has not re-evaluated. */
+  canExtend: boolean;
 
   overallAppealReason: string;
   hrRemandJustification: string;
@@ -324,16 +342,30 @@ export interface PostRemandReview {
   criteriaComparisons: CriterionScoreComparison[];
   kpiComparisons: KpiScoreComparison[];
 
+  /** The overall the appeal was filed against, and the overall now. */
   preRemandOverallScore: number;
   postRemandOverallScore: number;
+  /** The manager's total before the remand, and after the re-evaluation. */
+  preRemandManagerScore?: number | null;
+  postRemandManagerScore?: number | null;
 
   hrCanModifyScores: boolean;
 }
 
-/** Only `Upheld` or `Rejected` — a remand cannot be remanded again. */
+/**
+ * Only `Upheld` or `Rejected` — a remand cannot be remanded again. `Rejected` restores the scores
+ * from before the remand; after a lapsed deadline both decisions stand on them (closure C5, D-34).
+ */
 export interface PostRemandFinalDecision {
   finalDecision: Extract<AppraisalAppealStatus, 'Upheld' | 'Rejected'>;
   hrFinalNotes: string;
+}
+
+/** HR moves a remand's re-evaluation deadline to a later day (closure D-34). */
+export interface ExtendRemandDeadline {
+  /** `yyyy-MM-dd` — the last day; the deadline is the end of it. */
+  newDeadline: string;
+  reason: string;
 }
 
 // ── The appellant's outcome view ─────────────────────────────────────────────────

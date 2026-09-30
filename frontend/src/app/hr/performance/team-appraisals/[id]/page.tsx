@@ -291,7 +291,9 @@ export default function ManagerEvaluationPage() {
         </CardContent>
       </Card>
 
-      {remanded && (
+      {/* A remand reopens the evaluation until its deadline (closure C3); once the manager has
+          re-submitted, the appeal is HR's to decide and the form is closed again. */}
+      {remanded && !context.isManagerEvaluationSubmitted && (
         <Alert variant="destructive">
           <TriangleAlert className="h-4 w-4" />
           <AlertTitle>Re-evaluation after an appeal</AlertTitle>
@@ -303,9 +305,20 @@ export default function ManagerEvaluationPage() {
                 {' '}
                 This must be resubmitted by{' '}
                 <strong>{formatDate(context.appealRemandDeadline)}</strong>
-                {context.isRemandDeadlineExceeded && ' — that deadline has passed, so the server will refuse the save. Contact HR.'}
+                {context.isRemandDeadlineExceeded &&
+                  ' — that deadline has passed, so the form is closed. HR can extend it, or decide the appeal on your original scores.'}
               </>
             )}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {remanded && context.isManagerEvaluationSubmitted && (
+        <Alert>
+          <Send className="h-4 w-4" />
+          <AlertTitle>Re-evaluation submitted</AlertTitle>
+          <AlertDescription>
+            HR will compare it with your original evaluation and decide the appeal.
           </AlertDescription>
         </Alert>
       )}

@@ -38,13 +38,16 @@ import type { AppraisalAppealStatus, CriterionScoreModification } from '@/types/
  * decisions. After a remand it is the comparison: what the manager scored before against what
  * they scored on re-evaluation, and a final Uphold/Reject.
  *
- * **Remand is not a verdict.** It rolls the appraisal back to Active, freezes a snapshot of the
- * manager's evaluation for the comparison, sets a re-evaluation deadline and notifies the
- * manager. Nothing is decided until they re-submit and HR rules again.
+ * **Remand is not a verdict.** The appraisal stays under appeal; a snapshot of the manager's
+ * evaluation is frozen for the comparison, the evaluation reopens until a re-evaluation deadline,
+ * and the manager is notified. Nothing is decided until they re-submit and HR rules again — or the
+ * deadline passes without it, when HR can extend it or decide on the scores from before the remand
+ * (closure C3, D-34). A final *Reject* restores those scores (C5).
  *
  * **Score changes depend on the cycle, not on HR's judgement.** `hrCanModifyScores` comes from
  * the settings profile the cycle runs on; when it is false the server refuses modifications, so
- * the fields are not offered.
+ * the fields are not offered. Changes go only with *Uphold*, each with a justification HR writes
+ * (C4) — the server refuses a rejection or a remand that carries any.
  */
 type Decision = Extract<AppraisalAppealStatus, 'Upheld' | 'Rejected' | 'Remanded'>;
 
@@ -61,6 +64,9 @@ export default function AppealReviewPage() {
   const [finalOpen, setFinalOpen] = useState(false);
   const [finalDecision, setFinalDecision] = useState<'Upheld' | 'Rejected'>('Upheld');
   const [finalNotes, setFinalNotes] = useState('');
+  const [extendOpen, setExtendOpen] = useState(false);
+  const [extendDate, setExtendDate] = useState('');
+  const [extendReason, setExtendReason] = useState('');
 
   const review = useQuery({
     queryKey: ['hr', 'appeal-review', appraisalId],
@@ -105,9 +111,12 @@ export default function AppealReviewPage() {
         templateItemId: c.templateItemId ?? null,
         criterionConfigId: c.criterionConfigId ?? null,
         newScore: Number(scoreEdits[c.criterionKey]),
-        justification: justifications[c.criterionKey]?.trim() || 'Adjusted on appeal',
+        // HR's own words — the server requires one per change, and this used to fill an empty box
+        // with "Adjusted on appeal" (closure C4).
+        justification: justifications[c.criterionKey]?.trim() ?? '',
       }));
   }, [review.data, scoreEdits, justifications]);
+  const unjustified = modifications.some((m) => !m.justification);
 
   const resolve = useMutation({
     // The decision is passed in rather than read off state, so the call cannot be made
@@ -116,7 +125,10 @@ export default function AppealReviewPage() {
       appraisalAppealService.resolveAppeal(appraisalId, {
         resolutionDecision,
         resolutionNotes: notes.trim(),
-        criteriaModifications: modifications.length ? modifications : null,
+        // Only an upheld appeal changes a score (C4): typed scores are not sent with a rejection
+        // or a remand, which the server refuses with any.
+        criteriaModifications:
+          resolutionDecision === 'Upheld' && modifications.length ? modifications : null,
       }),
     onSuccess: () => {
       toast({
@@ -156,6 +168,26 @@ export default function AppealReviewPage() {
       refresh();
     },
     onError: fail('Could not finalise the appeal'),
+  });
+
+  // D-34: while the manager has not re-evaluated, HR can move the deadline to a later day.
+  const extend = useMutation({
+    mutationFn: () =>
+      appraisalAppealService.extendRemand(appraisalId, {
+        newDeadline: extendDate,
+        reason: extendReason.trim(),
+      }),
+    onSuccess: () => {
+      toast({
+        title: 'Deadline moved',
+        description: `The manager has been told the new deadline, ${formatDate(extendDate)}.`,
+      });
+      setExtendOpen(false);
+      setExtendDate('');
+      setExtendReason('');
+      refresh();
+    },
+    onError: fail('Could not move the deadline'),
   });
 
   if (review.isLoading) {
@@ -253,23 +285,46 @@ export default function AppealReviewPage() {
       )}
 
       {isRemanded && (
-        <Alert>
+        <Alert variant={postRemand.data?.deadlinePassed ? 'destructive' : 'default'}>
           <RotateCcw className="h-4 w-4" />
-          <AlertTitle>With the manager</AlertTitle>
+          <AlertTitle>
+            {postRemand.data && !postRemand.data.awaitingReevaluation
+              ? 'Re-evaluated — your decision'
+              : postRemand.data?.deadlinePassed
+                ? 'The re-evaluation deadline has passed'
+                : 'With the manager'}
+          </AlertTitle>
           <AlertDescription>
-            {postRemand.data?.managerReevaluationDate
-              ? 'The manager has re-submitted. Compare the two evaluations below and make the final decision.'
-              : `Waiting on the manager's re-evaluation${
-                  postRemand.data?.appealRemandDeadline
-                    ? `, due ${formatDate(postRemand.data.appealRemandDeadline)}`
-                    : ''
-                }. The final decision opens once they submit.`}
+            {!postRemand.data
+              ? 'Loading where the remand stands…'
+              : !postRemand.data.awaitingReevaluation
+                ? 'The manager has re-submitted. Compare the two evaluations below and make the final decision.'
+                : postRemand.data.deadlinePassed
+                  ? `The manager did not re-evaluate by ${formatDate(postRemand.data.appealRemandDeadline)}. Extend the deadline, or decide now on the scores from before the remand.`
+                  : `Waiting on the manager's re-evaluation, due ${formatDate(postRemand.data.appealRemandDeadline)}. The final decision opens once they submit or the deadline passes; you can extend it meanwhile.`}
           </AlertDescription>
         </Alert>
       )}
 
+      {isRemanded && postRemand.data && (postRemand.data.canExtend || postRemand.data.canDecide) && (
+        <div className="flex flex-wrap justify-end gap-2">
+          {postRemand.data.canExtend && (
+            <Button variant="outline" onClick={() => setExtendOpen(true)}>
+              <RotateCcw className="mr-2 h-4 w-4" />
+              Extend the deadline
+            </Button>
+          )}
+          {postRemand.data.canDecide && postRemand.data.awaitingReevaluation && (
+            <Button onClick={() => setFinalOpen(true)}>
+              <CheckCircle2 className="mr-2 h-4 w-4" />
+              Decide on the original scores
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* ── Post-remand comparison ───────────────────────────────────────────── */}
-      {isRemanded && postRemand.data && (
+      {isRemanded && postRemand.data && !postRemand.data.awaitingReevaluation && (
         <>
           <Card>
             <CardHeader>
@@ -278,15 +333,22 @@ export default function AppealReviewPage() {
             <CardContent className="space-y-4">
               <div className="flex flex-wrap gap-8 text-sm">
                 <div>
-                  <div className="text-muted-foreground">Pre-remand overall</div>
+                  <div className="text-muted-foreground">Overall appealed</div>
                   <div className="text-lg tabular-nums">
                     {fmt(postRemand.data.preRemandOverallScore)}
                   </div>
                 </div>
                 <div>
-                  <div className="text-muted-foreground">Post-remand overall</div>
+                  <div className="text-muted-foreground">Overall after re-evaluation</div>
                   <div className="text-lg font-medium tabular-nums">
                     {fmt(postRemand.data.postRemandOverallScore)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Manager before → after</div>
+                  <div className="text-lg tabular-nums">
+                    {fmt(postRemand.data.preRemandManagerScore)} →{' '}
+                    {fmt(postRemand.data.postRemandManagerScore)}
                   </div>
                 </div>
               </div>
@@ -350,7 +412,7 @@ export default function AppealReviewPage() {
             </CardContent>
           </Card>
 
-          {postRemand.data.managerReevaluationDate && (
+          {postRemand.data.canDecide && (
             <div className="flex justify-end">
               <Button onClick={() => setFinalOpen(true)}>
                 <CheckCircle2 className="mr-2 h-4 w-4" />
@@ -502,7 +564,7 @@ export default function AppealReviewPage() {
             </DialogTitle>
             <DialogDescription>
               {decision === 'Remanded'
-                ? "The appraisal returns to the manager, a snapshot of their current evaluation is frozen for comparison, and a deadline is set. Nothing is decided until they re-submit."
+                ? "The manager's evaluation reopens until a deadline, and a snapshot of it is frozen for the comparison. Nothing is decided until they re-submit — or the deadline passes, when you can extend it or decide on the original scores."
                 : 'This is final. The employee is notified and can read your notes on their outcome page.'}
             </DialogDescription>
           </DialogHeader>
@@ -518,10 +580,19 @@ export default function AppealReviewPage() {
               onChange={(e) => setNotes(e.target.value)}
               placeholder="The employee reads this. Be specific about what was and was not accepted."
             />
-            {modifications.length > 0 && decision !== 'Remanded' && (
+            {modifications.length > 0 && decision === 'Upheld' && (
               <p className="text-xs text-muted-foreground">
-                {modifications.length} score change(s) will be applied and the overall score
-                recalculated.
+                {unjustified
+                  ? 'Every new score needs a justification in the table before the appeal can be upheld.'
+                  : `${modifications.length} score change(s) will be applied and the overall score recalculated.`}
+              </p>
+            )}
+            {modifications.length > 0 && decision !== 'Upheld' && (
+              <p className="text-xs text-muted-foreground">
+                The new scores you typed are not applied:{' '}
+                {decision === 'Remanded'
+                  ? 'on a remand the manager re-evaluates.'
+                  : 'a rejected appeal changes no score.'}
               </p>
             )}
           </div>
@@ -532,7 +603,12 @@ export default function AppealReviewPage() {
             </Button>
             <Button
               onClick={() => decision && resolve.mutate(decision)}
-              disabled={!decision || !notes.trim() || resolve.isPending}
+              disabled={
+                !decision ||
+                !notes.trim() ||
+                (decision === 'Upheld' && unjustified) ||
+                resolve.isPending
+              }
             >
               {resolve.isPending ? 'Recording…' : 'Confirm'}
             </Button>
@@ -546,9 +622,9 @@ export default function AppealReviewPage() {
           <DialogHeader>
             <DialogTitle>Final decision</DialogTitle>
             <DialogDescription>
-              The manager has re-evaluated. Upholding accepts the appeal as having had merit;
-              rejecting confirms the scores as they now stand. Either way the appraisal is
-              complete and the scores lock.
+              {postRemand.data?.awaitingReevaluation
+                ? 'The manager did not re-evaluate by the deadline, so the scores from before the remand stand either way — anything they drafted is discarded. Upholding records that the appeal had merit. The appraisal completes and the scores lock.'
+                : 'The manager has re-evaluated. Upholding keeps the re-evaluation; rejecting restores the scores from before the remand. Either way the appraisal is complete and the scores lock.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -591,6 +667,56 @@ export default function AppealReviewPage() {
               disabled={!finalNotes.trim() || finalize.isPending}
             >
               {finalize.isPending ? 'Finalising…' : 'Finalise'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Extend the re-evaluation deadline (D-34) ─────────────────────────── */}
+      <Dialog open={extendOpen} onOpenChange={setExtendOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Extend the re-evaluation deadline</DialogTitle>
+            <DialogDescription>
+              The manager has until the end of the day you choose, and is told the new date with
+              your reason.
+              {postRemand.data?.appealRemandDeadline
+                ? ` The deadline is now ${formatDate(postRemand.data.appealRemandDeadline)}.`
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="extendDate">New deadline</Label>
+              <Input
+                id="extendDate"
+                type="date"
+                value={extendDate}
+                onChange={(e) => setExtendDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="extendReason">Why</Label>
+              <Textarea
+                id="extendReason"
+                rows={3}
+                value={extendReason}
+                onChange={(e) => setExtendReason(e.target.value)}
+                placeholder="The manager reads this."
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExtendOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => extend.mutate()}
+              disabled={!extendDate || !extendReason.trim() || extend.isPending}
+            >
+              {extend.isPending ? 'Saving…' : 'Extend'}
             </Button>
           </DialogFooter>
         </DialogContent>

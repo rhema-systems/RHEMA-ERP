@@ -18,7 +18,9 @@ namespace ErpSystem.Core.Services.HR.Appraisal;
 ///         they can read.</item>
 /// </list>
 /// A remanded appraisal is not released: the re-evaluated score is provisional until HR's
-/// post-remand decision, and the appeal pages carry the score the appeal was filed against.
+/// post-remand decision, and the appeal pages carry the score the appeal was filed against. A remand
+/// keeps the appraisal Appealed (performance closure C3), so Appealed is released only when no
+/// remand is pending.
 /// </remarks>
 public static class AppraisalRelease
 {
@@ -30,7 +32,8 @@ public static class AppraisalRelease
         bool requireCalibration,
         bool requireHrReview) => status switch
     {
-        AppraisalStatus.Completed or AppraisalStatus.Closed or AppraisalStatus.Appealed => true,
+        AppraisalStatus.Completed or AppraisalStatus.Closed => true,
+        AppraisalStatus.Appealed => !remanded,
         AppraisalStatus.Governance =>
             !remanded
             && (!requireCalibration || isCalibrated)

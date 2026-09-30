@@ -52,8 +52,10 @@ reminder sweep today — it is not one of lane 10's eleven — and its lane H bu
 **Built so far (2026-09-29):** migration batch 1 and lanes A, P, B1 (with B3–B5) and L (slices L-a,
 L-b, L-c), all merged upstream in round 4 (PR #278); then the rest of lane B on hrdev — B2 in two
 slices (B-v visibility, B-w write paths with B6 and B8), so **lane B is complete** (every appraisal
-setting now does what it says; the KPI tolerance moved to batch 2). **Next: lane C**, the appeal
-machine. The closure plan's START HERE block and § 2 carry the live state.
+setting now does what it says; the KPI tolerance moved to batch 2). **Lane C**, the appeal machine,
+is in two slices: C-a (2026-09-30) made the remand work, the decisions honest and HR's two-actor rule;
+**next: C-b**, what an appeal may name on the page and how its reads name it. The closure plan's START
+HERE block and § 2 carry the live state.
 
 ▶ **Lane 11 (added 2026-09-25): probation is not absence.** About 1,800 long-serving staff on the
 demo database are on probation, because the employee import has no confirmation date. Two code sites

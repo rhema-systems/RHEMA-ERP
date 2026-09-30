@@ -31,6 +31,12 @@ public sealed record AppraisalGateFacts
     /// <summary><c>AppealRemandedDate</c> is set: the manager owes a re-evaluation.</summary>
     public bool Remanded { get; init; }
 
+    /// <summary>
+    /// The remand's re-evaluation deadline — set while the manager owes the re-evaluation, cleared
+    /// when they submit it and the appeal waits for HR (performance closure C3).
+    /// </summary>
+    public DateTime? RemandDeadline { get; init; }
+
     public bool HasAppeal { get; init; }
     public bool IsCalibrated { get; init; }
 
@@ -214,7 +220,12 @@ public static class AppraisalGates
         }
 
         if (f.CurrentAppealStatus == AppraisalAppealStatus.Remanded && f.Remanded)
-            return new(AppraisalSubStatus.AppealUnderReview, "the appeal was remanded: the manager re-evaluates, then HR decides");
+        {
+            // Whose move it is (C3): the manager's until they re-submit, then HR's.
+            return new(AppraisalSubStatus.AppealUnderReview, f.RemandDeadline is DateTime due
+                ? $"the appeal was remanded: the manager re-evaluates by {due:d MMM yyyy}, then HR decides"
+                : "the manager has re-evaluated: HR decides the appeal");
+        }
 
         if (f.Status == AppraisalStatus.Appealed)
         {

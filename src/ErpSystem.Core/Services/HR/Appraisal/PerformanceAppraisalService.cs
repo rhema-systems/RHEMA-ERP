@@ -161,6 +161,16 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         return _appealRepository.GetQueryable().Where(a => a.TenantId == tenantId);
     }
 
+    /// <summary>
+    /// The appraisal's appeals, newest first — the first is the one every appeal read and write
+    /// acts on (performance closure C2). Four of them took whichever appeal the database served; an
+    /// appraisal takes one appeal (B1), but the removed legacy filer (C1) could add more.
+    /// </summary>
+    private IQueryable<AppraisalAppeal> LatestAppealQuery(Guid appraisalId)
+        => TenantAppealQuery()
+            .Where(a => a.PerformanceAppraisalId == appraisalId)
+            .OrderByDescending(a => a.SubmittedDate);
+
     private IQueryable<EvaluatorEvaluation> TenantEvaluationQuery()
     {
         var tenantId = GetTenantId();
@@ -301,49 +311,11 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         return true;
     }
 
-    public async Task<AppraisalAppealDto> FileAppealAsync(CreateAppraisalAppealDto appealDto, CancellationToken cancellationToken = default)
-    {
-        var appraisal = await GetOwnedAppraisalAsync(appealDto.PerformanceAppraisalId, cancellationToken);
-
-        // Create new appeal entity
-        var appealEntity = new AppraisalAppeal
-        {
-            TenantId = appraisal.TenantId,
-            PerformanceAppraisalId = appealDto.PerformanceAppraisalId,
-            EmployeeId = appraisal.EmployeeId,
-            SubmittedDate = DateTime.UtcNow,
-            AppealReason = appealDto.AppealReason,
-            Status = AppraisalAppealStatus.Submitted
-        };
-
-        // Add appeal items if provided
-        if (appealDto.Items != null && appealDto.Items.Any())
-        {
-            foreach (var itemDto in appealDto.Items)
-            {
-                var appealItem = new AppraisalAppealItem
-                {
-                    TenantId = appraisal.TenantId,
-                    TemplateItemId = itemDto.TemplateItemId,
-                    Reason = itemDto.Reason
-                };
-                appealEntity.Items.Add(appealItem);
-            }
-        }
-
-        // Update appraisal HasAppeal flag
-        appraisal.HasAppeal = true;
-        appraisal.CurrentAppealStatus = AppraisalAppealStatus.Submitted;
-
-        // Save entities
-        await _appealRepository.AddAsync(appealEntity);
-        await _appraisalRepository.UpdateAsync(appraisal);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Appeal filed successfully for appraisal: {appraisalId}", appealDto.PerformanceAppraisalId);
-
-        return appealEntity.ToDto();
-    }
+    // ⚠ The legacy appeal pair — FileAppealAsync and ResolveAppealAsync(ResolveAppraisalAppealDto),
+    // behind POST {id}/appeal and POST appeal/{appealId}/resolve — was removed in performance closure
+    // C1. The filer skipped every rule (the window, one appeal, the appraisal's own criteria) and the
+    // resolver set any status and AdjustedScore on any appeal. No screen called either. An appeal is
+    // filed with SubmitAppealAsync and decided with ResolveAppealAsync(appraisalId, …) below.
 
     public async Task<IEnumerable<PerformanceAppraisalDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
@@ -441,55 +413,6 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             Page = pageNumber,
             PageSize = pageSize
         };
-    }
-
-    public async Task<bool> ResolveAppealAsync(ResolveAppraisalAppealDto resolveDto, CancellationToken cancellationToken = default)
-    {
-        var appeal = await TenantAppealQuery()
-            .Include(a => a.Items)
-            .Include(a => a.PerformanceAppraisal)
-            .FirstOrDefaultAsync(a => a.Id == resolveDto.AppealId, cancellationToken);
-
-        if (appeal == null)
-        {
-            throw new ArgumentException($"Appeal with ID '{resolveDto.AppealId}' not found.");
-        }
-
-        // Update appeal status and resolution
-        appeal.Status = resolveDto.Status;
-        appeal.ResolutionNotes = resolveDto.ResolutionNotes;
-        appeal.ResolvedDate = DateTime.UtcNow;
-        // Note: ReviewedById should be set from the current user context in the controller
-
-        // Update individual appeal items if provided
-        if (resolveDto.ItemResolutions != null && resolveDto.ItemResolutions.Any())
-        {
-            foreach (var itemResolution in resolveDto.ItemResolutions)
-            {
-                var appealItem = appeal.Items.FirstOrDefault(i => i.Id == itemResolution.AppealItemId);
-                if (appealItem != null)
-                {
-                    appealItem.ResolutionNotes = itemResolution.ResolutionNotes;
-                    appealItem.ScoreAdjusted = itemResolution.ScoreAdjusted;
-                }
-            }
-        }
-
-        // Update appraisal CurrentAppealStatus and (optionally) AdjustedScore
-        if (appeal.PerformanceAppraisal != null)
-        {
-            appeal.PerformanceAppraisal.CurrentAppealStatus = resolveDto.Status;
-
-            if (resolveDto.AdjustedScore.HasValue)
-                appeal.PerformanceAppraisal.AdjustedScore = resolveDto.AdjustedScore;
-        }
-
-        await _appealRepository.UpdateAsync(appeal);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Appeal resolved successfully: {appealId}", resolveDto.AppealId);
-
-        return true;
     }
 
     public async Task<PerformanceAppraisalDto> UpdateAsync(UpdatePerformanceAppraisalDto updateDto, CancellationToken cancellationToken = default)
@@ -1702,7 +1625,9 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                 SelfEvaluationSubmitted = selfEvaluation?.SubmittedDate.HasValue ?? false,
                 SelfEvaluationSubmittedDate = selfEvaluation?.SubmittedDate,
                 ManagerEvaluationStarted = managerEvaluation?.StartedDate.HasValue ?? false,
-                ManagerEvaluationSubmitted = managerEvaluation?.SubmittedDate.HasValue ?? false,
+                // A remand reopens it: the manager owes a re-evaluation (C3).
+                ManagerEvaluationSubmitted = (managerEvaluation?.SubmittedDate.HasValue ?? false)
+                                             && !RemandOpen(appraisal, managerEvaluation),
                 ManagerEvaluationSubmittedDate = managerEvaluation?.SubmittedDate,
                 AppraisalStatus = appraisal.Status,
                 RequireSelfEvaluation = appraisal.AppraisalCycle?.AppraisalSettings?.RequireSelfEvaluation ?? true,
@@ -1757,11 +1682,18 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         var selfEvaluation = appraisal.EvaluatorEvaluations.FirstOrDefault(e => e.EvaluatorRole == EvaluatorRole.Self);
         var managerEvaluation = appraisal.EvaluatorEvaluations.FirstOrDefault(e => e.EvaluatorRole == EvaluatorRole.Manager);
 
-        bool isManagerEvaluationSubmitted = managerEvaluation?.SubmittedDate.HasValue ?? false;
-        // Editable if not submitted and status is appropriate for manager evaluation (Open, PeerEvaluation, or ManagerEvaluation)
+        // A remand reopens the submitted evaluation until its deadline (C3): the manager owes a
+        // re-evaluation, so it does not read as submitted, and the form opens though the appraisal
+        // is Appealed. It stayed shut — the remand's dead end (P-71).
+        var remandOpen = RemandOpen(appraisal, managerEvaluation);
+        var remandDeadlinePassed = remandOpen
+            && appraisal.AppealRemandDeadline is DateTime remandDue && DateTime.UtcNow > remandDue;
+        bool isManagerEvaluationSubmitted = (managerEvaluation?.SubmittedDate.HasValue ?? false) && !remandOpen;
         // Editable if manager has not yet submitted and appraisal is in an active workflow state
-        bool isEditable = !isManagerEvaluationSubmitted &&
-            (appraisal.Status == AppraisalStatus.Active || appraisal.Status == AppraisalStatus.Draft);
+        bool isEditable = remandOpen
+            ? !remandDeadlinePassed
+            : !isManagerEvaluationSubmitted &&
+              (appraisal.Status == AppraisalStatus.Active || appraisal.Status == AppraisalStatus.Draft);
 
         // B2: the employee's self-evaluation reaches the manager's form once it is submitted — never
         // as a draft (P12) — and then only as the profile allows: ShowSelfScoreToManager, or the
@@ -1878,14 +1810,17 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         if (scaleError != null)
             return new ManagerEvaluationResultDto { Success = false, Message = scaleError };
 
-        // Check if this is a remanded appeal re-evaluation
-        bool isRemandedReevaluation = appraisal.AppealRemandedDate.HasValue;
+        // Check if this is a remanded appeal re-evaluation: HR sent the appeal back and the manager
+        // has not re-submitted since (C3). It read any remand date, so a manager who had already
+        // re-evaluated counted as still owing one.
+        bool isRemandedReevaluation = RemandOpen(
+            appraisal, appraisal.EvaluatorEvaluations.FirstOrDefault(e => e.EvaluatorRole == EvaluatorRole.Manager));
 
         // Strict sequence (decision 5, B1): the submission is the manager-evaluation step's — the
         // self-evaluation and the peer minimum in, as the cycle requires. Drafts can be saved at any
         // point; HR's audited advance is the way past a step that will not be completed. A remanded
         // re-evaluation is the appeal's own step and is not held to the pipeline.
-        if (!saveDto.IsDraft && !(isRemandedReevaluation && appraisal.CurrentAppealStatus == AppraisalAppealStatus.Remanded))
+        if (!saveDto.IsDraft && !isRemandedReevaluation)
         {
             var gate = await _lifecycle.EnsureAtAsync(appraisal.Id, "The manager evaluation cannot be submitted yet",
                 [AppraisalSubStatus.ManagerEvaluation], cancellationToken);
@@ -1899,8 +1834,8 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             if (appraisal.AppealRemandDeadline.HasValue && DateTime.UtcNow > appraisal.AppealRemandDeadline.Value)
             {
                 throw new InvalidOperationException(
-                    $"The re-evaluation deadline ({appraisal.AppealRemandDeadline.Value:yyyy-MM-dd HH:mm}) has passed. " +
-                    "Please contact HR for further guidance.");
+                    $"The re-evaluation deadline ({appraisal.AppealRemandDeadline.Value:d MMM yyyy}) has passed. " +
+                    "HR can extend it, or decide the appeal on your original scores.");
             }
             
             _logger.LogInformation(
@@ -1933,10 +1868,11 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             };
             await _evaluatorEvaluationRepository.AddAsync(managerEvaluation);
         }
-        else if (managerEvaluation.SubmittedDate.HasValue)
+        else if (managerEvaluation.SubmittedDate.HasValue && !isRemandedReevaluation)
         {
-            // Block all writes (draft autosave included) once submitted. A legitimate re-evaluation
-            // (appeal remand) first clears SubmittedDate, so this won't block that flow.
+            // Block all writes (draft autosave included) once submitted — except a remand's
+            // re-evaluation, which reopens the submitted evaluation (C3). The comment here said a
+            // remand cleared SubmittedDate first; nothing did, so a remand was a dead end (P-71).
             return new ManagerEvaluationResultDto
             {
                 Success = false,
@@ -2061,15 +1997,16 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             if (isRemandedReevaluation)
             {
                 // The re-evaluation replaces the judgement a calibration restated: an earlier
-                // calibrated overall left in place would stop the redo moving the score at all.
+                // calibrated overall left in place would stop the redo moving the score at all. A
+                // rejection brings it back (C5).
                 appraisal.CalibratedOverallScore = null;
 
-                // Clear remand fields and progress to HR Review
+                // The deadline is met; the appeal waits for HR's post-remand decision. It stays
+                // Appealed (C3) — Governance made it a sign-off row that HR had already signed off.
                 appraisal.AppealRemandDeadline = null;
-                appraisal.Status = AppraisalStatus.Governance;
-                
+
                 _logger.LogInformation(
-                    "Manager completed remanded re-evaluation for appraisal {AppraisalId}. Returned to HR/Governance.",
+                    "Manager completed remanded re-evaluation for appraisal {AppraisalId}; HR decides the appeal next.",
                     appraisal.Id);
             }
             else if (appraisal.Status == AppraisalStatus.Draft)
@@ -2125,7 +2062,13 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         _logger.LogInformation("Manager evaluation saved for appraisal {AppraisalId} by manager {ManagerId}. IsDraft: {IsDraft}",
             saveDto.AppraisalId, saveDto.ManagerId, saveDto.IsDraft);
 
-        if (!saveDto.IsDraft)
+        if (!saveDto.IsDraft && isRemandedReevaluation)
+        {
+            // A re-evaluation is HR's to act on — the appeal's reviewer is told, not the employee,
+            // who hears the outcome once HR decides (C3). The HR review was signed off already.
+            await NotifyReevaluationSubmittedAsync(appraisal, cancellationToken);
+        }
+        else if (!saveDto.IsDraft)
         {
             // Submitting the manager evaluation is what hands the appraisal to HR, so this is
             // where the HR reviewer gets assigned. Best-effort: the evaluation is already saved,
@@ -2320,7 +2263,173 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             }, cancellationToken);
         }
     }
-    
+
+    // ── The appeal machine's shared rules (performance closure lane C) ──────────────────────────
+
+    /// <summary>
+    /// A remand is open: HR sent the appeal back to the manager, who has not re-submitted since
+    /// (C3). The manager's evaluation keeps its submission date through the remand — a lapsed remand
+    /// is closed on the original record (D-34) — so "reopened" is read from the dates, not stored.
+    /// </summary>
+    private static bool RemandOpen(PerformanceAppraisal appraisal, EvaluatorEvaluation? managerEvaluation)
+        => appraisal.CurrentAppealStatus == AppraisalAppealStatus.Remanded
+           && appraisal.AppealRemandedDate is DateTime remandedAt
+           && !(managerEvaluation?.SubmittedDate > remandedAt);
+
+    /// <summary>
+    /// The two-actor rule on the appeal's HR side (D-35): an HR officer does not pick up, decide,
+    /// extend or finalise an appeal on their own appraisal, nor one against an evaluation they wrote
+    /// or that they, as the appellant's line manager, would re-evaluate. Another HR officer does.
+    /// </summary>
+    private async Task EnsureNotPartyToAppealAsync(
+        PerformanceAppraisal appraisal, Guid hrEmployeeId, string action, CancellationToken cancellationToken)
+    {
+        if (appraisal.EmployeeId == hrEmployeeId)
+            throw new UnauthorizedAccessException(
+                $"You cannot {action} an appeal on your own appraisal. Another HR officer must.");
+
+        var author = await TenantEvaluationQuery()
+            .Where(e => e.AppraisalId == appraisal.Id && e.EvaluatorRole == EvaluatorRole.Manager)
+            .Select(e => (Guid?)e.EvaluatorId)
+            .FirstOrDefaultAsync(cancellationToken);
+        var lineManager = await _employeeRepository.GetQueryable()
+            .Where(e => e.TenantId == appraisal.TenantId && e.Id == appraisal.EmployeeId)
+            .Select(e => e.ManagerId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (author == hrEmployeeId || lineManager == hrEmployeeId)
+            throw new UnauthorizedAccessException(
+                $"You cannot {action} this appeal: it contests an evaluation you wrote or would re-evaluate as the employee's manager. Another HR officer must.");
+    }
+
+    /// <summary>
+    /// The criteria an appeal may name (C8): the ones the manager's submitted evaluation scored,
+    /// by criterion key — what the appraisal's outcome was built from. A criterion nobody scored has
+    /// nothing to contest.
+    /// </summary>
+    private async Task<HashSet<Guid>> AppealableCriterionKeysAsync(Guid appraisalId, CancellationToken cancellationToken)
+    {
+        var scores = await TenantCriterionScoreQuery()
+            .Where(cs => cs.EvaluatorEvaluation.AppraisalId == appraisalId
+                      && cs.EvaluatorEvaluation.EvaluatorRole == EvaluatorRole.Manager
+                      && cs.EvaluatorEvaluation.SubmittedDate != null
+                      && (cs.NumericScore != null || cs.ActualValue != null)
+                      && (cs.TemplateItemId != null || cs.CriterionConfigId != null))
+            .Select(cs => new { cs.TemplateItemId, cs.CriterionConfigId })
+            .ToListAsync(cancellationToken);
+        return scores.Select(s => s.TemplateItemId ?? s.CriterionConfigId!.Value).ToHashSet();
+    }
+
+    /// <summary>
+    /// Puts the manager's evaluation back as the remand found it (C5, D-34): each score's inputs
+    /// from the remand snapshot, a score added since removed and one removed since added back, the
+    /// evaluation's total, and the goal rows mirrored into the goal assessments again. The caller
+    /// settles.
+    /// </summary>
+    private async Task RestorePreRemandScoresAsync(PerformanceAppraisal appraisal, CancellationToken cancellationToken)
+    {
+        var snapshot = await _evaluationSnapshotRepository.GetQueryable()
+            .Include(s => s.CriterionScores)
+            .Where(s => s.TenantId == appraisal.TenantId && s.AppraisalId == appraisal.Id
+                     && s.SnapshotReason == AppealRemandSnapshotReason)
+            .OrderByDescending(s => s.SnapshotDate)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException(
+                "The snapshot taken at the remand is missing, so the manager's original scores cannot be restored.");
+
+        var managerEvaluation = await TenantEvaluationQuery()
+            .Include(e => e.CriterionScores)
+            .FirstOrDefaultAsync(e => e.AppraisalId == appraisal.Id && e.EvaluatorRole == EvaluatorRole.Manager, cancellationToken)
+            ?? throw new InvalidOperationException("The manager's evaluation is missing, so its scores cannot be restored.");
+
+        var before = snapshot.CriterionScores
+            .Where(s => !s.IsDeleted && (s.TemplateItemId.HasValue || s.CriterionConfigId.HasValue))
+            .GroupBy(s => s.CriterionKey())
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var scoring = await _scores.LoadScoringAsync(appraisal.Id, cancellationToken);
+        var restored = new List<CriterionScore>();
+
+        foreach (var score in managerEvaluation.CriterionScores
+                     .Where(s => !s.IsDeleted && (s.TemplateItemId.HasValue || s.CriterionConfigId.HasValue))
+                     .ToList())
+        {
+            if (before.Remove(score.CriterionKey(), out var then))
+            {
+                score.NumericScore = then.NumericScore;
+                score.ActualValue = then.ActualValue;
+                score.Notes = then.Notes;
+                await _scores.ScoreCriterionAsync(score, scoring, cancellationToken);
+                await _criterionScoreRepository.UpdateAsync(score);
+                restored.Add(score);
+            }
+            else
+            {
+                // Scored during the remand, not before it.
+                await _criterionScoreRepository.DeleteAsync(score);
+            }
+        }
+
+        foreach (var then in before.Values)
+        {
+            var score = new CriterionScore
+            {
+                Id = Guid.NewGuid(),
+                TenantId = appraisal.TenantId,
+                EvaluatorEvaluationId = managerEvaluation.Id,
+                TemplateItemId = then.TemplateItemId,
+                CriterionConfigId = then.CriterionConfigId,
+                NumericScore = then.NumericScore,
+                ActualValue = then.ActualValue,
+                Notes = then.Notes,
+            };
+            await _scores.ScoreCriterionAsync(score, scoring, cancellationToken);
+            await _criterionScoreRepository.AddAsync(score);
+            restored.Add(score);
+        }
+
+        managerEvaluation.TotalScore = snapshot.TotalScore;
+        await _evaluatorEvaluationRepository.UpdateAsync(managerEvaluation);
+
+        // The goal rows' figures are mirrored into the manager's side of the goal assessments (L3).
+        await SaveGoalAssessmentsAsync(appraisal, managerSide: true, inputs: null, restored, scoring, cancellationToken);
+
+        _logger.LogInformation(
+            "Appraisal {AppraisalId}: the manager's evaluation restored from the remand snapshot {SnapshotId} ({Count} score(s))",
+            appraisal.Id, snapshot.Id, restored.Count);
+    }
+
+    /// <summary>The manager has re-submitted a remanded evaluation: HR decides the appeal next (C3).</summary>
+    private async Task NotifyReevaluationSubmittedAsync(PerformanceAppraisal appraisal, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var reviewerId = await LatestAppealQuery(appraisal.Id)
+                .Select(a => a.ReviewedById)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (reviewerId is not Guid hr) return;
+
+            var subject = appraisal.Employee?.FullName ?? "An employee";
+            await NotifyQuietlyAsync(new[]
+            {
+                new AppraisalNotificationRequest(
+                    hr,
+                    AppraisalNotificationType.ActionRequired,
+                    $"Re-evaluation submitted: {subject}",
+                    "The manager has re-evaluated the appraisal you sent back on appeal. Compare the two evaluations and make the final decision.",
+                    appraisal.AppraisalCycle?.CycleName,
+                    $"/hr/performance/appeals/{appraisal.Id}",
+                    appraisal.Id,
+                    subject,
+                    NotificationUrgency.Urgent),
+            }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to notify HR of the re-evaluation for appraisal {AppraisalId}; the re-evaluation stands.", appraisal.Id);
+        }
+    }
+
     /// <summary>
     /// Get appeal page data for an employee
     /// </summary>
@@ -2424,9 +2533,11 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         if (submitDto.AppealedItems == null || !submitDto.AppealedItems.Any())
             throw new ArgumentException("At least one item must be appealed.");
 
+        if (submitDto.AppealedItems.Any(i => !i.TemplateItemId.HasValue && !i.CriterionConfigId.HasValue))
+            throw new ArgumentException("Each appealed item must name the criterion it contests.");
+
         // A goal row is named by its snapshot row, which must be this appraisal's; a template row
-        // named that way takes its template item from the row (lane L3). Whether a template item
-        // named directly belongs to the appraisal is lane C8's check.
+        // named that way takes its template item from the row (lane L3).
         var appealedConfigIds = submitDto.AppealedItems
             .Where(i => i.CriterionConfigId.HasValue)
             .Select(i => i.CriterionConfigId!.Value)
@@ -2445,7 +2556,26 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             .ToListAsync(cancellationToken);
         if (appealedConfigIds.Any(id => appealedRows.All(r => r.Id != id)))
             throw new ArgumentException("An appealed item is not one of this appraisal's criteria.");
-        
+
+        // C8: a template item named directly must be one of this appraisal's criteria too — it was
+        // stored as sent — and each criterion appealed once, and only one the manager scored: the
+        // appealable list the appeal page offers.
+        if (appealedTemplateItemIds.Any(id => appealedRows.All(r => r.TemplateItemId != id)))
+            throw new ArgumentException("An appealed item is not one of this appraisal's criteria.");
+
+        var appealedKeys = submitDto.AppealedItems
+            .Select(item => item.CriterionConfigId is Guid configId
+                ? appealedRows.First(r => r.Id == configId)
+                : appealedRows.First(r => r.TemplateItemId == item.TemplateItemId))
+            .Select(row => row.TemplateItemId ?? row.Id)
+            .ToList();
+        if (appealedKeys.Distinct().Count() != appealedKeys.Count)
+            throw new ArgumentException("Each criterion can be appealed once in an appeal.");
+
+        var appealable = await AppealableCriterionKeysAsync(appraisal.Id, cancellationToken);
+        if (appealedKeys.Any(key => !appealable.Contains(key)))
+            throw new ArgumentException("An appealed item was not scored by the manager, so there is nothing in it to contest.");
+
         // Create appeal
         var appeal = new AppraisalAppeal
         {
@@ -2671,12 +2801,12 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         if (!appraisal.HasAppeal)
             throw new InvalidOperationException("No appeal has been filed for this appraisal.");
         
-        // Load the appeal with related data
-        var appeal = await TenantAppealQuery()
+        // Load the appeal with related data — the latest (C2)
+        var appeal = await LatestAppealQuery(appraisalId)
             .Include(a => a.Items)
                 .ThenInclude(i => i.CriterionConfig)
             .Include(a => a.Reviewer)
-            .FirstOrDefaultAsync(a => a.PerformanceAppraisalId == appraisalId, cancellationToken);
+            .FirstOrDefaultAsync(cancellationToken);
         
         if (appeal == null)
             throw new InvalidOperationException("Appeal not found.");
@@ -2828,11 +2958,12 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         if (!appraisal.HasAppeal)
             throw new InvalidOperationException("No appeal exists for this appraisal");
 
-        // Load the appeal — with each item's snapshot row, which names a goal row (lane L3)
-        var appeal = await TenantAppealQuery()
+        // Load the appeal — the latest (C2), with each item's snapshot row, which names a goal row
+        // (lane L3)
+        var appeal = await LatestAppealQuery(appraisalId)
             .Include(a => a.Items)
                 .ThenInclude(i => i.CriterionConfig)
-            .FirstOrDefaultAsync(a => a.PerformanceAppraisalId == appraisalId, cancellationToken);
+            .FirstOrDefaultAsync(cancellationToken);
 
         if (appeal == null)
             throw new InvalidOperationException("Appeal not found");
@@ -2951,15 +3082,27 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         if (!appraisal.HasAppeal)
             throw new InvalidOperationException("No appeal exists for this appraisal");
 
-        var appeal = await TenantAppealQuery()
-            .FirstOrDefaultAsync(a => a.PerformanceAppraisalId == appraisalId, cancellationToken);
+        var appeal = await LatestAppealQuery(appraisalId).FirstOrDefaultAsync(cancellationToken);
 
         if (appeal == null)
             throw new InvalidOperationException("Appeal not found");
 
+        // C4: a decision is one of the three, and on an open appeal HR has not sent back. Any status
+        // used to be stored as a "resolution" with a resolved date, and a remanded appeal could be
+        // decided here again, skipping the manager's re-evaluation and the post-remand decision.
+        if (resolveDto.ResolutionDecision is not (AppraisalAppealStatus.Upheld or AppraisalAppealStatus.Rejected or AppraisalAppealStatus.Remanded))
+            throw new InvalidOperationException("A decision on an appeal is Upheld, Rejected or Remanded.");
+
         if (appeal.Status == AppraisalAppealStatus.Upheld || appeal.Status == AppraisalAppealStatus.Rejected)
             throw new InvalidOperationException("This appeal has already been resolved");
 
+        if (appeal.Status == AppraisalAppealStatus.Remanded)
+            throw new InvalidOperationException(
+                "This appeal was sent back to the manager. HR decides it on the post-remand review, once the manager has re-evaluated or the deadline has passed.");
+
+        await EnsureNotPartyToAppealAsync(appraisal, reviewerId, "decide", cancellationToken);
+
+        var decision = resolveDto.ResolutionDecision.Value;
         var settings = appraisal.AppraisalCycle?.AppraisalSettings;
         if (settings == null)
             throw new InvalidOperationException("Appraisal settings not found");
@@ -2967,6 +3110,13 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         // Validate score modifications if provided
         if (resolveDto.CriteriaModifications?.Any() ?? false)
         {
+            // C4: only an upheld appeal changes a score. A rejection applied them all the same, so a
+            // rejected appeal could move the result; a remand hands the scores to the manager.
+            if (decision == AppraisalAppealStatus.Rejected)
+                throw new InvalidOperationException("A rejected appeal changes no score. Leave the new scores empty, or uphold the appeal.");
+            if (decision == AppraisalAppealStatus.Remanded)
+                throw new InvalidOperationException("A remand changes no score: the manager re-evaluates. Leave the new scores empty.");
+
             if (!settings.HRCanModifyScores)
                 throw new InvalidOperationException("Score modifications are not allowed by appraisal policy");
 
@@ -3025,16 +3175,27 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                 appraisal.CalibratedOverallScore = null;
         }
 
+        // A remand hands the manager's evaluation back, so there has to be one. On a profile without
+        // a manager step the snapshot below failed with a generic message.
+        if (decision == AppraisalAppealStatus.Remanded
+            && !await TenantEvaluationQuery().AnyAsync(
+                e => e.AppraisalId == appraisalId && e.EvaluatorRole == EvaluatorRole.Manager && e.SubmittedDate != null,
+                cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "This appraisal has no submitted manager evaluation to send back. Uphold or reject the appeal instead.");
+        }
+
         // Update appeal status and resolution details
-        appeal.Status = resolveDto.ResolutionDecision;
+        appeal.Status = decision;
         appeal.ReviewedById = reviewerId;
         appeal.ResolvedDate = DateTime.UtcNow;
         appeal.ResolutionNotes = resolveDto.ResolutionNotes;
-        
+
         await _appealRepository.UpdateAsync(appeal);
 
         // Update appraisal status based on resolution decision
-        switch (resolveDto.ResolutionDecision)
+        switch (decision)
         {
             case AppraisalAppealStatus.Remanded:
                 // CRITICAL: Create immutable snapshot before remanding
@@ -3061,11 +3222,14 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                         "The original evaluation state must be preserved before remanding.", ex);
                 }
                 
-                // Roll back to Active so manager can re-evaluate
-                appraisal.Status = AppraisalStatus.Active;
+                // C3: the appraisal stays Appealed — the gates read a remand as an appeal row, and
+                // Active made it a pipeline row again (the dashboards counted it, and nothing
+                // reopened the manager's evaluation, so the remand was a dead end: P-71). The
+                // manager's evaluation reopens by the dates (RemandOpen): it keeps its submission,
+                // so a lapsed remand can be closed on the original record (D-34).
                 appraisal.CurrentAppealStatus = AppraisalAppealStatus.Remanded;
-                
-                // Set remand tracking fields
+
+                // Set remand tracking fields (the profile's window is 1–30 days — its DTOs' range)
                 appraisal.AppealRemandedDate = DateTime.UtcNow;
                 appraisal.AppealRemandDeadline = DateTime.UtcNow.AddDays(settings.AppealReevaluationWindowDays);
                 
@@ -3087,7 +3251,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                 // appraisal" on exactly the appraisals it exists to show, and the cycle activity
                 // feed could never report an appeal as resolved. Whether an appeal is still open
                 // is CurrentAppealStatus's job.
-                appraisal.CurrentAppealStatus = resolveDto.ResolutionDecision;
+                appraisal.CurrentAppealStatus = decision;
                 appraisal.AppealRemandedDate = null;
                 appraisal.AppealRemandDeadline = null;
 
@@ -3099,7 +3263,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 
         await _appraisalRepository.UpdateAsync(appraisal);
 
-        if (resolveDto.ResolutionDecision is AppraisalAppealStatus.Upheld or AppraisalAppealStatus.Rejected)
+        if (decision is AppraisalAppealStatus.Upheld or AppraisalAppealStatus.Rejected)
         {
             // A decided appeal completes the appraisal again: the settle recomputes from the
             // (possibly modified) item scores, saves the decision with it, and publishes (A7).
@@ -3115,7 +3279,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        await NotifyAppealResolvedAsync(appraisal, resolveDto.ResolutionDecision, cancellationToken);
+        await NotifyAppealResolvedAsync(appraisal, decision, cancellationToken);
     }
 
     /// <summary>
@@ -3134,13 +3298,15 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         if (!appraisal.HasAppeal)
             throw new InvalidOperationException("No appeal exists for this appraisal.");
 
-        var appeal = await TenantAppealQuery()
+        var appeal = await LatestAppealQuery(appraisalId)
             .Include(a => a.Items)
-            .FirstOrDefaultAsync(a => a.PerformanceAppraisalId == appraisalId, cancellationToken)
+            .FirstOrDefaultAsync(cancellationToken)
             ?? throw new ArgumentException("Appeal not found.");
 
         if (appeal.Status != AppraisalAppealStatus.Submitted)
             throw new InvalidOperationException($"Only a submitted appeal can be picked up for review. This one is {appeal.Status}.");
+
+        await EnsureNotPartyToAppealAsync(appraisal, reviewerId, "pick up", cancellationToken);
 
         appeal.Status = AppraisalAppealStatus.UnderReview;
         appeal.ReviewedById = reviewerId;
@@ -3183,6 +3349,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                 .ThenInclude(e => e.Position)
             .Include(a => a.Employee.OrganizationUnit)
             .Include(a => a.AppraisalCycle)
+                .ThenInclude(c => c!.AppraisalSettings)
             .Include(a => a.Appeals)
                 .ThenInclude(ap => ap.Items)
             .FirstOrDefaultAsync(a => a.Id == appraisalId, cancellationToken);
@@ -3225,8 +3392,15 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             .AsSplitQuery()
             .FirstOrDefaultAsync(cancellationToken);
 
-        if (currentManagerEval == null || !currentManagerEval.SubmittedDate.HasValue)
-            throw new InvalidOperationException("Manager has not completed post-remand re-evaluation");
+        if (currentManagerEval == null)
+            throw new InvalidOperationException("The appraisal has no manager evaluation");
+
+        // While the manager re-evaluates, this answers with where the remand stands rather than
+        // refusing (C3): HR's page read this to show the deadline, and the refusal hid it. The
+        // comparison waits for the re-evaluation — a draft is not a re-evaluation.
+        var awaiting = RemandOpen(appraisal, currentManagerEval);
+        var deadlinePassed = awaiting
+            && appraisal.AppealRemandDeadline is DateTime deadline && DateTime.UtcNow > deadline;
 
         var settings = appraisal.AppraisalCycle?.AppraisalSettings;
 
@@ -3253,17 +3427,32 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             
             AppealSubmittedDate = latestAppeal.SubmittedDate,
             AppealRemandedDate = appraisal.AppealRemandedDate ?? DateTime.UtcNow,
-            AppealRemandDeadline = appraisal.AppealRemandDeadline ?? DateTime.UtcNow,
-            ManagerReevaluationDate = currentManagerEval.SubmittedDate,
-            
+            // Null once the manager has re-evaluated — it read as "now" then.
+            AppealRemandDeadline = appraisal.AppealRemandDeadline,
+            ManagerReevaluationDate = awaiting ? null : currentManagerEval.SubmittedDate,
+            AwaitingReevaluation = awaiting,
+            DeadlinePassed = deadlinePassed,
+            // D-34: HR decides once the manager has re-evaluated, or once the deadline has passed
+            // without it; until then the deadline can be moved.
+            CanDecide = !awaiting || deadlinePassed,
+            CanExtend = awaiting,
+
             OverallAppealReason = latestAppeal.AppealReason,
             HRRemandJustification = latestAppeal.ResolutionNotes ?? "",
-            
-            PreRemandOverallScore = snapshot.TotalScore ?? 0,
+
+            // Like for like: the overall the appeal was filed against, against the overall now; and
+            // the manager's total before and after. "Pre-remand overall" was the manager's total, set
+            // beside the appraisal's overall — a difference even when nothing moved.
+            PreRemandOverallScore = latestAppeal.OriginalOverallScore ?? snapshot.TotalScore ?? 0,
             PostRemandOverallScore = appraisal.OverallScore ?? 0,
-            
+            PreRemandManagerScore = snapshot.TotalScore,
+            PostRemandManagerScore = awaiting ? null : currentManagerEval.TotalScore,
+
             HRCanModifyScores = settings?.HRCanModifyScores ?? false
         };
+
+        if (awaiting)
+            return result;
 
         // Build criterion comparisons, paired by criterion key — a goal row has no template item
         // (lane L3).
@@ -3329,9 +3518,9 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         if (appraisal.CurrentAppealStatus != AppraisalAppealStatus.Remanded)
             throw new InvalidOperationException("Appraisal is not in remanded status");
 
-        if (decisionDto.FinalDecision != AppraisalAppealStatus.Upheld && 
-            decisionDto.FinalDecision != AppraisalAppealStatus.Rejected)
+        if (decisionDto.FinalDecision is not (AppraisalAppealStatus.Upheld or AppraisalAppealStatus.Rejected))
             throw new InvalidOperationException("Final decision must be either Upheld or Rejected");
+        var decision = decisionDto.FinalDecision.Value;
 
         var latestAppeal = appraisal.Appeals
             .OrderByDescending(a => a.SubmittedDate)
@@ -3340,51 +3529,138 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         if (latestAppeal == null)
             throw new InvalidOperationException("No appeal found");
 
-        // Verify manager has completed re-evaluation
+        await EnsureNotPartyToAppealAsync(appraisal, reviewerId, "decide", cancellationToken);
+
         var managerEval = await TenantEvaluationQuery()
             .Where(e => e.AppraisalId == appraisalId && e.EvaluatorRole == EvaluatorRole.Manager)
-            .FirstOrDefaultAsync(cancellationToken);
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException("The appraisal has no manager evaluation");
 
-        if (managerEval == null || !managerEval.SubmittedDate.HasValue)
-            throw new InvalidOperationException("Manager has not completed post-remand re-evaluation");
+        // HR decides once the manager has re-evaluated — or, the deadline passed without it, on the
+        // original scores (D-34). This used to check only that the evaluation had a submission date,
+        // which the remand never cleared: HR could decide with no re-evaluation at all.
+        var reevaluated = !RemandOpen(appraisal, managerEval);
+        if (!reevaluated && !(appraisal.AppealRemandDeadline is DateTime due && DateTime.UtcNow > due))
+        {
+            throw new InvalidOperationException(appraisal.AppealRemandDeadline is DateTime dueBy
+                ? $"The manager's re-evaluation is due by {dueBy:d MMM yyyy}. Decide once it is in or the deadline has passed, or extend the deadline."
+                : "The manager has not re-evaluated yet.");
+        }
+
+        // C5: a rejection restores the scores the appeal was filed against — it kept the
+        // re-evaluation, so "the original stands" was false. A lapsed remand is decided on the
+        // original scores either way: whatever the manager drafted is not a re-evaluation.
+        var restore = decision == AppraisalAppealStatus.Rejected || !reevaluated;
+        if (restore)
+            await RestorePreRemandScoresAsync(appraisal, cancellationToken);
 
         // Update appeal status
-        latestAppeal.Status = decisionDto.FinalDecision;
+        latestAppeal.Status = decision;
         latestAppeal.ResolutionNotes = decisionDto.HRFinalNotes;
         latestAppeal.ReviewedById = reviewerId;
         latestAppeal.ResolvedDate = DateTime.UtcNow;
 
         // Update appraisal status. HasAppeal stays true — see the note in ResolveAppealAsync;
         // clearing it here hid the outcome from the employee this decision is about.
-        appraisal.CurrentAppealStatus = decisionDto.FinalDecision;
+        appraisal.CurrentAppealStatus = decision;
         appraisal.AppealRemandedDate = null;
         appraisal.AppealRemandDeadline = null;
 
-        // If upheld, post-remand scores are already in place (manager re-evaluated)
-        // If rejected, we keep current scores (which are the post-remand scores anyway)
-        // In both cases, we're confirming the current state as final.
-        //
-        // The remand had rolled the appraisal back to Active so the manager could re-evaluate;
-        // with a final verdict in, it is complete again.
+        // With a final verdict in, the appraisal is complete again.
         appraisal.Status = AppraisalStatus.Completed;
 
         await _appealRepository.UpdateAsync(latestAppeal);
         await _appraisalRepository.UpdateAsync(appraisal);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        // Complete again: settle from the re-evaluated scores in the same save, and publish (A7).
-        // AdjustedScore is set only when the appeal moved the overall — it was set to the current
-        // score unconditionally, so every post-remand outcome read as a change (A5).
+        // The re-evaluation cleared a calibrated overall so it could move the score; a rejection
+        // brings it back. Nothing moves the scores between the filing and the remand, so a restored
+        // appraisal whose items no longer give the overall it was appealed at had a calibrated one.
+        if (restore && reevaluated && appraisal.CalibratedOverallScore == null
+            && latestAppeal.OriginalOverallScore is decimal appealedAt)
+        {
+            var probe = await _scores.SettleAsync(appraisalId, AppraisalScoreChangeSource.Appeal, publish: false, cancellationToken);
+            if (probe.ComputedScore != appealedAt)
+                appraisal.CalibratedOverallScore = appealedAt;
+        }
+
+        // Complete again: settle in the same save, and publish (A7). AdjustedScore is set only when
+        // the appeal moved the overall — it was set to the current score unconditionally, so every
+        // post-remand outcome read as a change (A5).
         var settled = await _scores.SettleAsync(appraisalId, AppraisalScoreChangeSource.Appeal, publish: true, cancellationToken);
         var original = latestAppeal.OriginalOverallScore ?? settled.ScoreBefore;
         appraisal.AdjustedScore = settled.ScoreAfter != original ? settled.ScoreAfter : null;
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
-            "Post-remand appeal finalized with decision {Decision} for appraisal {AppraisalId}",
-            decisionDto.FinalDecision,
-            appraisalId);
+            "Post-remand appeal finalized with decision {Decision} for appraisal {AppraisalId} ({How})",
+            decision,
+            appraisalId,
+            reevaluated ? (restore ? "re-evaluated, original restored" : "re-evaluated") : "deadline passed, original restored");
 
-        await NotifyAppealResolvedAsync(appraisal, decisionDto.FinalDecision, cancellationToken);
+        await NotifyAppealResolvedAsync(appraisal, decision, cancellationToken);
+    }
+
+    /// <summary>
+    /// Moves a remand's re-evaluation deadline (D-34): while the manager has not re-evaluated, to a
+    /// later day — before the deadline, or after it has passed. The manager is told.
+    /// </summary>
+    public async Task ExtendRemandDeadlineAsync(
+        Guid appraisalId,
+        ExtendRemandDeadlineDto extendDto,
+        Guid reviewerId,
+        CancellationToken cancellationToken = default)
+    {
+        var appraisal = await TenantAppraisalQuery()
+            .Include(a => a.Employee)
+            .Include(a => a.AppraisalCycle)
+            .FirstOrDefaultAsync(a => a.Id == appraisalId, cancellationToken)
+            ?? throw new ArgumentException("Appraisal not found");
+
+        var managerEval = await TenantEvaluationQuery()
+            .FirstOrDefaultAsync(e => e.AppraisalId == appraisalId && e.EvaluatorRole == EvaluatorRole.Manager, cancellationToken);
+        if (!RemandOpen(appraisal, managerEval))
+            throw new InvalidOperationException("This appeal is not waiting on a re-evaluation, so there is no deadline to extend.");
+
+        await EnsureNotPartyToAppealAsync(appraisal, reviewerId, "extend", cancellationToken);
+
+        if (extendDto.NewDeadline is not DateOnly newDay)
+            throw new InvalidOperationException("Give the new deadline.");
+
+        // The end of the day given, so "by the 12th" includes the 12th.
+        var newDeadline = newDay.ToDateTime(new TimeOnly(23, 59, 59), DateTimeKind.Utc);
+        if (newDeadline <= DateTime.UtcNow)
+            throw new InvalidOperationException("The new deadline must be a day that has not ended yet.");
+        if (appraisal.AppealRemandDeadline is DateTime current && newDeadline <= current)
+            throw new InvalidOperationException(
+                $"The new deadline must be later than the current one ({current:d MMM yyyy}).");
+
+        var previous = appraisal.AppealRemandDeadline;
+        appraisal.AppealRemandDeadline = newDeadline;
+        await _appraisalRepository.UpdateAsync(appraisal);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Remand deadline for appraisal {AppraisalId} moved from {Previous} to {Deadline} by {ReviewerId}: {Reason}",
+            appraisalId, previous, newDeadline, reviewerId, extendDto.Reason);
+
+        if (appraisal.Employee?.ManagerId is Guid managerId)
+        {
+            var subject = appraisal.Employee.FullName;
+            await NotifyQuietlyAsync(new[]
+            {
+                new AppraisalNotificationRequest(
+                    managerId,
+                    AppraisalNotificationType.ActionRequired,
+                    $"Re-evaluation deadline extended: {subject}",
+                    $"HR has moved the deadline for your re-evaluation to {newDay:dd MMM yyyy}. {extendDto.Reason}",
+                    appraisal.AppraisalCycle?.CycleName,
+                    $"/hr/performance/team-appraisals/{appraisal.Id}",
+                    appraisal.Id,
+                    subject,
+                    NotificationUrgency.Urgent),
+            }, cancellationToken);
+        }
     }
     
     /// <summary>
