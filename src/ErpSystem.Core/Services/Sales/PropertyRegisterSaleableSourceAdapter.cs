@@ -18,6 +18,18 @@ public class PropertyRegisterSaleableSourceAdapter : ISalesSaleableSourceAdapter
 
     public string AdapterKey => "property-register";
 
+    public IReadOnlyCollection<SalesSaleableSourceFilterDefinitionDto> FilterDefinitions { get; } =
+    [
+        new() { Field = "status", DisplayName = "Property status" },
+        new() { Field = "assetType", DisplayName = "Property type" },
+        new() { Field = "location", DisplayName = "Location" },
+        new() { Field = "region", DisplayName = "Region" },
+        new() { Field = "district", DisplayName = "District" },
+        new() { Field = "town", DisplayName = "Town" },
+        new() { Field = "currency", DisplayName = "Currency" },
+        new() { Field = "boundaryVerified", DisplayName = "Boundary verified", ValueType = "boolean", Options = ["true", "false"] }
+    ];
+
     public async Task<IReadOnlyCollection<SalesSaleableItemDto>> SearchItemsAsync(
         SalesSaleableSource source,
         string? search = null,
@@ -28,10 +40,11 @@ public class PropertyRegisterSaleableSourceAdapter : ISalesSaleableSourceAdapter
             return [];
         }
 
+        var normalizedTake = Math.Clamp(take, 1, 100);
         var query = new EstateManagedAssetQuery
         {
             Search = search,
-            Take = take,
+            Take = Math.Max(normalizedTake * 5, 100),
             ExcludedStatuses = [EstateManagedAssetStatus.Sold, EstateManagedAssetStatus.Retired]
         };
 
@@ -47,7 +60,10 @@ public class PropertyRegisterSaleableSourceAdapter : ISalesSaleableSourceAdapter
         // Estate/Sales handoff: request only transaction-eligible estate assets before the source service applies its take limit.
         var assets = await _managedAssetService.GetManagedAssetsAsync(query);
 
+        var filters = SaleableSourceFilterSettings.Parse(source.SettingsJson);
         return assets
+            .Where(asset => MatchesFilters(asset, filters))
+            .Take(normalizedTake)
             .Select(asset => new SalesSaleableItemDto
             {
                 SourceId = source.Id,
@@ -80,4 +96,20 @@ public class PropertyRegisterSaleableSourceAdapter : ISalesSaleableSourceAdapter
             })
             .ToList();
     }
+
+    private static bool MatchesFilters(
+        EstateManagedAssetDto asset,
+        IReadOnlyCollection<SaleableSourceFilterValue> filters)
+        => filters.All(filter => SaleableSourceFilterSettings.Normalize(filter.Field) switch
+        {
+            "status" => asset.Status.ToString().Equals(filter.Value, StringComparison.OrdinalIgnoreCase),
+            "assettype" or "propertytype" or "type" => asset.AssetType.ToString().Equals(filter.Value, StringComparison.OrdinalIgnoreCase),
+            "location" => SaleableSourceFilterSettings.TextMatches(asset.Location, filter.Value),
+            "region" => SaleableSourceFilterSettings.TextMatches(asset.Region, filter.Value),
+            "district" => SaleableSourceFilterSettings.TextMatches(asset.District, filter.Value),
+            "town" => SaleableSourceFilterSettings.TextMatches(asset.Town, filter.Value),
+            "currency" => asset.Currency.Equals(filter.Value, StringComparison.OrdinalIgnoreCase),
+            "boundaryverified" => SaleableSourceFilterSettings.BoolMatches(asset.BoundaryVerified, filter.Value),
+            _ => true
+        });
 }

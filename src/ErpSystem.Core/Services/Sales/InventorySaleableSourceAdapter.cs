@@ -22,6 +22,22 @@ public class InventorySaleableSourceAdapter : ISalesSaleableSourceAdapter
 
     public string AdapterKey => "inventory";
 
+    public IReadOnlyCollection<SalesSaleableSourceFilterDefinitionDto> FilterDefinitions { get; } =
+    [
+        new() { Field = "inventoryType", DisplayName = "Inventory type" },
+        new() { Field = "status", DisplayName = "Status" },
+        new() { Field = "categoryName", DisplayName = "Category" },
+        new() { Field = "categoryId", DisplayName = "Category ID" },
+        new() { Field = "brand", DisplayName = "Brand" },
+        new() { Field = "manufacturer", DisplayName = "Manufacturer" },
+        new() { Field = "model", DisplayName = "Model" },
+        new() { Field = "unitOfMeasure", DisplayName = "Unit of measure" },
+        new() { Field = "isSerialTracked", DisplayName = "Serial tracked", ValueType = "boolean", Options = ["true", "false"] },
+        new() { Field = "isLotTracked", DisplayName = "Lot tracked", ValueType = "boolean", Options = ["true", "false"] },
+        new() { Field = "isExpirationTracked", DisplayName = "Expiration tracked", ValueType = "boolean", Options = ["true", "false"] },
+        new() { Field = "isLocationTracked", DisplayName = "Location tracked", ValueType = "boolean", Options = ["true", "false"] }
+    ];
+
     public async Task<IReadOnlyCollection<SalesSaleableItemDto>> SearchItemsAsync(
         SalesSaleableSource source,
         string? search = null,

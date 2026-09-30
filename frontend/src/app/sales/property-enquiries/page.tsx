@@ -33,6 +33,18 @@ type EstateHandoffState = {
     currency: string;
     actualCloseDate?: string | null;
   } | null;
+  salesOrder?: {
+    id: string;
+    reference: string;
+    status: string;
+    agreedAmount: number;
+    amountPaid: number;
+    currency: string;
+    completedAt?: string | null;
+    invoiceReference?: string | null;
+    paymentReference?: string | null;
+    paymentDate?: string | null;
+  } | null;
   estateCase?: {
     id: string;
     referenceNumber?: string | null;
@@ -179,6 +191,7 @@ function PropertyEnquiries() {
   const ticket = detail.data;
   const handoffState = handoff.data;
   const opportunity = handoffState?.opportunity;
+  const salesOrder = handoffState?.salesOrder;
   const listingType = ticket?.propertyListing?.listingType || '';
   const handoffRequiresDuration =
     listingType === 'Rent' ||
@@ -186,20 +199,51 @@ function PropertyEnquiries() {
     listingType === 'SaleAndRent' ||
     listingType === 'SaleAndLease';
   useEffect(() => {
-    if (!selectedId || !opportunity || handoffState?.estateCase) return;
+    setHandoffDraft({
+      salesReference: '',
+      agreedAmount: '',
+      requestedLeaseTerm: '',
+      salesAmountPaid: '',
+      salesPaymentReference: '',
+      currency: '',
+      salesCompletedAt: '',
+      notes: '',
+    });
+  }, [selectedId]);
+  useEffect(() => {
+    if (!selectedId || handoffState?.estateCase || (!opportunity && !salesOrder)) return;
 
     setHandoffDraft((current) => ({
       ...current,
+      salesReference: current.salesReference || salesOrder?.reference || '',
       agreedAmount:
         current.agreedAmount ||
-        (opportunity.amount > 0 ? String(opportunity.amount) : ''),
-      currency: current.currency || opportunity.currency || '',
+        (salesOrder && salesOrder.agreedAmount > 0
+          ? String(salesOrder.agreedAmount)
+          : opportunity && opportunity.amount > 0
+            ? String(opportunity.amount)
+            : ''),
+      salesAmountPaid: current.salesAmountPaid
+        || (salesOrder ? String(salesOrder.amountPaid) : ''),
+      salesPaymentReference: current.salesPaymentReference
+        || salesOrder?.paymentReference
+        || '',
+      currency: current.currency || salesOrder?.currency || opportunity?.currency || '',
+      salesCompletedAt: current.salesCompletedAt
+        || (salesOrder?.completedAt ? salesOrder.completedAt.slice(0, 10) : ''),
     }));
   }, [
     selectedId,
     opportunity?.id,
     opportunity?.amount,
     opportunity?.currency,
+    salesOrder?.id,
+    salesOrder?.reference,
+    salesOrder?.agreedAmount,
+    salesOrder?.amountPaid,
+    salesOrder?.paymentReference,
+    salesOrder?.currency,
+    salesOrder?.completedAt,
     handoffState?.estateCase?.id,
   ]);
   const handoffDraftIsValid = Boolean(
@@ -322,6 +366,14 @@ function PropertyEnquiries() {
                     closes this enquiry&apos;s CRM opportunity as won.
                   </p>
                 </div>
+                {salesOrder ? (
+                  <div className="grid gap-2 rounded border border-indigo-200 bg-white p-3 text-sm md:grid-cols-2">
+                    <p><span className="font-medium">Sales order:</span> {salesOrder.reference}</p>
+                    <p><span className="font-medium">Status:</span> {salesOrder.status}</p>
+                    <p><span className="font-medium">Amount paid:</span> {salesOrder.currency} {salesOrder.amountPaid.toLocaleString()}</p>
+                    <p><span className="font-medium">Payment reference:</span> {salesOrder.paymentReference || 'No allocated receipt yet'}</p>
+                  </div>
+                ) : null}
                 {handoff.isLoading ? (
                   <p className="text-sm text-slate-600">
                     Checking the linked Sales opportunity…

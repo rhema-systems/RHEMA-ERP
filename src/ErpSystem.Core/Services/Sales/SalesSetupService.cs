@@ -41,6 +41,19 @@ public class SalesSetupService : ISalesSetupService
         return sources;
     }
 
+    public Task<IReadOnlyCollection<SalesSaleableSourceAdapterDefinitionDto>> GetSaleableSourceAdapterDefinitionsAsync()
+    {
+        IReadOnlyCollection<SalesSaleableSourceAdapterDefinitionDto> definitions = _adapters.Values
+            .OrderBy(adapter => adapter.AdapterKey, StringComparer.OrdinalIgnoreCase)
+            .Select(adapter => new SalesSaleableSourceAdapterDefinitionDto
+            {
+                AdapterKey = adapter.AdapterKey,
+                Filters = adapter.FilterDefinitions
+            })
+            .ToArray();
+        return Task.FromResult(definitions);
+    }
+
     public async Task<IReadOnlyCollection<SalesSaleableItemDto>> SearchSaleableItemsAsync(Guid sourceId, string? search = null, int take = 50)
     {
         await EnsureDefaultSaleableSourcesAsync();
@@ -211,11 +224,18 @@ public class SalesSetupService : ISalesSetupService
         var existing = (await repository.FindAsync(x => x.TenantId == _currentUserProvider.TenantId))
             .ToDictionary(x => x.Code, StringComparer.OrdinalIgnoreCase);
 
-        var createdAny = false;
+        var changedAny = false;
         foreach (var source in GetDefaultSources())
         {
-            if (existing.ContainsKey(source.Code))
+            if (existing.TryGetValue(source.Code, out var current))
             {
+                if (UpgradeLandManagementPlaceholder(current))
+                {
+                    current.UpdatedBy = _currentUserProvider.Username;
+                    current.LastModifiedById = _currentUserProvider.UserId;
+                    await repository.UpdateAsync(current);
+                    changedAny = true;
+                }
                 continue;
             }
 
@@ -223,14 +243,35 @@ public class SalesSetupService : ISalesSetupService
             source.CreatedBy = _currentUserProvider.Username;
             source.CreatedById = _currentUserProvider.UserId;
             await repository.AddAsync(source);
-            createdAny = true;
+            changedAny = true;
         }
 
-        if (createdAny)
+        if (changedAny)
         {
             await _unitOfWork.SaveChangesAsync();
         }
     }
+
+    private static bool UpgradeLandManagementPlaceholder(SalesSaleableSource source)
+    {
+        if (!source.Code.Equals("LAND_MANAGEMENT", StringComparison.OrdinalIgnoreCase)
+            || !source.AdapterKey.Equals("land-management", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(source.SettingsJson?.Trim(),
+                "{\"source\":\"land-management\",\"integrationStatus\":\"pending-merge\"}",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        source.Description = "Published Estate land demarcations available for configured Sales transactions.";
+        source.IsActive = true;
+        source.RequiresExternalModule = false;
+        source.SettingsJson = LandManagementSettingsJson;
+        return true;
+    }
+
+    private const string LandManagementSettingsJson =
+        "{\"source\":\"land-management\",\"filters\":[{\"field\":\"isPublishedToExternalPortal\",\"value\":\"true\"},{\"field\":\"externalListingStatus\",\"value\":\"Published\"}]}";
 
     private static IReadOnlyCollection<SalesSaleableSource> GetDefaultSources() =>
     [
@@ -319,10 +360,10 @@ public class SalesSetupService : ISalesSetupService
         {
             Code = "LAND_MANAGEMENT",
             DisplayName = "Land Management Plots",
-            Description = "Pending source for available plots after the Land Management module is merged.",
+            Description = "Published Estate land demarcations available for configured Sales transactions.",
             SourceType = "LandManagement",
             AdapterKey = "land-management",
-            IsActive = false,
+            IsActive = true,
             Icon = "Map",
             ColorCode = "#0891B2",
             SortOrder = 50,
@@ -332,9 +373,9 @@ public class SalesSetupService : ISalesSetupService
             AllowSalesOrders = true,
             AllowSalesAgreements = true,
             AllowReservations = true,
-            RequiresExternalModule = true,
+            RequiresExternalModule = false,
             IsSystemSource = true,
-            SettingsJson = "{\"source\":\"land-management\",\"integrationStatus\":\"pending-merge\"}"
+            SettingsJson = LandManagementSettingsJson
         }
     ];
 
