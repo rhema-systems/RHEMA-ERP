@@ -656,7 +656,7 @@ export default function ExternalEstateServicesPage() {
         propertyReference: form.propertyReference.trim(),
         location: form.location.trim(),
         category: form.category.trim() || selectedType?.category || '',
-        priority: form.priority,
+        priority: selectedType?.entityType === 'EstateFacilityMaintenance' ? '' : form.priority,
         serviceImpact: form.serviceImpact,
         description: form.description.trim(),
         additionalValues,
@@ -813,7 +813,7 @@ export default function ExternalEstateServicesPage() {
                 <Label>Location</Label>
                 <Input value={form.location} readOnly />
               </div>
-              <div className="space-y-2">
+              {selectedType?.entityType !== 'EstateFacilityMaintenance' ? <div className="space-y-2">
                 <Label>Urgency</Label>
                 <Select
                   value={form.priority}
@@ -830,7 +830,7 @@ export default function ExternalEstateServicesPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
+              </div> : null}
             </div>
             {extraFields.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2">
@@ -864,7 +864,7 @@ export default function ExternalEstateServicesPage() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="estate-service-description">Description</Label>
+              <Label htmlFor="estate-service-description">{selectedType?.entityType === 'EstateFacilityMaintenance' ? 'Problem description' : 'Description'}</Label>
               <Textarea
                 id="estate-service-description"
                 className="min-h-[140px]"

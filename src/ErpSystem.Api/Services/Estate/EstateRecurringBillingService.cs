@@ -57,6 +57,11 @@ public sealed class EstateRecurringBillingService(
                     var account = await db.EstateGroundRentAccounts.AsNoTracking()
                         .FirstAsync(item => item.Id == id && item.TenantId == tenantId, cancellationToken);
                     if (account.Status != "Active"
+                        || await db.EstateManagedAssets.AsNoTracking().AnyAsync(item =>
+                            item.Id == account.EstateManagedAssetId && item.TenantId == tenantId
+                            && (item.Status == EstateManagedAssetStatus.Reserved
+                                || item.Status == EstateManagedAssetStatus.Blocked
+                                || item.Status == EstateManagedAssetStatus.Retired), cancellationToken)
                         || account.NextDueDate.Date > today.AddDays(account.PaymentTermsDays))
                         break;
                     await groundRentService.GenerateInvoiceAsync(id,

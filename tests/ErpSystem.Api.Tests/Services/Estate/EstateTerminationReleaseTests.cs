@@ -76,6 +76,60 @@ public sealed class EstateTerminationReleaseTests
         fixture.Asset.Notes.Should().Contain(legalCase.Id.ToString());
     }
 
+    [Theory]
+    [InlineData(EstateManagedAssetStatus.Reserved)]
+    [InlineData(EstateManagedAssetStatus.Blocked)]
+    [InlineData(EstateManagedAssetStatus.Retired)]
+    public async Task IneligibleStatusPausesFutureBillingAndStaffDuties(EstateManagedAssetStatus nextStatus)
+    {
+        var fixture = Fixture(EstateManagedAssetStatus.Available);
+        fixture.Asset.IsPublishedToExternalPortal = true;
+        fixture.Asset.ExternalListingStatus = "Published";
+        fixture.Asset.RentBillingActivatedAt = DateTime.UtcNow.AddMonths(-1);
+        var account = new EstateGroundRentAccount
+        {
+            TenantId = fixture.TenantId, EstateManagedAssetId = fixture.Asset.Id,
+            Status = "Active"
+        };
+        var roster = new EstateFacilityDutyRoster
+        {
+            TenantId = fixture.TenantId, PropertyReference = fixture.Asset.AssetCode,
+            PropertyUnit = "CHILD-UNIT", StartDate = DateTime.UtcNow.Date,
+            CompletionStatus = "Scheduled"
+        };
+        var completedRoster = new EstateFacilityDutyRoster
+        {
+            TenantId = fixture.TenantId, PropertyReference = fixture.Asset.AssetCode,
+            StartDate = DateTime.UtcNow.Date.AddDays(-5), CompletionStatus = "Completed"
+        };
+        var accounts = new Mock<IGenericRepository<EstateGroundRentAccount>>();
+        accounts.Setup(item => item.FindAsync(It.IsAny<Expression<Func<EstateGroundRentAccount, bool>>>() ))
+            .ReturnsAsync([account]);
+        accounts.Setup(item => item.UpdateAsync(It.IsAny<EstateGroundRentAccount>()))
+            .Returns(Task.CompletedTask);
+        var rosters = new Mock<IGenericRepository<EstateFacilityDutyRoster>>();
+        rosters.Setup(item => item.FindAsync(It.IsAny<Expression<Func<EstateFacilityDutyRoster, bool>>>() ))
+            .ReturnsAsync((Expression<Func<EstateFacilityDutyRoster, bool>> predicate) =>
+                new[] { roster, completedRoster }.Where(predicate.Compile()).ToList());
+        rosters.Setup(item => item.UpdateAsync(It.IsAny<EstateFacilityDutyRoster>()))
+            .Returns(Task.CompletedTask);
+        fixture.Unit.Setup(item => item.Repository<EstateGroundRentAccount>()).Returns(accounts.Object);
+        fixture.Unit.Setup(item => item.Repository<EstateFacilityDutyRoster>()).Returns(rosters.Object);
+
+        await fixture.Service.UpdateOccupancyAsync(fixture.Asset.Id,
+            new UpdateEstateManagedAssetOccupancyDto { Status = nextStatus });
+
+        fixture.Asset.AutoGenerateRentInvoices.Should().BeFalse();
+        fixture.Asset.NextRentBillingDate.Should().BeNull();
+        fixture.Asset.RentBillingActivatedAt.Should().NotBeNull();
+        fixture.Asset.IsPublishedToExternalPortal.Should().BeFalse();
+        account.Status.Should().Be("Held");
+        roster.CompletionStatus.Should().Be("Cancelled");
+        roster.EndDate.Should().BeBefore(DateTime.UtcNow.Date);
+        completedRoster.CompletionStatus.Should().Be("Completed");
+        completedRoster.EndDate.Should().BeNull();
+    }
+
     private static (EstateManagedAssetService Service, EstateManagedAsset Asset,
         Guid TenantId, Mock<IUnitOfWork> Unit,
         Mock<IGenericRepository<ProcedureCase>> LegalCases,

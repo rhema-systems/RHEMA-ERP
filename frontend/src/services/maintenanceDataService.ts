@@ -270,8 +270,7 @@ class MaintenanceDataService {
   // Fetch priority levels
   async getPriorityLevels(): Promise<PriorityLevel[]> {
     try {
-      const response = await apiService.get('/maintenance/priority-levels?isActive=true');
-      return response.data.data || [];
+      return await apiService.get<PriorityLevel[]>('/maintenance/priority-levels/active');
     } catch (error) {
       console.error('Error fetching priority levels:', error);
       return [];

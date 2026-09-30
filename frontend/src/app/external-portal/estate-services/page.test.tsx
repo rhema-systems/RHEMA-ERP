@@ -39,7 +39,7 @@ vi.mock('@/components/ui/select', () => ({
 }));
 
 beforeEach(() => {
-  mocks.getRequestTypes.mockResolvedValue([{ code: 'maintenance', title: 'Maintenance', module: 'Estate', entityType: 'Maintenance', category: 'Facilities' }]);
+  mocks.getRequestTypes.mockResolvedValue([{ code: 'maintenance', title: 'Maintenance', module: 'Facilities', entityType: 'EstateFacilityMaintenance', category: 'Facilities' }]);
   mocks.getMyRequestsPage.mockResolvedValue({ items: [], page: 1, pageSize: 10, totalCount: 0, totalPages: 1, hasPreviousPage: false, hasNextPage: false });
   mocks.getMyProperties.mockResolvedValue({ properties: [
     { id: 'asset-1', assetCode: 'ASR-001', name: 'First Property', customerBusinessPartnerId: 'customer-1', location: 'Accra' },
@@ -65,9 +65,10 @@ describe('Estate service property selection', () => {
     expect(within(property).getByRole('option', { name: 'ASR-002 · Second Property' })).toBeInTheDocument();
 
     fireEvent.change(property, { target: { value: 'ASR-002' } });
-    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Description' }), { target: { value: 'Please inspect the property.' } });
+    expect(within(dialog).queryByText('Urgency')).not.toBeInTheDocument();
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Problem description' }), { target: { value: 'Please inspect the property.' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Submit request' }));
-    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledWith(expect.objectContaining({ propertyReference: 'ASR-002', location: 'Tema' })));
+    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledWith(expect.objectContaining({ propertyReference: 'ASR-002', location: 'Tema', priority: '' })));
   });
 
   it('does not offer free-text property entry without linked properties', async () => {
