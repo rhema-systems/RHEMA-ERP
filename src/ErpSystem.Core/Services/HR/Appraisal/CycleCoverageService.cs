@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -82,10 +83,8 @@ public class CycleCoverageService : ICycleCoverageService
         // ──────────────────────────────────────────────────────────────
         // 2. Load active target groups
         // ──────────────────────────────────────────────────────────────
-        var activeTargets = await _targetRepo.GetQueryable()
-            .Where(t => t.AppraisalCycleId == cycleId && t.TenantId == tenantId && t.IsActive && !t.IsDeleted)
-            .Include(t => t.Exclusions)
-            .ToListAsync(cancellationToken);
+        var activeTargets = await AppraisalCycleScope.LoadActiveTargetsAsync(
+            _targetRepo.GetQueryable(), tenantId, cycleId, cancellationToken);
 
         var result = new CoveragePreviewDto
         {
@@ -101,12 +100,14 @@ public class CycleCoverageService : ICycleCoverageService
         // Resolved before the not-yet-configured bail below, because the scope overlaps only
         // need targets — and a cycle that has targets but no templates yet is exactly when a
         // clash with another cycle is most worth knowing about, while it is still being built.
-        var rawIds = activeTargets.Count > 0
-            ? await ResolveEmployeesInScopeAsync(activeTargets, tenantId, cancellationToken)
-            : new HashSet<Guid>();
-        var excludedWithReasons = await ApplyExclusionsAsync(activeTargets, rawIds, tenantId, cancellationToken);
-        var includedIds = rawIds.Where(id => !excludedWithReasons.ContainsKey(id)).ToHashSet();
-        var excludedIds = rawIds.Where(id => excludedWithReasons.ContainsKey(id)).ToHashSet();
+        // The rule is generation's own (AppraisalCycleScope, performance closure E-c): this
+        // preview kept a copy of it.
+        var scope = await AppraisalCycleScope.ResolveAsync(
+            activeTargets, _employeeRepo.GetQueryable(), _orgUnitRepo.GetQueryable(), tenantId, cancellationToken);
+        var rawIds = scope.Covered;
+        var excludedWithReasons = scope.Excluded;
+        var includedIds = scope.InScope;
+        var excludedIds = excludedWithReasons.Keys.ToHashSet();
 
         result.ScopeOverlaps = await ComputeScopeOverlapsAsync(cycle, includedIds, tenantId, cancellationToken);
 
@@ -139,8 +140,12 @@ public class CycleCoverageService : ICycleCoverageService
         // ──────────────────────────────────────────────────────────────
         // 5. Simulate template resolution per included employee
         // ──────────────────────────────────────────────────────────────
+        // In name order, the excluded after the rest (performance closure E-c): the employee query has no
+        // order of its own, so the rows — and the pages cut from them — came back in whatever order the
+        // query plan chose, and changed when the scope's id list did.
         var coveredItems = employees
             .Select(emp => ResolveEmployeeCoverage(emp, activeTemplates))
+            .OrderBy(i => i.EmployeeName).ThenBy(i => i.EmployeeNumber)
             .ToList();
 
         // 5b. Build items for explicitly excluded employees
@@ -163,7 +168,9 @@ public class CycleCoverageService : ICycleCoverageService
                 UnitName        = emp.OrganizationUnit?.Name,
                 Status          = EmployeeCoverageStatus.Excluded,
                 ExclusionReason = excludedWithReasons.TryGetValue(emp.Id, out var r) ? r : "Excluded",
-            }).ToList();
+            })
+            .OrderBy(i => i.EmployeeName).ThenBy(i => i.EmployeeNumber)
+            .ToList();
         }
 
         var allItems = coveredItems.Concat(excludedItems).ToList();
@@ -206,7 +213,7 @@ public class CycleCoverageService : ICycleCoverageService
     /// <summary>
     /// Other cycles of the same type and year competing for these employees.
     ///
-    /// Opening is refused only by the Open / InProgress ones — that is what
+    /// Opening is refused only by the Open ones — that is what
     /// <c>AppraisalCycleService.OpenCycleAsync</c> enforces. Drafts are reported too but
     /// marked as non-blocking, so a clash with a colleague's half-built cycle is visible here
     /// while it is still cheap to fix, instead of stopping someone at the moment they open.
@@ -231,18 +238,11 @@ public class CycleCoverageService : ICycleCoverageService
 
         foreach (var sibling in siblings)
         {
-            var siblingTargets = await _targetRepo.GetQueryable()
-                .Where(t => t.AppraisalCycleId == sibling.Id && t.TenantId == tenantId && t.IsActive && !t.IsDeleted)
-                .Include(t => t.Exclusions)
-                .ToListAsync(cancellationToken);
+            var siblingScope = await AppraisalCycleScope.ResolveCycleAsync(
+                _targetRepo.GetQueryable(), _employeeRepo.GetQueryable(), _orgUnitRepo.GetQueryable(),
+                tenantId, sibling.Id, cancellationToken);
 
-            if (siblingTargets.Count == 0) continue;
-
-            var siblingRaw = await ResolveEmployeesInScopeAsync(siblingTargets, tenantId, cancellationToken);
-            var siblingExcluded = await ApplyExclusionsAsync(siblingTargets, siblingRaw, tenantId, cancellationToken);
-            var siblingScope = siblingRaw.Where(id => !siblingExcluded.ContainsKey(id));
-
-            var shared = siblingScope.Count(includedIds.Contains);
+            var shared = siblingScope.InScope.Count(includedIds.Contains);
             if (shared == 0) continue;
 
             overlaps.Add(new CycleScopeOverlapDto
@@ -252,7 +252,7 @@ public class CycleCoverageService : ICycleCoverageService
                 CycleName = sibling.CycleName,
                 Status = sibling.Status,
                 SharedEmployeeCount = shared,
-                BlocksOpening = sibling.Status is AppraisalCycleStatus.Open or AppraisalCycleStatus.InProgress,
+                BlocksOpening = sibling.Status == AppraisalCycleStatus.Open,
             });
         }
 
@@ -374,201 +374,5 @@ public class CycleCoverageService : ICycleCoverageService
         .OrderByDescending(b => b.Priority)
         .ThenBy(b => b.TemplateName)
         .ToList();
-    }
-
-    private async Task<HashSet<Guid>> ResolveEmployeesInScopeAsync(
-        List<AppraisalCycleTarget> targets,
-        Guid tenantId,
-        CancellationToken cancellationToken)
-    {
-        var set = new HashSet<Guid>();
-
-        foreach (var target in targets)
-        {
-            switch (target.TargetType)
-            {
-                case AppraisalTargetType.Position:
-                    if (target.PositionId.HasValue)
-                    {
-                        var ids = await _employeeRepo.GetQueryable()
-                            .Where(e => e.TenantId == tenantId
-                                     && e.PositionId == target.PositionId
-                                     && !e.IsDeleted
-                                     && e.IsActive)
-                            .Select(e => e.Id)
-                            .ToListAsync(cancellationToken);
-                        foreach (var id in ids) set.Add(id);
-                    }
-                    break;
-
-                case AppraisalTargetType.OrganizationUnit:
-                    if (target.OrganizationUnitId.HasValue)
-                    {
-                        var childIds = await GetChildUnitIdsAsync(
-                            target.OrganizationUnitId.Value, tenantId, cancellationToken);
-                        childIds.Add(target.OrganizationUnitId.Value);
-
-                        var ids = await _employeeRepo.GetQueryable()
-                            .Where(e => e.TenantId == tenantId
-                                     && e.OrganizationUnitId.HasValue
-                                     && childIds.Contains(e.OrganizationUnitId.Value)
-                                     && !e.IsDeleted
-                                     && e.IsActive)
-                            .Select(e => e.Id)
-                            .ToListAsync(cancellationToken);
-                        foreach (var id in ids) set.Add(id);
-                    }
-                    break;
-
-                case AppraisalTargetType.OrganizationLevel:
-                    if (target.OrganizationLevelId.HasValue)
-                    {
-                        var ids = await _employeeRepo.GetQueryable()
-                            .Where(e => e.TenantId == tenantId
-                                     && e.OrganizationLevelId == target.OrganizationLevelId
-                                     && !e.IsDeleted
-                                     && e.IsActive)
-                            .Select(e => e.Id)
-                            .ToListAsync(cancellationToken);
-                        foreach (var id in ids) set.Add(id);
-                    }
-                    break;
-            }
-        }
-
-        return set;
-    }
-
-    /// <summary>
-    /// Returns a dictionary mapping employee IDs (from rawSet) to their exclusion reason
-    /// based on the active exclusion rules on each target.
-    /// </summary>
-    private async Task<Dictionary<Guid, string>> ApplyExclusionsAsync(
-        List<AppraisalCycleTarget> targets,
-        HashSet<Guid> rawSet,
-        Guid tenantId,
-        CancellationToken cancellationToken)
-    {
-        if (rawSet.Count == 0)
-            return new Dictionary<Guid, string>();
-
-        var allExclusions = targets
-            .SelectMany(t => t.Exclusions)
-            .Where(e => e.IsActive && !e.IsDeleted)
-            .ToList();
-
-        if (allExclusions.Count == 0)
-            return new Dictionary<Guid, string>();
-
-        var excludedWithReasons = new Dictionary<Guid, string>();
-
-        // 1. Direct employee exclusions
-        foreach (var ex in allExclusions.Where(e => e.EmployeeId.HasValue))
-        {
-            if (rawSet.Contains(ex.EmployeeId!.Value))
-                excludedWithReasons.TryAdd(ex.EmployeeId.Value, ex.Reason);
-        }
-
-        // 2. Position exclusions
-        var posExclusions = allExclusions
-            .Where(e => e.PositionId.HasValue && !e.EmployeeId.HasValue)
-            .ToList();
-        if (posExclusions.Count > 0)
-        {
-            var posIds = posExclusions.Select(e => e.PositionId!.Value).Distinct().ToHashSet();
-            var matched = await _employeeRepo.GetQueryable()
-                .Where(e => e.TenantId == tenantId && posIds.Contains(e.PositionId) && rawSet.Contains(e.Id) && !e.IsDeleted)
-                .Select(e => new { e.Id, e.PositionId })
-                .ToListAsync(cancellationToken);
-            foreach (var emp in matched)
-            {
-                var reason = posExclusions.First(ex => ex.PositionId == emp.PositionId).Reason;
-                excludedWithReasons.TryAdd(emp.Id, reason);
-            }
-        }
-
-        // 3. Organization unit exclusions (including child units)
-        var unitExclusions = allExclusions
-            .Where(e => e.OrganizationUnitId.HasValue && !e.EmployeeId.HasValue && !e.PositionId.HasValue)
-            .ToList();
-        if (unitExclusions.Count > 0)
-        {
-            var unitIdToReason = new Dictionary<Guid, string>();
-            foreach (var ex in unitExclusions)
-            {
-                var rootId = ex.OrganizationUnitId!.Value;
-                unitIdToReason.TryAdd(rootId, ex.Reason);
-                var childIds = await GetChildUnitIdsAsync(rootId, tenantId, cancellationToken);
-                foreach (var childId in childIds)
-                    unitIdToReason.TryAdd(childId, ex.Reason);
-            }
-            var allExcludedUnitIds = unitIdToReason.Keys.ToHashSet();
-            var matched = await _employeeRepo.GetQueryable()
-                .Where(e => e.TenantId == tenantId
-                         && e.OrganizationUnitId.HasValue
-                         && allExcludedUnitIds.Contains(e.OrganizationUnitId.Value)
-                         && rawSet.Contains(e.Id)
-                         && !e.IsDeleted)
-                .Select(e => new { e.Id, e.OrganizationUnitId })
-                .ToListAsync(cancellationToken);
-            foreach (var emp in matched)
-            {
-                var reason = unitIdToReason.TryGetValue(emp.OrganizationUnitId!.Value, out var r)
-                    ? r : unitExclusions[0].Reason;
-                excludedWithReasons.TryAdd(emp.Id, reason);
-            }
-        }
-
-        // 4. Organization level exclusions
-        var levelExclusions = allExclusions
-            .Where(e => e.OrganizationLevelId.HasValue
-                     && !e.EmployeeId.HasValue
-                     && !e.PositionId.HasValue
-                     && !e.OrganizationUnitId.HasValue)
-            .ToList();
-        if (levelExclusions.Count > 0)
-        {
-            var levelIds = levelExclusions.Select(e => e.OrganizationLevelId!.Value).Distinct().ToHashSet();
-            var matched = await _employeeRepo.GetQueryable()
-                .Where(e => e.TenantId == tenantId
-                         && e.OrganizationLevelId.HasValue
-                         && levelIds.Contains(e.OrganizationLevelId.Value)
-                         && rawSet.Contains(e.Id)
-                         && !e.IsDeleted)
-                .Select(e => new { e.Id, e.OrganizationLevelId })
-                .ToListAsync(cancellationToken);
-            foreach (var emp in matched)
-            {
-                var reason = levelExclusions.First(ex => ex.OrganizationLevelId == emp.OrganizationLevelId).Reason;
-                excludedWithReasons.TryAdd(emp.Id, reason);
-            }
-        }
-
-        return excludedWithReasons;
-    }
-
-    private async Task<HashSet<Guid>> GetChildUnitIdsAsync(
-        Guid parentUnitId, Guid tenantId, CancellationToken cancellationToken)
-    {
-        var result = new HashSet<Guid>();
-        var queue = new Queue<Guid>();
-        queue.Enqueue(parentUnitId);
-
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
-            var children = await _orgUnitRepo.GetQueryable()
-                .Where(u => u.TenantId == tenantId && u.ParentUnitId == current && !u.IsDeleted)
-                .Select(u => u.Id)
-                .ToListAsync(cancellationToken);
-
-            foreach (var child in children)
-            {
-                if (result.Add(child))
-                    queue.Enqueue(child);
-            }
-        }
-
-        return result;
     }
 }

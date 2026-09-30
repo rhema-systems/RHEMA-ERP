@@ -925,7 +925,8 @@ public static class AppraisalMappingExtensions
             StartDate = dto.StartDate,
             EndDate = dto.EndDate,
             AppraisalSettingsId = dto.AppraisalSettingsId,
-            Status = dto.Status,
+            // Created as a Draft, whatever the body says (performance closure E-c); open and close move it.
+            Status = AppraisalCycleStatus.Draft,
             GoalSettingOpenDate = dto.GoalSettingOpenDate,
             GoalSettingDeadline = dto.GoalSettingDeadline,
             Q1ReviewOpenDate = dto.Q1ReviewOpenDate,
@@ -1008,7 +1009,7 @@ public static class AppraisalMappingExtensions
             PositionId = entity.PositionId,
             PositionTitle = entity.Position?.Title,
             EstimatedEmployeeCount = entity.EstimatedEmployeeCount,
-            ActiveEmployeeCount = entity.ActiveEmployeeCount,
+            // ActiveEmployeeCount is resolved live by AppraisalCycleTargetService.
             Notes = entity.Notes,
             IsActive = entity.IsActive,
             CreatedAt = entity.CreatedAt,
@@ -1035,7 +1036,7 @@ public static class AppraisalMappingExtensions
 
     public static void UpdateEntity(this UpdateAppraisalCycleTargetDto dto, AppraisalCycleTarget entity)
     {
-        entity.AppraisalCycleId = dto.AppraisalCycleId;
+        // The cycle is not copied: a target stays in its cycle (performance closure E-c).
         entity.TargetType = dto.TargetType;
         entity.OrganizationLevelId = dto.OrganizationLevelId;
         entity.OrganizationUnitId = dto.OrganizationUnitId;

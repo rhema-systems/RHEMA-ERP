@@ -40,7 +40,7 @@ function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
  * comes from the published AppraisalTemplate workflow definition; a caller who is not an
  * approver for the current step gets 403 rather than a hidden button.
  *
- * ⚠ Editing is locked once the template is assigned to an Open or InProgress cycle. That is
+ * ⚠ Editing is locked once the template is assigned to an Open cycle. That is
  * enforced server-side on every structural write; the editor below is switched to read-only so
  * the affordances disappear instead of failing, and copying is the way forward.
  */
@@ -132,7 +132,7 @@ export default function AppraisalTemplateDetailPage() {
   }
 
   const liveAssignments = (assignments ?? []).filter((a) => a.isActive);
-  // The server blocks edits for Open/InProgress cycles specifically; the assignment rows do
+  // The server blocks edits for Open cycles specifically; the assignment rows do
   // not carry a cycle status, so any live assignment is treated as a freeze here. Erring this
   // way shows the reason rather than letting the write fail.
   const frozen = liveAssignments.length > 0;
@@ -163,7 +163,7 @@ export default function AppraisalTemplateDetailPage() {
             <div className="space-y-1 text-sm">
               <p className="font-medium">This template is assigned to a cycle</p>
               <p className="text-muted-foreground">
-                Structural edits are refused while a cycle is Open or InProgress, so the form an
+                Structural edits are refused while a cycle is Open, so the form an
                 appraisal was scored on cannot change underneath it. Copy the template from the
                 list page and change the copy.
               </p>

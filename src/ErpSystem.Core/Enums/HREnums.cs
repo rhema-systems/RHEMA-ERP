@@ -1467,20 +1467,30 @@ public enum EmploymentActionProposalStatus
     PendingApproval = 5
 }
 
+/// <summary>
+/// Draft → Open → Closed, moved only by the open and close actions.
+///
+/// <para>3 was <c>InProgress</c>, which only the demo seeder ever wrote and every live-cycle check read
+/// as Open; it is gone and its rows were moved to Open (performance closure D-14). 3 is not reused.</para>
+/// </summary>
 public enum AppraisalCycleStatus
 {
     Draft = 1,                    // Being configured
-    Open = 2,                   // Active, appraisals can be created
-    InProgress = 3,               // Evaluations are happening
+    Open = 2,                     // Running: appraisals are generated and evaluated
     Closed = 4,                   // Finalized, no changes
 }
 
+/// <summary>
+/// What a cycle target covers: everyone in a position, in a unit and the units beneath it, or at an
+/// organisation level. 4 was <c>Employee</c>, which no column could hold and nothing resolved; it is gone
+/// (performance closure D-44), and one person is covered by a position target, or left out by an
+/// exclusion.
+/// </summary>
 public enum AppraisalTargetType
 {
     OrganizationLevel = 1,
     OrganizationUnit = 2,
     Position = 3,
-    Employee = 4,
 }
 
 /// <summary>

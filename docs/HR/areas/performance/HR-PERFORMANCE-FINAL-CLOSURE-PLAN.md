@@ -61,8 +61,11 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    (`run-final-lifecycle.mjs` 130/130 twice; regression 2631/2640; lane E's E-a State block).
    ~~Slice **E-b** (calibration)~~ **Done 2026-09-30** (`run-final-lifecycle.mjs` 276/276 twice; regression
    2777/2786; lane E's E-b State block — read its refinements: a commit also skips what its manager
-   submitted after the panel closed, and the grid says what a commit would take). **Slice E-c (cycle
-   rules and D-14) is next.**
+   submitted after the panel closed, and the grid says what a commit would take). ~~Slice **E-c** (cycle
+   rules and D-14)~~ **Done 2026-09-30** (source-checked first: § 1i D-47–D-50; `run-final-lifecycle.mjs`
+   391/391 twice; lane E's E-c State block — one scope rule, `AppraisalCycleScope`, and one door for
+   targets; D-14's data migration applied to UAT, so APC2026 is Open). **Slice E-d (Withdrawn, the close
+   and the live cycle) is next** — read § 5's *Added by lane E-c* rows first: two of them are E-d's.
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -173,6 +176,15 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | D-45 | **Three E10 items need columns:** who rejected or dismissed a recommendation; a store for interim review scores apart from goal progress; `OverallPeriodScore` shown or dropped | **Migration batch 2 / lane F**, beside that batch's decider and author columns; lane E carries them | F, batch 2 |
 | D-46 | The source check's other recommendations, taken as proposed | **D-17's reopen is built with lane N** (it writes the rating history N2 builds; lane E closes the accidental door). **An approved PIP's terms stay refused** — goal add and delete included — with no re-approval flow. **A settings profile is refused while any live appraisal uses it**, with a clone door. **Calibration gets a Cancel** (Pending or in progress), releasing its appraisals. **A Draft appraisal still takes its first save** (B1's refinement 9). **E11's negative cases run on a scratch database only**; **E12's repair runs on UAT's Rule 8 five only on the user's go** (S5) | E-a–E-g, N, S5 |
 
+### 1i. Decisions from slice E-c's source check — settled with the user, 2026-09-30
+
+| # | Question | Decision (2026-09-30) | Affects |
+|---|---|---|---|
+| D-47 | **A target's "Resolves to".** The column read the typed estimate less exclusions it never loaded — both APC2026 targets showed 0 — while the guide (ch. 14, P-15), the TS type and the dialog all call it live (§ 5's E2 residual) | **Resolve it live in E-c**: the target's active staff whom the cycle appraises, after the exclusions; an inactive target reads 0. The estimate stays HR's planning figure | E-c, guide ch. 14 |
+| D-48 | **How far the one scope rule goes.** Three copies: generation and the open's overlap check, the in-scope list (the open notice, the reminders, `GET {id}/employees`), and the coverage preview | **One resolver for all of them** (`AppraisalCycleScope`) — the excluded count and the live counts included — proven by APC2026's coverage preview matching field for field, and by new suite checks | E-c |
+| D-49 | **A target's ids against its type.** The dialog sends the level a unit was picked under, so every unit target from the screen was refused ("exactly one id"); the server never matched the id to the type | **Keep the id the type names and clear the others** (the dialog's own hint); refuse a missing, unknown or other-tenant scope, or an unknown type | E-c |
+| D-50 | **The pin on a Draft cycle that already has appraisals** (generation ran on Draft cycles until E-d; UAT holds hundreds of harness ones) | **Settings profile, year and type are fixed once the cycle is opened *or* has appraisals; the period once it has appraisals.** Name, code and phase deadlines stay editable | E-c |
+
 ---
 
 ## 2. Lane status
@@ -185,7 +197,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ☑ 2026-09-29 — L-a 157/157 twice; L-b 244/244 twice; L-c 261/261 twice (one suite holds L-b and L-c); staged |
 | C | One appeal machine | 2 days (+0.5–1, D-36) | D-22, D-34, D-35, D-36, D-37, D-38 | ☑ **complete 2026-09-30**; C10 was batch 1's. Two slices (D-36): C-a ☑ — 209/209 twice, regression 2089/2098, committed effb567f5. C-b ☑ — source-checked (§ 1f D-37, D-38), `run-final-appeals.mjs` 397/397 twice, regression 2309/2318; staged |
 | D | Peer nomination and evaluation integrity | 1 day (1.5–2, the source check) | D-39, D-40, D-41 | ☑ 2026-09-30 — source-checked (§ 1g); `run-final-nominations.mjs` 186/186 twice, regression 2496/2505; staged |
-| E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | ~12 days (D-42; was 4) | D-10, D-14, D-17, D-20, D-42–D-46 | ◐ source-checked 2026-09-30 (§ 1h); seven slices E-a…E-g. E-a ☑ (130/130 twice, regression 2631/2640), E-b ☑ (`run-final-lifecycle.mjs` 276/276 twice, regression 2777/2786); staged. E-c next |
+| E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | ~12 days (D-42; was 4) | D-10, D-14, D-17, D-20, D-42–D-50 | ◐ source-checked 2026-09-30 (§ 1h); seven slices E-a…E-g. E-a ☑ (130/130 twice, regression 2631/2640), E-b ☑ (`run-final-lifecycle.mjs` 276/276 twice, regression 2777/2786), E-c ☑ (source-checked, § 1i; 391/391 twice, regression 2892/2901; D-14's migration on UAT); staged. E-d next |
 | F | Recommendations, proposals, probation, PIP chain, segregation of duties | 2.5 days | D-12, D-19; **F1 waits on D-18** (the finish plan's lane 9) | ☐ |
 | G | Notifications on the platform topics | 5 days | D-21, D-28 | ☐ |
 | H | Nightly sweep and the advance path | 2.5 days | D-16, D-21 | ☐ |
@@ -2050,28 +2062,30 @@ not HR's; offered for the cross-module register). No suite was affected.
       - **Header update** is refused on Completed/Closed/Appealed/Withdrawn. **Delete** is allowed
         only for Draft, or Active with no submission.
       - **Self / manager / peer writes** check appraisal Active and a **live** cycle: Open, or
-        InProgress until D-14 lands. The demo cycle is InProgress.
+        InProgress until D-14 lands. The demo cycle is InProgress. *(D-14 landed in E-c, 2026-09-30:
+        a live cycle is Open, and APC2026 is Open.)*
       - **`AcknowledgeAppraisalAsync`** reads HR sign-off from `AppraisalHRReview` (manual advance
         writes that, AWS :550-560) and accepts comments.
       - **Withdrawn** per D-10: an HR action with a reason; `SeparationService.CompleteSeparationAsync`
         (:1240) withdraws the leaver's open appraisal; a withdrawn appraisal leaves every score,
         denominator and close check.
-- [ ] E2 **Cycle:**
-      - Create ignores the body `Status` (MAP :942).
-      - Update refuses a settings-profile swap once `OpenedDate` is set (:353), and a year/type
-        change once appraisals exist.
+- [ ] E2 **Cycle:** *(E-c did every bullet but the close and the Draft generation, which are E-d's.)*
+      - ~~Create ignores the body `Status` (MAP :942).~~ *E-c.*
+      - ~~Update refuses a settings-profile swap once `OpenedDate` is set (:353), and a year/type
+        change once appraisals exist.~~ *E-c, as D-50 put it: profile, year and type once opened or
+        with appraisals; the period once with appraisals.*
       - `CloseCycleAsync` (:970-994) refuses while any appraisal is not Completed, Closed or
         Withdrawn, and closes the Completed ones through the lifecycle (**no force flag**).
       - Generation is refused on Draft cycles (:590 refuses only Closed; the FE offers it at
         `cycles/[id]/page.tsx:327`).
-      - `AppraisalCycleStatus.InProgress` per D-14: removed, with its six readers, the seeder and a
-        data migration.
-      - The duplicate cycle-target CRUD (:1706-1796) is deleted in favour of
+      - ~~`AppraisalCycleStatus.InProgress` per D-14: removed, with its six readers, the seeder and a
+        data migration.~~ *E-c.*
+      - ~~The duplicate cycle-target CRUD (:1706-1796) is deleted in favour of
         `AppraisalCycleTargetService`, with cycle-status checks added. The demo pack's `060:38, :44`
-        uses the duplicate (S3).
-      - `CalculateExcludedEmployees` is implemented (it returns 0, :1117).
-      - `GetEmployeesInScopeAsync` becomes the generation scope: drop the tenant-wide auto-discovery
-        (:1514+) and the inactive targets (:1479).
+        uses the duplicate (S3).~~ *E-c: the nested routes stay and delegate, so `060` is unchanged.*
+      - ~~`CalculateExcludedEmployees` is implemented (it returns 0, :1117).~~ *E-c.*
+      - ~~`GetEmployeesInScopeAsync` becomes the generation scope: drop the tenant-wide auto-discovery
+        (:1514+) and the inactive targets (:1479).~~ *E-c, with leavers and the level rule too.*
 - [ ] E3 **Settings profile:** `UpdateAsync` refused while any Open/InProgress cycle uses it
       ("clone the profile"); allowed when all Draft/Closed.
 - [ ] E4 **Template:**
@@ -2305,7 +2319,8 @@ with each:
       session's scope and facilitator pinned (`FacilitatedById` from the token); deleting a session
       releases its appraisals, and a Cancel (Pending or in progress) does the same; *Start* folded into
       Open (demo `061:249`); P-41 — the grid reads the settled and calibrated overall once committed.
-- [ ] **Slice E-c — cycle rules and D-14.** D-14 (the member, its readers, the seeder, a data-only
+- [x] **Slice E-c — cycle rules and D-14.** *(2026-09-30 — the E-c source check and State blocks below;
+      § 1i D-47–D-50.)* D-14 (the member, its readers, the seeder, a data-only
       migration moving UAT's APC2026 to Open); create ignores the body's status; update refuses a profile,
       year or type change once opened and a date change once appraisals exist; the target routes — the
       nested ones delegate to the target service (the duplicate goes), the cycle pinned, the
@@ -2495,6 +2510,128 @@ Active fallback (it called the raw transition).
 reads it. The demo pack's `061` no longer calls `/start` or names a facilitator. `hr-w3-permissions/
 run-slice10-performance.mjs` probes `/cancel` for the Write gate — it probed `/start`, which now answers 404
 from routing and would pass vacuously (edited, not run).
+
+**E-c source check (2026-09-30, after E-b; line numbers as of `7ce042063`).** The slice's rows, read again in
+source before building; the user settled four questions (§ 1i, D-47–D-50). Row by row:
+- **D-14 — live, as written.** UAT's APC2026 was back at InProgress (3) — the 2026-09-29 rebuild re-seeded it
+  after batch 1 had moved it — beside 450 Draft cycles and 22 Closed ones; none Open. Readers: the open's overlap
+  check (ACS :427), the template lock and its message (ATS :902), the coverage preview's *blocks opening* (CCS
+  :255), the HR dashboard's default cycle (HRCDQS :94) and the manager's team cycles (PAS :1574); writers, the
+  seeder (:317) and the create body. Frontend: the two unions (`goals.ts`'s also carried an `'Archived'` the API
+  never had), `CycleSelect`, the cycle list's *Live* tile, three template-editor texts; the guide five times.
+  `IsCycleActive` (PAS :4240) read Open only, so APC2026's HR review said `false` — no screen reads it. Book 3
+  states no status.
+- **Create — live.** The mapper stored the body's status, a name or a number: a cycle created Open had no opened
+  date (so it stayed deletable), skipped the overlap check, and the dashboard counted it live. No harness or demo
+  create sends one.
+- **Update — live.** Only Closed was refused; profile, year, type, period and deadlines all moved on an opened
+  cycle. "A date change once appraisals exist" is the **period** — generation copies it into each appraisal (ACS
+  :703-705) — while the phase deadlines stay editable: the gates read them live, and *Edit dates* and
+  `run-sliceD` move them on an opened cycle.
+- **Target routes — live, and worse than written.** An edit copied the cycle id from the body on both route sets
+  (MAP :1038) — into any cycle, another tenant's included, so the target vanished from its own. The nested create
+  had no duplicate check (the flat one had), no edit checked, nothing checked the cycle's status (nor did the
+  exclusion writes), and the nested list answered 500 for an unknown cycle. The cycle page and demo `060` use the
+  nested target routes and the flat exclusion routes; the harness the flat target routes.
+- **Individual employee (D-44)** — as lane E's check said: no column, it resolved nobody (ACS :1548), and no UAT
+  target is one (351: 349 Position, 2 Unit). Once the member went, a number still bound (the string enum
+  converter allows integers), so the service refuses an unknown type.
+- **`CalculateExcludedEmployees`** — live: always 0.
+- **The in-scope resolver — live, and wider than the row.** Besides the tenant-wide auto-discovery and inactive
+  targets, it counted leavers and read a level target through the units at that level. It feeds the open notice,
+  the reminders and `GET {id}/employees`. Measured on UAT: auto-discovery reached no one, and APC2026's list was
+  102 before and after. Three copies of the rule: generation and the open (ACS), the in-scope list (ACS), the
+  coverage preview (CCS).
+- **`CreateAppraisalInstancesAsync`** — dead: private, no caller.
+
+**Beyond the rows:** (1) **the target dialog could not make a unit target** — the cascading picker offers a unit
+only under its level and writes the level into the form (`CascadingPicker.tsx:231, :245`), so every unit target
+arrived with two ids and was refused (400); and a position target naming only a unit was accepted and covered
+nobody. The demo's two unit targets were made by the API with one id. (2) **"Resolves to" was not live** — the
+typed estimate less exclusions that were never loaded — so both APC2026 targets read 0, while the guide (ch. 14
+and P-15) called it "the real, live number" (D-47). (3) The cycle and target routes answered 400 to a rule, and
+the exclusion edit and removal 500.
+
+**E-c State (2026-09-30): DONE — built, verified on UAT, staged.** One data-only migration (D-14). What exists now:
+- **Three statuses** — `AppraisalCycleStatus` is Draft, Open, Closed (3 is not reused). Every reader reads Open;
+  the seeder writes Open; `20260930151521_PerformanceClosureRetireCycleInProgress` moves any cycle at 3 to 2
+  (guarded; Down leaves it; Estate's eleven scaffolded operations stripped — § 6). Applied to UAT: APC2026 Open.
+- **Create** — always a Draft; `CreateAppraisalCycleDto` has no status.
+- **Update** — once opened or with appraisals, the settings profile, year and type are fixed; once with
+  appraisals, the period; the 422 names the fields. Name, code and phase deadlines still move. The cycle list's
+  edit dialog greys the type and profile of an opened cycle and marks the year.
+- **One scope rule** — `AppraisalCycleScope` (`LoadActiveTargetsAsync`, `ResolveCycleAsync`, `ResolveAsync` →
+  `AppraisalCycleScopeResolution`: each active target's staff, the union, the excluded with their reasons, the
+  scope). Read by generation, the open's overlap check (Open siblings only), `GetEmployeesInScopeAsync` (the open
+  notice, the reminders, `GET {id}/employees`), the progress page's *Excluded*, each target's live count and the
+  coverage preview. Active staff only; a unit and its subtree, walked a tier per query; a level by the employee's
+  own level; exclusions most specific first (employee, position, unit and beneath, level), the older exclusion's
+  reason on a tie.
+- **One door for targets** — `AppraisalCycleTargetService`; the cycle's nested routes delegate, and the cycle
+  service's copy is gone. The id the type names is kept and the others cleared (D-49); a missing, unknown or
+  other-tenant scope, or an unknown type, is refused; one target per scope, on create and on edit; a target stays
+  in its cycle (`UpdateAppraisalCycleTargetDto` has no cycle); through a cycle's route, only that cycle's targets;
+  a closed cycle's targets and exclusions refuse every write; 422s for the rules, 404 for an unknown cycle's list.
+  `ActiveEmployeeCount` is resolved live (D-47; the entity's computed property is gone).
+- **D-44** — `AppraisalTargetType.Employee` is gone, with the breakdown's count and the page's row.
+- **The coverage preview** — its rows in name order, the excluded last.
+- **Dead code** — `CreateAppraisalInstancesAsync`, the auto-discovery, the in-scope list's resolver, the
+  generation copy's private resolver and the preview's copy; the cycle service's unused template and position
+  repositories (lane J's list names the latter).
+- **The screens** — both unions are Draft/Open/Closed; `CycleSelect` and the *Live* tile read Open; the
+  template editor's texts; the target dialog's three types, its edit no longer sending a cycle; no *Individual
+  targets* row; the edit dialog's fixed fields; "another open cycle" in the open dialog and service comment.
+
+**Where the build refines the rows** (each deliberate; say if one should go back):
+1. **The "date" that freezes is the period** — the phase deadlines stay HR's to move (D-50).
+2. **The pin also holds on a Draft cycle with appraisals** (D-50) — generation ran on Drafts until E-d.
+3. **The coverage preview is on the one rule** (D-48), and **its rows have an order** — the unification changed the
+   order of the scope's id list, and with it the preview's rows, which had none (no ORDER BY; pages cut from them
+   could repeat or skip rows). Found by the before/after comparison.
+4. **Exclusion writes are refused on a closed cycle too** — the row named the targets; an exclusion changes the
+   scope the same way.
+5. **A target's extra ids are cleared, not refused** (D-49) — the dialog's own hint said so.
+6. **The in-scope list also drops leavers and reads a level as generation does** — both beyond the row.
+7. **The open's overlap check counts only Open siblings** — InProgress went with D-14; Drafts were already
+   advisory.
+
+**Verified** (Staging API on `ErpSystemDB_UAT`, the final build):
+- `run-final-lifecycle.mjs` **391/391, then 391/391** — E-a's 130, E-b's 146 and E-c's 115, all green on the first
+  run. Apart from the paired positives, each E-c check asserts something the old code did not do — established
+  by reading the old code, not by running the old build against the new checks.
+- Regression (`run-all.mjs`, fifteen suites): interim reviews 133/133, attachments 65/65, slice C 52/52, slice D 22/22
+  (its deadline edit on an opened cycle still passes), **slice E 17/26 — the same 9 stale**, gates 32/32, lane A
+  187/187, lane P 338/338, lane B1 256/256, lane L-a 157/157, lanes L-b/L-c 296/296, lane B2 363/363 (its default
+  profile moved and restored), lane C 397/397, lane D 186/186, **lane E 391/391**. **2892/2901** — E-b's 2777/2786
+  plus exactly the 115 new; no assertion lost. Afterwards only APC2026 is Open, the default profile is *Standard
+  Annual Appraisal*, and no cycle is at 3.
+- API log: no request answered 5xx; the rule refusals logged as warnings. Only UAT's missing SMTP, defect #23's
+  payroll-profile FK (179 fixture employees), the five-minutely HR/Identity reconciliation, and three timeouts of
+  the platform notification service's clean-up (the bulk UPDATE of old `Notifications`, as at E-a and E-b).
+- Frontend: scoped `tsc` over the cycle and template pages, `CycleSelect`, the appraisal and goal types and the
+  appraisal service, 0 errors — the 4 errors planted in a probe file were all reported; ESLint clean. Not
+  browser-walked.
+- The migration: its SQL tested first on a scratch database (no table → skipped; two rows at 3 moved; a second
+  run moved none; other statuses untouched); applied by the API's start after a COPY_ONLY backup
+  (`ErpSystemDB_UAT_preEc_20260930.bak`, verified); the history row read back in SQL (105 rows, was 104); no cycle
+  at 3.
+- Demo: APC2026's 107 phases identical before and after — byte for byte after the migration, employee for employee
+  after the three runs (the snapshot tool's rows had no order either; `tools/phase-snapshot.mjs` sorts them now);
+  its calendar and its in-scope list (102) byte-identical; its coverage preview identical field for field and row
+  for row, now in name order (the MD, excluded, still last).
+  What the screens show differently: **APC2026 reads *Open*** (the list, the header, the overview; the HR review's
+  `isCycleActive` is now true — nothing reads it); **the Targets tab's *Resolves to* reads 96 and 6** (MD's Office
+  less the MD, and Internal Audit — they read 0 and 0); **the Progress tab's *Excluded* reads 1** (was 0) and has no
+  *Individual targets* row; the target dialog offers three types and can make a unit target; the list's edit dialog
+  greys APC2026's type and profile. The guide's chapters 13 and 14 say so.
+
+**Harness changes in the slice:** `buildLifecycleFixture()` gains cycle EC (profile LN, template TLC, a Position
+target estimated at 9), positions EC and ECX, and four staff without logins (ec1–ec3, ecx1 — the suite marks ec3
+inactive by SQL: never a login's holder, whom the reconciliation sweep would switch off). `run-final-lifecycle.mjs`
+gains E-c's 115 checks: it opens EC and closes it in a `finally` (a harness cycle left Open becomes the HR
+dashboard's default), and removes its three scratch cycles and the bait template. No other suite or demo scenario
+changed: every fixture target is a one-id Position target, `run-sliceD` edits deadlines only, and `060`'s nested
+unit target and flat exclusion pass the new rules.
 
 ### Lane F — Recommendations, proposals, probation, PIP chain, segregation of duties
 
@@ -2808,9 +2945,9 @@ Group 3 — screens for server-supported actions, and controls for this plan's n
 - [ ] Delete the client methods that still have no caller after this lane (of the 91 listed by the
       audit) — re-run the two greps first.
 
-Group 4 — types: `AppraisalCycleStatus` union aligned (`types/hr/goals.ts:103` has `'Archived'`,
-`types/hr/appraisal.ts:29` does not; `InProgress` removed per D-14); C# enum members missing from TS
-unions added (`Withdrawn`, section `Kind`).
+Group 4 — types: ~~`AppraisalCycleStatus` union aligned (`types/hr/goals.ts:103` has `'Archived'`,
+`types/hr/appraisal.ts:29` does not; `InProgress` removed per D-14)~~ *(done in E-c: both are
+Draft/Open/Closed)*; C# enum members missing from TS unions added (`Withdrawn`, section `Kind`).
 
 **Verification:** scoped `tsconfig` type-check in two groups (full `tsc` crashes), eslint on touched
 files, and the persona walk in § 7.
@@ -2823,9 +2960,11 @@ files, and the persona walk in § 7.
 - [ ] Dead members: the four `GetAttachmentAsync` (:97, :723, :793, :981);
       `IEffectiveAppraisalConfigurationService.ResolveForEmployeeAsync` (:1079);
       `ICalibrationSessionService.GetScopedAppraisalIdsAsync` (:968) made private; PAS
-      `GetOwnedAppealAsync` (:135); `AppraisalCycleService.CreateAppraisalInstancesAsync` (finish plan
-      9.26); `GoalRiskApplicationService` (`GoalRiskService`, never registered).
-- [ ] **`ResolveEmployeesFromTargetsAsync` gains the `Employee` case** (finish plan 9.26 second half):
+      `GetOwnedAppealAsync` (:135); ~~`AppraisalCycleService.CreateAppraisalInstancesAsync` (finish plan
+      9.26)~~ *(deleted in E-c)*; `GoalRiskApplicationService` (`GoalRiskService`, never registered).
+- [x] ~~**`ResolveEmployeesFromTargetsAsync` gains the `Employee` case**~~ — *settled otherwise by D-44 in E-c,
+      2026-09-30: the member went, with its count and its dialog option; the resolver is now
+      `AppraisalCycleScope`.* (finish plan 9.26 second half):
       `AppraisalTargetType.Employee = 4` exists (`HREnums.cs:1477`), but only Position,
       OrganizationUnit and OrganizationLevel resolve. D-20 and S8 need it, so harness fixtures can
       generate one appraisal.
@@ -2835,7 +2974,7 @@ files, and the persona walk in § 7.
       enum member goes and fixtures keep one Position per case, as `buildClosureFixture()` does.
 - [ ] Unused injected fields: PAS `_kpiEvaluationSnapshotRepository` (so `KpiSnapshots` at :3574 is
       always empty — decide with C6), `PeerEvaluationService` `_gradeRepository` /
-      `_appraisalCompetencyRepository`, `AppraisalCycleService` `_positionRepository`,
+      `_appraisalCompetencyRepository`, ~~`AppraisalCycleService` `_positionRepository`~~ *(removed in E-c)*,
       `AppraisalTemplateService` `_competencyRepository`, `EffectiveAppraisalConfigurationService`
       `_appraisalRepository`, `GoalDetailQueryService` `_clock`, `PerformanceAnalyticsService` `_logger`.
 - [ ] `UpdateStatusOnDraft` unused params (PAS :2018); `const bool peerEvaluationComplete = false`
@@ -2953,7 +3092,7 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
       `seed-hr-demo`):
       - ~~Drop `IsManagerAuthoritative` (:162) and `RequireDevelopmentPlanUpdate` (:189) — in the same
         slice as B3.~~ *Done with batch 1.*
-      - Set `IsDefault`; set the cycle status per D-14 (:314).
+      - Set `IsDefault`; ~~set the cycle status per D-14 (:314)~~ *(done in E-c: the seeder writes Open)*.
       - P-5: stop truncating codes (:133).
       - Fixture goals (:435-491): three per employee, weights totalling 100, locked through the
         unified path. Today they are `IsLocked=true` with `Status=Approved`, two each, with
@@ -3088,7 +3227,7 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | Conversation scheduled by the employee does not tell the manager; PIP meeting notice to employee only | `AppraisalConversationService.cs:185`; PIP :192-206 | G |
 | ~~Nothing told in Manager nomination mode~~ | PNS :464-489 | D/G — done in lane D, 2026-09-30 (the peers are told at approval) |
 | PIP handler numbering `PIP-APR-…` vs `PIP-yyyy-NNNN` | `PipRecommendationHandler.cs:103` | E7 |
-| `AppraisalCycleTarget.EstimatedEmployeeCount` client-supplied; `ActiveEmployeeCount` can go negative | MAP :1044; entity :647 | E2 |
+| ~~`AppraisalCycleTarget.EstimatedEmployeeCount` client-supplied; `ActiveEmployeeCount` can go negative~~ | MAP :1044; entity :647 | E2 — done in lane E-c, 2026-09-30 (the count is resolved live, D-47; the estimate stays HR's planning figure) |
 | `PerformanceAppraisal.DevelopmentPlanId/RankInPosition/RankInUnit/NextAppraisalDate` never computed | entity | J (N5 computes `DevelopmentPlanId`) |
 | ~~`EmployeeAcknowledgmentComments` written only by manual advance~~ | AWS :605 | E1 — done in lane E-a, 2026-09-30 (the acknowledgment keeps its comment) |
 | ~~`PeerNomination.DueDate` ignored~~ | PNS :525 | D5 — done 2026-09-30 |
@@ -3099,19 +3238,19 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | ~~Analytics includes pre-final scores~~ | `PerformanceAnalyticsService.cs:61` | A9 — done 2026-09-29 |
 | ~~Talent sync no recency check~~ | `TalentRatingSyncService.cs:51-82` | A8 — done 2026-09-29 |
 | Manager resolution inlined ~57 times, snapshot vs live, no head-of-unit fallback (an employee with no manager cannot submit goals, `GoalWorkflowCommandService.cs:148`) | module-wide | M2 (evaluator record) + D-28 (no HR fallback — decision 6) |
-| `GetEmployeesInScopeAsync` tenant-wide auto-discovery | `AppraisalCycleService.cs:1467-1514` | E2 |
+| ~~`GetEmployeesInScopeAsync` tenant-wide auto-discovery~~ | `AppraisalCycleService.cs:1467-1514` | E2 — done in lane E-c, 2026-09-30 (one scope rule, `AppraisalCycleScope`) |
 | Interim finalise writes goal `ProgressPercent` | `AppraisalReviewEventService.cs:263-285` | E10 |
-| `AppraisalCycleStatus.InProgress` never assigned; `IsCycleActive` checks only Open (PAS :4157) | 6 readers | D-14 / E2 |
+| ~~`AppraisalCycleStatus.InProgress` never assigned; `IsCycleActive` checks only Open (PAS :4157)~~ | 6 readers | D-14 / E2 — done in lane E-c, 2026-09-30 (the member, its readers, the seeder and a data migration) |
 | Salary figures readable by anyone with Performance Read | proposals controllers | F3 (policy) |
 | Recall with no definition has no initiator check | salary/employment services | F9 |
-| Frontend: `AppraisalCycleStatus` 'Archived' in one TS file only | `types/hr/goals.ts:103` | I |
+| ~~Frontend: `AppraisalCycleStatus` 'Archived' in one TS file only~~ | `types/hr/goals.ts:103` | I — done in lane E-c, 2026-09-30 (both unions are Draft/Open/Closed) |
 | Frontend: `PerformanceAttachmentsPanel` "visible to anyone who can see this record" while the appraisee has no evidence tab | `:220` | I |
 | Frontend: salary "Raise the salary change" and "Mark applied" independent | `proposals/salary-review/[id]/page.tsx:178-190` | F5 |
 | *Added by the review:* | | |
 | P-7 editor freezes on any assignment; the server refuses only Open/InProgress | `templates/[id]/page.tsx:134-138` | E4 + I |
 | P-8 activation demands bands on a weight-0 free-text item; submit-for-approval too | `AppraisalTemplateService.cs:922-931, :323` | L4 |
 | P-11 goal-risk thresholds tenant-wide | `GoalRiskSetting.cs:19-56` | v2 |
-| P-13 generation repairs nothing; snapshot failures swallowed | `AppraisalCycleService.cs:623-631, :1366-1377` | E12 |
+| P-13 generation repairs nothing; ~~snapshot failures swallowed~~ | `AppraisalCycleService.cs:623-631, :1366-1377` | E12 — the swallowing copy, the dead `CreateAppraisalInstancesAsync`, was deleted in lane E-c; the repair action remains |
 | P-22 goal-library link fixed at creation | DTO :4258 | E5 |
 | P-24 at-risk filters by the employee's unit and level | `AtRiskGoalsQueryService.cs:155-159` | kept — disclosed on screen (:176) |
 | P-25 no export on the at-risk list | `AtRiskGoalsController.cs:65` | D-23 (catalogue programme) |
@@ -3123,7 +3262,7 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | P-51 Result column links only salary/employment; the other pages now exist | `types/hr/outcomes.ts:99-102` | I |
 | P-54 no effective date on proposals | entities :1287-1345 | D-19 / F5 |
 | Finish plan 9.3 raw create takes no snapshot | PAS :269-297 | D-20 / E1 |
-| Finish plan 9.26 `Employee` target case missing | `AppraisalCycleService` resolver | J |
+| ~~Finish plan 9.26 `Employee` target case missing~~ | `AppraisalCycleService` resolver | J — settled by D-44 in lane E-c, 2026-09-30: the member went instead |
 | ~~Manager and peer forms show the live target; frontend preview formula differs~~ | PAS :4840, PES :584; `appraisal-run.ts:965-972` | A12 — done 2026-09-29 |
 | ~~Scores accepted above an item's top band; appeal `NewScore` unchecked~~ | `AppraisalTemplateService.cs:797-817`; DTO :2956 | A11 — done 2026-09-29 |
 | Goals set before generation invisible to the appraisal | EGS :221-229 | L2 |
@@ -3167,6 +3306,14 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | A session's particulars edit and its delete have no screen (`update`, `remove` have no caller) | `calibration.service.ts` | I |
 | The E-b screen (the calibration session page) not browser-walked | 1 page | K |
 | `hr-w3-permissions/run-slice10-performance.mjs` edited for E-b, not run | dev-harness | S8 |
+| *Added by lane E-c (2026-09-30):* | | |
+| A cycle's code can still change after generation; its appraisals' numbers carry the code they were generated under | `UpdateAsync`, `GenerateAppraisalNumber` | J (numbering) |
+| The coverage preview resolves every other cycle of the same type and year for its overlap card — on UAT some 450 harness Drafts, two queries each, per preview | `ComputeScopeOverlapsAsync` | S8 (teardown) / § 7 item 8 |
+| `GET api/AppraisalCycleTarget/type/{type}` has no caller, and now resolves a live count for each cycle it lists | `AppraisalCycleTargetController` | J |
+| The progress page's *Targeted* is the count of appraisals, not the scope (APC2026: 107 against 102 — the five Rule 8 appraisals) | `GetCycleProgressAsync` | E-d (with Withdrawn's denominators) |
+| An exclusion may name no scope at all, and then leaves out nobody; nothing refuses it | `AddExclusionAsync` | E-g |
+| Opening a cycle with no targets skips the overlap check, and a target added to an open cycle is never checked | `OpenCycleAsync` | E-d (generation runs the overlap check) |
+| The E-c screens (the cycle list's edit dialog, the target dialog, the Coverage and Progress tabs) not browser-walked | 2 pages | K |
 
 ---
 
@@ -3269,6 +3416,12 @@ table there. Backfills are for databases that already hold data.
     - `CriterionScore.NumericScore` stays `int` (A13's round-explicitly option).
     - D-14 stays split as § 1b assigns it: batch 1 migrates the data; E2 removes the enum member,
       its readers and the seeder's `InProgress`. `IsDefault` is not set by the seeder until S1.
+      *(Done in E-c, 2026-09-30. The 2026-09-29 rebuild had seeded APC2026 at InProgress again after
+      batch 1 ran, so a second, data-only migration — `20260930151521_PerformanceClosureRetireCycleInProgress`,
+      the same guarded `UPDATE … SET Status = 2 WHERE Status = 3`, Down leaves it — went with the enum's
+      removal and the seeder's fix. Its scaffold carried Estate's eleven pending operations, which were
+      stripped (the snapshot keeps them). Applied to UAT after a COPY_ONLY backup,
+      `ErpSystemDB_UAT_preEc_20260930.bak`: 105 history rows, APC2026 Open.)*
     - The rating history's table is **`AppraisalScoreChanges`** (plural): the name S6 lists.
     - ⚠ **The scaffold emitted `RenameColumn(RequireDevelopmentPlanUpdate → IsDefault)`**: two `bit`
       columns left and one arrived. Applied, it would have crowned every profile the default. The

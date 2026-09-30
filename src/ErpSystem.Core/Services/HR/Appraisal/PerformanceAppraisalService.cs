@@ -1571,7 +1571,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                 .ThenInclude(a => a.Employee)
             .Include(c => c.PerformanceAppraisals)
                 .ThenInclude(a => a.EvaluatorEvaluations)
-            .Where(c => c.Status == AppraisalCycleStatus.Open || c.Status == AppraisalCycleStatus.InProgress)
+            .Where(c => c.Status == AppraisalCycleStatus.Open)
             .Where(c => c.PerformanceAppraisals.Any(a => a.Employee.ManagerId == managerId))
             .OrderByDescending(c => c.StartDate)
             .ToListAsync(cancellationToken);

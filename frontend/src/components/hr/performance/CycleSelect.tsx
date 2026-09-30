@@ -35,7 +35,8 @@ export function cycleLabel(cycle: AppraisalCycleOption): string {
   return `${cycle.cycleCode} · ${cycle.cycleName}`;
 }
 
-const OPEN_STATUSES = new Set(['Open', 'InProgress']);
+// A running cycle is Open; InProgress, which only the demo seeder wrote, is gone (D-14).
+const OPEN_STATUSES = new Set(['Open']);
 
 /** Sentinel for the "every cycle" option — Radix Select refuses an empty-string item value. */
 const ALL = '__all__';

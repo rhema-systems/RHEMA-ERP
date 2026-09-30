@@ -91,7 +91,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             .GetQueryable(c =>
                 c.TenantId == tenantId &&
                 !c.IsDeleted &&
-                (c.Status == AppraisalCycleStatus.Open || c.Status == AppraisalCycleStatus.InProgress))
+                c.Status == AppraisalCycleStatus.Open)
             .OrderByDescending(c => c.UpdatedAt ?? c.CreatedAt)
             .Select(c => (Guid?)c.Id)
             .FirstOrDefaultAsync(ct);

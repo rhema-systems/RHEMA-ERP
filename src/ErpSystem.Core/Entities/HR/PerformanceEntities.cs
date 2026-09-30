@@ -633,17 +633,12 @@ public class AppraisalCycleTarget : TenantEntity
 	public Guid? PositionId { get; set; }
 	
 	/// <summary>
-	/// Preview of affected employee count (computed at creation time).
-	/// Updated automatically when exclusions are added/removed.
+	/// HR's own planning figure for the target, as typed. The live count is resolved by
+	/// AppraisalCycleTargetService through the cycle's scope rule; a computed property here subtracted the
+	/// exclusions from this figure, and read none of them unless they were loaded.
 	/// </summary>
 	public int EstimatedEmployeeCount { get; set; }
 
-	/// <summary>
-	/// Actual employee count after exclusions.
-	/// </summary>
-	[NotMapped]
-    public int ActiveEmployeeCount { get => EstimatedEmployeeCount - Exclusions.Count(e => e.IsActive); }
-	
 	/// <summary>
 	/// Optional notes about why this target was created or its purpose.
 	/// </summary>

@@ -80,6 +80,11 @@ settings as a policy reference; this document says which of them the code obeys.
 >   *"Since lane E-b"*: `RequireCalibration` — a session commits each appraisal once, and only the
 >   evaluation its panel sat over, so a commit run again undoes neither an upheld appeal nor a return;
 >   the grid says what a commit would take; a cancelled or deleted session releases its appraisals.
+> - **Lane E, slice E-c** (cycle rules, 2026-09-30) moved no verdict and changed no setting. What it
+>   changed around them: **a cycle's settings profile is fixed once the cycle is opened or has
+>   appraisals** — an edit could swap the rulebook under running appraisals — and the deadline reminders
+>   (`DeadlineRisk*` bands) now reach the cycle's scope as generation reads it, not leavers, inactive
+>   targets or anyone holding a post a template names.
 >
 > Line numbers below are as of 2026-09-17; lanes A and B1 rewrote much of `PerformanceAppraisalService.cs`,
 > and `AppraisalAdvanceHelpers.cs` is gone — its resolver is `AppraisalGates.cs`.

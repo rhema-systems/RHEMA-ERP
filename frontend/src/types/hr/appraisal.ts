@@ -23,13 +23,19 @@ import type { AuditFields } from './common';
 export type AppraisalType = 'Quarterly' | 'MidYear' | 'Annual' | 'OneOff' | 'Probation';
 
 /**
- * Draft → Open → InProgress → Closed. Only Draft can be deleted, and only a cycle that has
- * never been opened; a closed cycle refuses every edit.
+ * Draft → Open → Closed, moved only by the open and close actions. Only a cycle that has never been
+ * opened can be deleted; a closed cycle refuses every edit. `InProgress`, which only the demo seeder
+ * ever wrote, is gone (performance closure D-14).
  */
-export type AppraisalCycleStatus = 'Draft' | 'Open' | 'InProgress' | 'Closed';
+export type AppraisalCycleStatus = 'Draft' | 'Open' | 'Closed';
 
-/** What a target group selects. Each row names exactly one of the four scope ids. */
-export type AppraisalTargetType = 'OrganizationLevel' | 'OrganizationUnit' | 'Position' | 'Employee';
+/**
+ * What a target group selects: everyone in a position, in a unit and the units beneath it, or at a
+ * level. The server keeps the one scope id the type names and clears the others. There is no
+ * individual-employee target (D-44): one person is covered through their position, or left out by an
+ * exclusion.
+ */
+export type AppraisalTargetType = 'OrganizationLevel' | 'OrganizationUnit' | 'Position';
 
 /** Templates are drafted by a unit and signed off centrally before a cycle may use them. */
 export type TemplateApprovalStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected';
@@ -104,7 +110,6 @@ export const APPRAISAL_TYPE_OPTIONS = opts<AppraisalType>([
 export const APPRAISAL_CYCLE_STATUS_OPTIONS = opts<AppraisalCycleStatus>([
   ['Draft', 'Draft'],
   ['Open', 'Open'],
-  ['InProgress', 'In progress'],
   ['Closed', 'Closed'],
 ]);
 
@@ -112,7 +117,6 @@ export const APPRAISAL_TARGET_TYPE_OPTIONS = opts<AppraisalTargetType>([
   ['OrganizationLevel', 'Organisation level'],
   ['OrganizationUnit', 'Organisation unit'],
   ['Position', 'Position'],
-  ['Employee', 'Individual employee'],
 ]);
 
 export const PEER_NOMINATION_MODE_OPTIONS = opts<PeerNominationMode>([
@@ -509,6 +513,10 @@ export interface AppraisalCycle extends AuditFields, AppraisalCyclePhaseDates {
   closedDate?: string | null;
 }
 
+/**
+ * ⚠ No `status` — a cycle is always created as a Draft (performance closure E-c: the server stored the
+ * body's status, so a cycle created Open skipped the overlap check and stayed deletable).
+ */
 export interface CreateAppraisalCycle extends AppraisalCyclePhaseDates {
   cycleCode: string;
   cycleName: string;
@@ -517,16 +525,18 @@ export interface CreateAppraisalCycle extends AppraisalCyclePhaseDates {
   startDate: string;
   endDate: string;
   appraisalSettingsId: string;
-  status: AppraisalCycleStatus;
 }
 
 /**
- * ⚠ No `status` — the server ignores it on this path and it is off the type so nobody sends one.
- * A cycle moves between Draft / Open / Closed through the open, close and reopen endpoints, which
- * run the scope-overlap checks and stamp who acted. This form used to post a hardcoded `'Draft'`
+ * ⚠ No `status` — a cycle moves between Draft / Open / Closed through the open and close endpoints,
+ * which run the scope-overlap checks and stamp who acted. This form used to post a hardcoded `'Draft'`
  * on every save, so editing an Open cycle's phase dates quietly reverted it to Draft.
+ *
+ * Once the cycle is opened or has appraisals, the server refuses a change to the settings profile, the
+ * year or the type (422); once it has appraisals, to the start or end date. The name, the code and the
+ * phase deadlines stay editable.
  */
-export type UpdateAppraisalCycle = Omit<CreateAppraisalCycle, 'status'> & { id: string };
+export type UpdateAppraisalCycle = CreateAppraisalCycle & { id: string };
 
 /** What `POST {cycle}/generate-appraisals` reports back. */
 export interface GenerateAppraisalsResult {
@@ -540,7 +550,9 @@ export interface GenerateAppraisalsResult {
 
 /**
  * One rule saying who this cycle covers. `estimatedEmployeeCount` is HR's own planning
- * figure; `activeEmployeeCount` is what the rule actually resolves to right now.
+ * figure; `activeEmployeeCount` is what the rule actually resolves to right now — the staff it covers
+ * whom the cycle appraises, after the exclusions (0 for an inactive target). Until performance closure
+ * E-c it was the estimate itself.
  */
 export interface AppraisalCycleTarget extends AuditFields {
   tenantId: string;
@@ -570,7 +582,8 @@ export interface CreateAppraisalCycleTarget {
   isActive: boolean;
 }
 
-export type UpdateAppraisalCycleTarget = CreateAppraisalCycleTarget & { id: string };
+/** No cycle: a target stays in its cycle (the server copied the body's, E-c). */
+export type UpdateAppraisalCycleTarget = Omit<CreateAppraisalCycleTarget, 'appraisalCycleId'> & { id: string };
 
 /** Carves people back out of a target — a unit is in scope except these two positions. */
 export interface AppraisalCycleTargetExclusion extends AuditFields {
@@ -716,7 +729,6 @@ export interface TargetBreakdown {
   organizationLevelTargets: number;
   organizationUnitTargets: number;
   positionTargets: number;
-  individualEmployeeTargets: number;
 }
 
 export interface DeadlineRisk {

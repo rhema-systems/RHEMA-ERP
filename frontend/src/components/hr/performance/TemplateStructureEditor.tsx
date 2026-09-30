@@ -53,7 +53,7 @@ import type {
  * KPI may not appear twice anywhere in the template, in any section. That comes back as a 409
  * with a readable message.
  *
- * ⚠ When the template is assigned to an Open or InProgress cycle every write below is refused —
+ * ⚠ When the template is assigned to an Open cycle every write below is refused —
  * the form an appraisal was scored on must not change underneath it. Clone it instead. The
  * parent passes `readOnly` in that case so the affordances disappear rather than failing.
  */

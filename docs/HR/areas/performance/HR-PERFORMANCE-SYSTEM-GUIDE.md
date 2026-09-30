@@ -136,7 +136,7 @@ The whole demonstration lives inside these three records:
 
 | | |
 |---|---|
-| **Cycle** | `APC2026` — *Annual Performance Cycle 2026*, 1 Jan → 31 Dec 2026, status **In progress**, opened 2 Jan 2026 |
+| **Cycle** | `APC2026` — *Annual Performance Cycle 2026*, 1 Jan → 31 Dec 2026, status **Open**, opened 2 Jan 2026 |
 | **Settings profile** | *Standard Annual Appraisal* — self 10%, peers 20%, manager 70%; 2–4 peers; calibration, HR review, acknowledgment and appeals all ON |
 | **Form** | *Standard Employee Template 2026* — 2 sections (KPIs 60%, Core Competencies 40%), 4 scored items, 1 free-text question |
 | **Appraisals** | **107** generated — 73 Draft, 30 Active, 1 Governance, 3 Completed |
@@ -478,8 +478,10 @@ name = `DbSet<>` name; there is no prefix.
 
 Enums serialise as their **member names**, so what you see on screen is what the API expects back.
 
-**`AppraisalCycleStatus`** — `Draft` → `Open` → `InProgress` → `Closed`. Only a cycle that has never
-been opened can be deleted; a closed cycle refuses every edit.
+**`AppraisalCycleStatus`** — `Draft` → `Open` → `Closed`, moved only by the open and close actions (a
+cycle is always created as a Draft, whatever a request says). Only a cycle that has never been opened can
+be deleted; a closed cycle refuses every edit. *(`InProgress` went on 2026-09-30, performance closure
+D-14: only the demo seeder ever wrote it, and the demo cycle was moved to Open.)*
 
 **`AppraisalStatus`** (the record's own coarse lifecycle) — `Draft`, `Active`, `Governance`,
 `Appealed`, `Completed`, `Closed`. Everything between opening and HR sign-off is `Active`; the
@@ -855,7 +857,7 @@ This is the card. Everything below was verified on `ErpSystemDB_UAT` on 17 Septe
 
 | | |
 |---|---|
-| `APC2026` *Annual Performance Cycle 2026* | 1 Jan → 31 Dec 2026, **In progress**, opened 2 Jan 2026 |
+| `APC2026` *Annual Performance Cycle 2026* | 1 Jan → 31 Dec 2026, **Open**, opened 2 Jan 2026 |
 | Targets | **2** — *Managing Director's Office* (the whole tree) and *Internal Audit Department* (which reports to the Board, not to the MD) |
 | Exclusions | **1** — Nana Nyaho, the Managing Director: *"appraised by the Board of Directors under his contract of engagement"* |
 | Template assignments | **1** — Standard Employee Template 2026, priority 10 |
@@ -1720,8 +1722,9 @@ reach them through *My Self-Service*. That is a deliberate split: this hub is th
 ### 📖 What it is
 Every run of the appraisal process. A cycle is created as a **Draft**, given target groups and template
 assignments on its detail page, and then **opened**. Opening is checked against the other cycles of the
-same type and year: an employee may be covered by only one non-closed cycle at a time, and the refusal
-names the cycles that overlap.
+same type and year: an employee may be covered by only one open cycle at a time, and the refusal names
+the cycles that overlap (a Draft that overlaps is shown on the coverage preview as advice, and blocks
+nothing).
 
 Generation of the appraisal records themselves is deliberately a **separate step after opening**, so
 the coverage preview can be read first.
@@ -1741,7 +1744,7 @@ the coverage preview can be read first.
 
 | Cycle | Name | Type | Year | Period | Settings | Status |
 |---|---|---|---|---|---|---|
-| **APC2026** | Annual Performance Cycle 2026 | Annual | 2026 | 2026-01-01 → 2026-12-31 | Standard Annual Appraisal | **In progress** |
+| **APC2026** | Annual Performance Cycle 2026 | Annual | 2026 | 2026-01-01 → 2026-12-31 | Standard Annual Appraisal | **Open** |
 
 **The New cycle dialog** — *"Phase dates are all optional — a phase with no deadline never appears on
 the calendar or in reminders."*
@@ -1774,8 +1777,8 @@ the calendar or in reminders."*
 | Element | Endpoint | Note |
 |---|---|---|
 | List / tiles | `GET api/AppraisalCycle` | |
-| Create | `POST api/AppraisalCycle` | always created as **Draft**; Open and Closed are separate endpoints |
-| Edit | `PUT api/AppraisalCycle/{id}` | **the payload deliberately carries no `status`** — it used to post a hard-coded `'Draft'`, so editing an open cycle's phase dates quietly reverted it |
+| Create | `POST api/AppraisalCycle` | always created as **Draft** — a status in the request is ignored (it was stored until 2026-09-30); Open and Closed are separate endpoints |
+| Edit | `PUT api/AppraisalCycle/{id}` | **the payload deliberately carries no `status`** — it used to post a hard-coded `'Draft'`, so editing an open cycle's phase dates quietly reverted it. Once a cycle is opened or has appraisals, its **settings profile, year and type** are fixed (the dialog greys the type and profile); once it has appraisals, its **start and end dates** — a change is refused, 422, saying why. Name, code and phase deadlines stay editable |
 | Delete | `DELETE api/AppraisalCycle/{id}` | only a cycle that has never been opened; **`HR.Performance.Admin`** |
 
 ### ⚠ Known gaps
@@ -1806,7 +1809,7 @@ Opening the cycle sits before all of that and is checked separately.
 
 **Title:** `APC2026 · Annual Performance Cycle 2026`
 **Subtitle:** `Annual · 2026-01-01 → 2026-12-31 · Standard Annual Appraisal`
-**Status badge:** *In progress*
+**Status badge:** *Open*
 
 **Buttons**, which change with status:
 
@@ -1841,8 +1844,8 @@ rule."*
 
 | Type | Scope | Estimated | Resolves to | Status |
 |---|---|---|---|---|
-| Organisation unit | **Managing Director's Office** | 0 | *(live count)* | Active |
-| Organisation unit | **Internal Audit Department** | 0 | *(live count)* | Active |
+| Organisation unit | **Managing Director's Office** | 0 | **96** | Active |
+| Organisation unit | **Internal Audit Department** | 0 | **6** | Active |
 
 Each row has an **Exclusions…** action, which opens a panel below. The MD's Office target carries
 **one** exclusion:
@@ -1850,10 +1853,20 @@ Each row has an **Exclusions…** action, which opens a panel below. The MD's Of
 > **Excludes:** Nana Nyaho · **Reason:** *"The Managing Director is appraised by the Board of Directors
 > under his contract of engagement, not through the corporate appraisal cycle."*
 
-The target dialog: **Target type** (Organisation level · Organisation unit · Position · Employee),
-an org-unit picker, a position picker, **Estimated headcount** *("Your planning figure — the real count
-is resolved live")*, **Notes**, **Active** *("Inactive target groups are ignored entirely, including by
-the coverage preview")*.
+The target dialog: **Target type** (Organisation level · Organisation unit · Position), an org-unit
+picker (level, then unit), a position picker, **Estimated headcount** *("Your planning figure — the real
+count is resolved live")*, **Notes**, **Active** *("Inactive target groups are ignored entirely, including
+by the coverage preview")*. The dialog's hint — *"Pick the scope that matches the target type — the other
+two are ignored"* — is what the server does: it keeps the scope the type names and clears the others.
+
+> **Changed 2026-09-30** (performance closure lane E, slice E-c). **Resolves to** is resolved live: the
+> target's active staff whom the cycle appraises, after the exclusions — 96 is the MD's Office less the
+> MD, and 96 + 6 is the 102 the cycle appraises. It showed the typed estimate (0 here), whatever the
+> guide said. An inactive target reads 0. **A unit target can be made from this dialog**: the picker sends
+> the level it was chosen under beside the unit, which the server refused (400). The *Individual employee*
+> type is gone — no column could hold one, and it covered nobody; one person is covered through their
+> position, or left out by an exclusion. A target stays in its cycle, one per scope, and a closed cycle's
+> targets and exclusions no longer change.
 
 The exclusion dialog: **Employee** picker, **Position**, **Organisation unit**, **Reason** *(required)*,
 **Active**.
@@ -1877,8 +1890,10 @@ Three cards:
   **blocks opening**; a draft one is advisory. *Absent here: there is only one cycle.*
 * **By template** — Template · Scope · Priority · Employees. One row, carrying everybody.
 * **By employee** — the full table: **Employee · Position · Unit · Template · Matched on · Status**,
-  where status is `Covered` / `NoTemplate` / `Conflict` / `Excluded`. Nana Nyaho appears as
-  **Excluded**, with the exclusion reason on hover.
+  where status is `Covered` / `NoTemplate` / `Conflict` / `Excluded`, in name order with the excluded
+  last (since 2026-09-30; the order was whatever the database returned). Nana Nyaho appears as
+  **Excluded**, with the exclusion reason on hover. The preview reads the same scope rule generation
+  does, so what it lists is who a generation would appraise.
 
 ### 👁 Tab 5 — Progress & alerts
 * **Completion** — four bars: self-evaluation, peer evaluation, manager evaluation, HR review, each
@@ -1888,7 +1903,9 @@ Three cards:
   showing phase, date, relative time and a severity badge (or **Overdue**).
 * **Bottlenecks** — where the cycle is actually stuck, with a count per category.
 * **Participation** — Targeted · Excluded · Not started self-evaluation · Managers over workload ·
-  and the target breakdown by level / unit / position / individual.
+  and the target breakdown by level / unit / position. *Targeted* is the count of appraisals (107);
+  *Excluded* is how many of the targets' staff an exclusion leaves out — **1**, the MD (it read 0 until
+  2026-09-30, slice E-c).
 
 ### 👁 Tab 6 — Interim reviews
 HR's org-wide view of the cycle's checkpoints. Four tiles — **Checkpoints 107**, **Not started 102**,
@@ -1960,7 +1977,7 @@ order."* Columns: **Date · Event · Phase · Kind**, where Kind is *Deadline* o
 | Targets | `GET/POST/PUT/DELETE …/{cycleId}/targets[/{id}]` | `AppraisalCycleTargets` |
 | Exclusions | `…/api/AppraisalCycleTarget/{targetId}/exclusions` | `AppraisalCycleTargetExclusions` |
 | Template assignments | `api/AppraisalCycleTemplates` (`by-cycle`, `bulk-assign`, `resolve/{cycle}/{employee}`) | `AppraisalCycleTemplates` |
-| **Open cycle** | `POST …/{id}/open` | 400 when another non-closed cycle of the same type and year covers any of the same employees — **and the message names them**. Also notifies everyone in scope |
+| **Open cycle** | `POST …/{id}/open` | 400 when another open cycle of the same type and year covers any of the same employees — **and the message names them**. Also notifies everyone in scope: the people a generation would appraise (since 2026-09-30 — it also reached leavers, inactive targets and anyone holding a post a template names) |
 | **Generate appraisals** | `POST …/{id}/generate-appraisals` | creates `PerformanceAppraisals`, **takes the criterion snapshot**, creates the self and manager evaluator records and the review events. **Skips anyone who already has an appraisal in the cycle** |
 | **Send reminders** | `POST …/{id}/deadline-reminders` | repeat-safe — an identical unread reminder is skipped rather than duplicated |
 | **Close cycle** | `POST …/{id}/close` | |
@@ -1979,7 +1996,8 @@ regenerating will not fix them; only removing and regenerating will, and removal
 **P-14.** Q1 and Q3 review dates are unset on this cycle, so those rows read an em dash on the Overview
 and never appear on the calendar.
 **P-15.** *Estimated headcount* on both targets is 0 — it is HR's own planning figure and nobody filled
-it in. The *Resolves to* column beside it is the real, live number.
+it in. The *Resolves to* column beside it is the real, live number (since 2026-09-30, slice E-c; before
+that it repeated the estimate).
 
 ---
 
@@ -5391,7 +5409,7 @@ Every route in the module, its gate, and who should open it.
     she.manager  Josephine Appiah  TDC/00071   HSE Supervisor
     auditor      Yakubu Aryee      TDC/00004   Chief Internal Auditor
 
-  THE CYCLE    APC2026 · Annual Performance Cycle 2026 · 1 Jan – 31 Dec · In progress
+  THE CYCLE    APC2026 · Annual Performance Cycle 2026 · 1 Jan – 31 Dec · Open
   THE POLICY   Standard Annual Appraisal · self 10 / peers 20 / manager 70 · 2–4 peers
                calibration ON · HR review ON · acknowledgment ON · appeals ON (7 days)
                goals 3–6 · check-ins ON · private journal ON · auto-advance OFF

@@ -883,7 +883,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     // ─── Private Validation Helpers ───────────────────────────────────────
 
     /// <summary>
-    /// Throws if the template is assigned to any Open or InProgress appraisal cycle.
+    /// Throws if the template is assigned to any Open appraisal cycle.
     /// All structural edits must be made on a clone while the original is in use.
     /// </summary>
     private async Task AssertTemplateNotInActiveCycleAsync(Guid templateId, CancellationToken cancellationToken = default)
@@ -898,12 +898,11 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         if (template == null) return;
 
         var inActiveCycle = template.CycleAssignments
-            .Any(ct => ct.AppraisalCycle.Status == AppraisalCycleStatus.Open
-                    || ct.AppraisalCycle.Status == AppraisalCycleStatus.InProgress);
+            .Any(ct => ct.AppraisalCycle.Status == AppraisalCycleStatus.Open);
 
         if (inActiveCycle)
             throw new InvalidOperationException(
-                "This template cannot be modified because it is assigned to an Open or InProgress appraisal cycle. " +
+                "This template cannot be modified because it is assigned to an Open appraisal cycle. " +
                 "Use CloneAsync to create a new version for modifications.");
     }
 

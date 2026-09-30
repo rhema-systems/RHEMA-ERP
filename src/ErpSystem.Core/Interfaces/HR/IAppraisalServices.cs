@@ -307,6 +307,7 @@ public interface IAppraisalCycleService
     Task<AppraisalCycleProgressDto> GetCycleProgressAsync(Guid cycleId, CancellationToken cancellationToken = default);
     /// <summary>Builds a read-only calendar of activity dates (deadlines, windows, review events, check-ins) for a cycle.</summary>
     Task<IEnumerable<AppraisalCalendarEventDto>> GetCalendarAsync(Guid cycleId, CancellationToken cancellationToken = default);
+    /// <summary>Who the cycle appraises: the active staff its active targets cover, less its exclusions — generation's scope.</summary>
     Task<IEnumerable<Guid>> GetEmployeesInScopeAsync(Guid cycleId, CancellationToken cancellationToken = default);
     Task<(int Created, int EvaluationsCreated, int ReviewEventsCreated)> GenerateAppraisalsAsync(Guid cycleId, Guid generatedById, CancellationToken cancellationToken = default);
 
@@ -317,12 +318,9 @@ public interface IAppraisalCycleService
     /// Returns how many notifications were written.
     /// </summary>
     Task<int> SendDeadlineRemindersAsync(Guid cycleId, CancellationToken cancellationToken = default);
-    
-    // AppraisalCycleTarget operations
-    Task<AppraisalCycleTargetDto> AddCycleTargetAsync(Guid cycleId, CreateAppraisalCycleTargetDto createDto, CancellationToken cancellationToken = default);
-    Task<IEnumerable<AppraisalCycleTargetDto>> GetCycleTargetsAsync(Guid cycleId, CancellationToken cancellationToken = default);
-    Task<AppraisalCycleTargetDto> UpdateCycleTargetAsync(Guid cycleId, UpdateAppraisalCycleTargetDto updateDto, CancellationToken cancellationToken = default);
-    Task<bool> RemoveCycleTargetAsync(Guid cycleId, Guid targetId, CancellationToken cancellationToken = default);
+
+    // A cycle's targets are written through IAppraisalCycleTargetService, from both route sets
+    // (performance closure E-c: this service kept a second copy of the target writes).
 }
 
 #endregion Appraisal Cycle
@@ -335,8 +333,10 @@ public interface IAppraisalCycleTargetService
     Task<IEnumerable<AppraisalCycleTargetDto>> GetByCycleIdAsync(Guid cycleId, CancellationToken cancellationToken = default);
     Task<IEnumerable<AppraisalCycleTargetDto>> GetByTargetTypeAsync(AppraisalTargetType targetType, CancellationToken cancellationToken = default);
     Task<AppraisalCycleTargetDto> CreateAsync(CreateAppraisalCycleTargetDto createDto, CancellationToken cancellationToken = default);
-    Task<AppraisalCycleTargetDto> UpdateAsync(UpdateAppraisalCycleTargetDto updateDto, CancellationToken cancellationToken = default);
-    Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>Edits a target in place; through a cycle's nested route, <paramref name="cycleId"/> is that cycle, and another cycle's target is not found.</summary>
+    Task<AppraisalCycleTargetDto> UpdateAsync(UpdateAppraisalCycleTargetDto updateDto, Guid? cycleId = null, CancellationToken cancellationToken = default);
+    /// <summary>Removes a target; through a cycle's nested route, <paramref name="cycleId"/> is that cycle, and another cycle's target is not found.</summary>
+    Task<bool> DeleteAsync(Guid id, Guid? cycleId = null, CancellationToken cancellationToken = default);
     Task<bool> ValidateTargetAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Exclusion operations

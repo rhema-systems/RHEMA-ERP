@@ -80,7 +80,7 @@ import { OrganizationUnitPickerField } from '@/components/hr/common/Organization
  *   Generate  — only once coverage is clean, because generation refuses on a gap or a conflict.
  *
  * Opening the cycle sits before all of that and is checked separately: an employee may be
- * covered by only one non-closed cycle of the same type and year, and the refusal names the
+ * covered by only one open cycle of the same type and year, and the refusal names the
  * cycles that overlap.
  */
 const day = (value?: string | null) => value?.slice(0, 10) ?? '—';
@@ -527,7 +527,6 @@ export default function AppraisalCycleDetailPage() {
             update={(cycleId, targetId, values) =>
               appraisalCycleService.updateTarget(cycleId, targetId, {
                 id: targetId,
-                appraisalCycleId: cycleId,
                 targetType: values.targetType as AppraisalTargetType,
                 organizationLevelId: values.organizationLevelId || null,
                 organizationUnitId: values.organizationUnitId || null,
@@ -1088,10 +1087,6 @@ export default function AppraisalCycleDetailPage() {
                   <InfoRow label="Level targets" value={progress.targetBreakdown.organizationLevelTargets} />
                   <InfoRow label="Unit targets" value={progress.targetBreakdown.organizationUnitTargets} />
                   <InfoRow label="Position targets" value={progress.targetBreakdown.positionTargets} />
-                  <InfoRow
-                    label="Individual targets"
-                    value={progress.targetBreakdown.individualEmployeeTargets}
-                  />
                 </CardContent>
               </Card>
             </>
@@ -1166,7 +1161,7 @@ export default function AppraisalCycleDetailPage() {
         }
         description={
           action === 'open'
-            ? 'Everyone in scope is notified that the cycle is open. Opening is refused if another non-closed cycle of the same type and year already covers any of them.'
+            ? 'Everyone in scope is notified that the cycle is open. Opening is refused if another open cycle of the same type and year already covers any of them.'
             : action === 'close'
               ? 'A closed cycle refuses every further edit. This cannot be undone.'
               : action === 'generate'

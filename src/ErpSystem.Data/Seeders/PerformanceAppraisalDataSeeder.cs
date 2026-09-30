@@ -303,7 +303,8 @@ public sealed class PerformanceAppraisalDataSeeder
         }
         await _context.SaveChangesAsync(cancellationToken);
 
-        // 6. Appraisal Cycle (2026 annual cycle, currently in progress at mid-year)
+        // 6. Appraisal Cycle (the 2026 annual cycle, open since January). Open, not InProgress: that status
+        // is gone (performance closure D-14), and this seeder was its only writer.
         var cycle = new AppraisalCycle
         {
             TenantId = tenantId,
@@ -314,7 +315,7 @@ public sealed class PerformanceAppraisalDataSeeder
             StartDate = new DateOnly(2026, 1, 1),
             EndDate = new DateOnly(2026, 12, 31),
             AppraisalSettingsId = settings.Id,
-            Status = AppraisalCycleStatus.InProgress,
+            Status = AppraisalCycleStatus.Open,
             GoalSettingOpenDate = new DateOnly(2026, 1, 5),
             GoalSettingDeadline = new DateOnly(2026, 1, 31),
             MidYearOpenDate = new DateOnly(2026, 6, 1),

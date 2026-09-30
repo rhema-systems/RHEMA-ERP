@@ -1320,7 +1320,9 @@ public class CreateAppraisalCycleDto : CreateDtoBase
     [Required]
     public Guid AppraisalSettingsId { get; set; }
 
-    public AppraisalCycleStatus Status { get; set; } = AppraisalCycleStatus.Draft;
+    // Status is deliberately absent (performance closure E-c): a cycle is created as a Draft. The body's
+    // status was stored as sent, so a cycle created Open was never overlap-checked, carried no opened
+    // date and stayed deletable.
 
     public DateOnly? GoalSettingOpenDate { get; set; }
     public DateOnly? GoalSettingDeadline { get; set; }
@@ -1419,7 +1421,9 @@ public class AppraisalCycleTargetDto : BaseDto
     public string? OrganizationUnitName { get; set; }
     public Guid? PositionId { get; set; }
     public string? PositionTitle { get; set; }
+    /// <summary>HR's own planning figure, as typed.</summary>
     public int EstimatedEmployeeCount { get; set; }
+    /// <summary>How many of the target's staff the cycle appraises, resolved live; 0 for an inactive target.</summary>
     public int ActiveEmployeeCount { get; set; }
     public string? Notes { get; set; }
     public bool IsActive { get; set; }
@@ -1448,11 +1452,13 @@ public class CreateAppraisalCycleTargetDto : CreateDtoBase
     public bool IsActive { get; set; } = true;
 }
 
+/// <summary>
+/// A target's edit. No cycle (performance closure E-c): a target stays in its cycle — the body's cycle id
+/// was copied, so an edit moved a target into any cycle, even another tenant's, and it vanished from its
+/// own.
+/// </summary>
 public class UpdateAppraisalCycleTargetDto : UpdateDtoBase
 {
-    [Required]
-    public Guid AppraisalCycleId { get; set; }
-
     [Required]
     public AppraisalTargetType TargetType { get; set; }
 
@@ -1650,7 +1656,6 @@ public class TargetBreakdownDto
     public int OrganizationLevelTargets { get; set; }
     public int OrganizationUnitTargets { get; set; }
     public int PositionTargets { get; set; }
-    public int IndividualEmployeeTargets { get; set; }
 }
 
 public class DeadlineRiskDto

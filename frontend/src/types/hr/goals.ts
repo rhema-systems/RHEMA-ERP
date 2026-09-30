@@ -104,7 +104,8 @@ export const GOAL_PROGRESS_STATUS_OPTIONS = opts<GoalProgressStatus>([
 // ── Appraisal cycle (read-only here) ─────────────────────────────────────────────
 // Cycles themselves are a later slice of area 5; the goal screens only need to pick one.
 
-export type AppraisalCycleStatus = 'Draft' | 'Open' | 'InProgress' | 'Closed' | 'Archived';
+/** The API's statuses (`types/hr/appraisal.ts` has the same union); `InProgress` went with D-14, and `Archived` never existed. */
+export type AppraisalCycleStatus = 'Draft' | 'Open' | 'Closed';
 
 export interface AppraisalCycleOption extends AuditFields {
   cycleCode: string;

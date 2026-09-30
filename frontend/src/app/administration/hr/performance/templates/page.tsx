@@ -49,7 +49,7 @@ import { OrganizationUnitPickerField } from '@/components/hr/common/Organization
  *    total 100 within each section, and every item needs grade bands. The template detail page
  *    shows all three live.
  *  • **A template in a live cycle is frozen.** Every structural edit is refused once it is
- *    assigned to an Open or InProgress cycle. Copy it and change the copy.
+ *    assigned to an Open cycle. Copy it and change the copy.
  */
 const templateSchema = z.object({
   templateName: z.string().min(1, 'Required').max(100),

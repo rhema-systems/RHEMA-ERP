@@ -416,7 +416,7 @@ class AppraisalCycleService {
   // ── Lifecycle ────────────────────────────────────────────────────────────────────
 
   /**
-   * 400 when another non-closed cycle of the same type and year already covers any of these
+   * 400 when another open cycle of the same type and year already covers any of these
    * employees — the message names the overlapping cycles. Also raises the "cycle is open"
    * notification to everyone in scope.
    */
