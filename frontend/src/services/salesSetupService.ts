@@ -38,9 +38,9 @@ export interface SalesSaleableItemDto {
   commercialStatus?: string;
   customerId?: string;
   customerName?: string;
-  estimatedValue?: number;
+  estimatedValue?: number | null;
   currency?: string;
-  areaSquareMeters?: number;
+  areaSquareMeters?: number | null;
   propertyReference?: string;
   canCreateSalesOrder: boolean;
   canCreateSalesAgreement: boolean;
@@ -61,9 +61,9 @@ export interface SalesSaleableItemDto {
   locationId?: string;
   locationName?: string;
   unitOfMeasure?: string;
-  currentQuantity?: number;
-  availableQuantity?: number;
-  allocatedQuantity?: number;
+  currentQuantity?: number | null;
+  availableQuantity?: number | null;
+  allocatedQuantity?: number | null;
   shouldCreateSalesAllocation: boolean;
   activeAllocationId?: string;
   activeAllocationStatus?: string;
