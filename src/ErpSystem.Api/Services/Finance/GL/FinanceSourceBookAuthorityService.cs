@@ -77,6 +77,8 @@ public sealed partial class FinanceSourceBookAuthorityService : IFinanceSourceBo
         var retry = versions.SingleOrDefault(item => item.SourceWorkflowInstanceId == source.WorkflowInstanceId);
         if (retry is not null)
         {
+            if (retry.Id != versions[0].Id)
+                throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_STALE: only the latest governed source authority can be retried.");
             if (retry.SupersedesAuthorityId != predecessor.Id)
                 throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_LINEAGE_MISMATCH: retry has another predecessor.");
             await ValidateFrozenRequestAsync(retry, source, cancellationToken);

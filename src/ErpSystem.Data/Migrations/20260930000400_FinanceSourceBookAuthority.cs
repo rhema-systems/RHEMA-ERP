@@ -17,6 +17,9 @@ public partial class FinanceSourceBookAuthority : Migration
                OR OBJECT_ID(N'[dbo].[FinanceSourceBookAuthorities]', N'U') IS NOT NULL
                 THROW 51000, 'SOURCE_BOOK_AUTHORITY_SCHEMA_EXISTS: reconcile the existing schema before applying this migration.', 1;
 
+            ALTER TABLE [dbo].[WorkflowInstances]
+                ADD CONSTRAINT [AK_WorkflowInstances_TenantId_Id] UNIQUE ([TenantId],[Id]);
+
             CREATE TABLE [dbo].[FinanceSourceBookAuthorities]
             (
                 [Id] uniqueidentifier NOT NULL,
@@ -67,7 +70,7 @@ public partial class FinanceSourceBookAuthority : Migration
                 CONSTRAINT [FK_FinanceSourceBookAuthorities_Tenants_TenantId] FOREIGN KEY ([TenantId]) REFERENCES [dbo].[Tenants]([Id]),
                 CONSTRAINT [FK_FinanceSourceBookAuthorities_AccountingBooks_TenantId_AccountingBookId] FOREIGN KEY ([TenantId],[AccountingBookId]) REFERENCES [dbo].[AccountingBooks]([TenantId],[Id]),
                 CONSTRAINT [FK_FinanceSourceBookAuthorities_FinanceSourceBookAuthorities_TenantId_SupersedesAuthorityId] FOREIGN KEY ([TenantId],[SupersedesAuthorityId]) REFERENCES [dbo].[FinanceSourceBookAuthorities]([TenantId],[Id]),
-                CONSTRAINT [FK_FinanceSourceBookAuthorities_WorkflowInstances_SourceWorkflowInstanceId] FOREIGN KEY ([SourceWorkflowInstanceId]) REFERENCES [dbo].[WorkflowInstances]([Id]),
+                CONSTRAINT [FK_FinanceSourceBookAuthorities_WorkflowInstances_TenantId_SourceWorkflowInstanceId] FOREIGN KEY ([TenantId],[SourceWorkflowInstanceId]) REFERENCES [dbo].[WorkflowInstances]([TenantId],[Id]),
                 CONSTRAINT [FK_FinanceSourceBookAuthorities_FinancePostingEvents_TenantId_OriginalFinancePostingEventId] FOREIGN KEY ([TenantId],[OriginalFinancePostingEventId]) REFERENCES [dbo].[FinancePostingEvents]([TenantId],[Id]),
                 CONSTRAINT [FK_FinanceSourceBookAuthorities_JournalEntries_TenantId_OriginalJournalEntryId] FOREIGN KEY ([TenantId],[OriginalJournalEntryId]) REFERENCES [dbo].[JournalEntries]([TenantId],[Id])
             );
@@ -78,7 +81,7 @@ public partial class FinanceSourceBookAuthority : Migration
             CREATE UNIQUE INDEX [IX_FinanceSourceBookAuthorities_PostingEvent] ON [dbo].[FinanceSourceBookAuthorities] ([TenantId],[OriginalFinancePostingEventId]) WHERE [OriginalFinancePostingEventId] IS NOT NULL;
             CREATE UNIQUE INDEX [IX_FinanceSourceBookAuthorities_Journal] ON [dbo].[FinanceSourceBookAuthorities] ([TenantId],[OriginalJournalEntryId]) WHERE [OriginalJournalEntryId] IS NOT NULL;
             CREATE INDEX [IX_FinanceSourceBookAuthorities_AccountingBookId] ON [dbo].[FinanceSourceBookAuthorities] ([TenantId],[AccountingBookId]);
-            CREATE INDEX [IX_FinanceSourceBookAuthorities_Workflow] ON [dbo].[FinanceSourceBookAuthorities] ([SourceWorkflowInstanceId]);
+            CREATE INDEX [IX_FinanceSourceBookAuthorities_Tenant_Workflow] ON [dbo].[FinanceSourceBookAuthorities] ([TenantId],[SourceWorkflowInstanceId]);
 
             CREATE TABLE [dbo].[FinanceSourceBookAuthorityOrigins]
             (
@@ -150,15 +153,37 @@ public partial class FinanceSourceBookAuthority : Migration
                 IF EXISTS
                 (
                     SELECT 1 FROM inserted i
-                    LEFT JOIN [dbo].[WorkflowInstances] w ON w.Id=i.SourceWorkflowInstanceId
+                    LEFT JOIN [dbo].[WorkflowInstances] w ON w.Id=i.SourceWorkflowInstanceId AND w.TenantId=i.TenantId
                     LEFT JOIN [dbo].[WorkflowEntityTypes] wt ON wt.Id=w.EntityTypeId AND wt.TenantId=w.TenantId
+                    OUTER APPLY
+                    (
+                        SELECT MAX(a.ProcessedDate) AS FinalProcessedDate
+                        FROM [dbo].[WorkflowStepInstances] s
+                        JOIN [dbo].[WorkflowApprovals] a ON a.StepInstanceId=s.Id AND a.TenantId=s.TenantId
+                        WHERE s.TenantId=i.TenantId AND s.WorkflowInstanceId=w.Id
+                          AND s.IsDeleted=0 AND a.IsDeleted=0 AND s.Status=2 AND s.CompletedDate IS NOT NULL
+                          AND a.Status=1 AND a.ProcessedById IS NOT NULL AND a.ProcessedDate IS NOT NULL
+                          AND a.ProcessedDate<=s.CompletedDate AND a.ProcessedDate<=w.CompletedDate
+                    ) latestApproval
+                    OUTER APPLY
+                    (
+                        SELECT COUNT_BIG(*) AS FinalApprovalCount,
+                            SUM(CASE WHEN a.ProcessedById=w.InitiatedById THEN 1 ELSE 0 END) AS InitiatorApprovalCount
+                        FROM [dbo].[WorkflowStepInstances] s
+                        JOIN [dbo].[WorkflowApprovals] a ON a.StepInstanceId=s.Id AND a.TenantId=s.TenantId
+                        WHERE s.TenantId=i.TenantId AND s.WorkflowInstanceId=w.Id
+                          AND s.IsDeleted=0 AND a.IsDeleted=0 AND s.Status=2 AND s.CompletedDate IS NOT NULL
+                          AND a.Status=1 AND a.ProcessedById IS NOT NULL AND a.ProcessedDate=latestApproval.FinalProcessedDate
+                          AND a.ProcessedDate<=s.CompletedDate AND a.ProcessedDate<=w.CompletedDate
+                    ) finalApproval
                     WHERE i.SourceWorkflowInstanceId IS NOT NULL
-                      AND (w.Id IS NULL OR w.TenantId<>i.TenantId OR w.EntityId<>i.SourceDocumentId OR w.IsDeleted=1
+                      AND (w.Id IS NULL OR w.EntityId<>i.SourceDocumentId OR w.IsDeleted=1
                         OR wt.Id IS NULL OR wt.IsDeleted=1 OR wt.IsActive=0
                         OR UPPER(LTRIM(RTRIM(wt.Code))) COLLATE Latin1_General_100_BIN2<>i.SourceDocumentType COLLATE Latin1_General_100_BIN2
                         OR (i.OriginalFinancePostingEventId IS NULL AND i.FreezeStage=N'SUBMITTED' AND w.Status NOT IN (0,1,6))
-                        OR (i.OriginalFinancePostingEventId IS NULL AND i.FreezeStage IN (N'AUTHORIZED',N'PRE_POST') AND (w.Status<>2 OR w.CompletedDate IS NULL))
-                        OR (i.OriginalFinancePostingEventId IS NOT NULL AND (w.Status<>2 OR w.CompletedDate IS NULL)))
+                        OR ((i.OriginalFinancePostingEventId IS NOT NULL OR i.FreezeStage IN (N'AUTHORIZED',N'PRE_POST'))
+                            AND (w.Status<>2 OR w.CompletedDate IS NULL OR finalApproval.FinalApprovalCount<>1
+                                OR COALESCE(finalApproval.InitiatorApprovalCount,0)<>0)))
                 ) THROW 51005, 'SOURCE_BOOK_AUTHORITY_WORKFLOW_EVIDENCE_MISMATCH', 1;
 
                 IF EXISTS
@@ -245,6 +270,7 @@ public partial class FinanceSourceBookAuthority : Migration
             DROP TRIGGER IF EXISTS [dbo].[TR_FinanceSourceBookAuthorities_Evidence];
             DROP TABLE [dbo].[FinanceSourceBookAuthorityOrigins];
             DROP TABLE [dbo].[FinanceSourceBookAuthorities];
+            ALTER TABLE [dbo].[WorkflowInstances] DROP CONSTRAINT [AK_WorkflowInstances_TenantId_Id];
             """);
     }
 }

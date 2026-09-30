@@ -22,6 +22,16 @@ public sealed class FinanceSourceBookAuthorityMigrationTests
         authority!.GetKeys().Should().Contain(key => key.Properties.Select(item => item.Name)
             .SequenceEqual(new[] { nameof(FinanceSourceBookAuthority.TenantId), nameof(FinanceSourceBookAuthority.Id) }));
         authority.GetIndexes().Should().Contain(index => index.IsUnique && index.GetFilter() == "[OriginalJournalEntryId] IS NOT NULL");
+        authority.GetIndexes().Should().Contain(index => index.Properties.Select(item => item.Name)
+            .SequenceEqual(new[] { nameof(FinanceSourceBookAuthority.TenantId), nameof(FinanceSourceBookAuthority.SourceWorkflowInstanceId) }));
+        authority.GetForeignKeys().Should().Contain(foreignKey =>
+            foreignKey.Properties.Select(item => item.Name).SequenceEqual(new[]
+            {
+                nameof(FinanceSourceBookAuthority.TenantId), nameof(FinanceSourceBookAuthority.SourceWorkflowInstanceId)
+            }) && foreignKey.PrincipalKey.Properties.Select(item => item.Name).SequenceEqual(new[]
+            {
+                nameof(FinanceSourceBookAuthority.TenantId), nameof(FinanceSourceBookAuthority.Id)
+            }));
         authority.GetDeclaredTriggers().Select(item => item.ModelName).Should().Contain([
             "TR_FinanceSourceBookAuthorities_ImmutableBinding",
             "TR_FinanceSourceBookAuthorities_NoDelete",
@@ -39,9 +49,17 @@ public sealed class FinanceSourceBookAuthorityMigrationTests
             .And.Contain("AK_FinanceSourceBookAuthorities_TenantId_Id")
             .And.Contain("IX_FinanceSourceBookAuthorities_SourceVersion")
             .And.Contain("IX_FinanceSourceBookAuthorities_SourceWorkflow")
+            .And.Contain("AK_WorkflowInstances_TenantId_Id")
+            .And.Contain("FK_FinanceSourceBookAuthorities_WorkflowInstances_TenantId_SourceWorkflowInstanceId")
+            .And.Contain("IX_FinanceSourceBookAuthorities_Tenant_Workflow")
             .And.Contain("CK_FinanceSourceBookAuthorities_Lineage")
             .And.Contain("TR_FinanceSourceBookAuthorities_ImmutableBinding")
             .And.Contain("TR_FinanceSourceBookAuthorities_Evidence")
+            .And.Contain("[dbo].[WorkflowStepInstances]")
+            .And.Contain("[dbo].[WorkflowApprovals]")
+            .And.Contain("finalApproval.FinalApprovalCount<>1")
+            .And.Contain("finalApproval.InitiatorApprovalCount")
+            .And.Contain("a.ProcessedDate<=w.CompletedDate")
             .And.Contain("TR_FinanceSourceBookAuthorityOrigins_AppendOnly")
             .And.Contain("TR_FinanceSourceBookAuthorityOrigins_Evidence")
             .And.Contain("SOURCE_BOOK_AUTHORITY_WORKFLOW_EVIDENCE_MISMATCH")

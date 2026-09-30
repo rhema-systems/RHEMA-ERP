@@ -211,9 +211,58 @@ public sealed class FinanceSourceBookAuthorityServiceTests
         await beforeApproval.Should().ThrowAsync<InvalidOperationException>().WithMessage("*WORKFLOW_NOT_APPROVED*");
         pending.Status = WorkflowInstanceStatus.Completed;
         pending.CompletedDate = DateTime.UtcNow;
+        AddWorkflowApprovalEvidence(db, state, pending, Guid.NewGuid(),
+            pending.CompletedDate.Value.AddSeconds(-1));
         await db.SaveChangesAsync();
         (await service.RequireForPostingAsync(Request(state, workflowId: pending.Id,
             stage: FinanceSourceBookAuthorityFreezeStages.PrePost))).AuthorityId.Should().Be(authority.AuthorityId);
+    }
+
+    [Fact]
+    public async Task CompletedWorkflow_RequiresUniqueTimelyApprovedCheckerEvidence()
+    {
+        await using var db = Context();
+        var state = await SeedAsync(db);
+        var workflow = Workflow(state, WorkflowInstanceStatus.InProgress);
+        db.WorkflowInstances.Add(workflow);
+        await db.SaveChangesAsync();
+        var service = Service(db, state);
+        await service.FreezeInitialPrimaryAsync(Request(state, workflowId: workflow.Id,
+            stage: FinanceSourceBookAuthorityFreezeStages.Submitted));
+        workflow.Status = WorkflowInstanceStatus.Completed;
+        workflow.CompletedDate = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        var absent = () => service.RequireForPostingAsync(Request(state, workflowId: workflow.Id));
+        await absent.Should().ThrowAsync<InvalidOperationException>().WithMessage("*WORKFLOW_APPROVAL_REQUIRED*");
+
+        var completion = workflow.CompletedDate.Value;
+        var evidence = AddWorkflowApprovalEvidence(db, state, workflow, Guid.NewGuid(),
+            completion.AddSeconds(-1), WorkflowApprovalStatus.Rejected);
+        await db.SaveChangesAsync();
+        var rejected = () => service.RequireForPostingAsync(Request(state, workflowId: workflow.Id));
+        await rejected.Should().ThrowAsync<InvalidOperationException>().WithMessage("*WORKFLOW_APPROVAL_REQUIRED*");
+
+        evidence.Approval.Status = WorkflowApprovalStatus.Approved;
+        evidence.Approval.ProcessedDate = completion.AddSeconds(1);
+        evidence.Step.CompletedDate = completion.AddSeconds(2);
+        await db.SaveChangesAsync();
+        var afterCompletion = () => service.RequireForPostingAsync(Request(state, workflowId: workflow.Id));
+        await afterCompletion.Should().ThrowAsync<InvalidOperationException>().WithMessage("*WORKFLOW_APPROVAL_REQUIRED*");
+
+        var validProcessedAt = completion.AddSeconds(-1);
+        evidence.Approval.ProcessedDate = validProcessedAt;
+        evidence.Approval.ProcessedById = workflow.InitiatedById;
+        evidence.Step.CompletedDate = completion;
+        await db.SaveChangesAsync();
+        var sameActor = () => service.RequireForPostingAsync(Request(state, workflowId: workflow.Id));
+        await sameActor.Should().ThrowAsync<InvalidOperationException>().WithMessage("*WORKFLOW_MAKER_CHECKER_REQUIRED*");
+
+        evidence.Approval.ProcessedById = Guid.NewGuid();
+        AddWorkflowApprovalEvidence(db, state, workflow, Guid.NewGuid(), validProcessedAt);
+        await db.SaveChangesAsync();
+        var tiedLatest = () => service.RequireForPostingAsync(Request(state, workflowId: workflow.Id));
+        await tiedLatest.Should().ThrowAsync<InvalidOperationException>().WithMessage("*WORKFLOW_APPROVAL_AMBIGUOUS*");
     }
 
     [Fact]
@@ -243,6 +292,8 @@ public sealed class FinanceSourceBookAuthorityServiceTests
 
         oldWorkflow.Status = WorkflowInstanceStatus.Completed;
         oldWorkflow.CompletedDate = DateTime.UtcNow;
+        AddWorkflowApprovalEvidence(db, state, oldWorkflow, Guid.NewGuid(),
+            oldWorkflow.CompletedDate.Value.AddSeconds(-1));
         await db.SaveChangesAsync();
         var posting = await AddPostingAsync(db, state, state.SourceId);
         await service.BindOriginalPostingAsync(first.AuthorityId, posting.EventId, posting.JournalId);
@@ -282,6 +333,13 @@ public sealed class FinanceSourceBookAuthorityServiceTests
         await db.SaveChangesAsync();
         var third = await service.FreezeResubmissionAsync(Request(state, workflowId: thirdWorkflow.Id,
             stage: FinanceSourceBookAuthorityFreezeStages.Submitted), second.AuthorityId);
+
+        secondWorkflow.Status = WorkflowInstanceStatus.InProgress;
+        secondWorkflow.CompletedDate = null;
+        await db.SaveChangesAsync();
+        var staleSecondRetry = () => service.FreezeResubmissionAsync(Request(state, workflowId: secondWorkflow.Id,
+            stage: FinanceSourceBookAuthorityFreezeStages.Submitted), first.AuthorityId);
+        await staleSecondRetry.Should().ThrowAsync<InvalidOperationException>().WithMessage("*STALE*");
 
         var stale = () => service.FreezeInitialPrimaryAsync(Request(state, workflowId: firstWorkflow.Id,
             stage: FinanceSourceBookAuthorityFreezeStages.Submitted));
@@ -375,6 +433,35 @@ public sealed class FinanceSourceBookAuthorityServiceTests
         var actorAct = () => new FinanceSourceBookAuthorityService(db, current.Object)
             .FreezeInitialPrimaryAsync(Request(state));
         await actorAct.Should().ThrowAsync<UnauthorizedAccessException>();
+
+        var posting = await AddPostingAsync(db, state, state.SourceId);
+        var legacyAct = () => new FinanceSourceBookAuthorityService(db, current.Object)
+            .RetainExistingPostedOriginalAsync(
+                Request(state, stage: FinanceSourceBookAuthorityFreezeStages.LegacyPosted),
+                posting.JournalId, posting.EventId);
+        await legacyAct.Should().ThrowAsync<UnauthorizedAccessException>();
+    }
+
+    [Fact]
+    public async Task LegacyRetention_FiltersExplicitEventBeforeFullCardinalityCheck()
+    {
+        await using var db = Context();
+        var state = await SeedAsync(db);
+        var posting = await AddPostingAsync(db, state, state.SourceId);
+        FinancePostingEvent? fourth = null;
+        for (var index = 0; index < 3; index++)
+        {
+            fourth = MatchingPostingEvent(state, state.SourceId, posting.JournalId);
+            db.FinancePostingEvents.Add(fourth);
+        }
+        await db.SaveChangesAsync();
+        var service = Service(db, state);
+        var request = Request(state, stage: FinanceSourceBookAuthorityFreezeStages.LegacyPosted);
+
+        var ambiguous = () => service.RetainExistingPostedOriginalAsync(request, posting.JournalId);
+        await ambiguous.Should().ThrowAsync<InvalidOperationException>().WithMessage("*LEGACY_EVENT_AMBIGUOUS*");
+        var retained = await service.RetainExistingPostedOriginalAsync(request, posting.JournalId, fourth!.Id);
+        retained.OriginalFinancePostingEventId.Should().Be(fourth.Id);
     }
 
     [Fact]
@@ -423,6 +510,34 @@ public sealed class FinanceSourceBookAuthorityServiceTests
         db.FinancePostingEvents.Add(postingEvent);
         await db.SaveChangesAsync();
         return (postingEvent.Id, journal.Id);
+    }
+
+    private static FinancePostingEvent MatchingPostingEvent(State state, Guid sourceId, Guid journalId) => new()
+    {
+        TenantId = state.TenantId, SourceModule = "AR", SourceDocumentType = "Invoice", SourceDocumentId = sourceId,
+        PostingAction = "Post", JournalEntryId = journalId, PostingStatus = "Posted", PostingDate = state.Date,
+        PostedAt = DateTime.UtcNow, FunctionalCurrencyCode = "GHS", PrimaryTransactionCurrencyCode = "GHS",
+        BookClassification = state.Book.Code, AccountingBookId = state.Book.Id
+    };
+
+    private static (WorkflowStepInstance Step, WorkflowApproval Approval) AddWorkflowApprovalEvidence(
+        ApplicationDbContext db, State state, WorkflowInstance workflow, Guid processorId,
+        DateTime processedAt, WorkflowApprovalStatus status = WorkflowApprovalStatus.Approved)
+    {
+        var step = new WorkflowStepInstance
+        {
+            TenantId = state.TenantId, WorkflowInstanceId = workflow.Id, WorkflowStepId = Guid.NewGuid(),
+            Status = WorkflowStepInstanceStatus.Completed, CompletedDate = processedAt
+        };
+        var approval = new WorkflowApproval
+        {
+            TenantId = state.TenantId, StepInstanceId = step.Id, ApproverId = processorId,
+            Status = status, RequestedDate = processedAt.AddMinutes(-1), ProcessedDate = processedAt,
+            ProcessedById = processorId
+        };
+        db.WorkflowStepInstances.Add(step);
+        db.WorkflowApprovals.Add(approval);
+        return (step, approval);
     }
 
     private static WorkflowInstance Workflow(State state, WorkflowInstanceStatus status,

@@ -3287,6 +3287,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasFilter("[OriginalFinancePostingEventId] IS NOT NULL");
             entity.HasIndex(item => new { item.TenantId, item.OriginalJournalEntryId }).IsUnique()
                 .HasFilter("[OriginalJournalEntryId] IS NOT NULL");
+            entity.HasIndex(item => new { item.TenantId, item.SourceWorkflowInstanceId });
             entity.HasOne(item => item.AccountingBook).WithMany()
                 .HasForeignKey(item => new { item.TenantId, item.AccountingBookId })
                 .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
@@ -3294,7 +3295,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(item => new { item.TenantId, item.SupersedesAuthorityId })
                 .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.SourceWorkflowInstance).WithMany()
-                .HasForeignKey(item => item.SourceWorkflowInstanceId).OnDelete(DeleteBehavior.Restrict);
+                .HasForeignKey(item => new { item.TenantId, item.SourceWorkflowInstanceId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.OriginalFinancePostingEvent).WithMany()
                 .HasForeignKey(item => new { item.TenantId, item.OriginalFinancePostingEventId })
                 .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);

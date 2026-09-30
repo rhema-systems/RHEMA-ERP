@@ -12,6 +12,7 @@ public sealed partial class FinanceSourceBookAuthorityService
         Guid? retainedFinancePostingEventId = null, CancellationToken cancellationToken = default)
     {
         var source = Normalize(request, allowLegacyStage: true);
+        _ = Actor();
         if (retainedJournalEntryId == Guid.Empty || retainedFinancePostingEventId == Guid.Empty)
             throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_LEGACY_LINK_REQUIRED: posting links must be non-empty.");
         await RequireMutationScopeAndLockAsync(source, cancellationToken);
@@ -33,14 +34,28 @@ public sealed partial class FinanceSourceBookAuthorityService
             !SameOriginModule(journal.SourceModule, source.OriginModuleCode) ||
             journal.SourceDocumentId != source.SourceDocumentId || !SameNormalized(journal.SourceDocumentType, source.SourceDocumentType))
             throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_LEGACY_JOURNAL_INVALID: journal must be posted, non-replica, unreversed, and exact-source.");
-        var candidates = await _db.FinancePostingEvents.AsNoTracking().Where(item =>
-                item.TenantId == TenantId && item.JournalEntryId == retainedJournalEntryId &&
-                item.SourceDocumentId == source.SourceDocumentId && item.PostingStatus == "Posted" && !item.IsDeleted)
-            .Take(3).ToListAsync(cancellationToken);
-        var events = candidates.Where(item => SameNormalized(item.SourceDocumentType, source.SourceDocumentType) &&
-            SameNormalized(item.PostingAction, source.PostingAction) &&
-            FinanceModuleLockCatalog.ResolveOriginModuleCode(item.SourceModule, item.OriginModuleCode) == source.OriginModuleCode &&
-            (!retainedFinancePostingEventId.HasValue || item.Id == retainedFinancePostingEventId.Value)).ToList();
+        var eventQuery = _db.FinancePostingEvents.AsNoTracking().Where(item =>
+            item.TenantId == TenantId && item.JournalEntryId == retainedJournalEntryId &&
+            item.SourceDocumentId == source.SourceDocumentId && item.PostingStatus == "Posted" && !item.IsDeleted &&
+            item.SourceDocumentType.Trim().ToUpper() == source.SourceDocumentType &&
+            item.PostingAction.Trim().ToUpper() == source.PostingAction &&
+            (item.OriginModuleCode != null
+                ? item.OriginModuleCode.Trim().ToUpper() == source.OriginModuleCode
+                : source.OriginModuleCode == FinanceModuleLockCatalog.HumanResources
+                    ? item.SourceModule.Trim().ToUpper() == "PAYROLL"
+                    : source.OriginModuleCode == FinanceModuleLockCatalog.Inventory
+                        ? item.SourceModule.Trim().ToUpper() == "INV" || item.SourceModule.Trim().ToUpper() == "INVENTORY"
+                        : source.OriginModuleCode == FinanceModuleLockCatalog.Procurement
+                            ? item.SourceModule.Trim().ToUpper() == "PROC" || item.SourceModule.Trim().ToUpper() == "PROCUREMENT"
+                            : source.OriginModuleCode == FinanceModuleLockCatalog.Sales
+                                ? item.SourceModule.Trim().ToUpper() == "SALES"
+                                : item.SourceModule.Trim().ToUpper() != "PAYROLL" &&
+                                    item.SourceModule.Trim().ToUpper() != "INV" && item.SourceModule.Trim().ToUpper() != "INVENTORY" &&
+                                    item.SourceModule.Trim().ToUpper() != "PROC" && item.SourceModule.Trim().ToUpper() != "PROCUREMENT" &&
+                                    item.SourceModule.Trim().ToUpper() != "SALES"));
+        if (retainedFinancePostingEventId.HasValue)
+            eventQuery = eventQuery.Where(item => item.Id == retainedFinancePostingEventId.Value);
+        var events = await eventQuery.ToListAsync(cancellationToken);
         if (events.Count != 1)
             throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_LEGACY_EVENT_AMBIGUOUS: journal must resolve to one exact posted event.");
         var postingEvent = events[0];

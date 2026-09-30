@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces.Finance;
@@ -106,10 +107,10 @@ public sealed partial class FinanceSourceBookAuthorityService
         return settingsCurrency;
     }
 
-    private async Task RequireWorkflowOwnershipAsync(NormalizedSource source, CancellationToken cancellationToken,
+    private async Task<WorkflowApprovalEvidence?> RequireWorkflowOwnershipAsync(NormalizedSource source, CancellationToken cancellationToken,
         bool requireCompletedForPosting = false)
     {
-        if (!source.WorkflowInstanceId.HasValue) return;
+        if (!source.WorkflowInstanceId.HasValue) return null;
         var rows = await (from workflow in _db.WorkflowInstances.AsNoTracking()
                 join entityType in _db.WorkflowEntityTypes.AsNoTracking()
                     on new { workflow.TenantId, Id = workflow.EntityTypeId }
@@ -132,6 +133,36 @@ public sealed partial class FinanceSourceBookAuthorityService
             throw new InvalidOperationException(requireCompletedForPosting
                 ? "SOURCE_BOOK_AUTHORITY_WORKFLOW_NOT_APPROVED: posting requires an exact completed workflow outcome."
                 : "SOURCE_BOOK_AUTHORITY_WORKFLOW_STAGE_INVALID: workflow state does not support the requested freeze stage.");
+        return completed
+            ? await RequireCompletedWorkflowApprovalAsync(workflowEvidence, cancellationToken)
+            : null;
+    }
+
+    private async Task<WorkflowApprovalEvidence> RequireCompletedWorkflowApprovalAsync(
+        WorkflowInstance workflow, CancellationToken cancellationToken)
+    {
+        var approvals = await (from step in _db.WorkflowStepInstances.AsNoTracking()
+                join approval in _db.WorkflowApprovals.AsNoTracking()
+                    on new { step.TenantId, StepInstanceId = step.Id }
+                    equals new { approval.TenantId, approval.StepInstanceId }
+                where step.TenantId == TenantId && step.WorkflowInstanceId == workflow.Id &&
+                    !step.IsDeleted && !approval.IsDeleted &&
+                    step.Status == WorkflowStepInstanceStatus.Completed && step.CompletedDate.HasValue &&
+                    approval.Status == WorkflowApprovalStatus.Approved && approval.ProcessedById.HasValue &&
+                    approval.ProcessedDate.HasValue && workflow.CompletedDate.HasValue &&
+                    approval.ProcessedDate <= workflow.CompletedDate && approval.ProcessedDate <= step.CompletedDate
+                select new WorkflowApprovalEvidence(step.Id, approval.Id,
+                    approval.ProcessedById!.Value, approval.ProcessedDate!.Value))
+            .ToListAsync(cancellationToken);
+        if (approvals.Count == 0)
+            throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_WORKFLOW_APPROVAL_REQUIRED: completed workflow has no retained approved step evidence.");
+        var finalProcessedAt = approvals.Max(item => item.ProcessedAtUtc);
+        var final = approvals.Where(item => item.ProcessedAtUtc == finalProcessedAt).ToList();
+        if (final.Count != 1)
+            throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_WORKFLOW_APPROVAL_AMBIGUOUS: final approved workflow processor is not unique.");
+        if (final[0].ProcessedByUserId == workflow.InitiatedById)
+            throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_WORKFLOW_MAKER_CHECKER_REQUIRED: final approver must differ from workflow initiator.");
+        return final[0];
     }
 
     private FinanceSourceBookAuthority CreateAuthority(NormalizedSource source, Guid bookId, string bookCode,
@@ -265,4 +296,6 @@ public sealed partial class FinanceSourceBookAuthorityService
         string FreezeStage, Guid? WorkflowInstanceId);
     private sealed record PrimaryCoordinate(Guid BookId, string BookCode, string FunctionalCurrency, string SelectionBasis);
     private sealed record OriginInput(Guid AuthorityId, string Role);
+    private sealed record WorkflowApprovalEvidence(Guid StepInstanceId, Guid ApprovalId,
+        Guid ProcessedByUserId, DateTime ProcessedAtUtc);
 }
