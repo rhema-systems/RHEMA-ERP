@@ -838,7 +838,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             IReadOnlyList<FinancePostingLineDto> lines) => new()
         {
             SourceModule = producer.Definition.PostingSourceModule,
-            OriginModuleCode = producer.Definition.ProducerModule,
+            OriginModuleCode = ErpSystem.Core.Finance.FinanceModuleLockCatalog.ResolveOriginModuleCode(
+                producer.Definition.ProducerModule),
             SourceDocumentType = producer.Definition.DocumentType,
             SourceDocumentId = sourceDocumentId,
             SourceDocumentTenantId = TenantId,

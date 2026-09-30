@@ -2014,7 +2014,8 @@ public class CashTransactionService : ICashTransactionService
         }
         return new FinanceSourceBookAuthorityFreezeRequest
         {
-            OriginModuleCode = producer.Definition.ProducerModule,
+            OriginModuleCode = ErpSystem.Core.Finance.FinanceModuleLockCatalog.ResolveOriginModuleCode(
+                producer.Definition.ProducerModule),
             SourceDocumentType = producer.Definition.DocumentType,
             SourceDocumentId = source.Id,
             PostingAction = "Post",

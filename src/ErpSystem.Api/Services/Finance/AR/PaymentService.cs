@@ -3841,7 +3841,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             FinancePostingProducerContext producer,
             string freezeStage) => new()
         {
-            OriginModuleCode = producer.Definition.ProducerModule,
+            OriginModuleCode = FinanceModuleLockCatalog.ResolveOriginModuleCode(
+                producer.Definition.ProducerModule),
             SourceDocumentType = producer.Definition.DocumentType,
             SourceDocumentId = payment.Id,
             PostingAction = "Post",
@@ -3874,7 +3875,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                         ?? throw new InvalidOperationException(
                             "SOURCE_BOOK_AUTHORITY_LEGACY_EVIDENCE_INVALID: exact customer-payment posting evidence was not found.");
                     frozen = await authorityService.RetainExistingPostedOriginalAsync(
-                        CustomerPaymentAuthorityRequest(payment, producer, "LegacyPosted"),
+                        CustomerPaymentAuthorityRequest(payment, producer, FinanceSourceBookAuthorityFreezeStages.LegacyPosted),
                         payment.JournalEntryId.Value,
                         retainedEvent.Id,
                         cancellationToken);
@@ -3898,10 +3899,10 @@ namespace ErpSystem.Api.Services.Finance.AR
 
                     frozen = invoiceOrigins.Count == 0
                         ? await authorityService.FreezeInitialPrimaryAsync(
-                            CustomerPaymentAuthorityRequest(payment, producer, "PrePost"),
+                            CustomerPaymentAuthorityRequest(payment, producer, FinanceSourceBookAuthorityFreezeStages.PrePost),
                             cancellationToken)
                         : await authorityService.FreezeInheritedAsync(
-                            CustomerPaymentAuthorityRequest(payment, producer, "PrePost"),
+                            CustomerPaymentAuthorityRequest(payment, producer, FinanceSourceBookAuthorityFreezeStages.PrePost),
                             invoiceOrigins,
                             cancellationToken);
                 }
@@ -3912,7 +3913,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             }
 
             return await authorityService.RequireForPostingAsync(
-                CustomerPaymentAuthorityRequest(payment, producer, "PrePost"),
+                CustomerPaymentAuthorityRequest(payment, producer, FinanceSourceBookAuthorityFreezeStages.PrePost),
                 cancellationToken);
         }
 
@@ -3929,7 +3930,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     throw new InvalidOperationException(
                         "SOURCE_BOOK_AUTHORITY_MISSING: the customer payment has no retained original posting.");
                 var retained = await authorityService.RetainExistingPostedOriginalAsync(
-                    CustomerPaymentAuthorityRequest(payment, producer, "LegacyPosted"),
+                    CustomerPaymentAuthorityRequest(payment, producer, FinanceSourceBookAuthorityFreezeStages.LegacyPosted),
                     payment.JournalEntryId.Value,
                     retainedEventId,
                     cancellationToken);
@@ -3967,13 +3968,14 @@ namespace ErpSystem.Api.Services.Finance.AR
                 var retained = await authorityService.RetainExistingPostedOriginalAsync(
                     new FinanceSourceBookAuthorityFreezeRequest
                     {
-                        OriginModuleCode = retainedEvent.OriginModuleCode ?? retainedEvent.SourceModule,
+                        OriginModuleCode = FinanceModuleLockCatalog.ResolveOriginModuleCode(
+                            retainedEvent.SourceModule, retainedEvent.OriginModuleCode),
                         SourceDocumentType = "CustomerInvoice",
                         SourceDocumentId = invoice.Id,
                         PostingAction = "Post",
                         EffectiveDate = invoice.InvoiceDate,
                         TransactionCurrencyCode = invoice.CurrencyCode,
-                        FreezeStage = "LegacyPosted"
+                        FreezeStage = FinanceSourceBookAuthorityFreezeStages.LegacyPosted
                     },
                     invoice.JournalEntryId.Value,
                     retainedEvent.Id,

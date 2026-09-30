@@ -2359,7 +2359,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             string freezeStage,
             bool retainLegacy = false) => new()
         {
-            OriginModuleCode = producer?.Definition.ProducerModule ?? "Finance",
+            OriginModuleCode = producer is null
+                ? FinanceModuleLockCatalog.Finance
+                : FinanceModuleLockCatalog.ResolveOriginModuleCode(producer.Definition.ProducerModule),
             SourceDocumentType = "CustomerInvoice",
             SourceDocumentId = invoice.Id,
             PostingAction = "Post",

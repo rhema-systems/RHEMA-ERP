@@ -532,7 +532,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     var posting = await _postingEngine.PostAsync(new FinancePostingRequestV2Dto
                     {
                         SourceModule = SettlementProducer.Definition.PostingSourceModule,
-                        OriginModuleCode = SettlementProducer.Definition.ProducerModule,
+                        OriginModuleCode = FinanceModuleLockCatalog.ResolveOriginModuleCode(
+                            SettlementProducer.Definition.ProducerModule),
                         SourceDocumentType = SettlementProducer.Definition.DocumentType,
                         SourceDocumentId = project.Id,
                         SourceDocumentTenantId = TenantId,
