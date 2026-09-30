@@ -84,6 +84,12 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
 
     // ── GetActiveCycleIdAsync ─────────────────────────────────────────────────
 
+    /// <summary>
+    /// The cycle the dashboard opens on: the Open cycle with the most appraisals in play, then the
+    /// most recently opened (performance closure E-d2a, D-58). It was the most recently updated Open
+    /// cycle, so a harness or trial cycle left Open — or any edit to a small one — displaced the
+    /// organisation's real cycle.
+    /// </summary>
     public async Task<Guid> GetActiveCycleIdAsync(CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
@@ -92,7 +98,9 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
                 c.TenantId == tenantId &&
                 !c.IsDeleted &&
                 c.Status == AppraisalCycleStatus.Open)
-            .OrderByDescending(c => c.UpdatedAt ?? c.CreatedAt)
+            .OrderByDescending(c => c.PerformanceAppraisals.Count(a => !a.IsDeleted && a.Status != AppraisalStatus.Withdrawn))
+            .ThenByDescending(c => c.OpenedDate)
+            .ThenByDescending(c => c.CreatedAt)
             .Select(c => (Guid?)c.Id)
             .FirstOrDefaultAsync(ct);
 

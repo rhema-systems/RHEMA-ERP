@@ -1932,6 +1932,14 @@ rule needs a daily run, not one every 30 seconds.
   evaluation form timed out at 30 s five times — its own defect (HR's, recorded in the performance
   closure plan's § 5), made likelier by a table-wide `UPDATE` every half minute.
 
+- **Seen again at slice E-d2a (2026-09-30, the same monitor over a 23-minute regression):** the
+  clean-up had nothing to scan by then, but the dispatcher's own claim query (`SELECT TOP(@n) … WHERE
+  … @maxRetryAttempts …`, running in parallel — `CXSYNC_PORT`) held a **range lock that blocked a
+  notification insert for about 3 s** (`LCK_M_RIn_NL`); an HR template's submit-for-approval took 10 s
+  in that window. It was the only blocking the monitor saw. UAT's unsent notifications are claimed
+  200 at a time every 31 s, each failing at once for want of SMTP settings (8,110 failures in the
+  run's 34-minute log).
+
 ### What it blocks
 
 Nothing outright; it degrades every request that writes a notification, and adds to the memory
@@ -1941,7 +1949,8 @@ pressure that times out large reads.
 
 Run the clean-up on its own daily schedule (or at most hourly), not inside the 30-second dispatch
 loop; and index `Notifications (IsDeleted, CreatedAt)` so the `WHERE CreatedAt < @cutoff` finds its
-rows without a scan.
+rows without a scan. The claim query should not hold range locks over the table the rest of the
+application inserts into (read committed with a claim `UPDATE … OUTPUT`, or `READPAST`).
 
 ## How to use this file
 

@@ -242,6 +242,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpPost("{id:guid}/open")]
     [ProducesResponseType(typeof(AppraisalCycleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> OpenCycle(Guid id)
     {
@@ -265,7 +266,7 @@ public class AppraisalCycleController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BusinessRuleRejected(ex, "opening a cycle");
         }
         catch (ArgumentException ex)
         {
@@ -284,6 +285,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpPost("{id:guid}/close")]
     [ProducesResponseType(typeof(AppraisalCycleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> CloseCycle(Guid id)
     {
@@ -307,7 +309,7 @@ public class AppraisalCycleController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BusinessRuleRejected(ex, "closing a cycle");
         }
         catch (ArgumentException ex)
         {
@@ -327,6 +329,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpPost("{id:guid}/generate-appraisals")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> GenerateAppraisals(Guid id)
     {
@@ -342,7 +345,7 @@ public class AppraisalCycleController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BusinessRuleRejected(ex, "generating appraisals");
         }
         catch (ArgumentException ex)
         {
@@ -364,6 +367,7 @@ public class AppraisalCycleController : ControllerBase
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> SendDeadlineReminders(Guid id, CancellationToken cancellationToken = default)
     {
@@ -374,7 +378,7 @@ public class AppraisalCycleController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { message = ex.Message });
+            return BusinessRuleRejected(ex, "sending deadline reminders");
         }
         catch (ArgumentException ex)
         {
@@ -467,6 +471,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -477,7 +482,7 @@ public class AppraisalCycleController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BusinessRuleRejected(ex, "deleting a cycle");
         }
         catch (ArgumentException ex)
         {

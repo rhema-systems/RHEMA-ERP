@@ -91,6 +91,10 @@ settings as a policy reference; this document says which of them the code obeys.
 >   mode a withdrawn appraisal takes no more nominations, and in either mode a peer who has left is
 >   refused; `AllowEmployeeResponse` — HR's response route answers its refusal with 422, not 500. The
 >   deadline reminders and the open notice no longer reach anyone whose appraisal was withdrawn.
+> - **Lane E, slice E-d2a** (the cycle's own rules, 2026-09-30) moved no verdict and changed what two
+>   do, marked *"Since lane E-d2a"*: `EnableAppeals` and `AppealWindowDays` — a cycle is not closed while
+>   any Completed appraisal in it could still appeal. The deadline reminders (`DeadlineRisk*` bands) go
+>   out for an Open cycle only; a Closed one was reminded.
 >
 > Line numbers below are as of 2026-09-17; lanes A and B1 rewrote much of `PerformanceAppraisalService.cs`,
 > and `AppraisalAdvanceHelpers.cs` is gone — its resolver is `AppraisalGates.cs`.
@@ -372,6 +376,10 @@ anchored to the wrong date.
 page and the list row: Completed, no appeal yet, appeals on, and inside the window, which now runs
 from the **acknowledgment** (else HR's sign-off, else the last submission). `SubmitAppealAsync` refuses
 with a 422 that says which. The portal's button still keys off the status alone — lane I.
+
+*Since lane E-d2a — the window also holds the cycle open.* The cycle's close asks the same
+`CanFileAppeal` of every Completed appraisal and is refused (422, naming the day the last window
+closes) while any could still appeal; a close used to cut every open window.
 
 ### Group 3 — read, but only into wording or sort order
 

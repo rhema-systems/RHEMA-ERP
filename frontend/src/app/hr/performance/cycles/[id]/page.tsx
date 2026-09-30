@@ -1166,7 +1166,7 @@ export default function AppraisalCycleDetailPage() {
           action === 'open'
             ? 'Everyone in scope is notified that the cycle is open. Opening is refused if another open cycle of the same type and year already covers any of them.'
             : action === 'close'
-              ? 'A closed cycle refuses every further edit. This cannot be undone.'
+              ? 'Every appraisal must be finished — completed, or withdrawn if it will not be — and every appeal window lapsed; the server refuses the close and says what is left. The completed appraisals are closed with the cycle, and its targets and exclusions no longer change. This cannot be undone.'
               : action === 'generate'
                 ? 'Creates the appraisal records for everyone in scope. Refused if anyone has no template or a template conflict — check the Coverage tab first.'
                 : 'Raises an in-app notification for every phase that is overdue or closing soon, to everyone in scope. Repeat-safe: identical unread reminders are skipped.'

@@ -391,9 +391,20 @@ public class AppraisalCycleService : IAppraisalCycleService
     private static string JoinAnd(IReadOnlyList<string> items) =>
         items.Count == 1 ? items[0] : $"{string.Join(", ", items.Take(items.Count - 1))} and {items[^1]}";
 
+    /// <summary>
+    /// Deletes a cycle set up in error (performance closure E-d2a, D-57): never opened, and with
+    /// nothing but its configuration pointing at it. Its targets (with their exclusions) and its
+    /// template links go with it.
+    /// </summary>
+    /// <remarks>
+    /// It refused only an opened cycle and soft-deleted the cycle row alone, so a Draft cycle's
+    /// appraisals, goals, calibration sessions and check-ins — generation and goal setting ran on
+    /// Drafts — were left pointing at a hidden cycle, with its targets and template links.
+    /// </remarks>
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCycleAsync(id);
+        var tenantId = GetTenantId();
 
         // Check if cycle has been opened
         if (entity.OpenedDate.HasValue)
@@ -401,10 +412,54 @@ public class AppraisalCycleService : IAppraisalCycleService
             throw new InvalidOperationException("Cannot delete an appraisal cycle that has been opened.");
         }
 
+        // The work that points at the cycle — withdrawn appraisals included: they are records.
+        var work = new List<string>();
+        async Task CountAsync<T>(string label, System.Linq.Expressions.Expression<Func<T, bool>> belongs)
+            where T : ErpSystem.Core.Entities.BaseEntity
+        {
+            var n = await _unitOfWork.Repository<T>().GetQueryable().Where(belongs).CountAsync(cancellationToken);
+            if (n > 0) work.Add($"{n} {label}");
+        }
+        await CountAsync<PerformanceAppraisal>("appraisal(s)", a => a.TenantId == tenantId && a.AppraisalCycleId == id);
+        await CountAsync<EmployeeGoal>("employee goal(s)", g => g.TenantId == tenantId && g.AppraisalCycleId == id);
+        await CountAsync<UnitGoal>("unit goal(s)", g => g.TenantId == tenantId && g.AppraisalCycleId == id);
+        await CountAsync<CompanyGoal>("company goal(s)", g => g.TenantId == tenantId && g.AppraisalCycleId == id);
+        await CountAsync<CalibrationSession>("calibration session(s)", s => s.TenantId == tenantId && s.AppraisalCycleId == id);
+        await CountAsync<CheckIn>("check-in(s)", c => c.TenantId == tenantId && c.AppraisalCycleId == id);
+        await CountAsync<PerformanceJournalEntry>("journal entr(ies)", j => j.TenantId == tenantId && j.AppraisalCycleId == id);
+        await CountAsync<AppraisalReviewEvent>("review event(s)", r => r.TenantId == tenantId && r.AppraisalCycleId == id);
+        await CountAsync<EmployeeDevelopmentPlan>("development plan(s)", p => p.TenantId == tenantId && p.AppraisalCycleId == id);
+
+        if (work.Count > 0)
+            throw new InvalidOperationException(
+                $"This cycle cannot be deleted: {JoinAnd(work)} point at it. A cycle is deleted only while " +
+                "nothing but its targets and templates does.");
+
+        // Its configuration goes with it: the targets (and their exclusions) and the template links.
+        var targets = await _targetRepository.GetQueryable()
+            .Where(t => t.TenantId == tenantId && t.AppraisalCycleId == id)
+            .ToListAsync(cancellationToken);
+        var targetIds = targets.Select(t => t.Id).ToList();
+        var exclusions = await _unitOfWork.Repository<AppraisalCycleTargetExclusion>().GetQueryable()
+            .Where(x => x.TenantId == tenantId && targetIds.Contains(x.AppraisalCycleTargetId))
+            .ToListAsync(cancellationToken);
+        var templateLinks = await _cycleTemplateRepository.GetQueryable()
+            .Where(ct => ct.TenantId == tenantId && ct.AppraisalCycleId == id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var exclusion in exclusions)
+            await _unitOfWork.Repository<AppraisalCycleTargetExclusion>().DeleteAsync(exclusion);
+        foreach (var target in targets)
+            await _targetRepository.DeleteAsync(target);
+        foreach (var link in templateLinks)
+            await _cycleTemplateRepository.DeleteAsync(link);
+
         await _cycleRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Appraisal cycle deleted: {cycleId}", id);
+        _logger.LogInformation(
+            "Appraisal cycle deleted: {cycleId}, with {targets} target(s), {exclusions} exclusion(s) and {links} template link(s)",
+            id, targets.Count, exclusions.Count, templateLinks.Count);
 
         return true;
     }
@@ -511,8 +566,13 @@ public class AppraisalCycleService : IAppraisalCycleService
     {
         var cycle = await GetOwnedCycleAsync(cycleId);
 
-        if (cycle.Status == AppraisalCycleStatus.Draft)
-            throw new InvalidOperationException("Reminders can only be sent for a cycle that has been opened.");
+        // Only a running cycle has deadlines to chase (performance closure E-d2a): a Closed one was
+        // reminded as readily as an Open one, and the analytics page offered it.
+        if (cycle.Status != AppraisalCycleStatus.Open)
+            throw new InvalidOperationException(
+                cycle.Status == AppraisalCycleStatus.Closed
+                    ? "Reminders are sent for an open cycle, and this one is closed."
+                    : "Reminders can only be sent for a cycle that has been opened.");
 
         // Risk bands are a tenant policy, held on the cycle's settings profile. Falling back
         // to the DTO defaults keeps this working for a settings row saved before they existed.
@@ -896,9 +956,20 @@ public class AppraisalCycleService : IAppraisalCycleService
         };
     }
 
+    /// <summary>
+    /// Closes a cycle once its work is done (performance closure E-d2a, D-56): every appraisal
+    /// finished — Completed, Closed or Withdrawn — and every appeal window lapsed. The Completed
+    /// appraisals close with it, through the lifecycle; one with no score closes as it stands.
+    /// </summary>
+    /// <remarks>
+    /// It read no appraisal: it closed a cycle whatever was in it (26 of UAT's 34 Closed cycles hold
+    /// unfinished ones), cut every open appeal window, and left the Completed appraisals Completed —
+    /// only the raw status routes ever moved one to Closed.
+    /// </remarks>
     public async Task<bool> CloseCycleAsync(CloseAppraisalCycleDto closeDto, Guid closedById, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCycleAsync(closeDto.CycleId);
+        var tenantId = GetTenantId();
 
         if (!entity.OpenedDate.HasValue)
         {
@@ -910,6 +981,48 @@ public class AppraisalCycleService : IAppraisalCycleService
             throw new InvalidOperationException("Appraisal cycle is already closed.");
         }
 
+        // Tracked: the Completed ones are closed below, in the same save as the cycle.
+        var appraisals = await _appraisalRepository.GetQueryable()
+            .Where(a => a.TenantId == tenantId && a.AppraisalCycleId == entity.Id)
+            .ToListAsync(cancellationToken);
+
+        var unfinished = appraisals
+            .Where(a => a.Status is not (AppraisalStatus.Completed or AppraisalStatus.Closed or AppraisalStatus.Withdrawn))
+            .GroupBy(a => a.Status)
+            .OrderBy(g => (int)g.Key)
+            .Select(g => $"{g.Count()} {UnfinishedWord(g.Key)}")
+            .ToList();
+        if (unfinished.Count > 0)
+            throw new InvalidOperationException(
+                $"This cycle cannot be closed while appraisals are unfinished: {JoinAnd(unfinished)}. " +
+                "Each is completed — or withdrawn, if it will not be — before the cycle closes.");
+
+        var completed = appraisals.Where(a => a.Status == AppraisalStatus.Completed).ToList();
+
+        // An appeal window still open is the employee's to use: the close waits for the last one.
+        if (completed.Count > 0)
+        {
+            var states = await _lifecycle.GetStatesAsync(completed.Select(a => a.Id).ToList(), cancellationToken);
+            var now = DateTime.UtcNow;
+            var windows = states.Values
+                .Select(s => AppraisalGates.CanFileAppeal(s.Facts, s.Settings, now))
+                .Where(w => w.Allowed)
+                .ToList();
+            if (windows.Count > 0)
+            {
+                var lastDay = windows.Max(w => w.LastDay);
+                throw new InvalidOperationException(
+                    $"This cycle cannot be closed while {windows.Count} completed appraisal(s) are inside their appeal " +
+                    $"window: the last one closes on {lastDay:d MMM yyyy}.");
+            }
+        }
+
+        foreach (var appraisal in completed)
+        {
+            AppraisalLifecycle.EnsureTransition(appraisal.Status, AppraisalStatus.Closed);
+            appraisal.Status = AppraisalStatus.Closed;
+        }
+
         entity.ClosedById = closedById;
         entity.ClosedDate = DateTime.UtcNow;
         entity.Status = AppraisalCycleStatus.Closed;
@@ -917,10 +1030,22 @@ public class AppraisalCycleService : IAppraisalCycleService
         await _cycleRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Appraisal cycle closed: {cycleId} by user {userId}", closeDto.CycleId, closedById);
+        _logger.LogInformation(
+            "Appraisal cycle closed: {cycleId} by user {userId}; {closed} completed appraisal(s) closed with it ({scoreless} with no score)",
+            closeDto.CycleId, closedById, completed.Count, completed.Count(a => a.OverallScore == null));
 
         return true;
     }
+
+    /// <summary>How the close's refusal names an unfinished status.</summary>
+    private static string UnfinishedWord(AppraisalStatus status) => status switch
+    {
+        AppraisalStatus.Draft => "not started (Draft)",
+        AppraisalStatus.Active => "in progress (Active)",
+        AppraisalStatus.Governance => "in governance",
+        AppraisalStatus.Appealed => "under appeal",
+        _ => status.ToString(),
+    };
 
     /// <summary>
     /// Gets comprehensive progress metrics for an appraisal cycle dashboard

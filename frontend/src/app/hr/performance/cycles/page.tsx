@@ -19,6 +19,7 @@ import {
 } from '@/components/hr/employee/tabs/fields';
 import { CyclePhaseDateFields } from '@/components/hr/performance/CycleFormFields';
 import { appraisalCycleService, appraisalSettingsService } from '@/services/hr/appraisal.service';
+import { useAuth } from '@/hooks/use-auth';
 import { APPRAISAL_TYPE_OPTIONS } from '@/types/hr/appraisal';
 import type { AppraisalCycle, AppraisalType, CreateAppraisalCycle } from '@/types/hr/appraisal';
 import { humanizeEnum } from '@/lib/hr/attendance-format';
@@ -158,6 +159,11 @@ const day = (value?: string | null) => value?.slice(0, 10) ?? '—';
 const dayInput = (value?: string | null) => value?.slice(0, 10) ?? '';
 
 export default function AppraisalCyclesPage() {
+  // Deleting a cycle is admin-tier (a 403 otherwise), and only a never-opened one with nothing but its
+  // configuration can go (performance closure E-d2a) — the server names what else points at it.
+  const { hasPermission } = useAuth();
+  const canDelete = hasPermission('HR.Performance.Admin');
+
   const { data: settings } = useQuery({
     queryKey: ['hr', 'appraisal-settings'],
     queryFn: () => appraisalSettingsService.getAll(),
@@ -197,7 +203,7 @@ export default function AppraisalCyclesPage() {
           {
             label: 'In draft',
             value: drafts.length,
-            hint: 'Not yet opened — still editable and deletable.',
+            hint: 'Not yet opened — still editable, and deletable while nothing but its targets and templates points at it.',
             icon: FolderOpen,
           },
           {
@@ -222,6 +228,8 @@ export default function AppraisalCyclesPage() {
         // No status on an edit either: sending one is what used to revert an Open cycle to Draft.
         update={(id, values) => appraisalCycleService.update(id, { id, ...toPayload(values) })}
         remove={(id) => appraisalCycleService.remove(id)}
+        allowRemove={canDelete}
+        canRemoveItem={(r) => !r.openedDate}
         getId={(r) => r.id}
         columns={[
           {

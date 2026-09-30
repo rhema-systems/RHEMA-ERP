@@ -40,6 +40,12 @@ withdraw an appraisal, with a reason, until it is final; leaving withdraws the l
 appraisals; a withdrawn appraisal leaves every count, queue and list and takes no more work, and stays
 on the record without a score; the cycle's *Targeted* reads its scope, beside *Appraisals* and
 *Withdrawn*; the dashboard's feed records withdrawals, and the dashboard no longer times out.
+**And for lane E, slice E-d2a** (the cycle's own rules, 2026-09-30): chapters 13, 14 and 37 — a cycle
+closes only once every appraisal in it is completed or withdrawn and every appeal window has lapsed,
+and its completed appraisals close with it; a cycle is deleted only while nothing but its set-up
+points at it, and the set-up goes with it, and only the Admin tier sees *Delete* (P-12 fixed);
+reminders go only to an open cycle; the dashboard opens on the open cycle with the most appraisals;
+and the cycle's actions answer a refusal with a 422 that says why.
 **The database was rebuilt on 2026-09-29**: Rule 2, Rule 9, the demo tables and the Efua arithmetic give its figures (Efua 88.56, Cynthia 87.00, Efua's appeal window to 6 October). The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
 **Seventh in the series**, after Recruitment, Employees, Leave, Attendance & Time, Company Schedule and Staff Travel.
 
@@ -1784,10 +1790,11 @@ the calendar or in reminders."*
 | List / tiles | `GET api/AppraisalCycle` | |
 | Create | `POST api/AppraisalCycle` | always created as **Draft** — a status in the request is ignored (it was stored until 2026-09-30); Open and Closed are separate endpoints |
 | Edit | `PUT api/AppraisalCycle/{id}` | **the payload deliberately carries no `status`** — it used to post a hard-coded `'Draft'`, so editing an open cycle's phase dates quietly reverted it. Once a cycle is opened or has appraisals, its **settings profile, year and type** are fixed (the dialog greys the type and profile); once it has appraisals, its **start and end dates** — a change is refused, 422, saying why. Name, code and phase deadlines stay editable |
-| Delete | `DELETE api/AppraisalCycle/{id}` | only a cycle that has never been opened; **`HR.Performance.Admin`** |
+| Delete | `DELETE api/AppraisalCycle/{id}` | only a cycle that has never been opened **and that nothing but its set-up points at**: appraisals (withdrawn ones included), goals, calibration sessions, check-ins, journal entries, review events or development plans refuse it — a 422 that counts each. Its targets, their exclusions and its template links are deleted with it (until 2026-09-30 the delete took the cycle row alone, and refused only an opened cycle). **`HR.Performance.Admin`** — the list offers *Delete* only to that permission, and only on a cycle never opened |
 
 ### ⚠ Known gaps
-**P-12.** `Delete` renders for `hr.head` and 403s.
+~~**P-12.** `Delete` renders for `hr.head` and 403s.~~ Fixed 2026-09-30 (slice E-d2a): *Delete* shows only
+for `HR.Performance.Admin`, which `hr.head` does not hold, and only on a cycle that was never opened.
 
 ---
 
@@ -1823,7 +1830,7 @@ Opening the cycle sits before all of that and is checked separately.
 | **Open cycle** | Draft only | *(absent here — the cycle is already open)* |
 | **Generate appraisals** | any non-Closed cycle | Creates the appraisal records for everyone in scope |
 | **Send reminders** | open, not closed | Raises an in-app notice for every phase overdue or closing soon, to everyone in scope |
-| **Close cycle** | open, not closed | Irreversible; a closed cycle refuses every edit |
+| **Close cycle** | open, not closed | Irreversible; a closed cycle refuses every edit. **Refused while the cycle's work is unfinished** — any appraisal not started, in progress, in governance or under appeal, or any completed one still inside its appeal window; the message counts what is left, or names the day the last window closes. Its completed appraisals close with it |
 
 ### 👁 The four tiles
 
@@ -1985,12 +1992,13 @@ order."* Columns: **Date · Event · Phase · Kind**, where Kind is *Deadline* o
 | Targets | `GET/POST/PUT/DELETE …/{cycleId}/targets[/{id}]` | `AppraisalCycleTargets` |
 | Exclusions | `…/api/AppraisalCycleTarget/{targetId}/exclusions` | `AppraisalCycleTargetExclusions` |
 | Template assignments | `api/AppraisalCycleTemplates` (`by-cycle`, `bulk-assign`, `resolve/{cycle}/{employee}`) | `AppraisalCycleTemplates` |
-| **Open cycle** | `POST …/{id}/open` | 400 when another open cycle of the same type and year covers any of the same employees — **and the message names them**. Also notifies everyone in scope: the people a generation would appraise (since 2026-09-30 — it also reached leavers, inactive targets and anyone holding a post a template names) |
+| **Open cycle** | `POST …/{id}/open` | 422 (400 until 2026-09-30) when another open cycle of the same type and year covers any of the same employees — **and the message names them**. Also notifies everyone in scope: the people a generation would appraise (since 2026-09-30 — it also reached leavers, inactive targets and anyone holding a post a template names) |
 | **Generate appraisals** | `POST …/{id}/generate-appraisals` | creates `PerformanceAppraisals`, **takes the criterion snapshot**, creates the self and manager evaluator records and the review events. **Skips anyone who already has an appraisal in the cycle** |
-| **Send reminders** | `POST …/{id}/deadline-reminders` | repeat-safe — an identical unread reminder is skipped rather than duplicated |
-| **Close cycle** | `POST …/{id}/close` | |
+| **Send reminders** | `POST …/{id}/deadline-reminders` | repeat-safe — an identical unread reminder is skipped rather than duplicated. **An open cycle only** — a 422 for a draft or a closed one (a closed cycle's were sent until 2026-09-30) |
+| **Close cycle** | `POST …/{id}/close` | **since 2026-09-30 (slice E-d2a)**: a 422 while any appraisal is Draft, Active, in governance or under appeal (*"…unfinished: 2 not started (Draft) and 1 in progress (Active)"*), or any Completed one is inside its appeal window (*"…the last one closes on 7 Oct 2026"*); then every Completed appraisal moves to **Closed** in the same save — one with no score as it stands. It used to read no appraisal: it closed whatever was in the cycle, cut the open appeal windows, and left the appraisals Completed. An appraisal that will not be finished is withdrawn first (chapter 31) |
 
-All four lifecycle actions require **`HR.Performance.Write`**.
+All four lifecycle actions require **`HR.Performance.Write`**, and each answers a refusal with a 422 and its
+reason (a 400 until 2026-09-30).
 
 > **Worth knowing.** *Send reminders* covers **more** phases than the deadline table above it — goal
 > setting, peer nomination and the final conversation as well as the five year-end ones. So it can
@@ -5176,9 +5184,9 @@ Stuck at · Score · Action** — where *Action* is a **Nudge** button. The reas
 | Element | Endpoint |
 |---|---|
 | The whole dashboard | `GET api/HRCycleDashboard/{cycleId}` — one pre-aggregated payload |
-| Which cycle | `GET api/HRCycleDashboard/active-cycle` — ⚠ answers with the **all-zero GUID**, not a 404, when no cycle is open |
+| Which cycle | `GET api/HRCycleDashboard/active-cycle` — **the open cycle with the most appraisals in play, then the one opened last** (since 2026-09-30; it was the open cycle edited last, so a trial cycle left open, or an edit to a small one, displaced the organisation's). ⚠ Answers with the **all-zero GUID**, not a 404, when no cycle is open |
 | Nudge | `POST api/HRCycleDashboard/{cycleId}/appraisals/{appraisalId}/nudge` — **422 when the step is not one an individual can be nudged about**; show the message, it names the step |
-| Send reminders | `POST api/AppraisalCycle/{cycleId}/deadline-reminders` |
+| Send reminders | `POST api/AppraisalCycle/{cycleId}/deadline-reminders` — an open cycle only: the button is off for a draft or closed one, and the server refuses them (it sent a closed cycle's) |
 | Rating distribution | `GET api/PerformanceAnalytics/cycle/{cycleId}/rating-distribution` |
 | Employee trend | `GET api/PerformanceAnalytics/employee/{id}/trend` — readable by **HR, the employee, and their line manager** |
 
@@ -5199,6 +5207,10 @@ Stuck at · Score · Action** — where *Action* is a **Nudge** button. The reas
 > loads its appraisals in separate queries**: as one, it asked SQL Server for some 700 MB of working memory
 > on a fresh start and could wait past the 30-second timeout for it — a 500 even for a small cycle, 13
 > seconds cold on APC2026 (2 now).
+
+> **Changed 2026-09-30** (slice E-d2a). **The page opens on the open cycle with the most appraisals in
+> play** — APC2026 on this database, as before; it used to open on whichever open cycle was edited last.
+> **Send reminders is off unless the chosen cycle is open.**
 
 ### ⚠ Known gaps
 **P-58.** With four scored appraisals the distributions are a single bar. Honest, but not impressive —
@@ -5554,7 +5566,7 @@ mislabelled soft-skill switch (P-69) and an unenforced goal minimum (P-70). The 
 
 **P-1** admin.hr gates the whole setup tree · **P-2** no "default profile" concept · **P-3** appeal
 windows displayed not enforced · **P-5** criterion codes truncate to 10 characters · **P-7** template
-freeze is client-side pessimistic · **P-9 / P-12 / P-17** more 403-ing deletes · **P-11** goal-risk
+freeze is client-side pessimistic · **P-9 / P-17** more 403-ing deletes (~~P-12~~ fixed 2026-09-30) · **P-11** goal-risk
 thresholds are tenant-wide with no per-cycle override · **P-14** Q1/Q3 dates unset · **P-15** estimated
 headcounts are 0 · **P-16** the company-goal list carries only a description preview · **P-20** an
 unbalanced goal set is flagged, not refused · **P-22** the goal-library link is set only at creation ·
