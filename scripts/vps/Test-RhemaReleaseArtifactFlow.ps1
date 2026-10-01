@@ -123,10 +123,63 @@ foreach ($contract in @('DeployOnly', 'ArtifactDirectory',
 }
 Assert-Test (-not $deploy.Contains("NODE_OPTIONS = '--max-old-space-size=8192'")) `
     'The legacy deployer still overrides the build wrapper heap with 8 GB.'
+Assert-Test $deploy.Contains('Set-WindowsProcessArguments -StartInfo $startInfo') `
+    'The deployer does not use its Windows PowerShell 5.1 process-argument adapter.'
+Assert-Test (-not $deploy.Contains('$startInfo.ArgumentList.Add(')) `
+    'The deployer still uses ProcessStartInfo.ArgumentList, which is unavailable in Windows PowerShell 5.1.'
 Assert-Test (-not $deploy.Contains('Compress-Archive')) `
     'The legacy deployer still uses the slow PowerShell Compress-Archive implementation.'
 Assert-Test $deploy.Contains("if (`$PrepareOperationalUat -and -not `$FreshDatabaseName)") `
     'Normal application deployment still runs operational UAT seeds unconditionally.'
+
+$deployTokens = $null; $deployErrors = $null
+$deployAst = [Management.Automation.Language.Parser]::ParseFile(
+    $deployPath, [ref]$deployTokens, [ref]$deployErrors)
+foreach ($functionName in @('ConvertTo-WindowsProcessArgument',
+        'Set-WindowsProcessArguments')) {
+    $functionAst = $deployAst.Find({
+            param($candidate)
+            $candidate -is [Management.Automation.Language.FunctionDefinitionAst] -and
+                $candidate.Name -eq $functionName
+        }, $true)
+    Assert-Test ($null -ne $functionAst) `
+        "The deployer is missing the Windows process adapter function: $functionName"
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+$argumentProbe = [Diagnostics.ProcessStartInfo]::new()
+$argumentProbe.FileName = (Get-Command node.exe -ErrorAction Stop).Source
+$argumentProbe.UseShellExecute = $false
+$argumentProbe.CreateNoWindow = $true
+$argumentProbe.RedirectStandardOutput = $true
+$argumentProbe.RedirectStandardError = $true
+$expectedArguments = @('plain', 'value with spaces', 'C:\path with space\',
+    'quote"value')
+Set-WindowsProcessArguments -StartInfo $argumentProbe -Arguments `
+    (@('-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))') +
+        $expectedArguments)
+$argumentProcess = [Diagnostics.Process]::new()
+$argumentProcess.StartInfo = $argumentProbe
+try {
+    [void]$argumentProcess.Start()
+    $argumentStdout = $argumentProcess.StandardOutput.ReadToEnd()
+    $argumentStderr = $argumentProcess.StandardError.ReadToEnd()
+    $argumentProcess.WaitForExit()
+    Assert-Test ($argumentProcess.ExitCode -eq 0) `
+        "Windows process argument probe failed: $argumentStderr"
+    $parsedArguments = $argumentStdout | ConvertFrom-Json
+    $actualArguments = @(for ($index = 0; $index -lt $parsedArguments.Count; $index++) {
+            [string]$parsedArguments[$index]
+        })
+    Assert-Test ($actualArguments.Count -eq $expectedArguments.Count) `
+        'Windows process argument adapter changed the argument count.'
+    for ($index = 0; $index -lt $expectedArguments.Count; $index++) {
+        Assert-Test ($actualArguments[$index] -ceq $expectedArguments[$index]) `
+            "Windows process argument adapter changed argument $index."
+    }
+}
+finally {
+    $argumentProcess.Dispose()
+}
 
 $zipPackage = Get-Content $zipPackagePath -Raw
 foreach ($contract in @('tar.exe', 'ZipFile]::CreateFromDirectory', 'NoCompression', 'Fastest')) {
@@ -160,7 +213,10 @@ foreach ($contract in @('vps-release-contract', 'Test-CanonicalMigrationPrefligh
         '-DeployOnly', '-ArtifactDirectory',
         'actions/upload-artifact@v4', 'actions/download-artifact@v4',
         'compression-level: 0', 'StrictHostKeyChecking=yes',
-        'environment: test-vps', 'deploy_to_test_vps')) {
+        'environment: test-vps', 'deploy_to_test_vps',
+        'reuse_release_run_id', 'reuse_release_artifact_name',
+        'reuse_release_commit', 'run-id:',
+        '-ExpectedCommit $env:DEPLOY_EXPECTED_COMMIT')) {
     Assert-Test $workflow.Contains($contract) `
         "CI does not enforce the VPS release contract: $contract"
 }
