@@ -66,6 +66,8 @@
     <Compile Include="Controllers\Administration\UserTenantMappingsControllerTests.cs" />
     <Compile Include="Controllers\Administration\InternalUserCredentialsControllerTests.cs" />
     <Compile Include="Controllers\Crm\CrmControllerRouteTests.cs" />
+    <Compile Include="Controllers\Crm\CrmActivityTransactionTests.cs" />
+    <Compile Include="Controllers\Sales\SalesReferenceControllerTests.cs" />
     <Compile Include="Controllers\DocumentsAndSequencesSecurityTests.cs" />
     <Compile Include="Controllers\WorkflowEvidenceControllerTests.cs" />
     <Compile Include="Controllers\DocumentManagement\PaymentDocumentScopeTests.cs" />

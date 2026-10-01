@@ -137,10 +137,19 @@ public sealed class PropertyEnquiryProspectLifecycleTests
             Mock.Of<IEhcTicketService>(),
             NullLogger<PropertyEnquiryProspectService>.Instance);
 
-        var result = await service.CreateOpportunityAsync(ticket.Id, new CreatePropertyEnquiryOpportunityRequest
+        var currencyError = await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateOpportunityAsync(ticket.Id, new CreatePropertyEnquiryOpportunityRequest
         {
             Amount = 999999m,
             Currency = "USD",
+            ExpectedCloseDate = DateTime.UtcNow.AddDays(14),
+            ReserveProperty = false
+        }));
+        Assert.Contains("qualified prospect currency (GHS)", currencyError.Message);
+
+        var result = await service.CreateOpportunityAsync(ticket.Id, new CreatePropertyEnquiryOpportunityRequest
+        {
+            Amount = 999999m,
+            Currency = "GHS",
             ExpectedCloseDate = DateTime.UtcNow.AddDays(14),
             ReserveProperty = false
         });

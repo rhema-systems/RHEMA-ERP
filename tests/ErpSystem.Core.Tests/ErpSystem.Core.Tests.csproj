@@ -151,6 +151,7 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' != 'true'">
+    <Compile Include="Services\Sales\SalesCanonicalPartnerQueryTests.cs" />
     <Compile Include="Services\Ehc\EhcExternalTicketPolicyTests.cs" />
     <Compile Include="Services\Crm\**\*.cs" />
     <Compile Include="Services\Deployment\**\*.cs" />

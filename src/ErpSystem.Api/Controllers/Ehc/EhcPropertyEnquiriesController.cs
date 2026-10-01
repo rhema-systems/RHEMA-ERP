@@ -41,11 +41,11 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
         page = Math.Max(1, page);
         var total = await Query().CountAsync(cancellationToken);
         var rows = await Query().OrderByDescending(t => t.CreatedAt).Skip((page - 1) * 25).Take(25)
-            .Select(t => new { t.Id, t.TicketNumber, t.Subject, t.Status, t.CreatedAt, t.FirstRespondedAt,
+            .Select(t => new { t.Id, t.TicketNumber, t.Subject, t.Status, t.CreatedAt, t.FirstRespondedAt, t.CrmLeadId,
                 t.PropertyListingContextJson, FallbackRequesterName = t.RequesterUser == null
                     ? null : t.RequesterUser.FirstName + " " + t.RequesterUser.LastName })
             .ToArrayAsync(cancellationToken);
-        var items = rows.Select(t => new { t.Id, t.TicketNumber, t.Subject, t.Status, t.CreatedAt, t.FirstRespondedAt,
+        var items = rows.Select(t => new { t.Id, t.TicketNumber, t.Subject, t.Status, t.CreatedAt, t.FirstRespondedAt, t.CrmLeadId,
             RequesterName = PublicContactName(t.PropertyListingContextJson) ?? t.FallbackRequesterName }).ToArray();
         return Ok(new { success = true, data = items, totalCount = total, page, pageSize = 25 });
     }

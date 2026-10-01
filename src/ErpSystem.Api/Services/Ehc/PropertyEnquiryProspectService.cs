@@ -156,6 +156,10 @@ public sealed class PropertyEnquiryProspectService(
         if (request.Amount <= 0) throw new InvalidOperationException("Opportunity amount must be positive.");
         if (request.ExpectedCloseDate.Date < DateTime.UtcNow.Date)
             throw new InvalidOperationException("Expected close date cannot be in the past.");
+        var prospectCurrency = Currency(prospect.Currency);
+        var requestCurrency = Currency(request.Currency);
+        if (!string.Equals(requestCurrency, prospectCurrency, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Opportunity currency must match the qualified prospect currency ({prospectCurrency}).");
 
         if (ticket.CrmOpportunityId.HasValue && prospect.OpportunityId.HasValue
             && ticket.CrmOpportunityId.Value != prospect.OpportunityId.Value)
@@ -170,6 +174,8 @@ public sealed class PropertyEnquiryProspectService(
                 ?? throw new InvalidOperationException("The linked Sales opportunity could not be found for this tenant.");
             if (linkedOpportunity.LeadId != lead.Id)
                 throw new InvalidOperationException("The linked Sales opportunity does not belong to this prospect lead.");
+            if (!string.Equals(Currency(linkedOpportunity.Currency), prospectCurrency, StringComparison.Ordinal))
+                throw new InvalidOperationException("The linked Sales opportunity currency does not match the qualified prospect currency. Reconcile the Sales lineage before continuing.");
         }
 
         if (prospect.Status == EhcPropertyProspectStatuses.Opportunity
@@ -200,7 +206,7 @@ public sealed class PropertyEnquiryProspectService(
                 Stage = "Qualification",
                 Probability = 20,
                 Amount = request.Amount,
-                Currency = Currency(request.Currency),
+                Currency = prospectCurrency,
                 ExpectedCloseDate = request.ExpectedCloseDate,
                 LeadSource = "Public Property Listing",
                 OpportunityType = "New Business",
@@ -214,7 +220,7 @@ public sealed class PropertyEnquiryProspectService(
         prospect.OpportunityId = opportunityId.Value;
         prospect.Status = EhcPropertyProspectStatuses.Opportunity;
         prospect.AgreedAmount = linkedOpportunity?.Amount ?? request.Amount;
-        prospect.Currency = Currency(linkedOpportunity?.Currency ?? request.Currency);
+        prospect.Currency = prospectCurrency;
 
         if (request.ReserveProperty && source is not null)
         {

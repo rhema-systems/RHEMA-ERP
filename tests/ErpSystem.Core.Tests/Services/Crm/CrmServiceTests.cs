@@ -17,6 +17,50 @@ namespace ErpSystem.Core.Tests.Services.Crm;
 public class CrmServiceTests
 {
     [Fact]
+    public async Task GetLeadByIdAsync_ShouldExposeLinkedPropertyEnquiryCurrency()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var leadId = Guid.NewGuid();
+        var ticketId = Guid.NewGuid();
+        var fixture = new CrmServiceFixture(tenantId, userId);
+
+        fixture.Leads.Add(new Lead
+        {
+            Id = leadId,
+            TenantId = tenantId,
+            FirstName = "Akosua",
+            LastName = "Mensah",
+            LeadStatus = "Qualified",
+            LeadSource = "Property Enquiry"
+        });
+        fixture.EhcTickets.Add(new EhcTicket
+        {
+            Id = ticketId,
+            TenantId = tenantId,
+            TicketNumber = "EHC-PE-0007",
+            TicketType = EhcTicketType.Enquiry,
+            Description = "Published plot enquiry"
+        });
+        fixture.PropertyEnquiryProspects.Add(new EhcPropertyEnquiryProspect
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            TicketId = ticketId,
+            LeadId = leadId,
+            AgreedAmount = 275000m,
+            Currency = "GHS"
+        });
+
+        var result = await fixture.CreateService().GetLeadByIdAsync(leadId);
+
+        result.Should().NotBeNull();
+        result!.PropertyEnquiryTicketId.Should().Be(ticketId);
+        result.PropertyEnquiryTicketNumber.Should().Be("EHC-PE-0007");
+        result.PropertyEnquiryCurrency.Should().Be("GHS");
+    }
+
+    [Fact]
     public async Task GetOverviewAsync_ShouldAggregatePipelineAndAccountSignals()
     {
         var tenantId = Guid.NewGuid();
@@ -2939,6 +2983,7 @@ public class CrmServiceTests
         public List<BusinessPartnerUser> BusinessPartnerUsers { get; } = new();
         public List<TenderAssignment> TenderAssignments { get; } = new();
         public List<EhcTicket> EhcTickets { get; } = new();
+        public List<EhcPropertyEnquiryProspect> PropertyEnquiryProspects { get; } = new();
         public List<EhcProblem> EhcProblems { get; } = new();
         public List<EhcProblemTicketLink> EhcProblemTicketLinks { get; } = new();
         public List<Campaign> Campaigns { get; } = new();
@@ -2968,6 +3013,7 @@ public class CrmServiceTests
             _unitOfWork.Setup(x => x.Repository<BusinessPartnerUser>()).Returns(CreateRepository(BusinessPartnerUsers).Object);
             _unitOfWork.Setup(x => x.Repository<TenderAssignment>()).Returns(CreateRepository(TenderAssignments).Object);
             _unitOfWork.Setup(x => x.Repository<EhcTicket>()).Returns(CreateRepository(EhcTickets).Object);
+            _unitOfWork.Setup(x => x.Repository<EhcPropertyEnquiryProspect>()).Returns(CreateRepository(PropertyEnquiryProspects).Object);
             _unitOfWork.Setup(x => x.Repository<EhcProblem>()).Returns(CreateRepository(EhcProblems).Object);
             _unitOfWork.Setup(x => x.Repository<EhcProblemTicketLink>()).Returns(CreateRepository(EhcProblemTicketLinks).Object);
             _unitOfWork.Setup(x => x.Repository<Campaign>()).Returns(CreateRepository(Campaigns).Object);

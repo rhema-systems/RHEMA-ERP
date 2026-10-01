@@ -84,13 +84,14 @@ public class OpportunityService : IOpportunityService
     public async Task<OpportunityDetailDto?> GetByIdAsync(Guid id)
     {
         var opp = await _opportunityRepo.GetByIdAsync(id,
-            o => o.Customer!,
             o => o.Lead!,
             o => o.AssignedTo!,
             o => o.Quotes,
             o => o.Activities);
 
-        return opp == null ? null : MapToDetailDto(opp);
+        if (opp == null) return null;
+        var customerNames = await SalesBusinessPartnerNames.LoadAsync(_unitOfWork, _currentUserProvider.TenantId, new[] { opp.CustomerId });
+        return MapToDetailDto(opp, customerNames);
     }
 
     public async Task<PagedResult<OpportunitySummaryDto>> GetAllAsync(
@@ -118,7 +119,6 @@ public class OpportunityService : IOpportunityService
 
         var totalCount = await query.CountAsync();
         var items = await query
-            .Include(o => o.Customer)
             .Include(o => o.Lead)
             .Include(o => o.AssignedTo)
             .Include(o => o.Quotes)
@@ -127,9 +127,11 @@ public class OpportunityService : IOpportunityService
             .Take(pageSize)
             .ToListAsync();
 
+        var customerNames = await SalesBusinessPartnerNames.LoadAsync(_unitOfWork, _currentUserProvider.TenantId, items.Select(item => item.CustomerId));
+
         return new PagedResult<OpportunitySummaryDto>
         {
-            Items = items.Select(MapToSummaryDto).ToList(),
+            Items = items.Select(item => MapToSummaryDto(item, customerNames)).ToList(),
             TotalCount = totalCount,
             Page = page,
             PageSize = pageSize
@@ -220,31 +222,31 @@ public class OpportunityService : IOpportunityService
             query = query.Where(o => o.AssignedToId == assignedToId.Value);
 
         var items = await query
-            .Include(o => o.Customer)
             .Include(o => o.AssignedTo)
             .OrderBy(o => o.ExpectedCloseDate)
             .ToListAsync();
 
-        return items.Select(MapToSummaryDto).ToList();
+        var customerNames = await SalesBusinessPartnerNames.LoadAsync(_unitOfWork, _currentUserProvider.TenantId, items.Select(item => item.CustomerId));
+        return items.Select(item => MapToSummaryDto(item, customerNames)).ToList();
     }
 
     public async Task<List<OpportunitySummaryDto>> GetByCustomerAsync(Guid customerId)
     {
         var items = await _opportunityRepo.GetQueryable()
             .Where(o => o.CustomerId == customerId)
-            .Include(o => o.Customer)
             .Include(o => o.AssignedTo)
             .OrderByDescending(o => o.CreatedAt)
             .ToListAsync();
 
-        return items.Select(MapToSummaryDto).ToList();
+        var customerNames = await SalesBusinessPartnerNames.LoadAsync(_unitOfWork, _currentUserProvider.TenantId, items.Select(item => item.CustomerId));
+        return items.Select(item => MapToSummaryDto(item, customerNames)).ToList();
     }
 
     #endregion
 
     #region Mapping
 
-    private static OpportunitySummaryDto MapToSummaryDto(Opportunity o) => new()
+    private static OpportunitySummaryDto MapToSummaryDto(Opportunity o, IReadOnlyDictionary<Guid, string> customerNames) => new()
     {
         Id = o.Id,
         Name = o.Name,
@@ -254,7 +256,7 @@ public class OpportunityService : IOpportunityService
         Currency = o.Currency,
         ExpectedCloseDate = o.ExpectedCloseDate,
         ActualCloseDate = o.ActualCloseDate,
-        CustomerName = o.Customer?.CustomerName,
+        CustomerName = customerNames.GetValueOrDefault(o.CustomerId ?? Guid.Empty),
         LeadName = o.Lead != null ? o.Lead.FullName : null,
         AssignedToName = o.AssignedTo?.UserName,
         OpportunityType = o.OpportunityType,
@@ -263,7 +265,7 @@ public class OpportunityService : IOpportunityService
         CreatedAt = o.CreatedAt
     };
 
-    private static OpportunityDetailDto MapToDetailDto(Opportunity o) => new()
+    private static OpportunityDetailDto MapToDetailDto(Opportunity o, IReadOnlyDictionary<Guid, string> customerNames) => new()
     {
         Id = o.Id,
         Name = o.Name,
@@ -275,7 +277,7 @@ public class OpportunityService : IOpportunityService
         ExpectedCloseDate = o.ExpectedCloseDate,
         ActualCloseDate = o.ActualCloseDate,
         CustomerId = o.CustomerId,
-        CustomerName = o.Customer?.CustomerName,
+        CustomerName = customerNames.GetValueOrDefault(o.CustomerId ?? Guid.Empty),
         LeadId = o.LeadId,
         LeadName = o.Lead != null ? o.Lead.FullName : null,
         AssignedToId = o.AssignedToId,

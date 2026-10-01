@@ -2619,6 +2619,8 @@ public class CrmService : ICrmService
         var leadRepository = _unitOfWork.Repository<Lead>();
         var opportunityRepository = _unitOfWork.Repository<Opportunity>();
         var businessPartnerRepository = _unitOfWork.Repository<BusinessPartner>();
+        var propertyProspectRepository = _unitOfWork.Repository<EhcPropertyEnquiryProspect>();
+        var ticketRepository = _unitOfWork.Repository<EhcTicket>();
 
         var lead = await leadRepository.GetByIdAsync(leadId);
         if (lead == null || lead.TenantId != tenantId)
@@ -2635,6 +2637,15 @@ public class CrmService : ICrmService
             ? new Dictionary<Guid, string>()
             : (await businessPartnerRepository.FindAsync(x => x.TenantId == tenantId && businessPartnerIds.Contains(x.Id)))
                 .ToDictionary(x => x.Id, x => x.PartnerName);
+        var propertyProspect = (await propertyProspectRepository.FindAsync(x =>
+                x.TenantId == tenantId && x.LeadId == leadId && !x.IsDeleted))
+            .OrderByDescending(x => x.CreatedAt)
+            .FirstOrDefault();
+        var propertyTicket = propertyProspect == null
+            ? null
+            : (await ticketRepository.FindAsync(x =>
+                    x.TenantId == tenantId && x.Id == propertyProspect.TicketId && !x.IsDeleted))
+                .FirstOrDefault();
 
         return new CrmLeadDetailDto
         {
@@ -2666,6 +2677,9 @@ public class CrmService : ICrmService
             Notes = lead.Notes,
             ConvertedBusinessPartnerId = lead.ConvertedCustomerId,
             ConvertedDate = lead.ConvertedDate,
+            PropertyEnquiryTicketId = propertyProspect?.TicketId,
+            PropertyEnquiryTicketNumber = propertyTicket?.TicketNumber,
+            PropertyEnquiryCurrency = propertyProspect?.Currency,
             Opportunities = opportunities
                 .OrderByDescending(x => x.Amount * x.Probability / 100m)
                 .ThenBy(x => x.ExpectedCloseDate)

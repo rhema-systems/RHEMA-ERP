@@ -5,6 +5,7 @@ export type ProspectActivityType = 'Contact' | 'Note' | 'FollowUp';
 
 export interface PropertyEnquiryQueueItem {
   id: string;
+  crmLeadId?: string | null;
   ticketNumber: string;
   subject: string;
   status: string;

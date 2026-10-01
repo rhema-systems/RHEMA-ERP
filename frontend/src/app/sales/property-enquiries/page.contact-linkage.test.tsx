@@ -22,6 +22,14 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/services/api.service', () => ({
   apiService: { request: mocks.request },
 }));
+vi.mock('@/services/salesReferenceService', () => ({
+  salesReferenceService: {
+    getActiveCurrencies: async () => [
+      { code: 'GHS', name: 'Ghana Cedi', isBaseCurrency: true },
+      { code: 'USD', name: 'US Dollar', isBaseCurrency: false },
+    ],
+  },
+}));
 vi.mock('@/components/estate/PropertyEnquiryDetails', () => ({
   PropertyEnquiryDetails: () => null,
 }));
@@ -134,6 +142,28 @@ describe('property enquiry contact linkage', () => {
       ).not.toBeInTheDocument()
     );
     expect(screen.getByRole('button', { name: 'Mark qualified' })).toBeEnabled();
+    client.clear();
+  });
+
+  it('shows the inherited opportunity currency as read only', async () => {
+    mocks.prospectStatus = 'Qualified';
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <PropertyEnquiriesPage />
+      </QueryClientProvider>
+    );
+
+    const currency = await screen.findByRole('combobox', {
+      name: 'Opportunity Currency',
+    });
+    expect(currency).toHaveTextContent('GHS');
+    expect(currency).toBeDisabled();
+    expect(
+      screen.getByText('Inherited from the qualified prospect or property listing.')
+    ).toBeInTheDocument();
     client.clear();
   });
 });

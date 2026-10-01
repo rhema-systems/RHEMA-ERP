@@ -3,7 +3,7 @@
 import { hasCustomerRole } from '@/lib/business-partner-roles';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -71,6 +71,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { resolveActivityPropertyEnquiryContext } from '@/lib/crm-activity-property-enquiry';
 
 const ACTIVITY_STATUS_OPTIONS = [
   'Planned',
@@ -212,6 +213,8 @@ function ActivityDialog({
   opportunities,
   propertyEnquiries,
   propertyEnquiryReadOnly,
+  leadReadOnly,
+  leadName,
   onOpenChange,
   onSubmit,
   onChange,
@@ -226,6 +229,8 @@ function ActivityDialog({
   opportunities: CrmOpportunityListItemDto[];
   propertyEnquiries: PropertyEnquiryQueueItem[];
   propertyEnquiryReadOnly: boolean;
+  leadReadOnly: boolean;
+  leadName?: string;
   onOpenChange: (open: boolean) => void;
   onSubmit: () => void;
   onChange: <K extends keyof CreateCrmActivityDto>(
@@ -233,6 +238,12 @@ function ActivityDialog({
     value: CreateCrmActivityDto[K]
   ) => void;
 }) {
+  const {
+    inheritedPropertyEnquiry,
+    selectablePropertyEnquiries,
+    showPropertyEnquirySelector,
+  } = resolveActivityPropertyEnquiryContext(propertyEnquiries, form.leadId);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[85vh] max-w-4xl flex-col gap-0 overflow-hidden p-0">
@@ -313,27 +324,47 @@ function ActivityDialog({
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label>Lead</Label>
-              <Select
-                value={form.leadId || 'none'}
-                onValueChange={(value) =>
-                  onChange('leadId', value === 'none' ? '' : value)
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select lead" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No linked lead</SelectItem>
-                  {leads.map((lead) => (
-                    <SelectItem key={lead.leadId} value={lead.leadId}>
-                      {lead.fullName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {leadReadOnly ? (
+              <div className="space-y-2">
+                <Label>Lead</Label>
+                <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                  {leadName || 'Selected Lead'}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Linked automatically from the Lead page.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>Lead</Label>
+                <Select
+                  value={form.leadId || 'none'}
+                  onValueChange={(value) => {
+                    const leadId = value === 'none' ? '' : value;
+                    const linkedEnquiries = propertyEnquiries.filter(
+                      (enquiry) => enquiry.crmLeadId === leadId
+                    );
+                    onChange('leadId', leadId);
+                    onChange(
+                      'propertyEnquiryTicketId',
+                      linkedEnquiries.length === 1 ? linkedEnquiries[0].id : ''
+                    );
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select lead" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No linked lead</SelectItem>
+                    {leads.map((lead) => (
+                      <SelectItem key={lead.leadId} value={lead.leadId}>
+                        {lead.fullName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>Opportunity</Label>
@@ -360,41 +391,63 @@ function ActivityDialog({
               </Select>
             </div>
 
-            <div className="space-y-2 md:col-span-2">
-              <Label>Property Enquiry</Label>
-              <Select
-                disabled={propertyEnquiryReadOnly}
-                value={form.propertyEnquiryTicketId || 'none'}
-                onValueChange={(value) => {
-                  onChange(
-                    'propertyEnquiryTicketId',
-                    value === 'none' ? '' : value
-                  );
-                  if (value !== 'none') {
-                    onChange('businessPartnerId', '');
-                    onChange('leadId', '');
-                    onChange('opportunityId', '');
-                  }
-                }}
-              >
-                <SelectTrigger aria-label="Property Enquiry">
-                  <SelectValue placeholder="Select property enquiry" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No linked property enquiry</SelectItem>
-                  {propertyEnquiries.map((enquiry) => (
-                    <SelectItem key={enquiry.id} value={enquiry.id}>
-                      {enquiry.ticketNumber} - {enquiry.subject}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                A completed Call, Meeting, or Email records Sales contact for
-                this enquiry and enables qualification. Planned and other
-                activities remain linked without changing the prospect stage.
-              </p>
-            </div>
+            {inheritedPropertyEnquiry ? (
+              <div className="space-y-2 md:col-span-2">
+                <Label>Property Enquiry</Label>
+                <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                  {inheritedPropertyEnquiry.ticketNumber} -{' '}
+                  {inheritedPropertyEnquiry.subject}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Inherited automatically from the selected Lead.
+                </p>
+              </div>
+            ) : showPropertyEnquirySelector ? (
+              <div className="space-y-2 md:col-span-2">
+                <Label>Property Enquiry</Label>
+                <Select
+                  disabled={propertyEnquiryReadOnly}
+                  value={form.propertyEnquiryTicketId || 'none'}
+                  onValueChange={(value) => {
+                    const enquiry = propertyEnquiries.find(
+                      (item) => item.id === value
+                    );
+                    onChange(
+                      'propertyEnquiryTicketId',
+                      value === 'none' ? '' : value
+                    );
+                    if (enquiry?.crmLeadId) {
+                      onChange('leadId', enquiry.crmLeadId);
+                    }
+                    if (value !== 'none') {
+                      onChange('businessPartnerId', '');
+                      onChange('opportunityId', '');
+                    }
+                  }}
+                >
+                  <SelectTrigger aria-label="Property Enquiry">
+                    <SelectValue placeholder="Select property enquiry" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {!form.leadId ? (
+                      <SelectItem value="none">
+                        No linked property enquiry
+                      </SelectItem>
+                    ) : null}
+                    {selectablePropertyEnquiries.map((enquiry) => (
+                      <SelectItem key={enquiry.id} value={enquiry.id}>
+                        {enquiry.ticketNumber} - {enquiry.subject}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {form.leadId
+                    ? 'This Lead has multiple enquiries. Select the enquiry for this activity.'
+                    : 'A completed Call, Meeting, or Email records Sales contact for the selected enquiry and enables qualification.'}
+                </p>
+              </div>
+            ) : null}
 
             <div className="space-y-2">
               <Label>Priority</Label>
@@ -1391,6 +1444,8 @@ export default function CrmActivitiesPage() {
         opportunities={opportunities}
         propertyEnquiries={propertyEnquiries}
         propertyEnquiryReadOnly={formMode === 'edit'}
+        leadReadOnly={Boolean(scopedLeadId)}
+        leadName={scopedLeadName}
         onOpenChange={setFormOpen}
         onSubmit={() => void submitActivity()}
         onChange={(field, value) =>

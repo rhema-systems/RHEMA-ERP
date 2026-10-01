@@ -695,6 +695,9 @@ public class CrmLeadDetailDto : CrmLeadListItemDto
     public string? Notes { get; set; }
     public Guid? ConvertedBusinessPartnerId { get; set; }
     public DateTime? ConvertedDate { get; set; }
+    public Guid? PropertyEnquiryTicketId { get; set; }
+    public string? PropertyEnquiryTicketNumber { get; set; }
+    public string? PropertyEnquiryCurrency { get; set; }
     public List<CrmOpportunityOverviewDto> Opportunities { get; set; } = new();
 }
 

@@ -27,6 +27,107 @@ namespace ErpSystem.Api.Tests.Services.Ehc;
 public sealed class PropertyEnquiryContactLinkageTests
 {
     [Fact]
+    public async Task Crm_activity_inherits_the_property_enquiry_linked_to_its_lead()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var leadId = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options);
+        var salesUnit = new OrganizationUnit
+        {
+            TenantId = tenantId,
+            OrganizationLevelId = Guid.NewGuid(),
+            Name = "Sales",
+            Code = "DEPT-SALES",
+            Path = "/SALES",
+            IsActive = true
+        };
+        var ticket = Ticket(tenantId, salesUnit, "PE-CRM-AUTO", "LIST-CRM-AUTO");
+        ticket.CrmLeadId = leadId;
+        db.AddRange(salesUnit, ticket);
+        await db.SaveChangesAsync();
+
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(user => user.TenantId).Returns(tenantId);
+        currentUser.SetupGet(user => user.UserId).Returns(actorId.ToString());
+        currentUser.SetupGet(user => user.UserName).Returns("sales.officer");
+        CreateCrmActivityDto? captured = null;
+        var activityId = Guid.NewGuid();
+        var crm = new Mock<ICrmService>();
+        crm.Setup(service => service.CreateActivityAsync(It.IsAny<CreateCrmActivityDto>()))
+            .Callback<CreateCrmActivityDto>(dto => captured = dto)
+            .ReturnsAsync(new CrmActivityDetailDto
+            {
+                ActivityId = activityId,
+                LeadId = leadId,
+                Subject = "Lead follow-up",
+                ActivityType = "Call",
+                ActivityStatus = "Completed"
+            });
+        var propertyProspects = new Mock<IPropertyEnquiryProspectService>();
+        propertyProspects.Setup(service => service.GetAsync(ticket.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PropertyEnquiryProspectDto?)null);
+        propertyProspects.Setup(service => service.RecordContactAsync(
+                ticket.Id,
+                It.IsAny<RecordPropertyEnquiryContactRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PropertyEnquiryProspectDto(
+                ticket.Id,
+                leadId,
+                null,
+                null,
+                null,
+                null,
+                null,
+                EhcPropertyProspectStatuses.Contacted,
+                0m,
+                "GHS",
+                ProspectDepositRequirementTypes.Full,
+                0m,
+                0m,
+                true,
+                null,
+                null));
+        var controller = new CrmController(crm.Object)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                        [new Claim(ClaimTypes.Role, "Sales Officer")],
+                        "Test"))
+                }
+            }
+        };
+
+        var result = await controller.CreateActivity(
+            new CreateCrmActivityDto
+            {
+                Subject = "Lead follow-up",
+                ActivityType = "Call",
+                ActivityStatus = "Completed",
+                ActivityDate = DateTime.UtcNow,
+                LeadId = leadId
+            },
+            db,
+            currentUser.Object,
+            propertyProspects.Object,
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedAtActionResult>(result.Result);
+        var activity = Assert.IsType<CrmActivityDetailDto>(created.Value);
+        Assert.Equal(ticket.Id, captured?.PropertyEnquiryTicketId);
+        Assert.Equal(ticket.Id, activity.PropertyEnquiryTicketId);
+        Assert.Equal(ticket.TicketNumber, activity.PropertyEnquiryTicketNumber);
+        Assert.True(await db.EhcCrmEngagementLinks.AnyAsync(link =>
+            link.TicketId == ticket.Id && link.CrmActivityId == activityId));
+    }
+
+    [Fact]
     public async Task Crm_activity_links_the_selected_enquiry_but_only_completed_contacts_advance_it()
     {
         var tenantId = Guid.NewGuid();
