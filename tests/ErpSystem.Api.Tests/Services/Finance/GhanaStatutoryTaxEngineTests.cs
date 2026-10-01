@@ -354,6 +354,54 @@ public sealed class GhanaStatutoryTaxEngineTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-GhanaTax")]
     [Trait("Category", "Tax")]
+    public async Task TaxCalculation_ShouldApplyConfiguredLineAndDocumentRoundingBoundaries()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var payable = SeedAccount(db, tenantId, "2211", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
+        var receivable = SeedAccount(db, tenantId, "1411", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
+        var first = SeedTax(db, tenantId, "LEVY-A", "Levy A", 10m, TaxCategory.Standard, receivable.Id, payable.Id, new DateTime(2026, 1, 1));
+        var second = SeedTax(db, tenantId, "LEVY-B", "Levy B", 10m, TaxCategory.Standard, receivable.Id, payable.Id, new DateTime(2026, 1, 1));
+        var group = SeedTaxGroup(db, tenantId, "SCOPE-GRP", TaxApplicability.Sales);
+        AddComponent(db, tenantId, group.Id, first.Id, 1);
+        AddComponent(db, tenantId, group.Id, second.Id, 2);
+        var settings = new FinanceSettings
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BaseCurrency = "GHS",
+            TaxPercentageDecimalPlaces = 4,
+            TaxRoundingMethod = GovernedRoundingMethod.Nearest,
+            TaxRoundingScope = TaxRoundingScope.Line
+        };
+        db.FinanceSettings.Add(settings);
+        await db.SaveChangesAsync();
+
+        var engine = new TaxCalculationEngine(db, CreateCurrentUser(tenantId).Object, Mock.Of<ILogger<TaxCalculationEngine>>());
+        var request = new TaxCalculationRequestDto
+        {
+            BaseAmount = 0.23m,
+            TaxGroupId = group.Id,
+            TransactionDate = new DateTime(2026, 7, 6),
+            TransactionType = TaxTransactionType.SaleOfGoods
+        };
+
+        var lineResult = await engine.CalculateTaxesAsync(request);
+        settings.TaxRoundingScope = TaxRoundingScope.Document;
+        await db.SaveChangesAsync();
+        var documentResult = await engine.CalculateTaxesAsync(request);
+
+        lineResult.TotalTaxAmount.Should().Be(0.04m);
+        lineResult.TaxRoundingScope.Should().Be(TaxRoundingScope.Line);
+        documentResult.TotalTaxAmount.Should().Be(0.05m);
+        documentResult.TaxRoundingDelta.Should().Be(0.004m);
+        documentResult.TaxBreakdowns.Sum(item => item.TaxAmount).Should().Be(documentResult.TotalTaxAmount);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-GhanaTax")]
+    [Trait("Category", "Tax")]
     public async Task TaxConfiguration_ShouldRejectBackdatedRateChangesAndAuditConfigurationEvents()
     {
         var tenantId = Guid.NewGuid();

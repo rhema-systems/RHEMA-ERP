@@ -41,6 +41,13 @@ public class UnitType : TenantEntity
     public int DecimalPlaces { get; set; } = 2;
 
     /// <summary>
+    /// Optional business increment for this UOM (for example 0.125 hours or 0.5 units).
+    /// It must not be finer than DecimalPlaces and is independent of currency precision.
+    /// </summary>
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal? RoundingIncrement { get; set; }
+
+    /// <summary>
     /// Whether this unit type is active and can be used for new accounts.
     /// </summary>
     [Required]

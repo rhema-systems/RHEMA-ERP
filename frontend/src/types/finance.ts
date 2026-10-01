@@ -1368,6 +1368,9 @@ export interface FinanceSettings {
   coaType: 'Standard' | 'Segmented';
   coaConfigurationLocked: boolean;
   baseCurrency: string;
+  baseCurrencyName?: string;
+  baseCurrencySymbol?: string;
+  baseCurrencyDecimalPlaces?: number;
   whtStatutoryYearStartMonth?: number;
   whtStatutoryYearStartDay?: number;
   accountSeparator?: string;
@@ -1419,6 +1422,22 @@ export interface FinanceSettings {
   minimumReversalReasonLength?: number;
   enforceFinanceAccessScopes?: boolean;
   requireDepreciationBeforePeriodClose?: boolean;
+  unitPriceDecimalPlaces?: number;
+  exchangeRateInputDecimalPlaces?: number;
+  exchangeRateDisplayDecimalPlaces?: number;
+  taxPercentageDecimalPlaces?: number;
+  taxRoundingMethod?: 'Nearest' | 'Up' | 'Down';
+  taxRoundingScope?: 'Line' | 'TaxCodeGroup' | 'Document';
+  taxRoundingIncrement?: number;
+  invoiceRoundingEnabled?: boolean;
+  invoiceRoundingIncrement?: number;
+  invoiceRoundingMethod?: 'Nearest' | 'Up' | 'Down';
+  invoiceRoundingGainAccountId?: string;
+  invoiceRoundingLossAccountId?: string;
+  settlementToleranceAmount?: number;
+  settlementTolerancePercentage?: number;
+  reportDisplayDecimalPlaces?: number;
+  precisionAccountingPolicyLocked?: boolean;
   apInvoicePriceTolerancePercent: number;
   apInvoiceQuantityTolerancePercent: number;
   /** True when posted transactions exist — base currency and control accounts become locked */
@@ -1475,6 +1494,21 @@ export interface UpdateFinanceSettingsDto {
   minimumReversalReasonLength?: number;
   enforceFinanceAccessScopes?: boolean;
   requireDepreciationBeforePeriodClose?: boolean;
+  unitPriceDecimalPlaces?: number;
+  exchangeRateInputDecimalPlaces?: number;
+  exchangeRateDisplayDecimalPlaces?: number;
+  taxPercentageDecimalPlaces?: number;
+  taxRoundingMethod?: 'Nearest' | 'Up' | 'Down';
+  taxRoundingScope?: 'Line' | 'TaxCodeGroup' | 'Document';
+  taxRoundingIncrement?: number;
+  invoiceRoundingEnabled?: boolean;
+  invoiceRoundingIncrement?: number;
+  invoiceRoundingMethod?: 'Nearest' | 'Up' | 'Down';
+  invoiceRoundingGainAccountId?: string;
+  invoiceRoundingLossAccountId?: string;
+  settlementToleranceAmount?: number;
+  settlementTolerancePercentage?: number;
+  reportDisplayDecimalPlaces?: number;
   apInvoicePriceTolerancePercent?: number;
   apInvoiceQuantityTolerancePercent?: number;
 }

@@ -180,6 +180,7 @@ export default function UnitTypesPage() {
                                 <TableHead>Name</TableHead>
                                 <TableHead>Description</TableHead>
                                 <TableHead className="text-center">Decimals</TableHead>
+                                <TableHead className="text-center">Increment</TableHead>
                                 <TableHead className="text-center">Status</TableHead>
                                 <TableHead className="text-right">Actions</TableHead>
                             </TableRow>
@@ -195,6 +196,7 @@ export default function UnitTypesPage() {
                                         {type.description || '-'}
                                     </TableCell>
                                     <TableCell className="text-center">{type.decimalPlaces}</TableCell>
+                                    <TableCell className="text-center">{type.roundingIncrement ?? 'Decimal precision'}</TableCell>
                                     <TableCell className="text-center">
                                         <Badge variant={type.isActive ? 'default' : 'secondary'}>
                                             {type.isActive ? 'Active' : 'Inactive'}
