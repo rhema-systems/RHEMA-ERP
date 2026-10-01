@@ -220,6 +220,48 @@ function Protect-OpenSshFile {
     Assert-True ($LASTEXITCODE -eq 0) "Could not protect OpenSSH file: $Path"
 }
 
+function Set-OpenSshDirectoryPermissions {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $systemSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    $administratorsSid =
+        [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $authenticatedUsersSid =
+        [Security.Principal.SecurityIdentifier]::new('S-1-5-11')
+    $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+
+    $security = [Security.AccessControl.DirectorySecurity]::new()
+    $security.SetOwner($administratorsSid)
+    # OpenSSH 9.4 and later refuse service mode when ProgramData\ssh or its
+    # logs directory retain any unexpected writable ACE. Build a fresh DACL
+    # instead of using icacls /grant:r, which leaves unrelated explicit ACEs.
+    $security.SetAccessRuleProtection($true, $false)
+    $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+            $systemSid,
+            [Security.AccessControl.FileSystemRights]::FullControl,
+            $inheritance,
+            [Security.AccessControl.PropagationFlags]::None,
+            $allow))
+    $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+            $administratorsSid,
+            [Security.AccessControl.FileSystemRights]::FullControl,
+            $inheritance,
+            [Security.AccessControl.PropagationFlags]::None,
+            $allow))
+    $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+            $authenticatedUsersSid,
+            [Security.AccessControl.FileSystemRights]::ReadAndExecute,
+            $inheritance,
+            [Security.AccessControl.PropagationFlags]::None,
+            $allow))
+    Set-Acl -LiteralPath $Path -AclObject $security
+}
+
 function Repair-OpenSshServerPermissions {
     param(
         [Parameter(Mandatory)]
@@ -231,28 +273,13 @@ function Repair-OpenSshServerPermissions {
     $serviceSid = Get-OpenSshServiceSid
     [void][IO.Directory]::CreateDirectory($logsDirectory)
     foreach ($directory in @($sshDataDirectory, $logsDirectory)) {
-        $serviceGrant = if ($directory -ceq $logsDirectory) {
-            "*$serviceSid`:(OI)(CI)F"
-        }
-        else {
-            "*$serviceSid`:(OI)(CI)RX"
-        }
-        $directoryGrants = @(
-            '*S-1-5-18:(OI)(CI)F',
-            '*S-1-5-32-544:(OI)(CI)F',
-            '*S-1-5-11:(OI)(CI)RX'
-        )
-        if ($serviceSid -cne 'S-1-5-18') {
-            $directoryGrants += $serviceGrant
-        }
-        & icacls.exe $directory '/inheritance:r' '/grant:r' `
-            @directoryGrants | Out-Null
-        Assert-True ($LASTEXITCODE -eq 0) `
-            "Could not repair OpenSSH directory permissions: $directory"
-        & icacls.exe $directory '/setowner' '*S-1-5-32-544' | Out-Null
-        Assert-True ($LASTEXITCODE -eq 0) `
-            "Could not repair OpenSSH directory ownership: $directory"
+        Set-OpenSshDirectoryPermissions -Path $directory
     }
+
+    Get-ChildItem -LiteralPath $logsDirectory -File -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            Protect-OpenSshFile -Path $_.FullName -AdministratorsOnly
+        }
 
     Protect-OpenSshFile -Path $ConfigPath -AdministratorsOnly
     if ($serviceSid -cne 'S-1-5-18') {

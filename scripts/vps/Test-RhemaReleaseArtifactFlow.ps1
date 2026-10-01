@@ -179,6 +179,8 @@ foreach ($contract in @('SYNCFUSION_LICENSE', 'VPS_SSH_PRIVATE_KEY',
         'Get-AuthenticodeSignature', 'auth login',
         'OpenSSH.Server', 'RhemaERP GitHub Actions SSH',
         'AuthenticationMethods publickey', 'Repair-OpenSshServerPermissions',
+        'Set-OpenSshDirectoryPermissions',
+        'SetAccessRuleProtection($true, $false)',
         'SyslogFacility LOCAL0', 'Get-OpenSshServiceSid',
         'Get-OpenSshStartupEvidence', 'Ensure-OpenSshServiceRunning',
         'The sshd process exited after initially reaching Running state',
@@ -200,6 +202,17 @@ Assert-Test (-not $ciBootstrap.Contains("-P '' -f `$SshPrivateKeyPath")) `
     'GitHub CI/CD bootstrap uses an empty native argument that Windows PowerShell drops.'
 Assert-Test (-not $ciBootstrap.Contains('KbdInteractiveAuthentication')) `
     'GitHub CI/CD bootstrap uses an unsupported Windows OpenSSH setting.'
+$strictDirectoryAclIndex =
+    $ciBootstrap.IndexOf('$security.SetAccessRuleProtection($true, $false)')
+$directoryAclRepairIndex =
+    $ciBootstrap.IndexOf('Repair-OpenSshServerPermissions -ConfigPath')
+$serviceStartIndex = $ciBootstrap.IndexOf('Ensure-OpenSshServiceRunning -Restart')
+Assert-Test ($strictDirectoryAclIndex -ge 0 -and $directoryAclRepairIndex -ge 0 -and
+    $serviceStartIndex -gt $directoryAclRepairIndex) `
+    'GitHub CI/CD bootstrap does not replace stale OpenSSH directory ACLs before service startup.'
+Assert-Test (-not $ciBootstrap.Contains(
+        "& icacls.exe `$directory '/inheritance:r' '/grant:r'")) `
+    'GitHub CI/CD bootstrap still retains unrelated explicit OpenSSH directory grants.'
 $hostKeyPreparationIndex = $ciBootstrap.IndexOf('& ssh-keygen.exe -A')
 $sshdValidationIndex = $ciBootstrap.IndexOf('& $sshdExecutable -t')
 Assert-Test ($hostKeyPreparationIndex -ge 0 -and
