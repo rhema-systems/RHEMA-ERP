@@ -388,7 +388,7 @@ public class PerformanceImprovementPlansController : ControllerBase
                 ReviewSchedule    = req.ReviewSchedule,
             };
 
-            var response = await _improvementPlanService.CreateAsync(createDto);
+            var response = await _improvementPlanService.CreateAsync(createDto, ActorEmployeeId);
             return Ok(response.Id);
         }
         catch (InvalidOperationException ex)
@@ -460,13 +460,14 @@ public class PerformanceImprovementPlansController : ControllerBase
     }
 
     // ── Approval workflow ─────────────────────────────────────────────────────
-    // Submit / approve / reject / recall run on the generic workflow engine. There is no role
-    // attribute on approve and reject on purpose: the authority to approve comes from the published
-    // PerformanceImprovementPlan definition, and the service refuses anyone the engine has not
-    // routed the step to.
-    //
-    // ⚠ All four are inoperable until such a definition is published and
-    // POST api/Workflow/entity-types/seed has been re-run after this build.
+    // Submit / approve / reject / recall run on the generic workflow engine when a definition is
+    // published, and through the fallback when none is. There is no role attribute on approve and
+    // reject on purpose: the service decides from the record (F3, D-12, D-102) — whoever submitted
+    // the plan does not decide it; a plan the line manager put forward is HR's, one HR put forward
+    // the line manager's or a tenant administrator's — and the line manager holds no HR role.
+
+    /// <summary>The acting employee, from the token — the plan's author recorded, and the decider compared.</summary>
+    private Guid? ActorEmployeeId => _currentUserService.EmployeeId is Guid id && id != Guid.Empty ? id : null;
 
     /// <summary>Send a draft plan out for approval.</summary>
     [HttpPost("{id:guid}/submit")]
@@ -480,11 +481,15 @@ public class PerformanceImprovementPlansController : ControllerBase
 
         try
         {
-            return Ok(await _improvementPlanService.SubmitForApprovalAsync(id, ct));
+            return Ok(await _improvementPlanService.SubmitForApprovalAsync(id, ActorEmployeeId, ct));
         }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
@@ -508,7 +513,7 @@ public class PerformanceImprovementPlansController : ControllerBase
 
         try
         {
-            return Ok(await _improvementPlanService.ApproveAsync(id, ct));
+            return Ok(await _improvementPlanService.ApproveAsync(id, ActorEmployeeId, ct));
         }
         catch (ArgumentException ex)
         {
@@ -540,7 +545,7 @@ public class PerformanceImprovementPlansController : ControllerBase
 
         try
         {
-            return Ok(await _improvementPlanService.RejectAsync(id, request?.Reason, ct));
+            return Ok(await _improvementPlanService.RejectAsync(id, request?.Reason, ActorEmployeeId, ct));
         }
         catch (ArgumentException ex)
         {
@@ -573,11 +578,15 @@ public class PerformanceImprovementPlansController : ControllerBase
 
         try
         {
-            return Ok(await _improvementPlanService.RecallAsync(id, ct));
+            return Ok(await _improvementPlanService.RecallAsync(id, ActorEmployeeId, ct));
         }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {

@@ -313,7 +313,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     /// named employee, so it goes out for approval before it is in force — see
     /// <c>PerformanceImprovementPlanWorkflowStatusAdapter</c>.
     /// </summary>
-    public async Task<PerformanceImprovementPlanDto> CreateAsync(CreatePerformanceImprovementPlanDto createDto, CancellationToken cancellationToken = default)
+    public async Task<PerformanceImprovementPlanDto> CreateAsync(CreatePerformanceImprovementPlanDto createDto, Guid? authoredById, CancellationToken cancellationToken = default)
     {
         // ── Data integrity: only one live or in-flight PIP per employee at a time ──────────
         var tenantId = GetTenantId();
@@ -353,6 +353,8 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         performanceImprovementPlan.TenantId = tenantId;
         performanceImprovementPlan.Status = PipStatus.Draft;
         performanceImprovementPlan.PipNumber = await NextPipNumberAsync(tenantId, cancellationToken);
+        // Who wrote it (D-102); the submission re-stamps whoever puts it forward.
+        performanceImprovementPlan.AuthoredById = authoredById is { } author && author != Guid.Empty ? author : null;
 
         await _improvementPlanRepository.AddAsync(performanceImprovementPlan);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -572,10 +574,44 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     // see HrWorkflowFallbackAuthority for the mechanism and for why submit could not be fixed on
     // its own.
     //
-    // The second half of the old sentence still holds and is the point of the engine: when a
-    // definition IS published, the authority to approve comes from it and not from a role.
+    // When a definition IS published, it names who may be asked; the record names who may decide,
+    // on both paths (F3, D-12, D-102): the plan's author is whoever put it forward — stamped at
+    // create and again at submission — and never decides it. A plan the employee's line manager put
+    // forward is HR's to decide; one anybody else (HR) put forward is the line manager's or a tenant
+    // administrator's. Only the author recalls.
 
-    public async Task<PerformanceImprovementPlanDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default)
+    /// <summary>The record's decider rule (F3, D-12, D-102), run before either path is asked.</summary>
+    private async Task EnsureMayDecidePlanAsync(PerformanceImprovementPlan entity, Guid? actorEmployeeId, CancellationToken cancellationToken)
+    {
+        var roles = _currentUserProvider.Roles;
+        var isTenantAdmin = roles.Any(r => string.Equals(r, Constants.Roles.TenantAdmin, StringComparison.OrdinalIgnoreCase));
+        var actor = actorEmployeeId is { } a && a != Guid.Empty ? a : (Guid?)null;
+
+        if (actor is not null && actor == entity.AuthoredById)
+            throw new UnauthorizedAccessException("You put this plan forward, so someone else decides it.");
+
+        var lineManagerId = await _employeeRepository.GetQueryable()
+            .Where(e => e.Id == entity.EmployeeId && e.TenantId == entity.TenantId)
+            .Select(e => e.ManagerId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        // A plan with no recorded author predates the rule; it is HR's to decide, as every plan was.
+        var putForwardByLineManager = entity.AuthoredById is null || entity.AuthoredById == lineManagerId;
+        if (putForwardByLineManager)
+        {
+            if (isTenantAdmin || HrWorkflowFallbackAuthority.CanRuleWithoutWorkflow(roles, HrPermissions.ApprovePerformance))
+                return;
+            throw new UnauthorizedAccessException(
+                "This plan was put forward by the employee's line manager, so HR decides it.");
+        }
+
+        if (isTenantAdmin || (actor is not null && actor == lineManagerId))
+            return;
+        throw new UnauthorizedAccessException(
+            "This plan was put forward by HR, so the employee's line manager or a tenant administrator decides it.");
+    }
+
+    public async Task<PerformanceImprovementPlanDto> SubmitForApprovalAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPipAsync(id, cancellationToken);
 
@@ -623,6 +659,10 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
 
+        // Whoever puts the plan forward is its author for the decision (D-102): they do not decide it.
+        if (actorEmployeeId is { } submitter && submitter != Guid.Empty)
+            entity.AuthoredById = submitter;
+
         await _improvementPlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -642,30 +682,18 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
                 $"Only a plan awaiting approval can be {action}. This one is {entity.Status}.");
     }
 
-    public async Task<PerformanceImprovementPlanDto> ApproveAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<PerformanceImprovementPlanDto> ApproveAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPipAsync(id, cancellationToken);
         EnsureAwaitingApproval(entity, "approved");
         var userId = RequireUserId();
 
-        WorkflowOutcome approvalOutcome;
-        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
-        {
-            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
-                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+        await EnsureMayDecidePlanAsync(entity, actorEmployeeId, cancellationToken);
 
-            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Approve");
-            if (!workflowResult.ExecutionResult.Success)
-                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
-
-            approvalOutcome = workflowResult.Outcome;
-        }
-        else
-        {
-            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
-                _currentUserProvider, "approve an improvement plan", HrPermissions.ApprovePerformance);
-            approvalOutcome = WorkflowOutcome.Approved;
-        }
+        // Engine when a definition is published; with none, the record's rule above is the authority — the line
+        // manager deciding HR's plan holds no HR approve permission.
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalDecidedByRecordAsync(
+            _workflowIntegrationService, EntityType, id, userId, "Approve", null);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplyApprovalOutcome(entity, approvalOutcome, userId);
@@ -677,32 +705,18 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         return await AfterApprovalStepAsync(entity, cancellationToken);
     }
 
-    public async Task<PerformanceImprovementPlanDto> RejectAsync(Guid id, string? reason, CancellationToken cancellationToken = default)
+    public async Task<PerformanceImprovementPlanDto> RejectAsync(Guid id, string? reason, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPipAsync(id, cancellationToken);
         EnsureAwaitingApproval(entity, "rejected");
         var userId = RequireUserId();
 
+        await EnsureMayDecidePlanAsync(entity, actorEmployeeId, cancellationToken);
+
         var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
 
-        WorkflowOutcome rejectionOutcome;
-        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
-        {
-            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
-                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
-            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Reject", rejectionText);
-            if (!workflowResult.ExecutionResult.Success)
-                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
-
-            rejectionOutcome = workflowResult.Outcome;
-        }
-        else
-        {
-            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
-                _currentUserProvider, "reject an improvement plan", HrPermissions.ApprovePerformance);
-            rejectionOutcome = WorkflowOutcome.Rejected;
-        }
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalDecidedByRecordAsync(
+            _workflowIntegrationService, EntityType, id, userId, "Reject", rejectionText);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplyApprovalOutcome(entity, rejectionOutcome, userId, rejectionText);
@@ -714,13 +728,17 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         return await ReloadDtoAsync(id, cancellationToken);
     }
 
-    public async Task<PerformanceImprovementPlanDto> RecallAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<PerformanceImprovementPlanDto> RecallAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPipAsync(id, cancellationToken);
         var userId = RequireUserId();
 
         if (entity.Status != PipStatus.PendingApproval)
             throw new InvalidOperationException("Only a plan still awaiting approval can be recalled.");
+
+        // Only the person who put it forward pulls it back (F9); the engine kept that rule, nothing did without one.
+        if (entity.AuthoredById is { } author && actorEmployeeId != author)
+            throw new UnauthorizedAccessException("Only the person who put this plan forward can recall it.");
 
         // Skipped when nothing is published: RecallWorkflowAsync answers "No active workflow found"
         // without an instance, so the recall would fail on exactly the tenants where submitting now

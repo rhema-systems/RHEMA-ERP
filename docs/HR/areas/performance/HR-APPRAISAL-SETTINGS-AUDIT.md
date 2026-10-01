@@ -46,7 +46,9 @@ settings as a policy reference; this document says which of them the code obeys.
 >   and the last ghost (#1 `ShowPeerScoresToManager`) are enforced by the server on every read of an
 >   evaluation — marked *"Since lane B2"*. **The profile now: 48 enforced, 0 advisory, 0 client-side
 >   only, 0 ghosts — of 48.** (`KpiDefinition.TolerancePercent`, a KPI field rather than a profile
->   field, moved to migration batch 2 — closure plan D-32.)
+>   field, moved to migration batch 2 — closure plan D-32 — and **enforced since slice F-b (2026-10-01)**: kept with
+>   the KPI's target in the criterion snapshot at generation, and an actual within it of the target scores as met.
+>   Forms generated before then carry none and score as before.)
 > - **Lane B2, slice B-w** (the write paths, B6, B8) moved no verdict — all 48 were enforced — but
 >   changed what seven do, marked *"Since lane B2 (B-w)"*: `RequireManagerGoalApproval` (off, a
 >   submitted goal lands Approved and needs no manager; a draft holds goal setting either way),

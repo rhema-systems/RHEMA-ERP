@@ -241,6 +241,40 @@ public static class HrWorkflowFallbackAuthority
     }
 
     /// <summary>
+    /// The form for a record whose decider the calling service names from the record itself, not from a
+    /// permission: a pay or employment proposal is the Managing Director's (D-12, D-104), and a
+    /// plan an HR officer put forward is the line manager's — people who hold no HR approve permission. Through the
+    /// engine when a definition is published; with none, the caller's own rule — already run, and refusing everyone
+    /// else — is the authority.
+    /// </summary>
+    /// <remarks>⚠ Call it only after the service's record-level rule has run on both branches.</remarks>
+    public static async Task<WorkflowOutcome> ProcessApprovalDecidedByRecordAsync(
+        IWorkflowIntegrationService workflow,
+        string entityType,
+        Guid entityId,
+        Guid actingUserId,
+        string action,
+        string? comments)
+    {
+        var isRejection = string.Equals(action, "Reject", StringComparison.OrdinalIgnoreCase);
+
+        if (!await workflow.HasActiveApprovalWorkflowAsync(entityType))
+            return isRejection ? WorkflowOutcome.Rejected : WorkflowOutcome.Approved;
+
+        if (!await workflow.CanUserApproveAsync(entityType, entityId, actingUserId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current workflow step.");
+
+        var result = await workflow.ProcessApprovalAsync(entityType, entityId, actingUserId, action, comments);
+        if (!result.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                result.ExecutionResult.Message
+                ?? (isRejection ? "Failed to process the rejection." : "Failed to process the approval."));
+
+        return result.Outcome;
+    }
+
+    /// <summary>
     /// Runs the engine's recall when one is configured, and does nothing when none is.
     /// </summary>
     /// <returns>True when the engine ran; false when there was no workflow to recall.</returns>

@@ -2012,7 +2012,15 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                         HrPermissions.AdministerPerformance)))
                 .AddPolicy(HrPermissions.PerformanceAdminPolicy, policy =>
                     policy.Requirements.Add(new PermissionRequirement(
-                        HrPermissions.AdministerPerformance)));
+                        HrPermissions.AdministerPerformance)))
+                // The pay and employment proposals: the desk's Read ladder, or the Managing Director, who decides
+                // them (F3, D-94) and holds no other performance permission.
+                .AddPolicy(HrPermissions.PerformanceProposalsReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewPerformance,
+                        HrPermissions.MaintainPerformance,
+                        HrPermissions.AdministerPerformance,
+                        HrPermissions.ViewPerformanceProposals)));
 
             // Employee records & foundation. Same ladder. Deliberately NOT gated on
             // this family: the lean directory reads that feed the shared employee picker (POST

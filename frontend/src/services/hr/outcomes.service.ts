@@ -81,9 +81,8 @@ class AppraisalOutcomeRecommendationService {
  * it has been.
  *
  * Approval runs on the generic workflow engine: reuse `WorkflowApprovalActions` /
- * `WorkflowRecordTab` on the detail screen rather than driving approve/reject from here, and
- * remember that nothing can be submitted until a `SalaryReviewProposal` workflow definition has
- * been published.
+ * `WorkflowRecordTab` on the detail screen rather than driving approve/reject from here. The
+ * Managing Director decides it — never its submitter (F3, D-104).
  */
 class SalaryReviewProposalService {
   private readonly baseUrl = '/SalaryReviewProposals';

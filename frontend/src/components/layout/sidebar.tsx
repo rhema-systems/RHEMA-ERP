@@ -1401,7 +1401,8 @@ export const navigationItems: NavItem[] = [
               { title: 'Calibration', href: '/hr/performance/calibration', icon: Scale, permissions: ['HR.Performance.Read'] },
               { title: 'Appeals', href: '/hr/performance/appeals', icon: Gavel, permissions: ['HR.Performance.Read'] },
               { title: 'Recommendations', href: '/hr/performance/recommendations', icon: Lightbulb, permissions: ['HR.Performance.Read'] },
-              { title: 'Proposals', href: '/hr/performance/proposals', icon: Handshake, permissions: ['HR.Performance.Read'] },
+              // The Managing Director decides the proposals and holds only their read (F3, D-94).
+              { title: 'Proposals', href: '/hr/performance/proposals', icon: Handshake, permissions: ['HR.Performance.Read', 'HR.Performance.Proposals.Read'] },
               { title: 'Company Goals', href: '/hr/performance/company-goals', icon: Building2, permissions: ['HR.Performance.Read'] },
               { title: 'Unit Goals', href: '/hr/performance/unit-goals', icon: Layers },
               { title: 'Employee Goals', href: '/hr/performance/employee-goals', icon: Target },

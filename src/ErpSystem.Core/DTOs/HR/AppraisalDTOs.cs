@@ -181,6 +181,11 @@ public class EffectiveAppraisalCriterionDto
     public decimal? KpiTargetValue { get; set; }
     public decimal? KpiMinValue { get; set; }
     public decimal? KpiMaxValue { get; set; }
+    /// <summary>
+    /// The KPI's tolerance, kept with the target so a later edit of the definition restates nothing (D-32). Null with
+    /// no target, or no tolerance on the definition — an exact target.
+    /// </summary>
+    public decimal? KpiTolerancePercent { get; set; }
     public KpiTargetSource? KpiTargetSource { get; set; }
     public List<EffectiveGradeRangeDto> GradeRanges { get; set; } = new();
 }
@@ -1856,6 +1861,11 @@ public class EvaluationItemDto
     public decimal? KpiTargetValue { get; set; }
     public decimal? KpiMinValue { get; set; }
     public decimal? KpiMaxValue { get; set; }
+    /// <summary>
+    /// The snapshot's tolerance (D-32): an actual within it of the target scores as met. The form's live preview
+    /// reads it, so the figure it shows is the one the server scores.
+    /// </summary>
+    public decimal? KpiTolerancePercent { get; set; }
     public KpiTargetSource? KpiTargetSource { get; set; }
 
     /// <summary>Grade bands from the appraisal criterion snapshot (PerformanceAppraisalCriterionConfigGradeRange).</summary>
@@ -2329,13 +2339,35 @@ public class ManagerEvaluationContextDto
     public bool RecommendTraining { get; set; }
     public bool RecommendPIP { get; set; }
     public bool RecommendTermination { get; set; }
+    /// <summary>The Award tick — raises a Recognition recommendation at the submission (F2, D-92).</summary>
+    public bool RecommendAward { get; set; }
     public string? RecommendationNotes { get; set; }
-    
+
+    /// <summary>
+    /// The appraisal's interim reviews, as context for the year-end judgement (D-90): when each was due, where it
+    /// stands, and the period score a full interim appraisal gave. Read-only; cancelled reviews are left out.
+    /// </summary>
+    public List<InterimReviewContextDto> InterimReviews { get; set; } = new();
+
     /// <summary>
     /// Template sections in display order. Each section carries its weight
     /// and contains the items the manager must score (including employee self-scores as reference).
     /// </summary>
     public List<ManagerEvaluationSectionDto> Sections { get; set; } = new();
+}
+
+/// <summary>
+/// One interim review on the manager's year-end form (D-90). The period score is the one a full interim appraisal
+/// gave; a light-touch review has none. No new store holds interim scores — they are goal progress entries.
+/// </summary>
+public class InterimReviewContextDto
+{
+    public Guid Id { get; set; }
+    public ReviewEventType Type { get; set; }
+    public DateOnly EventDate { get; set; }
+    public AppraisalReviewStatus Status { get; set; }
+    public bool IsFullAppraisal { get; set; }
+    public decimal? OverallPeriodScore { get; set; }
 }
 
 // ManagerEvaluationKpiItemDto + ManagerEvaluationCompetencyItemDto removed — superseded by ManagerEvaluationItemDto / section-based model.
@@ -2395,10 +2427,13 @@ public class SaveManagerEvaluationDto
     public bool RecommendPIP { get; set; }
     
     public bool RecommendTermination { get; set; }
-    
+
+    /// <summary>The Award tick (F2, D-92): a Recognition recommendation at the submission.</summary>
+    public bool RecommendAward { get; set; }
+
     [MaxLength(2000)]
     public string? RecommendationNotes { get; set; }
-    
+
     /// <summary>
     /// Whether this is a draft save or final submission
     /// </summary>
@@ -3650,6 +3685,16 @@ public class UpdateSalaryReviewProposalDto
     [Range(0, double.MaxValue)]
     public decimal? ProposedAmount { get; set; }
 
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+}
+
+/// <summary>
+/// A note on a salary review proposal's decision or receipt — a rejection's reason, or what payroll changed. Its
+/// reject and mark-applied routes borrowed the employment action's DTO (F9); the body is the same <c>{ notes }</c>.
+/// </summary>
+public class SalaryReviewProposalNotesDto
+{
     [MaxLength(1000)]
     public string? Notes { get; set; }
 }

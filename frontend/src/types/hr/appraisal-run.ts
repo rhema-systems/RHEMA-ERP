@@ -316,6 +316,8 @@ export interface EvaluationItem {
   kpiTargetValue?: number | null;
   kpiMinValue?: number | null;
   kpiMaxValue?: number | null;
+  /** The snapshot's tolerance (D-32): an actual within it of the target scores as met. */
+  kpiTolerancePercent?: number | null;
   kpiTargetSource?: KpiTargetSource | null;
   gradeRanges: EvaluationGradeRange[];
 }
@@ -621,8 +623,22 @@ export interface ManagerEvaluationContext {
   recommendTraining: boolean;
   recommendPIP: boolean;
   recommendTermination: boolean;
+  /** The Award tick — a Recognition recommendation at the submission (F2, D-92). */
+  recommendAward?: boolean;
   recommendationNotes?: string | null;
+  /** The appraisal's interim reviews, read-only context for the year-end judgement (D-90). */
+  interimReviews?: InterimReviewContext[];
   sections: ManagerEvaluationSection[];
+}
+
+/** One interim review on the manager's year-end form (D-90): a full interim appraisal carries a period score. */
+export interface InterimReviewContext {
+  id: string;
+  type: string;
+  eventDate: string;
+  status: string;
+  isFullAppraisal: boolean;
+  overallPeriodScore?: number | null;
 }
 
 export interface SaveManagerEvaluation {
@@ -642,6 +658,7 @@ export interface SaveManagerEvaluation {
   recommendTraining: boolean;
   recommendPIP: boolean;
   recommendTermination: boolean;
+  recommendAward: boolean;
   recommendationNotes?: string | null;
   isDraft: boolean;
   goalAssessments: GoalAssessmentInput[];
@@ -1114,18 +1131,24 @@ export function resolveGrade(
  * marks. The stored value is always the server's — this only saves a round trip while the user
  * types. It used to divide actual by target and nothing else, so it showed 150 % for a score
  * the server caps at 100 % and ignored the floor altogether (performance closure A12).
+ *
+ * `tolerance` is the snapshot's (D-32): an actual short of the target by no more than that
+ * percentage of the target scores as met, as the server reads it.
  */
 export function kpiAchievementPercent(
   actual: number | null | undefined,
   target: number | null | undefined,
   min?: number | null,
   max?: number | null,
+  tolerance?: number | null,
 ): number | null {
   if (actual === null || actual === undefined) return null;
   if (!target) return null;
 
   let value = actual;
   if (max !== null && max !== undefined && value > max) value = max;
+
+  if (tolerance && tolerance > 0 && value >= target - (Math.abs(target) * tolerance) / 100) return 100;
 
   let percent: number;
   if (min !== null && min !== undefined && target !== min) {

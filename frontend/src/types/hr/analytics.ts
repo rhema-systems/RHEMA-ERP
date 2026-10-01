@@ -99,7 +99,10 @@ export interface CycleGradeDistributionItem {
   percentage: number;
 }
 
-/** What managers ticked on the appraisal form — intent, not outcome. */
+/**
+ * Appraisals with a standing recommendation of each kind — proposed, approved or actioned (F2, D-92).
+ * Counted from the recommendation rows, not the manager's ticks; Award is Recognition.
+ */
 export interface CycleRecommendationSummary {
   awardCount: number;
   promotionCount: number;

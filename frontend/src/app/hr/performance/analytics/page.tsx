@@ -478,8 +478,9 @@ export default function PerformanceAnalyticsPage() {
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">What managers asked for</CardTitle>
                   <CardDescription>
-                    Boxes ticked on the appraisal form. Intent — not a record that anything
-                    happened.
+                    Appraisals with a recommendation of each kind still standing — proposed,
+                    approved or actioned; a rejected or dismissed one no longer counts. Award
+                    counts recognition.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>

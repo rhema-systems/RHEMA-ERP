@@ -100,12 +100,32 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
             throw new InvalidOperationException(
                 "This appraisal was withdrawn from its cycle, so no outcome is proposed on it.");
 
+        // The two-actor rule (F-b): an HR officer does not propose an outcome — a promotion, an increase — on their own
+        // appraisal; the by-appraisal read already refused them.
+        if (recommendedById != Guid.Empty && appraisal.EmployeeId == recommendedById)
+            throw new UnauthorizedAccessException("You cannot propose an outcome on your own appraisal.");
+
         // A recommendation is the front half of a promotion, a demotion or a termination — the
         // handler turns an approved one into a real intake record. Anyone authenticated could
         // previously raise one against anyone's appraisal.
         if (!isPrivilegedActor && appraisal.Employee?.ManagerId != recommendedById)
             throw new UnauthorizedAccessException(
                 "Only this employee's manager, or HR, can propose an outcome for their appraisal.");
+
+        // One open recommendation of a type per appraisal (D-93): a second one approved would dispatch the same
+        // outcome twice. Rejected and dismissed ones are closed and do not count. Batch 2's unique index is the
+        // backstop; this answers first, with the row that holds the type.
+        var holding = await _repository.GetQueryable()
+            .Where(r => r.TenantId == tenantId
+                     && r.PerformanceAppraisalId == appraisal.Id
+                     && r.RecommendationType == dto.RecommendationType
+                     && (r.Status == RecommendationStatus.Proposed
+                      || r.Status == RecommendationStatus.Approved
+                      || r.Status == RecommendationStatus.Actioned))
+            .Select(r => (RecommendationStatus?)r.Status)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (holding is { } heldStatus)
+            throw new InvalidOperationException(DuplicateMessage(dto.RecommendationType, heldStatus));
 
         var entity = new AppraisalOutcomeRecommendation
         {
@@ -119,10 +139,45 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
         };
 
         await _repository.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex)
+        {
+            // Two proposals of one type at the same moment: the unique index took the second. Said as the rule.
+            _logger.LogWarning(ex, "Recommendation {Type} for appraisal {AppraisalId} refused by the one-open-per-type index",
+                dto.RecommendationType, dto.PerformanceAppraisalId);
+            throw new InvalidOperationException(DuplicateMessage(dto.RecommendationType, RecommendationStatus.Proposed));
+        }
 
         _logger.LogInformation("Outcome recommendation {Type} proposed for appraisal {AppraisalId}", dto.RecommendationType, dto.PerformanceAppraisalId);
         return ToDto(await GetEntityAsync(entity.Id, cancellationToken));
+    }
+
+    private static string DuplicateMessage(RecommendationType type, RecommendationStatus held)
+        => $"This appraisal already has a {type} recommendation that is {held.ToString().ToLowerInvariant()}. "
+         + "Decide that one first; a rejected or dismissed recommendation does not hold the type.";
+
+    /// <summary>
+    /// The deciders the record names (D-93 and the two-actor rule): the appraisee never decides an outcome on their own
+    /// appraisal, and the person who recommended it does not approve it — they may still reject or dismiss it, which
+    /// withdraws it.
+    /// </summary>
+    private async Task EnsureMayDecideAsync(AppraisalOutcomeRecommendation entity, Guid actorId, bool approving, CancellationToken cancellationToken)
+    {
+        if (actorId == Guid.Empty) return;
+
+        var appraiseeId = await _appraisalRepository.GetQueryable()
+            .Where(a => a.Id == entity.PerformanceAppraisalId)
+            .Select(a => (Guid?)a.EmployeeId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (appraiseeId == actorId)
+            throw new UnauthorizedAccessException("You cannot decide an outcome on your own appraisal.");
+
+        if (approving && entity.RecommendedById == actorId)
+            throw new UnauthorizedAccessException(
+                "You recommended this outcome, so someone else approves it. You can still dismiss it.");
     }
 
     public async Task<AppraisalOutcomeRecommendationDto> ApproveAsync(Guid id, Guid approverId, CancellationToken cancellationToken = default)
@@ -141,6 +196,8 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
         if (entity.Status == RecommendationStatus.Approved)
             throw new InvalidOperationException(
                 "This recommendation is already approved. If its downstream record was not created, retry the dispatch.");
+
+        await EnsureMayDecideAsync(entity, approverId, approving: true, cancellationToken);
 
         entity.Status = RecommendationStatus.Approved;
         entity.ApprovedById = approverId == Guid.Empty ? null : approverId;
@@ -226,6 +283,8 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
         if (entity.Status is RecommendationStatus.Rejected or RecommendationStatus.Dismissed)
             throw new InvalidOperationException(
                 $"This recommendation was already {entity.Status.ToString().ToLowerInvariant()} on {entity.DecidedDate:d MMM yyyy}.");
+
+        await EnsureMayDecideAsync(entity, reviewerId, approving: false, cancellationToken);
 
         // The decider has columns of their own (batch 2, D-45): stamping the approver's made a dismissed recommendation
         // read as approved by whoever dismissed it, and erased an approval it had before.

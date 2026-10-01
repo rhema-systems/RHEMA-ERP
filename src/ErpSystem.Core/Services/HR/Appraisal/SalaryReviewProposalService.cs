@@ -106,15 +106,16 @@ public class SalaryReviewProposalService : ISalaryReviewProposalService
     }
 
     // ── Approval workflow ──────────────────────────────────────────────────
-    // Submit / approve / reject / recall all run through the generic workflow engine; this
-    // service never sets an approval status itself. SalaryReviewProposalWorkflowStatusAdapter
-    // maps the engine's outcome onto the entity.
+    // Submit / approve / reject / recall run through the generic workflow engine when a definition
+    // is published, and through HrWorkflowFallbackAuthority when none is; this service never sets
+    // an approval status itself. SalaryReviewProposalWorkflowStatusAdapter maps the outcome onto
+    // the entity.
     //
-    // ⚠ Like every other entity on the engine, this is inoperable until a SalaryReviewProposal
-    // workflow definition has been published — the authority to approve comes from the
-    // definition, not from a role attribute.
+    // Who decides is the record's rule, on both paths (F3, D-12, D-94, D-104): the Managing Director,
+    // never the submitter and never the employee the proposal is about — see ProposalDecisionRules.
+    // The submitter is recorded at submission for it.
 
-    public async Task<SalaryReviewProposalDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<SalaryReviewProposalDto> SubmitForApprovalAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
 
@@ -149,6 +150,10 @@ public class SalaryReviewProposalService : ISalaryReviewProposalService
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
 
+        // Who submitted it, so they do not decide it and only they recall it (F3, F9).
+        entity.SubmittedById = actorEmployeeId is { } submitter && submitter != Guid.Empty ? submitter : null;
+        entity.SubmittedDate = DateTime.UtcNow;
+
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -156,17 +161,31 @@ public class SalaryReviewProposalService : ISalaryReviewProposalService
         return ToDto(await ReloadAsync(id, entity.TenantId, cancellationToken));
     }
 
-    public async Task<SalaryReviewProposalDto> ApproveAsync(Guid id, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// The record's rule before either path is asked: the proposal is awaiting a decision, and the caller may make it.
+    /// A fallback approve used to approve a proposal nobody had submitted.
+    /// </summary>
+    private void EnsureDecidable(SalaryReviewProposal entity, Guid? actorEmployeeId)
+    {
+        if (entity.Status != SalaryReviewProposalStatus.PendingApproval)
+            throw new InvalidOperationException(
+                $"Only a proposal awaiting approval can be decided. This one is {entity.Status}.");
+
+        ProposalDecisionRules.EnsureMayDecide(
+            _currentUserProvider.Roles, actorEmployeeId, entity.SubmittedById, entity.EmployeeId, "salary review proposal");
+    }
+
+    public async Task<SalaryReviewProposalDto> ApproveAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
         var userId = RequireUserId();
 
-        // Engine when a definition is published; the Approve tier when none is. Without the second
-        // branch a proposal submitted on an unseeded tenant could not be approved at all, because
-        // CanUserApproveAsync answers false with no workflow instance to name an approver.
-        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
-            _workflowIntegrationService, _currentUserProvider, EntityType, id, userId,
-            "Approve", null, "approve a salary review proposal", HrPermissions.ApproveCompensation);
+        EnsureDecidable(entity, actorEmployeeId);
+
+        // Engine when a definition is published; with none, the record's rule above is the authority — the Managing
+        // Director holds no HR approve permission, and HR, which does, is not a decider.
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalDecidedByRecordAsync(
+            _workflowIntegrationService, EntityType, id, userId, "Approve", null);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplyApprovalOutcome(entity, approvalOutcome, userId);
@@ -178,16 +197,17 @@ public class SalaryReviewProposalService : ISalaryReviewProposalService
         return ToDto(await ReloadAsync(id, entity.TenantId, cancellationToken));
     }
 
-    public async Task<SalaryReviewProposalDto> RejectAsync(Guid id, string? reason, CancellationToken cancellationToken = default)
+    public async Task<SalaryReviewProposalDto> RejectAsync(Guid id, string? reason, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
         var userId = RequireUserId();
 
+        EnsureDecidable(entity, actorEmployeeId);
+
         var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
 
-        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
-            _workflowIntegrationService, _currentUserProvider, EntityType, id, userId,
-            "Reject", rejectionText, "reject a salary review proposal", HrPermissions.ApproveCompensation);
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalDecidedByRecordAsync(
+            _workflowIntegrationService, EntityType, id, userId, "Reject", rejectionText);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplyApprovalOutcome(entity, rejectionOutcome, userId, rejectionText);
@@ -199,7 +219,7 @@ public class SalaryReviewProposalService : ISalaryReviewProposalService
         return ToDto(await ReloadAsync(id, entity.TenantId, cancellationToken));
     }
 
-    public async Task<SalaryReviewProposalDto> RecallAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<SalaryReviewProposalDto> RecallAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
         var userId = RequireUserId();
@@ -207,12 +227,17 @@ public class SalaryReviewProposalService : ISalaryReviewProposalService
         if (entity.Status != SalaryReviewProposalStatus.PendingApproval)
             throw new InvalidOperationException("Only a proposal still awaiting approval can be recalled.");
 
+        // The engine keeps recall to the requester; with no definition nothing did (F9).
+        ProposalDecisionRules.EnsureMayRecall(actorEmployeeId, entity.SubmittedById, "salary review proposal");
+
         // Skipped when nothing is published — RecallWorkflowAsync answers "No active workflow
         // found" without an instance, which would strand a proposal that Submit had just left at
         // PendingApproval. The record returns to Draft via the adapter either way.
         await HrWorkflowFallbackAuthority.RecallAsync(_workflowIntegrationService, EntityType, id, userId);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType).ApplyRecallOutcome(entity, userId);
+        entity.SubmittedById = null;
+        entity.SubmittedDate = null;
 
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

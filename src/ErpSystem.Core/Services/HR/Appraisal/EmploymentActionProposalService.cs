@@ -99,12 +99,12 @@ public class EmploymentActionProposalService : IEmploymentActionProposalService
     // take a no-workflow branch; see HrWorkflowFallbackAuthority for the mechanism and for why
     // fixing submit alone would have left the proposal stuck at PendingApproval for ever.
     //
-    // ⚠ No segregation-of-duties check is added here, unlike the movement and the offer: this
-    // entity carries no unambiguous requester field (only TenantEntity.CreatedById, whose id space
-    // is not stated on this type), so there is nothing safe to compare the approver against. If a
-    // proposer field is added later, guard it here the way StaffMovementService.ApproveAsync does.
+    // Segregation of duties (F3, D-12, D-94): batch 2 gave the entity its submitter, an employee id,
+    // stamped at submission. Who decides is the record's rule on both paths — the Managing Director
+    // (D-104), never the submitter and never the employee the proposal is about
+    // (ProposalDecisionRules) — and only the submitter recalls when no engine keeps that rule (F9).
 
-    public async Task<EmploymentActionProposalDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<EmploymentActionProposalDto> SubmitForApprovalAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
 
@@ -124,6 +124,10 @@ public class EmploymentActionProposalService : IEmploymentActionProposalService
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
 
+        // Who submitted it, so they do not decide it and only they recall it (F3, F9).
+        entity.SubmittedById = actorEmployeeId is { } submitter && submitter != Guid.Empty ? submitter : null;
+        entity.SubmittedDate = DateTime.UtcNow;
+
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -131,29 +135,30 @@ public class EmploymentActionProposalService : IEmploymentActionProposalService
         return ToDto(await ReloadAsync(id, entity.TenantId, cancellationToken));
     }
 
-    public async Task<EmploymentActionProposalDto> ApproveAsync(Guid id, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// The record's rule before either path is asked: the proposal is awaiting a decision, and the caller may make it.
+    /// A fallback approve used to approve a proposal nobody had submitted.
+    /// </summary>
+    private void EnsureDecidable(EmploymentActionProposal entity, Guid? actorEmployeeId)
+    {
+        if (entity.Status != EmploymentActionProposalStatus.PendingApproval)
+            throw new InvalidOperationException(
+                $"Only a proposal awaiting approval can be decided. This one is {entity.Status}.");
+
+        ProposalDecisionRules.EnsureMayDecide(
+            _currentUserProvider.Roles, actorEmployeeId, entity.SubmittedById, entity.EmployeeId, "employment action proposal");
+    }
+
+    public async Task<EmploymentActionProposalDto> ApproveAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
         var userId = RequireUserId();
 
-        WorkflowOutcome approvalOutcome;
-        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
-        {
-            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
-                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+        EnsureDecidable(entity, actorEmployeeId);
 
-            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Approve");
-            if (!workflowResult.ExecutionResult.Success)
-                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
-
-            approvalOutcome = workflowResult.Outcome;
-        }
-        else
-        {
-            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
-                _currentUserProvider, "approve an employment action proposal", HrPermissions.ApprovePerformance);
-            approvalOutcome = WorkflowOutcome.Approved;
-        }
+        // Engine when a definition is published; with none, the record's rule above is the authority.
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalDecidedByRecordAsync(
+            _workflowIntegrationService, EntityType, id, userId, "Approve", null);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplyApprovalOutcome(entity, approvalOutcome, userId);
@@ -165,31 +170,17 @@ public class EmploymentActionProposalService : IEmploymentActionProposalService
         return ToDto(await ReloadAsync(id, entity.TenantId, cancellationToken));
     }
 
-    public async Task<EmploymentActionProposalDto> RejectAsync(Guid id, string? reason, CancellationToken cancellationToken = default)
+    public async Task<EmploymentActionProposalDto> RejectAsync(Guid id, string? reason, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
         var userId = RequireUserId();
 
+        EnsureDecidable(entity, actorEmployeeId);
+
         var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
 
-        WorkflowOutcome rejectionOutcome;
-        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
-        {
-            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
-                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
-            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Reject", rejectionText);
-            if (!workflowResult.ExecutionResult.Success)
-                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
-
-            rejectionOutcome = workflowResult.Outcome;
-        }
-        else
-        {
-            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
-                _currentUserProvider, "reject an employment action proposal", HrPermissions.ApprovePerformance);
-            rejectionOutcome = WorkflowOutcome.Rejected;
-        }
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalDecidedByRecordAsync(
+            _workflowIntegrationService, EntityType, id, userId, "Reject", rejectionText);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplyApprovalOutcome(entity, rejectionOutcome, userId, rejectionText);
@@ -201,13 +192,16 @@ public class EmploymentActionProposalService : IEmploymentActionProposalService
         return ToDto(await ReloadAsync(id, entity.TenantId, cancellationToken));
     }
 
-    public async Task<EmploymentActionProposalDto> RecallAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<EmploymentActionProposalDto> RecallAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
         var userId = RequireUserId();
 
         if (entity.Status != EmploymentActionProposalStatus.PendingApproval)
             throw new InvalidOperationException("Only a proposal still awaiting approval can be recalled.");
+
+        // The engine keeps recall to the requester; with no definition nothing did (F9).
+        ProposalDecisionRules.EnsureMayRecall(actorEmployeeId, entity.SubmittedById, "employment action proposal");
 
         // Skipped when nothing is published: RecallWorkflowAsync answers "No active workflow found"
         // without an instance, so the recall would fail on exactly the tenants where submitting now
@@ -220,6 +214,8 @@ public class EmploymentActionProposalService : IEmploymentActionProposalService
         }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType).ApplyRecallOutcome(entity, userId);
+        entity.SubmittedById = null;
+        entity.SubmittedDate = null;
 
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

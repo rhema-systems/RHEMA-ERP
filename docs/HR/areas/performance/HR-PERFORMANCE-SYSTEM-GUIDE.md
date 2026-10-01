@@ -679,6 +679,13 @@ competencies:
 
 **Self score = 94.40.** That is the number on her record.
 
+> **The KPI tolerance, since closure F-b (2026-10-01, D-32).** Each KPI is defined with a tolerance — the
+> demo's carry 5 % — and it is now **kept with the target when the appraisal is generated** and read in the
+> score: an actual short of the target by no more than the tolerance scores as met. On this database the forms
+> were generated before the tolerance was kept, so every row carries none and the figures above stand. **After
+> the next rebuild** her 96 on *Project Delivery Timeliness* reads **100 %** (contribution 30.0) and the self score
+> **95.60**; four of the five tracks move this way, and lane S re-baselines the figures in this guide then.
+
 **Her manager (Kwasi Danquah) scored** 104, 92, 84, 82 → 30.0 + 27.6 + 16.8 + 16.4 = **90.80.**
 
 **Her two peers** each scored only the competencies (this cycle does not let peers score KPIs). Kojo
@@ -834,13 +841,16 @@ promising the wrong thing.
 |---|---|---|
 | **Employee goal** | **Bespoke** — `submit` / `approve` / `reject` / `lock` on the goal itself, and *lock goal set* over the employee's whole set for a cycle *(since closure lane L-a)*; `reject` also sends an approved goal back for changes | The employee's **direct manager**, read from their HR record. Not configurable, and not on the workflow engine. HR's audited advance past goal setting is the one other door (chapter 38). |
 | **Appraisal itself** | **Bespoke** — the phase machine plus HR sign-off | The appraisee, their peers, their manager, then HR |
-| **Appraisal template** | **Workflow engine** — `APPRAISAL_TEMPLATE` | HR, Manager or TenantAdmin (published definition) |
-| **Improvement plan** | **Workflow engine** — `PERFORMANCE_IMPROVEMENT_PLAN` | HR, Manager or TenantAdmin |
-| **Salary review proposal** | **Workflow engine** — `SALARY_REVIEW_PROPOSAL` | **Managing Director**, TenantAdmin or HR |
-| **Employment action proposal** | **Workflow engine** — `EMPLOYMENT_ACTION_PROPOSAL` | **Managing Director**, TenantAdmin or HR |
+| **Appraisal template** | **Workflow engine** — `APPRAISAL_TEMPLATE` | Another HR officer than the one who submitted it, or TenantAdmin |
+| **Improvement plan** | **Workflow engine** — `PERFORMANCE_IMPROVEMENT_PLAN` | **HR** for a plan the employee's line manager put forward; **the line manager or TenantAdmin** for one HR put forward — never whoever put it forward |
+| **Salary review proposal** | **Workflow engine** — `SALARY_REVIEW_PROPOSAL` | **The Managing Director** — never the submitter, never the employee it is about |
+| **Employment action proposal** | **Workflow engine** — `EMPLOYMENT_ACTION_PROPOSAL` | **The Managing Director**, as above |
 
 All four workflow definitions are **published and active on this database** — you can demonstrate
-submit/approve on any of them without preparation.
+submit/approve on any of them without preparation. *Since closure F-b (2026-10-01)* the rules in the right-hand
+column are enforced by the services on both paths (a published route or none), and the retrofit migration set
+every one of the four routes to refuse the person who submitted, and took HR and TenantAdmin off the two proposal
+routes (D-94, D-101, D-104). Before it, HR could approve a pay proposal it had just put a figure on.
 
 > **Why goal approval is deliberately *not* on the engine.** `GoalStatus` has two writers: the
 > approval lifecycle, and execution states written every time somebody logs progress. An engine
@@ -3869,7 +3879,7 @@ it needs changing.*
 |---|---|
 | **Evaluation** | The scoring form — **with the employee's own score beside every row** |
 | **Goals** | The goal assessment panel in *manager* mode: his conclusion, **with her claim shown read-only above it** |
-| **Assessment & recommendations** | Six narrative boxes, each 2000 characters with a live counter: **Overall comments · Strengths · Areas for improvement · Training needs · Career aspirations · Notes on your recommendations** — then five checkboxes: **Promotion · Salary increment · Training · Performance improvement plan · Termination** |
+| **Assessment & recommendations** | Six narrative boxes, each 2000 characters with a live counter: **Overall comments · Strengths · Areas for improvement · Training needs · Career aspirations · Notes on your recommendations** — then six checkboxes: **Promotion · Salary increment · Training · Performance improvement plan · Termination · Award or recognition** *(the Award box since closure F-b, 2026-10-01 — the appraisal stored it and no screen set it)*. *Since closure F-b* each box ticked **becomes a Proposed recommendation when the evaluation is submitted** — recommended by the manager, for HR to decide (chapter 34); a box unticked before a re-submission withdraws its recommendation while it is still Proposed. **Above the tabs**, a card lists the appraisal's **interim reviews** — each one's date, status and, for a full interim appraisal, its period score — as context (D-90); a light-touch review shows none, so on this database every one reads *"Light touch — no period score"* |
 | **Peer feedback** | Every peer's scores and comments, attributed — each criterion a peer scored, with its section and weight |
 | **Nominations** | Only when the cycle nominates in *Manager* mode — the manager chooses the peers, and each is asked as soon as they are nominated. *Since closure E-g1* only while the appraisal is a draft or active, as in Employee mode (Manager mode took them "until it is completed or closed" — in governance and on appeal too) |
 | **History** | The employee's score across previous cycles |
@@ -3943,11 +3953,11 @@ submitted count always, the scores and comments once the manager has submitted.
    writing an appraisal with the evidence in front of him — the journal entries, the check-in record,
    the progress log."*
 
-8. Point at the five recommendation checkboxes.
+8. Point at the six recommendation checkboxes.
 
-   💬 *"And these five are recorded against the appraisal for HR to act on. Ticking 'salary increment'
-   does not start a salary increment — it tells HR that this appraisal called for one. What happens next
-   is a separate, approved chain, and we will follow it in Part Six."*
+   💬 *"And these go to HR as recommendations the moment he submits. Ticking 'salary increment' does not
+   start a salary increment — it puts a recommendation on HR's desk, in his name, and somebody other than
+   him decides it. What happens next is a separate, approved chain, and we will follow it in Part Six."*
 
 9. Go to **Peer feedback**. Point at the banner — *2 of 2 peer evaluations submitted* — then at a
    peer's rows: *Communication* and *Teamwork*, each in *Core Competencies* at 50 %.
@@ -4824,8 +4834,8 @@ place or an improvement plan, each one routed to the module that owns it.*
 
 ```
   manager ticks a recommendation on the appraisal
-      →  HR proposes it formally               (AppraisalOutcomeRecommendations)
-      →  HR approves it, which DISPATCHES it   (a handler in the owning module)
+      →  submitting the evaluation proposes it (AppraisalOutcomeRecommendations, in the manager's name)
+      →  HR — not whoever recommended it — approves it, which DISPATCHES it   (a handler in the owning module)
       →  a real downstream record appears      (SalaryReviewProposal / EmploymentActionProposal /
                                                 training request / succession nomination / PIP /
                                                 the probation record)
@@ -4877,6 +4887,14 @@ record the recommendation became, where that screen exists.
 | Cynthia Sarpong | Training nomination | Training request |
 | *(TDC/00034)* | Promotion | **Employment action proposal** |
 
+> **Since closure F-b (2026-10-01) — read before the walk.** These seven were proposed *and* approved by
+> `hr.head`, which the module now refuses: whoever recommends an outcome does not approve it (D-93), and the
+> recommendations come from the managers' ticks when they submit (D-92). The rows above stay until the next
+> rebuild. **After it** the demo holds eight: the six above, recommended by each line manager and approved by
+> `hr.head`; **Efua Seidu's promotion** in place of TDC/00034's — `head.dev` ticks Promotion on her
+> evaluation (D-103; TDC/00034's line manager has no login); and **Kwasi's training, still Proposed** — his
+> appraisal waits for calibration — so the *Proposed* tab has one row to approve live (P-52).
+
 **The twelve outcomes a recommendation can be**, and where each one lands:
 
 | Recommendation | Dispatches to |
@@ -4916,8 +4934,8 @@ record the recommendation became, where that screen exists.
 |---|---|---|
 | Worklist | `GET api/AppraisalOutcomeRecommendations/worklist?status=` | HR. Capped at 500 rows, newest first |
 | By appraisal *(the panel on the appraisal screens)* | `GET …/by-appraisal/{id}` | |
-| Propose | `POST api/AppraisalOutcomeRecommendations` | **the appraisee's own manager, or HR** — 403 otherwise |
-| Approve | `POST …/{id}/approve` | HR. **Idempotent** — an already-actioned recommendation comes back unchanged |
+| Propose | `POST api/AppraisalOutcomeRecommendations` | **the appraisee's own manager, or HR** — 403 otherwise; *since closure F-b* never the appraisee (403), and **one open recommendation of a type per appraisal** — a second answers 422 naming the row that holds the type (proposed, approved or actioned; a rejected or dismissed one holds nothing). The manager's ticks propose through the same rule when the evaluation is submitted |
+| Approve | `POST …/{id}/approve` | HR. **Idempotent** — an already-actioned recommendation comes back unchanged. *Since closure F-b* **never whoever recommended it** (403 — they may still dismiss it) **and never the appraisee** |
 | Retry | `POST …/{id}/retry-dispatch` | **422 unless the row is Approved-but-not-Actioned** |
 | Reject / Dismiss | `POST …/{id}/reject`, `…/dismiss` | **422 once actioned** — the downstream record already exists; *since closure E-g1* **422 once rejected or dismissed** (a second close overwrote who decided it, when and why). An approved one not yet actioned may still be dismissed, and is not approved again (422 — retry its dispatch instead). *Since closure batch 2 (2026-10-01)* the close records **who decided and when** in `decidedById` / `decidedDate`; an approval before it keeps its own `approvedById` / `approvedDate`. (Before, the close stamped the approver's fields — UAT's 62 dismissed rows were moved over by the migration.) |
 
@@ -4980,6 +4998,9 @@ Two tables.
 |---|---|---|---|
 | *(TDC/00034)* | Promotion | Proposed | |
 
+*After the next rebuild this row is **Efua Seidu**'s promotion, raised from `head.dev`'s Promotion tick on
+her evaluation (closure F-b, D-103) — chapter 34's note.*
+
 ### 👁 The salary proposal detail
 
 * Header with the employee's name, the status badge, a link **Open the appraisal**, and the workflow
@@ -5033,7 +5054,15 @@ Recognition → *Awards and nominations*.
    Managing Director."*
 
 6. Go to the **Workflow** tab and show the step, the approver and the history.
+
+   💬 *"And notice who is not on it: HR. HR put the figure on it and sent it; HR does not approve it. A
+   pay decision is the Managing Director's, and the person who submitted it can never approve it."*
+
 7. Switch **window B** to `md.tdc` and open the same proposal.
+
+   *Until closure F-b (2026-10-01) this step answered 403: the Managing Director held no read of the
+   proposals. They now hold `HR.Performance.Proposals.Read` — the proposals and nothing else of
+   performance.*
 8. 🔴 **LIVE WRITE 16 — approve it.** Press **Approve**.
 
    Back on the screen, the status becomes **Approved** and the banner changes to **"Approved — nothing
@@ -5057,11 +5086,11 @@ Recognition → *Awards and nominations*.
 
 | Control | Endpoint |
 |---|---|
-| Salary list / detail | `GET api/SalaryReviewProposals[?status=]`, `…/{id}` |
+| Salary list / detail | `GET api/SalaryReviewProposals[?status=]`, `…/{id}` — the performance desk, or the **Managing Director** (`HR.Performance.Proposals.Read`, since closure F-b) |
 | Set the figure | `PUT api/SalaryReviewProposals/{id}` — **422 once the proposal has left Proposed** |
-| Submit / Approve / Reject / Recall | `POST …/{id}/submit` etc. — **workflow engine**, `SALARY_REVIEW_PROPOSAL`, published; approvers **Managing Director, TenantAdmin, HR** |
+| Submit / Approve / Reject / Recall | `POST …/{id}/submit` etc. — **workflow engine**, `SALARY_REVIEW_PROPOSAL`, published. *Since closure F-b (D-94, D-101, D-104)* the approver is the **Managing Director alone** — the retrofit migration took HR and TenantAdmin off the route — and the service refuses anyone else on both paths, **the submitter** (recorded at submission) and **the employee it is about** (403). Approve and reject only while it awaits approval (422). Recall: **its submitter only** |
 | Mark applied | `POST …/{id}/mark-applied` — **only from Approved** |
-| Employment actions | `api/EmploymentActionProposals` — same shape, `mark-actioned` instead; `EMPLOYMENT_ACTION_PROPOSAL`, same approvers |
+| Employment actions | `api/EmploymentActionProposals` — same shape, `mark-actioned` instead; `EMPLOYMENT_ACTION_PROPOSAL`, the same decider rule |
 
 **The page never sets a status.** The service drives the workflow, the status adapter maps the outcome
 onto the record, and the screen refetches and lets it decide.

@@ -99,8 +99,13 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    Rule 8 forms rebuilt. **Lane E is complete.** Lane F was source-checked and decided the same day (§ 1q, D-88–D-99;
    D-18 settled as D-99). ~~**F-a**, migration batch 2~~ **Done 2026-10-01** and applied to UAT on the user's go
    (lane F's F-a State block: 24/24 on a scratch copy first; lifecycle 1278/1278 twice; regression 3818/3827; the
-   recommendation decider moved, the rest left empty; D-99's probation schema). **Next: F-b** — source-check it first;
-   it also owes D-32's tolerance capture and read. **Before a long run,
+   recommendation decider moved, the rest left empty; D-99's probation schema). ~~**F-b**~~ **Done 2026-10-01**
+   (source-checked first — lane F's *F-b source check* block; decided: § 1r D-100–D-104, the last after the user weighed
+   the retrofit against enterprise practice; `run-final-chain.mjs` 161/161 twice; regression 3980/3988; the retrofit
+   migration applied to UAT; lane F's F-b State block — the ticks become recommendations at the submission, one open of a
+   type and never approved by its recommender, proposals the Managing Director's alone and never their submitter's, a
+   plan never decided by whoever put it forward, the KPI tolerance kept and read, the period score on the year-end form).
+   **Next: F-c** (F4–F7: the PIP chain, mark-applied, the handlers, stranded approvals) — source-check it first. **Before a long run,
    check free RAM and the stuck email queue** (§ 5, the second E-e row): either one starves SQL Server's query memory and
    reads time out at 30 s.
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
@@ -293,6 +298,25 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | D-98 | **F7 — stranded engine approvals** | **A reconciler service and an HR run-now action in F-c**; lane H's nightly host schedules it; a note on cross-module #15 | F-c, H |
 | D-99 | **D-18, settled here** (from the finish plan): who decides a probation extension — only an admin door no one can use | **Extension on the confirmation route**: a request decided by the probation's confirming authority through the workflow, as confirmation is; an approved Extend-Probation recommendation submits it, Confirm-Probation submits for confirmation; HR never decides the outcome; batch 2 adds the pending-extension state | F1, batch 2, finish plan |
 
+### 1r. Decisions from slice F-b's source check — settled with the user, 2026-10-01 (D-104 the same evening)
+
+| # | Question | Decision (2026-10-01) | Affects |
+|---|---|---|---|
+| D-100 | **D-92's re-submits** — a manager submits again after HR's return, an appeal remand, or HR's advance of their draft, and the ticks stay editable | **Sync at every submit**, HR's advance of the manager's draft included: a Proposed row for each ticked type with no open row; a type unticked since has its still-Proposed row from the ticks dismissed; approved or actioned rows and HR's hand-made rows are never touched | F-b |
+| D-101 | **D-94's retrofit** — all four HR routes are published on UAT, HR on the proposal stage, no initiator bar; the seeder only adds and runs only on `seed-workflows` | **The initiator bar on the four seeded definitions and HR off the two proposal routes, by a guarded data migration** (the user scaffolds an empty one); the seeder does the same for new tenants (`mdOnly`, the bar) | F-b, migration |
+| D-102 | **A PIP's author** for D-12's rule | **Whoever puts it forward:** `AuthoredById` stamped at create (the caller, or a recommendation's recommender) and re-stamped at submit, so whoever submits never approves. Author = the employee's line manager → HR approves; anyone else → the line manager or TenantAdmin | F-b |
+| D-103 | **The demo's employment-action proposal** — `070` raises it on TDC/00034, whose line manager has no login | **From a `061` Promotion tick:** one completed track's manager also ticks Promotion, hr.head approves the row; `070`'s block goes; the guide's ch. 34/35 follow | F-b, S |
+| D-104 | **TenantAdmin as a proposal decider** (D-12 kept it as the backstop) — asked after the user questioned D-101 against enterprise practice: a system administrator approving pay or a promotion is itself a segregation-of-duties weakness | **Off.** A pay or employment proposal is decided by the Managing Director alone (either role spelling); the retrofit takes TenantAdmin off the two proposal routes with HR, and the seeder seeds them Managing Director only. An absent MD is an acting appointment holding the role (delegation is lane N's). PIPs and templates keep D-12's TenantAdmin. Recorded for later, not decided: a two-stage proposal route (HR review, then the MD) and a Finance budget step, as larger organisations run | F-b, migration |
+
+**Taken as stated with them (no question needed):** the recommender may still reject or dismiss their own row (a
+withdrawal) — D-93 refuses only the approval; the appraisee never proposes or decides an outcome on their own appraisal
+(the two-actor rule); a duplicate answers 422 before the index is reached. Proposals are decided by the Managing
+Director (either role spelling) — **not SuperAdmin**, as `SeparationService` holds for FR-HR-092, and not TenantAdmin
+(D-104) — never by their submitter or by the employee they are about; the MD gains a proposals-read permission. A template is approved by a
+performance-Write holder other than its submitter. An HR officer who is the appraisee's line manager does not sign the
+appraisal off (§ 5's row). The tolerance is relative to the target (an actual within it of the
+target scores as met), taken for a goal row from the goal's KPI definition; no UAT backfill of rows from existing ticks.
+
 ### 1p. Decisions for slice E-g2 — settled with the user, 2026-10-01 (after E-g1, on the E-g source check and three more surveys)
 
 | # | Question | Decision (2026-10-01) | Affects |
@@ -327,7 +351,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | C | One appeal machine | 2 days (+0.5–1, D-36) | D-22, D-34, D-35, D-36, D-37, D-38 | ☑ **complete 2026-09-30**; C10 was batch 1's. Two slices (D-36): C-a ☑ — 209/209 twice, regression 2089/2098, committed effb567f5. C-b ☑ — source-checked (§ 1f D-37, D-38), `run-final-appeals.mjs` 397/397 twice, regression 2309/2318; staged |
 | D | Peer nomination and evaluation integrity | 1 day (1.5–2, the source check) | D-39, D-40, D-41 | ☑ 2026-09-30 — source-checked (§ 1g); `run-final-nominations.mjs` 186/186 twice, regression 2496/2505; staged |
 | E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | ~12 days (D-42; was 4) | D-10, D-14, D-17, D-20, D-42–D-58 | ◐ source-checked 2026-09-30 (§ 1h); seven slices E-a…E-g. E-a ☑ (130/130 twice, regression 2631/2640), E-b ☑ (`run-final-lifecycle.mjs` 276/276 twice, regression 2777/2786), E-c ☑ (source-checked, § 1i; 391/391 twice, regression 2892/2901; D-14's migration on UAT), E-d split in two (§ 1j): E-d1 ☑ (542/542 twice, regression 3043/3052), E-d2 split in two (§ 1k): E-d2a ☑ (601/601 twice, regression 3104/3113), E-d2b ☑ (source-checked, § 1l; 706/706 twice, regression 3226/3235), E-e ☑ (source-checked, § 1m; 821/821 twice, regression 3352/3361), E-f ☑ (source-checked, § 1n; 1016/1016 twice, regression 3549/3558), E-g split in two (§ 1o): E-g1 ☑ (1185/1185 twice, regression 3719/3728), E-g2 ☑ (§ 1p; 1271/1271 twice, regression 3811/3820); staged. **Lane E complete** — F next |
-| F | Recommendations, proposals, probation, PIP chain, segregation of duties | 2.5 days | D-12, D-19; **F1 waits on D-18** (the finish plan's lane 9) | ☐ |
+| F | Recommendations, proposals, probation, PIP chain, segregation of duties | 2.5 days | D-12, D-19; ~~**F1 waits on D-18**~~ D-99; § 1q, § 1r | ◐ F-a (batch 2) and F-b (F2, F3, F8, F9; `run-final-chain.mjs` 161/161 twice; the retrofit migration applied to UAT) done; F-c, F-d, F1 to come |
 | G | Notifications on the platform topics | 5 days | D-21, D-28 | ☐ |
 | H | Nightly sweep and the advance path | 2.5 days | D-16, D-21 | ☐ |
 | I | Frontend wiring | 5 days | — | ☐ |
@@ -3639,8 +3663,8 @@ without — `poolCandidates` is switched off in the suite's finally; its nominat
 **Order (§ 1q, D-88):** F-a migration batch 2 → F-b (F2, F3, F8, F9; D-90, D-92–D-95) → F-c (F4–F7) → F-d (D-87,
 its own schema) → F1 (D-99).
 
-**F-a State — migration batch 2 DONE 2026-10-01: built, applied to UAT on the user's go, verified (staged; the user
-commits).**
+**F-a State — migration batch 2 DONE 2026-10-01: built, applied to UAT on the user's go, verified, committed
+(`6a2ca2c20`).**
 `20261001120541_PerformanceClosureBatch2`, scaffolded by the user and rewritten as guarded SQL with batch 1's helpers.
 - **Holds:** the recommendation decider (`DecidedById`, `DecidedDate`) and the one-open-per-type unique index (D-93);
   the proposals' `SubmittedById/Date` and `ActionedById/Date`, the employment action's `SourcePipId` and `EffectiveDate`;
@@ -3699,6 +3723,201 @@ commits).**
   authority and workflow slices rewrite the tenant's map and definitions. The probation code did not change; the probe
   covers the model change. F1 owes it a UAT-safe review.
 
+**F-b source check (2026-10-01, after F-a; line numbers as of `6a2ca2c20`).** Four read-only surveys (the ticks and
+recommendations; segregation of duties; titles and recall; the tolerance and the period score), then every claim that
+decides a build re-read in source or on UAT (read only). Row by row:
+- **F2, the ticks — live.** Five ticks sit on the appraisal (`PerformanceEntities.cs` :1536-1540), written by one method
+  on every save, draft or submit (`SaveManagerEvaluationAsync`, PAS :2033-2038, before the submit branch at :2041).
+  `RecommendAward` (:1535) is on the entity, `PerformanceAppraisalDto` and the dashboard, but not on the form, its context
+  DTO or its save DTO, so the Award tile always reads 0. The dashboard counts booleans in `BuildRecommendations`
+  (`HRCycleDashboardQueryService.cs` :620-632; the plan's :596-601 is stale) and raises the *PIP / Termination
+  recommended* attention items from them (:821-837); its outcome pipeline already counts rows (:644-706). The analytics
+  card *What managers asked for* reads the booleans (`analytics/page.tsx` :477-506). Nothing turns a tick into a row.
+  **A manager submits more than once, three ways:** HR's return (PAS :4701-4790 clears `SubmittedDate`), an appeal
+  remand (the form reopens; the appraisal stays Appealed), and **HR's advance at the manager step, which stamps the
+  draft's `SubmittedDate` itself** (`AppraisalWorkflowService.cs` :401-431) — a hook on the save alone misses it. The
+  ticks stay editable before each re-submit.
+- **D-93, the recommendation rules — live.** `ProposeAsync` (:87-126) refuses only a withdrawn appraisal: no duplicate
+  check, no appraisee check. **Under batch 2's index a second open row of a type answers 500** — the `DbUpdateException`
+  reaches the controller's catch-all; the index's filter includes Actioned (3), so an actioned row holds its type for
+  good. `ApproveAsync` (:128-155) compares the approver with nobody — neither the recommender nor the appraisee; reject
+  and dismiss likewise. Recognition has a handler (an employment action of type Recognition). **UAT:** APC2026's seven
+  rows were all proposed **and** approved by hr.head (TDC/00009) — the demo pack's `061` :336-346, `070` :324-335 and
+  `100` :167-178 propose and approve as one user.
+- **F3 / D-94, segregation of duties — live on every route.** No service checks the submitter or the subject on either
+  path for the salary proposal, the employment action, the PIP or the template. The services see only the login id
+  (`ICurrentUserProvider` has no employee id); the template controller passes the token's employee id, the two proposal
+  controllers have no `ICurrentUserService`. Batch 2's `SubmittedById`, `ActionedById` and `AuthoredById` are written
+  nowhere, and `CreatedById` is never stamped. **On the fallback path the rule is upside down:** `ApproveCompensation`
+  and `ApprovePerformance` are held by HR (the code map and UAT's `RolePermissions` agree), so HR may approve a salary
+  proposal and the Managing Director may not. **The MD cannot read a proposal at all** — the reads need
+  `HR.Performance.Read`, which md.tdc's three roles (Manager, Employee, Managing Director) do not grant — so the system
+  guide's ch. 35 step 7 (*"switch window B to md.tdc and open the same proposal"*) answers 403 today: md.tdc reaches the
+  page (`hr.access`) and its read fails. **UAT:** all **four** HR routes are published (the plan said three): salary and
+  employment name Managing Director, TenantAdmin and HR; PIP and template name HR, Manager and TenantAdmin;
+  `preventInitiatorApproval` is false on all four. UAT has **no TenantAdmin holder** — md.tdc (TDC/00001, linked) and
+  `managing.director` (unlinked) are the only possible proposal deciders. Nothing of the four is pending approval.
+  - The engine's `preventInitiatorApproval` compares the instance's `InitiatedById` — the submitter's **login** id — at
+    the step and in `CanUserApproveAsync`, and at start removes the initiator from the eligible approvers
+    (`WorkflowRuntimeGovernanceService` :89-109: a workflow whose only eligible approver is its submitter cannot start).
+    It also guards the generic `api/Workflow/approvals/{id}/process` path, which bypasses the HR services (#15, F7).
+  - **The seeder only adds.** An existing definition is skipped, unless `preventInitiatorApproval: true` is passed —
+    then `EnsureWorkflowInitiatorSeparationAsync` (`DatabaseSeedingService.cs` :5977-6018) sets both separation flags on
+    the approval steps of the definition **found by name**; it never changes roles. The seeder runs only on
+    `seed-workflows` (`New-UatDatabase.ps1` :163), the HR test-data screen, or `StartupInitialization:
+    SeedWorkflowDefinitions` (false by default, unset) — **an existing database gets nothing from a seeder change until
+    someone runs it.**
+  - The portal inbox (`/me/inbox`) has no approve button; it deep-links to the record, so the HR screens decide through
+    the module's own route. Their Approve button shows on the engine's `canCurrentUserApprove` alone; a service refusal
+    arrives as a toast.
+  - PIP submit and recall and the template submit do not catch `UnauthorizedAccessException` (a new refusal there would
+    answer 500); the template controller maps `InvalidOperationException` to 400, not 422.
+  - **§ 5's sign-off row, confirmed:** `ApproveAndFinalizeAsync` refuses only the appraisee (PAS :4589); an HR officer
+    who is the appraisee's line manager signs it off. `PartyToAppealAsync` (:2381-2399) already holds the line-manager
+    rule for appeals. **Demo:** hr.head's five direct reports sit at Draft; no demo sign-off is affected.
+- **F8 / D-95, titles — live.** `WorkflowEntityDisplayService.GetEntityDisplayInfoAsync` writes the employee's full name
+  into `EntityName` for the salary proposal (:431), the employment action (:443) and the PIP (:455); none sets
+  `EntityNumber`. The one screen that shows it is `/me/inbox` (heading `entityNumber ? "num — name" : entityName`).
+  Workflow notifications use `EntityNumber` only, so for these three they read "entity {GUID}". Discipline (:397-412) is
+  the pattern.
+- **F9, recall — live.** With no definition published, none of the four recalls compares the caller with anyone
+  (salary :202-222 through the helper, a no-op there; employment :204-229 and PIP :717-742 skip the engine; template
+  :472-490). Salary and employment recall carry no policy at all. The stale *"inoperable until published"* comments:
+  `SalaryReviewProposalService.cs` :113-115, `SalaryReviewProposalsController.cs` :100-104 (and its class remark
+  :18-20), `EmploymentActionProposalsController.cs` :78-83 (and :20-24), `PerformanceImprovementPlansController.cs`
+  :468-469, `EmploymentActionProposalService.cs` :102-105 (*"no unambiguous requester field"* — false since batch 2),
+  and four frontend files (`types/hr/outcomes.ts` :28-30, `types/hr/pip.ts` :10-12, `services/hr/pip.service.ts`
+  :27-28, `services/hr/outcomes.service.ts` :85-86). Salary `Reject` binds `UpdateEmploymentActionProposalDto`
+  (controller :120-124) — the reason still arrives, both send `notes`; `MarkApplied` borrows it too. The screens recall
+  through the generic `api/Workflow/entity/{type}/{id}/recall`, not the services (#15's).
+- **D-32, the tolerance — owed.** No scoring code reads any tolerance. It is captured beside the target, floor and
+  ceiling in three writers: `EffectiveAppraisalConfigurationService.BuildEffectiveConfig` :377-400 → `SnapshotConfigAsync`
+  :160-163 (generation and rebuild-form; the template item's `KpiDefinition` is already loaded), `AppraisalGoalRowService.
+  RebuildAsync` :180-183 (goal rows; the goal's `KpiDefinition` is not loaded, and `RowShape` must count the tolerance as
+  a change) and the seeder's Rule 8 snapshot (`PerformanceAppraisalDataSeeder.cs` :471-474). It is read at
+  `KpiAchievementPercent` (`AppraisalScoring.cs` :70-102) through `CriterionScoringInfo` (`AppraisalScoreService.cs`
+  :18-19, :210-212 — every settle, preview and peer path), by three direct snapshot readers (PAS :4425 the summary,
+  PAS :5040 the forms' display, `CalibrationSessionService.cs` :731), one live-goal reader (PAS :1439 → GoalRows :100) and
+  the frontend's preview twin (`types/hr/appraisal-run.ts` :1109-1139, called by `EvaluationScoreForm` :188) — whose item
+  DTO carries no tolerance. The designed meaning (B2, above): within tolerance of target scores as met; null is exact.
+  **Demo:** UAT's snapshot rows hold none (F-a), so no UAT score moves; the next rebuild captures 5 % and four tracks
+  move (D-32) — the guide's worked example (Efua's self actual 96 read as 96 %) reads 100 %.
+- **D-90, the period score.** `OverallPeriodScore` is written only by `FinalizeFullAppraisalAsync`
+  (`AppraisalReviewEventService.cs` :355-367) and read only by the interim-review screens. The year-end manager form
+  (`team-appraisals/[id]`; context `GetManagerEvaluationContextAsync`, PAS :1691-1827) loads no review event. **Demo:**
+  every APC2026 event is light-touch, so no period score exists to show.
+
+**Beyond the rows:**
+1. **A second open recommendation answers 500**, not a refusal — batch 2's index arrived before D-93's check.
+2. **On the fallback HR approves salary proposals and the MD cannot; and the MD cannot read one at all** — the ch. 35
+   walk's MD step has been impossible.
+3. **An HR officer may propose or approve an outcome on their own appraisal** — only the by-appraisal read refuses them.
+4. **The demo's employment-action proposal cannot follow D-93 as written:** `070` raises it on TDC/00034, whose line
+   manager (TDC/00019) has no login, and hr.head is the demo's only active HR login, so nobody else can approve what
+   hr.head proposes. `100`'s merit proposal (TDC/00062, manager TDC/00065, no login) is dormant: 061's approved merit
+   rows create salary proposals first.
+5. **The demo PIP (`060`) is written, submitted and approved by hr.head** (`asAnyOf` tries hr.head first) — under D-12 an
+   HR-written plan goes to the line manager (head.dev).
+6. **Harness:** `run-final-lifecycle.mjs` eg1-rec (:2285-2302) has T.hr propose and then approve and dismiss its own row;
+   `hr-succession/run-slice6.mjs` :127-162 proposes one type twice (now a 500) and self-approves, as does
+   `probe-area5-join.mjs`. The template steps already submit as `hr` and approve as `hr2`. No suite asserts the
+   dashboard's tick counts.
+7. **The template's `SubmittedById` is stamped after the engine starts**, so the workflow context's submitter is stale
+   (cosmetic; the service reads the column).
+
+**F-b State — DONE 2026-10-01: built, the retrofit migration applied to UAT on the user's go, verified (staged; the user
+commits).**
+§ 1r D-100–D-104. What exists now:
+- **The ticks (F2, D-92, D-100).** `AppraisalRecommendationTicks.StageAsync` — called by the manager's submission
+  (`SaveManagerEvaluationAsync`, before its one save) and by HR's advance when it submits the manager's draft — adds a
+  Proposed row for each ticked type with no open row (Proposed, Approved or Actioned: batch 2's index set), recommended
+  by the manager with their recommendation notes, and dismisses a still-Proposed row of an unticked type the manager
+  recommended (the decider the manager, the note *"the tick was cleared"*). A row HR proposed by hand, or one already
+  approved or actioned, is never touched. The Award tick is on the form, its context and its save (Recognition). The
+  HR dashboard counts **appraisals with a standing row of each type** (Award = Recognition) and raises its PIP and
+  termination alerts from Proposed or Approved rows; the analytics card says so.
+- **Recommendation rules (D-93).** A second open row of a type answers **422 naming the row that holds it** (it
+  answered 500 once batch 2's index was in; a `DbUpdateException` at the save is turned into the same 422). The
+  recommender does not approve their own (403) and may still reject or dismiss it; the appraisee proposes and decides
+  nothing on their own appraisal (403). The state checks run before the actor rule, so "already approved" still answers
+  first (eg1-rec unchanged).
+- **Proposals (F3, D-94, D-104).** `ProposalDecisionRules`: the **Managing Director alone** (either role spelling;
+  not TenantAdmin, not SuperAdmin) decides a salary review or employment action proposal, never its submitter, never
+  the employee it is about — on both paths, before the engine is asked; approve and reject only while it awaits approval
+  (a fallback approve used to approve a proposal nobody had submitted). The submitter and date are stamped at submission
+  (batch 2's columns) and cleared by a recall; **only the submitter recalls** (F9). The no-definition path no longer asks
+  for an HR approve permission — `HrWorkflowFallbackAuthority.ProcessApprovalDecidedByRecordAsync`: the record's rule is
+  the authority. The controllers pass the token's employee; the MD reads the proposals through
+  **`HR.Performance.Proposals.Read`** (a new permission, granted to both MD roles by a new `ManagingDirectorGrants`, not
+  Internal Audit's array) and the `PerformanceProposalsReadPolicy`; the sidebar's Proposals entry names it. Salary's
+  reject and mark-applied bind their own `SalaryReviewProposalNotesDto`.
+- **Plans (D-102).** `AuthoredById` stamped at create (the screen's caller; a recommendation's recommender in the
+  handler) and **re-stamped at submission**. The author never decides; a plan the employee's line manager put forward —
+  or one with no recorded author — is decided by the HR approve tier or TenantAdmin; one anybody else put forward by the
+  line manager or TenantAdmin. The fallback asks for no permission (the line manager holds none). Only the author recalls.
+  PIP submit and recall now answer a refusal 403 (they had no catch: 500).
+- **Templates (D-12).** The submitter neither approves nor rejects their own (403); only the submitter recalls. The
+  template submit catches a refusal (403).
+- **Sign-off (§ 5).** An HR officer who is the appraisee's line manager does not sign the appraisal off (403).
+- **Titles (F8, D-95).** The salary proposal, the employment action and the PIP name no employee in the approval inbox:
+  *"Merit increase proposal"*, *"Promotion proposal"*, *"Performance improvement plan"* with the PIP number as the
+  entity number (notifications named a GUID).
+- **The tolerance (D-32).** Captured at generation and rebuild-form (`BuildEffectiveConfig` → `SnapshotConfigAsync`),
+  on goal rows from the goal's KPI definition (`RowShape` counts it), and in the seeder's Rule 8 snapshot; read in
+  `KpiAchievementPercent` (relative to the target: an actual at or above `target − |target| × t / 100` scores 100) through
+  `CriterionScoringInfo`, the three direct snapshot readers and the live goal panel; the item DTOs carry it and the
+  frontend preview reads it. A row with none scores as before.
+- **The period score (D-90).** `ManagerEvaluationContextDto.InterimReviews` (its own read — the context's query is
+  already a large memory grant); a read-only card above the manager form's tabs.
+- **The retrofit (D-101, D-104)** — § 6.
+- **The seeder:** the two proposal routes seeded **Managing Director only**; the four performance routes bar the
+  initiator (an existing definition gets the bar from the maker-checker repair when `seed-workflows` runs).
+- **Stale comments (F9):** the "inoperable until published" notes in two services, three controllers, the interface and
+  four frontend files.
+
+**Refinements of the rows:** (1) the dashboard counts rows Proposed, Approved or Actioned — the index's open set — so an
+actioned increase still counts as asked for; (2) HR's advance raises the draft's rows too (a hook on the save alone missed
+it); (3) the proposals' fallback approve and reject now require *awaiting approval* (it approved an unsubmitted proposal);
+(4) D-104 removed TenantAdmin from the proposal decision only — PIPs and templates keep D-12's TenantAdmin; (5) the PIP's
+"line manager" is the employee's `ManagerId`, not the plan's supervisor; (6) the live goal-assessment panel reads the
+goal's **live** KPI tolerance, as it reads the goal's live target.
+
+**Harness:** `run-final-chain.mjs` — lane F's suite (D-88), with `buildChainFixture()` in `setup.mjs` (its own unit,
+post, people and logins; a 5 % KPI; one profile with HR's review after the manager and a full mid-year review). 161
+checks: fb-ticks, fb-rec, fb-sod, fb-pip, fb-tpl, fb-sign, fb-title, fb-tol, fb-interim. Added to `run-all.mjs`.
+`hr-succession/run-slice6.mjs` — the second nomination now expects 422 and the approval goes to another actor (**edited,
+not run**: it reads real staff). Not reachable on UAT: the services' no-definition branches (all four routes are
+published) — the same record rules run before either branch.
+
+**Demo pack (S):** `061` — Efua Seidu's manager ticks Promotion (D-103) and hr.head approves the Proposed rows the
+evaluations raised (it proposed and approved its own); `060` — head.dev writes and submits the plan, hr.head approves it;
+`070`, `100` — their self-approving proposal blocks removed (070's TDC/00034 promotion; 100's dormant merit). CRLF kept.
+**Not re-run on UAT** (a rebuild proves them): at the next rebuild the demo holds eight recommendations — seven Actioned,
+Efua's promotion among them, and Kwasi's training Proposed — and four tracks' scores move by the tolerance (lane S
+re-baselines the guide).
+
+**Verified:**
+- **The retrofit on UAT:** backup `ErpSystemDB_UAT_before_fb.bak` (COPY_ONLY, CHECKSUM, verified); the API's start
+  applied it (106 → 107 history rows); the four routes read exactly as on the scratch proof.
+- **The demo, as HR's desk reads APC2026 (ten reads + the 107 phases), against F-a's last capture:** identical but for
+  the dashboard's `recommendations` — **Promotion 0 → 1, Training 4 → 3** (rows, not ticks: TDC/00034's promotion has a
+  row and no tick, Kwasi's training a tick and no row) — and five clock-relative *"1 day ago" → "2 days ago"*.
+- `run-final-chain.mjs` **161/161 twice**, green on its first run.
+- Regression (`run-all.mjs`, now sixteen suites) **3980/3988** = F-a's 3818 + 161 + **one** slice E check that now
+  passes — *"the submitter cannot approve their own submission"* answered 200 on every run since the suite was written;
+  the eight left are slice E's definition-name lookups (§ 5). Lane E 1278, every other closure suite at its count.
+- hr-portal slice 5 **49/49**.
+- **What the runs wrote:** every demo row that existed before them is unchanged (count and checksum: journal, check-ins,
+  plans, profiles, appraisals, snapshot rows, recommendations, both proposal kinds, the plans, every other module's 433
+  workflow steps); the rows added are the suites' and portal slice 5's `A25…` fixtures; *Standard Annual Appraisal* is
+  still the default (the settings suite moves it and puts it back). **No 5xx**; the log's 220 failed saves are all
+  payroll's `FK_PayrollEmployeeProfiles_PayrollPaymentMethods_DefaultPaymentMethodId` (cross-module #23) and its one
+  other error the known TDC/00007 reconciliation. Every workflow instance the runs started on the four routes ended
+  Completed or Cancelled — **nothing left in a real persona's approval inbox** — but the role-routed steps still sent
+  **489 notices to real logins** (hr.head 80, md.tdc 52, managing.director 12; § 5's open E-e row).
+- **Not browser-walked:** the manager form's Award box and interim card, the analytics wording, the MD opening a
+  proposal (lane I / K).
+
 - [ ] F1 Extend-Probation handler passes `CurrentUserProvider.EmployeeId` (refuse with a message
       when unlinked); Confirm-Probation goes through the probation workflow submit / fallback
       authority instead of `ConfirmAsync`. ~~**Waits for D-18.**~~ **Settled as D-99** (§ 1q): an extension is a
@@ -3709,12 +3928,14 @@ commits).**
       approve / reject confirmation or extend; the generic `WorkflowController` runs status adapters **only for
       ServiceRequest**; the Extend handler passes a **user** id into `ExtendedById` (an Employee FK → 500); the demo pack
       has no confirmation flow, and its one extension comes from `TdcDemoProbationExtensionSeeder`.
-- [ ] F2 Manager `Recommend*` ticks (incl. `RecommendAward`, never written today, PAS :2477) create
+- [x] F2 *(slice F-b, 2026-10-01 — at every submission and HR's advance of the draft, D-100; the F-b State block)*
+      Manager `Recommend*` ticks (incl. `RecommendAward`, never written today, PAS :2477) create
       Proposed `AppraisalOutcomeRecommendation` rows on manager submit (idempotent per
       appraisal+type — batch 2 filtered unique index); dashboards
       (`HRCycleDashboardQueryService.cs:596-601, 793-802`) count rows, not booleans. The demo pack's
       `061:300-306` stops creating its own (S3).
-- [ ] F3 **Segregation of duties, rewritten by the review.** The premise "the engine path already has
+- [x] F3 *(slice F-b, 2026-10-01 — proposals the Managing Director's alone, D-104; PIPs by who put them forward,
+      D-102; the retrofit migration, D-101; the F-b State block)* **Segregation of duties, rewritten by the review.** The premise "the engine path already has
       `preventInitiatorApproval`" is false:
       - no seeded HR definition sets it — `DatabaseSeedingService.cs:596` explains why; only the
         vendor payment at :1717 does;
@@ -3776,9 +3997,9 @@ commits).**
         status adapter and raises the PipOpened / decided notice.
       - The HR screens keep deep-linking to the module's own approve.
       - Add a note to #15 saying so.
-- [ ] F8 Approval display names withhold the employee's name for PIP and employment action
+- [x] F8 *(slice F-b, 2026-10-01 — the salary proposal too, D-95; a PIP by its number)* Approval display names withhold the employee's name for PIP and employment action
       (`WorkflowEntityDisplayService.cs:436-457`; mirror discipline :403-409).
-- [ ] F9 Recall without a published definition checks the initiator (salary :212 area, employment);
+- [x] F9 *(slice F-b, 2026-10-01 — PIP and template recall too)* Recall without a published definition checks the initiator (salary :212 area, employment);
       stale "inoperable until a definition is published" comments removed; salary `Reject` binds the
       right DTO.
 
@@ -3947,7 +4168,8 @@ Group 2 — screens that lie or can only be empty:
       the snapshot (`hr-review/[id]/page.tsx:631, 670-672`).
 - [ ] **P-43:** Finalise enabled from the server's gate — `canFinalise` + reason on the HR review DTO —
       not `self && manager && peers` (`hr-review/[id]/page.tsx:282-285`; PAS :4088).
-- [ ] Analytics "Award" tile (`analytics/page.tsx:485`) reads recommendation rows (F2).
+- [x] Analytics "Award" tile (`analytics/page.tsx:485`) reads recommendation rows (F2). *(F-b, 2026-10-01 — the
+      dashboard's counts are the rows, Award = Recognition, and the card says so)*
 - [ ] Check-in follow-up / employee comments (`me/performance/check-ins/[id]/page.tsx:231-266`):
       complete form gains the fields; `checkInService.update` gets a caller.
 - [ ] Portal list "Acknowledge appraisal" (`me/performance/appraisals/page.tsx:132-146`) only after
@@ -4314,8 +4536,8 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | ~~`GetEmployeesInScopeAsync` tenant-wide auto-discovery~~ | `AppraisalCycleService.cs:1467-1514` | E2 — done in lane E-c, 2026-09-30 (one scope rule, `AppraisalCycleScope`) |
 | Interim finalise writes goal `ProgressPercent` | `AppraisalReviewEventService.cs:263-285` | E10 |
 | ~~`AppraisalCycleStatus.InProgress` never assigned; `IsCycleActive` checks only Open (PAS :4157)~~ | 6 readers | D-14 / E2 — done in lane E-c, 2026-09-30 (the member, its readers, the seeder and a data migration) |
-| Salary figures readable by anyone with Performance Read | proposals controllers | F3 (policy) |
-| Recall with no definition has no initiator check | salary/employment services | F9 |
+| ~~Salary figures readable by anyone with Performance Read~~ | proposals controllers | F3 (policy) — done in F-b, 2026-10-01: the reads are the performance desk's (HR alone holds its Read) or the Managing Director's new proposals read; no other role reaches them |
+| ~~Recall with no definition has no initiator check~~ | salary/employment services | F9 — done in F-b, 2026-10-01 (the PIP's and the template's too) |
 | ~~Frontend: `AppraisalCycleStatus` 'Archived' in one TS file only~~ | `types/hr/goals.ts:103` | I — done in lane E-c, 2026-09-30 (both unions are Draft/Open/Closed) |
 | Frontend: `PerformanceAttachmentsPanel` "visible to anyone who can see this record" while the appraisee has no evidence tab | `:220` | I |
 | Frontend: salary "Raise the salary change" and "Mark applied" independent | `proposals/salary-review/[id]/page.tsx:178-190` | F5 |
@@ -4345,7 +4567,7 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | ~~`IsAuthoritative` column loses its writer with B3~~ | `AppraisalCycleService.cs:734`; PAS ~:2391 | B3 / J — done with batch 1 |
 | APR numbering: ledger D-28 says harmless, J said collides | PAS :563-569 | J |
 | Rank in unit shown on the employee record | `HR-EMPLOYEES-SYSTEM-GUIDE.md:1214-1218` | J |
-| Seeded definitions route by role; conditional routing does not route | cross-module #3; `DatabaseSeedingService.cs:505-545` | F3 |
+| Seeded definitions route by role; conditional routing does not route | cross-module #3; `DatabaseSeedingService.cs:505-545` | F3 — narrowed in F-b, 2026-10-01: the services decide from the record on both paths (the MD for proposals, the author rule for plans); the routes still name roles, and amount thresholds (a large increase to the Board) wait for #3 |
 | Check-in ↔ company objective link unconfirmed | ledger :2178 | D-27 |
 | Round 3 walks owed (T3 tab; proposal → salary tab) | round 3 plan :170, :242 | K |
 | Harness fixtures and `run-sliceE` would resolve to real UAT staff | `setup.mjs:26-27, :178`; README :77-79 | S8 — *the real-position half done in lane A (the fixture mints its unit and position); the raw create remains, D-20* |
@@ -4354,7 +4576,7 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | `[Range(0, 100)]` on decimal DTO fields has int bounds and rounds first — 100.5 passes | e.g. `CreateCalibrationRatingAdjustmentDto.AdjustedScore` | J (the service rules hold) |
 | Two writers of the talent-pool rating cache: the appraisal sync, and the documented "latest confirmed `TalentReviewRating`" rule | `SuccessionPlanningEntities.cs:680-692` | K (succession's owner) |
 | `PreCalibrationScore` null when HR's advance auto-submits a manager draft | AWS ManagerEvaluation arm | H3 |
-| Slice E's 9 definition assertions stale on UAT (seeded names; no `preventInitiatorApproval`) | `run-sliceE.mjs:18-31, :84-88` | F3 / S |
+| Slice E's 9 definition assertions stale on UAT (seeded names; no `preventInitiatorApproval`) | `run-sliceE.mjs:18-31, :84-88` | F3 / S — **8** since F-b, 2026-10-01: the submitter's own approval is refused now; the eight left look definitions up by names the seeder does not use (S) |
 | *Added by lane C-b (2026-09-30):* | | |
 | `AppraisalAppealItem.ScoreAdjusted` and `.ResolutionNotes` never written — "changed on appeal" is read from the kept score | `PerformanceEntities.cs` (appeal item) | J |
 | An upheld change's justification is appended to the manager's criterion `Notes`, rewriting the manager's comment; the appeal item's `ResolutionNotes` is the natural home | `ResolveAppealAsync` (the modifications loop) | J |
@@ -4367,7 +4589,7 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | The lane D screens (nomination panel, peer feedback, the peer's list and form) not browser-walked | 4 files | K |
 | `hr-portal/run-slice5.mjs` and `hr-w3-permissions/run-slice10-performance.mjs` edited for lane D, not run | dev-harness | S8 |
 | *Added by lane E-a (2026-09-30):* | | |
-| An HR officer who is the appraisee's line manager may sign it off (the two-actor rule covers the appraisee) | `ApproveAndFinalizeAsync` | F3 |
+| ~~An HR officer who is the appraisee's line manager may sign it off (the two-actor rule covers the appraisee)~~ | `ApproveAndFinalizeAsync` | F3 — done in F-b, 2026-10-01 (403; the return-to-manager is not narrowed) |
 | HR's review page offers its actions to an HR officer reading their own appraisal; the server refuses them (403) | `hr-review/[id]/page.tsx` | I |
 | `probe-lane3-appraisals.mjs` still sends the old header (a probe, not in `run-all`) | dev-harness | S8 |
 | The E-a screens (HR's review page) not browser-walked | 1 page | K |
@@ -4448,6 +4670,14 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | Nothing stops two panels being opened over one scope; D-81 makes the second hold nothing and commit nothing the first still holds, but it sits and appears in the lists | `CreateAsync` / `OpenSessionAsync` | J (refuse, or say so at opening) |
 | The HR-reviewer pool is tenant-wide and matched on "HR" in a post title or unit name — a harness can only test it with fixture candidates that hold no open review and sort first (E-g2's first run gave two fixture reviews to real officers) | `AssignHRReviewerAsync`; the lifecycle suite's eg2-hr | K (keep the guard check) |
 | The E-g2 screens (the calibration grid's *Being re-evaluated*, HR's review page's *Rebuild form*) not browser-walked | 2 files | K |
+| *Added by slice F-b (2026-10-01):* | | |
+| The generic approval paths (`approvals/{id}/process`, `steps/{id}/process`, the mobile actions) still bypass the HR services' record rules — the retrofit's initiator bar and the proposal routes' Managing-Director-only approvers now cover the submitter and the decider there, not the PIP author rule | cross-module #15 | F7 / platform |
+| PIPs and templates still name TenantAdmin as a decider (D-12) — the same segregation argument D-104 applied to proposals | `PerformanceImprovementPlanService`, `AppraisalTemplateService` | F (the user's call) |
+| Not modelled: a two-stage proposal route (HR review, then the MD) and a Finance budget step, as larger organisations run (D-104's note) | the proposal routes | N / TDC's delegation of authority |
+| The recommendation screens offer Approve to the recommender and the appraisee; the server refuses (403 with the reason) | `recommendations/page.tsx`, `OutcomeRecommendationsPanel` | I |
+| The template's `SubmittedById` is stamped after the engine starts, so the workflow context's submitter is stale (the service reads the column) | `AppraisalTemplateService.SubmitForApprovalAsync` | J |
+| `hr-succession/run-slice6.mjs` edited for D-93 (another actor approves; a second nomination is 422) — not run: it reads real staff | dev-harness | S8 |
+| The F-b screens (the manager form's Award box and interim card, the analytics wording, the MD's proposal reads) not browser-walked | 4 files | K |
 
 ---
 
@@ -4591,6 +4821,14 @@ table there. Backfills are for databases that already hold data.
     scale (the resolver's cache keyed by it). Existing grades go to every existing profile's scale (or to
     one shared scale the profiles point to) — decide at the scaffold. E-g1's freeze stays: a graded
     scale is replaced by a new profile's scale, not edited.
+- **The workflow retrofit (slice F-b, D-101, D-104): `20261001172838_PerformanceClosureWorkflowRetrofit`** — data
+  only, an empty scaffold rewritten as guarded SQL. On the four seeded performance routes (found by seeded name and
+  entity type) it sets `preventInitiatorApproval` and `requireDistinctApprovers`, and takes the HR and TenantAdmin
+  approver rules off the two proposal routes; a proposal step left with no approver stops it with the count. Down
+  changes nothing. Proven 3/3 on a COPY_ONLY restore of UAT (Up; Up again, no change; a planted HR-only step refused and
+  rolled back) and **applied to UAT on 2026-10-01 on the user's go** after a verified backup
+  (`ErpSystemDB_UAT_before_fb.bak`): 107 history rows, the four routes exactly as on the scratch copy. A database built
+  from empty gets the same from `seed-workflows` (the routes are seeded after the chain runs).
 - **Batch 3: withdrawn by the review** (D-21). `AppraisalNotification` stays: it is the record for
   people without a login.
 

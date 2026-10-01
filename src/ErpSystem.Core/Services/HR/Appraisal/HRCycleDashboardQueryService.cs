@@ -212,6 +212,24 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
                 .AsNoTracking()
                 .ToListAsync(ct);
 
+            // 8. What the appraisals in play recommend — the rows, not the manager's ticks (F2, D-92). A tick
+            // became a row at the submission; a rejected or dismissed row recommends nothing any more.
+            var recommendationIds = appraisalIds.ToList();
+            List<(Guid AppraisalId, RecommendationType Type, RecommendationStatus Status)> liveRecommendations =
+                recommendationIds.Count == 0
+                ? new()
+                : (await _recommendationRepo
+                    .GetQueryable(r => r.TenantId == tenantId && !r.IsDeleted
+                                       && recommendationIds.Contains(r.PerformanceAppraisalId)
+                                       && (r.Status == RecommendationStatus.Proposed
+                                        || r.Status == RecommendationStatus.Approved
+                                        || r.Status == RecommendationStatus.Actioned))
+                    .AsNoTracking()
+                    .Select(r => new { r.PerformanceAppraisalId, r.RecommendationType, r.Status })
+                    .ToListAsync(ct))
+                    .Select(r => (AppraisalId: r.PerformanceAppraisalId, Type: r.RecommendationType, r.Status))
+                    .ToList();
+
             // ── Build the response ─────────────────────────────────────────────
             var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
@@ -243,11 +261,11 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
                                         out int scoredCount, out decimal? avgScore),
                 ScoredAppraisalCount = scoredCount,
                 AverageScore         = avgScore,
-                Recommendations    = BuildRecommendations(appraisals),
+                Recommendations    = BuildRecommendations(liveRecommendations),
                 OutcomePipeline    = await BuildOutcomePipelineAsync(tenantId, appraisalIds, ct),
                 DepartmentBreakdown = BuildDepartmentBreakdown(appraisals, calibSessions,
                                          managerLookup, cycle.GoalSettingDeadline, today),
-                AttentionItems     = BuildAttentionItems(appraisals, subs, managerLookup, allGrades, cycle, today),
+                AttentionItems     = BuildAttentionItems(appraisals, subs, managerLookup, allGrades, cycle, today, liveRecommendations),
                 RecentActivity     = BuildActivity(appraisals, withdrawn, advanceLogs),
             };
 
@@ -617,17 +635,24 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
         }).ToList();
     }
 
+    /// <summary>
+    /// Appraisals recommending each outcome, from the rows (F2, D-92): the booleans were the manager's ticks, which
+    /// counted an outcome HR had already rejected and never one HR proposed by hand. One row per type per appraisal
+    /// is open at most (batch 2's index); Award reads Recognition.
+    /// </summary>
     private static HRCycleRecommendationSummaryDto BuildRecommendations(
-        List<PerformanceAppraisal> appraisals)
+        List<(Guid AppraisalId, RecommendationType Type, RecommendationStatus Status)> live)
     {
+        int Of(RecommendationType type) => live.Where(r => r.Type == type).Select(r => r.AppraisalId).Distinct().Count();
+
         return new HRCycleRecommendationSummaryDto
         {
-            AwardCount       = appraisals.Count(a => a.RecommendAward),
-            PromotionCount   = appraisals.Count(a => a.RecommendPromotion),
-            IncrementCount   = appraisals.Count(a => a.RecommendIncrement),
-            TrainingCount    = appraisals.Count(a => a.RecommendTraining),
-            PIPCount         = appraisals.Count(a => a.RecommendPIP),
-            TerminationCount = appraisals.Count(a => a.RecommendTermination),
+            AwardCount       = Of(RecommendationType.Recognition),
+            PromotionCount   = Of(RecommendationType.Promotion),
+            IncrementCount   = Of(RecommendationType.MeritIncrease),
+            TrainingCount    = Of(RecommendationType.TrainingNomination),
+            PIPCount         = Of(RecommendationType.PerformanceImprovementPlan),
+            TerminationCount = Of(RecommendationType.Termination),
         };
     }
 
@@ -802,10 +827,18 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
         Dictionary<Guid, string>   managerLookup,
         List<AppraisalGradeDefinition> grades,
         AppraisalCycle             cycle,
-        DateOnly                   today)
+        DateOnly                   today,
+        List<(Guid AppraisalId, RecommendationType Type, RecommendationStatus Status)> liveRecommendations)
     {
         var items    = new List<HRCycleAttentionItemDto>();
         var gradeMap = grades.ToDictionary(g => g.Id, g => g.GradeName);
+
+        // A PIP or a termination still waiting on HR — proposed, or approved and not yet actioned (F2): once actioned,
+        // the plan or the proposal is the owning module's to follow.
+        var undecided = liveRecommendations
+            .Where(r => r.Status is RecommendationStatus.Proposed or RecommendationStatus.Approved)
+            .Select(r => (r.AppraisalId, r.Type))
+            .ToHashSet();
 
         foreach (var a in appraisals)
         {
@@ -819,7 +852,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             var gradeLabel  = a.OverallGradeDefinitionId.HasValue && gradeMap.TryGetValue(a.OverallGradeDefinitionId.Value, out var gl) ? gl : null;
 
             // PIP recommendation
-            if (a.RecommendPIP)
+            if (undecided.Contains((a.Id, RecommendationType.PerformanceImprovementPlan)))
             {
                 items.Add(BuildItem(a, deptName, position, managerName, gradeLabel, subStatus,
                     AttentionReason.PIPrecommendation, "PIP Recommended",
@@ -828,7 +861,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             }
 
             // Termination recommendation
-            if (a.RecommendTermination)
+            if (undecided.Contains((a.Id, RecommendationType.Termination)))
             {
                 items.Add(BuildItem(a, deptName, position, managerName, gradeLabel, subStatus,
                     AttentionReason.TerminationRecommendation, "Termination Recommended",

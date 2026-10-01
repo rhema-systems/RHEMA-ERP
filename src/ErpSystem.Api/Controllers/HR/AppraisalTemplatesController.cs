@@ -319,10 +319,11 @@ public class AppraisalTemplatesController : ControllerBase
     }
 
     // ── Approval workflow ───────────────────────────────────────────────────
-    // These four endpoints are thin pass-throughs to the generic workflow engine. Approval
-    // authority comes from the published AppraisalTemplate workflow definition — a role
-    // attribute here would silently override that configuration, so there is none. A caller
-    // who is not an approver for the current step gets 403 from the service.
+    // Thin pass-throughs to the generic workflow engine (or its fallback when no definition is
+    // published), behind the performance Write policy. Who may be asked comes from the published
+    // AppraisalTemplate definition; the service adds the record's rule on both paths (F3, D-12):
+    // the submitter does not decide their own template and only the submitter recalls it. A caller
+    // refused either way gets 403 from the service.
 
     /// <summary>
     /// The acting employee, used for the template's own SubmittedBy / ApprovedBy stamps.
@@ -342,6 +343,7 @@ public class AppraisalTemplatesController : ControllerBase
             return Ok(result);
         }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
         catch (Exception ex)
         {
@@ -402,7 +404,7 @@ public class AppraisalTemplatesController : ControllerBase
     {
         try
         {
-            var result = await _templateService.RecallAsync(id, cancellationToken);
+            var result = await _templateService.RecallAsync(id, GetEmployeeId() ?? Guid.Empty, cancellationToken);
             return Ok(result);
         }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }

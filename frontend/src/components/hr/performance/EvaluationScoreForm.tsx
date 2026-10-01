@@ -186,7 +186,13 @@ function ScoreRow({
   const goal = isGoalItem(item);
   const grade = measured ? null : resolveGrade(value.numericScore, item.gradeRanges);
   const achievement = measured
-    ? kpiAchievementPercent(value.actualValue, item.kpiTargetValue, item.kpiMinValue, item.kpiMaxValue)
+    ? kpiAchievementPercent(
+        value.actualValue,
+        item.kpiTargetValue,
+        item.kpiMinValue,
+        item.kpiMaxValue,
+        item.kpiTolerancePercent,
+      )
     : null;
   const top = scaleTop(item.gradeRanges);
   const key = item.criterionKey;

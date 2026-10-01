@@ -153,22 +153,23 @@ public interface IPerformanceImprovementPlanService
     Task<IEnumerable<PerformanceImprovementPlanDto>> GetBySupervisorAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<PerformanceImprovementPlanDto>> GetByStatusAsync(PipStatus status, CancellationToken cancellationToken = default);
     Task<IEnumerable<PerformanceImprovementPlanDto>> GetActivePipsAsync(CancellationToken cancellationToken = default);
-    Task<PerformanceImprovementPlanDto> CreateAsync(CreatePerformanceImprovementPlanDto createDto, CancellationToken cancellationToken = default);
+    /// <summary>Creates a Draft plan; <paramref name="authoredById"/> is the employee who wrote it (D-102).</summary>
+    Task<PerformanceImprovementPlanDto> CreateAsync(CreatePerformanceImprovementPlanDto createDto, Guid? authoredById, CancellationToken cancellationToken = default);
     Task<PerformanceImprovementPlanDto> UpdateAsync(UpdatePerformanceImprovementPlanDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> UpdateStatusAsync(UpdatePipStatusDto statusDto, CancellationToken cancellationToken = default);
     Task<bool> CompletePipAsync(CompletePipDto completeDto, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
-    // Approval workflow — Draft → PendingApproval → Active on the generic workflow engine.
-    // ⚠ This used to say "Inoperable until a PerformanceImprovementPlan workflow definition has
-    // been published". It was NOT inoperable — it auto-approved, putting an unreviewed plan into
-    // force against the employee (corrected 2026-09-15). With no definition published, submitting
-    // now lands the plan at PendingApproval and a HR.Performance.Admin holder rules on it. See
-    // HrWorkflowFallbackAuthority.
-    Task<PerformanceImprovementPlanDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<PerformanceImprovementPlanDto> ApproveAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<PerformanceImprovementPlanDto> RejectAsync(Guid id, string? reason, CancellationToken cancellationToken = default);
-    Task<PerformanceImprovementPlanDto> RecallAsync(Guid id, CancellationToken cancellationToken = default);
+    // Approval workflow — Draft → PendingApproval → Active on the generic workflow engine, or the
+    // fallback when no definition is published (HrWorkflowFallbackAuthority). Who decides is the
+    // record's rule on both paths (F3, D-12, D-102): whoever submits becomes the plan's author and
+    // does not decide it; a plan the line manager put forward is HR's to decide (the
+    // HR.Performance.Approve tier), one HR put forward the line manager's or a tenant
+    // administrator's. Only the author recalls (F9).
+    Task<PerformanceImprovementPlanDto> SubmitForApprovalAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<PerformanceImprovementPlanDto> ApproveAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<PerformanceImprovementPlanDto> RejectAsync(Guid id, string? reason, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<PerformanceImprovementPlanDto> RecallAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 
     // PipReviewMeeting operations
     Task<PipReviewMeetingDto> AddReviewMeetingAsync(Guid pipId, CreatePipReviewMeetingDto createDto, CancellationToken cancellationToken = default);
@@ -459,12 +460,15 @@ public interface IAppraisalTemplateService
 
     /// <summary>Submit a Draft/Rejected template for approval, starting its workflow.</summary>
     Task<AppraisalTemplateDto> SubmitForApprovalAsync(Guid id, Guid submittedByEmployeeId, CancellationToken cancellationToken = default);
-    /// <summary>Record an approval on the current workflow step. Approves the template outright once the last step passes.</summary>
+    /// <summary>
+    /// Record an approval on the current workflow step. Approves the template outright once the last step passes. Never
+    /// by its submitter (F3, D-12).
+    /// </summary>
     Task<AppraisalTemplateDto> ApproveAsync(Guid id, Guid approvedByEmployeeId, CancellationToken cancellationToken = default);
-    /// <summary>Reject the template at the current workflow step, with an optional reason.</summary>
+    /// <summary>Reject the template at the current workflow step, with an optional reason. Never by its submitter.</summary>
     Task<AppraisalTemplateDto> RejectAsync(Guid id, Guid rejectedByEmployeeId, string? reason, CancellationToken cancellationToken = default);
-    /// <summary>Pull a still-pending template back to Draft so its author can keep editing.</summary>
-    Task<AppraisalTemplateDto> RecallAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>Pull a still-pending template back to Draft so its author can keep editing. Its submitter only (F9).</summary>
+    Task<AppraisalTemplateDto> RecallAsync(Guid id, Guid recalledByEmployeeId, CancellationToken cancellationToken = default);
 }
 
 #endregion Appraisal Template
@@ -677,12 +681,16 @@ public interface ISalaryReviewProposalService
     // Who signs off a pay change is configuration, not code: the proposal's type, percentage and
     // amount go into the workflow entity context so a definition can route on them.
 
-    /// <summary>Sends the proposal for approval. Requires a figure to have been set.</summary>
-    Task<SalaryReviewProposalDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<SalaryReviewProposalDto> ApproveAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<SalaryReviewProposalDto> RejectAsync(Guid id, string? reason, CancellationToken cancellationToken = default);
-    /// <summary>Pulls a pending proposal back so its figure can be reworked.</summary>
-    Task<SalaryReviewProposalDto> RecallAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>Sends the proposal for approval and records who sent it. Requires a figure to have been set.</summary>
+    Task<SalaryReviewProposalDto> SubmitForApprovalAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Decided by the Managing Director — never the submitter, never the employee it is about (F3, D-12, D-104) — on
+    /// both paths.
+    /// </summary>
+    Task<SalaryReviewProposalDto> ApproveAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<SalaryReviewProposalDto> RejectAsync(Guid id, string? reason, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>Pulls a pending proposal back so its figure can be reworked. Only its submitter does (F9).</summary>
+    Task<SalaryReviewProposalDto> RecallAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Records that payroll has made the change. Not an approval — it is the receipt for one —
@@ -701,10 +709,12 @@ public interface IEmploymentActionProposalService
     // The action type is in the workflow entity context, so a definition can send a recognition
     // and a termination to different approvers.
 
-    Task<EmploymentActionProposalDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<EmploymentActionProposalDto> ApproveAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<EmploymentActionProposalDto> RejectAsync(Guid id, string? reason, CancellationToken cancellationToken = default);
-    Task<EmploymentActionProposalDto> RecallAsync(Guid id, CancellationToken cancellationToken = default);
+    // Who decides is the record's rule, as for a salary review proposal (F3, D-12, D-104): the Managing Director, never
+    // the submitter, never the employee it is about; only the submitter recalls (F9).
+    Task<EmploymentActionProposalDto> SubmitForApprovalAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<EmploymentActionProposalDto> ApproveAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<EmploymentActionProposalDto> RejectAsync(Guid id, string? reason, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<EmploymentActionProposalDto> RecallAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Records that the owning module has created the real record. Refused unless the proposal

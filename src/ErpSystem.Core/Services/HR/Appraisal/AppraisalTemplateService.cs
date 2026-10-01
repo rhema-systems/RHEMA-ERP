@@ -418,6 +418,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             throw new InvalidOperationException(
                 $"Only a template awaiting approval can be approved; this one is {entity.ApprovalStatus}.");
 
+        EnsureNotSubmitter(entity, approvedByEmployeeId);
+
         var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
             _workflowIntegrationService, _currentUserProvider, EntityType, id, userId,
             "Approve", null, "approve an appraisal template", HrPermissions.ApprovePerformance);
@@ -448,6 +450,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             throw new InvalidOperationException(
                 $"Only a template awaiting approval can be rejected; this one is {entity.ApprovalStatus}.");
 
+        EnsureNotSubmitter(entity, rejectedByEmployeeId);
+
         var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
 
         var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
@@ -465,17 +469,32 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     }
 
     /// <summary>
+    /// Segregation of duties (F3, D-12, D-94): a template is decided by another HR officer, or a tenant administrator —
+    /// never by the person who submitted it, on either path. The submitter may recall it instead.
+    /// </summary>
+    private static void EnsureNotSubmitter(AppraisalTemplate entity, Guid actorEmployeeId)
+    {
+        if (actorEmployeeId != Guid.Empty && entity.SubmittedById == actorEmployeeId)
+            throw new UnauthorizedAccessException(
+                "You submitted this template, so another HR officer or a tenant administrator decides it. You can recall it.");
+    }
+
+    /// <summary>
     /// Pulls a submitted template back to Draft so its author can keep editing it. Allowed
     /// only while it is still awaiting a decision — once HR has ruled, the way back is a new
-    /// submission, not a recall.
+    /// submission, not a recall. Only the person who submitted it recalls it (F9).
     /// </summary>
-    public async Task<AppraisalTemplateDto> RecallAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<AppraisalTemplateDto> RecallAsync(Guid id, Guid recalledByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
         var userId = RequireUserId();
 
         if (entity.ApprovalStatus != TemplateApprovalStatus.PendingApproval)
             throw new InvalidOperationException("Only a template still awaiting approval can be recalled.");
+
+        // The engine kept recall to the requester; with no definition published nothing did (F9).
+        if (entity.SubmittedById is { } submitter && submitter != recalledByEmployeeId)
+            throw new UnauthorizedAccessException("Only the person who submitted this template can recall it.");
 
         // Skipped when nothing is published; the adapter returns the template to Draft either way.
         await HrWorkflowFallbackAuthority.RecallAsync(_workflowIntegrationService, EntityType, id, userId);

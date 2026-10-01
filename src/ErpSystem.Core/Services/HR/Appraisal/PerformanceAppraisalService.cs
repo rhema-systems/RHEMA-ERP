@@ -36,6 +36,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
     private readonly IGenericRepository<EmployeeGoal> _goalRepository;
     private readonly IGenericRepository<AppraisalHRReview> _hrReviewRepository;
     private readonly IGenericRepository<AppraisalGradeDefinition> _gradeDefinitionRepository;
+    private readonly IGenericRepository<AppraisalOutcomeRecommendation> _recommendationRepository;
     private readonly IAppraisalScoreService _scores;
     private readonly IAppraisalLifecycleService _lifecycle;
     private readonly IAppraisalNotificationService _notifications;
@@ -67,6 +68,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         IGenericRepository<EmployeeGoal> goalRepository,
         IGenericRepository<AppraisalHRReview> hrReviewRepository,
         IGenericRepository<AppraisalGradeDefinition> gradeDefinitionRepository,
+        IGenericRepository<AppraisalOutcomeRecommendation> recommendationRepository,
         IAppraisalScoreService scores,
         IAppraisalLifecycleService lifecycle,
         IAppraisalNotificationService notifications,
@@ -95,6 +97,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         _goalRepository = goalRepository;
         _hrReviewRepository = hrReviewRepository;
         _gradeDefinitionRepository = gradeDefinitionRepository;
+        _recommendationRepository = recommendationRepository;
         _scores = scores;
         _lifecycle = lifecycle;
         _notifications = notifications;
@@ -1436,8 +1439,9 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
     /// KPI achievement percentage. Delegates to <see cref="AppraisalScoring.KpiAchievementPercent"/>
     /// so the goal-assessment path and the scoring path cannot drift apart.
     /// </summary>
-    private static decimal CalculateKpiAchievement(decimal actualValue, decimal? targetValue, decimal? minValue, decimal? maxValue)
-        => AppraisalScoring.KpiAchievementPercent(actualValue, targetValue, minValue, maxValue);
+    private static decimal CalculateKpiAchievement(
+        decimal actualValue, decimal? targetValue, decimal? minValue, decimal? maxValue, decimal? tolerancePercent)
+        => AppraisalScoring.KpiAchievementPercent(actualValue, targetValue, minValue, maxValue, tolerancePercent);
 
     /// <summary>
     /// Why an evaluation cannot be submitted for want of evidence (<c>RequireEvidence</c>, B2), or
@@ -1819,9 +1823,28 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             RecommendTraining = appraisal.RecommendTraining,
             RecommendPIP = appraisal.RecommendPIP,
             RecommendTermination = appraisal.RecommendTermination,
+            RecommendAward = appraisal.RecommendAward,
             RecommendationNotes = appraisal.RecommendationNotes,
             Sections = BuildManagerEvaluationSections(appraisal, selfShown, managerEvaluation, appealedCriteriaIds)
         };
+
+        // The interim reviews, as context for the year-end judgement (D-90). Their own read, not another Include on
+        // the query above — that one already asks SQL Server for a large memory grant.
+        result.InterimReviews = await _appraisalRepository.GetQueryable()
+            .Where(a => a.Id == appraisal.Id)
+            .SelectMany(a => a.ReviewEvents)
+            .Where(e => !e.IsDeleted && e.Status != AppraisalReviewStatus.Cancelled)
+            .OrderBy(e => e.EventDate)
+            .Select(e => new InterimReviewContextDto
+            {
+                Id = e.Id,
+                Type = e.Type,
+                EventDate = e.EventDate,
+                Status = e.Status,
+                IsFullAppraisal = e.IsFullAppraisal,
+                OverallPeriodScore = e.OverallPeriodScore,
+            })
+            .ToListAsync(cancellationToken);
 
         return result;
     }
@@ -2035,6 +2058,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         appraisal.RecommendTraining = saveDto.RecommendTraining;
         appraisal.RecommendPIP = saveDto.RecommendPIP;
         appraisal.RecommendTermination = saveDto.RecommendTermination;
+        appraisal.RecommendAward = saveDto.RecommendAward;
         appraisal.RecommendationNotes = saveDto.RecommendationNotes;
 
         // If submitting (not draft), set submitted date and calculate TotalScore
@@ -2103,6 +2127,12 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             appraisal, managerSide: true, saveDto.GoalAssessments, scoredThisSave, scoring, cancellationToken);
         if (assessmentError != null)
             return new ManagerEvaluationResultDto { Success = false, Message = assessmentError };
+
+        // Each submission turns the ticks into recommendation rows, in this save (F2, D-92, D-100): a re-submission
+        // after a return or a remand adds what was newly ticked and dismisses what was unticked while still Proposed.
+        if (!saveDto.IsDraft)
+            await AppraisalRecommendationTicks.StageAsync(
+                _recommendationRepository, appraisal, managerEvaluation.EvaluatorId, cancellationToken);
 
         // Saved first: the gates read what is saved.
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -4422,7 +4452,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
                     AchievementPercentage = cs.NumericScore.HasValue
                         ? (decimal?)cs.NumericScore.Value
                         : cs.ActualValue.HasValue
-                            ? AppraisalScoring.KpiAchievementPercent(cs.ActualValue.Value, config?.KpiTargetValue, config?.KpiMinValue, config?.KpiMaxValue)
+                            ? AppraisalScoring.KpiAchievementPercent(cs.ActualValue.Value, config?.KpiTargetValue, config?.KpiMinValue, config?.KpiMaxValue, config?.KpiTolerancePercent)
                             : null,
                     AchievementOverridden = cs.NumericScore.HasValue,
                     Unit = cs.TemplateItem?.KpiDefinition?.Unit ?? config?.Unit,
@@ -4587,6 +4617,12 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             throw new ArgumentException($"Appraisal with ID '{appraisalId}' not found.");
 
         EnsureNotOwnAppraisal(appraisal, "sign off");
+
+        // Segregation of duties (F3, § 5): an HR officer who is the appraisee's line manager judged the appraisal as
+        // their manager; another officer signs it off. The two-actor rule above covers only the appraisee.
+        if (_currentUser.EmployeeId is Guid signer && signer != Guid.Empty && signer == appraisal.Employee?.ManagerId)
+            throw new UnauthorizedAccessException(
+                "You are this employee's line manager, so another HR officer signs the appraisal off.");
 
         // A sign-off is made in governance (performance closure E-a). The gates hold it to HR's review
         // step; the status is checked as well, since the step alone did not say the manager's
@@ -5004,6 +5040,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             KpiTargetValue          = effectiveTarget,
             KpiMinValue             = effectiveMin,
             KpiMaxValue             = effectiveMax,
+            KpiTolerancePercent     = config.KpiTolerancePercent,
             GradeRanges             = config.GradeRanges.Select(gr => new EvaluationGradeRangeDto
             {
                 GradeDefinitionId = gr.GradeDefinitionId,
@@ -5037,7 +5074,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             return null;
 
         return Math.Round(
-            AppraisalScoring.KpiAchievementPercent(actual, config.KpiTargetValue, config.KpiMinValue, config.KpiMaxValue),
+            AppraisalScoring.KpiAchievementPercent(actual, config.KpiTargetValue, config.KpiMinValue, config.KpiMaxValue, config.KpiTolerancePercent),
             1, MidpointRounding.AwayFromZero);
     }
 
@@ -5133,6 +5170,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         KpiTargetValue           = config.KpiTargetValue,
         KpiMinValue              = config.KpiMinValue,
         KpiMaxValue              = config.KpiMaxValue,
+        KpiTolerancePercent      = config.KpiTolerancePercent,
         GradeRanges              = config.GradeRanges.Select(gr => new EvaluationGradeRangeDto
         {
             GradeDefinitionId = gr.GradeDefinitionId,

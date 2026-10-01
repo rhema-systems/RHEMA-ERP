@@ -634,6 +634,7 @@ public class PeerEvaluationService : IPeerEvaluationService
         KpiTargetValue          = config.KpiTargetValue,
         KpiMinValue             = config.KpiMinValue,
         KpiMaxValue             = config.KpiMaxValue,
+        KpiTolerancePercent     = config.KpiTolerancePercent,
         GradeRanges             = config.GradeRanges.Select(gr => new EvaluationGradeRangeDto
         {
             GradeDefinitionId = gr.GradeDefinitionId,

@@ -15,8 +15,13 @@ namespace ErpSystem.Core.Services.HR.Appraisal;
 /// <param name="Share">The criterion's share of the whole form, 0–100 (<see cref="AppraisalScoring.CriterionShare"/>).</param>
 /// <param name="MaxScore">The top of the criterion's own scale — its highest grade band, or 100 when it has none.</param>
 /// <param name="IsKpi">Measured against a target rather than rated.</param>
+/// <param name="KpiTolerance">
+/// The tolerance the snapshot kept with the target (D-32): an actual within it of the target scores as met. Null on a row
+/// generated before it was kept, and on the live-template fallback — an exact target, as those scored.
+/// </param>
 public sealed record CriterionScoringInfo(
-    decimal Share, decimal MaxScore, bool IsKpi, decimal? KpiTarget, decimal? KpiMin, decimal? KpiMax);
+    decimal Share, decimal MaxScore, bool IsKpi, decimal? KpiTarget, decimal? KpiMin, decimal? KpiMax,
+    decimal? KpiTolerance = null);
 
 /// <summary>The criterion an evaluation input names, resolved against the appraisal's snapshot.</summary>
 /// <param name="Key">The criterion key: a template row's template item, a goal row's own snapshot id.</param>
@@ -209,7 +214,8 @@ public class AppraisalScoreService : IAppraisalScoreService
                     : row.TemplateKpiDefinitionId.HasValue,
                 KpiTarget: c.KpiTargetValue,
                 KpiMin: c.KpiMinValue,
-                KpiMax: c.KpiMaxValue);
+                KpiMax: c.KpiMaxValue,
+                KpiTolerance: c.KpiTolerancePercent);
         }
 
         return new AppraisalCriterionScoring(appraisalId, items, configs.Select(row => row.Config));
@@ -296,7 +302,8 @@ public class AppraisalScoreService : IAppraisalScoreService
         }
         else if (score.ActualValue is decimal actual)
         {
-            achievement = AppraisalScoring.KpiAchievementPercent(actual, info.KpiTarget, info.KpiMin, info.KpiMax) / 100m;
+            achievement = AppraisalScoring.KpiAchievementPercent(
+                actual, info.KpiTarget, info.KpiMin, info.KpiMax, info.KpiTolerance) / 100m;
         }
         else
         {

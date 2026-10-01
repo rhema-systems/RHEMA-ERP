@@ -728,7 +728,7 @@ public class CalibrationSessionService : ICalibrationSessionService
                     : score.NumericScore.HasValue
                         ? (decimal?)score.NumericScore.Value
                         : score.ActualValue is decimal actual
-                            ? AppraisalScoring.KpiAchievementPercent(actual, c.KpiTargetValue, c.KpiMinValue, c.KpiMaxValue)
+                            ? AppraisalScoring.KpiAchievementPercent(actual, c.KpiTargetValue, c.KpiMinValue, c.KpiMaxValue, c.KpiTolerancePercent)
                             : null,
                 AdjustmentId = adjustment?.Id,
                 AdjustedScore = adjustment?.AdjustedScore,

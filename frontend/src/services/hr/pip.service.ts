@@ -24,8 +24,8 @@ import { PIP_OUTCOME_VALUES } from '@/types/hr/pip';
  * the screen must never set a status itself — refetch and let the adapter decide. Reuse
  * `WorkflowApprovalActions` / `WorkflowRecordTab` rather than building buttons here.
  *
- * ⚠ All four are inoperable until a `PerformanceImprovementPlan` workflow definition has been
- * published and `POST api/Workflow/entity-types/seed` re-run.
+ * With no published definition the server's fallback rules on them; the decider is the record's
+ * rule either way (whoever submitted does not decide — see `types/hr/pip.ts`).
  *
  * **Reads are entitlement-scoped.** Anything keyed on a plan id is 403 unless the caller is HR,
  * the employee, the supervisor or the HR owner. `getMine` and `getSupervising` need no id at all.

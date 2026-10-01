@@ -61,6 +61,8 @@ public partial class PerformanceAppraisalService
             .Where(g => g.TenantId == appraisal.TenantId
                      && g.EmployeeId == appraisal.EmployeeId
                      && g.AppraisalCycleId == appraisal.AppraisalCycleId)
+            // The goal's KPI carries the tolerance its achievement is read with (D-32).
+            .Include(g => g.KpiDefinition)
             .AsNoTracking()
             .ToDictionaryAsync(g => g.Id, cancellationToken);
 
@@ -97,7 +99,8 @@ public partial class PerformanceAppraisalService
             var goal = goals[input.GoalId];
             var progress = input.FinalProgressPercent;
             if (goal.KpiDefinitionId.HasValue && goal.MeasurementType != MeasurementType.Boolean && input.FinalActualValue.HasValue)
-                progress = CalculateKpiAchievement(input.FinalActualValue.Value, goal.TargetValue, goal.MinValue, goal.MaxValue);
+                progress = CalculateKpiAchievement(input.FinalActualValue.Value, goal.TargetValue, goal.MinValue, goal.MaxValue,
+                    goal.KpiDefinition?.TolerancePercent);
 
             var assessment = await AssessmentFor(input.GoalId);
             if (managerSide)

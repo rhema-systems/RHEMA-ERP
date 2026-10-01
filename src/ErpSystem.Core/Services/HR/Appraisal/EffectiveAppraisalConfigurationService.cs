@@ -160,6 +160,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
                 KpiTargetValue = criterion.KpiTargetValue,
                 KpiMinValue = criterion.KpiMinValue,
                 KpiMaxValue = criterion.KpiMaxValue,
+                KpiTolerancePercent = criterion.KpiTolerancePercent,
                 KpiTargetSource = criterion.KpiTargetSource,
                 GradeRanges = criterion.GradeRanges.Select(gr => new PerformanceAppraisalCriterionConfigGradeRange
                 {
@@ -368,6 +369,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
             decimal? kpiTargetValue = null;
             decimal? kpiMinValue = null;
             decimal? kpiMaxValue = null;
+            decimal? kpiTolerancePercent = null;
             KpiTargetSource? kpiTargetSource = null;
 
             // A template KPI item is the same KPI with the same target for everyone on the template
@@ -381,6 +383,8 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
                     kpiTargetValue = item.KpiTargetValue;
                     kpiMinValue = item.KpiMinValue;
                     kpiMaxValue = item.KpiMaxValue;
+                    // The definition's tolerance, captured with the target (D-32).
+                    kpiTolerancePercent = item.KpiDefinition?.TolerancePercent;
                     kpiTargetSource = KpiTargetSource.Template;
                 }
             }
@@ -397,6 +401,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
                 KpiTargetValue = kpiTargetValue,
                 KpiMinValue = kpiMinValue,
                 KpiMaxValue = kpiMaxValue,
+                KpiTolerancePercent = kpiTolerancePercent,
                 KpiTargetSource = kpiTargetSource,
                 GradeRanges = gradeRanges
             });

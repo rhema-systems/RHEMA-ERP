@@ -471,6 +471,10 @@ public sealed class PerformanceAppraisalDataSeeder
                     KpiTargetValue = measured ? item.KpiTargetValue : null,
                     KpiMinValue = measured ? item.KpiMinValue : null,
                     KpiMaxValue = measured ? item.KpiMaxValue : null,
+                    // The KPI's tolerance kept with its target, as generation keeps it (D-32).
+                    KpiTolerancePercent = measured
+                        ? kpis.Values.FirstOrDefault(k => k.Id == item.KpiDefinitionId)?.TolerancePercent
+                        : null,
                     KpiTargetSource = measured ? KpiTargetSource.Template : null,
                     GradeRanges = gradeData.Select(g => new PerformanceAppraisalCriterionConfigGradeRange
                     {

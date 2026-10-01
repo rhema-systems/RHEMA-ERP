@@ -7,9 +7,9 @@
  * `PerformanceImprovementPlan` workflow definition before it is in force. Use
  * `WorkflowApprovalActions` / `WorkflowRecordTab` for that, never a bespoke approve button.
  *
- * ⚠ Submit/approve/reject/recall are inoperable until such a definition has been published and
- * `POST api/Workflow/entity-types/seed` re-run — approval authority comes from the definition,
- * not from a role.
+ * With no published definition the server's fallback rules on them. Either way whoever submits
+ * the plan does not decide it: a plan the line manager put forward is HR's to decide, one HR put
+ * forward the line manager's or a tenant administrator's; only its author recalls it (F3, D-102).
  *
  * **Extending is not closing.** `Extended` is the one outcome that leaves the plan running: it
  * needs a `newEndDate` and pushes the end date out instead of writing a completion.

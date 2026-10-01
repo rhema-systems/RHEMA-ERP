@@ -27,6 +27,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     private readonly IGenericRepository<AppraisalConversation> _conversationRepository;
     private readonly IGenericRepository<EmployeeGoal> _goalRepository;
     private readonly IGenericRepository<AppraisalManualAdvanceLog> _advanceLogRepository;
+    private readonly IGenericRepository<AppraisalOutcomeRecommendation> _recommendationRepository;
     private readonly IAppraisalScoreService _scores;
     private readonly IAppraisalLifecycleService _lifecycle;
     private readonly IAppraisalGoalRowService _goalRows;
@@ -44,6 +45,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         IGenericRepository<AppraisalConversation> conversationRepository,
         IGenericRepository<EmployeeGoal> goalRepository,
         IGenericRepository<AppraisalManualAdvanceLog> advanceLogRepository,
+        IGenericRepository<AppraisalOutcomeRecommendation> recommendationRepository,
         IAppraisalScoreService scores,
         IAppraisalLifecycleService lifecycle,
         IAppraisalGoalRowService goalRows,
@@ -63,6 +65,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         _conversationRepository = conversationRepository;
         _goalRepository       = goalRepository;
         _advanceLogRepository = advanceLogRepository;
+        _recommendationRepository = recommendationRepository;
         _scores               = scores;
         _lifecycle            = lifecycle;
         _unitOfWork           = unitOfWork;
@@ -410,6 +413,15 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
                         appraisal.PreCalibrationScore = managerEval.TotalScore;
                     await _evalRepository.UpdateAsync(managerEval);
                     actions.Add("Auto-submitted existing manager evaluation draft.");
+
+                    // The draft's ticks are submitted with it, so they become rows as a submission's do (D-100),
+                    // recommended by the manager who ticked them. A placeholder HR creates below carries none.
+                    var (added, dismissed) = await AppraisalRecommendationTicks.StageAsync(
+                        _recommendationRepository, appraisal, managerEval.EvaluatorId, ct);
+                    if (added > 0)
+                        actions.Add($"Raised {added} recommendation(s) from the manager's ticks.");
+                    if (dismissed > 0)
+                        actions.Add($"Dismissed {dismissed} recommendation(s) the manager no longer ticks.");
                 }
                 else
                 {

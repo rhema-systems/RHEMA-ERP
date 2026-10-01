@@ -128,6 +128,9 @@ public class PipRecommendationHandler : IOutcomeRecommendationHandler
             // The HR officer who approved the outcome owns the plan they set in motion (D-75): the
             // approval is the desk's. Left empty when that would be the employee.
             HROwnerId = NotTheEmployee(recommendation.ApprovedById),
+            // Whoever recommended the plan wrote it, for the decision (D-102) — usually the line manager, so HR decides
+            // it; the submission re-stamps whoever puts it forward.
+            AuthoredById = NotTheEmployee(recommendation.RecommendedById),
             StartDate = now,
             EndDate = now.AddDays(90),
             Status = PipStatus.Draft,

@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -14,10 +15,11 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 /// <remarks>
 /// <para><b>W3 slice 14</b>, on <c>HR.Performance.*</c> — the same tiering, for the same reasons,
-/// as <see cref="EmploymentActionProposalsController"/>: reads → Read; setting the figure,
-/// submit and mark-applied (status-checked only in the service) → Write; approve/reject/recall
-/// carry no permission because the service validates the workflow assignee or initiator per
-/// instance, and the old SuperAdmin/HR class gate would have refused a non-HR assignee.</para>
+/// as <see cref="EmploymentActionProposalsController"/>: reads → Read, or the Managing Director's
+/// proposals read (F3, D-94); setting the figure, submit and mark-applied → Write;
+/// approve/reject/recall carry no permission because the service decides from the record — the
+/// Managing Director (D-104), never the submitter or the employee concerned, and only the
+/// submitter recalls — and a role gate here would refuse the MD.</para>
 /// </remarks>
 [ApiController]
 [Route("api/[controller]")]
@@ -25,13 +27,21 @@ namespace ErpSystem.Api.Controllers.HR;
 public class SalaryReviewProposalsController : ControllerBase
 {
     private readonly ISalaryReviewProposalService _service;
+    private readonly ICurrentUserService _currentUser;
     private readonly ILogger<SalaryReviewProposalsController> _logger;
 
-    public SalaryReviewProposalsController(ISalaryReviewProposalService service, ILogger<SalaryReviewProposalsController> logger)
+    public SalaryReviewProposalsController(
+        ISalaryReviewProposalService service,
+        ICurrentUserService currentUser,
+        ILogger<SalaryReviewProposalsController> logger)
     {
         _service = service;
+        _currentUser = currentUser;
         _logger = logger;
     }
+
+    /// <summary>The acting employee, from the token — the submitter recorded, and the decider compared (F3).</summary>
+    private Guid? ActorEmployeeId => _currentUser.EmployeeId is Guid id && id != Guid.Empty ? id : null;
 
     private IActionResult BusinessRuleRejected(InvalidOperationException ex, string action)
     {
@@ -41,7 +51,7 @@ public class SalaryReviewProposalsController : ControllerBase
 
     /// <summary>List salary review proposals (optionally filtered by status)</summary>
     [HttpGet]
-    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
+    [Authorize(Policy = HrPermissions.PerformanceProposalsReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<SalaryReviewProposalDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll([FromQuery] SalaryReviewProposalStatus? status = null, CancellationToken cancellationToken = default)
     {
@@ -55,7 +65,7 @@ public class SalaryReviewProposalsController : ControllerBase
 
     /// <summary>Get one salary review proposal</summary>
     [HttpGet("{id:guid}")]
-    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
+    [Authorize(Policy = HrPermissions.PerformanceProposalsReadPolicy)]
     [ProducesResponseType(typeof(SalaryReviewProposalDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken = default)
@@ -97,11 +107,11 @@ public class SalaryReviewProposalsController : ControllerBase
 
     // ── Approval, on the generic workflow engine ────────────────────────────
     //
-    // ⚠ Approval authority comes from the published SalaryReviewProposal workflow definition,
-    // not from any attribute on this controller: submit/approve/reject are inoperable
-    // until one is published, and `POST api/Workflow/entity-types/seed` has been re-run.
-    // Approve/reject/recall deliberately carry no permission — the service refuses anyone but
-    // the workflow assignee (approve/reject) or the initiator (recall).
+    // Through the published SalaryReviewProposal definition when there is one, and the fallback
+    // when there is none (HrWorkflowFallbackAuthority). Who decides is the record's rule, run by
+    // the service on both paths: the Managing Director (D-104), never the submitter, never the
+    // employee concerned; only the submitter recalls (F3, F9). Approve/reject/recall therefore
+    // carry no permission here.
 
     /// <summary>Send the proposal for approval. Refused until a figure has been set.</summary>
     [HttpPost("{id:guid}/submit")]
@@ -109,32 +119,35 @@ public class SalaryReviewProposalsController : ControllerBase
     [ProducesResponseType(typeof(SalaryReviewProposalDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public Task<IActionResult> Submit(Guid id, CancellationToken cancellationToken = default)
-        => RunWorkflowAction(() => _service.SubmitForApprovalAsync(id, cancellationToken), id, "submitting the proposal");
+        => RunWorkflowAction(() => _service.SubmitForApprovalAsync(id, ActorEmployeeId, cancellationToken), id, "submitting the proposal");
 
     /// <summary>Approve the current workflow step.</summary>
     [HttpPost("{id:guid}/approve")]
     [ProducesResponseType(typeof(SalaryReviewProposalDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public Task<IActionResult> Approve(Guid id, CancellationToken cancellationToken = default)
-        => RunWorkflowAction(() => _service.ApproveAsync(id, cancellationToken), id, "approving the proposal");
+        => RunWorkflowAction(() => _service.ApproveAsync(id, ActorEmployeeId, cancellationToken), id, "approving the proposal");
 
     /// <summary>Reject the proposal at the current workflow step.</summary>
     [HttpPost("{id:guid}/reject")]
     [ProducesResponseType(typeof(SalaryReviewProposalDto), StatusCodes.Status200OK)]
-    public Task<IActionResult> Reject(Guid id, [FromBody] UpdateEmploymentActionProposalDto? dto, CancellationToken cancellationToken = default)
-        => RunWorkflowAction(() => _service.RejectAsync(id, dto?.Notes, cancellationToken), id, "rejecting the proposal");
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public Task<IActionResult> Reject(Guid id, [FromBody] SalaryReviewProposalNotesDto? dto, CancellationToken cancellationToken = default)
+        => RunWorkflowAction(() => _service.RejectAsync(id, dto?.Notes, ActorEmployeeId, cancellationToken), id, "rejecting the proposal");
 
-    /// <summary>Pull a pending proposal back so its figure can be reworked.</summary>
+    /// <summary>Pull a pending proposal back so its figure can be reworked. Its submitter only.</summary>
     [HttpPost("{id:guid}/recall")]
     [ProducesResponseType(typeof(SalaryReviewProposalDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public Task<IActionResult> Recall(Guid id, CancellationToken cancellationToken = default)
-        => RunWorkflowAction(() => _service.RecallAsync(id, cancellationToken), id, "recalling the proposal");
+        => RunWorkflowAction(() => _service.RecallAsync(id, ActorEmployeeId, cancellationToken), id, "recalling the proposal");
 
     /// <summary>Record that payroll has made the change. Only from Approved.</summary>
     [HttpPost("{id:guid}/mark-applied")]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     [ProducesResponseType(typeof(SalaryReviewProposalDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public Task<IActionResult> MarkApplied(Guid id, [FromBody] UpdateEmploymentActionProposalDto? dto, CancellationToken cancellationToken = default)
+    public Task<IActionResult> MarkApplied(Guid id, [FromBody] SalaryReviewProposalNotesDto? dto, CancellationToken cancellationToken = default)
         => RunWorkflowAction(() => _service.MarkAppliedAsync(id, dto?.Notes, cancellationToken), id, "marking the proposal applied");
 
     private async Task<IActionResult> RunWorkflowAction(Func<Task<SalaryReviewProposalDto>> action, Guid id, string description)

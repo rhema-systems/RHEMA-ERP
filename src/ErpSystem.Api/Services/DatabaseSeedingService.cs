@@ -524,6 +524,9 @@ namespace ErpSystem.Web.Services
                 var hrControlled = new[] { Constants.Roles.Hr, Constants.Roles.Manager, Constants.Roles.TenantAdmin };
                 var executive = new[] { Constants.Roles.ManagingDirector, Constants.Roles.TenantAdmin, Constants.Roles.Hr };
                 var mdOnly = new[] { Constants.Roles.ManagingDirector, Constants.Roles.TenantAdmin };
+                // Performance closure D-104: a pay or employment decision is the appointing authority's alone — no
+                // administrator backstop, which would be a system role making a business decision.
+                var managingDirector = new[] { Constants.Roles.ManagingDirector };
 
                 var specs = new (string Code, string Name, string Definition, string Description, string[] Roles)[]
                 {
@@ -544,8 +547,11 @@ namespace ErpSystem.Web.Services
                     ("STAFF_MOVEMENT", "Staff Movement", "Staff Movement Approval", "Promotion, transfer, secondment or demotion: Draft -> PendingApproval (HR, Managing Director) -> Approved.", executive),
                     ("PROBATION_PERIOD", "Probation Period", "Probation Confirmation", "Confirmation at the end of probation: Draft -> PendingApproval (confirming authority) -> Approved.", hrControlled),
                     ("PERFORMANCE_IMPROVEMENT_PLAN", "Performance Improvement Plan", "PIP Approval", "Performance improvement plan: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
-                    ("SALARY_REVIEW_PROPOSAL", "Salary Review Proposal", "Salary Review Approval", "Post-appraisal salary proposal: Draft -> PendingApproval (Managing Director) -> Approved.", executive),
-                    ("EMPLOYMENT_ACTION_PROPOSAL", "Employment Action Proposal", "Employment Action Approval", "Post-appraisal employment action: Draft -> PendingApproval (Managing Director) -> Approved.", executive),
+                    // Performance closure F3 (D-12, D-94, D-104): a pay or employment proposal is the Managing
+                    // Director's to decide — HR prepares it. `executive` names HR, and stays as it is for the salary
+                    // change request below.
+                    ("SALARY_REVIEW_PROPOSAL", "Salary Review Proposal", "Salary Review Approval", "Post-appraisal salary proposal: Draft -> PendingApproval (Managing Director) -> Approved.", managingDirector),
+                    ("EMPLOYMENT_ACTION_PROPOSAL", "Employment Action Proposal", "Employment Action Approval", "Post-appraisal employment action: Draft -> PendingApproval (Managing Director) -> Approved.", managingDirector),
                     ("SUCCESSION_PLAN", "Succession Plan", "Succession Plan Approval", "Succession plan for a critical post: Draft -> PendingApproval (HR, Managing Director) -> Approved.", executive),
                     ("STAFF_DISCIPLINARY_ACTION", "Staff Disciplinary Action", "Disciplinary Decision Confirmation", "Confirmation of a proposed disciplinary decision: Draft -> PendingApproval (HR, Managing Director) -> Approved.", executive),
                     ("EMPLOYEE_SEPARATION", "Employee Separation", "Separation Approval", "Resignation, retirement or termination: Draft -> PendingApproval (Managing Director, FR-HR-092) -> Approved.", mdOnly),
@@ -565,6 +571,17 @@ namespace ErpSystem.Web.Services
                     ("HR_EMPLOYEE_SALARY_CHANGE_REQUEST", "HR Employee Salary Change Request", "Salary Change Approval", "A change to an employee's pay: Draft -> PendingApproval (HR, Managing Director) -> Approved, then applied to HR and payroll.", executive),
                 };
 
+                // Performance closure F3 (D-94): the four performance routes bar the initiator, so the engine itself
+                // refuses the person who submitted — including on the generic approval paths that bypass the services
+                // (cross-module #15). The services' record-level rules still run on both their paths. An existing
+                // definition gets the bar from EnsureWorkflowInitiatorSeparationAsync; existing databases also get it,
+                // and HR and TenantAdmin taken off the two proposal routes, from the PerformanceClosureWorkflowRetrofit
+                // migration (D-101, D-104) — this seeder only adds.
+                var barInitiator = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "PERFORMANCE_IMPROVEMENT_PLAN", "SALARY_REVIEW_PROPOSAL", "EMPLOYMENT_ACTION_PROPOSAL", "APPRAISAL_TEMPLATE",
+                };
+
                 foreach (var tenant in tenants)
                 {
                     foreach (var spec in specs)
@@ -576,7 +593,8 @@ namespace ErpSystem.Web.Services
                             entityClassName: null,
                             definitionName: spec.Definition,
                             description: spec.Description,
-                            approvalRoleNames: spec.Roles);
+                            approvalRoleNames: spec.Roles,
+                            preventInitiatorApproval: barInitiator.Contains(spec.Code));
                     }
                 }
             }

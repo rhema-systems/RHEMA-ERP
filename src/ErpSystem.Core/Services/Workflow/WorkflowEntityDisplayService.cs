@@ -421,14 +421,17 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            // The three below withhold the employee's name, as discipline does (performance closure F8, D-95): a pay
+            // change, a promotion or a termination, and an improvement plan are about one person, and these strings
+            // travel into approval queues seen more widely than the record. The approver opens it to learn who.
             if (key == Normalize("SalaryReviewProposal") || key == Normalize("SALARY_REVIEW_PROPOSAL") || key == Normalize("Salary Review Proposal"))
             {
                 var proposal = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.SalaryReviewProposal>()
-                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Employee);
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
                 info.EntityType = "SalaryReviewProposal";
                 info.EntityName = proposal == null
                     ? null
-                    : $"{proposal.ProposalType} — {proposal.Employee?.FullName}";
+                    : $"{InWords(proposal.ProposalType.ToString())} proposal";
                 info.ActionUrl = $"/hr/performance/proposals/salary-review/{entityId}";
                 return info;
             }
@@ -436,11 +439,11 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
             if (key == Normalize("EmploymentActionProposal") || key == Normalize("EMPLOYMENT_ACTION_PROPOSAL") || key == Normalize("Employment Action Proposal"))
             {
                 var proposal = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.EmploymentActionProposal>()
-                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Employee);
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
                 info.EntityType = "EmploymentActionProposal";
                 info.EntityName = proposal == null
                     ? null
-                    : $"{proposal.ActionType} — {proposal.Employee?.FullName}";
+                    : $"{InWords(proposal.ActionType.ToString())} proposal";
                 info.ActionUrl = $"/hr/performance/proposals/employment-action/{entityId}";
                 return info;
             }
@@ -448,11 +451,11 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
             if (key == Normalize("PerformanceImprovementPlan") || key == Normalize("PERFORMANCE_IMPROVEMENT_PLAN") || key == Normalize("Performance Improvement Plan"))
             {
                 var plan = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.PerformanceImprovementPlan>()
-                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Employee);
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
                 info.EntityType = "PerformanceImprovementPlan";
-                info.EntityName = plan == null
-                    ? null
-                    : $"{plan.PipNumber} — {plan.Employee?.FullName}";
+                // The plan's number is its reference — notifications name the record by it.
+                info.EntityNumber = plan?.PipNumber;
+                info.EntityName = plan == null ? null : "Performance improvement plan";
                 info.ActionUrl = $"/hr/performance/pip/{entityId}";
                 return info;
             }
@@ -1150,4 +1153,19 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
 
     private static string Normalize(string s)
         => new string((s ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+
+    /// <summary>An enum member's name as words: <c>MeritIncrease</c> → "Merit increase".</summary>
+    private static string InWords(string pascal)
+    {
+        var words = new System.Text.StringBuilder(pascal.Length + 4);
+        for (var i = 0; i < pascal.Length; i++)
+        {
+            var c = pascal[i];
+            if (i > 0 && char.IsUpper(c))
+                words.Append(' ').Append(char.ToLowerInvariant(c));
+            else
+                words.Append(c);
+        }
+        return words.ToString();
+    }
 }

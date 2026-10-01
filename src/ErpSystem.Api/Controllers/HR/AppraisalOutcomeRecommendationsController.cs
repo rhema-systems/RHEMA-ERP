@@ -179,6 +179,7 @@ public class AppraisalOutcomeRecommendationsController : ControllerBase
 
         try { return Ok(await _service.ApproveAsync(id, employeeId, cancellationToken)); }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BusinessRuleRejected(ex, "approving the recommendation"); }
         catch (Exception ex)
         {
@@ -214,6 +215,7 @@ public class AppraisalOutcomeRecommendationsController : ControllerBase
 
         try { return Ok(await _service.RejectAsync(id, employeeId, dto?.Notes, cancellationToken)); }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BusinessRuleRejected(ex, "rejecting the recommendation"); }
         catch (Exception ex)
         {
@@ -232,6 +234,7 @@ public class AppraisalOutcomeRecommendationsController : ControllerBase
 
         try { return Ok(await _service.DismissAsync(id, employeeId, dto?.Notes, cancellationToken)); }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BusinessRuleRejected(ex, "dismissing the recommendation"); }
         catch (Exception ex)
         {

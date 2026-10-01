@@ -176,7 +176,15 @@ public static class HrPermissions
     public const string MaintainPerformance = "HR.Performance.Write";
     public const string AdministerPerformance = "HR.Performance.Admin";
 
+    /// <summary>
+    /// Read the pay and employment proposals an appraisal raised, and nothing else of performance (F3, D-94) — what
+    /// the Managing Director needs to decide the proposals the record says are theirs.
+    /// </summary>
+    public const string ViewPerformanceProposals = "HR.Performance.Proposals.Read";
+
     public const string PerformanceReadPolicy = "HR.Policy.PerformanceRead";
+    /// <summary>The proposals' reads: the performance desk, or a proposal decider (<see cref="ViewPerformanceProposals"/>).</summary>
+    public const string PerformanceProposalsReadPolicy = "HR.Policy.PerformanceProposalsRead";
     public const string PerformanceWritePolicy = "HR.Policy.PerformanceWrite";
     public const string PerformanceAdminPolicy = "HR.Policy.PerformanceAdmin";
 
@@ -530,6 +538,9 @@ public static class HrPermissions
         new(AdministerPerformance, "Administer Performance",
             "Delete performance records — appraisals, cycles, templates, grade and KPI definitions, goal-library items, calibration sessions, review events and improvement plans — and reset goal-risk thresholds. Approving a goal is NOT this permission — that belongs to the goal's direct manager, validated per goal by the goal workflow.",
             CategoryPerformance),
+        new(ViewPerformanceProposals, "View Pay & Employment Proposals",
+            "Read the salary review and employment action proposals raised from appraisals — the figure, the action, the history — and nothing else of performance. Held by the Managing Director, who decides them; the authority to decide is read off the record, not granted here.",
+            CategoryPerformance),
 
         new(ViewCompany, "View Company & Administration",
             "View the company-level administration surface: the company profile with its statutory numbers, the HR policy settings, the external-associate register with its contact details, and the company schedule — events, meeting rooms and bookings, milestones, business closures and fiscal years.",
@@ -803,6 +814,15 @@ public static class HrPermissions
     };
 
     /// <summary>
+    /// The Managing Director's: a separation to sign, and the pay and employment proposals to decide (F3, D-94) —
+    /// read only, as <see cref="ApprovalReaderGrants"/>, which Internal Audit shares and which stays as it is.
+    /// </summary>
+    private static readonly string[] ManagingDirectorGrants =
+    {
+        ViewSeparation, ViewPerformanceProposals
+    };
+
+    /// <summary>
     /// What Finance holds in HR (leave settings audit 2, decision P2): the valuation step, and
     /// nothing else. Finance works from its own queue of what awaits a figure, so it needs no read
     /// of HR's records at large.
@@ -881,8 +901,10 @@ public static class HrPermissions
             // Deliberately Read only: the authority to decide is not a permission at all, it is
             // read off the record by SeparationService. Granting Write here would let the MD edit
             // what they are about to sign.
-            [Constants.Roles.ManagingDirector] = ApprovalReaderGrants,
-            [Constants.Roles.TdcManagingDirector] = ApprovalReaderGrants,
+            //
+            // The MD also decides the pay and employment proposals an appraisal raises (F3, D-12), so reads those too.
+            [Constants.Roles.ManagingDirector] = ManagingDirectorGrants,
+            [Constants.Roles.TdcManagingDirector] = ManagingDirectorGrants,
             [Constants.Roles.InternalAudit] = ApprovalReaderGrants,
 
             // Finance values the pay HR records in days (leave settings audit 2, P2).

@@ -90,6 +90,7 @@ export default function ManagerEvaluationPage() {
     recommendTraining: false,
     recommendPIP: false,
     recommendTermination: false,
+    recommendAward: false,
   });
   const [goalValues, setGoalValues] = useState<GoalAssessmentValues>({});
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -139,6 +140,7 @@ export default function ManagerEvaluationPage() {
       recommendTraining: context.recommendTraining,
       recommendPIP: context.recommendPIP,
       recommendTermination: context.recommendTermination,
+      recommendAward: context.recommendAward ?? false,
     });
   }, [appraisalId, context?.isManagerEvaluationSubmitted]);
 
@@ -342,6 +344,34 @@ export default function ManagerEvaluationPage() {
         </p>
       )}
 
+      {/* D-90: the interim reviews as context for the year-end judgement. A full interim
+          appraisal gave a period score; a light-touch review gives none. Read-only. */}
+      {(context.interimReviews?.length ?? 0) > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Interim reviews this cycle</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              For context. The year-end score is yours; a period score does not feed it.
+            </p>
+          </CardHeader>
+          <CardContent className="grid gap-2 sm:grid-cols-3">
+            {context.interimReviews!.map((review) => (
+              <div key={review.id} className="rounded-md border p-3 text-sm">
+                <div className="font-medium">{humanizeEnum(review.type)}</div>
+                <div className="text-muted-foreground">
+                  {formatDate(review.eventDate)} · {humanizeEnum(review.status)}
+                </div>
+                <div className="mt-1">
+                  {review.isFullAppraisal
+                    ? `Period score ${review.overallPeriodScore ?? '—'}`
+                    : 'Light touch — no period score'}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="evaluation">Evaluation</TabsTrigger>
@@ -508,8 +538,9 @@ export default function ManagerEvaluationPage() {
             <CardHeader>
               <CardTitle className="text-base">Recommendations</CardTitle>
               <p className="text-sm text-muted-foreground">
-                These are recorded against the appraisal for HR to act on — ticking one does not
-                itself start a promotion, increment or improvement plan.
+                When you submit, each one ticked goes to HR as a recommendation to decide — ticking
+                one does not itself start a promotion, increment or improvement plan. Untick one before
+                submitting again and the recommendation is withdrawn, unless HR has already decided it.
               </p>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2">
@@ -520,6 +551,7 @@ export default function ManagerEvaluationPage() {
                   ['recommendTraining', 'Training'],
                   ['recommendPIP', 'Performance improvement plan'],
                   ['recommendTermination', 'Termination'],
+                  ['recommendAward', 'Award or recognition'],
                 ] as const
               ).map(([key, label]) => (
                 <label key={key} className="flex items-center gap-2 text-sm">

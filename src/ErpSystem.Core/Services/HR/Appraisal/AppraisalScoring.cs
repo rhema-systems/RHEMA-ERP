@@ -41,7 +41,7 @@ public static class AppraisalScoring
     //
     //   1. ITEM      a criterion's achievement, 0–1
     //                  competency  → numericScore / maxScore
-    //                  KPI         → KpiAchievementPercent(actual, target, min, max) / 100
+    //                  KPI         → KpiAchievementPercent(actual, target, min, max, tolerance) / 100
     //   2. EVALUATOR a weighted mean of the items *that evaluator scored*, 0–100
     //                  Σ(item × share) / Σ(share)
     //   3. OVERALL   a weighted mean across evaluator ROLES, 0–100
@@ -74,14 +74,23 @@ public static class AppraisalScoring
     /// beyond an explicit <paramref name="maxValue"/> ceiling counts as attaining the cap. When
     /// a floor is set, achievement is measured across the min→target band rather than from zero.
     /// </summary>
+    /// <param name="tolerancePercent">
+    /// The KPI's tolerance as the criterion snapshot kept it (D-32): an actual short of the target by no more than
+    /// this percentage <b>of the target</b> scores as met — 96 against a target of 100 with 5 % is full marks. Null or
+    /// zero is an exact target, the scoring before the tolerance was read.
+    /// </param>
     public static decimal KpiAchievementPercent(
-        decimal actualValue, decimal? targetValue, decimal? minValue, decimal? maxValue)
+        decimal actualValue, decimal? targetValue, decimal? minValue, decimal? maxValue, decimal? tolerancePercent = null)
     {
         if (!targetValue.HasValue || targetValue.Value == 0)
             return 0;
 
         if (maxValue.HasValue && actualValue > maxValue.Value)
             actualValue = maxValue.Value;
+
+        if (tolerancePercent is > 0
+            && actualValue >= targetValue.Value - Math.Abs(targetValue.Value) * tolerancePercent.Value / 100m)
+            return 100;
 
         decimal achievementPercent;
 
