@@ -209,15 +209,35 @@ function Protect-OpenSshFile {
         [switch]$AdministratorsOnly
     )
 
-    $grants = if ($AdministratorsOnly) {
-        @('*S-1-5-18:F', '*S-1-5-32-544:F')
+    $systemSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    $administratorsSid =
+        [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $currentUserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $ownerSid = if ($AdministratorsOnly) {
+        $administratorsSid
     }
     else {
-        $currentUserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-        @('*S-1-5-18:F', "*$currentUserSid`:F")
+        $currentUserSid
     }
-    & icacls.exe $Path '/inheritance:r' '/grant:r' @grants | Out-Null
-    Assert-True ($LASTEXITCODE -eq 0) "Could not protect OpenSSH file: $Path"
+    $allowedSids = if ($AdministratorsOnly) {
+        @($systemSid, $administratorsSid)
+    }
+    else {
+        @($systemSid, $currentUserSid)
+    }
+
+    $security = [Security.AccessControl.FileSecurity]::new()
+    $security.SetOwner($ownerSid)
+    # Replace the DACL completely. icacls /grant:r replaces rules only for the
+    # named principal and can leave another explicit writable ACE behind.
+    $security.SetAccessRuleProtection($true, $false)
+    foreach ($sid in $allowedSids) {
+        $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+                $sid,
+                [Security.AccessControl.FileSystemRights]::FullControl,
+                [Security.AccessControl.AccessControlType]::Allow))
+    }
+    Set-Acl -LiteralPath $Path -AclObject $security
 }
 
 function Set-OpenSshDirectoryPermissions {
