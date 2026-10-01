@@ -1329,6 +1329,42 @@ public sealed class FinancePostingEngineTests
 
     [Fact]
     [Trait("Category", "AccountingBookModelV2")]
+    public async Task PostAsync_ShouldRejectStaleOpenEndedDailyRateForParallelReplica()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        var primary = db.AccountingBooks.Local.Single(item => item.Code == "IFRS");
+        primary.BookType = AccountingBookType.PrimaryFull;
+        primary.FunctionalCurrencyCode = "GHS";
+        primary.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+        var parallel = SeedAdditionalBook(db, tenantId, "USD_PARALLEL", debit.Id, credit.Id);
+        parallel.BookType = AccountingBookType.ParallelFull;
+        parallel.BaseAccountingBookId = primary.Id;
+        parallel.FunctionalCurrencyCode = "USD";
+        parallel.ReplicationStartDate = new DateTime(2026, 1, 1);
+        parallel.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+        var staleRate = SeedExchangeRate(db, tenantId, "USD", 12.5m);
+        staleRate.EffectiveDate = new DateTime(2024, 12, 15);
+        staleRate.EndDate = null;
+        await db.SaveChangesAsync();
+
+        var action = () => CreateService(db, tenantId)
+            .PostAsync(CreateRequest(tenantId, debit.Id, credit.Id));
+
+        var failure = await action.Should().ThrowAsync<InvalidOperationException>();
+        failure.WithMessage("PARALLEL_EXCHANGE_RATE_REQUIRED:*");
+        failure.Which.Message.Should().Contain("exact-date Daily")
+            .And.Contain("2026-07-04");
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Category", "AccountingBookModelV2")]
     public async Task PostAsync_ShouldCreateImmutableSourceToTargetParallelReplica()
     {
         var tenantId = Guid.NewGuid();

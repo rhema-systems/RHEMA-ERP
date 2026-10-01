@@ -32,7 +32,7 @@ export default function DetailedLedgerPage() {
     const searchParams = useSearchParams();
     const [startDate, setStartDate] = useState(searchParams.get('startDate') || formatDateInput(new Date(new Date().getFullYear(), 0, 1)));
     const [endDate, setEndDate] = useState(searchParams.get('endDate') || formatDateInput(new Date()));
-    const [bookClassification, setBookClassification] = useState(searchParams.get('bookClassification') || 'IFRS');
+    const [bookClassification, setBookClassification] = useState(searchParams.get('bookClassification') || 'BASE');
     const [accountingBooks, setAccountingBooks] = useState(DEFAULT_ACCOUNTING_BOOKS);
     const [includeReversed, setIncludeReversed] = useState(parseBooleanParam(searchParams.get('includeReversed'), true));
     const [accountSearch, setAccountSearch] = useState('');

@@ -57,6 +57,83 @@ public sealed class CoreFinancialReportingFoundationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-Reporting")]
     [Trait("Category", "Reporting")]
+    public async Task DetailedLedger_ShouldUseExactBookRowsAndSelectedBookCurrency()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedPeriod(db, tenantId);
+        var revenue = SeedAccount(db, tenantId, AccountType.Revenue, "4110", "Rental Income");
+        var expense = SeedAccount(db, tenantId, AccountType.Expense, "6020", "Salaries");
+        var baseBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "BASE", Name = "Ghana Statutory Primary",
+            BookType = AccountingBookType.PrimaryFull, LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS", IsActive = true, IsDefault = true, AllowsPosting = true
+        };
+        var parallelBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "USD_PARALLEL", Name = "USD Parallel",
+            BookType = AccountingBookType.ParallelFull, LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "USD", BaseAccountingBookId = baseBook.Id,
+            IsActive = true, AllowsPosting = false
+        };
+        db.AccountingBooks.AddRange(baseBook, parallelBook);
+
+        SeedJournal(db, tenantId, period.Id, "JE-BASE", "Posted", (revenue.Id, 150m, 0m), (expense.Id, 0m, 150m));
+        var baseJournal = db.JournalEntries.Local.Single(item => item.JournalEntryNumber == "JE-BASE");
+        baseJournal.AccountingBookId = baseBook.Id;
+        baseJournal.BookClassification = baseBook.Code;
+        foreach (var line in db.AccountTransactions.Local.Where(item => item.JournalEntryId == baseJournal.Id))
+        {
+            line.AccountingBookId = baseBook.Id;
+            line.BookClassification = baseBook.Code;
+            line.FunctionalCurrencyCode = "GHS";
+            line.TransactionCurrency = "GHS";
+        }
+
+        SeedJournal(db, tenantId, period.Id, "JE-USD", "Posted", (revenue.Id, 12m, 0m), (expense.Id, 0m, 12m));
+        var parallelJournal = db.JournalEntries.Local.Single(item => item.JournalEntryNumber == "JE-USD");
+        parallelJournal.AccountingBookId = parallelBook.Id;
+        parallelJournal.BookClassification = parallelBook.Code;
+        foreach (var line in db.AccountTransactions.Local.Where(item => item.JournalEntryId == parallelJournal.Id))
+        {
+            line.AccountingBookId = parallelBook.Id;
+            line.BookClassification = parallelBook.Code;
+            line.FunctionalCurrencyCode = "USD";
+            line.TransactionCurrency = "GHS";
+            line.ForeignCurrencyAmount = 150m;
+            line.ExchangeRate = 0.08m;
+        }
+
+        await db.SaveChangesAsync();
+        var service = CreateGeneralLedgerService(db, tenantId);
+        var request = new DetailedLedgerRequestDto
+        {
+            StartDate = period.StartDate,
+            EndDate = period.EndDate,
+            AccountIds = new List<Guid> { revenue.Id },
+            BookClassification = "BASE",
+            IncludeOpeningBalances = false
+        };
+
+        var baseReport = await service.GenerateDetailedLedgerAsync(request);
+        request.BookClassification = "USD_PARALLEL";
+        var parallelReport = await service.GenerateDetailedLedgerAsync(request);
+
+        baseReport.BookClassification.Should().Be("BASE");
+        baseReport.CurrencyCode.Should().Be("GHS");
+        baseReport.Accounts.Single().Lines.Should().ContainSingle(line =>
+            line.JournalEntryNumber == "JE-BASE" && line.DebitAmount == 150m);
+        parallelReport.BookClassification.Should().Be("USD_PARALLEL");
+        parallelReport.CurrencyCode.Should().Be("USD");
+        parallelReport.Accounts.Single().Lines.Should().ContainSingle(line =>
+            line.JournalEntryNumber == "JE-USD" && line.DebitAmount == 12m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-Reporting")]
+    [Trait("Category", "Reporting")]
     public async Task BalanceSheet_ShouldDeriveFromPostedGlAndNormalizeCreditBalanceSections()
     {
         var tenantId = Guid.NewGuid();
