@@ -152,6 +152,8 @@ Assert-Test (-not $remote.Contains('Expand-Archive')) `
 $workflow = Get-Content $workflowPath -Raw
 Assert-Test $workflow.Contains('frontend/.next-production/cache') `
     'CI does not persist the real Next.js build cache.'
+Assert-Test $workflow.Contains('NEXT_BUILD_MAX_OLD_SPACE_SIZE_MB: 10240') `
+    'CI does not reserve the verified 10 GiB heap required by the production route graph.'
 foreach ($contract in @('vps-release-contract', 'Test-CanonicalMigrationPreflight.ps1',
         'Test-RhemaZipPackage.ps1', 'Test-RhemaReleaseArtifactFlow.ps1',
         'Build-RhemaRelease.ps1', 'Deploy-RhemaVps.ps1',
