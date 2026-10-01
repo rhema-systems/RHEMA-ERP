@@ -35,7 +35,13 @@ function New-RhemaZipPackage {
     $nativeSucceeded = $false
     $packager = 'ManagedZip'
     if ($null -ne $nativeTar) {
-        & $nativeTar.Source -a -c -f $destinationPath -C $sourcePath .
+        $nativeCompressionOptions = switch ($CompressionLevel) {
+            'NoCompression' { 'zip:compression=store' }
+            'Fastest' { 'zip:compression=deflate,zip:compression-level=1' }
+            default { 'zip:compression=deflate,zip:compression-level=6' }
+        }
+        & $nativeTar.Source -a -c -f $destinationPath `
+            --options $nativeCompressionOptions -C $sourcePath .
         $nativeSucceeded = ($LASTEXITCODE -eq 0)
         if ($nativeSucceeded) { $packager = 'WindowsTar' }
         if (-not $nativeSucceeded -and (Test-Path -LiteralPath $destinationPath)) {

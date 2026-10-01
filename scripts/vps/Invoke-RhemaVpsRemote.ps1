@@ -78,6 +78,7 @@ function Invoke-RemoteTimedStep {
     $started = [DateTime]::UtcNow
     $resourcesBefore = Get-RemoteResourceSnapshot
     $watch = [Diagnostics.Stopwatch]::StartNew()
+    Write-Output "REMOTE_STEP_START|$Name|$($started.ToString('o'))"
     try {
         & $Operation
         $watch.Stop()
@@ -88,6 +89,7 @@ function Invoke-RemoteTimedStep {
             durationSeconds = [Math]::Round($watch.Elapsed.TotalSeconds, 2)
             resourcesBefore = $resourcesBefore; resourcesAfter = Get-RemoteResourceSnapshot
         })
+        Write-Output ("REMOTE_STEP_PASS|{0}|{1:n1}s" -f $Name, $watch.Elapsed.TotalSeconds)
     }
     catch {
         $watch.Stop()
@@ -99,6 +101,7 @@ function Invoke-RemoteTimedStep {
             resourcesBefore = $resourcesBefore; resourcesAfter = Get-RemoteResourceSnapshot
             error = $_.Exception.Message
         })
+        Write-Output ("REMOTE_STEP_FAIL|{0}|{1:n1}s|{2}" -f $Name, $watch.Elapsed.TotalSeconds, $_.Exception.Message)
         throw
     }
 }
@@ -343,10 +346,31 @@ function Invoke-DatabaseNonQuery {
 function Invoke-RobocopyChecked {
     param([string[]]$Arguments)
 
-    & robocopy.exe @Arguments | Out-Null
+    $effectiveArguments = [System.Collections.Generic.List[string]]::new()
+    $effectiveArguments.AddRange([string[]]$Arguments)
+    if (-not @($Arguments | Where-Object { $_ -match '^/MT(?::\d+)?$' }).Count) {
+        # The release tree contains more than 100,000 small frontend files.
+        # Conservative multi-threading reduces staging time without the memory
+        # and disk contention of robocopy's 128-thread maximum.
+        $effectiveArguments.Add('/MT:16')
+    }
+    & robocopy.exe @($effectiveArguments) | Out-Null
     $code = $LASTEXITCODE
     if ($code -gt 7) {
         throw "Robocopy failed with exit code $code."
+    }
+}
+
+function Expand-ZipArchiveChecked {
+    param([string]$ArchivePath, [string]$DestinationPath)
+
+    $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
+    Assert-True ($null -ne $tar) `
+        'Native tar.exe is required for fast release extraction on the Windows VPS.'
+    [void](New-Item -ItemType Directory -Path $DestinationPath -Force)
+    & $tar.Source -xf $ArchivePath -C $DestinationPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Native archive extraction failed for $ArchivePath (exit code $LASTEXITCODE)."
     }
 }
 
@@ -854,6 +878,8 @@ function Invoke-Preflight {
             $BackupsRoot, $LogsRoot)) {
         Assert-True (Test-Path -LiteralPath $path) "Required VPS path is missing: $path"
     }
+    Assert-True ($null -ne (Get-Command tar.exe -ErrorAction SilentlyContinue)) `
+        'Native tar.exe is required for fast release package extraction.'
     if (-not $UsesNssmApiConfiguration) {
         Assert-True (Test-Path -LiteralPath $ApiServiceXml) `
             "Required VPS path is missing: $ApiServiceXml"
@@ -1454,10 +1480,10 @@ function Invoke-Apply {
         New-Item -ItemType Directory -Path (Join-Path $immutableRelease 'api'), `
             (Join-Path $immutableRelease 'frontend') | Out-Null
         Invoke-RemoteTimedStep 'Expand immutable API and frontend artifacts' {
-            Expand-Archive -LiteralPath $apiZip -DestinationPath `
-                (Join-Path $immutableRelease 'api') -Force
-            Expand-Archive -LiteralPath $frontendZip -DestinationPath `
-                (Join-Path $immutableRelease 'frontend') -Force
+            Expand-ZipArchiveChecked -ArchivePath $apiZip -DestinationPath `
+                (Join-Path $immutableRelease 'api')
+            Expand-ZipArchiveChecked -ArchivePath $frontendZip -DestinationPath `
+                (Join-Path $immutableRelease 'frontend')
         }
         [IO.File]::WriteAllText((Join-Path $immutableRelease 'release.json'),
             ($immutableMetadata | ConvertTo-Json -Depth 5),

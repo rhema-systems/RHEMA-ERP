@@ -115,11 +115,14 @@ foreach ($contract in @("Join-Path `$RhemaRoot 'releases'", 'VERSIONED_RELEASE|'
         'Create compressed SQL COPY_ONLY backup',
         'Verify SQL backup checksum and restore metadata',
         'Recheck migration guards after API stop',
+        'Expand-ZipArchiveChecked', 'tar.exe', "'/MT:16'",
         'Start API, run migrations, and wait for liveness',
         'Activate frontend release and wait for readiness',
         'REMOTE_TIMING_JSON|')) {
     Assert-Test $remote.Contains($contract) "Remote release contract is missing: $contract"
 }
+Assert-Test (-not $remote.Contains('Expand-Archive')) `
+    'Remote activation still uses slow PowerShell Expand-Archive.'
 
 $qsDeploy = Get-Content $qsDeployPath -Raw
 foreach ($contract in @('Build immutable release once', 'Activate verified ERP release',
