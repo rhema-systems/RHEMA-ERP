@@ -63,14 +63,14 @@ public class AccountTransaction : BusinessEntity
     /// Debit amount in base currency (home currency).
     /// Either DebitAmount or CreditAmount must be > 0, not both.
     /// </summary>
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal DebitAmount { get; set; } = 0;
 
     /// <summary>
     /// Credit amount in base currency (home currency).
     /// Either DebitAmount or CreditAmount must be > 0, not both.
     /// </summary>
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal CreditAmount { get; set; } = 0;
 
     // ========================================================================
@@ -97,21 +97,21 @@ public class AccountTransaction : BusinessEntity
     /// Debit amount in the original transaction currency.
     /// For functional-currency transactions this normally matches DebitAmount.
     /// </summary>
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal? TransactionDebitAmount { get; set; }
 
     /// <summary>
     /// Credit amount in the original transaction currency.
     /// For functional-currency transactions this normally matches CreditAmount.
     /// </summary>
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal? TransactionCreditAmount { get; set; }
 
     /// <summary>
     /// Foreign currency amount (if TransactionCurrency is not base currency).
     /// This is the original transaction amount before conversion.
     /// </summary>
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal? ForeignCurrencyAmount { get; set; }
 
     /// <summary>

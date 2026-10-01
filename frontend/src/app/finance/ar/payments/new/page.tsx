@@ -58,25 +58,30 @@ import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/so
 import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
 import { useAuth } from '@/hooks/use-auth';
 
+const optionalGuidSchema = z.preprocess(
+    value => value === '' || value == null ? undefined : value,
+    z.string().uuid('Select a valid configured record').optional(),
+);
+
 const paymentSchema = z.object({
     businessPartnerId: z.string().min(1, 'Business Partner is required'),
-    bankAccountId: z.string().optional(),
-    liquidityAccountId: z.string().optional(),
+    bankAccountId: optionalGuidSchema,
+    liquidityAccountId: optionalGuidSchema,
     paymentDate: z.date(),
     totalAmount: z.coerce.number().min(0.01, 'Amount must be positive'),
     paymentMethod: z.string().min(1, 'Payment method is required'),
-    paymentMethodId: z.string().optional(),
+    paymentMethodId: optionalGuidSchema,
     referenceNumber: z.string().optional(),
     checkNumber: z.string().optional(),
     chequeDrawerBank: z.string().optional(),
     currencyCode: z.string().default('GHS'),
     exchangeRate: z.coerce.number().min(0.0001, 'Exchange rate must be greater than 0').default(1),
-    exchangeRateId: z.string().optional(),
-    withholdingTaxId: z.string().optional(),
-    withholdingTaxAccountId: z.string().optional(),
+    exchangeRateId: optionalGuidSchema,
+    withholdingTaxId: optionalGuidSchema,
+    withholdingTaxAccountId: optionalGuidSchema,
     withholdingTaxAmount: z.coerce.number().min(0).default(0),
-    vatWithholdingTaxId: z.string().optional(),
-    vatWithholdingAccountId: z.string().optional(),
+    vatWithholdingTaxId: optionalGuidSchema,
+    vatWithholdingAccountId: optionalGuidSchema,
     vatWithholdingAmount: z.coerce.number().min(0).default(0),
     withholdingCertificateNumber: z.string().optional(),
     withholdingCertificateDate: z.string().optional(),
@@ -577,6 +582,10 @@ export default function NewReceiptPage() {
 
             await arService.createPayment({
                 ...data,
+                // Nullable GUIDs must be omitted, never serialized as an empty string. Bank and
+                // liquidity destinations are mutually exclusive posting routes.
+                bankAccountId: directBankReceipt ? data.bankAccountId : undefined,
+                liquidityAccountId: directBankReceipt ? undefined : data.liquidityAccountId,
                 // The API derives functional header totals from the per-invoice evidence below.
                 // Sending zero prevents mixed native currencies from being added at the header.
                 withholdingTaxAmount: 0,
@@ -744,6 +753,36 @@ export default function NewReceiptPage() {
                                 {form.formState.errors.businessPartnerId && (
                                     <p className="text-sm text-red-500">{form.formState.errors.businessPartnerId.message}</p>
                                 )}
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="paymentMethod">Payment Method</Label>
+                                <Select
+                                    onValueChange={(val) => {
+                                        const method = paymentMethods?.find((item) => item.id === val);
+                                        form.setValue('paymentMethodId', val);
+                                        form.setValue('paymentMethod', toCustomerPaymentMethod(method?.type));
+                                    }}
+                                    value={form.watch('paymentMethodId') || undefined}
+                                    disabled={isSubmitting}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select payment method..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {paymentMethods?.map((method) => (
+                                            <SelectItem key={method.id} value={method.id}>
+                                                {method.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                {form.formState.errors.paymentMethodId && (
+                                    <p className="text-sm text-red-500">{form.formState.errors.paymentMethodId.message}</p>
+                                )}
+                                <p className="text-xs text-muted-foreground">
+                                    This determines whether the receipt is deposited directly to a bank account or first received into a holding account.
+                                </p>
                             </div>
 
                             {isDirectBankReceipt ? (
@@ -972,33 +1011,6 @@ export default function NewReceiptPage() {
                                     />
                                 </div>
                             )}
-
-                            <div className="space-y-2">
-                                <Label htmlFor="paymentMethod">Payment Method</Label>
-                                <Select
-                                    onValueChange={(val) => {
-                                        const method = paymentMethods?.find((item) => item.id === val);
-                                        form.setValue('paymentMethodId', val);
-                                        form.setValue('paymentMethod', toCustomerPaymentMethod(method?.type));
-                                    }}
-                                    value={form.watch('paymentMethodId') || undefined}
-                                    disabled={isSubmitting}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select payment method..." />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {paymentMethods?.map((method) => (
-                                            <SelectItem key={method.id} value={method.id}>
-                                                {method.name}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                {form.formState.errors.paymentMethodId && (
-                                    <p className="text-sm text-red-500">{form.formState.errors.paymentMethodId.message}</p>
-                                )}
-                            </div>
 
                             <div className="space-y-2">
                                 <Label htmlFor="reference">Reference #</Label>

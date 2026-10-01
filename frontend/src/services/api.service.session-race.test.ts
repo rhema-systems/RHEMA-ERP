@@ -118,6 +118,22 @@ describe('API session changes during outstanding requests', () => {
     },
   );
 
+  it('surfaces Finance field-validation details instead of the generic ASP.NET title', async () => {
+    fetchMock.mockResolvedValueOnce(response(400, {
+      title: 'One or more validation errors occurred.',
+      errors: {
+        liquidityAccountId: ['Select an active Cash Till or holding account.'],
+        paymentMethodId: ['Payment method is required.'],
+      },
+    }, '/api/ar/payments'));
+
+    await expect(apiService.post('/ar/payments')).rejects.toMatchObject({
+      message: 'Liquidity Account ID: Select an active Cash Till or holding account. Payment Method ID: Payment method is required.',
+      financeTitle: 'Finance action failed',
+      status: 400,
+    });
+  });
+
   it('does not restore a logged-out session when its refresh finishes later', async () => {
     const refresh = deferred<Response>();
     fetchMock.mockReturnValueOnce(refresh.promise);

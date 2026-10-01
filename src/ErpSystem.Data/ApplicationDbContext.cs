@@ -4026,6 +4026,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<JournalEntry>(entity =>
         {
             entity.ToTable("JournalEntries");
+            entity.Property(e => e.TotalDebitAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.TotalCreditAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.BalanceDifference).HasColumnType("decimal(20,4)");
             entity.HasAlternateKey(e => new { e.TenantId, e.Id, e.AccountingBookId });
             // The reciprocal flags are useful evidence, but this database invariant is what closes
             // the concurrent double-reversal race for every server-owned reversal path.
@@ -4316,8 +4319,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.ToTable("AccountTransactions");
             entity.Property(e => e.FunctionalCurrencyCode).HasMaxLength(3).IsRequired();
-            entity.Property(e => e.TransactionDebitAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TransactionCreditAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.DebitAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.CreditAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.TransactionDebitAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.TransactionCreditAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.ForeignCurrencyAmount).HasColumnType("decimal(20,4)");
             // Trial balance, ledger inquiry and reconciliation all begin with tenant/book/date
             // scoping before narrowing to accounts. This composite index was added from the
             // NFR-PER workload review so high-volume tenants do not scan the full shared ledger.
@@ -11234,6 +11240,28 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             {
                 if (property.ClrType == typeof(decimal) || property.ClrType == typeof(decimal?))
                 {
+                    // Posted ledger evidence must preserve the configured ISO minor unit through
+                    // functional, transaction and parallel-book amounts. Four stored decimals
+                    // cover the supported 0-4 range while posting applies the currency-specific
+                    // scale. Keep this ahead of the broad amount-name convention below.
+                    if ((entityType.ClrType == typeof(AccountTransaction)
+                            && property.Name is nameof(AccountTransaction.DebitAmount)
+                                or nameof(AccountTransaction.CreditAmount)
+                                or nameof(AccountTransaction.TransactionDebitAmount)
+                                or nameof(AccountTransaction.TransactionCreditAmount)
+                                or nameof(AccountTransaction.ForeignCurrencyAmount))
+                        || (entityType.ClrType == typeof(JournalEntry)
+                            && property.Name is nameof(JournalEntry.TotalDebitAmount)
+                                or nameof(JournalEntry.TotalCreditAmount)
+                                or nameof(JournalEntry.BalanceDifference))
+                        || (entityType.ClrType == typeof(FinancePostingEvent)
+                            && property.Name is nameof(FinancePostingEvent.TotalDebitAmount)
+                                or nameof(FinancePostingEvent.TotalCreditAmount)))
+                    {
+                        property.SetColumnType("decimal(20,4)");
+                        continue;
+                    }
+
                     // Year-end closing evidence is a functional-currency amount. Keep the
                     // runtime model aligned with the entity annotation and migration instead
                     // of allowing the broad name-based convention below to widen it to 18,4.
