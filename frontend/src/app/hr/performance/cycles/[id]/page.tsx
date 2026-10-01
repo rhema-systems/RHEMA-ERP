@@ -731,7 +731,8 @@ export default function AppraisalCycleDetailPage() {
             The forms this cycle may draw on. Each employee gets the most specific one that
             matches them — position beats unit beats level beats global — and{' '}
             <strong>priority</strong> is what breaks a tie between two that are equally specific.
-            Only approved, active templates are offered.
+            Only approved, active templates are offered. Once appraisals in this cycle are scored on a
+            template, its row stays as it is — add another template for people not yet generated.
           </p>
 
           <ResourceCollectionTab<
@@ -764,12 +765,24 @@ export default function AppraisalCycleDetailPage() {
             }
             remove={(_cycleId, assignmentId) => appraisalCycleTemplateService.remove(assignmentId)}
             readOnly={isClosed}
+            // A link whose template this cycle's appraisals are scored on stays as it is (performance
+            // closure E-e, D-68): removing or switching it off was a way round the template's lock.
+            canEditItem={(r) => !r.templateInUseInCycle}
+            canRemoveItem={(r) => !r.templateInUseInCycle}
             getId={(r) => r.id}
             columns={[
               { header: 'Template', cell: (r) => <span className="font-medium">{r.templateName}</span> },
               { header: 'Scope', cell: (r) => <Badge variant="outline">{scopeLabel(r)}</Badge> },
               { header: 'Priority', cell: (r) => r.priority, className: 'text-right' },
-              { header: 'Status', cell: (r) => <StatusBadge active={r.isActive} /> },
+              {
+                header: 'Status',
+                cell: (r) => (
+                  <span className="flex items-center gap-2">
+                    <StatusBadge active={r.isActive} />
+                    {r.templateInUseInCycle && <Badge variant="secondary">Appraisals on it</Badge>}
+                  </span>
+                ),
+              },
             ]}
             schema={
               z.object({
@@ -784,20 +797,23 @@ export default function AppraisalCycleDetailPage() {
               priority: r.priority,
               isActive: r.isActive,
             })}
-            renderFields={(form) => (
+            renderFields={(form, editing) => (
               <>
-                <SelectField
-                  form={form}
-                  name="appraisalTemplateId"
-                  label="Template"
-                  required
-                  options={assignableTemplates}
-                  placeholder={
-                    assignableTemplates.length === 0
-                      ? 'No approved, active templates yet'
-                      : 'Select a template…'
-                  }
-                />
+                {/* A link's template is fixed (E-e, D-68): another template is another link. */}
+                <fieldset disabled={editing} className="min-w-0">
+                  <SelectField
+                    form={form}
+                    name="appraisalTemplateId"
+                    label="Template"
+                    required
+                    options={assignableTemplates}
+                    placeholder={
+                      assignableTemplates.length === 0
+                        ? 'No approved, active templates yet'
+                        : 'Select a template…'
+                    }
+                  />
+                </fieldset>
                 <FieldRow>
                   <NumberField
                     form={form}

@@ -95,6 +95,22 @@ settings as a policy reference; this document says which of them the code obeys.
 >   do, marked *"Since lane E-d2a"*: `EnableAppeals` and `AppealWindowDays` — a cycle is not closed while
 >   any Completed appraisal in it could still appeal. The deadline reminders (`DeadlineRisk*` bands) go
 >   out for an Open cycle only; a Closed one was reminded.
+> - **Lane E, slice E-d2b** (the live cycle, 2026-09-30) moved no verdict and changed what one does, marked
+>   *"Since lane E-d2b"*: `AutoLockOnDeadline` — the sweep runs on an open cycle only and leaves the
+>   officer's own appraisal alone.
+> - **Lane E, slice E-e** (templates and settings, 2026-10-01) moved no verdict; it changed **when a
+>   profile's settings can change at all** (D-67). Every appraisal reads its profile live through its
+>   cycle — finished ones still read `ShowScoreBreakdownToEmployee`, `PeerReviewsAnonymous`,
+>   `PeerNominationMode`, `EnableAppeals`/`AppealWindowDays` (Completed ones), `AllowEmployeeResponse`, and
+>   `ProbationExtensionMonths` and the two succession settings whenever an outcome is approved — and only
+>   the three evaluator weights (stamped on each evaluation), the interim-review pair (the review events)
+>   and `AppealReevaluationWindowDays` (the remand deadline) are copied per appraisal. So **once any
+>   appraisal sits on a cycle running under a profile, its rules are frozen** (`PUT` answers 409, naming
+>   the fields); `SettingsName`, the three `DeadlineRisk*` bands, `ManagerWorkloadThreshold` and
+>   `DefaultHRReviewerId` stay editable, and `POST …/{id}/clone` copies a profile for new rules. The save
+>   now also refuses a weight outside 0–1 (the `[Range(0, 1)]` attributes have int bounds and let −0.4
+>   and 1.4 through), a `SuccessionPoolName` over 100 characters (a 500), an enum value outside its type,
+>   and a `DefaultHRReviewerId` that is not an employee of the tenant.
 >
 > Line numbers below are as of 2026-09-17; lanes A and B1 rewrote much of `PerformanceAppraisalService.cs`,
 > and `AppraisalAdvanceHelpers.cs` is gone — its resolver is `AppraisalGates.cs`.

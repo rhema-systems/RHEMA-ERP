@@ -125,6 +125,17 @@ public class CycleCoverageService : ICycleCoverageService
                 ? "The cycle is closed."
                 : "The cycle has not been opened — appraisals are generated once it is open.");
 
+        // Then its templates: nobody is scored on one not approved (performance closure E-e) — one sent back to Draft
+        // by a structural edit, or never approved.
+        var unapproved = activeTemplates
+            .Where(ct => ct.AppraisalTemplate.ApprovalStatus != TemplateApprovalStatus.Approved)
+            .Select(ct => $"'{ct.AppraisalTemplate.TemplateName}' ({ct.AppraisalTemplate.ApprovalStatus})")
+            .ToList();
+        if (unapproved.Count > 0)
+            result.GenerationBlockedBy.Add(
+                $"{(unapproved.Count == 1 ? "A template on the cycle is" : $"{unapproved.Count} templates on the cycle are")} " +
+                $"not approved: {string.Join(", ", unapproved)}.");
+
         // Pre-flight: bail early if the cycle isn't configured yet
         if (!result.HasActiveTemplates || !result.HasActiveTargets || rawIds.Count == 0)
         {
@@ -346,8 +357,10 @@ public class CycleCoverageService : ICycleCoverageService
                       && ct.AppraisalTemplate.PositionId == null)
             .ToList();
 
+        // A level template covers that level's employees — it matched everyone (performance closure E-e).
         var levelMatches = assignments
             .Where(ct => ct.AppraisalTemplate.OrganizationLevelId.HasValue
+                      && ct.AppraisalTemplate.OrganizationLevelId == emp.OrganizationLevelId
                       && ct.AppraisalTemplate.OrganizationUnitId == null
                       && ct.AppraisalTemplate.PositionId == null)
             .ToList();

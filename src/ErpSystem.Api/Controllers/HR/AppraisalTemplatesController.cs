@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Shared;
@@ -211,6 +212,15 @@ public class AppraisalTemplatesController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (AppraisalConfigurationLockedException ex)
+        {
+            // Locked, or awaiting approval (performance closure E-e, D-66): a conflict with its state, answered 409.
+            return Conflict(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating appraisal template {Id}", id);
@@ -234,6 +244,15 @@ public class AppraisalTemplatesController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (AppraisalConfigurationLockedException ex)
+        {
+            // Locked, or awaiting approval (performance closure E-e, D-66): a conflict with its state, answered 409.
+            return Conflict(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -259,6 +278,11 @@ public class AppraisalTemplatesController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // A rule refused it (the activation's weights and bands, or a copy's missing name): it answered 404 or 500.
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error setting active status for appraisal template {Id}", id);
@@ -281,6 +305,11 @@ public class AppraisalTemplatesController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A rule refused it (the activation's weights and bands, or a copy's missing name): it answered 404 or 500.
+            return BadRequest(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -485,6 +514,11 @@ public class AppraisalTemplatesController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // Locked, or awaiting approval (performance closure E-e, D-66): a conflict with its state, answered 409.
+            return Conflict(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting section {SectionId} from appraisal template {TemplateId}", sectionId, templateId);
@@ -508,6 +542,11 @@ public class AppraisalTemplatesController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Locked, or awaiting approval (performance closure E-e, D-66): a conflict with its state, answered 409.
+            return Conflict(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -613,6 +652,11 @@ public class AppraisalTemplatesController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // Locked, or awaiting approval (performance closure E-e, D-66): a conflict with its state, answered 409.
+            return Conflict(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting item {ItemId} from section {SectionId}", itemId, sectionId);
@@ -636,6 +680,11 @@ public class AppraisalTemplatesController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Locked, or awaiting approval (performance closure E-e, D-66): a conflict with its state, answered 409.
+            return Conflict(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -684,6 +733,11 @@ public class AppraisalTemplatesController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (AppraisalConfigurationLockedException ex)
+        {
+            // Locked, or awaiting approval (performance closure E-e, D-66): a conflict with its state, answered 409.
+            return Conflict(new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {

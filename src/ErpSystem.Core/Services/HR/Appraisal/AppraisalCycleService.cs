@@ -674,6 +674,18 @@ public class AppraisalCycleService : IAppraisalCycleService
         if (!activeTemplates.Any())
             throw new InvalidOperationException("No active templates are configured for this cycle. Assign at least one template before generating.");
 
+        // ── 1b. Nobody is scored on a template that is not approved (performance closure E-e): one sent back to Draft
+        //        by a structural edit, or never approved — the assignment checked once, and generation never again. ──
+        var unapproved = activeTemplates
+            .Where(ct => ct.AppraisalTemplate.ApprovalStatus != TemplateApprovalStatus.Approved)
+            .Select(ct => $"'{ct.AppraisalTemplate.TemplateName}' ({ct.AppraisalTemplate.ApprovalStatus})")
+            .ToList();
+        if (unapproved.Count > 0)
+            throw new InvalidOperationException(
+                $"Cannot generate appraisals — {(unapproved.Count == 1 ? "a template on this cycle is" : $"{unapproved.Count} templates on this cycle are")} " +
+                $"not approved: {string.Join(", ", unapproved)}. Approve {(unapproved.Count == 1 ? "it" : "them")}, or remove " +
+                $"{(unapproved.Count == 1 ? "it" : "them")} from the cycle, and generate again.");
+
         // ── 2. Resolve employees from targets (the one scope rule the coverage preview reads) ──
         var activeTargets = await AppraisalCycleScope.LoadActiveTargetsAsync(
             _targetRepository.GetQueryable(), tenantId, cycleId, cancellationToken);
@@ -871,8 +883,10 @@ public class AppraisalCycleService : IAppraisalCycleService
                       && ct.AppraisalTemplate.OrganizationUnitId == emp.OrganizationUnitId
                       && ct.AppraisalTemplate.PositionId == null)
             .ToList();
+        // A level template covers that level's employees — it matched everyone (performance closure E-e).
         var levelMatches = assignments
             .Where(ct => ct.AppraisalTemplate.OrganizationLevelId.HasValue
+                      && ct.AppraisalTemplate.OrganizationLevelId == emp.OrganizationLevelId
                       && ct.AppraisalTemplate.OrganizationUnitId == null
                       && ct.AppraisalTemplate.PositionId == null)
             .ToList();

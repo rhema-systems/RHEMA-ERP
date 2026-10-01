@@ -813,7 +813,10 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 
             // One appeal rule for the list, the appeal page and the submit (B1): the window runs
             // from the acknowledgment (else HR's sign-off, else completion), not from the cycle's end.
-            bool canFileAppeal = state != null && AppraisalGates.CanFileAppeal(state.Facts, state.Settings, now).Allowed;
+            // ... and on an open cycle, as the submit is (performance closure E-e): on another it said "can appeal"
+            // while the submit refused.
+            bool canFileAppeal = state != null && AppraisalLiveCycle.IsLive(state.Facts.CycleStatus)
+                && AppraisalGates.CanFileAppeal(state.Facts, state.Settings, now).Allowed;
 
             var released = AppraisalRelease.IsReleased(
                 appraisal.Status,
@@ -2509,6 +2512,12 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         // Whether they may appeal, by the same rule the submit is held to (B1).
         var state = await _lifecycle.GetStateAsync(appraisal.Id, cancellationToken);
         var (canAppeal, cannotAppealReason, _) = AppraisalGates.CanFileAppeal(state.Facts, state.Settings, DateTime.UtcNow);
+        // The page says what the submit will (performance closure E-e): on a cycle that is not open, the cycle answers.
+        if (!AppraisalLiveCycle.IsLive(state.Facts.CycleStatus))
+        {
+            canAppeal = false;
+            cannotAppealReason = AppraisalLiveCycle.Refusal(state.Facts.CycleStatus, state.Facts.CycleName, "An appeal cannot be filed");
+        }
 
         // B2: this page carried the manager's scores and the overall whenever it was asked — before
         // HR's sign-off included, where the release rule (P2) withholds them everywhere else. Before

@@ -54,6 +54,13 @@ cycle of the same type and year already covers or appraises, naming them; the co
 it would refuse; the raw create is gone; the peer's routes take a peer's evaluation only; HR does not
 advance their own appraisal, and the deadline sweep leaves it alone. The other chapters' walks run on
 APC2026, which is open, so they read as before.
+**And for lane E, slice E-e** (templates and settings, 2026-10-01): chapters 4, 8 and 14 — a template is
+locked while appraisals are scored on it or an open cycle has it (its name still changes; a structural
+change to an approved one sends it back to Draft; nothing changes while it awaits approval), a template on
+a cycle is not deleted, a cycle's template rows are pinned once its appraisals are scored on them, and
+generation refuses an unapproved template; a settings profile in use keeps its rules — changed on a copy —
+while its name, risk bands, workload threshold and default HR reviewer stay editable. Chapter 4's walk
+shows the weights badge on a new, unsaved profile: the demo profile's rules are read-only now.
 **The database was rebuilt on 2026-09-29**: Rule 2, Rule 9, the demo tables and the Efua arithmetic give its figures (Efua 88.56, Cynthia 87.00, Efua's appeal window to 6 October). The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
 **Seventh in the series**, after Recruitment, Employees, Leave, Attendance & Time, Company Schedule and Staff Travel.
 
@@ -1108,17 +1115,26 @@ One profile is the tenant's **default** — a flag HR moves with **Make default*
 tenant. *(Since closure B6, 2026-09-29. `GET /default` used to hand back the most recently created
 profile, so any new or test profile silently became the default, and the list marked the newest.)*
 
+**A profile in use keeps its rules** *(since closure E-e, 2026-10-01, D-67)*. Once any appraisal sits on
+a cycle running under it, its rules are frozen: the appraisals read them live — every step's gate, the
+release and visibility rules, peer anonymity, the appeal window, the probation-extension and succession
+settings when an outcome is approved — finished appraisals included. Its **name, deadline-risk bands,
+manager workload threshold and default HR reviewer** stay editable, because they change nothing an
+appraisal holds. To change the rules, **Copy** the profile, change the copy, and make it the default (or
+pick it when the next cycle is created) — a cycle's profile is fixed once it opens. *Standard Annual
+Appraisal* is in use (APC2026's 107 appraisals), so its rules read but do not edit.
+
 ### 👁 On the list page
 Header, a **New profile** button, and a table — the default first, then the newest:
 
 | Column | What it shows | On this database |
 |---|---|---|
-| **Profile** | Name, with a *Default* badge on the tenant's default | Standard Annual Appraisal *(Default)* |
+| **Profile** | Name, with a *Default* badge on the tenant's default and an *In use* badge on one appraisals read (hover: how many, on which cycles) | Standard Annual Appraisal *(Default, In use)* |
 | **Evaluation weights** | The three weights as a summary | Self 10% · Peer 20% · Manager 70% |
 | **Sign-off** | Which of calibration / HR review / acknowledgment are required | all three |
 | **Appeals** | On/off and the window | On, 7 days |
 | **Interim reviews** | Frequency and depth | Mid-year only, light touch |
-| *(actions)* | **Make default** on every other row, then **Edit** | — |
+| *(actions)* | **Make default** on every other row, then **Edit** and **Copy** | — |
 
 Empty-state copy, if you ever see it: *"A cycle cannot be created without one — start with a profile
 describing your standard annual appraisal."*
@@ -1134,29 +1150,38 @@ tabs. The full inventory is in §1.6; what matters on screen is the grouping:
 | **Goals & conversations** | Goal setting · Check-ins and journals · Conversations · Interim reviews |
 | **Operations** | Deadlines · Outcomes |
 
-Bottom of the page: **Save**, and a **Delete** with the confirmation *"Cycles already using it will
-block the delete."*
+The header carries **Copy**, **Save** and — on a profile that is neither the default nor in use —
+**Delete**, with the confirmation *"Cycles already using it will block the delete."* On a profile in use
+an amber card says how many appraisals on which cycles read its rules, and every rule field is greyed;
+the name, the deadline-risk bands, the workload threshold and the default HR reviewer stay live.
 
 ### ▶ Walk it
 
-1. Open **Appraisal Settings**. One row: *Standard Annual Appraisal*.
-2. Click it. Land on the **Evaluation** tab.
+1. Open **Appraisal Settings**. One row: *Standard Annual Appraisal*, badged *Default* and *In use*.
+2. Click it. Land on the **Evaluation** tab. Point at the amber card: *"This profile is in use — 107
+   appraisals on Annual Performance Cycle 2026 read its rules…"*
+
+   💬 *"Every appraisal in this year's cycle reads these rules as it goes — who must score, what the
+   employee sees, how long they have to appeal. So the rules do not change underneath them: to change
+   them you copy the profile and change the copy, for the next cycle."*
+
 3. Point at the badge beside the profile name: **Evaluation weights total — 1.00**.
 
    💬 *"Three people score this appraisal and the system will not let their weights come to anything
    other than one. Ten per cent the employee, twenty per cent their peers, seventy per cent their
    manager. That is not a convention — the API rejects the save."*
 
-4. Toggle **Require peer reviews** off. Watch the total badge: it stays **1.00**, because the peer
-   weight is now excluded from the sum — and the peer card collapses away.
+4. To show the weights rule, go back and click **New profile** — a blank form nobody uses. Toggle
+   **Require peer reviews** off. Watch the total badge: the peer weight is now excluded from the sum —
+   and the peer card collapses away.
 
-   💬 *"And here is the thing that catches people. Turning peers off does not give you twenty points
-   to play with. The API zeroes a disabled evaluator's weight before it checks the total, so self and
+   💬 *"And here is the thing that catches people. Turning peers off does not give you its points to
+   play with. The API zeroes a disabled evaluator's weight before it checks the total, so self and
    manager now have to carry the whole thing between them. The number on screen is the number the
    server will validate — not a client-side guess."*
 
-5. **Toggle peer reviews back ON.** Do not save. *(If you saved by accident, set the peer weight back
-   to 0.2 and save again — see Appendix E.)*
+5. **Leave the new form without saving**, and open *Standard Annual Appraisal* again. *(The walk used to
+   toggle the demo profile itself; its rules are read-only since closure E-e.)*
 6. Move to **Sign-off & appeals**. Read three switches aloud: *Require a calibration session*
    (**on** — "this is the gate"), *HR may change scores* (**off**), *Allow acknowledgment before the
    final conversation* (**off**).
@@ -1180,12 +1205,13 @@ block the delete."*
 
 | Element | Endpoint | Service → table |
 |---|---|---|
-| The list | `GET api/AppraisalSettings` | `AppraisalSettingsService` → `AppraisalSettings` |
+| The list | `GET api/AppraisalSettings` | `AppraisalSettingsService` → `AppraisalSettings`; each row carries `isInUse`, `inUseAppraisalCount` and `inUseCycleNames` (since E-e) |
 | The editor | `GET api/AppraisalSettings/{id}` | same |
-| Save | `PUT api/AppraisalSettings/{id}` — **`HR.Performance.Write`** | validates the weight total = 1.0 *after* zeroing disabled evaluators; *since B6*, also that no minimum (peers, goals) is above its maximum and the risk bands run high ≤ medium ≤ low — each refusal a 400 that says which |
-| Make default | `POST api/AppraisalSettings/{id}/make-default` — **`HR.Performance.Write`** | clears the previous default and flags this one in one transaction (a filtered unique index allows one per tenant) |
+| Save | `PUT api/AppraisalSettings/{id}` — **`HR.Performance.Write`** | validates the weight total = 1.0 *after* zeroing disabled evaluators; *since B6*, also that no minimum (peers, goals) is above its maximum and the risk bands run high ≤ medium ≤ low — each refusal a 400 that says which; *since E-e*, each weight between 0 and 1 (the `[Range(0,1)]` attribute let −0.4 and 1.4 through), a succession pool name of at most 100 characters (a longer one was a 500), every enum one of its values, and a default HR reviewer who is an employee of the tenant — and, on a profile in use, **409** when any rule would change, naming the fields (an unknown profile answers 404, it answered 400) |
+| Copy | `POST api/AppraisalSettings/{id}/clone` `{ settingsName }` — **`HR.Performance.Write`** | *since E-e*: every rule and setting under a new name, not the default — 201 |
+| Make default | `POST api/AppraisalSettings/{id}/make-default` — **`HR.Performance.Write`** | clears the previous default and flags this one in one transaction (a filtered unique index allows one per tenant); not held by the in-use rule — it changes which profile new cycles start from, not a rule |
 | The default | `GET api/AppraisalSettings/default` | the flagged profile, or **404** when none is flagged |
-| Delete | `DELETE api/AppraisalSettings/{id}` — **`HR.Performance.Admin`** | 400 while any cycle uses it, **and for the default** (make another the default first); **403 for `hr.head`** |
+| Delete | `DELETE api/AppraisalSettings/{id}` — **`HR.Performance.Admin`** | 400 while any cycle uses it, **and for the default** (make another the default first); **403 for `hr.head`**. The editor offers it only on a profile neither default nor in use (since E-e) |
 | The total badge | client-side `evaluationWeightTotal()` | reproduces the server's rule exactly |
 | Validate weights | `GET api/AppraisalSettings/{id}/validate-weights` | returns `{ isValid, message }` |
 
@@ -1420,19 +1446,33 @@ result of that resolution *before* anything is generated. Where two templates ar
 | **Structure** | 2 sections · 5 items |
 | **Approval** | Approved |
 | **Active** | Yes |
-| **In use** | *Assigned to a cycle* |
+| **In use** | *Locked* (hover: the reason) — *On a cycle* for a template a cycle has but nobody is scored on |
 
-Row actions: **Edit**, **Copy…**, **Delete** *(Admin — 403 for `hr.head`)*.
+Row actions: **Edit**, **Copy…**, and **Delete** *(Admin — 403 for `hr.head`)* — since closure E-e
+offered only on a template neither locked nor on any cycle, so not on this one.
+
+**The lock** *(since closure E-e, 2026-10-01, D-66)*: a template is locked while **any appraisal is
+scored on it, or an open cycle has it** — the forms read the template live (its sections, rows,
+questions, whether a row is rated or measured), and an appraisal's snapshot freezes only the weights,
+KPI targets and bands. Locked, its sections, items, bands, their order, its scope and its delete are
+refused (409, with the reason); its **name and description** still change. Nothing changes while it
+awaits approval (recall it first), and a structural change to an approved template that is not locked
+sends it **back to Draft** — approved again before a cycle can generate on it. *(The lock covered the
+open cycle alone: a closed cycle's appraisals, or a Draft cycle's, did not hold it.)*
 
 ### 👁 On the detail page
 Header: the template name, an **approval status** badge, an **active** badge, an
 **Activate / Deactivate** button, and the workflow **Submit / Approve / Reject / Recall** actions.
 
-A prominent amber banner, because the template is assigned to a running cycle:
+A prominent amber banner, because appraisals are scored on the template and an open cycle has it — the
+server's own reason, read from the template:
 
-> **This template is assigned to a cycle** — *Structural edits are refused while a cycle is Open or
-> InProgress, so the form an appraisal was scored on cannot change underneath it. Copy the template
-> from the list page and change the copy.*
+> **This template is locked** — *107 appraisals are scored on it, and it is assigned to the open cycle
+> 'Annual Performance Cycle 2026'. Its structure cannot change underneath them — copy the template from
+> the list page and change the copy. Its name and description can still be edited.*
+
+A template awaiting approval shows *Awaiting approval — recall it to make a change*, and an approved one
+not locked says that a change to its structure sends it back to Draft.
 
 Four tabs: **Structure**, **Details** (scope + approval dates), **Cycles (1)**, **Workflow**.
 
@@ -1457,8 +1497,8 @@ Four tabs: **Structure**, **Details** (scope + approval dates), **Cycles (1)**, 
 
    💬 *"This form is locked, and the reason is the whole point of the module. A hundred and seven
    appraisals have been scored on it. If somebody could reweight a section now, every score already
-   recorded would silently mean something different. So the system freezes the form the moment a cycle
-   is running — and gives you a copy button instead."*
+   recorded would silently mean something different. So the system freezes the form while anyone is
+   scored on it — even after the cycle closes — and gives you a copy button instead."*
 
 3. Move to **Structure**. Point at the three live totals.
 
@@ -1484,22 +1524,26 @@ Four tabs: **Structure**, **Details** (scope + approval dates), **Cycles (1)**, 
 
 | Element | Endpoint | Note |
 |---|---|---|
-| List | `GET api/AppraisalTemplates/summaries` | projection with counts and the in-use flag |
+| List | `GET api/AppraisalTemplates/summaries` | projection with counts, the on-a-cycle flag, and `isLocked` / `lockReason` (since E-e) |
+| The template | `GET api/AppraisalTemplates/{id}` | carries `isLocked` and `lockReason` — what the editor's freeze reads (P-7, since E-e) |
 | Structure | `GET …/{id}/sections`, `GET …/sections/{id}/items` | one items query per section — the section read does not carry `gradeRangeCount`, which is what rule 3 needs |
-| Add / edit section | `POST` / `PUT …/{templateId}/sections[/{id}]` | |
-| Add / edit item | `POST` / `PUT …/sections/{sectionId}/items[/{id}]` | **409** if the same criterion or KPI is already on the template, in any section |
-| Reorder | `PATCH …/sections/reorder`, `…/items/reorder` | body is a bare array of ids |
-| Grade bands | `PUT api/AppraisalTemplates/items/{itemId}/grade-ranges` | **replace-all**; overlaps and repeated grades are refused |
-| Activate | `PATCH …/{id}/active-status` | body is a bare boolean; runs the structure validation first |
+| Add / edit section | `POST` / `PUT …/{templateId}/sections[/{id}]` | **409** while locked or awaiting approval; since E-e the PUT refuses a body naming another template (it moved the section, past that template's lock) |
+| Add / edit item | `POST` / `PUT …/sections/{sectionId}/items[/{id}]` | **409** if the same criterion or KPI is already on the template, in any section, and while locked or awaiting approval; since E-e the PUT refuses a body naming another section |
+| Remove section / item | `DELETE …/{templateId}/sections/{id}`, `…/sections/{sectionId}/items/{id}` | **409** while locked (they answered 500 before E-e) |
+| Reorder | `PATCH …/sections/reorder`, `…/items/reorder` | body is a bare array of ids; **409** while locked (they took no lock before E-e) |
+| Grade bands | `PUT api/AppraisalTemplates/items/{itemId}/grade-ranges` | **replace-all**; overlaps and repeated grades are refused (400); **409** while locked |
+| Edit (name, scope) | `PUT …/{id}` | the name and description always; a scope change is structural — **409** while locked; activation through it now validates, as below |
+| Activate | `PATCH …/{id}/active-status` | body is a bare boolean; runs the structure validation first — a failure answers **400** with the reasons (it answered 500) |
 | Clone | `POST …/{id}/clone` | the copy lands **inactive and in Draft**, whatever the source was, and its scope is stated on the copy rather than inherited |
-| Submit / Approve / Reject / Recall | `POST …/{id}/submit-for-approval` etc. | **workflow engine**, `APPRAISAL_TEMPLATE` — published on this database, approvers HR / Manager / TenantAdmin |
-| Delete | `DELETE …/{id}` | **`HR.Performance.Admin`** — 403 for `hr.head` |
+| Submit / Approve / Reject / Recall | `POST …/{id}/submit-for-approval` etc. | **workflow engine**, `APPRAISAL_TEMPLATE` — published on this database, approvers HR / Manager / TenantAdmin; since E-e approve and reject act on a template awaiting approval only (400 otherwise) |
+| Delete | `DELETE …/{id}` | **`HR.Performance.Admin`** — 403 for `hr.head`; since E-e **409** while locked or on any cycle (generation dropped a deleted template's link, and its people fell to another template or none), and its sections, items and bands go with it |
 
 ### ⚠ Known gaps
-**P-7.** Every structural write is refused while the template is on a live cycle — including on a
+~~**P-7.** Every structural write is refused while the template is on a live cycle — including on a
 *Draft* cycle in some readings, because the assignment rows do not carry a cycle status and the client
 treats any live assignment as a freeze. Erring this way shows the reason rather than letting the write
-fail.
+fail.~~ **Fixed 2026-10-01** (closure E-e): the editor reads the server's own `isLocked` and its reason,
+and the assignment rows carry the cycle's status.
 ~~**P-8.** The free-text question has **0 grade bands**, which is one of the three activation rules. The
 template is already Approved and active so nothing is blocked today, but a re-activation attempt could
 be refused on it.~~ **Fixed 2026-09-29** (closure lane L-c): a free-text question with **weight 0** is
@@ -1842,7 +1886,7 @@ Opening the cycle sits before all of that and is checked separately.
 | Button | Shown when | What it does |
 |---|---|---|
 | **Open cycle** | Draft only | *(absent here — the cycle is already open)* |
-| **Generate appraisals** | an **open** cycle only (since 2026-09-30, slice E-d2b — it was offered on a draft too) | Creates the appraisal records for everyone in scope who has none yet. **Refused when anyone it would create is already covered by another open cycle of the same type and year** — in that cycle's scope, or holding an appraisal there — the message naming the cycle and the people |
+| **Generate appraisals** | an **open** cycle only (since 2026-09-30, slice E-d2b — it was offered on a draft too) | Creates the appraisal records for everyone in scope who has none yet. **Refused when anyone it would create is already covered by another open cycle of the same type and year** — in that cycle's scope, or holding an appraisal there — the message naming the cycle and the people; and *since closure E-e* while any template on the cycle is not approved (one sent back to Draft by a change, or never approved), naming it |
 | **Send reminders** | open, not closed | Raises an in-app notice for every phase overdue or closing soon, to everyone in scope |
 | **Close cycle** | open, not closed | Irreversible; a closed cycle refuses every edit. **Refused while the cycle's work is unfinished** — any appraisal not started, in progress, in governance or under appeal, or any completed one still inside its appeal window; the message counts what is left, or names the day the last window closes. Its completed appraisals close with it |
 
@@ -1906,7 +1950,15 @@ approved, active templates are offered."*
 
 | Template | Scope | Priority | Status |
 |---|---|---|---|
-| Standard Employee Template 2026 | Global | 10 | Active |
+| Standard Employee Template 2026 | Global | 10 | Active · *Appraisals on it* |
+
+*Since closure E-e (D-68)* the row carries **Appraisals on it** when this cycle's appraisals are scored on
+its template, and then offers neither **Edit** nor **Remove**: the link stays as it is — removing it, or
+switching it off, released the template's lock while those appraisals still read it. An open cycle still
+**takes a new template** (for people added to its scope and not yet generated); editing a row changes its
+priority and its *Active* switch, never its template (another template is another row); a cycle takes each
+template once; and a closed cycle's tab is read-only, as it was on screen — the server now refuses those
+writes too.
 
 ### 👁 Tab 4 — Coverage *(the one to spend time on)*
 Intro: *"A dry run of generation. Nothing here is written — it simulates resolving every in-scope
@@ -2007,7 +2059,7 @@ order."* Columns: **Date · Event · Phase · Kind**, where Kind is *Deadline* o
 | Calendar tab | `GET …/{id}/calendar` | derived, never stored |
 | Targets | `GET/POST/PUT/DELETE …/{cycleId}/targets[/{id}]` | `AppraisalCycleTargets` |
 | Exclusions | `…/api/AppraisalCycleTarget/{targetId}/exclusions` | `AppraisalCycleTargetExclusions` |
-| Template assignments | `api/AppraisalCycleTemplates` (`by-cycle`, `bulk-assign`, `resolve/{cycle}/{employee}`) | `AppraisalCycleTemplates` |
+| Template assignments | `api/AppraisalCycleTemplates` (`by-cycle`, `bulk-assign`, `resolve/{cycle}/{employee}`) | `AppraisalCycleTemplates`. *Since closure E-e (D-68):* a row carries the cycle's status and `templateInUseInCycle`; the PUT never re-points the cycle or the template (422); a row whose template the cycle's appraisals are scored on is neither removed nor changed (409), nor is any row of a closed cycle; the same template twice is refused (422); `resolve` and the coverage preview match a level template only to that level's employees (it matched everyone without a position or unit match); `by-cycle` for an unknown cycle answers 404 (it answered 500) |
 | **Open cycle** | `POST …/{id}/open` | 422 (400 until 2026-09-30) when another open cycle of the same type and year covers any of the same employees — in its scope, or (since slice E-d2b) holding an appraisal there — **and the message names them**. Also notifies everyone in scope: the people a generation would appraise (since 2026-09-30 — it also reached leavers, inactive targets and anyone holding a post a template names) |
 | **Generate appraisals** | `POST …/{id}/generate-appraisals` | creates `PerformanceAppraisals`, **takes the criterion snapshot**, creates the self and manager evaluator records and the review events. **Skips anyone who already has an appraisal in the cycle**. **Since 2026-09-30 (slice E-d2b): an open cycle only** (a draft generated, skipping the open's overlap check and its notice), and a 422 when anyone it would create is in the scope of another open cycle of the same type and year, or holds an unwithdrawn appraisal in one — naming the cycle and the people, and creating no one. The open checked the scope it had then; a target added since, or a person who moved posts after another cycle generated theirs, is caught here. It is the only way an appraisal comes to exist: the raw `POST api/PerformanceAppraisals` is gone |
 | **Send reminders** | `POST …/{id}/deadline-reminders` | repeat-safe — an identical unread reminder is skipped rather than duplicated. **An open cycle only** — a 422 for a draft or a closed one (a closed cycle's were sent until 2026-09-30) |

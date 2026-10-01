@@ -303,6 +303,23 @@ public sealed class PerformanceAppraisalDataSeeder
         }
         await _context.SaveChangesAsync(cancellationToken);
 
+        // The form's free-text question, built with the template before anything is scored on it (performance closure
+        // E-e). It was added afterwards, through EF, by a separate step — to an approved template already on an open
+        // cycle, the edit the template lock forbids. Weight 0: it is answered, not scored, so it takes no bands (P-8);
+        // the forms read it live from the template, so every appraisal shows it.
+        _context.AppraisalTemplateItems.Add(new AppraisalTemplateItem
+        {
+            TenantId = tenantId,
+            AppraisalTemplateSectionId = competencySection.Id,
+            CustomQuestion = "What did you contribute this year that you are most proud of, and what support do you need "
+                           + "from the Corporation next year?",
+            DisplayOrder = 3,
+            Weight = 0,
+            CreatedAt = now
+        });
+        await _context.SaveChangesAsync(cancellationToken);
+        totalCreated++;
+
         // 6. Appraisal Cycle (the 2026 annual cycle, open since January). Open, not InProgress: that status
         // is gone (performance closure D-14), and this seeder was its only writer.
         var cycle = new AppraisalCycle

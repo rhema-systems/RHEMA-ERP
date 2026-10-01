@@ -159,6 +159,9 @@ export default function AppraisalTemplatesPage() {
         create={(values) => appraisalTemplateService.create(toPayload(values))}
         update={(id, values) => appraisalTemplateService.update(id, { id, ...toPayload(values) })}
         remove={(id) => appraisalTemplateService.remove(id)}
+        // A locked template, or one on any cycle, is not deleted (performance closure E-e): it comes
+        // off its cycles first, and a locked one never does. Remove used to show on every row.
+        canRemoveItem={(r) => !r.isLocked && !r.hasCycleAssignments}
         getId={(r) => r.id}
         actions={[
           {
@@ -202,9 +205,15 @@ export default function AppraisalTemplatesPage() {
           { header: 'Active', cell: (r) => <StatusBadge active={r.isActive} /> },
           {
             header: 'In use',
+            // Locked (E-e): appraisals are scored on it or an open cycle has it — its structure
+            // changes on a copy. "On a cycle" alone still keeps it from being deleted.
             cell: (r) =>
-              r.hasCycleAssignments ? (
-                <Badge variant="secondary">Assigned to a cycle</Badge>
+              r.isLocked ? (
+                <Badge variant="secondary" title={r.lockReason ?? undefined}>
+                  Locked
+                </Badge>
+              ) : r.hasCycleAssignments ? (
+                <Badge variant="outline">On a cycle</Badge>
               ) : (
                 <span className="text-muted-foreground">—</span>
               ),

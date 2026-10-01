@@ -304,16 +304,9 @@ public class HrDemoSeedOrchestrator
             ct => new PerformanceAppraisalDataSeeder(_context, Log<PerformanceAppraisalDataSeeder>())
                       .SeedForTenantAsync(tenantId, ct)),
 
-        new SeedStep(
-            // A free-text item on the appraisal template. Without one, AppraisalCustomQuestionResponses
-            // can never hold a row, and the template cannot be edited through the API once the demo
-            // cycle is open (409) — so it is added here, before any cycle exists.
-            "Appraisal free-text question",
-            ct => _context.Set<AppraisalTemplateItem>().IgnoreQueryFilters()
-                          .AnyAsync(i => i.TenantId == tenantId && !i.IsDeleted
-                                      && i.CompetencyId == null && i.KpiDefinitionId == null
-                                      && i.CustomQuestion != null, ct),
-            ct => new TdcDemoAppraisalCustomQuestionSeeder(_context, Log<TdcDemoAppraisalCustomQuestionSeeder>()).SeedAsync(ct)),
+        // The appraisal template's free-text question is built with the template by the step above (performance
+        // closure E-e); a separate step added it afterwards through EF, to an approved template already on an open
+        // cycle — the edit the template lock forbids.
 
         new SeedStep(
             "Awards and recognition",

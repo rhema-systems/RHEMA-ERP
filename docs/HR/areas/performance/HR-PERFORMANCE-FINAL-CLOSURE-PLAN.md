@@ -77,9 +77,13 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    cycle)~~ **Done 2026-09-30** (source-checked first: § 1l D-59–D-65; `run-final-lifecycle.mjs` 706/706 twice;
    regression 3226/3235; lane E's E-d2b State block — generation and an appraisal's work, goals and panels on an Open
    cycle only, the overlap at generation, the raw create gone; every suite now opens and tears down its cycles).
-   **Slice E-e (templates and settings) is next** — source-check it first, and read § 5's *Added by lane E-c* to
-   *E-d2b* rows. **Before any more harness runs on UAT, read § 5's first E-d2b row** — the harness's template
-   approvals notify every harness login, eight demo personas included (a UAT clean-up waits on the user's go).
+   ~~Slice **E-e** (templates and settings)~~ **Done 2026-10-01** (source-checked first: § 1m D-66–D-70;
+   `run-final-lifecycle.mjs` 821/821 twice; regression 3352/3361; lane E's E-e State block — a template locked while
+   anyone is scored on it or an open cycle has it, links pinned, a profile in use kept as it is and copied to change;
+   every suite's teardown switches off the logins it minted, and the user cleaned UAT's notification backlog).
+   **Slice E-f (goals, PIPs, conversations) is next** — source-check it first, and read § 5's *Added by lane E-c* to
+   *E-e* rows. **Before a long run, check free RAM and the stuck email queue** (§ 5, the second E-e row): either one
+   starves SQL Server's query memory and reads time out at 30 s.
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -232,6 +236,16 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | D-64 | **`buildFixture()`'s light and full cycles** — both Annual in one year, both appraising the same person: the overlap rule refuses the second | **The full cycle becomes a MidYear cycle** (the type drives nothing but the by-type list, the edit pin and the overlap rule); each cycle generates over a post only its appraisee holds (D-44) | E-d2b, S8 |
 | D-65 | **The raw create's probes** — W3 slice 10 asserts 403 for it (the deleted route answers 405), and hr-portal slice 5 hangs its fixtures off the tenant's first real post (so it has never run on UAT) | **W3's row asserts the route is gone** (404 or 405, as its removed-route row does; W3 still does not run on UAT — real staff). **hr-portal slice 5 mints its own post, generates over it, and runs once on UAT**; its probe drops the raw create | E-d2b, S8 |
 
+### 1m. Decisions from slice E-e's source check — settled with the user, 2026-10-01
+
+| # | Question | Decision (2026-10-01) | Affects |
+|---|---|---|---|
+| D-66 | **What the template lock covers** (it refused only while an open cycle had the template; the forms read the live template — sections, rows, questions, rated or measured — and the snapshot froze only weights, KPI targets and bands) | **Structure locked.** Locked while any appraisal is scored on the template or an open cycle has it: no section, item or band change, no reorder, no scope change, no delete — a change is made on a copy. Its name and description stay editable. An approved template whose structure changes (while unlocked) goes back to Draft; nothing changes while it awaits approval. Approve and reject act on a template awaiting approval only | E-e |
+| D-67 | **When a settings profile is frozen** (E3 said "while an Open cycle uses it"; Draft cycles hold appraisals, and finished appraisals read visibility, anonymity, the appeal window and the outcome settings live) | **Once any appraisal uses it** — on any cycle running under it, finished and withdrawn ones included — its rules are frozen, compared field by field as the appraisals read them. Its name, deadline-risk bands, workload threshold and default HR reviewer stay editable (they change nothing an appraisal holds). Rules change on a **clone** (new `POST …/{id}/clone`), made the default or chosen by the next cycle; make-default is not guarded | E-e |
+| D-68 | **The cycle↔template links** (the PUT re-pointed cycle and template unchecked; removing an open cycle's link released the lock; a closed cycle's links stayed writable; a template on a Draft cycle could be deleted) | **Links pinned.** A template can be **added** to an open cycle (for people not yet generated); a link is removed, switched off or re-prioritised only while no appraisal in its cycle is scored on its template; the PUT never re-points (a different template is a new link); a closed cycle's links are frozen; a cycle takes each template once. A template on any cycle is not deleted (it comes off first), and its sections, items and bands go with a delete. Generation and the coverage preview refuse a template that is not approved | E-e |
+| D-69 | **The harness's logins** (every suite mints logins and leaves them active; a role-routed workflow step notifies every holder — 907 per template submission at E-d2b, eight demo personas among them) | **Switched off by SQL, and a one-off.** Each suite's teardown sets `IsActive = 0` on the logins that run minted, by id (hr-portal slice 5 likewise); a one-off switches off every existing harness login on UAT (`@e2e.local` and hr-portal's `a25v_`) — the user runs it or allows it. An inactive login gets no role notification; the reconciliation sweep leaves an admin's deactivation alone | E-e, S8 |
+| D-70 | **Beyond the rows** (each verified in source) | **Folded in:** the section and item PUTs refuse a body moving the row to another template or section (it moved them, past that template's lock and across tenants); a level template covers that level's employees (it matched everyone — no level template on UAT); the profile's field checks (each weight 0–1 — the `[Range(0,1)]` int-bounds trap —, the pool name's length, enum values, the default HR reviewer an employee of the tenant); the demo's free-text question built with the template by the performance seeder (an EF step added it to the approved, in-use template). **Folded regardless:** approve/reject preconditions, the duplicate-link guard, the lock's 409 on every template route (four answered 500), "can appeal" on the list and the appeal page reading the cycle (E-d2b residue). **Left to their lanes:** the two-actor rule on template approval (D-12, F); the profile PUT's missing concurrency token and racy name check (J) | E-e |
+
 ---
 
 ## 2. Lane status
@@ -244,7 +258,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ☑ 2026-09-29 — L-a 157/157 twice; L-b 244/244 twice; L-c 261/261 twice (one suite holds L-b and L-c); staged |
 | C | One appeal machine | 2 days (+0.5–1, D-36) | D-22, D-34, D-35, D-36, D-37, D-38 | ☑ **complete 2026-09-30**; C10 was batch 1's. Two slices (D-36): C-a ☑ — 209/209 twice, regression 2089/2098, committed effb567f5. C-b ☑ — source-checked (§ 1f D-37, D-38), `run-final-appeals.mjs` 397/397 twice, regression 2309/2318; staged |
 | D | Peer nomination and evaluation integrity | 1 day (1.5–2, the source check) | D-39, D-40, D-41 | ☑ 2026-09-30 — source-checked (§ 1g); `run-final-nominations.mjs` 186/186 twice, regression 2496/2505; staged |
-| E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | ~12 days (D-42; was 4) | D-10, D-14, D-17, D-20, D-42–D-58 | ◐ source-checked 2026-09-30 (§ 1h); seven slices E-a…E-g. E-a ☑ (130/130 twice, regression 2631/2640), E-b ☑ (`run-final-lifecycle.mjs` 276/276 twice, regression 2777/2786), E-c ☑ (source-checked, § 1i; 391/391 twice, regression 2892/2901; D-14's migration on UAT), E-d split in two (§ 1j): E-d1 ☑ (542/542 twice, regression 3043/3052), E-d2 split in two (§ 1k): E-d2a ☑ (601/601 twice, regression 3104/3113), E-d2b ☑ (source-checked, § 1l; 706/706 twice, regression 3226/3235); staged. E-e next |
+| E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | ~12 days (D-42; was 4) | D-10, D-14, D-17, D-20, D-42–D-58 | ◐ source-checked 2026-09-30 (§ 1h); seven slices E-a…E-g. E-a ☑ (130/130 twice, regression 2631/2640), E-b ☑ (`run-final-lifecycle.mjs` 276/276 twice, regression 2777/2786), E-c ☑ (source-checked, § 1i; 391/391 twice, regression 2892/2901; D-14's migration on UAT), E-d split in two (§ 1j): E-d1 ☑ (542/542 twice, regression 3043/3052), E-d2 split in two (§ 1k): E-d2a ☑ (601/601 twice, regression 3104/3113), E-d2b ☑ (source-checked, § 1l; 706/706 twice, regression 3226/3235), E-e ☑ (source-checked, § 1m; 821/821 twice, regression 3352/3361); staged. E-f next |
 | F | Recommendations, proposals, probation, PIP chain, segregation of duties | 2.5 days | D-12, D-19; **F1 waits on D-18** (the finish plan's lane 9) | ☐ |
 | G | Notifications on the platform topics | 5 days | D-21, D-28 | ☐ |
 | H | Nightly sweep and the advance path | 2.5 days | D-16, D-21 | ☐ |
@@ -2135,9 +2149,10 @@ not HR's; offered for the cross-module register). No suite was affected.
       - ~~`CalculateExcludedEmployees` is implemented (it returns 0, :1117).~~ *E-c.*
       - ~~`GetEmployeesInScopeAsync` becomes the generation scope: drop the tenant-wide auto-discovery
         (:1514+) and the inactive targets (:1479).~~ *E-c, with leavers and the level rule too.*
-- [ ] E3 **Settings profile:** `UpdateAsync` refused while any Open/InProgress cycle uses it
-      ("clone the profile"); allowed when all Draft/Closed.
-- [ ] E4 **Template:**
+- [x] E3 **Settings profile:** `UpdateAsync` refused while any Open/InProgress cycle uses it
+      ("clone the profile"); allowed when all Draft/Closed. *(Lane E-e, 2026-10-01 — refused once any
+      appraisal uses it, D-67: the cycle test was a wrong premise; the clone door added.)*
+- [x] E4 **Template:** *(Lane E-e, 2026-10-01 — every bullet; D-66, D-68.)*
       - Structural edits reset `ApprovalStatus` to Draft. P-8 is fixed in L4 first, or re-approval
         of the demo template fails.
       - The lock covers any cycle with generated appraisals.
@@ -2394,7 +2409,8 @@ with each:
       appeal windows (`withdrawAndClose` in `setup.mjs` is the start); `buildFixture()` and `hr-portal`
       slice 5 generate. Its own questions at its source check (D-55): which writes need Open, the raw
       create's ten harness callers, A0's template lock, `buildFixture`'s light/full overlap, the w3 probe.
-- [ ] **Slice E-e — templates and settings.** The lock: any appraisal on the template, or an Open cycle
+- [x] **Slice E-e — templates and settings.** *(2026-10-01 — the E-e source check and State blocks below; § 1m
+      D-66–D-70.)* The lock: any appraisal on the template, or an Open cycle
       assigned; a structural edit recalls an Approved template to Draft, and edits wait while
       PendingApproval; generation re-checks Approved; a template assigned to a cycle cannot be deleted; the
       assignment PUT pinned; `IsLocked` and its reason on the template DTO, read by the editor (P-7). The
@@ -3032,6 +3048,150 @@ hr-portal: `setup.mjs` gains `mintHarnessPlace` (a unit and posts of its own) an
 generates over its own post; `probe-slice5.mjs` is retired (its fixture raw-created the appraisal). The demo pack's `060`
 opens the Draft its fallback creates before generating.
 
+**E-e source check (2026-10-01, after E-d2b; line numbers as of `28bec4085`).** Four read-only surveys — the template and
+link backend, the settings profile, the harness / demo pack / seeders, and the screens with the workflow's notification
+recipients — then every claim that decides the build read again in source; the user settled five questions (§ 1m,
+D-66–D-70). What they found:
+- **E4, the template — every row live.** The lock (`AssertTemplateNotInActiveCycleAsync`, ATS :889-907) refused only while
+  an Open cycle had the template — not a Draft cycle with appraisals, nor a Closed one — and the template PUT, the
+  activation, the clone, the workflow routes and both reorders never asked it. No write read `ApprovalStatus`: an approved
+  template stayed approved after any edit, and edits ran while it awaited approval. Generation and the coverage preview
+  never read the approval (ACS :663-674); the assignment checked it once. A template on a Draft or Closed cycle could be
+  deleted; its sections, items and bands stayed. The link PUT rewrote the cycle and the template unchecked (MAP
+  :1444-1450), and a closed cycle's links stayed writable. The DTO carried no lock (P-7: the editor froze on any active
+  assignment). **One premise wrong:** a deleted template is *not* used by generation — its link drops out under the
+  soft-delete filter, so its people fell to another template or to none, and appraisals already on it lost their form's
+  sections.
+- **Why the lock matters:** the snapshot freezes weights, KPI targets and bands only; the forms read the live template —
+  sections, rows, questions, item text, whether a row is rated or measured (`CriterionTemplateKey` :67-70), and the
+  self-evaluation's submit asks for every competency on the *live* template (PAS :1018-1023).
+- **E3, the settings profile — live, its test wrong.** `UpdateAsync` read no cycle and no appraisal, and replaced all 48
+  fields. "Refused while an Open cycle uses it" misses Draft cycles holding appraisals and Closed ones from before E-d2a; and
+  finished appraisals read the profile live — the appeal window and the response switch on Completed ones; score
+  visibility, peer anonymity and the nomination mode on any; the probation-extension and succession settings whenever an
+  outcome is approved (`ProbationHandlers` :155-159, `SuccessionNominationHandler` :86-96). Only the evaluator weights
+  (stamped on each evaluation), the review events and the remand deadline are copied per appraisal. No clone door existed.
+- **The harness:** no API write breaks under the lock (A0 already asserts the 409; every template is built in Draft); one
+  breaks under the profile guard — `run-final-settings.mjs` :643, B8's mid-cycle change — and :676 would pass vacuously
+  (its invalid update aimed at a profile in use). A seeder (`TdcDemoAppraisalCustomQuestionSeeder`) added the demo's
+  free-text question through EF to the approved template already on an open cycle. A full run mints 146 logins (35 HR,
+  18 Manager), hr-portal five more, and nothing switched them off.
+- **The screens:** the editor froze on any active link and stayed editable while pending; nothing warned that a change
+  sends an approved template back to Draft; *Remove* showed on every list row; four lock refusals reached the user as
+  "An error occurred…" (500); the settings editor was always editable, offered *Delete* on the default, had no clone and
+  no in-use sign; the cycle page let an open cycle's link be removed or re-pointed. Chapter 4's walk toggles the demo
+  profile's *Require peer reviews* (unsaved).
+- **The notifications:** a role-routed step notifies every active holder of the role in the tenant (`NotificationTopicPublisher`
+  :228 keeps `IsActive` users only) — so an inactive login gets nothing; the reconciliation sweep re-activates only what it
+  suspended itself.
+
+**Beyond the rows** (each verified in source): (1) the section and item PUTs copied the body's parent id (MAP :1208,
+:1271; the controller checks only the row's own id) — a row could move into another template or tenant past its lock;
+(2) the lock could be dodged by removing an open cycle's link; (3) a level-scoped template matched everyone with no
+position or unit match (ACS :874-878, the preview, the resolver); (4) with no definition published, approve and reject
+acted from any status; (5) the same template could be assigned twice; (6) the profile's weights were unbounded one by one
+(`[Range(0,1)]` has int bounds), the pool name's length unchecked (a 500), enums and the default HR reviewer unchecked;
+(7) the my-appraisals list and the appeal page said "can appeal" on a cycle that is not open. Left to their lanes: the
+two-actor rule on template approval (D-12, F), the profile's concurrency token (J).
+
+**E-e State (2026-10-01): DONE — built, verified on UAT, staged.** No migration. What exists now:
+- **The template lock (D-66)** — `AppraisalTemplateService.GetLockReasonsAsync`: a template is locked while any appraisal
+  is scored on it (withdrawn ones too — they stay on the record, on their form) or an active link puts it on an open
+  cycle; the reason names both (*"107 appraisals are scored on it, and it is assigned to the open cycle 'Annual Performance
+  Cycle 2026'"*). `EnsureStructureEditableAsync` holds every structural write — sections and items (add, edit, remove,
+  reorder), bands, the scope on the template PUT, the delete — to it, and refuses all of them, and the rename, while the
+  template awaits approval. A structural change to an approved, unlocked template sends it back to Draft through the
+  adapter's recall outcome (`ReturnToDraftIfApproved`). Approve and reject act on a template awaiting approval only.
+  The template DTO and its summary carry `IsLocked` and `LockReason` on every read (P-7).
+- **The links and the delete (D-68)** — `AppraisalCycleTemplateService`: the PUT never re-points the cycle or the template
+  (422); a link of a closed cycle, or one whose template its cycle's appraisals are scored on, is neither removed nor
+  changed (409); a cycle takes each template once (422); an open cycle takes a new one. The rows carry the cycle's status
+  and `TemplateInUseInCycle`. A template on any cycle is not deleted (409), and a delete takes its sections, items and
+  bands. Generation refuses a cycle whose templates are not all approved (422, naming them), and the coverage preview
+  lists the reason.
+- **The profile guard (D-67)** — `AppraisalSettingsService`: once any appraisal sits on a cycle running under a profile,
+  an update that changes a rule is refused (409, naming the fields) — the rules compared before and after over every
+  scalar field but the editable and non-rule ones, so a field added later is frozen by default; a disabled evaluator's
+  weight reads 0 on both sides. `SettingsName`, the three `DeadlineRisk*` bands, `ManagerWorkloadThreshold` and
+  `DefaultHRReviewerId` stay editable. `POST …/{id}/clone` copies every rule and setting, not the default flag. Every read
+  carries `IsInUse`, `InUseAppraisalCount` and `InUseCycleNames`. The save checks each weight (0–1), the pool name's
+  length, the six enums and the default HR reviewer.
+- **Beyond the rows (D-70)** — the section and item PUTs refuse a body moving the row (and the mappers no longer copy
+  the parent id); a level template matches only its level's employees — generation, the preview, the resolver; "can
+  appeal" on the list and the appeal page reads the cycle; the demo's free-text question is built by
+  `PerformanceAppraisalDataSeeder` with the template, and `TdcDemoAppraisalCustomQuestionSeeder` is deleted.
+- **409s and 404s** — every template lock refusal answers 409 (four answered 500); an activation's failure 400 (500); the
+  by-cycle list of an unknown cycle 404 (500); a profile update's unknown id 404 (400).
+- **The screens** — the template editor freezes on the server's lock, with its reason, and on a pending template, and
+  says that a change sends an approved one back to Draft (the header refreshes after each change); the list reads
+  *Locked* / *On a cycle* and offers *Remove* only on a template neither; the settings list badges *In use* and offers
+  *Copy*; the editor greys an in-use profile's rules (sending them back as loaded), keeps its name, bands, threshold and
+  reviewer live, and offers *Delete* only on a profile neither default nor in use; the cycle page's template rows with
+  appraisals on them offer neither *Edit* nor *Remove*, and *Edit* never changes the template.
+
+**Where the build refines the rows** (each deliberate; say if one should go back):
+1. **A rename is not structure** — D-66's lock keeps the name and description editable; the scope, which decides who is
+   scored on the template, is structural. The rename is refused only while the template awaits approval.
+2. **An inactive link does not lock** — the lock counts active links to an open cycle (the old one counted any): an
+   inactive link puts nobody on the template.
+3. **The order is structure** — a reorder is held to the lock and sends an approved template back to Draft: the forms lay
+   the template out in its order, live.
+4. **Generation refuses any unapproved template on the cycle**, not only those someone would resolve to — the cycle's
+   set-up is wrong either way.
+5. **Activation through the template PUT validates** — it skipped the weights and bands the active-status route checks.
+6. **The profile's comparison is over the entity's fields**, so a rule added later is frozen without touching the guard;
+   make-default is not held (it changes which profile new cycles start from).
+7. **Withdrawn appraisals count** for both locks — a withdrawn appraisal stays on the record, read on its form and under
+   its profile's visibility.
+
+**Verified** (Staging API on `ErpSystemDB_UAT`, the build; no pending migration — 102 active migrations, all in UAT's
+history of 105):
+- `run-final-lifecycle.mjs` **821/821 on its first run, and 821/821 again (run 4)** — E-a…E-d2b's 706 and E-e's 115:
+  ee-approval (18), ee-lock (45, its two halves, the closed cycle's link checks with the second), ee-link (12),
+  ee-appeal (5), ee-template (6), ee-level (8), ee-profile (21); the teardown's check now also counts the logins. Apart from the set-up steps, each asserts what the old
+  code did not do — it edited a pending or approved template freely and kept it approved, generated on an unapproved
+  one, locked on an open cycle only, answered 500 to four refusals, let a link be removed, re-pointed or doubled, let a
+  closed cycle's links change, let a section or item move templates, matched a level template to everyone, said "can
+  appeal" on a closed cycle, and saved any rule on a profile in use and any weight, pool name, enum or reviewer —
+  established by reading the old code, not by running the old build.
+- Two runs between them lost checks to SQL Server's memory: E-e's first regression (lifecycle 819/821 — two
+  manager-form reads) and lifecycle run 3 (807/821 — seven calibration-grid reads and two manager-form reads): every
+  failure a read that timed out at 30 s (11 × 500, the only 5xx), with the machine at 1.2 GB free and the platform's
+  notification processor rescanning ~126,000 stuck emails (`RESOURCE_SEMAPHORE`; § 5). With VS Code reloaded (3.2 GB
+  free) and the queue dead-lettered, run 4 and the second regression ran clean.
+- Regression (`run-all.mjs`, fifteen suites, the second run): interim reviews 134/134, attachments 66/66, slice C 53/53, slice D
+  27/27, **slice E 19/28 — the same 9 stale**, gates 33/33, lane A 188/188, lane P 339/339, lane B1 257/257, lane L-a
+  158/158, lanes L-b/L-c 297/297, **lane B2 375/375**, lane C 398/398, lane D 187/187, **lane E 821/821**. **3352/3361** —
+  E-d2b's 3226/3235 plus exactly the 126 new (115 lifecycle, 11 settings); no assertion lost; 4 min 47 s, no call over
+  10 s (the template submissions took 10–15 s at E-d2b, writing ~1,800 notification rows each). Afterwards only APC2026
+  is Open, and every login a run minted is inactive.
+- hr-portal slice 5 **49/49 on UAT** — its cycle closed, its five logins switched off (the new check).
+- API log: the only 5xx were the eleven timed-out reads above, all before the clean-up (the last at 01:26:50);
+  otherwise UAT's missing SMTP, defect #23's payroll-profile FK (425 fixture employees), the notification clean-up's
+  timeouts, and the HR/Identity reconciliation's TDC/00052.
+- Frontend: scoped `tsc` over the nine changed files, 0 errors (the probe's two planted errors reported; it found one —
+  `CreateAppraisalSettings` now omits the usage fields); ESLint clean. Not browser-walked.
+- Demo: APC2026 captured on this build before the runs and after them all (the second regression and slice 5)
+  — its 107 phases, calendar, coverage preview, targets, in-scope list (102), progress, HR dashboard and review desk
+  byte-identical (against E-d2b's capture, only the dashboard's "days past deadline" moved, the date having turned). What
+  the screens show differently: *Standard Employee Template 2026* reads **locked** — *"107 appraisals are scored on it, and
+  it is assigned to the open cycle 'Annual Performance Cycle 2026'"* — so the editor's banner gives that reason (it said
+  "assigned to a cycle"), the list reads *Locked* and offers no *Remove*; *Standard Annual Appraisal* reads **in use**
+  (107 appraisals) — its rules greyed, *Copy* offered, *Delete* gone; APC2026's template row reads *Appraisals on it* and
+  offers neither *Edit* nor *Remove*. Chapter 4's walk moved its toggle to a new, unsaved profile.
+
+**UAT writes beyond the fixtures (each the user's, after a verified COPY_ONLY backup):** the 2,465 harness logins left
+active by earlier runs switched off (`logins-oneoff.sql`, D-69 — now 1 HR and 9 Manager holders get a role-routed
+notification, not ~900); the nine non-harness logins' 2,950 notifications about harness templates and PIPs soft-deleted,
+and 126,816 queued emails dead-lettered (`clean-apply2.sql`; the demo's own notifications untouched).
+
+**Harness changes in the slice:** `setup.mjs` records every login it mints and `tearDown` switches them off by SQL
+(`deactivateMintedLogins`), its one check now reading *"… closed or deleted, and its N login(s) switched off"*; hr-portal's
+`setup.mjs` the same, with slice 5's own check (49). `run-final-lifecycle.mjs` gains E-e's 115 (cycles EE and EF, template
+TE and scratch TX, all its own). `run-final-settings.mjs`: B8's mid-cycle change is asserted refused (409, the field
+named), W4 renamed and copied, the change then planted by SQL (D-63's pattern) — +8; the invalid update moved to a scratch
+profile nobody uses and its text asserted — +3 (375).
+
 ### Lane F — Recommendations, proposals, probation, PIP chain, segregation of duties
 
 - [ ] F1 Extend-Probation handler passes `CurrentUserProvider.EmployeeId` (refuse with a message
@@ -3313,7 +3473,7 @@ Group 2 — screens that lie or can only be empty:
 - [ ] **P-51:** the Result column links training requests, PIPs and probation periods too — the
       pages exist (`app/hr/training/requests/[id]`, `hr/performance/pip/[id]`, `hr/probation/[id]`);
       a talent-pool member links to the pool page (`types/hr/outcomes.ts:99-102`).
-- [ ] **P-7:** the template editor's freeze mirrors the server (E4).
+- [x] **P-7:** the template editor's freeze mirrors the server (E4). *(Lane E-e, 2026-10-01.)*
 - [ ] Rating guidance (N4) and the "overridden by calibration/appeal" marker (A14) on every form.
 
 Group 3 — screens for server-supported actions, and controls for this plan's new endpoints:
@@ -3648,7 +3808,7 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | Frontend: `PerformanceAttachmentsPanel` "visible to anyone who can see this record" while the appraisee has no evidence tab | `:220` | I |
 | Frontend: salary "Raise the salary change" and "Mark applied" independent | `proposals/salary-review/[id]/page.tsx:178-190` | F5 |
 | *Added by the review:* | | |
-| P-7 editor freezes on any assignment; the server refuses only Open/InProgress | `templates/[id]/page.tsx:134-138` | E4 + I |
+| ~~P-7 editor freezes on any assignment; the server refuses only Open/InProgress~~ | `templates/[id]/page.tsx:134-138` | E4 + I — done in lane E-e, 2026-10-01 (the editor reads the server's `isLocked` and reason; the assignment rows carry the cycle status) |
 | P-8 activation demands bands on a weight-0 free-text item; submit-for-approval too | `AppraisalTemplateService.cs:922-931, :323` | L4 |
 | P-11 goal-risk thresholds tenant-wide | `GoalRiskSetting.cs:19-56` | v2 |
 | P-13 generation repairs nothing; ~~snapshot failures swallowed~~ | `AppraisalCycleService.cs:623-631, :1366-1377` | E12 — the swallowing copy, the dead `CreateAppraisalInstancesAsync`, was deleted in lane E-c; the repair action remains |
@@ -3737,7 +3897,7 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | A cycle cannot close before its last appeal window lapses: there is no waiver for an employee who will not appeal | `CloseCycleAsync` | kept (D-56) |
 | The E-d2a screens (the cycle list's *Delete*, the close dialog's text, the analytics page's *Send reminders*) not browser-walked | 3 pages | K |
 | *Added by lane E-d2b (2026-09-30):* | | |
-| **The harness's appraisal-template approvals notify every harness login on UAT, and eight demo personas with them.** Each submission's "Approval Required" goes, in-app and as a queued email, to every holder of the HR or Manager role — 907 logins, 898 of them harness-minted (`@e2e.local`). The suites mint logins every run and never deactivate them (2,460 on UAT, 1,832 minted on 2026-09-30), so each run notifies more than the last: 9,843 in-app rows on 2026-09-29, 112,139 on 2026-09-30 — some 1,800 rows per submission, and the regression's template submissions take 10–15 s. **The nine other logins holding either role** — eight demo personas (`hr.head`, `md.tdc`, `gm.ops`, `head.dev`, `head.estate`, `sales.manager`, `property.manager`, `authorised.signatory`) and the seeded `manager` — each hold 249 unread approvals of harness templates (every one `E2E …` or portal slice 5's) and 18 of PIPs; `hr.head` 498 and 40. UAT's Notifications table holds 279,064 rows; 69,867 emails wait Pending and 56,585 Failed (no SMTP) — all to `@e2e.local`, `@demo.tdc.local` or `@example.com`, except 198 to a seeded `…@default.com` login, a real domain. Found by E-d2b's log scan; it began before E-d2b and not from its code | UAT (harness data), `dev-harness` | S8 — the teardown deactivates the logins a run mints; a UAT clean-up (the personas' harness notifications, the dead email queue) on the user's go |
+| **The harness's appraisal-template approvals notify every harness login on UAT, and eight demo personas with them.** Each submission's "Approval Required" goes, in-app and as a queued email, to every holder of the HR or Manager role — 907 logins, 898 of them harness-minted (`@e2e.local`). The suites mint logins every run and never deactivate them (2,460 on UAT, 1,832 minted on 2026-09-30), so each run notifies more than the last: 9,843 in-app rows on 2026-09-29, 112,139 on 2026-09-30 — some 1,800 rows per submission, and the regression's template submissions take 10–15 s. **The nine other logins holding either role** — eight demo personas (`hr.head`, `md.tdc`, `gm.ops`, `head.dev`, `head.estate`, `sales.manager`, `property.manager`, `authorised.signatory`) and the seeded `manager` — each hold 249 unread approvals of harness templates (every one `E2E …` or portal slice 5's) and 17 of harness PIPs (the 18th, PIP-2026-0001, is the demo's own); `hr.head` 498 and 34. UAT's Notifications table holds 279,064 rows; 69,867 emails wait Pending and 56,585 Failed (no SMTP) — all to `@e2e.local`, `@demo.tdc.local` or `@example.com`, except 198 to a seeded `…@default.com` login, a real domain. Found by E-d2b's log scan; it began before E-d2b and not from its code | UAT (harness data), `dev-harness` | S8 — **done in lane E-e, 2026-10-01** (D-69): every suite's teardown switches off the logins its run minted; the user switched off the 2,465 earlier ones (`logins-oneoff.sql`), then cleared the nine logins' 2,950 harness notifications and dead-lettered 126,816 queued emails (`clean-apply2.sql`), each after a verified COPY_ONLY backup. What remains — the tenant's own holders still get each run's approvals — is the first E-e row |
 | The peer's evaluation form carries no *editable* flag — on a cycle that is not open its save and submission answer 422 with no read-only form first (the self and manager forms read not editable) | `PeerEvaluationDetailDto`, `peer-reviews/[id]/page.tsx` | I |
 | The goal screens' cycle picker (`CycleSelect`) lists every cycle, draft and closed ones included; a goal set or moved on one is refused, naming the cycle | `CycleSelect.tsx` | I (offer open cycles for new goals) |
 | hr-portal's other slices still hang their actors off the tenant's first real post (`readReferenceData`); slice 5 alone mints its own unit and posts (`mintHarnessPlace`) | `dev-harness/hr-portal/setup.mjs` | S8 |
@@ -3745,6 +3905,17 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | `hr-portal/probe-slice5.mjs` retired: its fixture raw-created the appraisal; it stops where that write was | dev-harness | S8 |
 | No suite runs the deadline sweep with `AutoLockOnDeadline` off — the lifecycle suite's LD proves it on | `AdvanceOverdueAppraisalsAsync` | B7 / S |
 | The E-d2b screens (the cycle page's *Generate* on an open cycle only, its warning card's reasons and competing-cycles badge; the self-evaluation banner) not browser-walked | 2 pages | K |
+| *Added by lane E-e (2026-10-01):* | | |
+| **The tenant's own HR and Manager holders still receive every harness run's approval notifications** — the demo personas and the seeded `manager` (1 HR, 9 Manager on UAT). D-69 stopped the harness logins piling up (the teardown switches off what a run mints; the 2,465 earlier ones are off), not the real recipients: each regression adds some 25 template approvals to their bells. Cleared on 2026-10-01 (2,950 rows, by the user's `clean-apply2.sql`); it refills with every run | UAT, `dev-harness` | S8 (a teardown that clears the run's notifications for non-harness recipients — the user's call) |
+| **The platform's notification processor rescanned the stuck email queue every few seconds** — some 126,000 Pending/Failed emails (UAT has no SMTP): its `TOP … ORDER BY` claim waited 20 s and more for query memory (`RESOURCE_SEMAPHORE`), with the clean-up's table-wide `UPDATE`, and starved heavy reads — 11 timed-out 500s in E-e's regression and lifecycle run 3 (the manager's form, the calibration grid), on a machine with 1.2 GB free. Dead-lettered on 2026-10-01 (126,816 rows); it refills while UAT runs without SMTP | `UnifiedNotificationService` (claim), UAT | cross-module #33; S8 |
+| A calibration grid read that fails reads as an empty grid, so a check of what the grid *no longer* lists passes vacuously (`ed-read`: "no longer lists wd1 or wd3" passed while the read 500'd) | `run-final-lifecycle.mjs` `gridOf` | S (assert the read) |
+| The template list's *Edit* dialog offers the scope fields on a locked template; the server refuses a scope change (409, with the reason) | `templates/page.tsx` | I |
+| The template PUT still takes `IsActive` from the body, so a body that omits it deactivates the template (activation through it now validates) | `UpdateAppraisalTemplateDto` | J |
+| The template copy's *"a name is required"* check cannot be reached over HTTP — `[Required]` answers first; moving it to a rule (it was an `ArgumentException`, a 404) changed nothing observable | `AppraisalTemplateService.CloneAsync` | J |
+| `ResolveTemplateForEmployeeAsync` picks a tie by priority where generation and the preview report a conflict | `AppraisalCycleTemplateService` | J |
+| The profile's validate-weights endpoint allows ±0.01 where a save allows ±0.005; the create DTO defaults `MinPeerEvaluators` to 0 where the entity says 1; the PUT is a full replace with no concurrency token and a racy name check (D-70) | `AppraisalSettingsService`, DTOs | J |
+| The demo seeder's free-text question is proven by reading, not by a rebuild from empty | `PerformanceAppraisalDataSeeder` | S10 (the next rebuild) |
+| The E-e screens (the template editor's lock and banners, the template list's *Locked* column and *Remove*, the settings editor's in-use lock and *Copy*, the cycle page's pinned rows and fixed template on edit) not browser-walked | 7 files | K |
 
 ---
 

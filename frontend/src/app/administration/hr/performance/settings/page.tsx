@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Plus } from 'lucide-react';
@@ -17,6 +18,7 @@ import {
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { CloneSettingsProfileDialog } from '@/components/hr/performance/CloneSettingsProfileDialog';
 import { appraisalSettingsService } from '@/services/hr/appraisal.service';
 import { evaluationWeightTotal } from '@/types/hr/appraisal';
 import type { AppraisalSettings } from '@/types/hr/appraisal';
@@ -51,6 +53,8 @@ export default function AppraisalSettingsListPage() {
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  // A profile in use changes its rules on a copy (performance closure E-e, D-67).
+  const [cloneOf, setCloneOf] = useState<AppraisalSettings | null>(null);
   const makeDefault = useMutation({
     mutationFn: (id: string) => appraisalSettingsService.makeDefault(id),
     onSuccess: (profile) => {
@@ -138,6 +142,15 @@ export default function AppraisalSettingsListPage() {
                               Default
                             </Badge>
                           )}
+                          {s.isInUse && (
+                            <Badge
+                              variant="outline"
+                              className="ml-2"
+                              title={`Read by ${s.inUseAppraisalCount} appraisal(s): ${s.inUseCycleNames.join(', ')}. Its rules change on a copy.`}
+                            >
+                              In use
+                            </Badge>
+                          )}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
@@ -180,6 +193,9 @@ export default function AppraisalSettingsListPage() {
                               Edit
                             </Link>
                           </Button>
+                          <Button variant="ghost" size="sm" onClick={() => setCloneOf(s)}>
+                            Copy
+                          </Button>
                         </TableCell>
                       </TableRow>
                     );
@@ -190,6 +206,8 @@ export default function AppraisalSettingsListPage() {
           )}
         </CardContent>
       </Card>
+
+      <CloneSettingsProfileDialog profile={cloneOf} onOpenChange={(open) => !open && setCloneOf(null)} />
     </div>
   );
 }

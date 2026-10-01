@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Shared;
@@ -160,13 +161,19 @@ public class AppraisalSettingsController : ControllerBase
             var response = await _settingsService.UpdateAsync(updateDto);
             return Ok(response);
         }
+        catch (AppraisalConfigurationLockedException ex)
+        {
+            // In use (performance closure E-e, D-67): appraisals read its rules — a conflict with its state, 409.
+            return Conflict(new { message = ex.Message });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(ex.Message);
+            // An unknown profile, or another tenant's: it answered 400.
+            return NotFound(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -222,6 +229,40 @@ public class AppraisalSettingsController : ControllerBase
         {
             _logger.LogError(ex, "Error making appraisal settings {SettingsId} the default", id);
             return StatusCode(500, "An error occurred while making the appraisal settings the default");
+        }
+    }
+
+    /// <summary>
+    /// Copy a profile under a new name (performance closure E-e, D-46): how the rules of a profile in use change. The
+    /// copy is not the default; a cycle takes it when created, or once it is made the default.
+    /// </summary>
+    [HttpPost("{id:guid}/clone")]
+    [ProducesResponseType(typeof(AppraisalSettingsDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
+    public async Task<IActionResult> Clone(Guid id, [FromBody] CloneAppraisalSettingsDto dto)
+    {
+        try
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            var response = await _settingsService.CloneAsync(id, dto, HttpContext.RequestAborted);
+            return StatusCode(201, response);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error copying appraisal settings {SettingsId}", id);
+            return StatusCode(500, "An error occurred while copying the appraisal settings");
         }
     }
 

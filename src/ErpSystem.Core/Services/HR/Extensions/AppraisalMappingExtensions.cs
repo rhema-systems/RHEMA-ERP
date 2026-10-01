@@ -1205,7 +1205,8 @@ public static class AppraisalMappingExtensions
 
     public static void UpdateEntity(this UpdateAppraisalTemplateSectionDto dto, AppraisalTemplateSection entity)
     {
-        entity.AppraisalTemplateId = dto.AppraisalTemplateId;
+        // A section stays on its template (performance closure E-e): the body's template id moved it — past that
+        // template's lock, and across tenants.
         entity.SectionName = dto.SectionName;
         entity.Description = dto.Description;
         entity.DisplayOrder = dto.DisplayOrder;
@@ -1268,7 +1269,8 @@ public static class AppraisalMappingExtensions
 
     public static void UpdateEntity(this UpdateAppraisalTemplateItemDto dto, AppraisalTemplateItem entity)
     {
-        entity.AppraisalTemplateSectionId = dto.AppraisalTemplateSectionId;
+        // An item stays in its section (performance closure E-e): the body's section id moved it into another
+        // template, a goals section, or another tenant, past each check.
         entity.CompetencyId = dto.CompetencyId;
         entity.KpiDefinitionId = dto.KpiDefinitionId;
         entity.KpiTargetValue = dto.KpiTargetValue;
@@ -1413,6 +1415,7 @@ public static class AppraisalMappingExtensions
             TenantId = entity.TenantId,
             AppraisalCycleId = entity.AppraisalCycleId,
             CycleCode = entity.AppraisalCycle?.CycleCode,
+            CycleStatus = entity.AppraisalCycle?.Status,
             AppraisalTemplateId = entity.AppraisalTemplateId,
             TemplateName = tmpl?.TemplateName ?? string.Empty,
             OrganizationLevelId = tmpl?.OrganizationLevelId,
@@ -1443,8 +1446,8 @@ public static class AppraisalMappingExtensions
 
     public static void UpdateEntity(this UpdateAppraisalCycleTemplateDto dto, AppraisalCycleTemplate entity)
     {
-        entity.AppraisalCycleId = dto.AppraisalCycleId;
-        entity.AppraisalTemplateId = dto.AppraisalTemplateId;
+        // The link's cycle and template are pinned (performance closure E-e, D-68): re-pointing an Open cycle's link
+        // released the template's lock while its appraisals still read it. A different template is a new link.
         entity.Priority = dto.Priority;
         entity.IsActive = dto.IsActive;
     }

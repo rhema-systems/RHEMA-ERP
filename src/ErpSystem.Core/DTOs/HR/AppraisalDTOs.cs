@@ -996,6 +996,16 @@ public class AppraisalSettingsDto : BaseDto
     /// </summary>
     public bool IsDefault { get; set; }
 
+    /// <summary>
+    /// Appraisals read this profile's rules (performance closure E-e, D-67): it is in use once any appraisal sits on
+    /// a cycle using it — finished ones too, which still read its visibility, anonymity and outcome settings. An
+    /// in-use profile's rules are changed on a clone; its name, deadline-risk bands, workload threshold and default
+    /// HR reviewer stay editable.
+    /// </summary>
+    public bool IsInUse { get; set; }
+    public int InUseAppraisalCount { get; set; }
+    public List<string> InUseCycleNames { get; set; } = new();
+
     // Self-evaluation
     public bool RequireSelfEvaluation { get; set; }
     public bool AllowSelfSoftSkillRating { get; set; }
@@ -1071,6 +1081,17 @@ public class AppraisalSettingsDto : BaseDto
     public int DeadlineRiskLowDays { get; set; } = 7;
     public string SuccessionPoolName { get; set; } = "Appraisal Nominations";
     public ReadinessLevel SuccessionDefaultReadiness { get; set; } = ReadinessLevel.ReadyIn12Months;
+}
+
+/// <summary>
+/// Copies a profile under a new name (performance closure E-e, D-46/D-67): the door to changing the rules of one in
+/// use. The copy is not the default; a cycle takes it when created, or once it is made the default.
+/// </summary>
+public class CloneAppraisalSettingsDto
+{
+    [Required]
+    [MaxLength(100)]
+    public string SettingsName { get; set; } = string.Empty;
 }
 
 public class CreateAppraisalSettingsDto : CreateDtoBase
@@ -3348,6 +3369,15 @@ public class AppraisalTemplateDto : BaseDto
     public DateTime? SubmittedDate { get; set; }
     public DateTime? ApprovalDate { get; set; }
     public string? RejectionReason { get; set; }
+
+    /// <summary>
+    /// The template's structure is frozen (performance closure E-e, D-66): appraisals are scored on it, or it is
+    /// assigned to an open cycle. Its name and description stay editable; a structural change is made on a copy.
+    /// </summary>
+    public bool IsLocked { get; set; }
+
+    /// <summary>Why it is locked, e.g. "107 appraisals are scored on it, and it is assigned to the open cycle 'X'".</summary>
+    public string? LockReason { get; set; }
 }
 
 public class CreateAppraisalTemplateDto : CreateDtoBase
@@ -3416,6 +3446,10 @@ public class AppraisalTemplateSummaryDto : BaseDto
     public int SectionsCount { get; set; }
     public int TotalItemsCount { get; set; }
     public bool HasCycleAssignments { get; set; }
+
+    /// <summary>As <see cref="AppraisalTemplateDto.IsLocked"/>: appraisals are scored on it, or an open cycle has it.</summary>
+    public bool IsLocked { get; set; }
+    public string? LockReason { get; set; }
 }
 
 /// <summary>Reason payload for rejecting a submitted appraisal template.</summary>
@@ -3952,6 +3986,16 @@ public class AppraisalCycleTemplateDto : BaseDto
     public Guid TenantId { get; set; }
     public Guid AppraisalCycleId { get; set; }
     public string? CycleCode { get; set; }
+
+    /// <summary>The cycle's status (P-7): a Closed cycle's links are frozen, an Open cycle's pinned while used.</summary>
+    public AppraisalCycleStatus? CycleStatus { get; set; }
+
+    /// <summary>
+    /// Appraisals in this cycle are scored on this template (performance closure E-e, D-68), so the link is neither
+    /// removed nor changed — removing it was a way round the template's lock.
+    /// </summary>
+    public bool TemplateInUseInCycle { get; set; }
+
     public Guid AppraisalTemplateId { get; set; }
     public string TemplateName { get; set; } = string.Empty;
     // Scope — sourced from AppraisalTemplate

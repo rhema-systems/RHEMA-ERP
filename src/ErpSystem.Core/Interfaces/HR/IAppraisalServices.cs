@@ -284,6 +284,9 @@ public interface IAppraisalSettingsService
 
     /// <summary>Makes the profile the tenant's default, and no other (closure B6).</summary>
     Task<AppraisalSettingsDto> MakeDefaultAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>Copies the profile under a new name, not the default (closure E-e): how an in-use profile's rules change.</summary>
+    Task<AppraisalSettingsDto> CloneAsync(Guid id, CloneAppraisalSettingsDto dto, CancellationToken cancellationToken = default);
     Task<bool> ValidateWeightsAsync(Guid id, CancellationToken cancellationToken = default);
 }
 

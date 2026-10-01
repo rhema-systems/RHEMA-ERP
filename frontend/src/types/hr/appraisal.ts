@@ -181,6 +181,14 @@ export interface AppraisalSettings extends AuditFields {
    * create and update bodies do not carry it.
    */
   isDefault: boolean;
+  /**
+   * Appraisals read its rules (performance closure E-e, D-67): once any appraisal sits on a cycle
+   * using it, its rules change on a clone. Its name, deadline-risk bands, workload threshold and
+   * default HR reviewer stay editable.
+   */
+  isInUse: boolean;
+  inUseAppraisalCount: number;
+  inUseCycleNames: string[];
 
   requireSelfEvaluation: boolean;
   allowSelfSoftSkillRating: boolean;
@@ -246,7 +254,11 @@ export interface AppraisalSettings extends AuditFields {
   successionDefaultReadiness: ReadinessLevel;
 }
 
-export type CreateAppraisalSettings = Omit<AppraisalSettings, keyof AuditFields | 'tenantId' | 'isDefault'>;
+// The usage fields are the server's reading (E-e), not part of what is saved.
+export type CreateAppraisalSettings = Omit<
+  AppraisalSettings,
+  keyof AuditFields | 'tenantId' | 'isDefault' | 'isInUse' | 'inUseAppraisalCount' | 'inUseCycleNames'
+>;
 export type UpdateAppraisalSettings = CreateAppraisalSettings & { id: string };
 
 /**
@@ -344,6 +356,12 @@ export interface AppraisalTemplate extends AuditFields {
   submittedDate?: string | null;
   approvalDate?: string | null;
   rejectionReason?: string | null;
+  /**
+   * Its structure is frozen (performance closure E-e, D-66): appraisals are scored on it, or an
+   * open cycle has it. The editor reads this (P-7); a structural change is made on a copy.
+   */
+  isLocked: boolean;
+  lockReason?: string | null;
 }
 
 /** List projection: adds the counts and the in-use flag without loading the whole graph. */
@@ -360,8 +378,11 @@ export interface AppraisalTemplateSummary extends AuditFields {
   approvalStatus: TemplateApprovalStatus;
   sectionsCount: number;
   totalItemsCount: number;
-  /** True once assigned to any cycle — assignment to a live cycle is what freezes edits. */
+  /** True once assigned to any cycle: such a template is not deleted until it comes off them. */
   hasCycleAssignments: boolean;
+  /** As `AppraisalTemplate.isLocked` — what freezes its structure (E-e). */
+  isLocked: boolean;
+  lockReason?: string | null;
 }
 
 export interface CreateAppraisalTemplate {
@@ -625,6 +646,13 @@ export interface AppraisalCycleTemplate extends AuditFields {
   tenantId: string;
   appraisalCycleId: string;
   cycleCode?: string | null;
+  /** The cycle's status (P-7): a Closed cycle's links are frozen. */
+  cycleStatus?: AppraisalCycleStatus | null;
+  /**
+   * Appraisals in this cycle are scored on this template (E-e, D-68): the link is neither removed
+   * nor changed — removing it was a way round the template's lock.
+   */
+  templateInUseInCycle: boolean;
   appraisalTemplateId: string;
   templateName: string;
   organizationLevelId?: string | null;

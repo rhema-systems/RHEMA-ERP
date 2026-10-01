@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -20,6 +21,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     private readonly IGenericRepository<TemplateItemGradeRange> _gradeRangeRepository;
     private readonly IGenericRepository<AppraisalGradeDefinition> _gradeDefinitionRepository;
     private readonly IGenericRepository<AppraisalCompetency> _competencyRepository;
+    private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
+    private readonly IGenericRepository<AppraisalCycleTemplate> _cycleTemplateRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
@@ -40,6 +43,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         IGenericRepository<TemplateItemGradeRange> gradeRangeRepository,
         IGenericRepository<AppraisalGradeDefinition> gradeDefinitionRepository,
         IGenericRepository<AppraisalCompetency> competencyRepository,
+        IGenericRepository<PerformanceAppraisal> appraisalRepository,
+        IGenericRepository<AppraisalCycleTemplate> cycleTemplateRepository,
         ICurrentUserProvider currentUserProvider,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
@@ -52,6 +57,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         _gradeRangeRepository = gradeRangeRepository;
         _gradeDefinitionRepository = gradeDefinitionRepository;
         _competencyRepository = competencyRepository;
+        _appraisalRepository = appraisalRepository;
+        _cycleTemplateRepository = cycleTemplateRepository;
         _currentUserProvider = currentUserProvider;
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
@@ -119,7 +126,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         if (entity == null)
             throw new ArgumentException($"Appraisal template with ID '{id}' not found.");
 
-        return entity.ToDto();
+        return (await WithLocksAsync(new List<AppraisalTemplateDto> { entity.ToDto() }, cancellationToken))[0];
     }
 
     public async Task<IEnumerable<AppraisalTemplateDto>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -133,7 +140,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             .OrderBy(t => t.TemplateName)
             .ToListAsync(cancellationToken);
 
-        return entities.ToDtoList();
+        return await WithLocksAsync(entities.ToDtoList(), cancellationToken);
     }
 
     public async Task<IEnumerable<AppraisalTemplateSummaryDto>> GetSummariesAsync(CancellationToken cancellationToken = default)
@@ -150,6 +157,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             .OrderBy(t => t.TemplateName)
             .ToListAsync(cancellationToken);
 
+        var locks = await GetLockReasonsAsync(entities.Select(t => t.Id).ToList(), cancellationToken);
         return entities.Select(t => new AppraisalTemplateSummaryDto
         {
             Id                    = t.Id,
@@ -165,7 +173,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             ApprovalStatus        = t.ApprovalStatus,
             SectionsCount         = t.Sections.Count,
             TotalItemsCount       = t.Sections.Sum(s => s.TemplateItems.Count),
-            HasCycleAssignments   = t.CycleAssignments.Any()
+            HasCycleAssignments   = t.CycleAssignments.Any(),
+            IsLocked              = locks.ContainsKey(t.Id),
+            LockReason            = locks.GetValueOrDefault(t.Id)
         }).ToList();
     }
 
@@ -184,7 +194,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
         return new PagedResult<AppraisalTemplateDto>
         {
-            Items = items.ToDtoList(),
+            Items = await WithLocksAsync(items.ToDtoList(), cancellationToken),
             TotalCount = totalCount,
             Page = pageNumber,
             PageSize = pageSize
@@ -200,7 +210,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             .OrderBy(t => t.TemplateName)
             .ToListAsync(cancellationToken);
 
-        return entities.ToDtoList();
+        return await WithLocksAsync(entities.ToDtoList(), cancellationToken);
     }
 
     public async Task<IEnumerable<AppraisalTemplateDto>> GetByOrganizationUnitIdAsync(Guid orgUnitId, CancellationToken cancellationToken = default)
@@ -212,7 +222,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             .OrderBy(t => t.TemplateName)
             .ToListAsync(cancellationToken);
 
-        return entities.ToDtoList();
+        return await WithLocksAsync(entities.ToDtoList(), cancellationToken);
     }
 
     public async Task<IEnumerable<AppraisalTemplateDto>> GetByOrganizationLevelIdAsync(Guid orgLevelId, CancellationToken cancellationToken = default)
@@ -224,7 +234,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             .OrderBy(t => t.TemplateName)
             .ToListAsync(cancellationToken);
 
-        return entities.ToDtoList();
+        return await WithLocksAsync(entities.ToDtoList(), cancellationToken);
     }
 
     public async Task<IEnumerable<AppraisalTemplateDto>> GetActiveTemplatesAsync(CancellationToken cancellationToken = default)
@@ -238,7 +248,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             .OrderBy(t => t.TemplateName)
             .ToListAsync(cancellationToken);
 
-        return entities.ToDtoList();
+        return await WithLocksAsync(entities.ToDtoList(), cancellationToken);
     }
 
     public async Task<AppraisalTemplateDto> CreateAsync(CreateAppraisalTemplateDto createDto, CancellationToken cancellationToken = default)
@@ -258,9 +268,24 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     {
         var entity = await GetOwnedAsync(updateDto.Id);
 
-        await AssertTemplateNotInActiveCycleAsync(updateDto.Id, cancellationToken);
+        // Nothing changes while it awaits approval (performance closure E-e, D-66). Its name and description are
+        // words, not structure, and stay editable while it is locked; its scope decides who is scored on it, so a
+        // scope change is structural — refused while locked, and an approved template goes back to Draft.
+        EnsureNotAwaitingApproval(entity);
+        var scopeChanged = entity.OrganizationLevelId != updateDto.OrganizationLevelId
+                        || entity.OrganizationUnitId != updateDto.OrganizationUnitId
+                        || entity.PositionId != updateDto.PositionId;
+        if (scopeChanged)
+            await EnsureStructureEditableAsync(entity.Id, cancellationToken);
+
+        // Activation checks the weights and bands through this route as through the active-status one; it
+        // skipped them here.
+        if (updateDto.IsActive && !entity.IsActive)
+            await ValidateTemplateWeightsAsync(entity.Id, cancellationToken);
 
         updateDto.UpdateEntity(entity);
+        if (scopeChanged)
+            ReturnToDraftIfApproved(entity);
 
         await _templateRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -272,14 +297,49 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedAsync(id);
+        var entity = await EnsureStructureEditableAsync(id, cancellationToken);
+        var tenantId = GetTenantId();
 
-        await AssertTemplateNotInActiveCycleAsync(id, cancellationToken);
+        // A template on a cycle is not deleted (performance closure E-e, D-68): generation silently dropped the
+        // link, and the people it covered fell to another template or to none. It comes off its cycles first.
+        var cycles = await _cycleTemplateRepository.GetQueryable()
+            .Where(l => l.TenantId == tenantId && l.AppraisalTemplateId == id)
+            .Select(l => l.AppraisalCycle.CycleName)
+            .Distinct()
+            .OrderBy(n => n)
+            .ToListAsync(cancellationToken);
+        if (cycles.Count > 0)
+            throw new AppraisalConfigurationLockedException(
+                $"This template is on {(cycles.Count == 1 ? "the cycle" : "the cycles")} " +
+                $"{string.Join(", ", cycles.Select(n => $"'{n}'"))}: remove it from " +
+                $"{(cycles.Count == 1 ? "that cycle" : "them")} before deleting it.");
+
+        // Its sections, items and bands go with it — they stayed, pointing at a deleted template.
+        var sections = await _sectionRepository.GetQueryable()
+            .Where(s => s.TenantId == tenantId && s.AppraisalTemplateId == id)
+            .ToListAsync(cancellationToken);
+        var sectionIds = sections.Select(s => s.Id).ToList();
+        var items = await _itemRepository.GetQueryable()
+            .Where(i => i.TenantId == tenantId && sectionIds.Contains(i.AppraisalTemplateSectionId))
+            .ToListAsync(cancellationToken);
+        var itemIds = items.Select(i => i.Id).ToList();
+        var ranges = await _gradeRangeRepository.GetQueryable()
+            .Where(r => r.TenantId == tenantId && itemIds.Contains(r.AppraisalTemplateItemId))
+            .ToListAsync(cancellationToken);
+
+        foreach (var range in ranges)
+            await _gradeRangeRepository.DeleteAsync(range);
+        foreach (var item in items)
+            await _itemRepository.DeleteAsync(item);
+        foreach (var section in sections)
+            await _sectionRepository.DeleteAsync(section);
 
         await _templateRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Appraisal template deleted: {Id}", id);
+        _logger.LogInformation(
+            "Appraisal template deleted: {Id}, with {sections} section(s), {items} item(s) and {ranges} grade range(s)",
+            id, sections.Count, items.Count, ranges.Count);
         return true;
     }
 
@@ -349,6 +409,12 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         var entity = await GetOwnedAsync(id);
         var userId = RequireUserId();
 
+        // Only what was submitted is decided (performance closure E-e): with no definition published, an approver
+        // could approve a Draft nobody submitted — past the weight check only the submission runs.
+        if (entity.ApprovalStatus != TemplateApprovalStatus.PendingApproval)
+            throw new InvalidOperationException(
+                $"Only a template awaiting approval can be approved; this one is {entity.ApprovalStatus}.");
+
         var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
             _workflowIntegrationService, _currentUserProvider, EntityType, id, userId,
             "Approve", null, "approve an appraisal template", HrPermissions.ApprovePerformance);
@@ -373,6 +439,11 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     {
         var entity = await GetOwnedAsync(id);
         var userId = RequireUserId();
+
+        // As the approval: an approved template — perhaps already on a cycle — is not rejected after the fact.
+        if (entity.ApprovalStatus != TemplateApprovalStatus.PendingApproval)
+            throw new InvalidOperationException(
+                $"Only a template awaiting approval can be rejected; this one is {entity.ApprovalStatus}.");
 
         var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
 
@@ -425,8 +496,9 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<AppraisalTemplateDto> CloneAsync(Guid sourceTemplateId, CopyAppraisalTemplateDto dto, CancellationToken cancellationToken = default)
     {
+        // A rule, not a missing record — it answered 404.
         if (string.IsNullOrWhiteSpace(dto.NewTemplateName))
-            throw new ArgumentException("A name is required for the copied template.");
+            throw new InvalidOperationException("A name is required for the copied template.");
 
         var tenantId = GetTenantId();
         var source = await _templateRepository.GetQueryable()
@@ -508,9 +580,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<AppraisalTemplateSectionDto> AddSectionAsync(Guid templateId, CreateAppraisalTemplateSectionDto dto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedAsync(templateId);
-
-        await AssertTemplateNotInActiveCycleAsync(templateId, cancellationToken);
+        var template = await EnsureStructureEditableAsync(templateId, cancellationToken);
 
         var tenantId = GetTenantId();
         var entity = dto.ToEntity();
@@ -530,6 +600,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         }
 
         await _sectionRepository.AddAsync(entity);
+        ReturnToDraftIfApproved(template);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         entity = await _sectionRepository.GetQueryable()
@@ -561,7 +632,12 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     {
         var entity = await GetOwnedSectionAsync(templateId, dto.Id);
 
-        await AssertTemplateNotInActiveCycleAsync(templateId, cancellationToken);
+        // A section stays on its template (performance closure E-e): the body's template id moved it, past that
+        // template's lock and across tenants. Moving it is copying the template.
+        if (dto.AppraisalTemplateId != Guid.Empty && dto.AppraisalTemplateId != templateId)
+            throw new InvalidOperationException("A section stays on its template; it cannot be moved to another one.");
+
+        var template = await EnsureStructureEditableAsync(templateId, cancellationToken);
 
         // Becoming a goals section: the only one on the template, and empty — its rows are each
         // employee's goals, and items kept beside them would count the section twice (lane L).
@@ -576,6 +652,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
         dto.UpdateEntity(entity);
         await _sectionRepository.UpdateAsync(entity);
+        ReturnToDraftIfApproved(template);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Template section updated: {SectionId}", entity.Id);
@@ -586,9 +663,10 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     {
         var entity = await GetOwnedSectionAsync(templateId, sectionId);
 
-        await AssertTemplateNotInActiveCycleAsync(templateId, cancellationToken);
+        var template = await EnsureStructureEditableAsync(templateId, cancellationToken);
 
         await _sectionRepository.DeleteAsync(entity);
+        ReturnToDraftIfApproved(template);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Template section deleted: {SectionId}", sectionId);
@@ -597,7 +675,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     public async Task<bool> ReorderSectionsAsync(Guid templateId, IEnumerable<Guid> orderedSectionIds, CancellationToken cancellationToken = default)
     {
-        await GetOwnedAsync(templateId);
+        // The forms lay a template out in its order, live, so the order is part of its structure (E-e, D-66).
+        var template = await EnsureStructureEditableAsync(templateId, cancellationToken);
         var tenantId = GetTenantId();
 
         var sections = await _sectionRepository.GetQueryable()
@@ -615,6 +694,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         foreach (var section in sections)
             await _sectionRepository.UpdateAsync(section);
 
+        ReturnToDraftIfApproved(template);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Template {TemplateId} sections reordered", templateId);
@@ -631,7 +711,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         if (section == null)
             throw new ArgumentException($"Template section with ID '{sectionId}' not found.");
 
-        await AssertTemplateNotInActiveCycleAsync(section.AppraisalTemplateId, cancellationToken);
+        var template = await EnsureStructureEditableAsync(section.AppraisalTemplateId, cancellationToken);
 
         // A goals section is filled by each employee's locked goals (lane L); an item beside them
         // would share the section's weight with every goal and count the section twice.
@@ -674,6 +754,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         }
 
         await _itemRepository.AddAsync(entity);
+        ReturnToDraftIfApproved(template);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         entity = await _itemRepository.GetQueryable()
@@ -713,7 +794,12 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         if (entity == null)
             throw new ArgumentException("Template item not found.");
 
-        await AssertTemplateNotInActiveCycleAsync(entity.Section.AppraisalTemplateId, cancellationToken);
+        // An item stays in its section (performance closure E-e): the body's section id moved it into another
+        // template, a goals section or another tenant, past each check — which all ran on where it came from.
+        if (dto.AppraisalTemplateSectionId != Guid.Empty && dto.AppraisalTemplateSectionId != sectionId)
+            throw new InvalidOperationException("An item stays in its section; it cannot be moved to another one.");
+
+        var template = await EnsureStructureEditableAsync(entity.Section.AppraisalTemplateId, cancellationToken);
 
         // Duplicate check: same competency/KPI cannot appear more than once across all sections (exclude self)
         if (dto.CompetencyId.HasValue)
@@ -741,6 +827,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
         dto.UpdateEntity(entity);
         await _itemRepository.UpdateAsync(entity);
+        ReturnToDraftIfApproved(template);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Template item updated: {ItemId}", entity.Id);
@@ -751,9 +838,10 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     {
         var entity = await GetOwnedItemAsync(sectionId, itemId);
 
-        await AssertTemplateNotInActiveCycleAsync(entity.Section.AppraisalTemplateId, cancellationToken);
+        var template = await EnsureStructureEditableAsync(entity.Section.AppraisalTemplateId, cancellationToken);
 
         await _itemRepository.DeleteAsync(entity);
+        ReturnToDraftIfApproved(template);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Template item deleted: {ItemId}", itemId);
@@ -763,6 +851,11 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     public async Task<bool> ReorderItemsAsync(Guid sectionId, IEnumerable<Guid> orderedItemIds, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+        var section = await _sectionRepository.GetQueryable()
+            .FirstOrDefaultAsync(s => s.Id == sectionId && s.TenantId == tenantId, cancellationToken)
+            ?? throw new ArgumentException($"Template section with ID '{sectionId}' not found.");
+        var template = await EnsureStructureEditableAsync(section.AppraisalTemplateId, cancellationToken);
+
         var items = await _itemRepository.GetQueryable()
             .Where(i => i.TenantId == tenantId && i.AppraisalTemplateSectionId == sectionId)
             .ToListAsync(cancellationToken);
@@ -778,6 +871,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         foreach (var item in items)
             await _itemRepository.UpdateAsync(item);
 
+        ReturnToDraftIfApproved(template);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Section {SectionId} items reordered", sectionId);
@@ -808,7 +902,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         if (item == null)
             throw new ArgumentException($"Template item with ID '{itemId}' not found.");
 
-        await AssertTemplateNotInActiveCycleAsync(item.Section.AppraisalTemplateId, cancellationToken);
+        var template = await EnsureStructureEditableAsync(item.Section.AppraisalTemplateId, cancellationToken);
 
         // ── Validate input ──────────────────────────────────────────────────
         if (dto.Ranges == null || dto.Ranges.Count == 0)
@@ -861,6 +955,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         foreach (var newRange in newRanges)
             await _gradeRangeRepository.AddAsync(newRange);
 
+        ReturnToDraftIfApproved(template);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Grade ranges updated for template item {ItemId}: {Count} ranges", itemId, newRanges.Count);
@@ -882,28 +977,101 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
     // ─── Private Validation Helpers ───────────────────────────────────────
 
+    // ─── The lock (performance closure E-e, D-66) ─────────────────────────
+    // An appraisal's form reads its template live — the sections, the rows, the questions, whether a row is rated or
+    // measured, which competencies a self-evaluation must score — and its snapshot freezes only the weights, KPI
+    // targets and bands. So a template's structure does not change while appraisals are scored on it, nor while an
+    // open cycle has it (whoever it generates next is scored on what the others were). The lock covered the open
+    // cycle alone — not a Draft cycle with appraisals, nor a Closed one.
+
     /// <summary>
-    /// Throws if the template is assigned to any Open appraisal cycle.
-    /// All structural edits must be made on a clone while the original is in use.
+    /// Why each template is locked; a template with no entry is not. Appraisals scored on it (withdrawn ones too —
+    /// they stay on the record, on their form), or an active link to an open cycle.
     /// </summary>
-    private async Task AssertTemplateNotInActiveCycleAsync(Guid templateId, CancellationToken cancellationToken = default)
+    private async Task<Dictionary<Guid, string>> GetLockReasonsAsync(IReadOnlyCollection<Guid> templateIds, CancellationToken cancellationToken)
     {
+        var reasons = new Dictionary<Guid, string>();
+        if (templateIds.Count == 0)
+            return reasons;
+
         var tenantId = GetTenantId();
-        var template = await _templateRepository.GetQueryable()
-            .Where(t => t.Id == templateId && t.TenantId == tenantId)
-            .Include(t => t.CycleAssignments)
-                .ThenInclude(ct => ct.AppraisalCycle)
-            .FirstOrDefaultAsync(t => t.Id == templateId, cancellationToken);
+        var scored = await _appraisalRepository.GetQueryable()
+            .Where(a => a.TenantId == tenantId && a.AppraisalTemplateId != null && templateIds.Contains(a.AppraisalTemplateId.Value))
+            .GroupBy(a => a.AppraisalTemplateId!.Value)
+            .Select(g => new { TemplateId = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+        var openCycles = await _cycleTemplateRepository.GetQueryable()
+            .Where(l => l.TenantId == tenantId && l.IsActive && templateIds.Contains(l.AppraisalTemplateId)
+                     && l.AppraisalCycle.Status == AppraisalCycleStatus.Open)
+            .Select(l => new { l.AppraisalTemplateId, l.AppraisalCycle.CycleName })
+            .ToListAsync(cancellationToken);
 
-        if (template == null) return;
+        foreach (var id in templateIds)
+        {
+            var parts = new List<string>();
+            var count = scored.FirstOrDefault(s => s.TemplateId == id)?.Count ?? 0;
+            if (count > 0)
+                parts.Add(count == 1 ? "an appraisal is scored on it" : $"{count} appraisals are scored on it");
+            var cycles = openCycles.Where(l => l.AppraisalTemplateId == id).Select(l => l.CycleName)
+                .Distinct().OrderBy(n => n).ToList();
+            if (cycles.Count > 0)
+                parts.Add($"it is assigned to the open cycle{(cycles.Count == 1 ? "" : "s")} " +
+                          string.Join(", ", cycles.Select(n => $"'{n}'")));
+            if (parts.Count > 0)
+                reasons[id] = string.Join(", and ", parts);
+        }
+        return reasons;
+    }
 
-        var inActiveCycle = template.CycleAssignments
-            .Any(ct => ct.AppraisalCycle.Status == AppraisalCycleStatus.Open);
+    /// <summary>Sets <c>IsLocked</c> and <c>LockReason</c> on each template read (P-7: the editor reads them).</summary>
+    private async Task<List<AppraisalTemplateDto>> WithLocksAsync(List<AppraisalTemplateDto> templates, CancellationToken cancellationToken)
+    {
+        var reasons = await GetLockReasonsAsync(templates.Select(t => t.Id).ToList(), cancellationToken);
+        foreach (var template in templates)
+        {
+            template.IsLocked = reasons.TryGetValue(template.Id, out var reason);
+            template.LockReason = reason;
+        }
+        return templates;
+    }
 
-        if (inActiveCycle)
-            throw new InvalidOperationException(
-                "This template cannot be modified because it is assigned to an Open appraisal cycle. " +
-                "Use CloneAsync to create a new version for modifications.");
+    /// <summary>
+    /// Refuses a change to the template's structure — its sections, items, bands, their order, its scope, its
+    /// delete — while it awaits approval or is locked. Returns the template, so the caller can send an approved one
+    /// back to Draft once the change is made (<see cref="ReturnToDraftIfApproved"/>).
+    /// </summary>
+    private async Task<AppraisalTemplate> EnsureStructureEditableAsync(Guid templateId, CancellationToken cancellationToken)
+    {
+        var template = await GetOwnedAsync(templateId);
+        EnsureNotAwaitingApproval(template);
+
+        var reasons = await GetLockReasonsAsync(new[] { templateId }, cancellationToken);
+        if (reasons.TryGetValue(templateId, out var reason))
+            throw new AppraisalConfigurationLockedException(
+                $"This template is locked: {reason}. Its structure cannot change underneath them — copy it and edit the copy.");
+        return template;
+    }
+
+    /// <summary>Nothing changes on a template awaiting a decision: what the approver sees is what is decided.</summary>
+    private static void EnsureNotAwaitingApproval(AppraisalTemplate template)
+    {
+        if (template.ApprovalStatus == TemplateApprovalStatus.PendingApproval)
+            throw new AppraisalConfigurationLockedException(
+                "This template is awaiting approval: recall it before changing it.");
+    }
+
+    /// <summary>
+    /// An approved template whose structure changed goes back to Draft: what was approved is no longer what it is, so
+    /// it is approved again before a cycle takes it (generation refuses an unapproved one). The adapter's recall
+    /// outcome clears the submission and approval stamps, as a recall does.
+    /// </summary>
+    private void ReturnToDraftIfApproved(AppraisalTemplate template)
+    {
+        if (template.ApprovalStatus != TemplateApprovalStatus.Approved)
+            return;
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType).ApplyRecallOutcome(template, _currentUserProvider.UserId);
+        _logger.LogInformation("Appraisal template {Id} returned to Draft: its structure changed after approval", template.Id);
     }
 
     /// <summary>
