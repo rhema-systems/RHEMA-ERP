@@ -97,6 +97,17 @@ public enum AssetStatus
 }
 
 /// <summary>
+/// Identifies the authoritative register behind a maintenance asset reference.
+/// LegacyMaintenanceAsset preserves job cards created before source-aware asset selection.
+/// </summary>
+public enum JobCardAssetSource
+{
+    LegacyMaintenanceAsset = 0,
+    FixedAsset = 1,
+    EstateManagedAsset = 2
+}
+
+/// <summary>
 /// Asset type classification for categories
 /// </summary>
 public enum AssetTypeClassification

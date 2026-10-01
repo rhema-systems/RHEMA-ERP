@@ -14,6 +14,7 @@ import {
   type SalesSaleableItemDto,
   type SalesSaleableSourceDto,
 } from '@/services/salesSetupService';
+import { hasSaleableNumber } from '@/lib/sales/saleableItemDisplay';
 
 export interface SalesLinkedSourceContext {
   sourceId?: string;
@@ -27,9 +28,9 @@ export interface SalesLinkedSourceContext {
   itemType?: string;
   customerId?: string;
   customerName?: string;
-  estimatedValue?: number;
+  estimatedValue?: number | null;
   currency?: string;
-  areaSquareMeters?: number;
+  areaSquareMeters?: number | null;
   propertyReference?: string;
   projectId?: string;
   projectCode?: string;
@@ -46,9 +47,9 @@ export interface SalesLinkedSourceContext {
   locationId?: string;
   locationName?: string;
   unitOfMeasure?: string;
-  currentQuantity?: number;
-  availableQuantity?: number;
-  allocatedQuantity?: number;
+  currentQuantity?: number | null;
+  availableQuantity?: number | null;
+  allocatedQuantity?: number | null;
   shouldCreateSalesAllocation?: boolean;
 }
 
@@ -346,12 +347,12 @@ export function SaleableSourceQuickStart({
             <div className="mt-2 flex flex-wrap gap-1">
               {linkedContext.sourceType ? <Badge variant="secondary">{linkedContext.sourceType}</Badge> : null}
               {linkedContext.itemType ? <Badge variant="outline">{linkedContext.itemType}</Badge> : null}
-              {linkedContext.estimatedValue !== undefined ? (
+              {hasSaleableNumber(linkedContext.estimatedValue) ? (
                 <Badge variant="outline">{formatAmount(linkedContext.estimatedValue, linkedContext.currency)}</Badge>
               ) : null}
               {linkedContext.warehouseName ? <Badge variant="outline">{linkedContext.warehouseName}</Badge> : null}
               {linkedContext.locationName ? <Badge variant="outline">{linkedContext.locationName}</Badge> : null}
-              {linkedContext.availableQuantity !== undefined ? (
+              {hasSaleableNumber(linkedContext.availableQuantity) ? (
                 <Badge variant="outline">
                   {linkedContext.availableQuantity.toLocaleString()} {linkedContext.unitOfMeasure || ''}
                 </Badge>
@@ -470,11 +471,13 @@ export function SaleableSourceQuickStart({
                       <div className="font-medium">{selectedItem.warehouseName || '-'}</div>
                     </div>
                     <div>
-                      <div className="text-muted-foreground">{selectedItem.availableQuantity !== undefined ? 'Available' : 'Area'}</div>
+                      <div className="text-muted-foreground">{hasSaleableNumber(selectedItem.availableQuantity) ? 'Available' : 'Area'}</div>
                       <div className="font-medium">
-                        {selectedItem.availableQuantity !== undefined
+                        {hasSaleableNumber(selectedItem.availableQuantity)
                           ? `${selectedItem.availableQuantity.toLocaleString()} ${selectedItem.unitOfMeasure || ''}`.trim()
-                          : selectedItem.areaSquareMeters ? `${selectedItem.areaSquareMeters.toLocaleString()} sqm` : '-'}
+                          : hasSaleableNumber(selectedItem.areaSquareMeters)
+                            ? `${selectedItem.areaSquareMeters.toLocaleString()} sqm`
+                            : '-'}
                       </div>
                     </div>
                     <div>

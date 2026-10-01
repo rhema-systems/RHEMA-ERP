@@ -5,6 +5,8 @@ using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
+using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 
@@ -14,6 +16,15 @@ namespace ErpSystem.Core.Entities.Maintenance;
 
 public class MaintenanceAsset : TenantEntity
 {
+    /// <summary>
+    /// Authoritative register behind this maintenance profile. Legacy records remain valid and
+    /// have no source FK; new Finance and Estate profiles are unique mappings to their source.
+    /// </summary>
+    public JobCardAssetSource SourceType { get; set; } = JobCardAssetSource.LegacyMaintenanceAsset;
+
+    public Guid? FixedAssetId { get; set; }
+    public Guid? EstateManagedAssetId { get; set; }
+
     [Required]
     [MaxLength(100)]
     public string Name { get; set; } = string.Empty;
@@ -133,6 +144,8 @@ public class MaintenanceAsset : TenantEntity
 
     // Navigation properties
     public virtual MaintenanceAssetCategory AssetCategory { get; set; } = null!;
+    public virtual FixedAsset? FixedAsset { get; set; }
+    public virtual EstateManagedAsset? EstateManagedAsset { get; set; }
     public virtual Employee? Employee { get; set; } // Asset custodian/responsible employee
     public virtual Project? CurrentProject { get; set; }
     public virtual Location? CurrentSiteLocation { get; set; }
@@ -973,6 +986,14 @@ public class JobCard : TenantEntity
     [Required]
     public Guid AssetId { get; set; }
 
+    /// <summary>
+    /// The authoritative register selected by the user. AssetId remains the compatible
+    /// maintenance-profile FK used by existing work-order and maintenance-history flows.
+    /// </summary>
+    public JobCardAssetSource AssetSource { get; set; } = JobCardAssetSource.LegacyMaintenanceAsset;
+    public Guid? FixedAssetId { get; set; }
+    public Guid? EstateManagedAssetId { get; set; }
+
     [Required]
     public Guid MaintenanceTypeId { get; set; }
 
@@ -1153,6 +1174,8 @@ public class JobCard : TenantEntity
 
     // Navigation properties
     public virtual MaintenanceAsset Asset { get; set; } = null!;
+    public virtual FixedAsset? FixedAsset { get; set; }
+    public virtual EstateManagedAsset? EstateManagedAsset { get; set; }
     public virtual MaintenanceType MaintenanceType { get; set; } = null!;
     public virtual PriorityLevel PriorityLevel { get; set; } = null!;
     public virtual BusinessPartner? CustomerBusinessPartner { get; set; }

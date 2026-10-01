@@ -122,7 +122,7 @@ public sealed class GlobalSearchEstateLegalTests
         db.AddRange(structure, level, sales, other, visible, Ticket(Guid.NewGuid(), sales),
             Ticket(tenantId, other), Ticket(tenantId, sales, EhcTicketType.Helpdesk), Ticket(tenantId, sales, deleted: true));
         await db.SaveChangesAsync();
-        var controller = new EhcPropertyEnquiriesController(db, User(), Mock.Of<IEhcTicketService>(), Mock.Of<IEstateSalesListingApplicationHandoffService>());
+        var controller = new EhcPropertyEnquiriesController(db, User(), Mock.Of<IEhcTicketService>(), Mock.Of<IEstateSalesListingApplicationHandoffService>(), Mock.Of<IPropertyEnquiryProspectService>());
 
         var rows = Rows(await controller.Search("TEMA", 5));
         Assert.Equal(visible.Id, Assert.Single(rows.EnumerateArray()).GetProperty("id").GetGuid());

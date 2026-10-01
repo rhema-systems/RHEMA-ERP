@@ -36,6 +36,7 @@ public interface IMaintenanceAssetService
     Task<MaintenanceAssetLifecycleHistoryDto> GetLifecycleHistoryAsync(Guid assetId);
     Task<MaintenanceAssetImportResultDto> ImportAssetsFromExcelAsync(Stream fileStream, string fileName);
     Task<byte[]> GenerateImportTemplateAsync();
+    Task<IReadOnlyList<JobCardAssetOptionDto>> GetJobCardAssetOptionsAsync(string? searchTerm = null);
 }
 
 public interface IMaintenanceAssetCategoryService

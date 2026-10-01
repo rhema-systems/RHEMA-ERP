@@ -2185,7 +2185,8 @@ public class CrmService : ICrmService
             ? new List<EhcTicket>()
             : (await ticketRepository.FindAsync(
                     x => x.TenantId == tenantId
-                        && portalUserIds.Contains(x.RequesterUserId),
+                        && x.RequesterUserId.HasValue
+                        && portalUserIds.Contains(x.RequesterUserId.Value),
                     x => x.Feedbacks,
                     x => x.Category,
                     x => x.AssignedToUser,
@@ -2265,12 +2266,12 @@ public class CrmService : ICrmService
             .GroupBy(x => x.UserId)
             .ToDictionary(x => x.Key, x => x.First().BusinessPartnerId);
         var ticketsByPartnerId = tickets
-            .Where(x => partnerIdByRequesterId.ContainsKey(x.RequesterUserId))
-            .GroupBy(x => partnerIdByRequesterId[x.RequesterUserId])
+            .Where(x => x.RequesterUserId.HasValue && partnerIdByRequesterId.ContainsKey(x.RequesterUserId.Value))
+            .GroupBy(x => partnerIdByRequesterId[x.RequesterUserId!.Value])
             .ToDictionary(x => x.Key, x => x.ToList());
         var ticketPartnerIds = tickets
-            .Where(x => partnerIdByRequesterId.ContainsKey(x.RequesterUserId))
-            .ToDictionary(x => x.Id, x => partnerIdByRequesterId[x.RequesterUserId]);
+            .Where(x => x.RequesterUserId.HasValue && partnerIdByRequesterId.ContainsKey(x.RequesterUserId.Value))
+            .ToDictionary(x => x.Id, x => partnerIdByRequesterId[x.RequesterUserId!.Value]);
         var problemLookup = problems.ToDictionary(x => x.Id);
         var problemsByPartnerId = problemLinks
             .Where(x => ticketPartnerIds.ContainsKey(x.TicketId))
@@ -2442,7 +2443,8 @@ public class CrmService : ICrmService
             ? new List<EhcTicket>()
             : (await ticketRepository.FindAsync(
                     x => x.TenantId == tenantId
-                        && portalUserIds.Contains(x.RequesterUserId),
+                        && x.RequesterUserId.HasValue
+                        && portalUserIds.Contains(x.RequesterUserId.Value),
                     x => x.Feedbacks,
                     x => x.Category,
                     x => x.AssignedToUser,

@@ -201,12 +201,34 @@ release checkout, invoke the wrapper as one script:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-QsUatVps.ps1
 ```
 
-This uses the normal deployment's preflight, backup, migration, seed and smoke
+This builds one immutable release and passes it to the normal deployer with
+`-DeployOnly`. The deployer retains its preflight, backup, migration, seed and smoke
 gates, then generates the read-only QS prerequisite report and VPS walkthrough.
 It stops on deployment failure and does not run the report or print completion.
 If only the report fails, it explicitly distinguishes that from deployment failure.
 The default target remains the previously cut-over test database
 `RhemaERP_VpsTest_20260926_173800`; the report checks the actual service target.
+
+For the normal one-command test VPS update, build, activation, and readiness run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\Deploy-QsUatVps.ps1 -UpdateSource
+```
+
+The builder prints `RELEASE_ARTIFACT_DIRECTORY|<path>`. If activation or a later
+check fails after that marker, correct the reported blocker and reuse the exact
+verified release without another frontend or API build:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\Deploy-QsUatVps.ps1 `
+  -ArtifactDirectory 'C:\Users\Administrator\Documents\ERP\RHEMA-ERP\artifacts\vps-releases\<release-id>'
+```
+
+Do not use `-CleanBuild` during a routine deployment; it deliberately discards
+the persistent Next.js compilation cache. `-LegacyFullBuild` keeps the original
+all-in-one deployer available for an explicit diagnostic or recovery run.
 
 For the explicitly authorized QS UAT configuration auto-approval, run:
 

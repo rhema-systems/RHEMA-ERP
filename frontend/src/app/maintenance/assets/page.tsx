@@ -50,6 +50,10 @@ import { format } from 'date-fns';
 
 interface Asset {
   id: string;
+  assetSource?: 'LegacyMaintenanceAsset' | 'FixedAsset' | 'EstateManagedAsset';
+  sourceAssetId?: string;
+  maintenanceAssetId?: string | null;
+  isSourceControlled?: boolean;
   assetCategoryId: string;
   assetNumber: string;
   name: string;
@@ -354,6 +358,12 @@ function AssetsPageContent() {
 
       const mapped = {
         ...asset,
+        assetSource: asset.assetSource || asset.AssetSource || 'LegacyMaintenanceAsset',
+        sourceAssetId: asset.sourceAssetId || asset.SourceAssetId || asset.id || asset.Id,
+        isSourceControlled: asset.isSourceControlled ?? asset.IsSourceControlled ?? false,
+        maintenanceAssetId: (asset.isSourceControlled ?? asset.IsSourceControlled)
+          ? (asset.id || asset.Id)
+          : (asset.maintenanceAssetId || asset.MaintenanceAssetId || asset.id || asset.Id),
         assetCategoryId: asset.assetCategoryId || asset.AssetCategoryId || asset.assetCategory?.id || '',
         assetNumber: asset.assetNumber || asset.AssetNumber || 'N/A',
         value: asset.currentValue || asset.CurrentValue || 0,
@@ -436,11 +446,16 @@ function AssetsPageContent() {
 
   useEffect(() => {
     if (!isViewDialogOpen || !selectedAsset?.id) return;
+    if (selectedAsset.isSourceControlled && !selectedAsset.maintenanceAssetId) {
+      setLifecycleHistory(null);
+      setLifecycleLoading(false);
+      return;
+    }
     const loadLifecycleHistory = async () => {
       setLifecycleLoading(true);
       const token = localStorage.getItem('token') || localStorage.getItem('authToken');
       try {
-        const response = await fetch(`${API_URL}/maintenance/assets/${selectedAsset.id}/lifecycle-history`, {
+        const response = await fetch(`${API_URL}/maintenance/assets/${selectedAsset.maintenanceAssetId || selectedAsset.id}/lifecycle-history`, {
           headers: { Authorization: token ? `Bearer ${token}` : '' },
         });
         if (!response.ok) throw new Error(await response.text());
@@ -453,7 +468,7 @@ function AssetsPageContent() {
       }
     };
     void loadLifecycleHistory();
-  }, [API_URL, isViewDialogOpen, selectedAsset?.id]);
+  }, [API_URL, isViewDialogOpen, selectedAsset?.id, selectedAsset?.isSourceControlled, selectedAsset?.maintenanceAssetId]);
 
   const loadAssetInspections = React.useCallback(async (assetId?: string | null) => {
     if (!assetId) {
@@ -481,8 +496,13 @@ function AssetsPageContent() {
 
   useEffect(() => {
     if (!isViewDialogOpen || !selectedAsset?.id) return;
-    void loadAssetInspections(selectedAsset.id);
-  }, [isViewDialogOpen, loadAssetInspections, selectedAsset?.id]);
+    if (selectedAsset.isSourceControlled && !selectedAsset.maintenanceAssetId) {
+      setAssetInspections([]);
+      setAssetInspectionsError(null);
+      return;
+    }
+    void loadAssetInspections(selectedAsset.maintenanceAssetId || selectedAsset.id);
+  }, [isViewDialogOpen, loadAssetInspections, selectedAsset?.id, selectedAsset?.isSourceControlled, selectedAsset?.maintenanceAssetId]);
 
   useEffect(() => {
     if (initialInspectionHandledRef.current || !isViewDialogOpen || assetInspectionsLoading) return;
@@ -501,7 +521,7 @@ function AssetsPageContent() {
       setLoading(true);
       try {
         const token = localStorage.getItem('authToken');
-        const [assetsResponse, categoriesResponse] = await Promise.all([
+        const [assetsResponse, categoriesResponse, selectionOptionsResponse] = await Promise.all([
           fetch(`${API_URL}/maintenance/assets`, {
             headers: {
               'Authorization': token ? `Bearer ${token}` : '',
@@ -513,13 +533,54 @@ function AssetsPageContent() {
               'Authorization': token ? `Bearer ${token}` : '',
               'Content-Type': 'application/json'
             }
+          }),
+          fetch(`${API_URL}/maintenance/assets/selection-options`, {
+            headers: {
+              'Authorization': token ? `Bearer ${token}` : '',
+              'Content-Type': 'application/json'
+            }
           })
         ]);
 
+        let rawProfiles: any[] = [];
         if (assetsResponse.ok) {
           const assetsData = await assetsResponse.json();
-          const rawAssets = assetsData.data || assetsData.items || assetsData || [];
-          setAssets(mapAssets(rawAssets));
+          rawProfiles = assetsData.data || assetsData.items || assetsData || [];
+        }
+
+        if (selectionOptionsResponse.ok) {
+          const options = await selectionOptionsResponse.json();
+          const profileById = new Map(rawProfiles.map((profile: any) => [String(profile.id), profile]));
+          const financeRows = (Array.isArray(options) ? options : [])
+            .filter((option: any) => option.assetSource === 'FixedAsset')
+            .map((option: any) => {
+              const profile = option.maintenanceAssetId
+                ? profileById.get(String(option.maintenanceAssetId)) || {}
+                : {};
+              return {
+                ...profile,
+                id: option.maintenanceAssetId || option.sourceAssetId,
+                maintenanceAssetId: option.maintenanceAssetId || null,
+                sourceAssetId: option.sourceAssetId,
+                assetSource: option.assetSource,
+                isSourceControlled: true,
+                assetNumber: option.assetCode,
+                name: option.assetName,
+                categoryName: option.categoryOrPropertyType,
+                location: option.location,
+                status: option.status,
+                description: option.description,
+                serialNumber: option.serialNumber,
+                purchaseDate: option.acquisitionDate,
+                currentValue: option.currentValue,
+              };
+            });
+          const legacyRows = rawProfiles.filter((profile: any) =>
+            !profile.isSourceControlled &&
+            (!profile.assetSource || profile.assetSource === 'LegacyMaintenanceAsset'));
+          setAssets(mapAssets([...financeRows, ...legacyRows]));
+        } else {
+          setAssets(mapAssets(rawProfiles));
         }
 
         console.log('Asset categories response status:', categoriesResponse.status);
@@ -577,8 +638,7 @@ function AssetsPageContent() {
       const asset = assets.find(a => a.id === assetId);
       if (asset) {
         console.log('Opening asset from URL:', asset);
-        setSelectedAsset(asset);
-        setIsViewDialogOpen(true);
+        void handleViewAsset(asset);
       } else {
         console.warn('Asset not found with ID:', assetId);
         toast({
@@ -832,29 +892,77 @@ function AssetsPageContent() {
     }
   };
 
-  const handleEditAsset = (asset: Asset) => {
-    setSelectedAsset(asset);
+  const handleEditAsset = async (asset: Asset) => {
+    let editableAsset = asset;
+    if (asset.assetSource === 'FixedAsset' && asset.sourceAssetId && !asset.maintenanceAssetId) {
+      try {
+        const profile = await maintenanceApiService.ensureSourceProfile('FixedAsset', asset.sourceAssetId);
+        editableAsset = {
+          ...asset,
+          id: profile.maintenanceAssetId,
+          maintenanceAssetId: profile.maintenanceAssetId,
+          isSourceControlled: true,
+        };
+        setAssets((current) => current.map((item) => item === asset ? editableAsset : item));
+      } catch (error) {
+        toast({
+          title: 'Maintenance profile could not be opened',
+          description: error instanceof Error ? error.message : 'The Finance asset profile could not be prepared.',
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+
+    setSelectedAsset(editableAsset);
     setNewAsset({
-      name: asset.name || '',
-      assetNumber: asset.assetNumber || '',
-      description: asset.description || '',
-      category: asset.category || '',
-      location: asset.location || '',
-      manufacturer: asset.manufacturer || '',
-      model: asset.model || '',
-      year: asset.year != null ? String(asset.year) : '',
-      ownershipType: asset.ownershipType || 'Owned',
-      serialNumber: asset.serialNumber || '',
-      licensePlate: asset.licensePlate || '',
-      vin: asset.vin || '',
-      fuelType: asset.fuelType || '',
-      isFleetAsset: !!asset.isFleetAsset,
-      purchaseDate: formatDateForInput(asset.purchaseDate),
-      warrantyExpiry: formatDateForInput(asset.warrantyExpiry),
-      criticality: asset.criticality || 'Medium',
-      value: asset.value || 0,
+      name: editableAsset.name || '',
+      assetNumber: editableAsset.assetNumber || '',
+      description: editableAsset.description || '',
+      category: editableAsset.category || '',
+      location: editableAsset.location || '',
+      manufacturer: editableAsset.manufacturer || '',
+      model: editableAsset.model || '',
+      year: editableAsset.year != null ? String(editableAsset.year) : '',
+      ownershipType: editableAsset.ownershipType || 'Owned',
+      serialNumber: editableAsset.serialNumber || '',
+      licensePlate: editableAsset.licensePlate || '',
+      vin: editableAsset.vin || '',
+      fuelType: editableAsset.fuelType || '',
+      isFleetAsset: !!editableAsset.isFleetAsset,
+      purchaseDate: formatDateForInput(editableAsset.purchaseDate),
+      warrantyExpiry: formatDateForInput(editableAsset.warrantyExpiry),
+      criticality: editableAsset.criticality || 'Medium',
+      value: editableAsset.value || 0,
     });
     setIsEditDialogOpen(true);
+  };
+
+  const handleViewAsset = async (asset: Asset) => {
+    let viewAsset = asset;
+    if (asset.assetSource === 'FixedAsset' && asset.sourceAssetId && !asset.maintenanceAssetId) {
+      try {
+        const profile = await maintenanceApiService.ensureSourceProfile('FixedAsset', asset.sourceAssetId);
+        viewAsset = {
+          ...asset,
+          id: profile.maintenanceAssetId,
+          maintenanceAssetId: profile.maintenanceAssetId,
+          isSourceControlled: true,
+        };
+        setAssets((current) => current.map((item) => item === asset ? viewAsset : item));
+      } catch (error) {
+        toast({
+          title: 'Maintenance profile could not be opened',
+          description: error instanceof Error ? error.message : 'The Finance asset profile could not be prepared.',
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+
+    setSelectedAsset(viewAsset);
+    setAssetViewTab('details');
+    setIsViewDialogOpen(true);
   };
 
   // Deep-link helper to open edit dialog for a specific asset (e.g. /maintenance/assets?id={id}&edit=1)
@@ -926,19 +1034,30 @@ function AssetsPageContent() {
         throw new Error('Failed to update asset');
       }
 
-      // Refresh the list
-      const assetsResponse = await fetch(`${API_URL}/maintenance/assets`, {
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (assetsResponse.ok) {
-        const assetsData = await assetsResponse.json();
-        const rawAssets = assetsData.data || assetsData.items || assetsData || [];
-        setAssets(mapAssets(rawAssets));
-      }
+      const updatedProfile = mapAssets([await response.json()])[0];
+      setAssets((current) => current.map((item) => {
+        if (item.id !== selectedAsset.id) return item;
+        return selectedAsset.assetSource === 'FixedAsset'
+          ? {
+              ...updatedProfile,
+              id: selectedAsset.id,
+              maintenanceAssetId: selectedAsset.maintenanceAssetId,
+              sourceAssetId: selectedAsset.sourceAssetId,
+              assetSource: selectedAsset.assetSource,
+              isSourceControlled: true,
+              assetNumber: selectedAsset.assetNumber,
+              name: selectedAsset.name,
+              description: selectedAsset.description,
+              category: selectedAsset.category,
+              location: selectedAsset.location,
+              serialNumber: selectedAsset.serialNumber,
+              purchaseDate: selectedAsset.purchaseDate,
+              value: selectedAsset.value,
+              currentValue: selectedAsset.currentValue,
+              status: selectedAsset.status,
+            }
+          : updatedProfile;
+      }));
 
       setIsEditDialogOpen(false);
       setSelectedAsset(null);
@@ -1319,9 +1438,7 @@ function AssetsPageContent() {
       <GlobalSearchRecordOpener<Asset>
         load={async id => mapAssets([await maintenanceApiService.getAssetById(id)])[0]}
         onOpen={asset => {
-          setSelectedAsset(asset);
-          setAssetViewTab('details');
-          setIsViewDialogOpen(true);
+          void handleViewAsset(asset);
         }}
       />
       {/* Page Header */}
@@ -1329,7 +1446,7 @@ function AssetsPageContent() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Asset Management</h1>
           <p className="text-muted-foreground">
-            Manage and track all maintenance assets and their conditions
+            Finance fixed assets enabled for Maintenance, with operational settings and history
           </p>
         </div>
       </div>
@@ -1354,7 +1471,7 @@ function AssetsPageContent() {
       <div className="flex items-center justify-between">
         <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
           <DialogTrigger asChild>
-            <Button variant="outline"><Upload className="mr-2 h-4 w-4" />Upload Assets</Button>
+            <Button variant="outline" className="hidden"><Upload className="mr-2 h-4 w-4" />Upload Assets</Button>
           </DialogTrigger>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
@@ -1398,7 +1515,7 @@ function AssetsPageContent() {
         </Dialog>
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
-            <Button>
+            <Button className="hidden">
               <Plus className="mr-2 h-4 w-4" />
               Add Asset
             </Button>
@@ -1637,7 +1754,7 @@ function AssetsPageContent() {
             <DialogHeader>
               <DialogTitle>Edit Asset</DialogTitle>
               <DialogDescription>
-                Update the asset information.
+                Update Maintenance-owned settings. Finance-owned details are read-only.
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4">
@@ -1645,6 +1762,12 @@ function AssetsPageContent() {
                 <div className="bg-muted p-3 rounded">
                   <Label className="text-sm font-medium text-muted-foreground">Asset Number</Label>
                   <p className="text-sm font-mono mt-1">{selectedAsset.assetNumber}</p>
+                </div>
+              )}
+              {selectedAsset?.assetSource === 'FixedAsset' && (
+                <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                  Asset code, name, description, location, serial number, purchase date and value
+                  come from Finance Fixed Assets. Update those fields in Finance.
                 </div>
               )}
               <div className="grid grid-cols-2 gap-4">
@@ -1655,6 +1778,7 @@ function AssetsPageContent() {
                     value={newAsset.name}
                     onChange={(e) => setNewAsset(prev => ({ ...prev, name: e.target.value }))}
                     placeholder="Asset name"
+                    disabled={selectedAsset?.assetSource === 'FixedAsset'}
                   />
                 </div>
                 <div className="space-y-2">
@@ -1681,6 +1805,7 @@ function AssetsPageContent() {
                   onChange={(e) => setNewAsset(prev => ({ ...prev, description: e.target.value }))}
                   placeholder="Detailed description of the asset"
                   rows={3}
+                  disabled={selectedAsset?.assetSource === 'FixedAsset'}
                 />
               </div>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -1691,6 +1816,7 @@ function AssetsPageContent() {
                     value={newAsset.location}
                     onChange={(e) => setNewAsset(prev => ({ ...prev, location: e.target.value }))}
                     placeholder="Physical location"
+                    disabled={selectedAsset?.assetSource === 'FixedAsset'}
                   />
                 </div>
                 <div className="space-y-2">
@@ -1716,6 +1842,7 @@ function AssetsPageContent() {
                     value={newAsset.manufacturer}
                     onChange={(e) => setNewAsset(prev => ({ ...prev, manufacturer: e.target.value }))}
                     placeholder="Manufacturer"
+                    disabled={selectedAsset?.assetSource === 'FixedAsset'}
                   />
                 </div>
                 <div className="space-y-2">
@@ -1725,6 +1852,7 @@ function AssetsPageContent() {
                     value={newAsset.model}
                     onChange={(e) => setNewAsset(prev => ({ ...prev, model: e.target.value }))}
                     placeholder="Model number"
+                    disabled={selectedAsset?.assetSource === 'FixedAsset'}
                   />
                 </div>
                 <div className="space-y-2">
@@ -1734,6 +1862,7 @@ function AssetsPageContent() {
                     value={newAsset.serialNumber}
                     onChange={(e) => setNewAsset(prev => ({ ...prev, serialNumber: e.target.value }))}
                     placeholder="Serial number"
+                    disabled={selectedAsset?.assetSource === 'FixedAsset'}
                   />
                 </div>
               </div>
@@ -1783,11 +1912,12 @@ function AssetsPageContent() {
                       value={newAsset.year}
                       onChange={(e) => setNewAsset((prev) => ({ ...prev, year: e.target.value }))}
                       placeholder="e.g. 2021"
+                      disabled={selectedAsset?.assetSource === 'FixedAsset'}
                     />
                   </div>
                   <div className="space-y-2">
                     <Label>Ownership</Label>
-                    <Select value={newAsset.ownershipType} onValueChange={(value) => setNewAsset((prev) => ({ ...prev, ownershipType: value }))}>
+                    <Select value={newAsset.ownershipType} onValueChange={(value) => setNewAsset((prev) => ({ ...prev, ownershipType: value }))} disabled={selectedAsset?.assetSource === 'FixedAsset'}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select ownership" />
                       </SelectTrigger>
@@ -1828,6 +1958,7 @@ function AssetsPageContent() {
                     type="date"
                     value={newAsset.purchaseDate}
                     onChange={(e) => setNewAsset(prev => ({ ...prev, purchaseDate: e.target.value }))}
+                    disabled={selectedAsset?.assetSource === 'FixedAsset'}
                   />
                 </div>
                 <div className="space-y-2">
@@ -1849,6 +1980,7 @@ function AssetsPageContent() {
                     value={newAsset.value}
                     onChange={(e) => setNewAsset(prev => ({ ...prev, value: parseFloat(e.target.value) || 0 }))}
                     placeholder="0"
+                    disabled={selectedAsset?.assetSource === 'FixedAsset'}
                   />
                 </div>
               </div>
@@ -2117,10 +2249,7 @@ function AssetsPageContent() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => {
-                          setSelectedAsset(asset);
-                          setIsViewDialogOpen(true);
-                        }}
+                        onClick={() => void handleViewAsset(asset)}
                       >
                         <Eye className="h-4 w-4" />
                       </Button>
@@ -2216,10 +2345,7 @@ function AssetsPageContent() {
                           type="button"
                           size="sm"
                           className="bg-blue-600 hover:bg-blue-700"
-                          onClick={() => {
-                            setSelectedAsset(asset);
-                            setIsViewDialogOpen(true);
-                          }}
+                          onClick={() => void handleViewAsset(asset)}
                         >
                           <ArrowRight className="h-4 w-4" />
                           Detail

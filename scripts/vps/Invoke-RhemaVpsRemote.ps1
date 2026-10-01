@@ -32,10 +32,83 @@ $ApiServiceXml = Join-Path $RhemaRoot 'services\api\RhemaERPAPI.xml'
 $NssmParametersPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\RhemaERPAPI\Parameters'
 $FrontendNssmParametersPath = `
     'HKLM:\SYSTEM\CurrentControlSet\Services\RhemaERPFrontend\Parameters'
+$RemoteTimings = [System.Collections.Generic.List[object]]::new()
 
 function Assert-True {
     param([bool]$Condition, [string]$Message)
     if (-not $Condition) { throw $Message }
+}
+
+function Get-RemoteResourceSnapshot {
+    try {
+        $operatingSystem = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+        $processors = @(Get-CimInstance Win32_Processor -ErrorAction Stop)
+        $drive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction Stop
+        $pageFiles = @(Get-CimInstance Win32_PageFileUsage -ErrorAction SilentlyContinue)
+        $diskPerformance = @(Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk `
+            -ErrorAction SilentlyContinue | Where-Object Name -eq '_Total' | Select-Object -First 1)
+        $networkPerformance = @(Get-CimInstance Win32_PerfFormattedData_Tcpip_NetworkInterface `
+            -ErrorAction SilentlyContinue)
+        return [ordered]@{
+            capturedUtc = [DateTime]::UtcNow.ToString('o')
+            cpuLoadPercent = [Math]::Round([double](($processors | Measure-Object LoadPercentage -Average).Average), 2)
+            availablePhysicalMemoryBytes = [long]$operatingSystem.FreePhysicalMemory * 1KB
+            totalPhysicalMemoryBytes = [long]$operatingSystem.TotalVisibleMemorySize * 1KB
+            availableVirtualMemoryBytes = [long]$operatingSystem.FreeVirtualMemory * 1KB
+            totalVirtualMemoryBytes = [long]$operatingSystem.TotalVirtualMemorySize * 1KB
+            pageFileAllocatedBytes = [long](($pageFiles | Measure-Object AllocatedBaseSize -Sum).Sum) * 1MB
+            pageFileUsedBytes = [long](($pageFiles | Measure-Object CurrentUsage -Sum).Sum) * 1MB
+            diskFreeBytes = [long]$drive.FreeSpace
+            diskSizeBytes = [long]$drive.Size
+            diskBytesPerSecond = if ($diskPerformance.Count) { [long]$diskPerformance[0].DiskBytesPersec } else { $null }
+            averageDiskSecondsPerTransfer = if ($diskPerformance.Count) { [double]$diskPerformance[0].AvgDisksecPerTransfer } else { $null }
+            networkBytesPerSecond = [long](($networkPerformance | Measure-Object BytesTotalPersec -Sum).Sum)
+        }
+    }
+    catch {
+        return [ordered]@{
+            capturedUtc = [DateTime]::UtcNow.ToString('o')
+            unavailable = $_.Exception.Message
+        }
+    }
+}
+
+function Invoke-RemoteTimedStep {
+    param([string]$Name, [scriptblock]$Operation)
+    $started = [DateTime]::UtcNow
+    $resourcesBefore = Get-RemoteResourceSnapshot
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        & $Operation
+        $watch.Stop()
+        $completed = [DateTime]::UtcNow
+        $RemoteTimings.Add([ordered]@{
+            name = $Name; status = 'Passed'; startedUtc = $started.ToString('o')
+            completedUtc = $completed.ToString('o')
+            durationSeconds = [Math]::Round($watch.Elapsed.TotalSeconds, 2)
+            resourcesBefore = $resourcesBefore; resourcesAfter = Get-RemoteResourceSnapshot
+        })
+    }
+    catch {
+        $watch.Stop()
+        $completed = [DateTime]::UtcNow
+        $RemoteTimings.Add([ordered]@{
+            name = $Name; status = 'Failed'; startedUtc = $started.ToString('o')
+            completedUtc = $completed.ToString('o')
+            durationSeconds = [Math]::Round($watch.Elapsed.TotalSeconds, 2)
+            resourcesBefore = $resourcesBefore; resourcesAfter = Get-RemoteResourceSnapshot
+            error = $_.Exception.Message
+        })
+        throw
+    }
+}
+
+function Write-RemoteTimingRecords {
+    foreach ($timing in @($RemoteTimings | Sort-Object durationSeconds -Descending)) {
+        $json = $timing | ConvertTo-Json -Depth 8 -Compress
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
+        Write-Output "REMOTE_TIMING_JSON|$encoded"
+    }
 }
 
 __RHEMA_FRESHDATABASEPROVISIONING_LIBRARY__
@@ -212,16 +285,22 @@ function Invoke-OperationalSeed {
     [void](New-Item -ItemType Directory -Path $work)
     $settings = @{ Logging=@{LogLevel=@{Default='Warning'}}; Serilog=@{MinimumLevel=@{Default='Warning'};WriteTo=@(@{Name='Console'})} }
     [IO.File]::WriteAllText((Join-Path $work 'appsettings.json'), ($settings | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
+    $operationalPassword=Get-RhemaOperationalPassword -Optional
     try {
-        $command = Invoke-RhemaFreshApiCli -ApiExecutable (Join-Path $ApiRoot 'ErpSystem.Api.exe') `
-            -ContentRoot $work -ConnectionString $connectionString -Command 'seed-operational-uat' `
-            -OperationalUatPassword (Get-RhemaOperationalPassword)
-        $snapshot = Get-RhemaOperationalSeedSnapshot $connectionString $builder.InitialCatalog
-        Assert-RhemaOperationalSeedReadiness $snapshot
+        $command = Invoke-RemoteTimedStep 'Run operational UAT seed command' {
+            Invoke-RhemaFreshApiCli -ApiExecutable (Join-Path $ApiRoot 'ErpSystem.Api.exe') `
+                -ContentRoot $work -ConnectionString $connectionString -Command 'seed-operational-uat' `
+                -OperationalUatPassword $operationalPassword
+        }
+        $snapshot = Invoke-RemoteTimedStep 'Verify operational UAT seed state' {
+            $seedSnapshot = Get-RhemaOperationalSeedSnapshot $connectionString $builder.InitialCatalog
+            Assert-RhemaOperationalSeedReadiness $seedSnapshot
+            $seedSnapshot
+        }
         $evidence = [ordered]@{ database=$builder.InitialCatalog; command=$command; operationalSeed=$snapshot }
         [IO.File]::WriteAllText((Join-Path $work 'verification.json'), ($evidence | ConvertTo-Json -Depth 7), (New-Object Text.UTF8Encoding($false)))
         Write-Output 'OPERATIONAL_SEED|PASS'
-    } finally { $connectionString=$null; $builder=$null }
+    } finally { $operationalPassword=$null; $connectionString=$null; $builder=$null }
 }
 
 function Invoke-DatabaseTable {
@@ -805,9 +884,27 @@ function Invoke-Preflight {
 
     $environment = Get-ApiServiceEnvironment
     Assert-SyncfusionLicenseConfigured
-    if ([string]::IsNullOrWhiteSpace((Get-RhemaOperationalPassword -Optional))) {
+    $configuredOperationalPassword=Get-RhemaOperationalPassword -Optional
+    $missingOperationalActors=@()
+    if($FreshDatabaseName){
+        $missingOperationalActors=@('fresh-database-bootstrap')
+    }else{
+        $operationalConnectionString=Get-DatabaseConnectionString
+        $operationalBuilder=New-Object System.Data.SqlClient.SqlConnectionStringBuilder $operationalConnectionString
+        try{
+            $missingOperationalActors=@(Get-RhemaMissingOperationalActorNames `
+                -ConnectionString $operationalConnectionString -DatabaseName $operationalBuilder.InitialCatalog)
+        }finally{$operationalConnectionString=$null;$operationalBuilder=$null}
+    }
+    Write-Output "UAT_MISSING_ACTORS|$($missingOperationalActors.Count)"
+    if(-not [string]::IsNullOrWhiteSpace($configuredOperationalPassword)){
+        Write-Output 'UAT_CREDENTIAL|CONFIGURED'
+    }elseif($missingOperationalActors.Count -gt 0){
         Write-Output 'UAT_CREDENTIAL|REQUIRED'
-    } else { Write-Output 'UAT_CREDENTIAL|CONFIGURED' }
+    }else{
+        Write-Output 'UAT_CREDENTIAL|NOT_REQUIRED'
+    }
+    $configuredOperationalPassword=$null;$missingOperationalActors=$null
     $requiredSettings = @{
         'StartupInitialization__SeedDevelopmentData' = 'true'
         'StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment' = 'true'
@@ -1082,29 +1179,35 @@ function Invoke-Backup {
     New-Item -ItemType Directory -Path $apiBackup,$frontendBackup,$serviceBackup |
         Out-Null
 
-    Invoke-RobocopyChecked @(
-        $ApiRoot, $apiBackup, '/E', '/R:2', '/W:2', '/NFL', '/NDL',
-        '/NJH', '/NJS', '/NP',
-        '/XD', (Join-Path $ApiRoot 'logs'),
-        (Join-Path $ApiRoot 'secure-file-storage'),
-        (Join-Path $ApiRoot 'wwwroot\uploads')
-    )
-    Invoke-RobocopyChecked @(
-        $FrontendRoot, $frontendBackup, '/E', '/R:2', '/W:2', '/NFL', '/NDL',
-        '/NJH', '/NJS', '/NP', '/XJ',
-        '/XD', (Join-Path $FrontendRoot 'node_modules'),
-        (Join-Path $FrontendRoot 'logs'),
-        '/XF', (Join-Path $FrontendRoot 'let')
-    )
-    if ($UsesNssmApiConfiguration) {
-        [System.IO.File]::WriteAllText(
-            (Join-Path $serviceBackup 'RhemaERPAPI.nssm-environment.json'),
-            ((Get-NssmEnvironmentSnapshot) | ConvertTo-Json -Depth 6),
-            (New-Object System.Text.UTF8Encoding($false)))
+    Invoke-RemoteTimedStep 'Back up deployed API files' {
+        Invoke-RobocopyChecked @(
+            $ApiRoot, $apiBackup, '/E', '/R:2', '/W:2', '/NFL', '/NDL',
+            '/NJH', '/NJS', '/NP',
+            '/XD', (Join-Path $ApiRoot 'logs'),
+            (Join-Path $ApiRoot 'secure-file-storage'),
+            (Join-Path $ApiRoot 'wwwroot\uploads')
+        )
     }
-    else {
-        Copy-Item -LiteralPath $ApiServiceXml -Destination `
-            (Join-Path $serviceBackup 'RhemaERPAPI.xml') -Force
+    Invoke-RemoteTimedStep 'Back up deployed frontend files' {
+        Invoke-RobocopyChecked @(
+            $FrontendRoot, $frontendBackup, '/E', '/R:2', '/W:2', '/NFL', '/NDL',
+            '/NJH', '/NJS', '/NP', '/XJ',
+            '/XD', (Join-Path $FrontendRoot 'node_modules'),
+            (Join-Path $FrontendRoot 'logs'),
+            '/XF', (Join-Path $FrontendRoot 'let')
+        )
+    }
+    Invoke-RemoteTimedStep 'Back up API service configuration' {
+        if ($UsesNssmApiConfiguration) {
+            [System.IO.File]::WriteAllText(
+                (Join-Path $serviceBackup 'RhemaERPAPI.nssm-environment.json'),
+                ((Get-NssmEnvironmentSnapshot) | ConvertTo-Json -Depth 6),
+                (New-Object System.Text.UTF8Encoding($false)))
+        }
+        else {
+            Copy-Item -LiteralPath $ApiServiceXml -Destination `
+                (Join-Path $serviceBackup 'RhemaERPAPI.xml') -Force
+        }
     }
 
     $builder = New-Object System.Data.SqlClient.SqlConnectionStringBuilder `
@@ -1123,12 +1226,18 @@ function Invoke-Backup {
 
     $safeDatabase = $databaseName.Replace(']', ']]')
     $safeBackupPath = $sqlBackupPath.Replace("'", "''")
-    Invoke-DatabaseNonQuery @"
+    Invoke-RemoteTimedStep 'Create compressed SQL COPY_ONLY backup' {
+        Invoke-DatabaseNonQuery @"
 BACKUP DATABASE [$safeDatabase]
 TO DISK = N'$safeBackupPath'
 WITH COPY_ONLY, COMPRESSION, CHECKSUM, INIT, STATS = 10;
+"@ 3600
+    }
+    Invoke-RemoteTimedStep 'Verify SQL backup checksum and restore metadata' {
+        Invoke-DatabaseNonQuery @"
 RESTORE VERIFYONLY FROM DISK = N'$safeBackupPath' WITH CHECKSUM;
 "@ 3600
+    }
     Assert-True (Test-Path -LiteralPath $sqlBackupPath) `
         'SQL backup did not appear at the expected path.'
 
@@ -1306,10 +1415,12 @@ function Invoke-Apply {
     Assert-True (Test-Path -LiteralPath $apiZip) "API package is missing: $apiZip"
     Assert-True (Test-Path -LiteralPath $frontendZip) `
         "Frontend package is missing: $frontendZip"
-    Assert-True ((Get-FileHash $apiZip -Algorithm SHA256).Hash -eq $ApiSha256) `
-        'Uploaded API package hash does not match the release manifest.'
-    Assert-True ((Get-FileHash $frontendZip -Algorithm SHA256).Hash -eq $FrontendSha256) `
-        'Uploaded frontend package hash does not match the release manifest.'
+    Invoke-RemoteTimedStep 'Hash and validate uploaded release packages' {
+        Assert-True ((Get-FileHash $apiZip -Algorithm SHA256).Hash -eq $ApiSha256) `
+            'Uploaded API package hash does not match the release manifest.'
+        Assert-True ((Get-FileHash $frontendZip -Algorithm SHA256).Hash -eq $FrontendSha256) `
+            'Uploaded frontend package hash does not match the release manifest.'
+    }
 
     $effectiveReleaseId = if ([string]::IsNullOrWhiteSpace($ReleaseId)) {
         $DeploymentId
@@ -1342,10 +1453,12 @@ function Invoke-Apply {
     } else {
         New-Item -ItemType Directory -Path (Join-Path $immutableRelease 'api'), `
             (Join-Path $immutableRelease 'frontend') | Out-Null
-        Expand-Archive -LiteralPath $apiZip -DestinationPath `
-            (Join-Path $immutableRelease 'api') -Force
-        Expand-Archive -LiteralPath $frontendZip -DestinationPath `
-            (Join-Path $immutableRelease 'frontend') -Force
+        Invoke-RemoteTimedStep 'Expand immutable API and frontend artifacts' {
+            Expand-Archive -LiteralPath $apiZip -DestinationPath `
+                (Join-Path $immutableRelease 'api') -Force
+            Expand-Archive -LiteralPath $frontendZip -DestinationPath `
+                (Join-Path $immutableRelease 'frontend') -Force
+        }
         [IO.File]::WriteAllText((Join-Path $immutableRelease 'release.json'),
             ($immutableMetadata | ConvertTo-Json -Depth 5),
             (New-Object Text.UTF8Encoding($false)))
@@ -1363,14 +1476,16 @@ function Invoke-Apply {
         "Deployment stage already exists: $stage"
     New-Item -ItemType Directory -Path (Join-Path $stage 'api'), `
         (Join-Path $stage 'frontend'), $retired | Out-Null
-    Invoke-RobocopyChecked @(
-        (Join-Path $immutableRelease 'api'), (Join-Path $stage 'api'),
-        '/E', '/R:2', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
-    )
-    Invoke-RobocopyChecked @(
-        (Join-Path $immutableRelease 'frontend'), (Join-Path $stage 'frontend'),
-        '/E', '/R:2', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
-    )
+    Invoke-RemoteTimedStep 'Create disposable activation stage' {
+        Invoke-RobocopyChecked @(
+            (Join-Path $immutableRelease 'api'), (Join-Path $stage 'api'),
+            '/E', '/R:2', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
+        )
+        Invoke-RobocopyChecked @(
+            (Join-Path $immutableRelease 'frontend'), (Join-Path $stage 'frontend'),
+            '/E', '/R:2', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
+        )
+    }
 
     $stageApi = Join-Path $stage 'api'
     $stageFrontend = Join-Path $stage 'frontend'
@@ -1411,21 +1526,27 @@ function Invoke-Apply {
         Invoke-FreshDatabaseCutover -StageApi $stageApi -StageFrontend $stageFrontend -Backup $backup -Retired $retired
     }
     else {
-    Set-TestServerConfiguration
+    Invoke-RemoteTimedStep 'Apply test-server runtime configuration' {
+        Set-TestServerConfiguration
+    }
     $apiActivationWatch = [Diagnostics.Stopwatch]::StartNew()
     $apiStartedAt = Get-Date
     try {
-        Stop-ManagedService RhemaERPAPI
-        Invoke-RobocopyChecked @(
-            $stageApi, $ApiRoot, '/E', '/R:2', '/W:2', '/NFL', '/NDL',
-            '/NJH', '/NJS', '/NP',
-            '/XF', 'appsettings.json', 'appsettings.Production.json',
-            'appsettings.Development.json', 'appsettings.AntiSpam.json',
-            '.env', '.env.production',
-            '/XD', (Join-Path $ApiRoot 'wwwroot\uploads'),
-            (Join-Path $ApiRoot 'logs'), (Join-Path $ApiRoot 'secure-file-storage')
-        )
-        Start-ApiWithControlledMigrations $apiStartedAt
+        Invoke-RemoteTimedStep 'Stop API and copy release files' {
+            Stop-ManagedService RhemaERPAPI
+            Invoke-RobocopyChecked @(
+                $stageApi, $ApiRoot, '/E', '/R:2', '/W:2', '/NFL', '/NDL',
+                '/NJH', '/NJS', '/NP',
+                '/XF', 'appsettings.json', 'appsettings.Production.json',
+                'appsettings.Development.json', 'appsettings.AntiSpam.json',
+                '.env', '.env.production',
+                '/XD', (Join-Path $ApiRoot 'wwwroot\uploads'),
+                (Join-Path $ApiRoot 'logs'), (Join-Path $ApiRoot 'secure-file-storage')
+            )
+        }
+        Invoke-RemoteTimedStep 'Start API, run migrations, and wait for liveness' {
+            Start-ApiWithControlledMigrations $apiStartedAt
+        }
     }
     catch {
         Stop-Service RhemaERPAPI -Force -ErrorAction SilentlyContinue
@@ -1457,33 +1578,35 @@ function Invoke-Apply {
 
     $frontendActivationWatch = [Diagnostics.Stopwatch]::StartNew()
     try {
-        Stop-ManagedService RhemaERPFrontend
-        if (Test-Path (Join-Path $FrontendRoot '.next')) {
-            Move-Item (Join-Path $FrontendRoot '.next') (Join-Path $retired '.next')
-        }
-        if (Test-Path (Join-Path $FrontendRoot 'public')) {
-            Move-Item (Join-Path $FrontendRoot 'public') (Join-Path $retired 'public')
-        }
-        if (Test-Path (Join-Path $FrontendRoot 'node_modules')) {
-            Move-Item (Join-Path $FrontendRoot 'node_modules') `
-                (Join-Path $retired 'node_modules')
-        }
-        foreach ($name in @('package.json', 'package-lock.json', 'next.config.js')) {
-            $liveFile = Join-Path $FrontendRoot $name
-            if (Test-Path $liveFile) {
-                Copy-Item $liveFile (Join-Path $retired $name) -Force
+        Invoke-RemoteTimedStep 'Activate frontend release and wait for readiness' {
+            Stop-ManagedService RhemaERPFrontend
+            if (Test-Path (Join-Path $FrontendRoot '.next')) {
+                Move-Item (Join-Path $FrontendRoot '.next') (Join-Path $retired '.next')
             }
+            if (Test-Path (Join-Path $FrontendRoot 'public')) {
+                Move-Item (Join-Path $FrontendRoot 'public') (Join-Path $retired 'public')
+            }
+            if (Test-Path (Join-Path $FrontendRoot 'node_modules')) {
+                Move-Item (Join-Path $FrontendRoot 'node_modules') `
+                    (Join-Path $retired 'node_modules')
+            }
+            foreach ($name in @('package.json', 'package-lock.json', 'next.config.js')) {
+                $liveFile = Join-Path $FrontendRoot $name
+                if (Test-Path $liveFile) {
+                    Copy-Item $liveFile (Join-Path $retired $name) -Force
+                }
+            }
+            Move-Item (Join-Path $stageFrontend '.next') (Join-Path $FrontendRoot '.next')
+            Move-Item (Join-Path $stageFrontend 'public') (Join-Path $FrontendRoot 'public')
+            Move-Item (Join-Path $stageFrontend 'node_modules') `
+                (Join-Path $FrontendRoot 'node_modules')
+            Copy-Item (Join-Path $stageFrontend 'package.json'), `
+                (Join-Path $stageFrontend 'package-lock.json'), `
+                (Join-Path $stageFrontend 'next.config.js') `
+                -Destination $FrontendRoot -Force
+            Start-Service RhemaERPFrontend
+            Wait-FrontendReady
         }
-        Move-Item (Join-Path $stageFrontend '.next') (Join-Path $FrontendRoot '.next')
-        Move-Item (Join-Path $stageFrontend 'public') (Join-Path $FrontendRoot 'public')
-        Move-Item (Join-Path $stageFrontend 'node_modules') `
-            (Join-Path $FrontendRoot 'node_modules')
-        Copy-Item (Join-Path $stageFrontend 'package.json'), `
-            (Join-Path $stageFrontend 'package-lock.json'), `
-            (Join-Path $stageFrontend 'next.config.js') `
-            -Destination $FrontendRoot -Force
-        Start-Service RhemaERPFrontend
-        Wait-FrontendReady
     }
     catch {
         Stop-Service RhemaERPFrontend -Force -ErrorAction SilentlyContinue
@@ -1803,13 +1926,19 @@ function Invoke-Verify {
             @{ Uri = 'http://127.0.0.1:5000/health/ready'; Name = 'api-ready'; Deadline = 180; AttemptTimeout = 30 },
             @{ Uri = 'http://127.0.0.1:5000/health'; Name = 'api-health'; Deadline = 180; AttemptTimeout = 30 },
             @{ Uri = 'http://127.0.0.1:3001/login'; Name = 'frontend-login'; Deadline = 180; AttemptTimeout = 30 })) {
-        Invoke-LocalRouteWithRetry -Uri $item.Uri -Name $item.Name `
-            -DeadlineSeconds $item.Deadline -AttemptTimeoutSeconds $item.AttemptTimeout
+        Invoke-RemoteTimedStep "Verify local route $($item.Name)" {
+            Invoke-LocalRouteWithRetry -Uri $item.Uri -Name $item.Name `
+                -DeadlineSeconds $item.Deadline -AttemptTimeoutSeconds $item.AttemptTimeout
+        }
     }
 
-    $history = @(Get-MigrationHistory)
+    $history = @(Invoke-RemoteTimedStep 'Read deployed migration history' {
+        Get-MigrationHistory
+    })
     foreach ($row in $history) { Write-Output "MIGRATION_ID|$($row.MigrationId)" }
-    $summary = @(Get-DatabaseControlSummary)[0]
+    $summary = @(Invoke-RemoteTimedStep 'Read database integrity controls' {
+        Get-DatabaseControlSummary
+    })[0]
     Write-Output "MIGRATION_COUNT|$($summary.MigrationCount)"
     Write-Output "LATEST_MIGRATION|$($summary.LatestMigration)"
     Write-Output "UNTRUSTED_FKS|$($summary.UntrustedForeignKeys)"
@@ -1825,7 +1954,9 @@ function Invoke-Verify {
     Assert-True ([long]$summary.SvgSupplierRequirements -eq 0) `
         'Active SVG entries exist in a supplier evidence requirement.'
 
-    $tenderPaymentPermission = @(Get-TenderPaymentPermissionSummary)[0]
+    $tenderPaymentPermission = @(Invoke-RemoteTimedStep 'Read tender payment permission controls' {
+        Get-TenderPaymentPermissionSummary
+    })[0]
     Write-Output "TENDER_PAYMENT_VERIFY_PERMISSIONS|$($tenderPaymentPermission.PermissionCount)"
     Write-Output "TENDER_PAYMENT_VERIFY_ROLE_GRANTS|$($tenderPaymentPermission.RoleGrantCount)"
     Assert-True ([long]$tenderPaymentPermission.PermissionCount -eq 1) `
@@ -1852,14 +1983,21 @@ function Invoke-Verify {
     Write-Output 'VERIFY|PASS'
 }
 
-switch ($Action) {
-    'Preflight' { Invoke-Preflight }
-    'Backup' { Invoke-Backup }
-    'Apply' { Invoke-Apply }
-    'SeedOperational' { Invoke-OperationalSeed }
-    'ResumeFrontend' { Invoke-ResumeFrontend }
-    'Verify' { Invoke-Verify }
-    'RollbackRelease' { Restore-ApplicationRelease }
-    'RollbackFresh' { Restore-FreshDatabaseCutover }
-    'CompleteFresh' { Complete-FreshDatabaseCutover }
+try {
+    Invoke-RemoteTimedStep "Remote action $Action" {
+        switch ($Action) {
+            'Preflight' { Invoke-Preflight }
+            'Backup' { Invoke-Backup }
+            'Apply' { Invoke-Apply }
+            'SeedOperational' { Invoke-OperationalSeed }
+            'ResumeFrontend' { Invoke-ResumeFrontend }
+            'Verify' { Invoke-Verify }
+            'RollbackRelease' { Restore-ApplicationRelease }
+            'RollbackFresh' { Restore-FreshDatabaseCutover }
+            'CompleteFresh' { Complete-FreshDatabaseCutover }
+        }
+    }
+}
+finally {
+    Write-RemoteTimingRecords
 }

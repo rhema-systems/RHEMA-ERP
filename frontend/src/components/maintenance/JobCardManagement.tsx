@@ -96,6 +96,7 @@ import maintenanceApiService, {
   PriorityLevel,
   MaintenanceStaffSchedule,
   MaintenanceExpense,
+  JobCardAssetOption,
 } from '@/services/maintenanceApiService';
 import { maintenanceDataService } from '@/services/maintenanceDataService';
 import jobCardService, {
@@ -233,6 +234,7 @@ interface JobCardFormState {
   description: string;
   assetName: string;
   assetId: string;
+  assetSelectionKey: string;
   priority: JobCardPriority;
   maintenanceType: string;
   maintenanceTypeId: string;
@@ -436,6 +438,7 @@ export default function JobCardsPage() {
   const [technicians, setTechnicians] = useState<Employee[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [assetOptions, setAssetOptions] = useState<JobCardAssetOption[]>([]);
   const [priorityLevels, setPriorityLevels] = useState<PriorityLevel[]>([]);
   const [maintenanceTypes, setMaintenanceTypes] = useState<any[]>([]);
   const [customerBusinessPartners, setCustomerBusinessPartners] = useState<
@@ -463,6 +466,7 @@ export default function JobCardsPage() {
   const [isAdmissionDialogOpen, setIsAdmissionDialogOpen] = useState(false);
   const [admissionForm, setAdmissionForm] = useState({
     assetId: '',
+    assetSelectionKey: '',
     jobCardId: '',
     workOrderId: '',
     admissionType: 'Scheduled' as 'Scheduled' | 'Emergency' | 'Breakdown',
@@ -627,6 +631,7 @@ export default function JobCardsPage() {
     description: '',
     assetName: '',
     assetId: '',
+    assetSelectionKey: '',
     priority: 'Medium' as const,
     maintenanceType: 'Preventive',
     maintenanceTypeId: '',
@@ -662,6 +667,7 @@ export default function JobCardsPage() {
     description: '',
     assetName: '',
     assetId: '',
+    assetSelectionKey: '',
     priority: 'Medium' as const,
     maintenanceType: '',
     maintenanceTypeId: '',
@@ -906,6 +912,7 @@ export default function JobCardsPage() {
 
           const [
             assetsResponse,
+            assetOptionsResponse,
             priorityLevelsList,
             maintenanceTypesList,
             techniciansList,
@@ -916,6 +923,11 @@ export default function JobCardsPage() {
               'maintenance assets',
               () => maintenanceApiService.getAssets(),
               { items: [] } as any
+            ),
+            safeLookup(
+              'job card asset options',
+              () => maintenanceApiService.getJobCardAssetOptions(),
+              [] as JobCardAssetOption[]
             ),
             safeLookup(
               'priority levels',
@@ -943,6 +955,7 @@ export default function JobCardsPage() {
           console.log('Loaded users:', usersList);
 
           setAssets(assetsResponse.items || []);
+          setAssetOptions(assetOptionsResponse || []);
           setPriorityLevels(priorityLevelsList || []);
           setMaintenanceTypes(maintenanceTypesList || []);
           setTechnicians(Array.isArray(techniciansList) ? techniciansList : []);
@@ -973,6 +986,7 @@ export default function JobCardsPage() {
           }
 
           setAssets([]);
+          setAssetOptions([]);
           setPriorityLevels([]);
           setMaintenanceTypes([]);
           setCustomerBusinessPartners([]);
@@ -1050,6 +1064,7 @@ export default function JobCardsPage() {
 
       setAdmissionForm({
         assetId: '',
+        assetSelectionKey: '',
         jobCardId: '',
         workOrderId: '',
         admissionType: 'Scheduled',
@@ -1431,6 +1446,7 @@ export default function JobCardsPage() {
       description: card.description || '',
       assetName: card.assetName,
       assetId: card.assetId,
+      assetSelectionKey: `LegacyMaintenanceAsset:${card.assetId}`,
       priority: card.priority,
       maintenanceType: card.maintenanceType,
       maintenanceTypeId: card.maintenanceTypeId,
@@ -1917,7 +1933,9 @@ export default function JobCardsPage() {
   const handleCreateJobCard = async () => {
     try {
       // Find selected asset and other data
-      const selectedAsset = assets.find((a) => a.name === newJobCard.assetName);
+      const selectedAsset = assetOptions.find(
+        (asset) => `${asset.assetSource}:${asset.sourceAssetId}` === newJobCard.assetSelectionKey
+      );
       const selectedPriority = priorityLevels.find(
         (pl) => pl.name === newJobCard.priority
       );
@@ -1939,7 +1957,7 @@ export default function JobCardsPage() {
           jobCardNumber: `JC-${new Date().getFullYear()}-${String(jobCards.length + 1).padStart(3, '0')}`,
           title: newJobCard.title,
           description: newJobCard.description,
-          assetName: selectedAsset.name,
+          assetName: selectedAsset.assetName,
           requestedBy: 'Current User',
           jobCardStatus: 'Draft',
           approvalStatus: 'NotStarted',
@@ -1949,7 +1967,7 @@ export default function JobCardsPage() {
           estimatedCost: newJobCard.estimatedCost,
           maintenanceType: newJobCard.maintenanceType,
           workOrderBillingType: newJobCard.workOrderBillingType,
-          assetId: selectedAsset.id,
+          assetId: selectedAsset.maintenanceAssetId || selectedAsset.sourceAssetId,
           maintenanceTypeId: selectedMaintenanceType.id,
           priorityLevelId: selectedPriority.id,
         };
@@ -1963,7 +1981,9 @@ export default function JobCardsPage() {
           title: newJobCard.title,
           description: newJobCard.description,
           problemDescription: newJobCard.problemDescription,
-          assetId: selectedAsset.id,
+          assetId: selectedAsset.maintenanceAssetId || selectedAsset.sourceAssetId,
+          assetSource: selectedAsset.assetSource,
+          sourceAssetId: selectedAsset.sourceAssetId,
           maintenanceTypeId: selectedMaintenanceType.id,
           priorityLevelId: selectedPriority.id,
           customerBusinessPartnerId:
@@ -2002,6 +2022,7 @@ export default function JobCardsPage() {
         description: '',
         assetName: '',
         assetId: '',
+        assetSelectionKey: '',
         priority: 'Medium',
         maintenanceType: 'Preventive',
         maintenanceTypeId: '',
@@ -2492,10 +2513,18 @@ export default function JobCardsPage() {
                   <div className="space-y-2">
                     <Label htmlFor="assetName">Asset</Label>
                     <Select
-                      value={newJobCard.assetName}
-                      onValueChange={(value) =>
-                        setNewJobCard((prev) => ({ ...prev, assetName: value }))
-                      }
+                      value={newJobCard.assetSelectionKey}
+                      onValueChange={(value) => {
+                        const option = assetOptions.find(
+                          (asset) => `${asset.assetSource}:${asset.sourceAssetId}` === value
+                        );
+                        setNewJobCard((prev) => ({
+                          ...prev,
+                          assetSelectionKey: value,
+                          assetId: option?.maintenanceAssetId || option?.sourceAssetId || '',
+                          assetName: option?.assetName || '',
+                        }));
+                      }}
                       disabled={loadingData}
                     >
                       <SelectTrigger>
@@ -2503,7 +2532,7 @@ export default function JobCardsPage() {
                           placeholder={
                             loadingData
                               ? 'Loading assets...'
-                              : assets.length === 0
+                              : assetOptions.length === 0
                                 ? 'No assets available'
                                 : 'Select asset'
                           }
@@ -2514,27 +2543,38 @@ export default function JobCardsPage() {
                           <SelectItem value="loading" disabled>
                             Loading assets...
                           </SelectItem>
-                        ) : assets.length === 0 ? (
+                        ) : assetOptions.length === 0 ? (
                           <SelectItem value="no-assets" disabled>
-                            No assets found. Check console for errors.
+                            No maintainable Finance or Estate assets found.
                           </SelectItem>
                         ) : (
-                          assets.map((asset) => (
-                            <SelectItem key={asset.id} value={asset.name}>
-                              {asset.name} ({asset.assetNumber})
+                          assetOptions.map((asset) => (
+                            <SelectItem
+                              key={`${asset.assetSource}:${asset.sourceAssetId}`}
+                              value={`${asset.assetSource}:${asset.sourceAssetId}`}
+                            >
+                              {asset.assetCode} · {asset.assetName} · {asset.categoryOrPropertyType} ·{' '}
+                              {asset.assetSource === 'FixedAsset'
+                                ? 'Finance'
+                                : asset.assetSource === 'EstateManagedAsset'
+                                  ? 'Estate'
+                                  : 'Legacy'}{' '}
+                              · {asset.status}{asset.location ? ` · ${asset.location}` : ''}
                             </SelectItem>
                           ))
                         )}
                       </SelectContent>
                     </Select>
-                    {!loadingData && assets.length === 0 && (
+                    {!loadingData && assetOptions.length === 0 && (
                       <p className="text-sm text-red-600">
-                        No assets loaded. Check browser console for API errors.
+                        No eligible assets are available. Finance categories must be enabled for
+                        Maintenance; Estate assets must not be retired.
                       </p>
                     )}
-                    {!loadingData && assets.length > 0 && (
-                      <p className="text-sm text-green-600">
-                        {assets.length} assets loaded successfully
+                    {!loadingData && assetOptions.length > 0 && (
+                      <p className="text-sm text-muted-foreground">
+                        {assetOptions.length} source-aware assets available from Finance, Estate,
+                        and retained legacy records.
                       </p>
                     )}
                   </div>

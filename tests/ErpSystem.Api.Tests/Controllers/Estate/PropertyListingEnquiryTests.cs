@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.ComponentModel.DataAnnotations;
 using ErpSystem.Api.Controllers.Estate;
 using ErpSystem.Api.Controllers.Ehc;
 using ErpSystem.Api.Services.Estate;
@@ -26,6 +27,7 @@ using ErpSystem.Core.Services.Sales;
 using ErpSystem.Core.Services.Legal;
 using ErpSystem.Core.Services.Planning;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
@@ -51,8 +53,11 @@ public sealed class PropertyListingEnquiryTests
         user.SetupGet(u => u.FullName).Returns("Supplier Contact"); user.SetupGet(u => u.Email).Returns("contact@example.test");
         return user;
     }
-    private EstateExternalDocumentsController Controller(ApplicationDbContext db, Mock<IEhcTicketService> tickets)
-        => new(db, User().Object, null!, null!, null!, null!, null!, tickets.Object, Mock.Of<ICaptchaVerificationService>(),
+    private EstateExternalDocumentsController Controller(
+        ApplicationDbContext db,
+        Mock<IEhcTicketService> tickets,
+        ICurrentUserService? currentUser = null)
+        => new(db, currentUser ?? User().Object, null!, null!, null!, null!, null!, tickets.Object, Mock.Of<ICaptchaVerificationService>(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<EstateExternalDocumentsController>.Instance)
         { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
     private EstateManagedAsset Asset() => new()
@@ -73,6 +78,273 @@ public sealed class PropertyListingEnquiryTests
             PartnerType = "Supplier", IsActive = true, ApprovalStatus = "Approved", UserId = userId };
         db.AddRange(asset, portion, partner, new EhcTicketCategory { TenantId = tenantId, Code = "PROPERTY-LISTING", Name = "Property enquiry", AppliesToType = EhcTicketType.Enquiry });
         await db.SaveChangesAsync(); return (asset, portion, partner);
+    }
+
+    [Fact]
+    public void PublicEnquiryContractValidatesContactDetailsAndExcludesInternalFields()
+    {
+        var invalid = new PublicPropertyListingEnquiryRequestDto
+        {
+            SubmissionId = Guid.Empty,
+            Message = " ",
+            ContactName = " ",
+            ContactEmail = "not-an-email",
+            ContactPhone = "abc",
+            AlternativePhoneNumber = "123",
+            PreferredContactMethod = "InternalWorkflow"
+        };
+        var validationResults = new List<ValidationResult>();
+
+        Assert.False(Validator.TryValidateObject(
+            invalid,
+            new ValidationContext(invalid),
+            validationResults,
+            validateAllProperties: true));
+        Assert.Contains(validationResults, result => result.MemberNames.Contains(nameof(invalid.ContactEmail)));
+        Assert.Contains(validationResults, result => result.MemberNames.Contains(nameof(invalid.ContactPhone)));
+        Assert.Contains(validationResults, result => result.MemberNames.Contains(nameof(invalid.AlternativePhoneNumber)));
+        // DataAnnotations invokes IValidatableObject only after property-level validation succeeds.
+        // Validate the class-level submission and contact-method rules independently so those
+        // assertions are not masked by the deliberately invalid contact properties above.
+        var invalidSubmission = new PublicPropertyListingEnquiryRequestDto
+        {
+            SubmissionId = Guid.Empty,
+            Message = "Please contact me about this property.",
+            ContactName = "Ama Mensah",
+            ContactEmail = "ama@example.com",
+            ContactPhone = "+233 20 555 0101",
+            PreferredContactMethod = "InternalWorkflow"
+        };
+        var submissionValidationResults = new List<ValidationResult>();
+        Assert.False(Validator.TryValidateObject(
+            invalidSubmission,
+            new ValidationContext(invalidSubmission),
+            submissionValidationResults,
+            validateAllProperties: true));
+        Assert.Contains(
+            submissionValidationResults,
+            result => result.MemberNames.Contains(nameof(invalidSubmission.SubmissionId)));
+        Assert.Contains(
+            submissionValidationResults,
+            result => result.MemberNames.Contains(nameof(invalidSubmission.PreferredContactMethod)));
+
+        var publicProperties = typeof(PublicPropertyListingEnquiryRequestDto)
+            .GetProperties()
+            .Select(property => property.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var internalField in new[]
+                 {
+                     "BusinessPartnerId", "AssignedEmployeeId", "AssignedSalesPersonId", "SalesTeamId",
+                     "Status", "OpportunityId", "CreatedByUserId", "ApprovalStatus", "WorkflowId"
+                 })
+        {
+            Assert.DoesNotContain(internalField, publicProperties);
+        }
+    }
+
+    [Fact]
+    public async Task Anonymous_public_listing_resolution_does_not_fall_back_to_an_arbitrary_active_tenant()
+    {
+        await using var db = Database();
+        var unrelatedTenantId = Guid.NewGuid();
+        db.Tenants.Add(new Tenant
+        {
+            Id = unrelatedTenantId,
+            Code = "UNRELATED",
+            Name = "Unrelated active tenant",
+            Status = TenantStatus.Active,
+            Domain = "unrelated.example.test",
+            IsDefaultForPublicUsers = false
+        });
+        db.EstateManagedAssets.Add(new EstateManagedAsset
+        {
+            TenantId = unrelatedTenantId,
+            AssetCode = "PROP-UNRELATED-001",
+            Name = "Unrelated tenant property",
+            AssetType = EstateManagedAssetType.Property,
+            SourceType = EstateManagedAssetSourceType.Imported,
+            Status = EstateManagedAssetStatus.Available,
+            Location = "Accra",
+            IsPublishedToExternalPortal = true,
+            ExternalListingStatus = "Published",
+            ExternalListingType = "Sale",
+            IsAvailableForSale = true,
+            ExternalSalePrice = 125000m,
+            ExternalListingCurrency = "GHS"
+        });
+        await db.SaveChangesAsync();
+        var anonymousUser = new Mock<ICurrentUserService>();
+        anonymousUser.SetupGet(user => user.TenantId).Returns((Guid?)null);
+        var controller = Controller(db, new Mock<IEhcTicketService>(), anonymousUser.Object);
+        controller.HttpContext.Request.Host = new HostString("unknown.example.test");
+
+        var result = Assert.IsType<OkObjectResult>(await controller.GetPublicListings(cancellationToken: default));
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(result.Value));
+
+        Assert.Empty(document.RootElement.GetProperty("data").EnumerateArray());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Anonymous_public_listing_resolution_preserves_host_and_public_default_mappings(bool useHostMapping)
+    {
+        await using var db = Database();
+        var mappedTenantId = Guid.NewGuid();
+        db.Tenants.Add(new Tenant
+        {
+            Id = mappedTenantId,
+            Code = useHostMapping ? "HOST-MAPPED" : "PUBLIC-DEFAULT",
+            Name = "Mapped public tenant",
+            Status = TenantStatus.Active,
+            Domain = useHostMapping ? "mapped.example.test" : "other.example.test",
+            IsDefaultForPublicUsers = !useHostMapping
+        });
+        db.EstateManagedAssets.Add(new EstateManagedAsset
+        {
+            TenantId = mappedTenantId,
+            AssetCode = "PROP-MAPPED-001",
+            Name = "Mapped tenant property",
+            AssetType = EstateManagedAssetType.Property,
+            SourceType = EstateManagedAssetSourceType.Imported,
+            Status = EstateManagedAssetStatus.Available,
+            Location = "Accra",
+            IsPublishedToExternalPortal = true,
+            ExternalListingStatus = "Published",
+            ExternalListingType = "Sale",
+            IsAvailableForSale = true,
+            ExternalSalePrice = 125000m,
+            ExternalListingCurrency = "GHS"
+        });
+        await db.SaveChangesAsync();
+        var anonymousUser = new Mock<ICurrentUserService>();
+        anonymousUser.SetupGet(user => user.TenantId).Returns((Guid?)null);
+        var controller = Controller(db, new Mock<IEhcTicketService>(), anonymousUser.Object);
+        controller.HttpContext.Request.Host = new HostString(
+            useHostMapping ? "mapped.example.test" : "unknown.example.test");
+
+        var result = Assert.IsType<OkObjectResult>(await controller.GetPublicListings(cancellationToken: default));
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(result.Value));
+
+        Assert.Single(document.RootElement.GetProperty("data").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task AnonymousPublicEnquiryUsesServerControlledFieldsAndPreservesListingAndContactSnapshot()
+    {
+        await using var db = Database();
+        var seeded = await Seed(db);
+        var externalUserId = Guid.NewGuid();
+        db.Users.Add(new ApplicationUser
+        {
+            Id = externalUserId,
+            TenantId = tenantId,
+            UserName = "external",
+            Email = "external@default.com",
+            FirstName = "Public",
+            LastName = "Enquiry",
+            IsActive = true
+        });
+        await db.SaveChangesAsync();
+
+        CreateEhcTicketRequestDto? capturedTicket = null;
+        EhcPropertyListingContextDto? capturedProperty = null;
+        Guid capturedTenantId = Guid.Empty;
+        Guid capturedRequesterId = Guid.Empty;
+        var tickets = new Mock<IEhcTicketService>();
+        tickets.Setup(service => service.CreatePublicPropertyEnquiryAsync(
+                It.IsAny<CreateEhcTicketRequestDto>(),
+                It.IsAny<EhcPropertyListingContextDto>(),
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<CreateEhcTicketRequestDto, EhcPropertyListingContextDto, Guid, Guid, Guid, string, CancellationToken>(
+                (ticket, property, _, submittedTenantId, requesterId, _, _) =>
+                {
+                    capturedTicket = ticket;
+                    capturedProperty = property;
+                    capturedTenantId = submittedTenantId;
+                    capturedRequesterId = requesterId;
+                })
+            .ReturnsAsync(new EhcTicketDetailDto { TicketNumber = "EHC-PUBLIC-001" });
+
+        var result = await Controller(db, tickets).CreatePublicListingEnquiry(
+            seeded.Portion.Id,
+            new PublicPropertyListingEnquiryRequestDto
+            {
+                SubmissionId = Guid.NewGuid(),
+                Message = "  Please send the deposit and viewing details.  ",
+                ContactName = "  Ama Mensah  ",
+                ContactEmail = "ama@example.test",
+                ContactPhone = "  +233 24 555 0101  ",
+                PreferredContactMethod = "Email",
+                AlternativePhoneNumber = "+233 50 100 2000",
+                ContactReference = "  GH-REF-100  "
+            },
+            default);
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(capturedTicket);
+        Assert.NotNull(capturedProperty);
+        Assert.Equal(EhcTicketType.Enquiry, capturedTicket.TicketType);
+        Assert.Equal(EhcTicketSource.Web, capturedTicket.Source);
+        Assert.Equal("Please send the deposit and viewing details.", capturedTicket.Description);
+        Assert.Equal("EstateListing", capturedTicket.RelatedEntityType);
+        Assert.Equal(seeded.Portion.Id, capturedProperty.ListingId);
+        Assert.Equal("LAND-002-D002", capturedProperty.ListingReference);
+        Assert.Null(capturedProperty.BusinessPartnerId);
+        Assert.Equal("Ama Mensah", capturedProperty.ContactName);
+        Assert.Equal("ama@example.test", capturedProperty.ContactEmail);
+        Assert.Equal("+233 24 555 0101", capturedProperty.ContactPhone);
+        Assert.Equal("+233 50 100 2000", capturedProperty.AlternativePhoneNumber);
+        Assert.Equal("Email", capturedProperty.PreferredContactMethod);
+        Assert.Equal("GH-REF-100", capturedProperty.ContactReference);
+        Assert.Equal(tenantId, capturedTenantId);
+        Assert.Equal(externalUserId, capturedRequesterId);
+    }
+
+    [Fact]
+    public async Task PublicEnquiryNeverFallsBackToAnUnrelatedActiveTenantUser()
+    {
+        await using var db = Database();
+        var seeded = await Seed(db);
+        db.Users.Add(new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            UserName = "finance.approver",
+            Email = "finance@example.test",
+            FirstName = "Finance",
+            LastName = "Approver",
+            IsActive = true
+        });
+        await db.SaveChangesAsync();
+
+        var tickets = new Mock<IEhcTicketService>();
+        var result = await Controller(db, tickets).CreatePublicListingEnquiry(
+            seeded.Portion.Id,
+            new PublicPropertyListingEnquiryRequestDto
+            {
+                SubmissionId = Guid.NewGuid(),
+                Message = "Please contact me about this listing.",
+                ContactName = "Ama Mensah",
+                ContactEmail = "ama@example.test",
+                ContactPhone = "+233245550101"
+            },
+            default);
+
+        var unavailable = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, unavailable.StatusCode);
+        tickets.Verify(service => service.CreatePublicPropertyEnquiryAsync(
+            It.IsAny<CreateEhcTicketRequestDto>(),
+            It.IsAny<EhcPropertyListingContextDto>(),
+            It.IsAny<Guid>(),
+            It.IsAny<Guid>(),
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -179,7 +451,7 @@ public sealed class PropertyListingEnquiryTests
         var ordinary = new EhcTicket { TenantId = tenantId, TicketNumber = "H-1", RequesterUserId = userId, Description = "Private helpdesk", TicketType = EhcTicketType.Helpdesk };
         var foreign = new EhcTicket { TenantId = Guid.NewGuid(), TicketNumber = "H-2", RequesterUserId = userId, Description = "Other tenant", TicketType = EhcTicketType.Enquiry, PropertyListingContextJson = "{}" };
         db.AddRange(ordinary, foreign); await db.SaveChangesAsync();
-        var service = new Mock<IEhcTicketService>(); var controller = new EhcPropertyEnquiriesController(db, User().Object, service.Object, Mock.Of<IEstateSalesListingApplicationHandoffService>());
+        var service = new Mock<IEhcTicketService>(); var controller = new EhcPropertyEnquiriesController(db, User().Object, service.Object, Mock.Of<IEstateSalesListingApplicationHandoffService>(), Mock.Of<IPropertyEnquiryProspectService>());
         Assert.IsType<NotFoundResult>(await controller.Get(ordinary.Id, default));
         Assert.IsType<NotFoundResult>(await controller.Get(foreign.Id, default));
         Assert.IsType<NotFoundResult>(await controller.Reply(ordinary.Id, new() { Body = "Reply" }, default));
@@ -260,7 +532,7 @@ public sealed class PropertyListingEnquiryTests
         db.AddRange(requester, structure, level, salesAndMarketing, otherUnit, legacySalesDepartment, ready, newAtSales, routedToOtherUnit, unassigned, legacyDepartmentOnly);
         await db.SaveChangesAsync();
 
-        var controller = new EhcPropertyEnquiriesController(db, User().Object, Mock.Of<IEhcTicketService>(), Mock.Of<IEstateSalesListingApplicationHandoffService>());
+        var controller = new EhcPropertyEnquiriesController(db, User().Object, Mock.Of<IEhcTicketService>(), Mock.Of<IEstateSalesListingApplicationHandoffService>(), Mock.Of<IPropertyEnquiryProspectService>());
         var result = Assert.IsType<OkObjectResult>(await controller.List(cancellationToken: default));
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(result.Value));
         var ids = document.RootElement.GetProperty("data").EnumerateArray()
@@ -455,7 +727,7 @@ public sealed class PropertyListingEnquiryTests
         };
         db.AddRange(requester, structure, level, sales, partner, otherPartner, ticket, invoice, order, otherOrder, payment, allocation, history);
         await db.SaveChangesAsync();
-        var controller = new EhcPropertyEnquiriesController(db, User().Object, Mock.Of<IEhcTicketService>(), Mock.Of<IEstateSalesListingApplicationHandoffService>());
+        var controller = new EhcPropertyEnquiriesController(db, User().Object, Mock.Of<IEhcTicketService>(), Mock.Of<IEstateSalesListingApplicationHandoffService>(), Mock.Of<IPropertyEnquiryProspectService>());
 
         var result = Assert.IsType<OkObjectResult>(await controller.GetEstateHandoff(ticket.Id, default));
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(result.Value));
@@ -641,7 +913,7 @@ public sealed class PropertyListingEnquiryTests
         handoffs.Setup(item => item.CreateAsync(tenantId, It.IsAny<EstateSalesListingApplicationHandoffRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EstateSalesListingApplicationHandoffResult(estateCaseId, "ESTATE-001", "Purchase enquiry", "Open", "Estate review", DateTime.UtcNow, false));
 
-        var controller = new EhcPropertyEnquiriesController(db, User().Object, tickets.Object, handoffs.Object);
+        var controller = new EhcPropertyEnquiriesController(db, User().Object, tickets.Object, handoffs.Object, Mock.Of<IPropertyEnquiryProspectService>());
         var result = await controller.CreateEstateHandoff(ticket.Id, new("AGR-001", 1250000m,
             RequestedLeaseTerm: null, SalesAmountPaid: 1250000m, SalesPaymentReference: "RCT-FULL",
             Currency: "GHS", SalesCompletedAt: opportunity.ActualCloseDate, Notes: null), default);

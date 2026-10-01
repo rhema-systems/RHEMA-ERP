@@ -30,6 +30,7 @@ import {
   type SalesSaleableItemDto,
   type SalesSaleableSourceDto,
 } from '@/services/salesSetupService';
+import { hasSaleableNumber } from '@/lib/sales/saleableItemDisplay';
 
 interface LineItem extends CreateSalesOrderLineDto {
   key: string;
@@ -720,12 +721,12 @@ export default function CreateSalesOrderPage() {
                                       .join(' - ')}
                                   </div>
                                   <div className="mt-1 flex flex-wrap gap-1 text-xs text-muted-foreground">
-                                    {item.availableQuantity !== undefined ? (
+                                    {hasSaleableNumber(item.availableQuantity) ? (
                                       <span>
                                         Available: {item.availableQuantity.toLocaleString()} {item.unitOfMeasure || ''}
                                       </span>
                                     ) : null}
-                                    {item.estimatedValue !== undefined ? (
+                                    {hasSaleableNumber(item.estimatedValue) ? (
                                       <span>
                                         {item.currency || currency} {item.estimatedValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                       </span>

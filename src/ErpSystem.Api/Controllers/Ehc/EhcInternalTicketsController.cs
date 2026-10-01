@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Ehc;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Ehc;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -22,12 +23,18 @@ public sealed class EhcInternalTicketsController : ControllerBase
 {
     private readonly IEhcTicketService _ticketService;
     private readonly IEhcProblemService _problemService;
+    private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<EhcInternalTicketsController> _logger;
 
-    public EhcInternalTicketsController(IEhcTicketService ticketService, IEhcProblemService problemService, ILogger<EhcInternalTicketsController> logger)
+    public EhcInternalTicketsController(
+        IEhcTicketService ticketService,
+        IEhcProblemService problemService,
+        ICurrentUserService currentUserService,
+        ILogger<EhcInternalTicketsController> logger)
     {
         _ticketService = ticketService;
         _problemService = problemService;
+        _currentUserService = currentUserService;
         _logger = logger;
     }
 
@@ -150,6 +157,45 @@ public sealed class EhcInternalTicketsController : ControllerBase
         {
             _logger.LogError(ex, "Error assigning internal EHC ticket {TicketId}", id);
             return StatusCode(500, new { success = false, message = "Failed to assign ticket" });
+        }
+    }
+
+    [HttpPost("{id:guid}/route")]
+    public async Task<ActionResult> RouteToDepartment(Guid id, [FromQuery] Guid assignedOrganizationUnitId, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(_currentUserService.UserId, out var actorUserId) || actorUserId == Guid.Empty)
+        {
+            return Unauthorized(new { success = false, message = "Authenticated user context is required" });
+        }
+
+        if (assignedOrganizationUnitId == Guid.Empty)
+        {
+            return BadRequest(new { success = false, message = "Destination department is required" });
+        }
+
+        try
+        {
+            // This route deliberately derives the assigning/owning user from the authenticated
+            // request. The browser supplies only the destination organization unit.
+            await _ticketService.AssignTicketAsync(id, actorUserId, assignedOrganizationUnitId, cancellationToken);
+            return Ok(new { success = true });
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { success = false, message = "Ticket not found" });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error routing internal EHC ticket {TicketId}", id);
+            return StatusCode(500, new { success = false, message = "Failed to route ticket" });
         }
     }
 

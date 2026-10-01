@@ -33,6 +33,9 @@
     <Compile Include="Services\QsUatActorSeederTests.cs" />
     <Compile Include="Services\QsUatPreparationSeederTests.cs" />
     <Compile Include="Services\EstateUatLandSeederTests.cs" />
+    <Compile Include="Services\Maintenance\MaintenanceAssetSourceIntegrationTests.cs" />
+    <Compile Include="Services\Ehc\PropertyEnquiryProspectLifecycleTests.cs" />
+    <Compile Include="Services\Ehc\ProspectDepositFinancePostingServiceTests.cs" />
     <Compile Include="Controllers\Inventory\PhysicalCountReviewTests.cs" />
     <Compile Include="Services\Finance\ProcurementAutoInvoiceTests.cs" />
     <Compile Include="Services\Finance\CustomerBalanceAdjustmentPostingTests.cs" />
@@ -72,6 +75,7 @@
     <Compile Include="Controllers\CrossModuleLegacyAuthorizationSecurityTests.cs" />
     <Compile Include="Controllers\Estate\EstateGisControllerSecurityTests.cs" />
     <Compile Include="Controllers\Estate\PropertyListingEnquiryTests.cs" />
+    <Compile Include="Controllers\Ehc\EhcInternalTicketsAssignmentTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
     <Compile Include="Controllers\Finance\BusinessPartnerFinanceProfilesControllerTests.cs" />
     <Compile Include="Services\Finance\BusinessPartnerFinanceProfilePolicyTests.cs" />

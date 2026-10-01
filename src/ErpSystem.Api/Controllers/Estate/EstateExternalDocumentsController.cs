@@ -27,6 +27,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using QuestPDF.Fluent;
 using QuestPDF.Infrastructure;
+using System.ComponentModel.DataAnnotations;
 using QColors = QuestPDF.Helpers.Colors;
 
 namespace ErpSystem.Api.Controllers.Estate;
@@ -2467,16 +2468,22 @@ public sealed class EstateExternalDocumentsController : ControllerBase
     [HttpPost("/api/estate/public/listings/{listingId:guid}/enquiries")]
     [EnableRateLimiting("SensitivePolicy")]
     public async Task<IActionResult> CreatePublicListingEnquiry(Guid listingId,
-        [FromBody] CreatePropertyListingEnquiryRequest request, CancellationToken cancellationToken)
+        [FromBody] PublicPropertyListingEnquiryRequestDto request, CancellationToken cancellationToken)
     {
-        if (request is null || request.SubmissionId == Guid.Empty || string.IsNullOrWhiteSpace(request.Message) || request.Message.Trim().Length > 4000)
-            return BadRequest(new { success = false, message = "Enter an enquiry message of up to 4,000 characters and a submission identifier." });
-        if (string.IsNullOrWhiteSpace(request.ContactName))
-            return BadRequest(new { success = false, message = "Enter your name before sending the enquiry." });
-        if (string.IsNullOrWhiteSpace(request.ContactPhone))
-            return BadRequest(new { success = false, message = "Enter your phone number before sending the enquiry." });
-        if (!string.IsNullOrWhiteSpace(request.ContactEmail) && !request.ContactEmail.Contains('@', StringComparison.Ordinal))
-            return BadRequest(new { success = false, message = "Enter a valid email address or leave the email field empty." });
+        if (request is null)
+        {
+            return BadRequest(new { success = false, message = "Enter the contact details and enquiry message." });
+        }
+
+        var validationResults = new List<ValidationResult>();
+        if (!Validator.TryValidateObject(request, new ValidationContext(request), validationResults, validateAllProperties: true))
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = validationResults.FirstOrDefault()?.ErrorMessage ?? "The enquiry details are invalid."
+            });
+        }
 
         try
         {
@@ -2485,6 +2492,11 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             {
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, new { success = false, message = "The enquiry could not be sent right now. Please try again later." });
             }
+
+            var forwardedHost = Request.Headers["X-Forwarded-Host"].FirstOrDefault();
+            await _captchaService.EnsureCaptchaValidAsync(tenantId, request.CaptchaToken,
+                string.IsNullOrWhiteSpace(forwardedHost) ? Request.Host.Host : forwardedHost,
+                HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
 
             var (asset, demarcationListing) = await LoadExternalListingForEnquiryAsync(tenantId, listingId, cancellationToken);
             if (asset == null)
@@ -2505,7 +2517,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 return Conflict(new
                 {
                     success = false,
-                    message = $"You already have an active enquiry for this property ({duplicate.TicketNumber}). Sales will continue from that request."
+                    message = "You already have an active enquiry for this property. Sales will continue from that request."
                 });
             }
 
@@ -2521,16 +2533,11 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, new { success = false, message = "The enquiry could not be sent right now. Please try again later." });
             }
 
-            var forwardedHost = Request.Headers["X-Forwarded-Host"].FirstOrDefault();
-            await _captchaService.EnsureCaptchaValidAsync(tenantId, request.CaptchaToken,
-                string.IsNullOrWhiteSpace(forwardedHost) ? Request.Host.Host : forwardedHost,
-                HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
-
-            var requester = await ResolvePublicPropertyEnquiryRequesterAsync(tenantId, cancellationToken);
-            if (requester is null)
+            var workflowActor = await ResolvePublicPropertyEnquiryWorkflowActorAsync(tenantId, cancellationToken);
+            if (workflowActor is null)
             {
                 _logger.LogError(
-                    "No active public property enquiry requester account exists for tenant {TenantId}; listing {ListingId}; trace {TraceId}",
+                    "No active public property enquiry workflow actor exists for tenant {TenantId}; listing {ListingId}; trace {TraceId}",
                     tenantId,
                     listingId,
                     HttpContext.TraceIdentifier);
@@ -2550,12 +2557,17 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     ? (demarcationListing is null ? asset.ExternalListingPrice : ResolveDemarcationLeaseAmount(demarcationListing))
                     : demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice ?? demarcationListing?.ExternalListingPrice ?? asset.ExternalListingPrice;
             var contactName = request.ContactName.Trim();
-            var contactEmail = string.IsNullOrWhiteSpace(request.ContactEmail) ? null : request.ContactEmail.Trim();
+            var contactEmail = request.ContactEmail.Trim();
             var contactPhone = request.ContactPhone.Trim();
             var contactReference = string.IsNullOrWhiteSpace(request.ContactReference) ? null : request.ContactReference.Trim();
+            var alternativePhoneNumber = string.IsNullOrWhiteSpace(request.AlternativePhoneNumber)
+                ? null
+                : request.AlternativePhoneNumber.Trim();
+            var preferredContactMethod = request.PreferredContactMethod.Trim();
             var property = new EhcPropertyListingContextDto("estate-public-listing", listingId, reference, name, type,
                 string.IsNullOrWhiteSpace(currency) ? "GHS" : currency, asset.Location, price, asset.Id, demarcationListing?.Id,
-                null, contactName, contactName, contactEmail, contactPhone, contactReference);
+                null, contactName, contactName, contactEmail, contactPhone, contactReference,
+                alternativePhoneNumber, preferredContactMethod);
             var ticket = await _ticketService.CreatePublicPropertyEnquiryAsync(new CreateEhcTicketRequestDto
             {
                 TicketType = EhcTicketType.Enquiry,
@@ -2565,7 +2577,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 Description = request.Message.Trim(),
                 RelatedEntityType = "EstateListing",
                 RelatedEntityReference = reference
-            }, property, request.SubmissionId, tenantId, requester.Id, requester.UserName, cancellationToken);
+            }, property, request.SubmissionId, tenantId, workflowActor.Id, workflowActor.UserName, cancellationToken);
             return Ok(new { success = true, data = ticket });
         }
         catch (CaptchaVerificationException ex) { return BadRequest(new { success = false, message = ex.Message }); }
@@ -2725,7 +2737,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         return null;
     }
 
-    private async Task<PublicPropertyEnquiryRequester?> ResolvePublicPropertyEnquiryRequesterAsync(
+    private async Task<PublicPropertyEnquiryWorkflowActor?> ResolvePublicPropertyEnquiryWorkflowActorAsync(
         Guid tenantId,
         CancellationToken cancellationToken)
     {
@@ -2734,14 +2746,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             .Where(user => user.TenantId == tenantId && user.IsActive
                 && (user.UserName == "external" || user.Email == "external@default.com"))
             .OrderBy(user => user.UserName)
-            .Select(user => new PublicPropertyEnquiryRequester(user.Id, user.UserName ?? "external"))
-            .FirstOrDefaultAsync(cancellationToken)
-            ?? await _db.Users
-                .AsNoTracking()
-                .Where(user => user.TenantId == tenantId && user.IsActive)
-                .OrderBy(user => user.UserName)
-                .Select(user => new PublicPropertyEnquiryRequester(user.Id, user.UserName ?? "public-enquiry"))
-                .FirstOrDefaultAsync(cancellationToken);
+            .Select(user => new PublicPropertyEnquiryWorkflowActor(user.Id, user.UserName ?? "external"))
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     private static string? NormalizeContactPhone(string? value)
@@ -2752,7 +2758,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
     }
 
     private sealed record DuplicatePropertyEnquiry(Guid Id, string TicketNumber, EhcTicketStatus Status);
-    private sealed record PublicPropertyEnquiryRequester(Guid Id, string UserName);
+    private sealed record PublicPropertyEnquiryWorkflowActor(Guid Id, string UserName);
 
     private HashSet<string> BuildIdentityTerms()
     {
@@ -3926,12 +3932,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return defaultPublicTenantId;
         }
 
-        return await _db.Tenants
-            .AsNoTracking()
-            .Where(tenant => !tenant.IsDeleted && tenant.Status == TenantStatus.Active)
-            .OrderBy(tenant => tenant.DefaultPriority)
-            .Select(tenant => tenant.Id)
-            .FirstOrDefaultAsync(cancellationToken);
+        return Guid.Empty;
     }
 
     private static string? FirstNonBlank(params string?[] values)

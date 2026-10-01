@@ -85,20 +85,96 @@ function Clear-NextOutputPreservingCache {
         Remove-Item -Recurse -Force
 }
 
+function Get-DeploymentResourceSnapshot {
+    try {
+        $operatingSystem = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+        $processors = @(Get-CimInstance Win32_Processor -ErrorAction Stop)
+        $driveId = [IO.Path]::GetPathRoot($RepositoryRoot).TrimEnd('\')
+        $drive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$driveId'" -ErrorAction Stop
+        $pageFiles = @(Get-CimInstance Win32_PageFileUsage -ErrorAction SilentlyContinue)
+        $diskPerformance = @(Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk `
+            -ErrorAction SilentlyContinue | Where-Object Name -eq '_Total' | Select-Object -First 1)
+        $networkPerformance = @(Get-CimInstance Win32_PerfFormattedData_Tcpip_NetworkInterface `
+            -ErrorAction SilentlyContinue)
+        return [ordered]@{
+            capturedUtc = [DateTime]::UtcNow.ToString('o')
+            cpuLoadPercent = [Math]::Round([double](($processors | Measure-Object LoadPercentage -Average).Average), 2)
+            availablePhysicalMemoryBytes = [long]$operatingSystem.FreePhysicalMemory * 1KB
+            totalPhysicalMemoryBytes = [long]$operatingSystem.TotalVisibleMemorySize * 1KB
+            availableVirtualMemoryBytes = [long]$operatingSystem.FreeVirtualMemory * 1KB
+            totalVirtualMemoryBytes = [long]$operatingSystem.TotalVirtualMemorySize * 1KB
+            pageFileAllocatedBytes = [long](($pageFiles | Measure-Object AllocatedBaseSize -Sum).Sum) * 1MB
+            pageFileUsedBytes = [long](($pageFiles | Measure-Object CurrentUsage -Sum).Sum) * 1MB
+            diskFreeBytes = [long]$drive.FreeSpace
+            diskSizeBytes = [long]$drive.Size
+            diskBytesPerSecond = if ($diskPerformance.Count) { [long]$diskPerformance[0].DiskBytesPersec } else { $null }
+            averageDiskSecondsPerTransfer = if ($diskPerformance.Count) { [double]$diskPerformance[0].AvgDisksecPerTransfer } else { $null }
+            networkBytesPerSecond = [long](($networkPerformance | Measure-Object BytesTotalPersec -Sum).Sum)
+        }
+    }
+    catch {
+        return [ordered]@{
+            capturedUtc = [DateTime]::UtcNow.ToString('o')
+            unavailable = $_.Exception.Message
+        }
+    }
+}
+
+function Write-DeploymentTimingSummary {
+    if ($StepResults.Count -eq 0) { return }
+    Write-Host "`nDEPLOYMENT TIMING SUMMARY (slowest first)" -ForegroundColor Cyan
+    foreach ($step in @($StepResults | Sort-Object durationSeconds -Descending)) {
+        $scope = if ($step.scope) { " [$($step.scope)]" } else { '' }
+        Write-Host ("{0,10:n1}s  {1,-8}  {2}{3}" -f `
+                [double]$step.durationSeconds, $step.status, $step.name, $scope)
+    }
+}
+
+function Import-RemoteTimings {
+    param([string[]]$Output)
+    foreach ($line in @($Output | Where-Object { $_ -like 'REMOTE_TIMING_JSON|*' })) {
+        try {
+            $encoded = $line.Substring('REMOTE_TIMING_JSON|'.Length)
+            $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded))
+            $remote = $json | ConvertFrom-Json
+            $StepResults.Add([ordered]@{
+                name = [string]$remote.name
+                scope = 'Remote VPS'
+                status = [string]$remote.status
+                startedUtc = [string]$remote.startedUtc
+                completedUtc = [string]$remote.completedUtc
+                durationSeconds = [double]$remote.durationSeconds
+                resourcesBefore = $remote.resourcesBefore
+                resourcesAfter = $remote.resourcesAfter
+                error = [string]$remote.error
+            })
+        }
+        catch {
+            Write-Warning "Could not parse a remote timing record: $($_.Exception.Message)"
+        }
+    }
+}
+
 function Invoke-Step {
-    param([string]$Name, [scriptblock]$Operation)
+    param([string]$Name, [scriptblock]$Operation, [string]$Scope = 'Pipeline')
 
     Write-Host "`n==> $Name" -ForegroundColor Cyan
     $started = [DateTime]::UtcNow
+    $resourcesBefore = Get-DeploymentResourceSnapshot
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         $result = & $Operation
         $watch.Stop()
+        $completed = [DateTime]::UtcNow
         $StepResults.Add([ordered]@{
             name = $Name
+            scope = $Scope
             status = 'Passed'
             startedUtc = $started.ToString('o')
+            completedUtc = $completed.ToString('o')
             durationSeconds = [Math]::Round($watch.Elapsed.TotalSeconds, 2)
+            resourcesBefore = $resourcesBefore
+            resourcesAfter = Get-DeploymentResourceSnapshot
         })
         Write-Host ("PASS {0} ({1:n1}s)" -f $Name, $watch.Elapsed.TotalSeconds) `
             -ForegroundColor Green
@@ -106,11 +182,16 @@ function Invoke-Step {
     }
     catch {
         $watch.Stop()
+        $completed = [DateTime]::UtcNow
         $StepResults.Add([ordered]@{
             name = $Name
+            scope = $Scope
             status = 'Failed'
             startedUtc = $started.ToString('o')
+            completedUtc = $completed.ToString('o')
             durationSeconds = [Math]::Round($watch.Elapsed.TotalSeconds, 2)
+            resourcesBefore = $resourcesBefore
+            resourcesAfter = Get-DeploymentResourceSnapshot
             error = $_.Exception.Message
         })
         Write-Host ("FAIL {0} ({1:n1}s): {2}" -f `
@@ -552,21 +633,25 @@ function New-ReleaseArtifacts {
         Assert-True (Test-Path -LiteralPath `
                 (Join-Path $sourceApiOutput 'ErpSystem.Api.exe')) `
             "Reusable API publish output is missing: $sourceApiOutput"
-        Invoke-RobocopyChecked @(
-            $sourceApiOutput, $apiOutput, '/E', '/R:2', '/W:2',
-            '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
-        ) 'Reusing the verified API publish output failed'
+        Invoke-Step -Name 'Reuse prior API publish output' -Scope 'Build host' -Operation {
+            Invoke-RobocopyChecked @(
+                $sourceApiOutput, $apiOutput, '/E', '/R:2', '/W:2',
+                '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
+            ) 'Reusing the verified API publish output failed'
+        } | Out-Null
         Write-Host "Reused API publish output from $resolvedSourceCommit." `
             -ForegroundColor Green
     }
     else {
-        Invoke-NativeChecked 'dotnet' @(
-            'publish', 'src\ErpSystem.Api\ErpSystem.Api.csproj',
-            '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
-            '-o', $apiOutput,
-            '/p:PublishSingleFile=false',
-            '-p:UseSharedCompilation=false', '-m:1'
-        ) 'API publish failed' | Out-Host
+        Invoke-Step -Name 'Publish self-contained API' -Scope 'Build host' -Operation {
+            Invoke-NativeChecked 'dotnet' @(
+                'publish', 'src\ErpSystem.Api\ErpSystem.Api.csproj',
+                '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
+                '-o', $apiOutput,
+                '/p:PublishSingleFile=false',
+                '-p:UseSharedCompilation=false', '-m:1'
+            ) 'API publish failed' | Out-Host
+        } | Out-Null
     }
 
     foreach ($name in @(
@@ -641,17 +726,23 @@ function New-ReleaseArtifacts {
         try {
             Push-Location $frontendRoot
             try {
-                Invoke-NativeChecked 'npm.cmd' @(
-                    'ci', '--include=dev', '--no-audit', '--no-fund'
-                ) 'Frontend locked-dependency restore failed' | Out-Host
-                $syncfusionActivator = Join-Path $frontendRoot `
-                    'node_modules\.bin\syncfusion-license.cmd'
-                Assert-True (Test-Path -LiteralPath $syncfusionActivator) `
-                    'The installed Syncfusion frontend license activator is missing.'
-                Invoke-NativeChecked $syncfusionActivator @('activate') `
-                    'Syncfusion frontend license activation failed' | Out-Host
-                Invoke-NativeChecked 'npm.cmd' @('run', 'build') `
-                    'Frontend build failed' | Out-Host
+                Invoke-Step -Name 'Restore locked frontend dependencies' -Scope 'Build host' -Operation {
+                    Invoke-NativeChecked 'npm.cmd' @(
+                        'ci', '--include=dev', '--no-audit', '--no-fund'
+                    ) 'Frontend locked-dependency restore failed' | Out-Host
+                } | Out-Null
+                Invoke-Step -Name 'Activate Syncfusion frontend license' -Scope 'Build host' -Operation {
+                    $syncfusionActivator = Join-Path $frontendRoot `
+                        'node_modules\.bin\syncfusion-license.cmd'
+                    Assert-True (Test-Path -LiteralPath $syncfusionActivator) `
+                        'The installed Syncfusion frontend license activator is missing.'
+                    Invoke-NativeChecked $syncfusionActivator @('activate') `
+                        'Syncfusion frontend license activation failed' | Out-Host
+                } | Out-Null
+                Invoke-Step -Name 'Build Next.js production application' -Scope 'Build host' -Operation {
+                    Invoke-NativeChecked 'npm.cmd' @('run', 'build') `
+                        'Frontend build failed' | Out-Host
+                } | Out-Null
             }
             finally { Pop-Location }
         }
@@ -671,27 +762,29 @@ function New-ReleaseArtifacts {
     Assert-True (Test-Path (Join-Path $nextOutput 'required-server-files.json')) `
         'Regular Next.js server files are missing.'
 
-    Invoke-RobocopyChecked @(
-        $nextOutput, (Join-Path $frontendOutput '.next'), '/E', '/R:2', '/W:2',
-        '/NFL', '/NDL', '/NJH', '/NJS', '/NP',
-        '/XD', (Join-Path $nextOutput 'cache')
-    ) 'Frontend .next staging failed'
-    Invoke-RobocopyChecked @(
-        (Join-Path $frontendRoot 'public'), (Join-Path $frontendOutput 'public'),
-        '/E', '/R:2', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
-    ) 'Frontend public staging failed'
-    Copy-Item (Join-Path $frontendRoot 'package.json'), `
-        (Join-Path $frontendRoot 'package-lock.json'), `
-        (Join-Path $frontendRoot 'next.config.js') `
-        -Destination $frontendOutput -Force
-    Set-StagedFrontendRuntime -FrontendDirectory $frontendOutput
-    Push-Location $frontendOutput
-    try {
-        Invoke-NativeChecked 'npm.cmd' @(
-            'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'
-        ) 'Frontend production dependency staging failed' | Out-Host
-    }
-    finally { Pop-Location }
+    Invoke-Step -Name 'Stage frontend runtime and production dependencies' -Scope 'Build host' -Operation {
+        Invoke-RobocopyChecked @(
+            $nextOutput, (Join-Path $frontendOutput '.next'), '/E', '/R:2', '/W:2',
+            '/NFL', '/NDL', '/NJH', '/NJS', '/NP',
+            '/XD', (Join-Path $nextOutput 'cache')
+        ) 'Frontend .next staging failed'
+        Invoke-RobocopyChecked @(
+            (Join-Path $frontendRoot 'public'), (Join-Path $frontendOutput 'public'),
+            '/E', '/R:2', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
+        ) 'Frontend public staging failed'
+        Copy-Item (Join-Path $frontendRoot 'package.json'), `
+            (Join-Path $frontendRoot 'package-lock.json'), `
+            (Join-Path $frontendRoot 'next.config.js') `
+            -Destination $frontendOutput -Force
+        Set-StagedFrontendRuntime -FrontendDirectory $frontendOutput
+        Push-Location $frontendOutput
+        try {
+            Invoke-NativeChecked 'npm.cmd' @(
+                'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'
+            ) 'Frontend production dependency staging failed' | Out-Host
+        }
+        finally { Pop-Location }
+    } | Out-Null
     Assert-True (Test-Path `
             (Join-Path $frontendOutput 'node_modules\next\package.json')) `
         'Frontend production Next.js runtime is missing.'
@@ -734,13 +827,21 @@ function New-ReleaseArtifacts {
     foreach ($zip in @($apiZip, $frontendZip)) {
         if (Test-Path $zip) { Remove-Item -LiteralPath $zip -Force }
     }
-    Compress-Archive -Path (Join-Path $apiOutput '*') -DestinationPath $apiZip `
-        -CompressionLevel Optimal
-    Compress-Archive -Path (Join-Path $frontendOutput '*') `
-        -DestinationPath $frontendZip -CompressionLevel Optimal
+    Invoke-Step -Name 'Compress API and frontend artifacts' -Scope 'Build host' -Operation {
+        Compress-Archive -Path (Join-Path $apiOutput '*') -DestinationPath $apiZip `
+            -CompressionLevel Optimal
+        Compress-Archive -Path (Join-Path $frontendOutput '*') `
+            -DestinationPath $frontendZip -CompressionLevel Optimal
+    } | Out-Null
 
     $apiInfo = Get-Item $apiZip
     $frontendInfo = Get-Item $frontendZip
+    $artifactHashes = Invoke-Step -Name 'Hash API and frontend artifacts' -Scope 'Build host' -Operation {
+        [ordered]@{
+            api = (Get-FileHash $apiZip -Algorithm SHA256).Hash
+            frontend = (Get-FileHash $frontendZip -Algorithm SHA256).Hash
+        }
+    }
     $manifest = [ordered]@{
         schemaVersion = 1
         commit = $script:Commit
@@ -753,12 +854,12 @@ function New-ReleaseArtifacts {
         api = [ordered]@{
             file = $apiInfo.Name
             bytes = $apiInfo.Length
-            sha256 = (Get-FileHash $apiZip -Algorithm SHA256).Hash
+            sha256 = $artifactHashes.api
         }
         frontend = [ordered]@{
             file = $frontendInfo.Name
             bytes = $frontendInfo.Length
-            sha256 = (Get-FileHash $frontendZip -Algorithm SHA256).Hash
+            sha256 = $artifactHashes.frontend
         }
     }
     [System.IO.File]::WriteAllText(
@@ -947,6 +1048,7 @@ function Write-RunResult {
         release = $ReleaseManifest
         migrations = $MigrationState
         steps = $StepResults
+        slowestSteps = @($StepResults | Sort-Object durationSeconds -Descending)
         failure = $Failure
     }
     $name = if ($DryRun) { "dry-run-$DeploymentId.json" } else { "deployment-$DeploymentId.json" }
@@ -1064,6 +1166,7 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
     $preflight = @(Invoke-Step 'Fail-fast VPS and migration preflight' {
         Invoke-RemoteHelper $remoteHelperPath 'Preflight' @{ FreshDatabaseName = $FreshDatabaseName }
     })
+    Import-RemoteTimings $preflight
     if ($FreshDatabaseName) {
         Assert-True ($preflight -contains "FRESH_TARGET_READY|$FreshDatabaseName") 'Fresh database preflight did not confirm an absent target.'
         $migrationState = [ordered]@{ mode = 'FreshDatabase'; target = $FreshDatabaseName; provisioned = $false }
@@ -1079,6 +1182,7 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
         $verify = @(Invoke-Step 'Verify deployed services and database' {
             Invoke-RemoteHelper $remoteHelperPath 'Verify'
         })
+        Import-RemoteTimings $verify
         $migrationState = Compare-MigrationState $verify $true
         Invoke-Step 'Public API, asset, and CORS smoke' {
             Invoke-PublicSmoke '' -AllowConfigurationDrift
@@ -1108,10 +1212,13 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
     if ($DeployOnly) {
         Write-Host "Using prebuilt release $($releaseManifest.releaseId); no build or dependency command will run on the VPS." `
             -ForegroundColor Green
+        $recordedUtc = [DateTime]::UtcNow.ToString('o')
         $StepResults.Add([ordered]@{
             name = 'Consume prebuilt immutable release artifacts'
+            scope = 'Pipeline'
             status = 'Verified'
-            startedUtc = [DateTime]::UtcNow.ToString('o')
+            startedUtc = $recordedUtc
+            completedUtc = $recordedUtc
             durationSeconds = 0
         })
     }
@@ -1126,10 +1233,13 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
     else {
         Write-Host "Reusing verified artifacts for $($script:Commit)." `
             -ForegroundColor Green
+        $recordedUtc = [DateTime]::UtcNow.ToString('o')
         $StepResults.Add([ordered]@{
             name = 'Build and package immutable release artifacts'
+            scope = 'Pipeline'
             status = 'Reused'
-            startedUtc = [DateTime]::UtcNow.ToString('o')
+            startedUtc = $recordedUtc
+            completedUtc = $recordedUtc
             durationSeconds = 0
         })
     }
@@ -1146,6 +1256,7 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
             ExpectedCommit = $script:Commit
         }
     })
+    Import-RemoteTimings $backupOutput
 
     if ($preflight -contains 'UAT_CREDENTIAL|REQUIRED') {
         $secureOperationalPassword = Read-Host 'Initial password for NEW Procurement, Inventory and QS test accounts (existing passwords are preserved)' -AsSecureString
@@ -1179,24 +1290,15 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
         }
     })
     $applyOutput | Out-Host
-    foreach ($timingLine in @($applyOutput | Where-Object { $_ -like 'PERFORMANCE|*' })) {
-        $parts = $timingLine -split '\|'
-        if ($parts.Count -eq 3) {
-            $StepResults.Add([ordered]@{
-                name = $parts[1]
-                status = 'Passed'
-                startedUtc = $null
-                durationSeconds = [double]::Parse(
-                    $parts[2], [Globalization.CultureInfo]::InvariantCulture)
-            })
-        }
-    }
+    Import-RemoteTimings $applyOutput
     $applicationApplyCompleted = $true
 
     if (-not $FreshDatabaseName) {
-        Invoke-Step 'Seed and verify Procurement, Inventory and QS baseline' {
+        $seedOutput = @(Invoke-Step 'Seed and verify Procurement, Inventory and QS baseline' {
             Invoke-RemoteHelper $remoteHelperPath 'SeedOperational' @{ DeploymentId=$deploymentId }
-        } | Out-Host
+        })
+        $seedOutput | Out-Host
+        Import-RemoteTimings $seedOutput
     }
 
     $verifyOutput = @(Invoke-Step 'Verify deployed services and database' {
@@ -1205,6 +1307,7 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
             ExpectedCacheVersion = $releaseManifest.cacheVersion
         }
     })
+    Import-RemoteTimings $verifyOutput
     $migrationState = Compare-MigrationState $verifyOutput $true
 
     Invoke-Step 'Public API, asset, and CORS smoke' {
@@ -1224,36 +1327,43 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
     } | Out-Host
 
     if ($FreshDatabaseName) {
-        Invoke-Step 'Complete verified fresh database cutover' {
+        $completeFreshOutput = @(Invoke-Step 'Complete verified fresh database cutover' {
             Invoke-RemoteHelper $remoteHelperPath 'CompleteFresh' @{
                 DeploymentId = $deploymentId; ExpectedCommit = $script:Commit; FreshDatabaseName = $FreshDatabaseName
             }
-        } | Out-Host
+        })
+        $completeFreshOutput | Out-Host
+        Import-RemoteTimings $completeFreshOutput
         $freshApplyAttempted = $false
     }
 
+    Write-DeploymentTimingSummary
     Write-Host "`nDEPLOYMENT PASSED: $resultPath" -ForegroundColor Green
 }
 catch {
     $deploymentFailure = $_
     if ($applicationApplyCompleted -and -not $FreshDatabaseName) {
         try {
-            Invoke-Step 'Rollback application release after failed verification' {
+            $rollbackOutput = @(Invoke-Step 'Rollback application release after failed verification' {
                 Invoke-RemoteHelper $remoteHelperPath 'RollbackRelease' @{
                     DeploymentId = $deploymentId
                 }
-            } | Out-Host
+            })
+            $rollbackOutput | Out-Host
+            Import-RemoteTimings $rollbackOutput
         } catch {
             Write-Warning "Automatic application rollback failed. The database was not restored. $($_.Exception.Message)"
         }
     }
     if ($freshApplyAttempted) {
         try {
-            Invoke-Step 'Restore original application and database connection' {
+            $rollbackFreshOutput = @(Invoke-Step 'Restore original application and database connection' {
                 Invoke-RemoteHelper $remoteHelperPath 'RollbackFresh' @{
                     DeploymentId = $deploymentId; ExpectedCommit = $script:Commit; FreshDatabaseName = $FreshDatabaseName
                 }
-            } | Out-Host
+            })
+            $rollbackFreshOutput | Out-Host
+            Import-RemoteTimings $rollbackFreshOutput
         } catch {
             Write-Warning "Automatic rollback could not complete. Keep both databases and the deployment backup; review the VPS evidence. $($_.Exception.Message)"
         }
@@ -1274,6 +1384,7 @@ catch {
     throw $deploymentFailure
 }
 finally {
+    if ($null -ne $deploymentFailure) { Write-DeploymentTimingSummary }
     if ($operationalPasswordPrompted) {
         [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $priorOperationalPassword, 'Process')
     }

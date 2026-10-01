@@ -1129,6 +1129,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<EhcInboundEmailWebhookQueueItem> EhcInboundEmailWebhookQueueItems { get; set; }
     public DbSet<EhcInboundMessagingChannel> EhcInboundMessagingChannels { get; set; }
     public DbSet<EhcInboundMessagingMessage> EhcInboundMessagingMessages { get; set; }
+    public DbSet<EhcPropertyEnquiryProspect> EhcPropertyEnquiryProspects { get; set; }
+    public DbSet<EhcPropertyProspectDepositPolicy> EhcPropertyProspectDepositPolicies { get; set; }
+    public DbSet<ProspectDepositReceipt> EhcProspectDepositReceipts { get; set; }
+    public DbSet<EhcPropertyEnquiryEmailAttempt> EhcPropertyEnquiryEmailAttempts { get; set; }
 
     // Estate/DMS integration: Estate acquisition, property assets, and procedure cases are modeled here for shared workflow/DMS links.
     public DbSet<LandAcquisition> LandAcquisitions { get; set; }
@@ -1283,6 +1287,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new ApplicationUserConfiguration());
         builder.ApplyConfiguration(new TenantConfiguration());
         builder.ApplyConfiguration(new UserTenantConfiguration());
+        builder.ApplyConfiguration(new ErpSystem.Data.Configuration.Ehc.EhcPropertyEnquiryProspectConfiguration());
+        builder.ApplyConfiguration(new ErpSystem.Data.Configuration.Ehc.EhcPropertyProspectDepositPolicyConfiguration());
+        builder.ApplyConfiguration(new ErpSystem.Data.Configuration.Ehc.ProspectDepositReceiptConfiguration());
+        builder.ApplyConfiguration(new ErpSystem.Data.Configuration.Ehc.EhcPropertyEnquiryEmailAttemptConfiguration());
         builder.ApplyConfiguration(new JournalBatchConfiguration());
         builder.ApplyConfiguration(new JournalBatchEntryApprovalConfiguration());
         builder.ApplyConfiguration(new JournalBatchItemConfiguration());
@@ -4884,6 +4892,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.CapitalizationApprovalExchangeRateId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.MaintenanceAsset)
+                .WithMany()
+                .HasForeignKey(e => e.MaintenanceAssetId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         builder.Entity<FixedAssetCapitalizationCycle>(entity =>
@@ -7646,6 +7658,16 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // Configure MaintenanceAsset entity
         builder.Entity<MaintenanceAsset>(entity =>
         {
+            entity.ToTable("MaintenanceAssets", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_MaintenanceAssets_SourceReference",
+                    "([SourceType] = 'LegacyMaintenanceAsset' AND [FixedAssetId] IS NULL AND [EstateManagedAssetId] IS NULL) OR " +
+                    "([SourceType] = 'FixedAsset' AND [FixedAssetId] IS NOT NULL AND [EstateManagedAssetId] IS NULL) OR " +
+                    "([SourceType] = 'EstateManagedAsset' AND [FixedAssetId] IS NULL AND [EstateManagedAssetId] IS NOT NULL)");
+            });
+            entity.HasAlternateKey(a => new { a.TenantId, a.Id });
+            entity.Property(a => a.SourceType).HasConversion<string>().HasMaxLength(40);
             entity.HasIndex(a => a.AssetNumber);
             entity.HasIndex(a => a.AssetCategoryId);
             entity.HasIndex(a => a.Status);
@@ -7654,6 +7676,24 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(a => a.SerialNumber);
             entity.HasIndex(a => a.CurrentProjectId);
             entity.HasIndex(a => a.CurrentSiteLocationId);
+            entity.HasIndex(a => new { a.TenantId, a.FixedAssetId })
+                .IsUnique()
+                .HasFilter("[FixedAssetId] IS NOT NULL AND [IsDeleted] = 0");
+            entity.HasIndex(a => new { a.TenantId, a.EstateManagedAssetId })
+                .IsUnique()
+                .HasFilter("[EstateManagedAssetId] IS NOT NULL AND [IsDeleted] = 0");
+
+            entity.HasOne(a => a.FixedAsset)
+                .WithMany()
+                .HasForeignKey(a => new { a.TenantId, a.FixedAssetId })
+                .HasPrincipalKey(a => new { a.TenantId, a.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(a => a.EstateManagedAsset)
+                .WithMany()
+                .HasForeignKey(a => new { a.TenantId, a.EstateManagedAssetId })
+                .HasPrincipalKey(a => new { a.TenantId, a.Id })
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(a => a.AssetCategory)
                 .WithMany(c => c.Assets)
@@ -8289,9 +8329,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // Configure JobCard entity
         builder.Entity<JobCard>(entity =>
         {
-            entity.ToTable("JobCard"); // Explicitly set table name to singular
+            entity.ToTable("JobCard", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_JobCard_AssetSourceReference",
+                    "([AssetSource] = 'LegacyMaintenanceAsset' AND [FixedAssetId] IS NULL AND [EstateManagedAssetId] IS NULL) OR " +
+                    "([AssetSource] = 'FixedAsset' AND [FixedAssetId] IS NOT NULL AND [EstateManagedAssetId] IS NULL) OR " +
+                    "([AssetSource] = 'EstateManagedAsset' AND [FixedAssetId] IS NULL AND [EstateManagedAssetId] IS NOT NULL)");
+            }); // Explicitly set table name to singular
+            entity.Property(jc => jc.AssetSource).HasConversion<string>().HasMaxLength(40);
             entity.HasIndex(jc => jc.JobCardNumber).IsUnique();
             entity.HasIndex(jc => jc.AssetId);
+            entity.HasIndex(jc => new { jc.TenantId, jc.AssetSource, jc.FixedAssetId, jc.EstateManagedAssetId });
             entity.HasIndex(jc => jc.MaintenanceTypeId);
             entity.HasIndex(jc => jc.PriorityLevelId);
             entity.HasIndex(jc => jc.RequestedById);
@@ -8304,6 +8353,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(jc => jc.Asset)
                 .WithMany()
                 .HasForeignKey(jc => jc.AssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(jc => jc.FixedAsset)
+                .WithMany()
+                .HasForeignKey(jc => new { jc.TenantId, jc.FixedAssetId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(jc => jc.EstateManagedAsset)
+                .WithMany()
+                .HasForeignKey(jc => new { jc.TenantId, jc.EstateManagedAssetId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id })
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(jc => jc.MaintenanceType)
@@ -9752,7 +9813,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<EhcTicket>(entity =>
         {
             entity.HasIndex(x => new { x.TenantId, x.RequesterUserId, x.ExternalSubmissionId })
-                .IsUnique().HasFilter("[ExternalSubmissionId] IS NOT NULL");
+                .IsUnique().HasFilter("[ExternalSubmissionId] IS NOT NULL AND [RequesterUserId] IS NOT NULL");
+            entity.HasIndex(x => new { x.TenantId, x.ExternalSubmissionId })
+                .IsUnique().HasFilter("[ExternalSubmissionId] IS NOT NULL AND [RequesterUserId] IS NULL");
             entity.HasIndex(x => new { x.TenantId, x.TicketNumber }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.Status });
             entity.HasIndex(x => new { x.TenantId, x.RequesterUserId });
@@ -9762,6 +9825,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(x => new { x.TenantId, x.RootCauseId });
             entity.HasIndex(x => new { x.TenantId, x.CrmOpportunityId });
             entity.HasIndex(x => new { x.TenantId, x.EstateListingApplicationCaseId });
+
+            entity.HasOne(x => x.RequesterUser)
+                .WithMany()
+                .HasForeignKey(x => x.RequesterUserId)
+                .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasOne(x => x.Category)
                 .WithMany()
@@ -10731,6 +10799,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<EstateManagedAsset>(entity =>
         {
             entity.ToTable("EstateManagedAssets");
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id });
             entity.HasIndex(item => new { item.TenantId, item.AssetCode }).IsUnique();
             entity.HasIndex(item => new { item.TenantId, item.AssetType, item.Status });
             entity.HasIndex(item => new { item.TenantId, item.ProjectUnitId });

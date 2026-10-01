@@ -48,29 +48,83 @@ function Assert-SafeChildPath {
         "Refusing a filesystem operation outside $parentPath"
 }
 
+function Get-BuildResourceSnapshot {
+    try {
+        $operatingSystem = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+        $processor = @(Get-CimInstance Win32_Processor -ErrorAction Stop)
+        $drive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$([IO.Path]::GetPathRoot($repositoryRoot).TrimEnd('\'))'" -ErrorAction Stop
+        $pageFiles = @(Get-CimInstance Win32_PageFileUsage -ErrorAction SilentlyContinue)
+        $diskPerformance = @(Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk `
+            -ErrorAction SilentlyContinue | Where-Object Name -eq '_Total' | Select-Object -First 1)
+        $networkPerformance = @(Get-CimInstance Win32_PerfFormattedData_Tcpip_NetworkInterface `
+            -ErrorAction SilentlyContinue)
+        return [ordered]@{
+            capturedUtc = [DateTime]::UtcNow.ToString('o')
+            cpuLoadPercent = [Math]::Round([double](($processor | Measure-Object LoadPercentage -Average).Average), 2)
+            availablePhysicalMemoryBytes = [long]$operatingSystem.FreePhysicalMemory * 1KB
+            totalPhysicalMemoryBytes = [long]$operatingSystem.TotalVisibleMemorySize * 1KB
+            availableVirtualMemoryBytes = [long]$operatingSystem.FreeVirtualMemory * 1KB
+            totalVirtualMemoryBytes = [long]$operatingSystem.TotalVirtualMemorySize * 1KB
+            pageFileAllocatedBytes = [long](($pageFiles | Measure-Object AllocatedBaseSize -Sum).Sum) * 1MB
+            pageFileUsedBytes = [long](($pageFiles | Measure-Object CurrentUsage -Sum).Sum) * 1MB
+            diskFreeBytes = if ($null -ne $drive) { [long]$drive.FreeSpace } else { $null }
+            diskSizeBytes = if ($null -ne $drive) { [long]$drive.Size } else { $null }
+            diskBytesPerSecond = if ($diskPerformance.Count) { [long]$diskPerformance[0].DiskBytesPersec } else { $null }
+            averageDiskSecondsPerTransfer = if ($diskPerformance.Count) { [double]$diskPerformance[0].AvgDisksecPerTransfer } else { $null }
+            networkBytesPerSecond = [long](($networkPerformance | Measure-Object BytesTotalPersec -Sum).Sum)
+        }
+    }
+    catch {
+        return [ordered]@{
+            capturedUtc = [DateTime]::UtcNow.ToString('o')
+            unavailable = $_.Exception.Message
+        }
+    }
+}
+
+function Write-BuildTimingSummary {
+    if ($timings.Count -eq 0) { return }
+    Write-Host "`nBUILD TIMING SUMMARY (slowest first)" -ForegroundColor Cyan
+    foreach ($timing in @($timings | Sort-Object durationSeconds -Descending)) {
+        Write-Host ("{0,10:n1}s  {1,-6}  {2}" -f `
+                [double]$timing.durationSeconds, $timing.status, $timing.name)
+    }
+}
+
 function Invoke-TimedStep {
     param([string]$Name, [scriptblock]$Operation)
     Write-Host "`n==> $Name" -ForegroundColor Cyan
     $started = [DateTime]::UtcNow
+    $resourcesBefore = Get-BuildResourceSnapshot
     $watch = [Diagnostics.Stopwatch]::StartNew()
     try {
         $result = & $Operation
         $watch.Stop()
+        $completed = [DateTime]::UtcNow
         $timings.Add([ordered]@{
             name = $Name
+            scope = 'Build host'
             status = 'Passed'
             startedUtc = $started.ToString('o')
+            completedUtc = $completed.ToString('o')
             durationSeconds = [Math]::Round($watch.Elapsed.TotalSeconds, 2)
+            resourcesBefore = $resourcesBefore
+            resourcesAfter = Get-BuildResourceSnapshot
         })
         Write-Host ("PASS {0} ({1:n1}s)" -f $Name, $watch.Elapsed.TotalSeconds) -ForegroundColor Green
         return $result
     } catch {
         $watch.Stop()
+        $completed = [DateTime]::UtcNow
         $timings.Add([ordered]@{
             name = $Name
+            scope = 'Build host'
             status = 'Failed'
             startedUtc = $started.ToString('o')
+            completedUtc = $completed.ToString('o')
             durationSeconds = [Math]::Round($watch.Elapsed.TotalSeconds, 2)
+            resourcesBefore = $resourcesBefore
+            resourcesAfter = Get-BuildResourceSnapshot
             error = $_.Exception.Message
         })
         throw
@@ -428,7 +482,11 @@ try {
     [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 10),
         (New-Object Text.UTF8Encoding($false)))
     Write-Host "`nRELEASE_BUILD_PASSED|$releaseId|$manifestPath" -ForegroundColor Green
+    # Machine-readable output consumed by the one-command VPS wrapper. Keep the
+    # human-readable marker above for operators and existing transcripts.
+    Write-Output "RELEASE_ARTIFACT_DIRECTORY|$releaseDirectory"
 } finally {
+    Write-BuildTimingSummary
     Restore-ProcessEnvironment
     $license = $null
     if ($workDirectory -and (Test-Path -LiteralPath $workDirectory)) {

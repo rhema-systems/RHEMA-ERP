@@ -6,6 +6,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Ehc;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -16,11 +17,13 @@ namespace ErpSystem.Api.Controllers.Ehc;
 [ApiController]
 [Route("api/ehc/internal/property-enquiries")]
 [Authorize(Policy = "InternalOnly")]
-[Authorize(Roles = "Sales User,Marketing User,HelpdeskAgent,HelpdeskSupervisor,HelpdeskManager,TenantAdmin,SuperAdmin")]
+[Authorize(Roles = "Sales User,Sales Officer,Sales Manager,Marketing User,HelpdeskAgent,HelpdeskSupervisor,HelpdeskManager,Finance Officer,Finance Manager,Accounts Officer,Senior Accountant,Financial Controller,TenantAdmin,SuperAdmin")]
 public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICurrentUserService currentUser,
-    IEhcTicketService tickets, IEstateSalesListingApplicationHandoffService estateHandoffs) : ControllerBase
+    IEhcTicketService tickets, IEstateSalesListingApplicationHandoffService estateHandoffs,
+    IPropertyEnquiryProspectService prospects) : ControllerBase
 {
     private static readonly string[] SalesAndMarketingOrganizationUnitCodes = ["DEPT-SALES", "UNIT-MKT"];
+    private IPropertyEnquiryProspectService ProspectService => prospects;
 
     private IQueryable<ErpSystem.Core.Entities.Ehc.EhcTicket> Query() => db.EhcTickets.AsNoTracking()
         .Where(t => t.TenantId == currentUser.TenantId && !t.IsDeleted && t.TicketType == EhcTicketType.Enquiry
@@ -37,9 +40,13 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
     {
         page = Math.Max(1, page);
         var total = await Query().CountAsync(cancellationToken);
-        var items = await Query().OrderByDescending(t => t.CreatedAt).Skip((page - 1) * 25).Take(25)
+        var rows = await Query().OrderByDescending(t => t.CreatedAt).Skip((page - 1) * 25).Take(25)
             .Select(t => new { t.Id, t.TicketNumber, t.Subject, t.Status, t.CreatedAt, t.FirstRespondedAt,
-                RequesterName = t.RequesterUser.FirstName + " " + t.RequesterUser.LastName }).ToArrayAsync(cancellationToken);
+                t.PropertyListingContextJson, FallbackRequesterName = t.RequesterUser == null
+                    ? null : t.RequesterUser.FirstName + " " + t.RequesterUser.LastName })
+            .ToArrayAsync(cancellationToken);
+        var items = rows.Select(t => new { t.Id, t.TicketNumber, t.Subject, t.Status, t.CreatedAt, t.FirstRespondedAt,
+            RequesterName = PublicContactName(t.PropertyListingContextJson) ?? t.FallbackRequesterName }).ToArray();
         return Ok(new { success = true, data = items, totalCount = total, page, pageSize = 25 });
     }
 
@@ -104,7 +111,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
             // The ticket remains readable even if a historical snapshot is malformed.
         }
 
-        var linkedSalesOrder = await FindLinkedSalesOrderAsync(property, cancellationToken);
+        var linkedSalesOrder = await FindLinkedSalesOrderAsync(id, property, cancellationToken);
 
         var estateCase = ticket.EstateListingApplicationCaseId is not { } estateCaseId || estateCaseId == Guid.Empty
             ? null
@@ -133,11 +140,17 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
     }
 
     private async Task<object?> FindLinkedSalesOrderAsync(
+        Guid ticketId,
         EhcPropertyListingContextDto? property,
         CancellationToken cancellationToken)
     {
-        if (property?.BusinessPartnerId is not { } businessPartnerId
-            || businessPartnerId == Guid.Empty
+        var prospectBusinessPartnerId = await db.Set<ErpSystem.Core.Entities.Ehc.EhcPropertyEnquiryProspect>()
+            .AsNoTracking()
+            .Where(item => item.TenantId == currentUser.TenantId && item.TicketId == ticketId && !item.IsDeleted)
+            .Select(item => item.BusinessPartnerId)
+            .SingleOrDefaultAsync(cancellationToken);
+        var businessPartnerId = prospectBusinessPartnerId ?? property?.BusinessPartnerId;
+        if (property is null || businessPartnerId is null || businessPartnerId == Guid.Empty
             || string.IsNullOrWhiteSpace(property.ListingReference))
         {
             return null;
@@ -146,7 +159,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
         var orders = await db.SalesOrders.AsNoTracking()
             .Where(order => order.TenantId == currentUser.TenantId
                 && !order.IsDeleted
-                && order.BusinessPartnerId == businessPartnerId
+                && order.BusinessPartnerId == businessPartnerId.Value
                 && order.PropertyReference != null
                 && order.OrderStatus != SalesOrderStatus.Cancelled
                 && order.OrderStatus != SalesOrderStatus.Rejected)
@@ -183,7 +196,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
                 .Where(item => item.Id == invoiceId
                     && item.TenantId == currentUser.TenantId
                     && !item.IsDeleted
-                    && item.BusinessPartnerId == businessPartnerId)
+                    && item.BusinessPartnerId == businessPartnerId.Value)
                 .Select(item => new
                 {
                     item.Id,
@@ -203,7 +216,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
                          && !allocation.IsDeleted
                          && !allocation.IsReversal
                          && receipt.TenantId == currentUser.TenantId
-                         && receipt.BusinessPartnerId == businessPartnerId
+                         && receipt.BusinessPartnerId == businessPartnerId.Value
                          && !receipt.IsDeleted
                          && receipt.ReversedAt == null
                          && receipt.Status != "Cancelled"
@@ -293,8 +306,14 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
             return BadRequest(new { success = false, message = "The saved property listing context is invalid." });
         }
 
+        var prospectBusinessPartnerId = await db.Set<ErpSystem.Core.Entities.Ehc.EhcPropertyEnquiryProspect>()
+            .AsNoTracking()
+            .Where(item => item.TenantId == currentUser.TenantId && item.TicketId == id && !item.IsDeleted)
+            .Select(item => item.BusinessPartnerId)
+            .SingleOrDefaultAsync(cancellationToken);
+        var businessPartnerId = prospectBusinessPartnerId ?? property?.BusinessPartnerId;
         if (property is null || !IsEstateListingSource(property.Source) || property.ListingId == Guid.Empty
-            || property.BusinessPartnerId is not { } businessPartnerId || businessPartnerId == Guid.Empty)
+            || businessPartnerId is null || businessPartnerId == Guid.Empty)
             return BadRequest(new { success = false, message = "This enquiry does not contain a verified Estate listing and business partner context." });
 
         if (string.IsNullOrWhiteSpace(request.SalesReference) || request.SalesReference.Trim().Length > 200)
@@ -324,7 +343,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
         {
             var result = await estateHandoffs.CreateAsync(currentUser.TenantId ?? Guid.Empty, new(
                 property.ListingId,
-                businessPartnerId,
+                businessPartnerId.Value,
                 property.ListingType,
                 ticket.CrmOpportunityId.Value,
                 request.SalesReference.Trim(),
@@ -431,7 +450,137 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
         if (!await Query().AnyAsync(t => t.Id == id, cancellationToken)) return NotFound();
         if (string.IsNullOrWhiteSpace(request.Body) || request.Body.Trim().Length > 4000)
             return BadRequest(new { success = false, message = "Enter a reply of up to 4,000 characters." });
-        return Ok(new { success = true, data = await tickets.AddAgentMessageAsync(id, request, cancellationToken) });
+        var ticket = await Query().Where(t => t.Id == id).Select(t => new { t.TicketNumber, t.Subject }).SingleAsync(cancellationToken);
+        var result = await ProspectService.SendEmailAsync(id, new SendPropertyEnquiryEmailRequest
+        {
+            Subject = $"Re: {ticket.Subject ?? ticket.TicketNumber}",
+            Body = request.Body
+        }, cancellationToken);
+        if (!result.Sent)
+            return StatusCode(StatusCodes.Status502BadGateway, new { success = false, data = result, message = "The email was not sent. The failed attempt was retained and can be retried." });
+        return Ok(new { success = true, data = result });
+    }
+
+    [HttpGet("{id:guid}/prospect")]
+    public async Task<IActionResult> GetProspect(Guid id, CancellationToken cancellationToken)
+    {
+        if (!await Query().AnyAsync(t => t.Id == id, cancellationToken)) return NotFound();
+        return Ok(new { success = true, data = await ProspectService.GetAsync(id, cancellationToken) });
+    }
+
+    [HttpPost("{id:guid}/prospect/qualify")]
+    [Authorize(Roles = "Sales User,Sales Officer,Sales Manager,TenantAdmin,SuperAdmin")]
+    public async Task<IActionResult> Qualify(Guid id, [FromBody] QualifyPropertyEnquiryRequest request, CancellationToken cancellationToken)
+        => await ExecuteProspectActionAsync(id, () => ProspectService.QualifyAsync(id, request, cancellationToken), cancellationToken);
+
+    [HttpPost("{id:guid}/prospect/contacted")]
+    [Authorize(Roles = "Sales User,Sales Officer,Sales Manager,TenantAdmin,SuperAdmin")]
+    public async Task<IActionResult> RecordContact(Guid id, [FromBody] RecordPropertyEnquiryContactRequest request, CancellationToken cancellationToken)
+        => await ExecuteProspectActionAsync(id, () => ProspectService.RecordContactAsync(id, request, cancellationToken), cancellationToken);
+
+    [HttpPost("{id:guid}/prospect/disqualify")]
+    [Authorize(Roles = "Sales User,Sales Officer,Sales Manager,TenantAdmin,SuperAdmin")]
+    public async Task<IActionResult> Disqualify(Guid id, [FromBody] DisqualifyPropertyEnquiryRequest request, CancellationToken cancellationToken)
+        => await ExecuteProspectActionAsync(id, () => ProspectService.DisqualifyAsync(id, request, cancellationToken), cancellationToken);
+
+    [HttpPost("{id:guid}/prospect/opportunity")]
+    [Authorize(Roles = "Sales User,Sales Officer,Sales Manager,TenantAdmin,SuperAdmin")]
+    public async Task<IActionResult> CreateOpportunity(Guid id, [FromBody] CreatePropertyEnquiryOpportunityRequest request, CancellationToken cancellationToken)
+        => await ExecuteProspectActionAsync(id, () => ProspectService.CreateOpportunityAsync(id, request, cancellationToken), cancellationToken);
+
+    [HttpGet("{id:guid}/prospect/business-partner-matches")]
+    public async Task<IActionResult> BusinessPartnerMatches(Guid id, CancellationToken cancellationToken)
+        => await ExecuteProspectActionAsync(id, () => ProspectService.FindBusinessPartnerMatchesAsync(id, cancellationToken), cancellationToken);
+
+    [HttpPost("{id:guid}/prospect/link-business-partner")]
+    [Authorize(Roles = "Sales Manager,TenantAdmin,SuperAdmin")]
+    public async Task<IActionResult> LinkBusinessPartner(Guid id, [FromBody] LinkPropertyEnquiryBusinessPartnerRequest request, CancellationToken cancellationToken)
+        => await ExecuteProspectActionAsync(id, () => ProspectService.LinkBusinessPartnerAsync(id, request.BusinessPartnerId, cancellationToken), cancellationToken);
+
+    [HttpPost("{id:guid}/prospect/create-business-partner")]
+    [Authorize(Roles = "Sales Manager,TenantAdmin,SuperAdmin")]
+    public async Task<IActionResult> CreateBusinessPartner(Guid id, [FromBody] CreatePropertyEnquiryBusinessPartnerRequest request, CancellationToken cancellationToken)
+        => await ExecuteProspectActionAsync(id, () => ProspectService.CreateBusinessPartnerAsync(id, request, cancellationToken), cancellationToken);
+
+    [HttpPost("{id:guid}/prospect/finalize-business-partner")]
+    [Authorize(Roles = "Sales Manager,TenantAdmin,SuperAdmin")]
+    public async Task<IActionResult> FinalizeBusinessPartner(Guid id, CancellationToken cancellationToken)
+        => await ExecuteProspectActionAsync(id, () => ProspectService.FinalizeBusinessPartnerAsync(id, cancellationToken), cancellationToken);
+
+    [HttpPost("{id:guid}/prospect/deposits")]
+    [Authorize(Roles = "Sales User,Sales Officer,Sales Manager,TenantAdmin,SuperAdmin")]
+    public async Task<IActionResult> RecordDeposit(Guid id, [FromBody] RecordProspectDepositRequest request, CancellationToken cancellationToken)
+        => await ExecuteProspectActionAsync(id, () => ProspectService.RecordDepositAsync(id, request, cancellationToken), cancellationToken);
+
+    [HttpGet("{id:guid}/prospect/deposits")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
+    public async Task<IActionResult> GetDeposits(Guid id, CancellationToken cancellationToken)
+        => await ExecuteProspectActionAsync(id, () => ProspectService.GetDepositsAsync(id, cancellationToken), cancellationToken);
+
+    [HttpPost("{id:guid}/prospect/deposits/{receiptId:guid}/clear")]
+    [Authorize(Policy = FinancePermissions.ReceiveCustomerPayments)]
+    public async Task<IActionResult> ClearDeposit(Guid id, Guid receiptId, [FromBody] ClearProspectDepositRequest request, CancellationToken cancellationToken)
+        => await ExecuteProspectActionAsync(id, () => ProspectService.ClearDepositAsync(id, receiptId, request, cancellationToken), cancellationToken);
+
+    [HttpPost("{id:guid}/prospect/deposits/{receiptId:guid}/reverse")]
+    [Authorize(Policy = FinancePermissions.ReverseArPayments)]
+    public async Task<IActionResult> ReverseDeposit(Guid id, Guid receiptId, [FromBody] ReverseProspectDepositRequest request, CancellationToken cancellationToken)
+        => await ExecuteProspectActionAsync(id, () => ProspectService.ReverseDepositAsync(id, receiptId, request, cancellationToken), cancellationToken);
+
+    [HttpPost("prospect-deposit-policy")]
+    [Authorize(Policy = FinancePermissions.ManageBankingSettings)]
+    public async Task<IActionResult> UpsertDepositPolicy([FromBody] UpsertPropertyProspectDepositPolicyRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ProspectService.UpsertDepositPolicyAsync(request, cancellationToken);
+            return Ok(new { success = true });
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { success = false, message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { success = false, message = ex.Message }); }
+    }
+
+    [HttpGet("prospect-deposit-policy")]
+    [Authorize(Policy = FinancePermissions.ManageBankingSettings)]
+    public async Task<IActionResult> GetDepositPolicy(
+        [FromQuery] Guid salesSaleableSourceId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var policy = await ProspectService.GetDepositPolicyAsync(salesSaleableSourceId, cancellationToken);
+            return Ok(new { success = true, data = policy });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPost("{id:guid}/internal-note")]
+    public async Task<IActionResult> AddInternalNote(Guid id, [FromBody] AddEhcTicketMessageRequestDto request, CancellationToken cancellationToken)
+    {
+        if (!await Query().AnyAsync(t => t.Id == id, cancellationToken)) return NotFound();
+        if (string.IsNullOrWhiteSpace(request.Body) || request.Body.Trim().Length > 4000)
+            return BadRequest(new { success = false, message = "Enter an internal note of up to 4,000 characters." });
+        return Ok(new { success = true, data = await tickets.AddInternalCommentAsync(id, request, cancellationToken) });
+    }
+
+    private async Task<IActionResult> ExecuteProspectActionAsync<T>(Guid ticketId, Func<Task<T>> action, CancellationToken cancellationToken)
+    {
+        if (!await Query().AnyAsync(t => t.Id == ticketId, cancellationToken)) return NotFound();
+        try { return Ok(new { success = true, data = await action() }); }
+        catch (KeyNotFoundException ex) { return NotFound(new { success = false, message = ex.Message }); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
+        catch (ArgumentException ex) { return BadRequest(new { success = false, message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { success = false, message = ex.Message }); }
+    }
+
+    private static string? PublicContactName(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try { return JsonSerializer.Deserialize<EhcPropertyListingContextDto>(json)?.ContactName; }
+        catch (JsonException) { return null; }
     }
 
     [HttpGet("{id:guid}/transitions")]
