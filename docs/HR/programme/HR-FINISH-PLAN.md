@@ -1122,8 +1122,11 @@ Each was a deliberate deferral with a trigger, not an oversight.
       and any base amount, and the claim total followed. The same half-fix shape as
       `EmployeeNumberExistsAsync`: fixed where it was noticed, not on every path that writes the
       field. Both derived fields are now gone from the write DTOs and derived on both paths.
-- [ ] **D-02 — self-service invitation response is act-as-anyone** — **VERIFIED NOT LIVE
-      2026-09-01, trigger kept.** The only caller of `participants/respond` is the HR-desk screen
+- [ ] **D-02 — self-service invitation response is act-as-anyone** — **the trigger has fired
+      (2026-10-01): the company-schedule final closure plan's lane 7 ships a `/me/calendar`, and its
+      D-8 builds the invitee's own reply door with the self check** — see
+      `docs/HR/areas/company-schedule/HR-COMPANY-SCHEDULE-FINAL-CLOSURE-PLAN.md`. Closed there.
+      **VERIFIED NOT LIVE 2026-09-01, trigger kept.** The only caller of `participants/respond` is the HR-desk screen
       (`/hr/company-schedule/events/[id]`), and no `/me` events or invitations surface exists
       (`me-portal.service` has none). Correct for its one consumer; the self-or-permission check is
       still owed the day a `/me` calendar ships.
