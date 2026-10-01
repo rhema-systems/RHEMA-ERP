@@ -178,7 +178,8 @@ foreach ($contract in @('SYNCFUSION_LICENSE', 'VPS_SSH_PRIVATE_KEY',
         'AE64E556ECC240B200F7EBA60D550E4BB60D78E860E69DD88C449405B86067F4',
         'Get-AuthenticodeSignature', 'auth login',
         'OpenSSH.Server', 'RhemaERP GitHub Actions SSH',
-        'AuthenticationMethods publickey',
+        'AuthenticationMethods publickey', 'Repair-OpenSshServerPermissions',
+        'Get-OpenSshStartupEvidence',
         'github-actions-vps-deployment', 'administrators_authorized_keys',
         'Creating a dedicated GitHub Actions deployment identity',
         'replacing it with a verified unencrypted key',
@@ -195,6 +196,8 @@ Assert-Test (-not $ciBootstrap.Contains('Write-Output $privateKey')) `
     'GitHub CI/CD bootstrap can print the SSH private key.'
 Assert-Test (-not $ciBootstrap.Contains("-P '' -f `$SshPrivateKeyPath")) `
     'GitHub CI/CD bootstrap uses an empty native argument that Windows PowerShell drops.'
+Assert-Test (-not $ciBootstrap.Contains('KbdInteractiveAuthentication')) `
+    'GitHub CI/CD bootstrap uses an unsupported Windows OpenSSH setting.'
 $hostKeyPreparationIndex = $ciBootstrap.IndexOf('& ssh-keygen.exe -A')
 $sshdValidationIndex = $ciBootstrap.IndexOf('& $sshdExecutable -t')
 Assert-Test ($hostKeyPreparationIndex -ge 0 -and

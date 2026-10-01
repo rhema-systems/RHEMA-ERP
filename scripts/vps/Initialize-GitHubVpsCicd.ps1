@@ -148,7 +148,6 @@ Match User $SshUser
     AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys
     PubkeyAuthentication yes
     PasswordAuthentication no
-    KbdInteractiveAuthentication no
     AuthenticationMethods publickey
 Match all
 $blockEnd
@@ -172,22 +171,38 @@ $blockEnd
 
     & ssh-keygen.exe -A
     Assert-True ($LASTEXITCODE -eq 0) 'Windows OpenSSH host-key preparation failed.'
+    Repair-OpenSshServerPermissions -ConfigPath $script:SshdConfigPath
     & $sshdExecutable -t -f $script:SshdConfigPath
     Assert-True ($LASTEXITCODE -eq 0) `
         "Windows OpenSSH rejected its managed configuration: $($script:SshdConfigPath)"
 
     Set-Service -Name sshd -StartupType Automatic
     $sshdService = Get-Service -Name sshd
-    if ($sshdService.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running) {
-        Restart-Service -Name sshd -Force
+    if ($sshdService.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running) {
+        $portUsers = @(Get-NetTCPConnection -State Listen -LocalPort $SshPort `
+                -ErrorAction SilentlyContinue)
+        Assert-True ($portUsers.Count -eq 0) `
+            "TCP $SshPort is already used by process $($portUsers[0].OwningProcess); sshd cannot start."
     }
-    else {
-        Start-Service -Name sshd
+    $startAttempt = Get-Date
+    try {
+        if ($sshdService.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running) {
+            Restart-Service -Name sshd -Force -ErrorAction Stop
+        }
+        else {
+            Start-Service -Name sshd -ErrorAction Stop
+        }
+        $sshdService = Get-Service -Name sshd
+        $sshdService.WaitForStatus(
+            [System.ServiceProcess.ServiceControllerStatus]::Running,
+            [TimeSpan]::FromSeconds(30))
     }
-    $sshdService = Get-Service -Name sshd
-    $sshdService.WaitForStatus(
-        [System.ServiceProcess.ServiceControllerStatus]::Running,
-        [TimeSpan]::FromSeconds(30))
+    catch {
+        $activationError = $_.Exception.Message
+        Start-Sleep -Seconds 1
+        $startupEvidence = Get-OpenSshStartupEvidence -StartTime $startAttempt
+        throw "OpenSSH service activation failed: $activationError $startupEvidence"
+    }
 
     $firewallDisplayName = "RhemaERP GitHub Actions SSH $SshPort"
     $firewallRule = Get-NetFirewallRule -DisplayName $firewallDisplayName `
@@ -226,6 +241,83 @@ function Protect-OpenSshFile {
     }
     & icacls.exe $Path '/inheritance:r' '/grant:r' @grants | Out-Null
     Assert-True ($LASTEXITCODE -eq 0) "Could not protect OpenSSH file: $Path"
+}
+
+function Repair-OpenSshServerPermissions {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ConfigPath
+    )
+
+    $sshDataDirectory = 'C:\ProgramData\ssh'
+    $logsDirectory = Join-Path $sshDataDirectory 'logs'
+    [void][IO.Directory]::CreateDirectory($logsDirectory)
+    foreach ($directory in @($sshDataDirectory, $logsDirectory)) {
+        & icacls.exe $directory '/inheritance:r' '/grant:r' `
+            '*S-1-5-18:(OI)(CI)F' `
+            '*S-1-5-32-544:(OI)(CI)F' `
+            '*S-1-5-11:(OI)(CI)RX' | Out-Null
+        Assert-True ($LASTEXITCODE -eq 0) `
+            "Could not repair OpenSSH directory permissions: $directory"
+        & icacls.exe $directory '/setowner' '*S-1-5-32-544' | Out-Null
+        Assert-True ($LASTEXITCODE -eq 0) `
+            "Could not repair OpenSSH directory ownership: $directory"
+    }
+
+    Protect-OpenSshFile -Path $ConfigPath -AdministratorsOnly
+    & icacls.exe $ConfigPath '/setowner' '*S-1-5-32-544' | Out-Null
+    Assert-True ($LASTEXITCODE -eq 0) `
+        "Could not repair OpenSSH configuration ownership: $ConfigPath"
+
+    $hostKeyFiles = @(Get-ChildItem -LiteralPath $sshDataDirectory `
+            -Filter 'ssh_host_*_key*' -File -ErrorAction SilentlyContinue)
+    Assert-True ($hostKeyFiles.Count -gt 0) `
+        'OpenSSH host-key generation did not create any files.'
+    foreach ($hostKeyFile in $hostKeyFiles) {
+        Protect-OpenSshFile -Path $hostKeyFile.FullName -AdministratorsOnly
+        & icacls.exe $hostKeyFile.FullName '/setowner' '*S-1-5-32-544' | Out-Null
+        Assert-True ($LASTEXITCODE -eq 0) `
+            "Could not repair OpenSSH host-key ownership: $($hostKeyFile.FullName)"
+    }
+}
+
+function Get-OpenSshStartupEvidence {
+    param(
+        [Parameter(Mandatory)]
+        [datetime]$StartTime
+    )
+
+    $messages = [Collections.Generic.List[string]]::new()
+    try {
+        Get-WinEvent -LogName 'OpenSSH/Operational' -MaxEvents 8 `
+            -ErrorAction Stop |
+            Where-Object TimeCreated -GE $StartTime.AddMinutes(-1) |
+            ForEach-Object { [void]$messages.Add([string]$_.Message) }
+    }
+    catch {
+        # The operational channel is absent on some Windows Server builds.
+    }
+    try {
+        Get-WinEvent -FilterHashtable @{
+            LogName = 'System'
+            ProviderName = 'Service Control Manager'
+            StartTime = $StartTime.AddMinutes(-1)
+        } -ErrorAction Stop |
+            Where-Object Message -Match '(?i)sshd|OpenSSH SSH Server' |
+            Select-Object -First 5 |
+            ForEach-Object { [void]$messages.Add([string]$_.Message) }
+    }
+    catch {
+        # Service startup will still return a useful generic failure below.
+    }
+    if ($messages.Count -eq 0) {
+        return 'No OpenSSH or Service Control Manager event detail was available.'
+    }
+    $summary = (($messages | Select-Object -Unique) -join ' ') -replace '\s+', ' '
+    if ($summary.Length -gt 1600) {
+        $summary = $summary.Substring(0, 1600)
+    }
+    return $summary.Trim()
 }
 
 function New-DeploymentSshKey {
