@@ -144,14 +144,15 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
         EhcPropertyListingContextDto? property,
         CancellationToken cancellationToken)
     {
-        var prospectBusinessPartnerId = await db.Set<ErpSystem.Core.Entities.Ehc.EhcPropertyEnquiryProspect>()
+        var prospectLink = await db.Set<ErpSystem.Core.Entities.Ehc.EhcPropertyEnquiryProspect>()
             .AsNoTracking()
             .Where(item => item.TenantId == currentUser.TenantId && item.TicketId == ticketId && !item.IsDeleted)
-            .Select(item => item.BusinessPartnerId)
+            .Select(item => new { item.BusinessPartnerId, item.OpportunityId })
             .SingleOrDefaultAsync(cancellationToken);
-        var businessPartnerId = prospectBusinessPartnerId ?? property?.BusinessPartnerId;
-        if (property is null || businessPartnerId is null || businessPartnerId == Guid.Empty
-            || string.IsNullOrWhiteSpace(property.ListingReference))
+        var businessPartnerId = prospectLink?.BusinessPartnerId ?? property?.BusinessPartnerId;
+        var opportunityId = prospectLink?.OpportunityId;
+        if (businessPartnerId is null || businessPartnerId == Guid.Empty
+            || (!opportunityId.HasValue && string.IsNullOrWhiteSpace(property?.ListingReference)))
         {
             return null;
         }
@@ -160,7 +161,6 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
             .Where(order => order.TenantId == currentUser.TenantId
                 && !order.IsDeleted
                 && order.BusinessPartnerId == businessPartnerId.Value
-                && order.PropertyReference != null
                 && order.OrderStatus != SalesOrderStatus.Cancelled
                 && order.OrderStatus != SalesOrderStatus.Rejected)
             .Select(order => new
@@ -168,6 +168,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
                 order.Id,
                 order.DocumentNumber,
                 order.PropertyReference,
+                order.OpportunityId,
                 order.OrderStatus,
                 order.TotalAmount,
                 order.Currency,
@@ -177,11 +178,15 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
             })
             .ToArrayAsync(cancellationToken);
 
-        var order = orders
-            .Where(item => string.Equals(
+        // Opportunity is the durable link for public-enquiry Sales Orders. Property reference is
+        // retained only as a legacy fallback for orders created before that handoff was introduced.
+        var matchingOrders = opportunityId.HasValue
+            ? orders.Where(item => item.OpportunityId == opportunityId.Value)
+            : orders.Where(item => string.Equals(
                 item.PropertyReference?.Trim(),
-                property.ListingReference.Trim(),
-                StringComparison.OrdinalIgnoreCase))
+                property!.ListingReference.Trim(),
+                StringComparison.OrdinalIgnoreCase));
+        var order = matchingOrders
             .OrderByDescending(item => item.OrderStatus == SalesOrderStatus.Closed)
             .ThenByDescending(item => item.CreatedAt)
             .FirstOrDefault();
@@ -513,7 +518,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
         => await ExecuteProspectActionAsync(id, () => ProspectService.RecordDepositAsync(id, request, cancellationToken), cancellationToken);
 
     [HttpGet("{id:guid}/prospect/deposits")]
-    [Authorize(Policy = FinancePermissions.ViewFinance)]
+    [Authorize(Roles = "Sales User,Sales Officer,Sales Manager,Finance Officer,Finance Manager,Accounts Officer,Senior Accountant,Financial Controller,TenantAdmin,SuperAdmin")]
     public async Task<IActionResult> GetDeposits(Guid id, CancellationToken cancellationToken)
         => await ExecuteProspectActionAsync(id, () => ProspectService.GetDepositsAsync(id, cancellationToken), cancellationToken);
 

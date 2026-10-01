@@ -35,5 +35,22 @@ public interface IProspectDepositFinancePostingService
     Task<ProspectDepositCustomerAdvanceTransferResult> TransferToCustomerAdvanceAsync(ProspectDepositReceipt receipt, Guid businessPartnerId, CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// Applies converted public-prospect deposits to the posted invoice produced by the same Sales
+/// opportunity. A deposit cannot enter this workflow until customer conversion has created an
+/// approved Business Partner and reclassified the cleared receipt as a customer advance.
+/// </summary>
+public interface IPropertyEnquiryDepositApplicationService
+{
+    Task<ProspectDepositApplicationResult> ApplyToPostedSalesInvoiceAsync(
+        Guid salesOrderId,
+        Guid invoiceId,
+        CancellationToken cancellationToken = default);
+}
+
 public sealed record ProspectDepositFinancePostingResult(Guid PostingEventId, Guid JournalEntryId, bool WasDuplicate);
 public sealed record ProspectDepositCustomerAdvanceTransferResult(Guid PostingEventId, Guid JournalEntryId, Guid CustomerPaymentId, bool WasDuplicate);
+public sealed record ProspectDepositApplicationResult(int AppliedReceiptCount, decimal AppliedAmount)
+{
+    public static ProspectDepositApplicationResult None { get; } = new(0, 0m);
+}

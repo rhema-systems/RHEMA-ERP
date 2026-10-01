@@ -4,6 +4,7 @@ using ErpSystem.Api.Controllers.Ehc;
 using ErpSystem.Api.Services.Ehc;
 using ErpSystem.Core.DTOs.Ehc;
 using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
@@ -227,8 +228,11 @@ public sealed class PropertyEnquiryProspectLifecycleTests
         var configure = typeof(EhcPropertyEnquiriesController).GetMethod(nameof(EhcPropertyEnquiriesController.UpsertDepositPolicy));
         var list = typeof(EhcPropertyEnquiriesController).GetMethod(nameof(EhcPropertyEnquiriesController.GetDeposits));
 
-        Assert.Equal(FinancePermissions.ViewFinance,
-            list?.GetCustomAttribute<AuthorizeAttribute>()?.Policy);
+        var depositReadRoles = list?.GetCustomAttribute<AuthorizeAttribute>()?.Roles ?? string.Empty;
+        Assert.Contains("Sales User", depositReadRoles);
+        Assert.Contains("Sales Officer", depositReadRoles);
+        Assert.Contains("Sales Manager", depositReadRoles);
+        Assert.Null(list?.GetCustomAttribute<AuthorizeAttribute>()?.Policy);
         Assert.Equal(FinancePermissions.ReceiveCustomerPayments,
             clear?.GetCustomAttribute<AuthorizeAttribute>()?.Policy);
         Assert.Equal(FinancePermissions.ReverseArPayments,
@@ -247,5 +251,159 @@ public sealed class PropertyEnquiryProspectLifecycleTests
             read?.GetCustomAttribute<AuthorizeAttribute>()?.Policy);
         Assert.NotNull(typeof(PropertyProspectDepositPolicyDto)
             .GetProperty(nameof(PropertyProspectDepositPolicyDto.DepositLiabilityAccountId)));
+    }
+
+    [Fact]
+    public async Task Policy_change_reconciles_active_qualified_threshold_without_rewriting_cleared_receipt_history()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var sourceId = Guid.NewGuid();
+        var bankGlId = Guid.NewGuid();
+        var liabilityId = Guid.NewGuid();
+        var bankId = Guid.NewGuid();
+        var postingEventId = Guid.NewGuid();
+        var journalEntryId = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+            .Options);
+        var source = new SalesSaleableSource
+        {
+            Id = sourceId,
+            TenantId = tenantId,
+            Code = "LAND",
+            DisplayName = "Land Management",
+            SourceType = "LandManagement",
+            AdapterKey = "land-management",
+            DefaultCurrency = "GHS",
+            IsActive = true
+        };
+        var ticket = new EhcTicket
+        {
+            TenantId = tenantId,
+            TicketNumber = "EHC-POLICY-001",
+            Subject = "Policy threshold refresh",
+            Description = "Qualified public property prospect",
+            TicketType = EhcTicketType.Enquiry,
+            Status = EhcTicketStatus.Acknowledged,
+            PropertyListingContextJson = JsonSerializer.Serialize(new EhcPropertyListingContextDto(
+                "estate-public-listing", Guid.NewGuid(), "LIST-001", "Public land", "Sale", "GHS",
+                "Accra", 200000m, Guid.NewGuid(), null, null, "Ama Mensah", "Ama Mensah",
+                "ama@example.test", "+233245550101"))
+        };
+        var prospect = new EhcPropertyEnquiryProspect
+        {
+            TenantId = tenantId,
+            TicketId = ticket.Id,
+            Ticket = ticket,
+            LeadId = Guid.NewGuid(),
+            OpportunityId = Guid.NewGuid(),
+            Status = EhcPropertyProspectStatuses.Opportunity,
+            AgreedAmount = 200000m,
+            Currency = "GHS",
+            DepositRequirementType = ProspectDepositRequirementTypes.Full
+        };
+        var receipt = new ProspectDepositReceipt
+        {
+            TenantId = tenantId,
+            ProspectId = prospect.Id,
+            TicketId = ticket.Id,
+            LeadId = prospect.LeadId,
+            OpportunityId = prospect.OpportunityId!.Value,
+            ReceiptNumber = "PDR-001",
+            Amount = 50000m,
+            Currency = "GHS",
+            PaymentMethod = "BankTransfer",
+            ReceivedAt = DateTime.UtcNow.AddDays(-2),
+            Status = ProspectDepositReceiptStatuses.Cleared,
+            ClearedAt = DateTime.UtcNow.AddDays(-1),
+            DepositLiabilityAccountId = liabilityId,
+            BankAccountId = bankId,
+            PostingEventId = postingEventId,
+            JournalEntryId = journalEntryId
+        };
+        db.AddRange(
+            source,
+            ticket,
+            prospect,
+            receipt,
+            new Account
+            {
+                Id = bankGlId,
+                TenantId = tenantId,
+                AccountCode = "BANK",
+                AccountNumber = "1000",
+                AccountName = "Bank",
+                AccountType = AccountType.Asset,
+                CurrencyCode = "GHS",
+                Status = AccountStatus.Active,
+                AllowDirectPosting = true
+            },
+            new Account
+            {
+                Id = liabilityId,
+                TenantId = tenantId,
+                AccountCode = "DEP",
+                AccountNumber = "2100",
+                AccountName = "Prospect deposits",
+                AccountType = AccountType.Liability,
+                CurrencyCode = "GHS",
+                Status = AccountStatus.Active,
+                AllowDirectPosting = true
+            },
+            new BankAccount
+            {
+                Id = bankId,
+                TenantId = tenantId,
+                AccountNumber = "001",
+                AccountName = "Prospect collections",
+                BankName = "Test Bank",
+                Currency = "GHS",
+                GLAccountId = bankGlId,
+                IsActive = true
+            },
+            new FinanceSettings { TenantId = tenantId, BaseCurrency = "GHS" });
+        await db.SaveChangesAsync();
+
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(user => user.TenantId).Returns(tenantId);
+        currentUser.SetupGet(user => user.UserId).Returns(actorId.ToString());
+        currentUser.SetupGet(user => user.UserName).Returns("finance.manager");
+        var service = new PropertyEnquiryProspectService(
+            db,
+            currentUser.Object,
+            Mock.Of<IBusinessPartnerService>(),
+            Mock.Of<IOpportunityService>(),
+            Mock.Of<ISalesAllocationService>(),
+            Mock.Of<IProspectDepositFinancePostingService>(),
+            Mock.Of<INotificationService>(),
+            Mock.Of<IEhcTicketService>(),
+            NullLogger<PropertyEnquiryProspectService>.Instance);
+
+        await service.UpsertDepositPolicyAsync(new UpsertPropertyProspectDepositPolicyRequest
+        {
+            SalesSaleableSourceId = sourceId,
+            RequirementType = ProspectDepositRequirementTypes.Percentage,
+            Percentage = 25m,
+            DepositLiabilityAccountId = liabilityId,
+            DefaultBankAccountId = bankId,
+            IsActive = true
+        });
+
+        var savedProspect = await db.Set<EhcPropertyEnquiryProspect>().AsNoTracking().SingleAsync();
+        var savedReceipt = await db.Set<ProspectDepositReceipt>().AsNoTracking().SingleAsync();
+        Assert.Equal(ProspectDepositRequirementTypes.Percentage, savedProspect.DepositRequirementType);
+        Assert.Equal(25m, savedProspect.DepositPercentage);
+        Assert.Equal(50000m, PropertyEnquiryProspectService.RequiredDeposit(savedProspect));
+        Assert.Equal(postingEventId, savedReceipt.PostingEventId);
+        Assert.Equal(journalEntryId, savedReceipt.JournalEntryId);
+        Assert.Equal(ProspectDepositReceiptStatuses.Cleared, savedReceipt.Status);
+        Assert.Contains(await db.EhcTicketAuditEvents.AsNoTracking().ToListAsync(), audit =>
+            audit.EventType == "ProspectDepositPolicyReconciled"
+            && audit.Body != null
+            && audit.Body.Contains("full agreed value")
+            && audit.Body.Contains("25% of agreed value")
+            && audit.Body.Contains("No receipt or Finance posting was changed"));
     }
 }

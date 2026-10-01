@@ -43,6 +43,7 @@ export interface SalesSaleableItemDto {
   areaSquareMeters?: number | null;
   propertyReference?: string;
   canCreateSalesOrder: boolean;
+  salesOrderIneligibilityReason?: string;
   canCreateSalesAgreement: boolean;
   canCreateLeaseAgreement: boolean;
   suggestedOrderType?: string;

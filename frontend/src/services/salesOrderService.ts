@@ -386,7 +386,7 @@ function normalizeSalesOrderDetail(raw: any): SalesOrderDetailDto {
   };
 }
 
-function toBackendCreateSalesOrderDto(data: CreateSalesOrderDto) {
+export function toBackendCreateSalesOrderDto(data: CreateSalesOrderDto) {
   return {
     ...data,
     orderPriority: data.priority,
@@ -406,6 +406,7 @@ function toBackendCreateSalesOrderDto(data: CreateSalesOrderDto) {
       unitPrice: line.unitPrice,
       discountPercentage: line.discountPercentage ?? line.discountPercent,
       taxRate: line.taxRate ?? line.taxPercent,
+      taxGroupId: line.taxGroupId ?? data.taxGroupId,
       unit: line.unit || line.unitOfMeasure,
       warehouseId: line.warehouseId,
       locationId: line.locationId,

@@ -16,6 +16,8 @@ export interface CrmSalesHandoffContext {
   quoteName?: string;
   currency?: string;
   estimatedValue?: number;
+  propertyReference?: string;
+  propertyType?: string;
   contextLabel?: string;
 }
 
@@ -47,6 +49,8 @@ const buildSalesHref = (basePath: string, context: CrmSalesHandoffContext) => {
   appendIfPresent(params, 'quoteName', context.quoteName);
   appendIfPresent(params, 'currency', context.currency);
   appendIfPresent(params, 'estimatedValue', context.estimatedValue);
+  appendIfPresent(params, 'propertyReference', context.propertyReference);
+  appendIfPresent(params, 'propertyType', context.propertyType);
   appendIfPresent(params, 'crmContext', context.contextLabel);
 
   return `${basePath}?${params.toString()}`;

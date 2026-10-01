@@ -552,6 +552,8 @@ public class SalesSetupService : ISalesSetupService
             item.ActiveAllocationCustomerName = allocation.CustomerName;
             item.HasActiveAllocation = true;
             item.CanCreateSalesOrder = false;
+            item.SalesOrderIneligibilityReason =
+                $"This item already has an active {allocation.Status} allocation.";
             item.CanCreateSalesAgreement = false;
             item.CanCreateLeaseAgreement = false;
             item.CommercialStatus = string.IsNullOrWhiteSpace(item.CommercialStatus)

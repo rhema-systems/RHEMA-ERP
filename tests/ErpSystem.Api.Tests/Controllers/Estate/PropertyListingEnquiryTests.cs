@@ -624,7 +624,7 @@ public sealed class PropertyListingEnquiryTests
     }
 
     [Fact]
-    public async Task PropertyEnquiryLoadsPaymentOnlyFromMatchingCustomerAndLandSalesOrder()
+    public async Task PropertyEnquiryLoadsPaymentOnlyFromMatchingCustomerAndOpportunitySalesOrder()
     {
         await using var db = Database();
         var requester = new ApplicationUser
@@ -641,6 +641,7 @@ public sealed class PropertyListingEnquiryTests
         var partner = new BusinessPartner { TenantId = tenantId, PartnerCode = "CUS-001", PartnerName = "Buyer One", PartnerType = "Customer", IsActive = true, ApprovalStatus = "Approved" };
         var otherPartner = new BusinessPartner { TenantId = tenantId, PartnerCode = "CUS-002", PartnerName = "Buyer Two", PartnerType = "Customer", IsActive = true, ApprovalStatus = "Approved" };
         var listingId = Guid.NewGuid();
+        var opportunityId = Guid.NewGuid();
         var ticket = new EhcTicket
         {
             TenantId = tenantId,
@@ -678,7 +679,21 @@ public sealed class PropertyListingEnquiryTests
             OrderStatus = SalesOrderStatus.Closed,
             TotalAmount = 1250000m,
             Currency = "GHS",
+            OpportunityId = opportunityId,
             InvoiceId = invoice.Id
+        };
+        var sameCustomerWrongOpportunity = new SalesOrder
+        {
+            TenantId = tenantId,
+            DocumentNumber = "SO-WRONG-OPPORTUNITY",
+            BusinessPartnerId = partner.Id,
+            CustomerName = partner.PartnerName,
+            PropertyReference = "LAND-002-PORTION-002",
+            OpportunityId = Guid.NewGuid(),
+            OrderStatus = SalesOrderStatus.Closed,
+            TotalAmount = 1250000m,
+            Currency = "GHS",
+            CreatedAt = DateTime.UtcNow.AddMinutes(1)
         };
         var otherOrder = new SalesOrder
         {
@@ -725,7 +740,19 @@ public sealed class PropertyListingEnquiryTests
             ToStatus = SalesOrderStatus.Closed,
             ChangedAt = closedAt
         };
-        db.AddRange(requester, structure, level, sales, partner, otherPartner, ticket, invoice, order, otherOrder, payment, allocation, history);
+        var prospect = new EhcPropertyEnquiryProspect
+        {
+            TenantId = tenantId,
+            TicketId = ticket.Id,
+            LeadId = Guid.NewGuid(),
+            OpportunityId = opportunityId,
+            BusinessPartnerId = partner.Id,
+            Status = EhcPropertyProspectStatuses.Converted,
+            AgreedAmount = order.TotalAmount,
+            Currency = order.Currency
+        };
+        db.AddRange(requester, structure, level, sales, partner, otherPartner, ticket, invoice, order,
+            sameCustomerWrongOpportunity, otherOrder, prospect, payment, allocation, history);
         await db.SaveChangesAsync();
         var controller = new EhcPropertyEnquiriesController(db, User().Object, Mock.Of<IEhcTicketService>(), Mock.Of<IEstateSalesListingApplicationHandoffService>(), Mock.Of<IPropertyEnquiryProspectService>());
 

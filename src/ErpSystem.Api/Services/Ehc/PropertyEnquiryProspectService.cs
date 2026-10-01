@@ -48,7 +48,9 @@ public sealed class PropertyEnquiryProspectService(
             throw new InvalidOperationException("A disqualified prospect cannot record further qualification activity.");
         if (prospect.Status is not (EhcPropertyProspectStatuses.New or EhcPropertyProspectStatuses.Contacted))
             throw new InvalidOperationException("Contact activity cannot move a qualified or converted prospect back to Contacted.");
-        var lead = await db.Leads.SingleAsync(x => x.Id == prospect.LeadId && x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
+        var lead = prospect.Lead ?? await db.Leads.SingleAsync(
+            x => x.Id == prospect.LeadId && x.TenantId == TenantId && !x.IsDeleted,
+            cancellationToken);
         lead.LeadStatus = "Contacted";
         lead.LastContactDate = DateTime.UtcNow;
         if (!string.IsNullOrWhiteSpace(request.Notes)) lead.Notes = AppendNote(lead.Notes, request.Notes);
@@ -628,7 +630,58 @@ public sealed class PropertyEnquiryProspectService(
         policy.IsActive = request.IsActive;
         policy.UpdatedAt = DateTime.UtcNow;
         policy.UpdatedBy = currentUser.UserName;
+
+        // Qualified prospects keep the threshold values needed for a stable read model. Reconcile
+        // that snapshot whenever its source policy changes so Sales sees and enforces the current
+        // rule. Converted prospects are intentionally excluded: their cleared deposits may already
+        // have been transferred to customer advances and that posting history must remain immutable.
+        var activeProspects = await db.Set<EhcPropertyEnquiryProspect>()
+            .Include(x => x.Ticket)
+            .Where(x => x.TenantId == TenantId && !x.IsDeleted
+                && (x.Status == EhcPropertyProspectStatuses.Qualified
+                    || x.Status == EhcPropertyProspectStatuses.Opportunity
+                    || x.Status == EhcPropertyProspectStatuses.CustomerPendingApproval))
+            .ToListAsync(cancellationToken);
+        var reconciledAt = DateTime.UtcNow;
+        var reconciled = 0;
+        foreach (var prospect in activeProspects)
+        {
+            if (!ProspectUsesSource(prospect.Ticket.PropertyListingContextJson, source)) continue;
+
+            var previousThreshold = DescribeThreshold(
+                prospect.DepositRequirementType,
+                prospect.FixedDepositAmount,
+                prospect.DepositPercentage);
+            prospect.DepositRequirementType = request.IsActive
+                ? request.RequirementType
+                : ProspectDepositRequirementTypes.Full;
+            prospect.FixedDepositAmount = request.IsActive
+                && request.RequirementType == ProspectDepositRequirementTypes.Fixed
+                    ? request.FixedAmount
+                    : null;
+            prospect.DepositPercentage = request.IsActive
+                && request.RequirementType == ProspectDepositRequirementTypes.Percentage
+                    ? request.Percentage
+                    : null;
+            prospect.UpdatedAt = reconciledAt;
+            prospect.UpdatedBy = currentUser.UserName;
+            prospect.LastModifiedById = ActorId;
+            var currentThreshold = DescribeThreshold(
+                prospect.DepositRequirementType,
+                prospect.FixedDepositAmount,
+                prospect.DepositPercentage);
+            await AddAuditAsync(prospect.Ticket,
+                "ProspectDepositPolicyReconciled",
+                "Prospect deposit threshold updated",
+                $"The {source.DisplayName} deposit policy changed this prospect threshold from {previousThreshold} to {currentThreshold}. No receipt or Finance posting was changed.",
+                cancellationToken);
+            reconciled++;
+        }
+
         await db.SaveChangesAsync(cancellationToken);
+        logger.LogInformation(
+            "Prospect deposit policy {PolicyId} for source {SourceId} reconciled {ProspectCount} active qualified prospects",
+            policy.Id, source.Id, reconciled);
     }
 
     private async Task<EhcPropertyEnquiryProspect> RequireEligibleProspectAsync(Guid ticketId, CancellationToken cancellationToken)
@@ -722,6 +775,7 @@ public sealed class PropertyEnquiryProspectService(
             TenantId = TenantId,
             TicketId = ticket.Id,
             LeadId = lead.Id,
+            Lead = lead,
             OpportunityId = ticket.CrmOpportunityId,
             BusinessPartnerId = property.BusinessPartnerId,
             BusinessPartnerLinkedAt = property.BusinessPartnerId.HasValue ? ticket.CreatedAt : null,
@@ -758,6 +812,32 @@ public sealed class PropertyEnquiryProspectService(
             .OrderBy(x => x.SortOrder).FirstOrDefaultAsync(cancellationToken)
             ?? throw new InvalidOperationException($"No active Sales saleable source is configured for '{property.Source}'.");
     }
+
+    private static bool ProspectUsesSource(string? propertyContextJson, SalesSaleableSource source)
+    {
+        if (string.IsNullOrWhiteSpace(propertyContextJson)) return false;
+        EhcPropertyListingContextDto? property;
+        try { property = JsonSerializer.Deserialize<EhcPropertyListingContextDto>(propertyContextJson); }
+        catch (JsonException) { return false; }
+        if (property is null || string.IsNullOrWhiteSpace(property.Source)) return false;
+
+        var adapter = property.Source.Contains("estate", StringComparison.OrdinalIgnoreCase)
+            || property.Source.Contains("state", StringComparison.OrdinalIgnoreCase)
+                ? "land-management"
+                : property.Source;
+        return string.Equals(source.AdapterKey, adapter, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(source.Code, adapter, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(source.SourceType, adapter, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string DescribeThreshold(string requirementType, decimal? fixedAmount, decimal? percentage) =>
+        requirementType switch
+        {
+            ProspectDepositRequirementTypes.Fixed => $"fixed amount {(fixedAmount ?? 0m):0.00}",
+            ProspectDepositRequirementTypes.Percentage => $"{(percentage ?? 0m):0.####}% of agreed value",
+            ProspectDepositRequirementTypes.Full => "full agreed value",
+            _ => requirementType
+        };
 
     private IQueryable<EhcPropertyEnquiryProspect> ProspectQuery(bool tracking = false)
     {

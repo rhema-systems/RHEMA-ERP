@@ -69,6 +69,77 @@ public class SalesPropertyRegisterSourceTests
     }
 
     [Fact]
+    public async Task Published_lease_only_property_uses_source_order_configuration()
+    {
+        var property = Asset(
+            "LEASE-ONLY",
+            EstateManagedAssetType.Property,
+            isPublishedToExternalPortal: true,
+            externalListingStatus: "Published");
+        property.IsAvailableForSale = false;
+        property.IsAvailableForLease = true;
+
+        var estate = new Mock<IEstateManagedAssetService>();
+        estate.Setup(service => service.GetManagedAssetsAsync(It.IsAny<EstateManagedAssetQuery>()))
+            .ReturnsAsync([property]);
+
+        var source = new SalesSaleableSource
+        {
+            Id = Guid.NewGuid(),
+            Code = "PROPERTY_REGISTER",
+            SourceType = "PropertyRegister",
+            AdapterKey = "property-register",
+            IsActive = true,
+            AllowSalesOrders = true,
+            AllowSalesAgreements = true,
+            SettingsJson =
+                "{\"filters\":[{\"field\":\"assetType\",\"value\":\"Property\"}]}"
+        };
+
+        var item = (await new PropertyRegisterSaleableSourceAdapter(estate.Object)
+            .SearchItemsAsync(source)).Single();
+
+        item.CanCreateSalesOrder.Should().BeTrue();
+        item.CanCreateLeaseAgreement.Should().BeTrue();
+        item.SalesOrderIneligibilityReason.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Published_sale_asset_is_ineligible_when_source_disables_orders()
+    {
+        var property = Asset(
+            "SALE-READY",
+            EstateManagedAssetType.Property,
+            isPublishedToExternalPortal: true,
+            externalListingStatus: "Published");
+        property.IsAvailableForSale = true;
+
+        var estate = new Mock<IEstateManagedAssetService>();
+        estate.Setup(service => service.GetManagedAssetsAsync(It.IsAny<EstateManagedAssetQuery>()))
+            .ReturnsAsync([property]);
+
+        var source = new SalesSaleableSource
+        {
+            Id = Guid.NewGuid(),
+            Code = "PROPERTY_REGISTER",
+            SourceType = "PropertyRegister",
+            AdapterKey = "property-register",
+            IsActive = true,
+            AllowSalesOrders = false,
+            AllowSalesAgreements = true,
+            SettingsJson =
+                "{\"filters\":[{\"field\":\"assetType\",\"value\":\"Property\"}]}"
+        };
+
+        var item = (await new PropertyRegisterSaleableSourceAdapter(estate.Object)
+            .SearchItemsAsync(source)).Single();
+
+        item.CanCreateSalesOrder.Should().BeFalse();
+        item.SalesOrderIneligibilityReason.Should()
+            .Be("Sales orders are disabled for this saleable source.");
+    }
+
+    [Fact]
     public async Task Default_sources_activate_property_and_facility_and_retire_legacy_project_units()
     {
         var tenantId = Guid.NewGuid();

@@ -11,6 +11,7 @@ using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Ehc;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using FluentAssertions;
@@ -69,6 +70,42 @@ public sealed class SalesOrderInvoiceGuardTests
             invoices.VerifyNoOtherCalls();
         }
         (await db.Invoices.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Posting_sales_invoice_invokes_property_prospect_advance_application_after_canonical_posting()
+    {
+        await using var db = Context();
+        var tenant = Guid.NewGuid();
+        var user = new ApplicationUser { Id = Guid.NewGuid(), UserName = "finance-poster", IsActive = true };
+        db.Users.Add(user);
+        db.UserTenants.Add(new UserTenant { UserId = user.Id, User = user, TenantId = tenant, Status = UserTenantStatus.Active });
+        var actor = new Mock<ICurrentUserProvider>();
+        actor.SetupGet(value => value.UserId).Returns(user.Id);
+        actor.SetupGet(value => value.TenantId).Returns(tenant);
+        actor.SetupGet(value => value.IsAuthenticated).Returns(true);
+        actor.Setup(value => value.HasRole("TenantAdmin")).Returns(true);
+        var (order, account, _) = Source(tenant);
+        order.InvoiceId = Guid.NewGuid();
+        db.AddRange(order, account);
+        await db.SaveChangesAsync();
+
+        var invoices = new Mock<IInvoiceService>(MockBehavior.Strict);
+        invoices.Setup(value => value.PostAsync(order.InvoiceId.Value, SalesOrderInvoiceGuard.Producer, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InvoiceDto { Id = order.InvoiceId.Value, InvoiceNumber = "SI-PROP-001", Status = "Sent" });
+        invoices.Setup(value => value.GetByIdAsync(order.InvoiceId.Value, SalesOrderInvoiceGuard.Producer, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InvoiceDto { Id = order.InvoiceId.Value, InvoiceNumber = "SI-PROP-001", Status = "Sent" });
+        var prospectDeposits = new Mock<IPropertyEnquiryDepositApplicationService>(MockBehavior.Strict);
+        prospectDeposits.Setup(value => value.ApplyToPostedSalesInvoiceAsync(order.Id, order.InvoiceId.Value, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProspectDepositApplicationResult(1, 20m));
+        var service = new SalesOrderInvoiceService(db, actor.Object, invoices.Object,
+            prospectDeposits: prospectDeposits.Object);
+
+        var result = await service.PostAsync(order.Id);
+
+        result.Invoice.Id.Should().Be(order.InvoiceId.Value);
+        invoices.VerifyAll();
+        prospectDeposits.VerifyAll();
     }
 
     [Fact]

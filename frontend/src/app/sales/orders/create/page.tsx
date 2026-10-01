@@ -19,6 +19,8 @@ import { salesAllocationService } from '@/services/salesAllocationService';
 import { projectService } from '@/services/projectService';
 import { apiService } from '@/services/api.service';
 import { paymentTermService, type PaymentTermListDto } from '@/services/financeCommonService';
+import { taxDataService } from '@/services/finance/tax-data.service';
+import type { TaxGroup } from '@/types/tax';
 import {
   parseSaleableSourceContextFromParams,
   saleableItemToContext,
@@ -78,6 +80,11 @@ export default function CreateSalesOrderPage() {
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('');
   const [paymentTermId, setPaymentTermId] = useState('');
   const [paymentTerms, setPaymentTerms] = useState<PaymentTermListDto[]>([]);
+  const [taxGroups, setTaxGroups] = useState<TaxGroup[]>([]);
+  const [taxGroupId, setTaxGroupId] = useState('');
+  const [taxAmount, setTaxAmount] = useState(0);
+  const [taxLoading, setTaxLoading] = useState(false);
+  const [taxError, setTaxError] = useState('');
   const [customerPoNumber, setCustomerPoNumber] = useState('');
   const [propertyReference, setPropertyReference] = useState('');
   const [propertyType, setPropertyType] = useState('');
@@ -89,7 +96,7 @@ export default function CreateSalesOrderPage() {
 
   // Order lines
   const [lines, setLines] = useState<LineItem[]>([
-    { key: crypto.randomUUID(), itemName: '', quantity: 1, unitPrice: 0, discountPercent: 0, taxPercent: 0 },
+    { key: crypto.randomUUID(), itemName: '', quantity: 1, unitPrice: 0, discountPercent: 0 },
   ]);
   const [activeLinePicker, setActiveLinePicker] = useState<string | null>(null);
   const [lineItemSearch, setLineItemSearch] = useState<Record<string, string>>({});
@@ -195,6 +202,12 @@ export default function CreateSalesOrderPage() {
       .catch(() => setPaymentTerms([]));
   }, []);
 
+  useEffect(() => {
+    taxDataService.getActiveTaxGroups('Sales')
+      .then((groups) => setTaxGroups(groups || []))
+      .catch(() => setTaxGroups([]));
+  }, []);
+
   const applySaleableItem = (item: SalesSaleableItemDto, source: SalesSaleableSourceDto) => {
     const context = saleableItemToContext(item, source);
     setLinkedSourceContext(context);
@@ -260,7 +273,7 @@ export default function CreateSalesOrderPage() {
   };
 
   const addLine = () => {
-    setLines([...lines, { key: crypto.randomUUID(), itemName: '', quantity: 1, unitPrice: 0, discountPercent: 0, taxPercent: 0 }]);
+    setLines([...lines, { key: crypto.randomUUID(), itemName: '', quantity: 1, unitPrice: 0, discountPercent: 0 }]);
   };
 
   const removeLine = (key: string) => {
@@ -352,19 +365,52 @@ export default function CreateSalesOrderPage() {
 
   const calcLineTotal = (line: LineItem) => {
     const base = line.quantity * line.unitPrice;
-    const discounted = base * (1 - (line.discountPercent || 0) / 100);
-    const taxed = discounted * (1 + (line.taxPercent || 0) / 100);
-    return taxed;
+    return base * (1 - (line.discountPercent || 0) / 100);
   };
 
   const subtotal = lines.reduce((sum, l) => sum + l.quantity * l.unitPrice, 0);
   const totalDiscount = lines.reduce((sum, l) => sum + l.quantity * l.unitPrice * (l.discountPercent || 0) / 100, 0);
-  const totalTax = lines.reduce((sum, l) => {
-    const base = l.quantity * l.unitPrice;
-    const discounted = base * (1 - (l.discountPercent || 0) / 100);
-    return sum + discounted * (l.taxPercent || 0) / 100;
-  }, 0);
-  const grandTotal = subtotal - totalDiscount + totalTax;
+  const taxableAmount = Math.max(0, subtotal - totalDiscount);
+  const grandTotal = taxableAmount + taxAmount;
+
+  useEffect(() => {
+    let active = true;
+    if (!taxGroupId || taxableAmount <= 0) {
+      setTaxAmount(0);
+      setTaxError('');
+      setTaxLoading(false);
+      return () => { active = false; };
+    }
+
+    setTaxLoading(true);
+    setTaxError('');
+    const timer = window.setTimeout(() => {
+      const taxableLines = lines
+        .map((line) => Math.max(0, line.quantity * line.unitPrice * (1 - (line.discountPercent || 0) / 100)))
+        .filter((amount) => amount > 0);
+
+      Promise.all(taxableLines.map((baseAmount) => taxDataService.calculateTax({
+        baseAmount,
+        taxGroupId,
+        transactionType: 'SaleOfGoods',
+        businessPartnerId: businessPartnerId || null,
+        businessPartnerRole: 'Customer',
+      }))).then((results) => {
+        if (active) setTaxAmount(results.reduce((sum, result) => sum + result.totalTaxAmount, 0));
+      }).catch((error: any) => {
+        if (!active) return;
+        setTaxAmount(0);
+        setTaxError(error?.message || 'The selected tax could not be calculated.');
+      }).finally(() => {
+        if (active) setTaxLoading(false);
+      });
+    }, 200);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [businessPartnerId, lines, taxGroupId, taxableAmount]);
 
   const handleSave = async () => {
     if (!businessPartnerId) { toast.error('Please select a customer'); return; }
@@ -388,6 +434,7 @@ export default function CreateSalesOrderPage() {
       internalNotes: internalNotes || undefined,
       quoteId: crmHandoffContext?.quoteId,
       opportunityId: crmHandoffContext?.opportunityId,
+      taxGroupId: taxGroupId || undefined,
       lines: lines.map(l => ({
         itemName: l.itemName,
         itemCode: l.itemCode || undefined,
@@ -403,7 +450,7 @@ export default function CreateSalesOrderPage() {
         unit: l.unit || l.unitOfMeasure || 'EA',
         unitPrice: l.unitPrice,
         discountPercent: l.discountPercent || 0,
-        taxPercent: l.taxPercent || 0,
+        taxGroupId: taxGroupId || undefined,
       })),
     };
 
@@ -441,7 +488,7 @@ export default function CreateSalesOrderPage() {
             salesOrderId: result.id,
             allocationType: orderType === 'Lease' ? 'Lease' : 'Reservation',
             status: 'Reserved',
-            estimatedValue: linkedSourceContext.estimatedValue,
+            estimatedValue: linkedSourceContext.estimatedValue ?? undefined,
             agreedValue: result.totalAmount || grandTotal,
             currency,
             notes: `Reserved from Sales Order ${result.orderNumber || result.id}`,
@@ -651,7 +698,6 @@ export default function CreateSalesOrderPage() {
                 <TableHead className="w-20">UoM</TableHead>
                 <TableHead className="w-28">Unit Price</TableHead>
                 <TableHead className="w-20">Disc %</TableHead>
-                <TableHead className="w-20">Tax %</TableHead>
                 <TableHead className="text-right w-28">Total</TableHead>
                 <TableHead className="w-10"></TableHead>
               </TableRow>
@@ -759,9 +805,6 @@ export default function CreateSalesOrderPage() {
                   <TableCell>
                     <Input type="number" min={0} max={100} value={line.discountPercent || 0} onChange={(e) => updateLine(line.key, 'discountPercent', parseFloat(e.target.value) || 0)} />
                   </TableCell>
-                  <TableCell>
-                    <Input type="number" min={0} max={100} value={line.taxPercent || 0} onChange={(e) => updateLine(line.key, 'taxPercent', parseFloat(e.target.value) || 0)} />
-                  </TableCell>
                   <TableCell className="text-right font-semibold">
                     GHS {calcLineTotal(line).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </TableCell>
@@ -777,10 +820,30 @@ export default function CreateSalesOrderPage() {
 
           <Separator className="my-4" />
           <div className="flex justify-end">
-            <div className="w-64 space-y-2">
+            <div className="w-full max-w-sm space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="sales-order-tax">Tax</Label>
+                <Select
+                  value={taxGroupId || 'none'}
+                  onValueChange={(value) => setTaxGroupId(value === 'none' ? '' : value)}
+                >
+                  <SelectTrigger id="sales-order-tax" aria-label="Sales order tax">
+                    <SelectValue placeholder="Select tax" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No tax</SelectItem>
+                    {taxGroups.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>
+                        {group.name} ({group.code})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {taxError ? <p className="text-xs text-destructive">{taxError}</p> : null}
+              </div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">Subtotal</span><span>GHS {subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">Discount</span><span className="text-red-500">-GHS {totalDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-500">Tax</span><span>GHS {totalTax.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-500">Tax amount</span><span>{taxLoading ? 'Calculating...' : `GHS ${taxAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}</span></div>
               <Separator />
               <div className="flex justify-between font-bold text-lg"><span>Total</span><span className="text-blue-600">GHS {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
             </div>

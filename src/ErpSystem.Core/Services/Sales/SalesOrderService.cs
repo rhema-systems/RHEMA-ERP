@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
@@ -6,6 +7,7 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Core.Services.Projects;
@@ -31,6 +33,7 @@ public class SalesOrderService : ISalesOrderService
     private readonly ILogger<SalesOrderService> _logger;
     private readonly IDocumentNumberingService _documentNumberingService;
     private readonly ISalesOrderInvoiceService? _invoiceGenerator;
+    private readonly ITaxCalculationEngine? _taxCalculationEngine;
 
     public SalesOrderService(
         IGenericRepository<SalesOrder> salesOrderRepo,
@@ -45,7 +48,8 @@ public class SalesOrderService : ISalesOrderService
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ILogger<SalesOrderService> logger,
-        ISalesOrderInvoiceService? invoiceGenerator = null)
+        ISalesOrderInvoiceService? invoiceGenerator = null,
+        ITaxCalculationEngine? taxCalculationEngine = null)
     {
         _salesOrderRepo = salesOrderRepo;
         _lineRepo = lineRepo;
@@ -61,6 +65,7 @@ public class SalesOrderService : ISalesOrderService
         // Document numbering is kept with workflow governance so merged Sales orders remain traceable and approval-controlled.
         _documentNumberingService = documentNumberingService;
         _invoiceGenerator = invoiceGenerator;
+        _taxCalculationEngine = taxCalculationEngine;
     }
 
     #region CRUD
@@ -105,6 +110,7 @@ public class SalesOrderService : ISalesOrderService
                 InternalNotes = dto.InternalNotes,
                 ExternalNotes = dto.ExternalNotes,
                 ReferenceNumber = dto.ReferenceNumber ?? string.Empty,
+                TaxGroupId = dto.TaxGroupId,
                 TenantId = bp.TenantId
             };
 
@@ -117,6 +123,7 @@ public class SalesOrderService : ISalesOrderService
 
             foreach (var lineDto in dto.Lines)
             {
+                var tax = await CalculateLineTaxAsync(lineDto, dto.TaxGroupId, dto.BusinessPartnerId);
                 var line = new SalesOrderLine
                 {
                     SalesOrderId = salesOrder.Id,
@@ -128,9 +135,11 @@ public class SalesOrderService : ISalesOrderService
                     Quantity = lineDto.Quantity,
                     UnitPrice = lineDto.UnitPrice,
                     DiscountPercentage = lineDto.DiscountPercentage ?? 0,
-                    DiscountAmount = lineDto.DiscountAmount ?? 0,
-                    TaxRate = lineDto.TaxRate ?? 0,
-                    TaxCode = lineDto.TaxCode,
+                    DiscountAmount = tax.DiscountAmount,
+                    TaxRate = tax.EffectiveRate,
+                    TaxAmount = tax.TaxAmount,
+                    TaxCode = tax.TaxCode,
+                    TaxGroupId = tax.TaxGroupId,
                     Unit = lineDto.Unit,
                     WarehouseId = lineDto.WarehouseId ?? dto.WarehouseId,
                     LocationId = lineDto.LocationId,
@@ -142,7 +151,6 @@ public class SalesOrderService : ISalesOrderService
                     TenantId = bp.TenantId
                 };
 
-                line.TaxAmount = line.LineTotal * (line.TaxRate / 100);
                 subTotal += line.LineTotal - line.DiscountAmount;
                 totalTax += line.TaxAmount;
 
@@ -150,7 +158,9 @@ public class SalesOrderService : ISalesOrderService
             }
 
             salesOrder.SubTotal = subTotal;
-            salesOrder.TaxAmount = dto.TaxAmount ?? totalTax;
+            salesOrder.TaxAmount = dto.TaxGroupId.HasValue || dto.Lines.Any(line => line.TaxGroupId.HasValue)
+                ? totalTax
+                : dto.TaxAmount ?? totalTax;
             salesOrder.TotalAmount = subTotal + salesOrder.TaxAmount + salesOrder.ShippingAmount - salesOrder.DiscountAmount;
 
             // Record initial status
@@ -205,6 +215,7 @@ public class SalesOrderService : ISalesOrderService
             if (dto.InternalNotes != null) so.InternalNotes = dto.InternalNotes;
             if (dto.ExternalNotes != null) so.ExternalNotes = dto.ExternalNotes;
             if (dto.ReferenceNumber != null) so.ReferenceNumber = dto.ReferenceNumber;
+            if (dto.TaxGroupId.HasValue) so.TaxGroupId = dto.TaxGroupId;
 
             // If lines are provided, replace them
             if (dto.Lines != null)
@@ -219,6 +230,7 @@ public class SalesOrderService : ISalesOrderService
 
                 foreach (var lineDto in dto.Lines)
                 {
+                    var tax = await CalculateLineTaxAsync(lineDto, dto.TaxGroupId ?? so.TaxGroupId, so.BusinessPartnerId);
                     var line = new SalesOrderLine
                     {
                         SalesOrderId = id,
@@ -230,9 +242,11 @@ public class SalesOrderService : ISalesOrderService
                         Quantity = lineDto.Quantity,
                         UnitPrice = lineDto.UnitPrice,
                         DiscountPercentage = lineDto.DiscountPercentage ?? 0,
-                        DiscountAmount = lineDto.DiscountAmount ?? 0,
-                        TaxRate = lineDto.TaxRate ?? 0,
-                        TaxCode = lineDto.TaxCode,
+                        DiscountAmount = tax.DiscountAmount,
+                        TaxRate = tax.EffectiveRate,
+                        TaxAmount = tax.TaxAmount,
+                        TaxCode = tax.TaxCode,
+                        TaxGroupId = tax.TaxGroupId,
                         Unit = lineDto.Unit,
                         WarehouseId = lineDto.WarehouseId ?? so.WarehouseId,
                         LocationId = lineDto.LocationId,
@@ -241,7 +255,6 @@ public class SalesOrderService : ISalesOrderService
                         TenantId = so.TenantId
                     };
 
-                    line.TaxAmount = line.LineTotal * (line.TaxRate / 100);
                     subTotal += line.LineTotal - line.DiscountAmount;
                     totalTax += line.TaxAmount;
 
@@ -933,6 +946,65 @@ public class SalesOrderService : ISalesOrderService
                 group => ProjectUnitPresentationRules.BuildSalesLinkedProjectUnitContext(group.First()));
     }
 
+    private async Task<SalesOrderLineTax> CalculateLineTaxAsync(
+        CreateSalesOrderLineDto line,
+        Guid? documentTaxGroupId,
+        Guid businessPartnerId)
+    {
+        var lineAmount = line.Quantity * line.UnitPrice;
+        var discountAmount = line.DiscountAmount
+            ?? Math.Round(
+                lineAmount * ((line.DiscountPercentage ?? 0m) / 100m),
+                2,
+                MidpointRounding.AwayFromZero);
+        var taxableAmount = Math.Max(0m, lineAmount - discountAmount);
+        // The document selection is authoritative. Line-level groups are retained only for
+        // backwards-compatible API callers that do not provide a document tax group.
+        var taxGroupId = documentTaxGroupId ?? line.TaxGroupId;
+
+        if (!taxGroupId.HasValue)
+        {
+            var rate = line.TaxRate ?? 0m;
+            return new SalesOrderLineTax(
+                discountAmount,
+                Math.Round(taxableAmount * rate / 100m, 2, MidpointRounding.AwayFromZero),
+                rate,
+                line.TaxCode,
+                null);
+        }
+
+        if (_taxCalculationEngine == null)
+        {
+            throw new InvalidOperationException(
+                "The Finance tax calculation service is required when a sales-order tax group is selected.");
+        }
+
+        var result = await _taxCalculationEngine.CalculateTaxesAsync(new TaxCalculationRequestDto
+        {
+            BaseAmount = taxableAmount,
+            TaxGroupId = taxGroupId,
+            TransactionDate = DateTime.UtcNow,
+            TransactionType = TaxTransactionType.SaleOfGoods,
+            BusinessPartnerId = businessPartnerId,
+            BusinessPartnerRole = BusinessPartnerRoleType.Customer
+        });
+        var taxCode = string.Join("+", result.TaxBreakdowns.Select(item => item.TaxCode));
+
+        return new SalesOrderLineTax(
+            discountAmount,
+            result.TotalTaxAmount,
+            result.EffectiveTaxRate,
+            taxCode.Length <= 50 ? taxCode : taxCode[..50],
+            result.TaxGroupId ?? taxGroupId);
+    }
+
+    private sealed record SalesOrderLineTax(
+        decimal DiscountAmount,
+        decimal TaxAmount,
+        decimal EffectiveRate,
+        string? TaxCode,
+        Guid? TaxGroupId);
+
     private SalesOrderSummaryDto MapToSummaryDto(SalesOrder so, SalesLinkedProjectUnitContextDto? projectUnitContext = null) => new()
     {
         Id = so.Id,
@@ -970,6 +1042,7 @@ public class SalesOrderService : ISalesOrderService
         ActualDeliveryDate = so.ActualDeliveryDate,
         TotalAmount = so.TotalAmount,
         TaxAmount = so.TaxAmount,
+        TaxGroupId = so.TaxGroupId,
         Currency = so.Currency,
         ExchangeRate = so.ExchangeRate,
         SubTotal = so.SubTotal,
@@ -1028,6 +1101,7 @@ public class SalesOrderService : ISalesOrderService
             TaxRate = l.TaxRate,
             TaxAmount = l.TaxAmount,
             TaxCode = l.TaxCode,
+            TaxGroupId = l.TaxGroupId,
             Unit = l.Unit,
             WarehouseId = l.WarehouseId,
             LocationId = l.LocationId,

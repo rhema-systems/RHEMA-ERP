@@ -13,6 +13,7 @@ using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Ehc;
 using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Data;
@@ -22,7 +23,8 @@ using Microsoft.EntityFrameworkCore;
 namespace ErpSystem.Api.Services.Sales;
 
 internal sealed class SalesOrderInvoiceService(ApplicationDbContext db, ICurrentUserProvider actor,
-    IInvoiceService invoices, IInventoryTrackingControlService? tracking = null) : ISalesOrderInvoiceService
+    IInvoiceService invoices, IInventoryTrackingControlService? tracking = null,
+    IPropertyEnquiryDepositApplicationService? prospectDeposits = null) : ISalesOrderInvoiceService
 {
     public async Task<SalesOrderInvoiceDetailDto> GenerateAsync(Guid orderId, GenerateSalesOrderInvoiceRequest request, CancellationToken cancellationToken = default)
     {
@@ -158,7 +160,10 @@ IF @r<0 THROW 51000, 'The Sales order is busy. Retry the same invoice request.',
     {
         await RequireAsync(cancellationToken, FinancePermissions.ApprovePostArInvoices);
         var order = await LoadAsync(orderId, cancellationToken);
-        await invoices.PostAsync(RequireInvoice(order), SalesOrderInvoiceGuard.Producer, cancellationToken);
+        var invoiceId = RequireInvoice(order);
+        await invoices.PostAsync(invoiceId, SalesOrderInvoiceGuard.Producer, cancellationToken);
+        if (prospectDeposits is not null)
+            await prospectDeposits.ApplyToPostedSalesInvoiceAsync(order.Id, invoiceId, cancellationToken);
         return await DetailAsync(order, cancellationToken);
     }
 
