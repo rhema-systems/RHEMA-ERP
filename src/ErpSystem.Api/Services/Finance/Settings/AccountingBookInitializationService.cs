@@ -502,6 +502,18 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             var targetMappings = await _db.AccountAccountingBooks
                 .Where(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && !item.IsDeleted)
                 .ToDictionaryAsync(item => item.AccountId, cancellationToken);
+            var sourceDisabledAccountIds = await _db.AccountAccountingBooks.AsNoTracking()
+                .Where(item => item.TenantId == TenantId && item.AccountingBookId == baseBook.Id
+                    && (item.IsDeleted || !item.IsEnabled))
+                .Select(item => item.AccountId).ToListAsync(cancellationToken);
+            // Refresh inherited eligibility, without disabling target-only protected/local accounts.
+            foreach (var accountId in sourceDisabledAccountIds)
+            {
+                if (!targetMappings.TryGetValue(accountId, out var inherited)) continue;
+                inherited.IsEnabled = false;
+                inherited.UpdatedAt = DateTime.UtcNow;
+                inherited.UpdatedBy = ActorName();
+            }
             foreach (var sourceMapping in sourceMappings)
             {
                 var targetClassification = ResolveClassification(sourceMapping.AccountClassification!);
