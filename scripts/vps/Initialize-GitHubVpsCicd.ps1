@@ -140,7 +140,7 @@ function Initialize-DeploymentSshIdentity {
         Protect-OpenSshFile -Path $publicKeyPath -AdministratorsOnly
     }
 
-    $publicKey = (& ssh-keygen.exe -y -P '' -f $SshPrivateKeyPath | Out-String).Trim()
+    $publicKey = (& ssh-keygen.exe -y -f $SshPrivateKeyPath | Out-String).Trim()
     Assert-True ($LASTEXITCODE -eq 0 -and
         $publicKey -match '^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp\d+)\s+[A-Za-z0-9+/=]+$') `
         'The deployment SSH private key is invalid or encrypted.'
@@ -328,7 +328,7 @@ finally {
 $privateKey = Get-Content -LiteralPath $SshPrivateKeyPath -Raw
 Assert-True ($privateKey -match '-----BEGIN (OPENSSH|RSA|EC) PRIVATE KEY-----') `
     'The deployment SSH key does not contain a supported private-key header.'
-& ssh-keygen.exe -y -P '' -f $SshPrivateKeyPath | Out-Null
+& ssh-keygen.exe -y -f $SshPrivateKeyPath | Out-Null
 Assert-True ($LASTEXITCODE -eq 0) 'The deployment SSH private key is invalid or encrypted.'
 
 try {
