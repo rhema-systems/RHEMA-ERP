@@ -4514,9 +4514,15 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (!purchaseOrderId.HasValue)
             {
-                if (lines.Any(line => !Is(line, "Expense")))
+                static bool IsManualExpenseLine(VendorInvoiceLineItemCreateDto line) =>
+                    Is(line, "Expense") ||
+                    Is(line, "Freight") ||
+                    Is(line, "Miscellaneous") ||
+                    Is(line, "FinanceCharge");
+
+                if (lines.Any(line => !IsManualExpenseLine(line)))
                     throw new InvalidOperationException(
-                        "Manual non-PO invoices may contain only GL Account / Expense lines. Inventory and service lines must originate from their governed source modules.");
+                        "Manual non-PO invoices may contain only GL Account / Expense, Freight, Miscellaneous, or Finance Charge lines. Inventory, product, and service lines must originate from their governed source modules.");
                 return;
             }
 
