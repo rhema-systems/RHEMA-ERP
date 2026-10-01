@@ -140,11 +140,14 @@ function Initialize-WindowsOpenSshServer {
 
     $blockStart = '# BEGIN RHEMA ERP GITHUB ACTIONS SSH'
     $blockEnd = '# END RHEMA ERP GITHUB ACTIONS SSH'
+    $sshMatchUser = $SshUser.ToLowerInvariant()
     $managedBlock = @"
 $blockStart
 Port $SshPort
 PubkeyAuthentication yes
-Match User $SshUser
+SyslogFacility LOCAL0
+LogLevel ERROR
+Match User $sshMatchUser
     AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys
     PubkeyAuthentication yes
     PasswordAuthentication no
@@ -225,12 +228,25 @@ function Repair-OpenSshServerPermissions {
 
     $sshDataDirectory = 'C:\ProgramData\ssh'
     $logsDirectory = Join-Path $sshDataDirectory 'logs'
+    $serviceSid = Get-OpenSshServiceSid
     [void][IO.Directory]::CreateDirectory($logsDirectory)
     foreach ($directory in @($sshDataDirectory, $logsDirectory)) {
+        $serviceGrant = if ($directory -ceq $logsDirectory) {
+            "*$serviceSid`:(OI)(CI)F"
+        }
+        else {
+            "*$serviceSid`:(OI)(CI)RX"
+        }
+        $directoryGrants = @(
+            '*S-1-5-18:(OI)(CI)F',
+            '*S-1-5-32-544:(OI)(CI)F',
+            '*S-1-5-11:(OI)(CI)RX'
+        )
+        if ($serviceSid -cne 'S-1-5-18') {
+            $directoryGrants += $serviceGrant
+        }
         & icacls.exe $directory '/inheritance:r' '/grant:r' `
-            '*S-1-5-18:(OI)(CI)F' `
-            '*S-1-5-32-544:(OI)(CI)F' `
-            '*S-1-5-11:(OI)(CI)RX' | Out-Null
+            @directoryGrants | Out-Null
         Assert-True ($LASTEXITCODE -eq 0) `
             "Could not repair OpenSSH directory permissions: $directory"
         & icacls.exe $directory '/setowner' '*S-1-5-32-544' | Out-Null
@@ -239,6 +255,11 @@ function Repair-OpenSshServerPermissions {
     }
 
     Protect-OpenSshFile -Path $ConfigPath -AdministratorsOnly
+    if ($serviceSid -cne 'S-1-5-18') {
+        & icacls.exe $ConfigPath '/grant:r' "*$serviceSid`:R" | Out-Null
+        Assert-True ($LASTEXITCODE -eq 0) `
+            "Could not grant the sshd service access to its configuration: $ConfigPath"
+    }
     & icacls.exe $ConfigPath '/setowner' '*S-1-5-32-544' | Out-Null
     Assert-True ($LASTEXITCODE -eq 0) `
         "Could not repair OpenSSH configuration ownership: $ConfigPath"
@@ -249,9 +270,35 @@ function Repair-OpenSshServerPermissions {
         'OpenSSH host-key generation did not create any files.'
     foreach ($hostKeyFile in $hostKeyFiles) {
         Protect-OpenSshFile -Path $hostKeyFile.FullName -AdministratorsOnly
+        if ($serviceSid -cne 'S-1-5-18') {
+            & icacls.exe $hostKeyFile.FullName '/grant:r' `
+                "*$serviceSid`:R" | Out-Null
+            Assert-True ($LASTEXITCODE -eq 0) `
+                "Could not grant the sshd service access to host key: $($hostKeyFile.FullName)"
+        }
         & icacls.exe $hostKeyFile.FullName '/setowner' '*S-1-5-32-544' | Out-Null
         Assert-True ($LASTEXITCODE -eq 0) `
             "Could not repair OpenSSH host-key ownership: $($hostKeyFile.FullName)"
+    }
+}
+
+function Get-OpenSshServiceSid {
+    $service = Get-CimInstance Win32_Service -Filter "Name='sshd'" `
+        -ErrorAction SilentlyContinue
+    Assert-True ($null -ne $service) `
+        'Could not read the Windows OpenSSH service account.'
+    $startName = ([string]$service.StartName).Trim()
+    switch -Regex ($startName) {
+        '^(LocalSystem|NT AUTHORITY\\SYSTEM)$' { return 'S-1-5-18' }
+        '^(NT AUTHORITY\\)?LocalService$' { return 'S-1-5-19' }
+        '^(NT AUTHORITY\\)?NetworkService$' { return 'S-1-5-20' }
+    }
+    try {
+        return ([Security.Principal.NTAccount]::new($startName)).Translate(
+            [Security.Principal.SecurityIdentifier]).Value
+    }
+    catch {
+        throw "Could not resolve the sshd service account '$startName' to a Windows SID."
     }
 }
 
@@ -283,6 +330,17 @@ function Get-OpenSshStartupEvidence {
     }
     catch {
         # Service startup will still return a useful generic failure below.
+    }
+    $logsDirectory = 'C:\ProgramData\ssh\logs'
+    if (Test-Path -LiteralPath $logsDirectory -PathType Container) {
+        Get-ChildItem -LiteralPath $logsDirectory -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 3 |
+            ForEach-Object {
+                Get-Content -LiteralPath $_.FullName -Tail 40 `
+                    -ErrorAction SilentlyContinue |
+                    ForEach-Object { [void]$messages.Add([string]$_) }
+            }
     }
     if ($messages.Count -eq 0) {
         return 'No OpenSSH or Service Control Manager event detail was available.'
