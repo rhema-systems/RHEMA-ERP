@@ -210,8 +210,8 @@ public class AppraisalWithdrawalService : IAppraisalWithdrawalService
         {
             var note = $"Dismissed: the appraisal was withdrawn from its cycle. {appraisal.WithdrawnReason}";
             recommendation.Status = RecommendationStatus.Dismissed;
-            recommendation.ApprovedById = actor;
-            recommendation.ApprovedDate = now;
+            recommendation.DecidedById = actor;
+            recommendation.DecidedDate = now;
             recommendation.ResolutionNotes = note.Length > 1000 ? note[..1000] : note;
         }
 

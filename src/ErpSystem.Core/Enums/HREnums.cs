@@ -3083,6 +3083,29 @@ public enum ProbationStatus
     ConfirmationApproved = 5
 }
 
+/// <summary>Where a probation extension request stands (performance closure batch 2, D-99).</summary>
+public enum ProbationExtensionRequestStatus
+{
+    /// <summary>Out with the confirming authority.</summary>
+    PendingApproval = 1,
+
+    /// <summary>The authority has approved it, and it has not been applied yet.</summary>
+    /// <remarks>
+    /// Separate from <see cref="Applied"/> for the reason <see cref="ProbationStatus.ConfirmationApproved"/> is: a status
+    /// adapter is synchronous and sees only this row, so it cannot write the extension or move the probation's end date.
+    /// </remarks>
+    Approved = 2,
+
+    /// <summary>The authority refused it; the probation's end date stands.</summary>
+    Rejected = 3,
+
+    /// <summary>Withdrawn by its raiser before a decision.</summary>
+    Recalled = 4,
+
+    /// <summary>Applied: the extension row written and the probation's end date moved.</summary>
+    Applied = 5
+}
+
 public enum ProbationReviewStatus
 {
     Scheduled = 1,

@@ -3544,6 +3544,9 @@ public class AppraisalOutcomeRecommendationDto : BaseDto
     public DateTime? RecommendedDate { get; set; }
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedDate { get; set; }
+    /// <summary>Who rejected or dismissed it, and when (performance closure batch 2, D-45).</summary>
+    public Guid? DecidedById { get; set; }
+    public DateTime? DecidedDate { get; set; }
     public DateTime? ActionedDate { get; set; }
     public string? Notes { get; set; }
     public string? ResolutionNotes { get; set; }

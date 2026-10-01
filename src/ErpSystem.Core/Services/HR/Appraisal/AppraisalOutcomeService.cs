@@ -225,11 +225,13 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
         // Decided once (E-g1, D-80): closing a closed one again overwrote who decided it, when, and why.
         if (entity.Status is RecommendationStatus.Rejected or RecommendationStatus.Dismissed)
             throw new InvalidOperationException(
-                $"This recommendation was already {entity.Status.ToString().ToLowerInvariant()} on {entity.ApprovedDate:d MMM yyyy}.");
+                $"This recommendation was already {entity.Status.ToString().ToLowerInvariant()} on {entity.DecidedDate:d MMM yyyy}.");
 
+        // The decider has columns of their own (batch 2, D-45): stamping the approver's made a dismissed recommendation
+        // read as approved by whoever dismissed it, and erased an approval it had before.
         entity.Status = status;
-        entity.ApprovedById = reviewerId == Guid.Empty ? null : reviewerId;
-        entity.ApprovedDate = DateTime.UtcNow;
+        entity.DecidedById = reviewerId == Guid.Empty ? null : reviewerId;
+        entity.DecidedDate = DateTime.UtcNow;
         entity.ResolutionNotes = notes;
 
         await _repository.UpdateAsync(entity);
@@ -267,6 +269,8 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
         RecommendedDate = r.RecommendedDate,
         ApprovedById = r.ApprovedById,
         ApprovedDate = r.ApprovedDate,
+        DecidedById = r.DecidedById,
+        DecidedDate = r.DecidedDate,
         ActionedDate = r.ActionedDate,
         Notes = r.Notes,
         ResolutionNotes = r.ResolutionNotes,

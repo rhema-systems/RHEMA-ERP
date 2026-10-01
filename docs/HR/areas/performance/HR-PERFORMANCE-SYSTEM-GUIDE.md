@@ -390,10 +390,11 @@ snapshot**. Open any evaluation screen on one and you get:
 
 Every other appraisal on the database — 102 of them — carries its snapshot and opens correctly.
 
-> **Changed 2026-10-01** (closure E-g2, D-86). HR's review page now offers **Rebuild form** on an appraisal whose form
-> is empty and that nobody has scored: it rebuilds the form from the appraisal's own approved template. Until the five
-> are repaired on this database (on the user's go), the rule stands as written; a rebuild of the database seeds them
-> with their forms.
+> **Repaired 2026-10-01** (closure E-g2, D-86). HR's review page now offers **Rebuild form** on an appraisal whose form
+> is empty and that nobody has scored: it rebuilds the form from the appraisal's own approved template. **The five were
+> rebuilt on this database that day** — each now opens with its four criteria (Sales Target Achievement, Project Delivery
+> Timeliness, Communication, Teamwork), so the warning above no longer appears; they still belong to non-TDC fixture
+> staff, so keep them out of the walk. A rebuild of the database seeds them with their forms.
 
 **Never open an appraisal whose number starts `APR-2026-00`.** The real ones are numbered
 `APR-2026-APC2026-TDC/00017-0034`: cycle code, employee number, sequence. If you sort or search, sort
@@ -4918,7 +4919,7 @@ record the recommendation became, where that screen exists.
 | Propose | `POST api/AppraisalOutcomeRecommendations` | **the appraisee's own manager, or HR** — 403 otherwise |
 | Approve | `POST …/{id}/approve` | HR. **Idempotent** — an already-actioned recommendation comes back unchanged |
 | Retry | `POST …/{id}/retry-dispatch` | **422 unless the row is Approved-but-not-Actioned** |
-| Reject / Dismiss | `POST …/{id}/reject`, `…/dismiss` | **422 once actioned** — the downstream record already exists; *since closure E-g1* **422 once rejected or dismissed** (a second close overwrote who decided it, when and why). An approved one not yet actioned may still be dismissed, and is not approved again (422 — retry its dispatch instead) |
+| Reject / Dismiss | `POST …/{id}/reject`, `…/dismiss` | **422 once actioned** — the downstream record already exists; *since closure E-g1* **422 once rejected or dismissed** (a second close overwrote who decided it, when and why). An approved one not yet actioned may still be dismissed, and is not approved again (422 — retry its dispatch instead). *Since closure batch 2 (2026-10-01)* the close records **who decided and when** in `decidedById` / `decidedDate`; an approval before it keeps its own `approvedById` / `approvedDate`. (Before, the close stamped the approver's fields — UAT's 62 dismissed rows were moved over by the migration.) |
 
 > ⚠ **Approve answers 200 whether or not the dispatch succeeded.** Check the returned `status`.
 > `Actioned` means the downstream record exists and `targetEntityId` points at it; `Approved` means the

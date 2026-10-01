@@ -131,6 +131,8 @@ public partial class ApplicationDbContext
     public DbSet<CheckInGoalUpdate> CheckInGoalUpdates { get; set; } = null!;
     public DbSet<CheckInObjectiveLink> CheckInObjectiveLinks { get; set; } = null!;
     public DbSet<AppraisalOutcomeRecommendation> AppraisalOutcomeRecommendations { get; set; } = null!;
+    public DbSet<PerformanceSweepRun> PerformanceSweepRuns { get; set; } = null!;
+    public DbSet<PerformanceSweepDispatch> PerformanceSweepDispatches { get; set; } = null!;
     public DbSet<SalaryReviewProposal> SalaryReviewProposals { get; set; } = null!;
     public DbSet<EmploymentActionProposal> EmploymentActionProposals { get; set; } = null!;
     public DbSet<PerformanceJournalEntry> PerformanceJournalEntries { get; set; } = null!;
@@ -386,6 +388,7 @@ public partial class ApplicationDbContext
     public DbSet<ProbationPeriod> ProbationPeriods { get; set; } = null!;
     public DbSet<ProbationReview> ProbationReviews { get; set; } = null!;
     public DbSet<ProbationExtension> ProbationExtensions { get; set; } = null!;
+    public DbSet<ProbationExtensionRequest> ProbationExtensionRequests { get; set; } = null!;
     public DbSet<StaffRequisition> StaffRequisitions { get; set; } = null!;
     public DbSet<StaffRequisitionCost> StaffRequisitionCosts { get; set; } = null!;
     public DbSet<StaffRequisitionAttachment> StaffRequisitionAttachments { get; set; } = null!;
@@ -3641,7 +3644,13 @@ private void ConfigureHREntities(ModelBuilder builder)
 
         builder.Entity<PerformanceImprovementPlan>(entity =>
         {
-            entity.HasIndex(x => x.PipNumber).IsUnique(false);
+            // One number per plan in a tenant (performance closure batch 2, D-75): PipNumbering picks the next free
+            // number, and the global non-unique index let two plans saved at once share one.
+            entity.HasIndex(x => new { x.TenantId, x.PipNumber })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_PerformanceImprovementPlans_Tenant_PipNumber");
+            entity.HasOne(x => x.AuthoredBy).WithMany().HasForeignKey(x => x.AuthoredById).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(x => x.EmployeeId);
             entity.HasIndex(x => x.AppraisalId);
             entity.HasIndex(x => x.SupervisorId);
@@ -4603,6 +4612,12 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.PerformanceAppraisalId);
             entity.HasIndex(x => x.RecommendationType);
             entity.HasIndex(x => x.Status);
+            // One open recommendation of a type per appraisal (performance closure batch 2, D-93): Proposed, Approved or
+            // Actioned. A rejected or dismissed one leaves room for another. RecommendationStatus has no Cancelled.
+            entity.HasIndex(x => new { x.PerformanceAppraisalId, x.RecommendationType })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [Status] IN (1, 2, 3)")
+                .HasDatabaseName("UX_AppraisalOutcomeRecommendations_Appraisal_Type_Open");
 
             entity.Property(x => x.RecommendationType).HasConversion<int>();
             entity.Property(x => x.Status).HasConversion<int>();
@@ -4642,6 +4657,10 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.Property(x => x.ProposalType).HasConversion<int>();
             entity.Property(x => x.Status).HasConversion<int>();
 
+            // Performance closure batch 2 (F3, F5): the submitter and the one who marked it applied.
+            entity.HasOne(x => x.SubmittedBy).WithMany().HasForeignKey(x => x.SubmittedById).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.ActionedBy).WithMany().HasForeignKey(x => x.ActionedById).OnDelete(DeleteBehavior.Restrict);
+
             entity.HasOne(x => x.Employee)
                 .WithMany()
                 .HasForeignKey(x => x.EmployeeId)
@@ -4661,6 +4680,11 @@ private void ConfigureHREntities(ModelBuilder builder)
 
             entity.Property(x => x.ActionType).HasConversion<int>();
             entity.Property(x => x.Status).HasConversion<int>();
+
+            // Performance closure batch 2 (F3, F4, F5): the submitter, the one who marked it actioned, the plan that raised it.
+            entity.HasOne(x => x.SubmittedBy).WithMany().HasForeignKey(x => x.SubmittedById).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.ActionedBy).WithMany().HasForeignKey(x => x.ActionedById).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.SourcePip).WithMany().HasForeignKey(x => x.SourcePipId).OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(x => x.Employee)
                 .WithMany()
@@ -9610,6 +9634,10 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithOne(x => x.ProbationPeriod)
                 .HasForeignKey(x => x.ProbationPeriodId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Performance closure batch 2 (D-99): whom the confirmation went to, and who decided it.
+            entity.HasOne(x => x.ConfirmationAuthorityEmployee).WithMany().HasForeignKey(x => x.ConfirmationAuthorityEmployeeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.ConfirmationDecidedBy).WithMany().HasForeignKey(x => x.ConfirmationDecidedById).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<ProbationReview>(entity =>
@@ -9659,6 +9687,39 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(x => x.ExtendedById)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Performance closure batch 2 (D-99): the request it applied — one extension per request.
+            entity.HasIndex(x => x.ExtensionRequestId)
+                .IsUnique()
+                .HasFilter("[ExtensionRequestId] IS NOT NULL AND [IsDeleted] = 0")
+                .HasDatabaseName("UX_ProbationExtension_ExtensionRequestId");
+
+            entity.HasOne(x => x.ExtensionRequest)
+                .WithMany()
+                .HasForeignKey(x => x.ExtensionRequestId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- Probation extension request (performance closure batch 2, D-99) ----
+        builder.Entity<ProbationExtensionRequest>(entity =>
+        {
+            entity.HasIndex(x => x.ProbationPeriodId).HasDatabaseName("IX_ProbationExtensionRequest_ProbationId");
+            entity.HasIndex(x => x.AuthorityEmployeeId).HasDatabaseName("IX_ProbationExtensionRequest_AuthorityEmployeeId");
+
+            // One open request per probation — pending, or approved and not yet applied. The open request is the
+            // probation's pending-extension state. Named, because the unfiltered index on the same column stays for lookups.
+            entity.HasIndex(x => x.ProbationPeriodId, "UX_ProbationExtensionRequest_OneOpenPerProbation")
+                .IsUnique()
+                .HasFilter("[Status] IN (1, 2) AND [IsDeleted] = 0")
+                .HasDatabaseName("UX_ProbationExtensionRequest_OneOpenPerProbation");
+
+            entity.Property(x => x.Status).HasConversion<int>();
+
+            entity.HasOne(x => x.ProbationPeriod).WithMany(x => x.ExtensionRequests).HasForeignKey(x => x.ProbationPeriodId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.AuthorityEmployee).WithMany().HasForeignKey(x => x.AuthorityEmployeeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.DecidedBy).WithMany().HasForeignKey(x => x.DecidedById).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.SourceRecommendation).WithMany().HasForeignKey(x => x.SourceRecommendationId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.SourceProbationReview).WithMany().HasForeignKey(x => x.SourceProbationReviewId).OnDelete(DeleteBehavior.Restrict);
         });
 
         // =====================================================
@@ -11225,6 +11286,21 @@ private void ConfigureHREntities(ModelBuilder builder)
 
             e.HasOne(x => x.Run)
                 .WithMany(x => x.DispatchLogs)
+                .HasForeignKey(x => x.RunId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- Performance sweep engine (performance closure batch 2; lanes F7 and H) ----
+        builder.Entity<PerformanceSweepRun>(e => e.HasIndex(x => new { x.TenantId, x.StartedAt }));
+        builder.Entity<PerformanceSweepDispatch>(e =>
+        {
+            // The send-once guarantee — a sweep claims a key before it acts.
+            e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            e.HasIndex(x => new { x.TenantId, x.EmployeeId });
+
+            e.HasOne(x => x.Run)
+                .WithMany(r => r.Dispatches)
                 .HasForeignKey(x => x.RunId)
                 .OnDelete(DeleteBehavior.Cascade);
         });

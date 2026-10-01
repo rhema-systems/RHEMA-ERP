@@ -92,7 +92,9 @@ which waits on the Finance owner's answer in `../HANDOFF-FINANCE-HR-RECRUITMENT-
 ▶ **Lane 9 — demo dataset — BUILT 2026-09-04.** Every one of the 551 required HR/SHE tables holds data in
 `ErpSystemDB_UAT`, the six runbooks are checked against the database on every rebuild, and the
 rebuild is one command. **One decision is owed** (admin tier vs employee link — § Lane 9 and the
-cross-module doc § 25) and 27 HR-owned defects are tabled in § Lane 9. Start there.
+cross-module doc § 25) — **probation's door settled 2026-10-01** (the performance closure's D-99: an extension, like a
+confirmation, is decided by the probation's confirming authority through the workflow; HR never decides it), the other
+four doors still owed — and 27 HR-owned defects are tabled in § Lane 9. Start there.
 
 ▶ **Lane 4 is DONE (2026-09-01): 54 + 32 + 33 assertions, each twice** (see § Lane 4 for the
 row-by-row verification). Lane 6's buildable rows are closed — two of its
@@ -1647,7 +1649,10 @@ every HR/SHE entity a user can create has at least one seeded row; 48 system-gen
 
 **Decision owed (blocks five doors):** the admin-tier + employee-link contradiction — see
 `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` § 25 item 1. Either link a TenantAdmin login to an
-employee or grant the `HR` role the `HR.*.Admin` tier. Until then the demo seeds
+employee or grant the `HR` role the `HR.*.Admin` tier. **Probation's door is settled (2026-10-01, the performance
+closure's D-99):** extension goes the way confirmation does — a request decided by the probation's confirming authority
+through the workflow — and HR is not granted the probation tier; it is built in that closure's lane F (F1). Training
+budgets and plans, travel policies, talent reviews and the vacancy reconcile are still owed. Until then the demo seeds
 `TrainingBudgetTransactions`, `StaffMovementApprovalLevels` and `ProbationExtensions` directly.
 
 **HR-owned defects found by the build (each reproduced twice; payloads in the agents' reports):**

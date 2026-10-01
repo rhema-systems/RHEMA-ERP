@@ -68,6 +68,9 @@ export interface AppraisalOutcomeRecommendation extends AuditFields {
   recommendedDate?: string | null;
   approvedById?: string | null;
   approvedDate?: string | null;
+  /** Who rejected or dismissed it, and when — never the approver's fields. */
+  decidedById?: string | null;
+  decidedDate?: string | null;
   actionedDate?: string | null;
   notes?: string | null;
   resolutionNotes?: string | null;

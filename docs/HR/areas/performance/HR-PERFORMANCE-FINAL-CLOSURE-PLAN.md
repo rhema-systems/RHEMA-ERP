@@ -94,9 +94,13 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    2026-10-01** (decided first: § 1p D-81–D-87; `run-final-lifecycle.mjs` 1271/1271 twice; regression 3811/3820; lane E's
    E-g2 State block — one panel holds an appraisal, the grid reads no number after a return, HR's advance rejects a leaver
    peer, a released outcome stands, the HR reviewer is never the appraisee or line manager and the review names who acts, HR
-   rebuilds an empty form; D-87's scale per profile is in § 6's batch 2). **Two writes await the user's go:** the clean-up
-   of the four rows E-g2's first run wrote about two real HR officers, and the repair of UAT's five Rule 8 forms. **Lane E
-   is complete; lane F is next** — source-check it first. **Before a long run,
+   rebuilds an empty form; D-87's scale per profile is in § 6's batch 2). **Both UAT writes ran on the user's go,
+   2026-10-01** (the E-g2 State block's last paragraph): the four rows about two real HR officers soft-deleted, and the five
+   Rule 8 forms rebuilt. **Lane E is complete.** Lane F was source-checked and decided the same day (§ 1q, D-88–D-99;
+   D-18 settled as D-99). ~~**F-a**, migration batch 2~~ **Done 2026-10-01** and applied to UAT on the user's go
+   (lane F's F-a State block: 24/24 on a scratch copy first; lifecycle 1278/1278 twice; regression 3818/3827; the
+   recommendation decider moved, the rest left empty; D-99's probation schema). **Next: F-b** — source-check it first;
+   it also owes D-32's tolerance capture and read. **Before a long run,
    check free RAM and the stuck email queue** (§ 5, the second E-e row): either one starves SQL Server's query memory and
    reads time out at 30 s.
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
@@ -271,6 +275,23 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | D-74 | **Who writes an appraisal conversation** — the appraisee books, edits, holds and deletes their own (two helpers admit them, and the booker becomes the scheduler); a held conversation's delete moves the appraisal back; type and ids come from the body; the held date is always today | **The line manager, the conversation's scheduler or conductor, or HR when not the subject** — create, edit, hold, delete; the appraisee reads. Type, appraisal, scheduler and conductor are pinned (the scheduler is who booked, the conductor who marks it held); the held date can be stated (not future, default today); a held conversation is never deleted. On withdrawal, unheld conversations are removed and open review events Cancelled (and Cancelled closes an event) | E-f |
 | D-75 | **PIP numbering and the plan's own rules** — the recommendation handler numbers `PIP-APR-…` and skips the service's rules; approve and reject act from any status on the no-definition path; the plan's subject records their own outcome; the outcome value is unchecked; the number index is neither unique nor per tenant | **Folded, no migration**: the handler numbers `PIP-yyyy-NNNN` through the service's rule and keeps its checks (one live plan, an HR owner, a supervisor who is not the employee); approve and reject act on a pending plan only; the subject (HR included) does not complete, decide or delete their own plan; the outcome is checked. The number race goes to migration batch 2 | E-f, batch 2 |
 | D-76 | **Beyond the rows (E-f)** | **Folded:** goal link ids checked (company, unit and parent goal, library, KPI — tenant, existence, same cycle; a parent the same employee's and not itself; the manager id server-set; P-22 closed as by design; a progress entry's review event the goal's appraisal's); the PIP goal PUT binds its validated DTO (percent 0–100), text lengths checked, the seven goal and meeting routes answer 422/404 not 500; a conversation's review event belongs to its appraisal, and the type error lists every type. **Not folded:** a final review held before its step (§ 5) | E-f |
+
+### 1q. Decisions for lane F — settled with the user, 2026-10-01 (after lane E, on three surveys and UAT's counts)
+
+| # | Question | Decision (2026-10-01) | Affects |
+|---|---|---|---|
+| D-88 | **Lane F's shape** — most rows need batch 2's columns; F1 waited on D-18 | **Batch 2 first (F-a), then three slices:** F-b recommendations and segregation of duties (F2, F3, F8, F9); F-c the PIP chain, mark-applied, the handlers and stranded approvals (F4, F5, F6, F7); then F-d (D-89) and F1 on the probation route (D-99) | F |
+| D-89 | **D-87's placement** — its code is lane-sized (resolver, goal rows, grade screen, copying grades and their bands per profile) | **Its own slice after F-c (F-d)**, schema and code together; batch 2 carries everything else | F-d, batch 2b |
+| D-90 | **D-45's interim score store** — the scores are already progress entries tagged by review event, and move the goals (L7) | **No new store**: closed by design; the period score is shown as context on the year-end manager form | F-b |
+| D-91 | **Batch 2's unique indexes** — UAT has no duplicate open recommendation (appraisal, type) and no duplicate PIP number | **Refuse if any** (batch 1's pattern: the script stops with the count); nothing resolved silently | batch 2 |
+| D-92 | **F2 — the manager's ticks** (Award stored, never set; the dashboards count booleans) | **Proposed rows at the manager's submit**, once per type: Promotion → Promotion, Increment → MeritIncrease, Training → TrainingNomination, PIP → PerformanceImprovementPlan, Termination → Termination, Award → Recognition (the Award tick added to the form); the dashboards count rows; the demo pack approves the rows its evaluations create | F-b, S |
+| D-93 | **Recommendation rules** — duplicates allowed, the recommender could approve their own | **No open duplicate** (same appraisal and type, not Rejected or Dismissed); **the recommender does not approve their own**; no "completed" gate (the ticks propose before completion); the demo pack proposes as the line manager and hr.head approves | F-b, S |
+| D-94 | **F3 — segregation of duties (D-12)** — no service stops self-approval on either path; UAT's three published HR routes do not prevent it | **Service rules on both paths** (proposals → MD or TenantAdmin, never about the approver's own pay; PIPs by author — HR approves a manager's, the line manager or TenantAdmin an HR officer's; templates → another HR officer or TenantAdmin) with batch 2's submitter and author columns, an MD proposals-read policy, **and `preventInitiatorApproval` on the four HR routes** (retrofits existing tenants) | F-b, batch 2 |
+| D-95 | **F8 — approval inbox titles** | **PIP, employment action and salary proposal** withhold the employee's name, as discipline does | F-b |
+| D-96 | **F4 — a PIP's closing outcome** | Demotion, Termination **and Transferred** raise a Proposed employment action linked by `SourcePipId`; **Transferred gets a new `EmploymentActionType.Transfer`** | F-c, batch 2 |
+| D-97 | **F6 — wrong-person fallbacks** (the nominee as pool owner; the HR approver as a manager-less employee's PIP supervisor and owner) | **Refuse, keep it Approved**: with no proper owner or supervisor the handler raises nothing and the recommendation stays on *needs dispatch* for HR to fix and retry | F-c |
+| D-98 | **F7 — stranded engine approvals** | **A reconciler service and an HR run-now action in F-c**; lane H's nightly host schedules it; a note on cross-module #15 | F-c, H |
+| D-99 | **D-18, settled here** (from the finish plan): who decides a probation extension — only an admin door no one can use | **Extension on the confirmation route**: a request decided by the probation's confirming authority through the workflow, as confirmation is; an approved Extend-Probation recommendation submits it, Confirm-Probation submits for confirmation; HR never decides the outcome; batch 2 adds the pending-extension state | F1, batch 2, finish plan |
 
 ### 1p. Decisions for slice E-g2 — settled with the user, 2026-10-01 (after E-g1, on the E-g source check and three more surveys)
 
@@ -3605,11 +3626,89 @@ without — `poolCandidates` is switched off in the suite's finally; its nominat
 `run-final-lifecycle.mjs` gains E-g2's 86 in a block of its own; `run-final-nominations.mjs`'s d39 plants NA at three peers
 (put back after), has PeerGone leave before HR's advance and asserts the rejection (+6, 193).
 
+**UAT writes beyond the fixtures (run on the user's go, 2026-10-01, after the commit `9f4b3206c`):**
+- **The clean-up** (`eg2-pool-cleanup.sql`, after a verified COPY_ONLY backup, `ErpSystemDB_UAT_preEg2PoolCleanup_20261001.bak`):
+  the two HR evaluations and the two assignment notifications the first run wrote about Akpene Amoah and Fiifi Mensah,
+  soft-deleted in one transaction with asserted counts (2 + 2, committed).
+- **The five Rule 8 forms** — `POST rebuild-form` on APR-2026-001…005 as the admin desk: 200 each, 4 rows each (the template's two
+  KPIs and two competencies); the forms open (self-evaluation context: 2 sections, 4 items); *Rebuild form* no longer offered;
+  APC2026's ten demo reads, its 107 phases included, unchanged. **Rule 8 no longer holds on UAT.**
+
 ### Lane F — Recommendations, proposals, probation, PIP chain, segregation of duties
+
+**Order (§ 1q, D-88):** F-a migration batch 2 → F-b (F2, F3, F8, F9; D-90, D-92–D-95) → F-c (F4–F7) → F-d (D-87,
+its own schema) → F1 (D-99).
+
+**F-a State — migration batch 2 DONE 2026-10-01: built, applied to UAT on the user's go, verified (staged; the user
+commits).**
+`20261001120541_PerformanceClosureBatch2`, scaffolded by the user and rewritten as guarded SQL with batch 1's helpers.
+- **Holds:** the recommendation decider (`DecidedById`, `DecidedDate`) and the one-open-per-type unique index (D-93);
+  the proposals' `SubmittedById/Date` and `ActionedById/Date`, the employment action's `SourcePipId` and `EffectiveDate`;
+  the PIP's `AuthoredById` and the per-tenant number index (D-75, replacing the global one — the plain `TenantId` index
+  goes with it, as EF counts the new one as covering the key); `KpiTolerancePercent` on the criterion snapshot (D-32);
+  `PerformanceSweepRuns` / `PerformanceSweepDispatches`; and D-99's probation schema (below). D-87's scale per profile is
+  **not** here — F-d carries its own schema (D-89).
+- **Decided at the scaffold:**
+  - **The decider is MOVED, not copied.** On a rejected or dismissed recommendation the approver columns held whoever
+    closed it — the close and the withdrawal's dismissal stamped them, over an approval when there was one. Up copies
+    them to `Decided*` and clears them (62 dismissed rows on UAT). The code half is in this slice: `CloseAsync` and the
+    withdrawal's dismissal write `Decided*`; the "already dismissed on …" refusal reads `DecidedDate`; the DTO and the TS
+    type carry `decidedById` / `decidedDate`. From now on an approval before a close keeps its approver and date. No
+    screen read the approver of a closed recommendation; the handlers read it only on approved ones.
+  - **Left empty:** the submitter, who marked a proposal applied, and a PIP's author — nothing recorded them
+    (`CreatedById` is often null, cross-module #6) — and the KPI tolerance: filling it from today's definitions would
+    restate scores already given; a row with none scores as before. **Owed:** capturing the tolerance at generation and
+    reading it in `KpiAchievementPercent` (D-32) — placed in F-b; lane S re-baselines the demo after it.
+  - **The tolerance is `decimal(18,4)`**, not the `(5,2)` first written: the context's `ConfigureDecimalPrecision`
+    overrides every non-money decimal, and the definition's own `TolerancePercent` is `(18,4)`.
+  - **D-99's schema.** `ProbationExtensionRequest` — its own row and (in F1) its own engine entity type, because the
+    engine keeps one running instance per (entity type, entity id): a second request on the `ProbationPeriod` would reuse
+    the confirmation's instance and land on its adapter. Status PendingApproval → Approved → Applied, or Rejected /
+    Recalled (Approved apart from Applied for the reason `ConfirmationApproved` is: an adapter is synchronous and sees
+    only the row). One open request per probation (unique, `Status IN (1, 2)`). **No new `ProbationStatus` member** — the
+    probation is still running, and `ProbationStatus.Active` is read 26 times in 12 files; the open request IS the
+    pending-extension state. `ProbationExtension.ExtensionRequestId` (one extension per request; `ExtendedById` stays
+    required — the decider is an employee by construction, since a confirming-authority rule names one). On the
+    probation: `ConfirmationAuthorityEmployeeId`, `ConfirmationSubmittedDate`, `ConfirmationDecidedById`,
+    `ConfirmationDecidedDate`, so F1 can narrow the confirmation decision to the authority without another migration.
+- **Proof** (render by the csc recipe; a COPY_ONLY backup of UAT restored as a scratch database; UAT only read):
+  **24/24** — Up, Up again (no rows, same schema), Down (UAT's schema exactly, and every recommendation's approver
+  columns back exactly), Up after Down (same schema); Up on today's UAT copy refuses nothing (no duplicates); a planted
+  second open recommendation and a planted second live PIP number each stop Up with the count and roll everything back;
+  a soft-deleted duplicate number does not; a second open extension request is refused by its index; Down refuses while
+  an extension request exists and rolls back. The schema diff against UAT (130 lines added, 2 removed) matched the
+  scaffold object for object.
+- **Harness:** seven `fa-rec` checks in `run-final-lifecycle.mjs` (in ed-read and eg1-rec): the dismissal names its decider,
+  the approval before it keeps its approver and date, the refusal dates the decision, the withdrawal's dismissal names
+  the withdrawer and no approver.
+- **Applied to UAT 2026-10-01 on the user's go**, after a verified COPY_ONLY backup (`ErpSystemDB_UAT_before_batch2.bak`):
+  the history row is in (105 → 106), all 62 dismissed rows carry their decider and no approver, every other new column
+  is empty, and UAT's schema fingerprint equals the scratch run's line for line. Batch 2 was the only migration pending.
+- **Verified:** `run-final-lifecycle.mjs` **1278/1278 twice** (1271 + the seven); regression **3818/3827** = 3811 + exactly
+  7, the nine failures slice E's stale ones (the same list as E-g2's, bar a run stamp); hr-portal slice 5 **49/49**; a
+  read-only probe of eight probation reads (the demo's extended probation, its extension and reviews, a plain one, the
+  queues) 8/8; HR's desk on APC2026 (ten reads, phases included) **byte-identical** before and after; the API log has no
+  5xx — its 286 failed saves are all payroll's `FK_PayrollEmployeeProfiles_PayrollPaymentMethods_DefaultPaymentMethodId`
+  (cross-module #23) and two the known TDC/00007 reconciliation. **What the runs wrote:** no demo row changed; the
+  rows created are the suites' and portal slice 5's (`A25…`); batch 2's tables and the probation's confirmation columns
+  stay empty; 330 approval notices reached the nine real personas (the open E-e row). Of the twelve recommendations the
+  runs closed, six name no decider — a leaver's automatic withdrawal and the teardown's cycle close, which name no
+  person (the old code wrote a null actor there too); the teardown's rows show the fix: approved during the run, they
+  keep their approver after the dismissal.
+- **Not run on UAT:** the hr-probation harness — its reminder sweep would reach UAT's 3,748 live probations and its
+  authority and workflow slices rewrite the tenant's map and definitions. The probation code did not change; the probe
+  covers the model change. F1 owes it a UAT-safe review.
 
 - [ ] F1 Extend-Probation handler passes `CurrentUserProvider.EmployeeId` (refuse with a message
       when unlinked); Confirm-Probation goes through the probation workflow submit / fallback
-      authority instead of `ConfirmAsync`. **Waits for D-18.**
+      authority instead of `ConfirmAsync`. ~~**Waits for D-18.**~~ **Settled as D-99** (§ 1q): an extension is a
+      `ProbationExtensionRequest` decided by the confirming authority (schema in F-a). *Survey 2026-10-01, for F1's
+      source check:* a rule names one **employee**; approving a confirmation is **role-based** (the seed's `hrControlled`
+      = Hr, Manager, TenantAdmin) and `ApproveConfirmationAsync` never compares the caller with the authority; HR cannot
+      apply an approved confirmation (`POST confirm` is `ProbationAdminPolicy` + `RequireEmployeeId`); no screen calls
+      approve / reject confirmation or extend; the generic `WorkflowController` runs status adapters **only for
+      ServiceRequest**; the Extend handler passes a **user** id into `ExtendedById` (an Employee FK → 500); the demo pack
+      has no confirmation flow, and its one extension comes from `TdcDemoProbationExtensionSeeder`.
 - [ ] F2 Manager `Recommend*` ticks (incl. `RecommendAward`, never written today, PAS :2477) create
       Proposed `AppraisalOutcomeRecommendation` rows on manager submit (idempotent per
       appraisal+type — batch 2 filtered unique index); dashboards
@@ -4464,7 +4563,11 @@ table there. Backfills are for databases that already hold data.
     - ⚠ **The scaffold emitted `RenameColumn(RequireDevelopmentPlanUpdate → IsDefault)`**: two `bit`
       columns left and one arrived. Applied, it would have crowned every profile the default. The
       SQL drops the old column and adds the new one.
-- **Batch 2 (before lane F):**
+- **Batch 2 (before lane F):** **BUILT 2026-10-01 as `20261001120541_PerformanceClosureBatch2`** — lane F's F-a State
+  block is the record. Three bullets below were overtaken: duplicates are **refused, not resolved** (D-91 — the script
+  stops with the count; UAT had none); the tolerance is **left null** on existing rows (decided at the scaffold); the
+  grade scale per profile went to **F-d with its own schema** (D-89). Added beyond the list: D-45's decider columns
+  (moved from the approver's) and D-99's probation extension request.
   - `SalaryReviewProposal` / `EmploymentActionProposal`: `SubmittedById` + `SubmittedDate` (F3),
     `ActionedById` (Employee FK, null) + `ActionedDate` (F5);
   - an author column on `PerformanceImprovementPlan` (F3);

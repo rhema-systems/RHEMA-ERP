@@ -1253,6 +1253,14 @@ public class AppraisalOutcomeRecommendation : TenantEntity
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedDate { get; set; }
 
+    /// <summary>
+    /// The employee who rejected or dismissed it, and when (performance closure batch 2, D-45). The close stamped the
+    /// approver columns, so a dismissed recommendation read as approved by whoever dismissed it. An Employee id, as its
+    /// recommender and approver are.
+    /// </summary>
+    public Guid? DecidedById { get; set; }
+    public DateTime? DecidedDate { get; set; }
+
     public DateTime? ActionedDate { get; set; }
 
     [MaxLength(2000)]
@@ -1300,11 +1308,28 @@ public class SalaryReviewProposal : TenantEntity
     [MaxLength(1000)]
     public string? Notes { get; set; }
 
+    /// <summary>
+    /// The employee who submitted it for approval, and when (performance closure batch 2, F3): segregation of duties
+    /// needs a submitter to compare the approver with, and nothing recorded one.
+    /// </summary>
+    public Guid? SubmittedById { get; set; }
+    public DateTime? SubmittedDate { get; set; }
+
+    /// <summary>The employee who marked it applied, and when (F5) — it recorded no actor and overwrote the notes.</summary>
+    public Guid? ActionedById { get; set; }
+    public DateTime? ActionedDate { get; set; }
+
     [ForeignKey(nameof(EmployeeId))]
     public virtual Employee Employee { get; set; } = null!;
 
     [ForeignKey(nameof(SourceAppraisalId))]
     public virtual PerformanceAppraisal? SourceAppraisal { get; set; }
+
+    [ForeignKey(nameof(SubmittedById))]
+    public virtual Employee? SubmittedBy { get; set; }
+
+    [ForeignKey(nameof(ActionedById))]
+    public virtual Employee? ActionedBy { get; set; }
 }
 
 /// <summary>
@@ -1328,11 +1353,34 @@ public class EmploymentActionProposal : TenantEntity
     [MaxLength(1000)]
     public string? Notes { get; set; }
 
+    /// <summary>The employee who submitted it for approval, and when (performance closure batch 2, F3).</summary>
+    public Guid? SubmittedById { get; set; }
+    public DateTime? SubmittedDate { get; set; }
+
+    /// <summary>The employee who marked it actioned, and when (F5).</summary>
+    public Guid? ActionedById { get; set; }
+    public DateTime? ActionedDate { get; set; }
+
+    /// <summary>The performance improvement plan whose closing outcome raised it (F4, D-96), when one did.</summary>
+    public Guid? SourcePipId { get; set; }
+
+    /// <summary>When the action takes effect (D-19, P-54) — neither proposal carried one.</summary>
+    public DateOnly? EffectiveDate { get; set; }
+
     [ForeignKey(nameof(EmployeeId))]
     public virtual Employee Employee { get; set; } = null!;
 
     [ForeignKey(nameof(SourceAppraisalId))]
     public virtual PerformanceAppraisal? SourceAppraisal { get; set; }
+
+    [ForeignKey(nameof(SubmittedById))]
+    public virtual Employee? SubmittedBy { get; set; }
+
+    [ForeignKey(nameof(ActionedById))]
+    public virtual Employee? ActionedBy { get; set; }
+
+    [ForeignKey(nameof(SourcePipId))]
+    public virtual PerformanceImprovementPlan? SourcePip { get; set; }
 }
 
 /// <summary>
@@ -1720,6 +1768,13 @@ public class PerformanceAppraisalCriterionConfig : TenantEntity
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal? KpiMaxValue { get; set; }
+
+    /// <summary>
+    /// The KPI definition's tolerance when the row was snapshotted (performance closure batch 2, D-32): a measured row
+    /// within it of its target scores as met. Null scores as before — no tolerance. Stored as decimal(18,4), like the
+    /// definition's: the context's decimal convention sets every non-money decimal so.
+    /// </summary>
+    public decimal? KpiTolerancePercent { get; set; }
 
     /// <summary>Indicates which tier of the resolution chain provided the KPI target.</summary>
     public KpiTargetSource? KpiTargetSource { get; set; }
@@ -2581,6 +2636,15 @@ public class PerformanceImprovementPlan : TenantEntity
 	[ForeignKey(nameof(HROwnerId))]
 	public virtual Employee? HROwner { get; set; }
 
+    /// <summary>
+    /// The employee who wrote the plan (performance closure batch 2, F3): D-12 routes its approval by its author — HR
+    /// approves a plan a line manager wrote; the line manager or TenantAdmin approves one HR wrote. Nothing recorded one.
+    /// </summary>
+    public Guid? AuthoredById { get; set; }
+
+    [ForeignKey(nameof(AuthoredById))]
+    public virtual Employee? AuthoredBy { get; set; }
+
 	public virtual ICollection<PipGoal> PipGoals { get; set; } = new List<PipGoal>();
 	public virtual ICollection<PipReviewMeeting> ReviewMeetings { get; set; } = new List<PipReviewMeeting>();
 	public virtual ICollection<AppraisalAttachment> Attachments { get; set; } = new List<AppraisalAttachment>();
@@ -2768,4 +2832,76 @@ public class AppraisalNotification : TenantEntity
 
     [ForeignKey(nameof(AppraisalId))]
     public virtual PerformanceAppraisal? Appraisal { get; set; }
+}
+
+// ─── Performance sweep engine (performance closure batch 2; lanes F7 and H) ───────────────────────
+
+/// <summary>
+/// One execution of a performance sweep — the deadline reminders and escalations (lane H) and the reconciler of
+/// engine approvals stranded at Pending approval (F7). The leave engine's shape (<c>LeaveReminderRun</c>).
+/// </summary>
+public class PerformanceSweepRun : TenantEntity
+{
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+
+    /// <summary>"Scheduled" (background service) or "Manual" (run-now endpoint).</summary>
+    [MaxLength(20)]
+    public string Trigger { get; set; } = "Scheduled";
+
+    /// <summary>Which sweep: "Deadlines", "StrandedApprovals".</summary>
+    [MaxLength(40)]
+    public string Sweep { get; set; } = string.Empty;
+
+    public Guid? TriggeredByUserId { get; set; }
+
+    public int ItemsDispatched { get; set; }
+
+    public virtual ICollection<PerformanceSweepDispatch> Dispatches { get; set; } = new List<PerformanceSweepDispatch>();
+}
+
+/// <summary>
+/// One thing a performance sweep did — a reminder or escalation sent, or a stranded approval reconciled.
+/// </summary>
+/// <remarks>
+/// The unique <c>(TenantId, DedupeKey)</c> index is the send-once guarantee (lane H's key:
+/// <c>kind:appraisalId:step:deadline:tier</c>); a moved deadline makes fresh keys, which re-arms the ladder. Nothing
+/// here carries a score, a rating or a narrative: a reminder travels further than the record it is about.
+/// </remarks>
+public class PerformanceSweepDispatch : TenantEntity
+{
+    public Guid RunId { get; set; }
+
+    [ForeignKey(nameof(RunId))]
+    public virtual PerformanceSweepRun Run { get; set; } = null!;
+
+    /// <summary>Machine kind, e.g. "SelfEvaluationDue", "ManagerEvaluationOverdue", "StrandedApprovalReconciled".</summary>
+    [MaxLength(60)]
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>Human label for the swept item, e.g. "Appraisal", "Salary review proposal".</summary>
+    [MaxLength(100)]
+    public string ItemType { get; set; } = string.Empty;
+
+    /// <summary>Id of the swept record. No FK — the target table varies by kind.</summary>
+    public Guid EntityId { get; set; }
+
+    /// <summary>The employee it is about, so a feed can be scoped to a person.</summary>
+    public Guid? EmployeeId { get; set; }
+
+    /// <summary>What a notice shows: a number and a step, nothing more.</summary>
+    [MaxLength(250)]
+    public string Reference { get; set; } = string.Empty;
+
+    public DateTime? DueDate { get; set; }
+
+    /// <summary>Days remaining at dispatch time; negative when overdue.</summary>
+    public int DaysRemaining { get; set; }
+
+    /// <summary>0 for a due-soon rung; 1, 2 or 3 for an overdue escalation tier.</summary>
+    public int EscalationTier { get; set; }
+
+    [Required]
+    [MaxLength(300)]
+    public string DedupeKey { get; set; } = string.Empty;
 }
