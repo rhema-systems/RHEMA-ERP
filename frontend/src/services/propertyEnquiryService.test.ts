@@ -14,6 +14,37 @@ vi.mock('./api.service', () => ({
 describe('propertyEnquiryService', () => {
   beforeEach(() => vi.mocked(apiService.request).mockReset());
 
+  it('loads every scoped enquiry page for CRM selectors', async () => {
+    vi.mocked(apiService.request)
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ id: 'enquiry-1', ticketNumber: 'PE-001' }],
+        totalCount: 26,
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ id: 'enquiry-26', ticketNumber: 'PE-026' }],
+        totalCount: 26,
+      });
+
+    const enquiries = await propertyEnquiryService.listAll();
+
+    expect(enquiries.map((item) => item.id)).toEqual([
+      'enquiry-1',
+      'enquiry-26',
+    ]);
+    expect(apiService.request).toHaveBeenNthCalledWith(
+      1,
+      '/ehc/internal/property-enquiries?page=1',
+      { method: 'GET' }
+    );
+    expect(apiService.request).toHaveBeenNthCalledWith(
+      2,
+      '/ehc/internal/property-enquiries?page=2',
+      { method: 'GET' }
+    );
+  });
+
   it('creates an opportunity through an explicit prospect action', async () => {
     vi.mocked(apiService.request).mockResolvedValue({
       success: true,
@@ -98,13 +129,20 @@ describe('propertyEnquiryService', () => {
       data: { id: 'receipt-1' },
     });
 
+    const receivedAt = '2026-10-01T08:30:00.000Z';
+    const clearedAt = '2026-10-02T09:45:00.000Z';
     await propertyEnquiryService.recordDeposit('enquiry-1', {
       amount: 50000,
       currency: 'GHS',
       paymentMethod: 'BankTransfer',
       transactionReference: 'BANK-001',
+      receivedAt,
     });
-    await propertyEnquiryService.clearDeposit('enquiry-1', 'receipt-1');
+    await propertyEnquiryService.clearDeposit(
+      'enquiry-1',
+      'receipt-1',
+      clearedAt
+    );
 
     expect(apiService.request).toHaveBeenNthCalledWith(
       1,
@@ -116,6 +154,7 @@ describe('propertyEnquiryService', () => {
           currency: 'GHS',
           paymentMethod: 'BankTransfer',
           transactionReference: 'BANK-001',
+          receivedAt,
         }),
       }
     );
@@ -124,7 +163,33 @@ describe('propertyEnquiryService', () => {
       '/ehc/internal/property-enquiries/enquiry-1/prospect/deposits/receipt-1/clear',
       {
         method: 'POST',
-        body: JSON.stringify({ clearedAt: null }),
+        body: JSON.stringify({ clearedAt }),
+      }
+    );
+  });
+
+  it('passes the operator-selected reversal date to the controlled reversal route', async () => {
+    vi.mocked(apiService.request).mockResolvedValue({
+      success: true,
+      data: { id: 'receipt-1' },
+    });
+    const reversalDate = '2026-10-03T11:15:00.000Z';
+
+    await propertyEnquiryService.reverseDeposit(
+      'enquiry-1',
+      'receipt-1',
+      'Bank returned the transfer',
+      reversalDate
+    );
+
+    expect(apiService.request).toHaveBeenCalledWith(
+      '/ehc/internal/property-enquiries/enquiry-1/prospect/deposits/receipt-1/reverse',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          reason: 'Bank returned the transfer',
+          reversalDate,
+        }),
       }
     );
   });

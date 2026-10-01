@@ -75,7 +75,10 @@ public class PropertyRegisterSaleableSourceAdapter : ISalesSaleableSourceAdapter
                 Currency = asset.Currency,
                 AreaSquareMeters = asset.AreaSquareMeters,
                 PropertyReference = asset.AssetCode,
-                CanCreateSalesOrder = source.AllowSalesOrders && asset.IsAvailableForSale,
+                CanCreateSalesOrder = source.AllowSalesOrders,
+                SalesOrderIneligibilityReason = !source.AllowSalesOrders
+                    ? "Sales orders are disabled for this saleable source."
+                    : null,
                 CanCreateSalesAgreement = source.AllowSalesAgreements && asset.IsAvailableForSale,
                 CanCreateLeaseAgreement = source.AllowSalesAgreements && asset.IsAvailableForLease,
                 SuggestedOrderType = "PropertySale",

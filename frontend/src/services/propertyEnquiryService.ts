@@ -150,6 +150,16 @@ export const propertyEnquiryService = {
     );
   },
 
+  async listAll(): Promise<PropertyEnquiryQueueItem[]> {
+    const first = await this.list(1);
+    const pageCount = Math.ceil((first.totalCount ?? first.data.length) / 25);
+    if (pageCount <= 1) return first.data;
+    const remaining = await Promise.all(
+      Array.from({ length: pageCount - 1 }, (_, index) => this.list(index + 2))
+    );
+    return [first, ...remaining].flatMap((page) => page.data);
+  },
+
   async get(id: string): Promise<PropertyEnquiryDetail> {
     const [ticketResponse, prospectResponse] = await Promise.all([
       apiService.request<Envelope<PropertyEnquiryDetail>>(`${baseUrl}/${id}`, {
@@ -292,11 +302,15 @@ export const propertyEnquiryService = {
   async reverseDeposit(
     id: string,
     receiptId: string,
-    reason: string
+    reason: string,
+    reversalDate?: string | null
   ): Promise<ProspectDepositReceipt> {
     const response = await apiService.request<Envelope<ProspectDepositReceipt>>(
       `${baseUrl}/${id}/prospect/deposits/${receiptId}/reverse`,
-      { method: 'POST', body: JSON.stringify({ reason, reversalDate: null }) }
+      {
+        method: 'POST',
+        body: JSON.stringify({ reason, reversalDate: reversalDate || null }),
+      }
     );
     return response.data;
   },

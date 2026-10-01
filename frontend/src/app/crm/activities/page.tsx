@@ -54,6 +54,10 @@ import {
   type PagedResult,
 } from '@/services/crmService';
 import {
+  propertyEnquiryService,
+  type PropertyEnquiryQueueItem,
+} from '@/services/propertyEnquiryService';
+import {
   Activity,
   AlertTriangle,
   Building2,
@@ -99,6 +103,7 @@ const createEmptyActivityForm = (
   businessPartnerId: businessPartnerId || '',
   leadId: leadId || '',
   opportunityId: opportunityId || '',
+  propertyEnquiryTicketId: '',
   location: '',
   attendees: '',
   outcome: '',
@@ -150,6 +155,7 @@ const buildActivityPayload = (
   businessPartnerId: form.businessPartnerId || undefined,
   leadId: form.leadId || undefined,
   opportunityId: form.opportunityId || undefined,
+  propertyEnquiryTicketId: form.propertyEnquiryTicketId || undefined,
   location: toOptionalString(form.location),
   attendees: toOptionalString(form.attendees),
   outcome: toOptionalString(form.outcome),
@@ -176,6 +182,7 @@ const mapActivityToForm = (
   businessPartnerId: activity.businessPartnerId || '',
   leadId: activity.leadId || '',
   opportunityId: activity.opportunityId || '',
+  propertyEnquiryTicketId: activity.propertyEnquiryTicketId || '',
   location: activity.location || '',
   attendees: activity.attendees || '',
   outcome: activity.outcome || '',
@@ -203,6 +210,8 @@ function ActivityDialog({
   accounts,
   leads,
   opportunities,
+  propertyEnquiries,
+  propertyEnquiryReadOnly,
   onOpenChange,
   onSubmit,
   onChange,
@@ -215,6 +224,8 @@ function ActivityDialog({
   accounts: BusinessPartnerDto[];
   leads: CrmLeadListItemDto[];
   opportunities: CrmOpportunityListItemDto[];
+  propertyEnquiries: PropertyEnquiryQueueItem[];
+  propertyEnquiryReadOnly: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: () => void;
   onChange: <K extends keyof CreateCrmActivityDto>(
@@ -347,6 +358,42 @@ function ActivityDialog({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <Label>Property Enquiry</Label>
+              <Select
+                disabled={propertyEnquiryReadOnly}
+                value={form.propertyEnquiryTicketId || 'none'}
+                onValueChange={(value) => {
+                  onChange(
+                    'propertyEnquiryTicketId',
+                    value === 'none' ? '' : value
+                  );
+                  if (value !== 'none') {
+                    onChange('businessPartnerId', '');
+                    onChange('leadId', '');
+                    onChange('opportunityId', '');
+                  }
+                }}
+              >
+                <SelectTrigger aria-label="Property Enquiry">
+                  <SelectValue placeholder="Select property enquiry" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No linked property enquiry</SelectItem>
+                  {propertyEnquiries.map((enquiry) => (
+                    <SelectItem key={enquiry.id} value={enquiry.id}>
+                      {enquiry.ticketNumber} - {enquiry.subject}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                A completed Call, Meeting, or Email records Sales contact for
+                this enquiry and enables qualification. Planned and other
+                activities remain linked without changing the prospect stage.
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -545,6 +592,9 @@ export default function CrmActivitiesPage() {
   const [opportunities, setOpportunities] = useState<
     CrmOpportunityListItemDto[]
   >([]);
+  const [propertyEnquiries, setPropertyEnquiries] = useState<
+    PropertyEnquiryQueueItem[]
+  >([]);
 
   const [formOpen, setFormOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -581,6 +631,13 @@ export default function CrmActivitiesPage() {
       );
       setLeads(leadData.items);
       setOpportunities(opportunityData.items);
+      try {
+        setPropertyEnquiries(await propertyEnquiryService.listAll());
+      } catch {
+        // The selector is restricted to users who can access the Sales
+        // property-enquiry register. Other CRM activity workflows remain usable.
+        setPropertyEnquiries([]);
+      }
     } catch (error: unknown) {
       toast.error(getMessage(error, 'Failed to load CRM activity lookups'));
     }
@@ -1234,9 +1291,18 @@ export default function CrmActivitiesPage() {
                       </Link>
                     </Button>
                   ) : null}
+                  {selectedActivity.propertyEnquiryTicketId ? (
+                    <Button asChild variant="outline">
+                      <Link
+                        href={`/sales/property-enquiries?id=${selectedActivity.propertyEnquiryTicketId}`}
+                      >
+                        Open Property Enquiry
+                      </Link>
+                    </Button>
+                  ) : null}
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <div className="rounded-lg border p-4 text-sm">
                     <div className="mb-2 font-medium">Account</div>
                     <div className="text-muted-foreground">
@@ -1253,6 +1319,18 @@ export default function CrmActivitiesPage() {
                     <div className="mb-2 font-medium">Opportunity</div>
                     <div className="text-muted-foreground">
                       {selectedActivity.opportunityName || 'Not linked'}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border p-4 text-sm">
+                    <div className="mb-2 font-medium">Property Enquiry</div>
+                    <div className="text-muted-foreground">
+                      {selectedActivity.propertyEnquiryTicketNumber
+                        ? `${selectedActivity.propertyEnquiryTicketNumber}${
+                            selectedActivity.propertyEnquirySubject
+                              ? ` - ${selectedActivity.propertyEnquirySubject}`
+                              : ''
+                          }`
+                        : 'Not linked'}
                     </div>
                   </div>
                 </div>
@@ -1305,12 +1383,14 @@ export default function CrmActivitiesPage() {
         title={
           formMode === 'create' ? 'Create CRM Activity' : 'Edit CRM Activity'
         }
-        description="Track follow-ups, meetings, calls, and touchpoints directly against the current CRM account, lead, and opportunity records."
+        description="Track follow-ups, meetings, calls, and touchpoints against CRM records or a Sales property enquiry."
         form={form}
         saving={saving}
         accounts={accounts}
         leads={leads}
         opportunities={opportunities}
+        propertyEnquiries={propertyEnquiries}
+        propertyEnquiryReadOnly={formMode === 'edit'}
         onOpenChange={setFormOpen}
         onSubmit={() => void submitActivity()}
         onChange={(field, value) =>

@@ -65,6 +65,7 @@ public class SalesSaleableItemDto
     public decimal? AreaSquareMeters { get; set; }
     public string? PropertyReference { get; set; }
     public bool CanCreateSalesOrder { get; set; }
+    public string? SalesOrderIneligibilityReason { get; set; }
     public bool CanCreateSalesAgreement { get; set; }
     public bool CanCreateLeaseAgreement { get; set; }
     public string? SuggestedOrderType { get; set; }

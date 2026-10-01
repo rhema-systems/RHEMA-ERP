@@ -782,6 +782,9 @@ public class CrmActivityDetailDto : CrmActivityListItemDto
     public string? Attendees { get; set; }
     public string? Outcome { get; set; }
     public string? Notes { get; set; }
+    public Guid? PropertyEnquiryTicketId { get; set; }
+    public string? PropertyEnquiryTicketNumber { get; set; }
+    public string? PropertyEnquirySubject { get; set; }
 }
 
 public class CrmProjectSummaryDto
@@ -1305,6 +1308,7 @@ public abstract class CrmActivityUpsertDto
     public Guid? BusinessPartnerId { get; set; }
     public Guid? LeadId { get; set; }
     public Guid? OpportunityId { get; set; }
+    public Guid? PropertyEnquiryTicketId { get; set; }
 
     [MaxLength(200)]
     public string? Location { get; set; }

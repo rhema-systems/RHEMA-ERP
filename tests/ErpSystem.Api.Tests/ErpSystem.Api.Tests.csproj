@@ -35,6 +35,8 @@
     <Compile Include="Services\EstateUatLandSeederTests.cs" />
     <Compile Include="Services\Maintenance\MaintenanceAssetSourceIntegrationTests.cs" />
     <Compile Include="Services\Ehc\PropertyEnquiryProspectLifecycleTests.cs" />
+    <Compile Include="Services\Ehc\PropertyEnquiryContactLinkageTests.cs" />
+    <Compile Include="Services\Ehc\PropertyEnquiryDepositApplicationTests.cs" />
     <Compile Include="Services\Ehc\ProspectDepositFinancePostingServiceTests.cs" />
     <Compile Include="Controllers\Inventory\PhysicalCountReviewTests.cs" />
     <Compile Include="Services\Finance\ProcurementAutoInvoiceTests.cs" />

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Building2, FileText, Loader2, Package, Search, ShoppingCart } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -211,7 +211,7 @@ export const parseSaleableSourceContextFromParams = (params: URLSearchParams) =>
   return normalizeContext(context);
 };
 
-const formatAmount = (amount?: number, currency?: string) => {
+const formatAmount = (amount?: number | null, currency?: string) => {
   if (amount === undefined || amount === null) return currency || '-';
   return `${currency || ''} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`.trim();
 };
@@ -240,6 +240,7 @@ export function SaleableSourceQuickStart({
   const [selectedItemId, setSelectedItemId] = useState('');
   const [searching, setSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const searchRequestId = useRef(0);
 
   const availableSources = useMemo(
     () =>
@@ -298,16 +299,23 @@ export function SaleableSourceQuickStart({
     onSourceSelected?.(selectedSource || null);
   }, [onSourceSelected, selectedSource]);
 
-  const searchItems = async () => {
-    if (!selectedSource) return;
+  const searchItems = async (
+    source: SalesSaleableSourceDto | undefined = selectedSource,
+    query = search,
+  ) => {
+    if (!source) return;
+
+    const requestId = ++searchRequestId.current;
 
     try {
       setSearching(true);
       setHasSearched(true);
-      const results = await salesSetupService.searchSaleableItems(selectedSource.id, search.trim() || undefined, 50);
+      const results = await salesSetupService.searchSaleableItems(source.id, query.trim() || undefined, 50);
+      if (requestId !== searchRequestId.current) return;
       setItems(results);
       setSelectedItemId(results[0]?.sourceItemId || '');
     } catch (error: any) {
+      if (requestId !== searchRequestId.current) return;
       setItems([]);
       setSelectedItemId('');
       toast({
@@ -316,7 +324,7 @@ export function SaleableSourceQuickStart({
         variant: 'destructive',
       });
     } finally {
-      setSearching(false);
+      if (requestId === searchRequestId.current) setSearching(false);
     }
   };
 
@@ -375,14 +383,17 @@ export function SaleableSourceQuickStart({
           <Select
             value={selectedSource?.id || ''}
             onValueChange={(value) => {
+              const source = availableSources.find((candidate) => candidate.id === value);
               setSelectedSourceId(value);
+              setSearch('');
               setItems([]);
               setSelectedItemId('');
               setHasSearched(false);
+              void searchItems(source, '');
             }}
             disabled={loadingSources || availableSources.length === 0}
           >
-            <SelectTrigger>
+            <SelectTrigger aria-label="Saleable source">
               <SelectValue placeholder={loadingSources ? 'Loading sources' : 'Select source'} />
             </SelectTrigger>
             <SelectContent>
@@ -399,12 +410,17 @@ export function SaleableSourceQuickStart({
             onChange={(event) => setSearch(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
-                searchItems();
+                void searchItems();
               }
             }}
             disabled={!selectedSource || searching}
           />
-          <Button variant="outline" onClick={searchItems} disabled={!selectedSource || searching}>
+          <Button
+            variant="outline"
+            aria-label="Search saleable items"
+            onClick={() => void searchItems()}
+            disabled={!selectedSource || searching}
+          >
             {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
           </Button>
         </div>
@@ -493,6 +509,12 @@ export function SaleableSourceQuickStart({
                     <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                       This item already has an active {selectedItem.activeAllocationStatus || 'reservation'}.
                       {selectedItem.activeAllocationReservedUntil ? ` Reserved until ${new Date(selectedItem.activeAllocationReservedUntil).toLocaleDateString()}.` : ''}
+                    </div>
+                  ) : null}
+                  {mode === 'order' && !selectedItem.canCreateSalesOrder && !selectedItem.hasActiveAllocation ? (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      {selectedItem.salesOrderIneligibilityReason ||
+                        'This item is not currently eligible for a sales order.'}
                     </div>
                   ) : null}
                   {mode === 'order' ? (

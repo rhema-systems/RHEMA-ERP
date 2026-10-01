@@ -726,6 +726,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IEhcTicketService, ErpSystem.Core.Services.Ehc.EhcTicketService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IPropertyEnquiryProspectService, ErpSystem.Api.Services.Ehc.PropertyEnquiryProspectService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IProspectDepositFinancePostingService, ErpSystem.Api.Services.Ehc.ProspectDepositFinancePostingService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IPropertyEnquiryDepositApplicationService, ErpSystem.Api.Services.Ehc.PropertyEnquiryDepositApplicationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IEhcProblemService, ErpSystem.Core.Services.Ehc.EhcProblemService>();
 
             // Enhanced maintenance workflow integration - NOW ENABLED

@@ -9,6 +9,7 @@ vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(`
 vi.mock('@/services/api.service', () => ({ apiService: { request: mocks.request } }));
 vi.mock('@/components/estate/PropertyEnquiryDetails', () => ({ PropertyEnquiryDetails: () => null }));
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ hasPermission: () => false }) }));
 
 describe('property enquiry search link', () => {
   beforeEach(() => {

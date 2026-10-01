@@ -27,6 +27,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
+import { getPropertyEnquiryDepositAccess } from '@/lib/sales/property-enquiry-deposit-access';
+import { SalesHandoffActions } from '@/app/crm/components/SalesHandoffActions';
 
 type Envelope<T> = { success: boolean; data: T; totalCount?: number };
 type EstateHandoffState = {
@@ -113,6 +116,7 @@ function PropertyEnquiries() {
     receiptNumber: string;
   } | null>(null);
   const [reversalReason, setReversalReason] = useState('');
+  const [depositActionDate, setDepositActionDate] = useState('');
   const [showMatches, setShowMatches] = useState(false);
   const [selectedMatchId, setSelectedMatchId] = useState('');
   const [confirmLink, setConfirmLink] = useState(false);
@@ -141,6 +145,9 @@ function PropertyEnquiries() {
   const [confirmHandoff, setConfirmHandoff] = useState(false);
   const client = useQueryClient();
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
+  const { canClear, canReverse } =
+    getPropertyEnquiryDepositAccess(hasPermission);
   const queue = useQuery({
     queryKey: ['property-enquiries', page],
     queryFn: () => propertyEnquiryService.list(page),
@@ -267,6 +274,16 @@ function PropertyEnquiries() {
         variant: 'success',
       });
     },
+    onError: (mutationError) => {
+      toast({
+        title: 'Prospect could not be qualified',
+        description:
+          mutationError instanceof Error && mutationError.message.trim()
+            ? mutationError.message
+            : 'Record Sales contact, then try qualifying the prospect again.',
+        variant: 'destructive',
+      });
+    },
   });
 
   const disqualify = useMutation({
@@ -309,6 +326,16 @@ function PropertyEnquiries() {
         title: 'Activity recorded',
         description: 'The internal Sales activity was saved.',
         variant: 'success',
+      });
+    },
+    onError: (mutationError) => {
+      toast({
+        title: 'Activity could not be recorded',
+        description:
+          mutationError instanceof Error && mutationError.message.trim()
+            ? mutationError.message
+            : 'The Sales activity could not be saved. Please try again.',
+        variant: 'destructive',
       });
     },
   });
@@ -412,18 +439,21 @@ function PropertyEnquiries() {
       return depositAction.kind === 'clear'
         ? propertyEnquiryService.clearDeposit(
             selectedId,
-            depositAction.receiptId
+            depositAction.receiptId,
+            depositActionDate ? new Date(depositActionDate).toISOString() : null
           )
         : propertyEnquiryService.reverseDeposit(
             selectedId,
             depositAction.receiptId,
-            reversalReason.trim()
+            reversalReason.trim(),
+            depositActionDate ? new Date(depositActionDate).toISOString() : null
           );
     },
     onSuccess: async () => {
       const action = depositAction?.kind;
       setDepositAction(null);
       setReversalReason('');
+      setDepositActionDate('');
       await Promise.all([
         refreshSelected(),
         client.invalidateQueries({
@@ -627,6 +657,7 @@ function PropertyEnquiries() {
               onClick={() => {
                 setSelectedId(item.id);
                 setEmailBody('');
+                setActivityType('Contact');
                 setActivityNotes('');
                 setQualificationNotes('');
                 setQualificationScore('40');
@@ -649,6 +680,7 @@ function PropertyEnquiries() {
                 });
                 setDepositAction(null);
                 setReversalReason('');
+                setDepositActionDate('');
                 setShowMatches(false);
                 setSelectedMatchId('');
                 setHandoffDraft({
@@ -804,6 +836,7 @@ function PropertyEnquiries() {
                           !Number.isFinite(Number(agreedAmount)) ||
                           Number(agreedAmount) <= 0 ||
                           !/^[A-Za-z]{3}$/.test(qualificationCurrency) ||
+                          leadStatus !== 'Contacted' ||
                           qualify.isPending
                         }
                       >
@@ -820,6 +853,13 @@ function PropertyEnquiries() {
                         Mark disqualified
                       </Button>
                     </div>
+                    {leadStatus === 'New' ? (
+                      <p className="text-sm text-amber-700" role="status">
+                        Before qualifying, go to Internal activity below, choose
+                        Contact made, enter the contact notes, then select Record
+                        contact.
+                      </p>
+                    ) : null}
                   </>
                 ) : (
                   <p className="text-sm text-slate-700">
@@ -1049,7 +1089,7 @@ function PropertyEnquiries() {
                 ) : null}
                 {prospect?.opportunityId ? (
                   <div className="space-y-3 rounded border border-emerald-200 bg-white p-3">
-                    <div className="grid gap-2 md:grid-cols-5">
+                    <div className="grid gap-2 md:grid-cols-6">
                       <Input
                         aria-label="Deposit amount"
                         type="number"
@@ -1105,6 +1145,17 @@ function PropertyEnquiries() {
                           }))
                         }
                       />
+                      <Input
+                        aria-label="Receipt date and time"
+                        type="datetime-local"
+                        value={depositDraft.receivedAt}
+                        onChange={(event) =>
+                          setDepositDraft((value) => ({
+                            ...value,
+                            receivedAt: event.target.value,
+                          }))
+                        }
+                      />
                       <Button
                         onClick={() => recordDeposit.mutate()}
                         disabled={
@@ -1143,9 +1194,19 @@ function PropertyEnquiries() {
                               ? ` · ${receipt.transactionReference}`
                               : ''}
                           </p>
+                          <p className="text-xs text-slate-600">
+                            Received{' '}
+                            {new Date(receipt.receivedAt).toLocaleString()}
+                            {receipt.clearedAt
+                              ? ` · Cleared ${new Date(receipt.clearedAt).toLocaleString()}`
+                              : ''}
+                            {receipt.reversedAt
+                              ? ` · Reversed ${new Date(receipt.reversedAt).toLocaleString()}`
+                              : ''}
+                          </p>
                         </div>
                         <div className="flex gap-2">
-                          {receipt.status === 'Pending' ? (
+                          {receipt.status === 'Pending' && canClear ? (
                             <Button
                               size="sm"
                               variant="outline"
@@ -1160,7 +1221,7 @@ function PropertyEnquiries() {
                               Clear
                             </Button>
                           ) : null}
-                          {receipt.status === 'Cleared' ? (
+                          {receipt.status === 'Cleared' && canReverse ? (
                             <Button
                               size="sm"
                               variant="outline"
@@ -1219,6 +1280,60 @@ function PropertyEnquiries() {
                       >
                         Finalize after approval
                       </Button>
+                    ) : null}
+                    {prospect.status === 'Opportunity' ? (
+                      <div className="mt-3 space-y-2">
+                        <p className="text-xs text-slate-600">
+                          This approved existing customer is linked. Finalize
+                          the conversion after the cleared deposit reaches the
+                          configured threshold.
+                        </p>
+                        <Button
+                          variant="outline"
+                          onClick={() => finalizePartner.mutate()}
+                          disabled={
+                            !depositThresholdMet || finalizePartner.isPending
+                          }
+                        >
+                          Finalize customer conversion
+                        </Button>
+                      </div>
+                    ) : null}
+                    {prospect.status === 'Converted' &&
+                    prospect.opportunityId &&
+                    !salesOrder ? (
+                      <div className="mt-3 border-t pt-3">
+                        <p className="mb-2 text-xs text-slate-600">
+                          The customer account is approved and the prospect
+                          deposit is now a customer advance. Create the Sales
+                          Order for this opportunity before applying it to an
+                          invoice.
+                        </p>
+                        <SalesHandoffActions
+                          context={{
+                            businessPartnerId: prospect.businessPartnerId,
+                            businessPartnerName:
+                              prospect.businessPartnerName || undefined,
+                            leadId: prospect.leadId,
+                            leadName:
+                              ticket.propertyListing?.contactName ||
+                              ticket.subject,
+                            opportunityId: prospect.opportunityId,
+                            opportunityName:
+                              opportunity?.referenceNumber || ticket.subject,
+                            currency: prospect.currency,
+                            estimatedValue: prospect.agreedAmount,
+                            propertyReference:
+                              ticket.propertyListing?.listingReference,
+                            propertyType:
+                              ticket.propertyListing?.listingType,
+                            contextLabel: `Public property enquiry ${ticket.ticketNumber}`,
+                          }}
+                          size="sm"
+                          showUnavailableHint={false}
+                          showSalesAgreement={false}
+                        />
+                      </div>
                     ) : null}
                   </div>
                 ) : (
@@ -1343,6 +1458,7 @@ function PropertyEnquiries() {
                     <option value="FollowUp">Follow-up</option>
                   </select>
                   <Textarea
+                    aria-label="Activity notes"
                     rows={4}
                     maxLength={2000}
                     value={activityNotes}
@@ -1365,7 +1481,9 @@ function PropertyEnquiries() {
                       addActivity.isPending
                     }
                   >
-                    Save activity
+                    {activityType === 'Contact'
+                      ? 'Record contact'
+                      : 'Save activity'}
                   </Button>
                 </div>
                 <div className="space-y-2">
@@ -1722,6 +1840,7 @@ function PropertyEnquiries() {
           if (!open && !decideDeposit.isPending) {
             setDepositAction(null);
             setReversalReason('');
+            setDepositActionDate('');
           }
         }}
       >
@@ -1738,6 +1857,22 @@ function PropertyEnquiries() {
                 : `Reversing ${depositAction?.receiptNumber || 'this receipt'} removes it from the cleared threshold. The audit trail and original receipt remain.`}
             </DialogDescription>
           </DialogHeader>
+          <div className="space-y-1">
+            <Label htmlFor="deposit-action-date">
+              {depositAction?.kind === 'clear'
+                ? 'Clearance date and time'
+                : 'Reversal date and time'}
+            </Label>
+            <Input
+              id="deposit-action-date"
+              type="datetime-local"
+              value={depositActionDate}
+              onChange={(event) => setDepositActionDate(event.target.value)}
+            />
+            <p className="text-xs text-slate-600">
+              Leave blank to use the current server time.
+            </p>
+          </div>
           {depositAction?.kind === 'reverse' ? (
             <div className="space-y-1">
               <Label htmlFor="deposit-reversal-reason">Reversal reason</Label>
@@ -1753,7 +1888,11 @@ function PropertyEnquiries() {
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setDepositAction(null)}
+              onClick={() => {
+                setDepositAction(null);
+                setReversalReason('');
+                setDepositActionDate('');
+              }}
               disabled={decideDeposit.isPending}
             >
               Cancel
