@@ -632,8 +632,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             var existingLine = existingLines[i];
             var requestLine = validation.Lines[i];
             if (existingLine.AccountId != requestLine.AccountId ||
-                RoundMoney(existingLine.DebitAmount) != requestLine.DebitAmount ||
-                RoundMoney(existingLine.CreditAmount) != requestLine.CreditAmount)
+                RoundMoney(existingLine.DebitAmount, validation.FunctionalDecimalPlaces) != requestLine.DebitAmount ||
+                RoundMoney(existingLine.CreditAmount, validation.FunctionalDecimalPlaces) != requestLine.CreditAmount)
             {
                 throw new InvalidOperationException("Existing journal lines do not match the posting request.");
             }
@@ -1005,6 +1005,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             if (string.IsNullOrWhiteSpace(book.FunctionalCurrencyCode)
                 || string.Equals(book.FunctionalCurrencyCode, validation.FunctionalCurrencyCode, StringComparison.Ordinal))
                 throw new InvalidOperationException($"PARALLEL_CURRENCY_INVALID: Parallel book {book.Code} must use a foreign currency.");
+            var bookDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+                tenantId, book.FunctionalCurrencyCode, cancellationToken);
 
             var mappedIds = await _context.AccountAccountingBooks.AsNoTracking()
                 .Where(item => item.TenantId == tenantId && item.AccountingBookId == book.Id
@@ -1027,8 +1029,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
 
             var lines = primaryJournal.Transactions.OrderBy(item => item.LineNumber).Select(source =>
             {
-                var debit = RoundMoney(source.DebitAmount * rate.Rate);
-                var credit = RoundMoney(source.CreditAmount * rate.Rate);
+                var debit = RoundMoney(source.DebitAmount * rate.Rate, bookDecimalPlaces);
+                var credit = RoundMoney(source.CreditAmount * rate.Rate, bookDecimalPlaces);
                 FinanceDimensionSnapshot? sourceSnapshot = source.FinanceDimensionSnapshot;
                 if (source.FinanceDimensionSnapshotId.HasValue && sourceSnapshot is null
                     && !persistedSnapshots.TryGetValue(source.FinanceDimensionSnapshotId.Value, out sourceSnapshot))
@@ -1066,9 +1068,9 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 };
             }).ToList();
 
-            var debitTotal = RoundMoney(lines.Sum(item => item.DebitAmount));
-            var creditTotal = RoundMoney(lines.Sum(item => item.CreditAmount));
-            var residual = RoundMoney(debitTotal - creditTotal);
+            var debitTotal = RoundMoney(lines.Sum(item => item.DebitAmount), bookDecimalPlaces);
+            var creditTotal = RoundMoney(lines.Sum(item => item.CreditAmount), bookDecimalPlaces);
+            var residual = RoundMoney(debitTotal - creditTotal, bookDecimalPlaces);
             if (residual != 0m)
             {
                 if (!book.CurrencyRoundingAccountId.HasValue)
@@ -1097,8 +1099,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                     TransactionTag = "Parallel rounding", CreatedAt = now,
                     CreatedBy = _currentUserService.UserName, CreatedById = postedByUserId
                 });
-                debitTotal = RoundMoney(lines.Sum(item => item.DebitAmount));
-                creditTotal = RoundMoney(lines.Sum(item => item.CreditAmount));
+                debitTotal = RoundMoney(lines.Sum(item => item.DebitAmount), bookDecimalPlaces);
+                creditTotal = RoundMoney(lines.Sum(item => item.CreditAmount), bookDecimalPlaces);
             }
 
             var journal = new JournalEntry
@@ -1391,9 +1393,15 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 .OrderByDescending(t => t.TransactionDate)
                 .ThenByDescending(t => t.LineNumber)
                 .First();
+            var transactionDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+                tenantId, group.Key.CurrencyCode, cancellationToken);
+            var functionalDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+                tenantId, lastLine.FunctionalCurrencyCode, cancellationToken);
 
-            link.ForeignCurrencyBalance = RoundMoney(link.ForeignCurrencyBalance + foreignDelta);
-            link.BaseCurrencyEquivalent = RoundMoney(link.BaseCurrencyEquivalent + functionalDelta);
+            link.ForeignCurrencyBalance = RoundMoney(
+                link.ForeignCurrencyBalance + foreignDelta, transactionDecimalPlaces);
+            link.BaseCurrencyEquivalent = RoundMoney(
+                link.BaseCurrencyEquivalent + functionalDelta, functionalDecimalPlaces);
             link.HasTransactionHistory = true;
             link.TransactionCount += groupLines.Count;
             link.FirstTransactionDate = link.FirstTransactionDate.HasValue
@@ -1509,6 +1517,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 ?? throw new InvalidOperationException("DELTA_BASE_CURRENCY_REQUIRED: Delta base-book currency authority is missing.")
             : accountingBook.FunctionalCurrencyCode
                 ?? throw new InvalidOperationException("BOOK_FUNCTIONAL_CURRENCY_REQUIRED: Full-book currency authority is missing.");
+        var functionalDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+            tenantId, functionalCurrency, cancellationToken);
         if (!string.Equals(requestedFunctionalCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Posting functional currency does not match the selected book currency.");
@@ -1637,8 +1647,11 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 throw new InvalidOperationException("Posting line account is required.");
             }
 
-            var debit = RoundMoney(line.DebitAmount);
-            var credit = RoundMoney(line.CreditAmount);
+            var lineCurrency = NormalizeCurrency(line.TransactionCurrency, "Transaction currency", functionalCurrency);
+            var transactionDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+                tenantId, lineCurrency, cancellationToken);
+            var debit = RoundMoney(line.DebitAmount, functionalDecimalPlaces);
+            var credit = RoundMoney(line.CreditAmount, functionalDecimalPlaces);
             if (debit < 0 || credit < 0)
             {
                 throw new InvalidOperationException("Posting amounts cannot be negative.");
@@ -1649,7 +1662,6 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 throw new InvalidOperationException("Each posting line must contain either a debit or a credit amount.");
             }
 
-            var lineCurrency = NormalizeCurrency(line.TransactionCurrency, "Transaction currency", functionalCurrency);
             var exchangeRate = line.ExchangeRate;
             var foreignAmount = line.ForeignCurrencyAmount;
             var transactionDebit = line.TransactionDebitAmount;
@@ -1716,6 +1728,9 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 exchangeRateDate = rateSnapshot.RateDate;
                 transactionDebit ??= debit > 0 ? foreignAmount : 0m;
                 transactionCredit ??= credit > 0 ? foreignAmount : 0m;
+                transactionDebit = RoundMoney(transactionDebit.GetValueOrDefault(), transactionDecimalPlaces);
+                transactionCredit = RoundMoney(transactionCredit.GetValueOrDefault(), transactionDecimalPlaces);
+                foreignAmount = RoundMoney(foreignAmount.Value, transactionDecimalPlaces);
 
                 if ((transactionDebit.GetValueOrDefault() > 0 && transactionCredit.GetValueOrDefault() > 0)
                     || (transactionDebit.GetValueOrDefault() == 0 && transactionCredit.GetValueOrDefault() == 0))
@@ -1725,7 +1740,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
 
                 var expectedFunctional = RoundMoney((transactionDebit.GetValueOrDefault() > 0
                     ? transactionDebit.GetValueOrDefault()
-                    : transactionCredit.GetValueOrDefault()) * exchangeRate.Value);
+                    : transactionCredit.GetValueOrDefault()) * exchangeRate.Value, functionalDecimalPlaces);
                 var actualFunctional = debit > 0 ? debit : credit;
                 if (expectedFunctional != actualFunctional)
                 {
@@ -1740,6 +1755,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             {
                 transactionDebit ??= debit > 0 ? debit : 0m;
                 transactionCredit ??= credit > 0 ? credit : 0m;
+                transactionDebit = RoundMoney(transactionDebit.GetValueOrDefault(), transactionDecimalPlaces);
+                transactionCredit = RoundMoney(transactionCredit.GetValueOrDefault(), transactionDecimalPlaces);
                 foreignAmount = null;
                 exchangeRateId = null;
                 exchangeRate = null;
@@ -1789,8 +1806,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             throw new InvalidOperationException("Posting must contain at least one debit and one credit line.");
         }
 
-        var totalDebit = RoundMoney(normalizedLines.Sum(l => l.DebitAmount));
-        var totalCredit = RoundMoney(normalizedLines.Sum(l => l.CreditAmount));
+        var totalDebit = RoundMoney(normalizedLines.Sum(l => l.DebitAmount), functionalDecimalPlaces);
+        var totalCredit = RoundMoney(normalizedLines.Sum(l => l.CreditAmount), functionalDecimalPlaces);
         if (totalDebit != totalCredit)
         {
             throw new InvalidOperationException("Posting is not balanced. Total debits must equal total credits.");
@@ -1960,6 +1977,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             normalizedAccountingBookCode,
             accountingBook.Id,
             functionalCurrency,
+            functionalDecimalPlaces,
             fiscalPeriod,
             normalizedLines,
             totalDebit,
@@ -3307,9 +3325,32 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
             : null;
     }
 
-    private static decimal RoundMoney(decimal amount)
+    private static decimal RoundMoney(decimal amount, int decimalPlaces = 2) =>
+        CurrencyMinorUnitPolicy.Round(amount, decimalPlaces);
+
+    private async Task<int> ResolveCurrencyDecimalPlacesAsync(
+        Guid tenantId,
+        string currencyCode,
+        CancellationToken cancellationToken)
     {
-        return decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+        var normalized = NormalizeCurrency(currencyCode, "Currency");
+        var configured = await _context.Currencies
+            .AsNoTracking()
+            .Where(currency => currency.TenantId == tenantId
+                && currency.CurrencyCode == normalized
+                && !currency.IsDeleted)
+            .Select(currency => (int?)currency.DecimalPlaces)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (configured.HasValue)
+        {
+            CurrencyMinorUnitPolicy.Validate(normalized, configured.Value);
+            return configured.Value;
+        }
+
+        return CurrencyMinorUnitPolicy.ExpectedDecimalPlaces(normalized)
+            ?? throw new InvalidOperationException(
+                $"Currency {normalized} must be configured with its ISO 4217 minor-unit precision before posting.");
     }
 
     private static decimal RoundRate(decimal amount)
@@ -3815,6 +3856,7 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
         string AccountingBookCode,
         Guid AccountingBookId,
         string FunctionalCurrencyCode,
+        int FunctionalDecimalPlaces,
         FiscalPeriod FiscalPeriod,
         IReadOnlyList<ValidatedPostingLine> Lines,
         decimal TotalDebitAmount,

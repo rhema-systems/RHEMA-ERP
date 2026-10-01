@@ -4,6 +4,7 @@ using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ErpSystem.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261001170752_FinanceCurrencyMinorUnitPrecision")]
+    partial class FinanceCurrencyMinorUnitPrecision
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -12866,9 +12869,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("BudgetScenarioId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid?>("DistributionDimensionValueId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -12883,6 +12883,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("DistributionDimensionValueId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -12936,13 +12939,13 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("SegmentValueId");
 
-                    b.HasIndex("TenantId", "BudgetScenarioId", "SegmentValueId")
-                        .IsUnique()
-                        .HasFilter("[IsDeleted] = 0 AND [SegmentValueId] IS NOT NULL");
-
                     b.HasIndex("TenantId", "BudgetScenarioId", "DistributionDimensionValueId")
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0 AND [DistributionDimensionValueId] IS NOT NULL");
+
+                    b.HasIndex("TenantId", "BudgetScenarioId", "SegmentValueId")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0 AND [SegmentValueId] IS NOT NULL");
 
                     b.ToTable("BudgetReturns");
                 });

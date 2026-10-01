@@ -319,17 +319,34 @@ class ApiService {
 
       // Create a proper error with the message from the API response
       // Only fall back to generic HTTP status message if no other message is available
-      const firstValidationError =
-        Array.isArray(errorData?.errors)
-          ? errorData.errors.find((e: unknown) => typeof e === 'string')
-          : (errorData?.errors && typeof errorData.errors === 'object'
-            ? Object.values(errorData.errors).flat().find((e: unknown) => typeof e === 'string')
-            : undefined);
+      const validationMessages = (() => {
+        if (Array.isArray(errorData?.errors)) {
+          return errorData.errors.filter((entry: unknown): entry is string =>
+            typeof entry === 'string' && entry.trim().length > 0);
+        }
+        if (!errorData?.errors || typeof errorData.errors !== 'object') return [] as string[];
 
-      const sourceErrorMessage = errorData.message ||
-        errorData.detail ||
-        errorData.title ||
-        firstValidationError ||
+        return Object.entries(errorData.errors).flatMap(([field, entries]) => {
+          const leaf = field.split('.').at(-1)?.replace(/^\$+/, '') || 'Request';
+          const label = leaf
+            .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+            .replace(/\bId\b/g, 'ID')
+            .replace(/^./, (value) => value.toUpperCase());
+          return (Array.isArray(entries) ? entries : [entries])
+            .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+            .map((entry) => `${label}: ${entry.trim()}`);
+        });
+      })();
+      const validationSummary = [...new Set(validationMessages)].join(' ');
+      const apiMessage = typeof errorData?.message === 'string' ? errorData.message.trim() : '';
+      const apiTitle = typeof errorData?.title === 'string' ? errorData.title.trim() : '';
+      const isGenericValidationMessage = (value: string) =>
+        /^one or more validation errors occurred\.?$/i.test(value);
+
+      const sourceErrorMessage = errorData.detail ||
+        (apiMessage && !isGenericValidationMessage(apiMessage) ? apiMessage : undefined) ||
+        validationSummary ||
+        (apiTitle && !isGenericValidationMessage(apiTitle) ? apiTitle : undefined) ||
         errorData.error ||
         `HTTP ${response.status}: ${response.statusText}`;
       const responsePath = (() => {

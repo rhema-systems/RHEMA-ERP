@@ -54,10 +54,10 @@ public class FinancePostingEvent : TenantEntity
 
     public Guid? RequestedByUserId { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal TotalDebitAmount { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal TotalCreditAmount { get; set; }
 
     [Required]

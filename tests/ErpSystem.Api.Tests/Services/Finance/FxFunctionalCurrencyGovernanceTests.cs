@@ -8,6 +8,7 @@ using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -450,6 +451,61 @@ public sealed class FxFunctionalCurrencyGovernanceTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FXFoundation")]
     [Trait("Category", "FX")]
+    public async Task ThreeDecimalFunctionalPosting_PreservesPostingEventAndReplaysIdempotently()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "KWD");
+        SeedCurrency(db, tenantId, "KWD", isBase: true);
+        SeedFinanceSettings(db, tenantId, "KWD");
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1000", AccountType.Asset, currencyCode: "KWD");
+        var credit = SeedAccount(db, tenantId, "4000", AccountType.Revenue, currencyCode: "KWD");
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "KWD Primary",
+            BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "KWD",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        });
+        await db.SaveChangesAsync();
+
+        var request = new FinancePostingRequestV2Dto
+        {
+            SourceModule = "FXTEST",
+            SourceDocumentType = "ThreeDecimalReplay",
+            SourceDocumentId = Guid.NewGuid(),
+            SourceDocumentTenantId = tenantId,
+            PostingAction = "Post",
+            SourceDocumentReference = "FX-KWD-REPLAY",
+            Description = "KWD precision replay",
+            PostingDate = new DateTime(2026, 7, 4),
+            JournalType = "System Generated",
+            AccountingBookCode = "IFRS",
+            FunctionalCurrencyCode = "KWD",
+            Lines = new[]
+            {
+                new FinancePostingLineDto { AccountId = debit.Id, Description = "Cash", DebitAmount = 123.457m, TransactionCurrency = "KWD" },
+                new FinancePostingLineDto { AccountId = credit.Id, Description = "Revenue", CreditAmount = 123.457m, TransactionCurrency = "KWD" }
+            }
+        };
+        var service = CreatePostingEngine(db, tenantId);
+
+        var first = await service.PostAsync(request);
+        var replay = await service.PostAsync(request);
+
+        replay.JournalEntryId.Should().Be(first.JournalEntryId);
+        (await db.FinancePostingEvents.SingleAsync()).TotalDebitAmount.Should().Be(123.457m);
+        (await db.FinancePostingEvents.SingleAsync()).TotalCreditAmount.Should().Be(123.457m);
+        (await db.AccountTransactions.Where(item => item.JournalEntryId == first.JournalEntryId)
+            .Select(item => item.DebitAmount + item.CreditAmount).ToListAsync())
+            .Should().OnlyContain(amount => amount == 123.457m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
     public async Task ForeignCurrencyPostingRequiresEffectiveTenantExchangeRate()
     {
         var tenantId = Guid.NewGuid();
@@ -680,6 +736,41 @@ public sealed class FxFunctionalCurrencyGovernanceTests
         result.RoundingPrecision.Should().Be(1m);
         result.CountryCode.Should().Be("JP");
         result.CountryName.Should().Be("Japan");
+    }
+
+    [Theory]
+    [InlineData("JPY", 123.5, 124)]
+    [InlineData("GHS", 123.455, 123.46)]
+    [InlineData("KWD", 123.4565, 123.457)]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
+    public void CurrencyMinorUnitPolicy_RoundsAtTheCurrencyAccountingBoundary(
+        string currencyCode,
+        decimal amount,
+        decimal expected)
+    {
+        var decimalPlaces = CurrencyMinorUnitPolicy.ExpectedDecimalPlaces(currencyCode);
+
+        decimalPlaces.Should().NotBeNull();
+        CurrencyMinorUnitPolicy.Round(amount, decimalPlaces!.Value).Should().Be(expected);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
+    public void CoreLedgerStorage_RetainsUpToFourCurrencyDecimalPlaces()
+    {
+        using var db = CreateContext();
+
+        db.Model.FindEntityType(typeof(AccountTransaction))!
+            .FindProperty(nameof(AccountTransaction.TransactionDebitAmount))!
+            .FindAnnotation("Relational:ColumnType")!.Value.Should().Be("decimal(20,4)");
+        db.Model.FindEntityType(typeof(AccountTransaction))!
+            .FindProperty(nameof(AccountTransaction.DebitAmount))!
+            .FindAnnotation("Relational:ColumnType")!.Value.Should().Be("decimal(20,4)");
+        db.Model.FindEntityType(typeof(JournalEntry))!
+            .FindProperty(nameof(JournalEntry.TotalDebitAmount))!
+            .FindAnnotation("Relational:ColumnType")!.Value.Should().Be("decimal(20,4)");
     }
 
     [Fact]
@@ -1217,7 +1308,7 @@ public sealed class FxFunctionalCurrencyGovernanceTests
             BaseCurrency = baseCurrency,
             BaseCurrencyName = baseCurrency,
             CurrencySymbol = baseCurrency,
-            CurrencyDecimalPlaces = 2,
+            CurrencyDecimalPlaces = CurrencyMinorUnitPolicy.ExpectedDecimalPlaces(baseCurrency) ?? 2,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "Tests"
         });
@@ -1249,7 +1340,7 @@ public sealed class FxFunctionalCurrencyGovernanceTests
             NumericCode = code,
             CurrencyName = code,
             CurrencySymbol = code,
-            DecimalPlaces = 2,
+            DecimalPlaces = CurrencyMinorUnitPolicy.ExpectedDecimalPlaces(code) ?? 2,
             IsBaseCurrency = isBase,
             IsActive = true,
             CreatedAt = DateTime.UtcNow,
