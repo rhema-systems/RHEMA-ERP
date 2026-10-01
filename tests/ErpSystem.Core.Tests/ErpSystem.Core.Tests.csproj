@@ -157,6 +157,7 @@
     <Compile Include="Services\Procurement\**\*.cs" />
     <Compile Include="Services\Projects\**\*.cs" />
     <Compile Include="Services\QuantitySurvey\**\*.cs" />
+    <Compile Include="Services\Sales\SalesPropertyRegisterSourceTests.cs" />
     <Compile Include="Services\Security\**\*.cs" />
     <Compile Include="Services\Workflow\**\*.cs" />
     <Compile Include="Services\Inventory\InventoryItemIdentifierServiceTests.cs" />

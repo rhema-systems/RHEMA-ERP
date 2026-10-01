@@ -293,7 +293,7 @@ public sealed class PropertyListingEnquiryTests
         Assert.Equal("Please send the deposit and viewing details.", capturedTicket.Description);
         Assert.Equal("EstateListing", capturedTicket.RelatedEntityType);
         Assert.Equal(seeded.Portion.Id, capturedProperty.ListingId);
-        Assert.Equal("LAND-002-PORTION-002", capturedProperty.ListingReference);
+        Assert.Equal("LAND-002-D002", capturedProperty.ListingReference);
         Assert.Null(capturedProperty.BusinessPartnerId);
         Assert.Equal("Ama Mensah", capturedProperty.ContactName);
         Assert.Equal("ama@example.test", capturedProperty.ContactEmail);
