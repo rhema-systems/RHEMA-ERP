@@ -13,7 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Layers, Plus, Edit, Trash2, List, Settings2, Upload, FileSpreadsheet, Download, ArrowUp, ArrowDown, Loader2, TriangleAlert } from 'lucide-react';
+import { Layers, Plus, Edit, Trash2, List, Upload, FileSpreadsheet, Download, ArrowUp, ArrowDown, Loader2, TriangleAlert } from 'lucide-react';
 import type { SegmentStructure, SegmentLookupValue } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { toast } from 'sonner';
@@ -40,7 +40,16 @@ function SegmentConfigurationContent() {
     const [editingSegment, setEditingSegment] = useState<SegmentStructure | null>(null);
     const [lookupValueToDelete, setLookupValueToDelete] = useState<SegmentLookupValue | null>(null);
     const [isDeletingLookupValue, setIsDeletingLookupValue] = useState(false);
+    const [segmentToDelete, setSegmentToDelete] = useState<SegmentStructure | null>(null);
+    const [isDeletingSegment, setIsDeletingSegment] = useState(false);
     const [valueFormError, setValueFormError] = useState<string | null>(null);
+    const [segmentToActivate, setSegmentToActivate] = useState<SegmentStructure | null>(null);
+    const [activationLookupValues, setActivationLookupValues] = useState<SegmentLookupValue[]>([]);
+    const [activationDefaultValue, setActivationDefaultValue] = useState('');
+    const [activationDefaultLookupValueId, setActivationDefaultLookupValueId] = useState<string | undefined>();
+    const [activationReason, setActivationReason] = useState('');
+    const [activationConfirmed, setActivationConfirmed] = useState(false);
+    const [isActivatingSegment, setIsActivatingSegment] = useState(false);
 
     // Reorder confirmation dialog state
     const [reorderConfirmOpen, setReorderConfirmOpen] = useState(false);
@@ -93,19 +102,6 @@ function SegmentConfigurationContent() {
             fetchLookupValues(selectedSegmentId);
         }
     }, [selectedSegmentId]);
-
-    const handleRegenerate = async () => {
-        try {
-            setIsLoading(true);
-            await financeDataService.regenerateAccountNumbers();
-            toast.success('Account numbers regenerated');
-        } catch (error) {
-            console.error('Regeneration failed:', error);
-            toast.error('Failed to regenerate account numbers');
-        } finally {
-            setIsLoading(false);
-        }
-    };
 
     // Show confirmation dialog before reordering
     const handleReorderClick = (segmentId: string, direction: 'up' | 'down') => {
@@ -355,18 +351,77 @@ function SegmentConfigurationContent() {
 
 
 
-    const transitionSegment = async (segment: SegmentStructure, action: 'activate' | 'freeze') => {
+    const openActivationDialog = async (segment: SegmentStructure) => {
+        setSegmentToActivate(segment);
+        setActivationDefaultValue('');
+        setActivationDefaultLookupValueId(undefined);
+        setActivationReason('');
+        setActivationConfirmed(false);
+        setActivationLookupValues([]);
+        if (segment.lookupTableRequired) {
+            try {
+                const values = await financeDataService.getSegmentLookupValues(segment.id);
+                setActivationLookupValues(values.filter((value) => value.isActive));
+            } catch (error) {
+                toast.error(error instanceof Error ? error.message : 'Failed to load active segment values');
+            }
+        }
+    };
+
+    const activateSegment = async () => {
+        if (!segmentToActivate) return;
+        const hasExistingAccounts = (segmentToActivate.totalAccountCount ?? 0) > 0;
+        if (hasExistingAccounts && (!activationDefaultValue || !activationReason.trim() || !activationConfirmed)) {
+            toast.error('Select a default, enter a reason, and confirm the existing-account backfill.');
+            return;
+        }
         try {
-            setIsLoading(true);
-            if (action === 'activate') await financeDataService.activateSegmentStructure(segment.id, segment.rowVersion);
-            else await financeDataService.freezeSegmentStructure(segment.id, segment.rowVersion);
-            toast.success(`Segment ${action === 'activate' ? 'activated' : 'frozen'}`);
+            setIsActivatingSegment(true);
+            await financeDataService.activateSegmentStructure(segmentToActivate.id, segmentToActivate.rowVersion, {
+                reason: activationReason.trim() || undefined,
+                confirmExistingAccountBackfill: hasExistingAccounts ? activationConfirmed : false,
+                defaultSegmentValue: hasExistingAccounts ? activationDefaultValue : undefined,
+                defaultSegmentLookupValueId: hasExistingAccounts ? activationDefaultLookupValueId : undefined,
+            });
+            toast.success('Segment activated');
+            setSegmentToActivate(null);
             await loadData();
         } catch (error) {
-            toast.error(error instanceof Error ? error.message : `Failed to ${action} segment`);
+            toast.error(error instanceof Error ? error.message : 'Failed to activate segment');
+            await loadData();
+        } finally {
+            setIsActivatingSegment(false);
+        }
+    };
+
+    const freezeSegment = async (segment: SegmentStructure) => {
+        try {
+            setIsLoading(true);
+            await financeDataService.freezeSegmentStructure(segment.id, segment.rowVersion);
+            toast.success('Segment frozen');
+            await loadData();
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Failed to freeze segment');
             await loadData();
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const handleDeleteSegment = async () => {
+        if (!segmentToDelete) return;
+        try {
+            setIsDeletingSegment(true);
+            await financeDataService.deleteSegmentStructure(segmentToDelete.id, segmentToDelete.rowVersion);
+            toast.success('Draft segment deleted');
+            if (selectedSegmentId === segmentToDelete.id) setSelectedSegmentId('');
+            setSegmentToDelete(null);
+            await loadData();
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Failed to delete segment');
+            await loadData();
+        } finally {
+            setIsDeletingSegment(false);
         }
     };
 
@@ -400,10 +455,6 @@ function SegmentConfigurationContent() {
                         Configure the identity carried permanently by every GL account. Every active segment is required.
                     </p>
                 </div>
-                <Button variant="outline" onClick={handleRegenerate} disabled={isLoading || !canManage}>
-                    <Settings2 className="mr-2 h-4 w-4" />
-                    Regenerate COA
-                </Button>
             </div>
 
             {/* Breadcrumbs */}
@@ -439,7 +490,7 @@ function SegmentConfigurationContent() {
             <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
                 <TabsList>
                     <TabsTrigger value="structure" className="flex items-center gap-2">
-                        <Settings2 className="h-4 w-4" />
+                        <Layers className="h-4 w-4" />
                         Segment Structure
                     </TabsTrigger>
                     <TabsTrigger value="values" className="flex items-center gap-2">
@@ -577,8 +628,19 @@ function SegmentConfigurationContent() {
                                         <Button variant="ghost" size="sm" onClick={() => handleEditSegment(segment)} disabled={!canManage || segment.lifecycleStatus === 'Frozen' || segment.lifecycleStatus === 'Retired'}>
                                             <Edit className="h-4 w-4" />
                                         </Button>
-                                        {canManage && segment.canActivate && <Button size="sm" onClick={() => transitionSegment(segment, 'activate')}>Activate</Button>}
-                                        {canManage && segment.canFreeze && <Button size="sm" variant="outline" onClick={() => transitionSegment(segment, 'freeze')}>Freeze</Button>}
+                                        {canManage && segment.lifecycleStatus === 'Draft' && <Button size="sm" onClick={() => void openActivationDialog(segment)}>Activate</Button>}
+                                        {canManage && segment.canFreeze && <Button size="sm" variant="outline" onClick={() => void freezeSegment(segment)}>Freeze</Button>}
+                                        {canManage && segment.lifecycleStatus === 'Draft' && (segment.accountUsageCount ?? 0) === 0 && (
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="text-destructive hover:text-destructive"
+                                                onClick={() => setSegmentToDelete(segment)}
+                                                title="Delete unused draft segment"
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                        )}
                                     </div>
                                 </CardHeader>
                                 <CardContent>
@@ -604,8 +666,17 @@ function SegmentConfigurationContent() {
                                     </div>
                                     <div className="flex gap-2 mt-4">
                                         <Badge variant="secondary">Required</Badge>
-                                        <Badge variant="outline">{segment.accountUsageCount ?? 0} account uses</Badge>
+                                        <Badge variant="outline">
+                                            {(segment.totalAccountCount ?? 0) === 0
+                                                ? 'No GL accounts yet'
+                                                : `${segment.accountUsageCount ?? 0} / ${segment.totalAccountCount} accounts assigned`}
+                                        </Badge>
                                     </div>
+                                    {(segment.totalAccountCount ?? 0) > (segment.accountUsageCount ?? 0) && segment.lifecycleStatus !== 'Draft' && (
+                                        <p className="mt-2 text-sm text-destructive">
+                                            Reconciliation required: {segment.totalAccountCount - (segment.accountUsageCount ?? 0)} account(s) are missing this mandatory identity segment.
+                                        </p>
+                                    )}
                                 </CardContent>
                             </Card>
                         ))}
@@ -823,6 +894,75 @@ function SegmentConfigurationContent() {
                 </TabsContent>
             </Tabs>
 
+            {/* Governed activation and existing-account backfill */}
+            <Dialog open={!!segmentToActivate} onOpenChange={(open) => !open && setSegmentToActivate(null)}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>Activate {segmentToActivate?.segmentName}</DialogTitle>
+                        <DialogDescription>
+                            Every active account-number segment is mandatory. Activation is atomic and will not leave existing accounts on the old structure.
+                        </DialogDescription>
+                    </DialogHeader>
+                    {(segmentToActivate?.totalAccountCount ?? 0) > 0 ? (
+                        <div className="space-y-4 py-2">
+                            <Alert>
+                                <TriangleAlert className="h-4 w-4" />
+                                <AlertTitle>Existing GL identities will change</AlertTitle>
+                                <AlertDescription>
+                                    The selected default will be appended to all {segmentToActivate?.totalAccountCount} existing GL accounts. Activation is blocked if current identities are incomplete or accounting transactions already exist.
+                                </AlertDescription>
+                            </Alert>
+                            <div className="space-y-2">
+                                <Label htmlFor="activationDefault">Default value for existing accounts</Label>
+                                {segmentToActivate?.lookupTableRequired ? (
+                                    <Select
+                                        value={activationDefaultLookupValueId}
+                                        onValueChange={(id) => {
+                                            const selected = activationLookupValues.find((value) => value.id === id);
+                                            setActivationDefaultLookupValueId(id);
+                                            setActivationDefaultValue(selected?.segmentValue ?? '');
+                                        }}
+                                    >
+                                        <SelectTrigger id="activationDefault"><SelectValue placeholder="Select an active value" /></SelectTrigger>
+                                        <SelectContent>
+                                            {activationLookupValues.map((value) => (
+                                                <SelectItem key={value.id} value={value.id}>{value.segmentValue} — {value.description}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                ) : (
+                                    <Input
+                                        id="activationDefault"
+                                        value={activationDefaultValue}
+                                        maxLength={segmentToActivate?.segmentLength}
+                                        onChange={(event) => setActivationDefaultValue(event.target.value.toUpperCase())}
+                                    />
+                                )}
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="activationReason">Reason</Label>
+                                <Input id="activationReason" value={activationReason} onChange={(event) => setActivationReason(event.target.value)} />
+                            </div>
+                            <div className="flex items-start gap-2">
+                                <Checkbox id="activationConfirm" checked={activationConfirmed} onCheckedChange={(checked) => setActivationConfirmed(checked === true)} />
+                                <Label htmlFor="activationConfirm" className="font-normal leading-5">
+                                    I confirm the default value and governed backfill for every existing GL account.
+                                </Label>
+                            </div>
+                        </div>
+                    ) : (
+                        <Alert><AlertDescription>No GL accounts exist yet, so activation will only govern accounts created later.</AlertDescription></Alert>
+                    )}
+                    <DialogFooter>
+                        <Button variant="outline" disabled={isActivatingSegment} onClick={() => setSegmentToActivate(null)}>Cancel</Button>
+                        <Button disabled={isActivatingSegment} onClick={() => void activateSegment()}>
+                            {isActivatingSegment && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Activate Segment
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             {/* Reorder Confirmation Dialog */}
             <AlertDialog open={reorderConfirmOpen} onOpenChange={setReorderConfirmOpen}>
                 <AlertDialogContent>
@@ -831,15 +971,39 @@ function SegmentConfigurationContent() {
                         <AlertDialogDescription>
                             This will change the order of segments in your Chart of Accounts structure.
                             <br /><br />
-                            <strong>Important:</strong> All existing GL account codes will be regenerated
-                            to reflect the new segment order. This affects how account codes are displayed
-                            throughout the system.
+                            Reordering is available only while every segment is Draft and no GL account identity exists.
+                            Once accounts exist, structural changes require the governed activation or migration workflow.
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel onClick={() => setPendingReorder(null)}>Cancel</AlertDialogCancel>
                         <AlertDialogAction onClick={handleReorderConfirm}>
                             Yes, Reorder Segments
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            {/* Draft Segment Delete Confirmation Dialog */}
+            <AlertDialog open={!!segmentToDelete} onOpenChange={(open) => !open && setSegmentToDelete(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Delete Draft Segment?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This permanently removes <strong>{segmentToDelete?.segmentName}</strong> ({segmentToDelete?.segmentCode}).
+                            Only an unused Draft segment can be deleted. Active, frozen, or account-used identity segments are preserved.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={isDeletingSegment}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            disabled={isDeletingSegment}
+                            onClick={(event) => {
+                                event.preventDefault();
+                                void handleDeleteSegment();
+                            }}
+                        >
+                            {isDeletingSegment ? 'Deleting...' : 'Delete Draft Segment'}
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>

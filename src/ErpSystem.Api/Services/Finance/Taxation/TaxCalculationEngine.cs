@@ -243,6 +243,14 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             // Evaluate
             foreach (var rule in rules)
             {
+                if (rule.ProductCategoryId.HasValue || !string.IsNullOrWhiteSpace(rule.ServiceType))
+                {
+                    _logger.LogWarning(
+                        "Skipping legacy tax rule {TaxRuleId} because it contains unsupported product-category or service-type conditions.",
+                        rule.Id);
+                    continue;
+                }
+
                 bool match = true;
 
                 // 1. Transaction Type
@@ -258,9 +266,6 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                     if (string.IsNullOrEmpty(customerType) || !string.Equals(rule.CustomerType, customerType, StringComparison.OrdinalIgnoreCase))
                         match = false;
                 }
-
-                // 3. Service Type (Not implemented in Request yet)
-                // 4. Product Category (Not implemented in Request yet)
 
                 if (match)
                 {

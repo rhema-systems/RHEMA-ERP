@@ -374,10 +374,12 @@ public sealed class FinanceClassificationManifestSeeder
         if (naturalCode is "1000" or "1001" or "1002" or "1003" or "1010" or "1020" or "1021" or "1022" or "1023")
             return naturalCode is "1001" or "1002" ? "BANK" : "CASH";
         if (naturalCode is "1100" or "1120") return "RECEIVABLE_CONTROL";
+        if (naturalCode == "1140") return "INPUT_TAX";
         if (naturalCode == "1130") return "WHT_RECEIVABLE";
         if (naturalCode == "1200") return "INVENTORY_CONTROL";
-        if (naturalCode is "1500" or "1510" or "1520" or "1530") return naturalCode == "1500" ? "ASSET_UNDER_CONSTRUCTION" : "FIXED_ASSET_COST";
-        if (naturalCode == "1590") return "ACCUMULATED_DEPRECIATION";
+        if (naturalCode is "1500" or "1540") return "ASSET_UNDER_CONSTRUCTION";
+        if (naturalCode is "1510" or "1520" or "1530" or "1545") return "FIXED_ASSET_COST";
+        if (naturalCode is "1590" or "1595") return "ACCUMULATED_DEPRECIATION";
         if (naturalCode is "2000" or "2120") return "PAYABLE_CONTROL";
         if (naturalCode is "2100" or "2110") return "ACCRUED_LIABILITY";
         // Stable Procurement onboarding accounts are Finance-reviewed aliases: receipt clearing
@@ -389,13 +391,15 @@ public sealed class FinanceClassificationManifestSeeder
         if (naturalCode == "2500") return "DEBT";
         return accountType switch
         {
-            AccountType.Asset when naturalCode is "1990" or "9999" => "ASSET_OTHER",
-            AccountType.Equity when naturalCode is "3000" or "3100" => "EQUITY",
+            AccountType.Asset when naturalCode is "1030" or "1090" or "1210" or "1580" or "1990" or "9999" => "ASSET_OTHER",
+            AccountType.Liability when naturalCode == "2050" => "LIABILITY_OTHER",
+            AccountType.Liability when naturalCode == "2510" => "DEBT",
+            AccountType.Equity when naturalCode is "3000" or "3100" or "3200" => "EQUITY",
             AccountType.Revenue when naturalCode is "4000" or "4100" or "4110" => "REVENUE",
             AccountType.Revenue when naturalCode == "4210" => "REVENUE_DEDUCTIONS",
-            AccountType.Revenue when naturalCode is "4900" or "4910" or "4920" or "4930" or "7100" or "7200" => "OTHER_INCOME",
-            AccountType.Expense when naturalCode == "5000" => "COST_OF_SALES",
-            AccountType.Expense when naturalCode is "7110" or "7210" => "OTHER_EXPENSE",
+            AccountType.Revenue when naturalCode is "4900" or "4910" or "4920" or "4930" or "4935" or "4940" or "7100" or "7200" => "OTHER_INCOME",
+            AccountType.Expense when naturalCode is "5000" or "5010" => "COST_OF_SALES",
+            AccountType.Expense when naturalCode is "6310" or "6320" or "6330" or "6610" or "6700" or "7110" or "7210" => "OTHER_EXPENSE",
             AccountType.Expense when naturalCode is "6000" or "6020" or "6100" or "6200" or "6300" or "6400" or "6500" or "6600" => "EXPENSE",
             _ => null
         };

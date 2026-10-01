@@ -159,14 +159,15 @@ export default function BudgetScenariosPage() {
                                     New Scenario
                                 </Button>
                             </DialogTrigger>
-                            <DialogContent>
-                                <DialogHeader>
+                            <DialogContent className="flex max-h-[calc(100vh-2rem)] max-w-2xl flex-col overflow-hidden">
+                                <DialogHeader className="shrink-0">
                                     <DialogTitle>Create Budget Scenario</DialogTitle>
                                     <DialogDescription>
                                         Create a new budget version for a specific fiscal year.
                                     </DialogDescription>
                                 </DialogHeader>
-                                <div className="space-y-4 py-4">
+                                <div className="min-h-0 flex-1 overflow-y-auto pr-2">
+                                  <div className="space-y-4 py-4">
                                     <div className="space-y-2">
                                         <Label htmlFor="name">Scenario Name <span className="text-red-500">*</span></Label>
                                         <Input
@@ -250,8 +251,9 @@ export default function BudgetScenariosPage() {
                                                 );
                                             })}
                                     </div>
+                                  </div>
                                 </div>
-                                <DialogFooter>
+                                <DialogFooter className="shrink-0 border-t pt-4">
                                     <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
                                         Cancel
                                     </Button>

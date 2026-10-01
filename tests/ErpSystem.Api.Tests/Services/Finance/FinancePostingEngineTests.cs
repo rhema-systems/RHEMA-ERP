@@ -1348,13 +1348,20 @@ public sealed class FinancePostingEngineTests
         parallel.ReplicationStartDate = new DateTime(2026, 1, 1);
         parallel.LifecycleStatus = AccountingBookLifecycleStatus.Active;
         var rate = SeedExchangeRate(db, tenantId, "USD", 12.5m);
+        SeedDimensionValue(db, tenantId, "DEPARTMENT", "Department", "FIN", "Finance", 1);
         await db.SaveChangesAsync();
 
-        var result = await CreateService(db, tenantId)
-            .PostAsync(CreateRequest(tenantId, debit.Id, credit.Id));
+        var request = CreateRequest(tenantId, debit.Id, credit.Id);
+        request.Lines[0].Dimensions = new[]
+        {
+            new FinancePostingDimensionValueDto { DimensionCode = "DEPARTMENT", ValueCode = "FIN" }
+        };
+        var result = await CreateService(db, tenantId).PostAsync(request);
 
         var replica = await db.JournalEntries.Include(item => item.Transactions)
             .SingleAsync(item => item.AccountingBookId == parallel.Id);
+        var primaryJournal = await db.JournalEntries.Include(item => item.Transactions)
+            .SingleAsync(item => item.Id == result.JournalEntryId);
         replica.ReplicatedFromJournalEntryId.Should().Be(result.JournalEntryId);
         replica.ReplicationExchangeRateId.Should().Be(rate.Id);
         replica.ReplicationExchangeRate.Should().Be(0.08m);
@@ -1363,6 +1370,20 @@ public sealed class FinancePostingEngineTests
         replica.TotalCreditAmount.Should().Be(8m);
         replica.Transactions.Should().OnlyContain(item => item.FunctionalCurrencyCode == "USD"
             && item.TransactionCurrency == "GHS" && item.ExchangeRate == 0.08m);
+        var primaryDimensionLine = primaryJournal.Transactions.Single(item => item.LineNumber == 1);
+        var replicaDimensionLine = replica.Transactions.Single(item => item.LineNumber == 1);
+        primaryDimensionLine.FinanceDimensionSnapshotId.Should().NotBeNull();
+        replicaDimensionLine.FinanceDimensionSnapshotId.Should().NotBeNull();
+        replicaDimensionLine.FinanceDimensionSnapshotId!.Value.Should().NotBe(primaryDimensionLine.FinanceDimensionSnapshotId!.Value,
+            "each Primary and Parallel ledger line owns distinct immutable dimension evidence");
+        var snapshots = await db.FinanceDimensionSnapshots.Include(item => item.Items)
+            .Where(item => item.Id == primaryDimensionLine.FinanceDimensionSnapshotId
+                || item.Id == replicaDimensionLine.FinanceDimensionSnapshotId)
+            .ToListAsync();
+        snapshots.Should().HaveCount(2);
+        snapshots.Select(item => item.FinanceDimensionSetId).Distinct().Should().ContainSingle();
+        snapshots.SelectMany(item => item.Items).Should().OnlyContain(item =>
+            item.DimensionCodeSnapshot == "DEPARTMENT" && item.DimensionValueCodeSnapshot == "FIN");
     }
 
     [Fact]

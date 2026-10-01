@@ -268,6 +268,7 @@ function buildUpdateCurrencyPayload(data: UpdateCurrencyDto) {
     digitGrouping: 3,
     currencyClassification: 'Regional',
     geographicRegion: data.country?.trim() || undefined,
+    countryName: data.country?.trim() || undefined,
     autoRetrieveExchangeRate: false,
     exchangeRateUpdateFrequency: 'Daily',
     isActive: data.isActive ?? true,

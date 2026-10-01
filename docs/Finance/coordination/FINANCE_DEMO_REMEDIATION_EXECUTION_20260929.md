@@ -176,3 +176,22 @@ Complete scoped implementations, record exact commits and tests, independent acc
 - A permanent regression now asserts both migration metadata and the compiled EF runtime model retain `NetIncomeTransferred` as `decimal(18,2)`. Focused year-end rerun: **34 passed, 0 failed, 0 skipped**. TRX: `outputs/finance-demo/test-results/year-end-precision-final/year-end-precision-final.trx`.
 - `git diff --check` is clean. No UAT/production database mutation, deployment, remote push, or PR creation occurred at this checkpoint.
 - Existing-package completion is now closed. Caller expansion and database rehearsal remain separate next-phase gates and must not be represented by the 335-test result.
+
+## Final stakeholder-feedback remediation checkpoint — 1 October 2026
+
+- The stakeholder-authorized follow-up closes the surfaced segment, currency/rate, Ghana tax, account-classification/layout, posting-diagnostic, fixed-asset, banking, and budget-return UX/configuration defects on `codex/finance-demo-remediation-20260929`.
+- Ordinary AP invoice posting now resolves the tenant's one active, posting-enabled default `PrimaryFull` accounting book instead of hard-coding `IFRS`; the named UAT tenant's governed primary book is `BASE`.
+- Sales-side NHIL, GETFund, and VAT seed convergence supplies missing output-tax payable mappings without overwriting tenant selections. The current UAT tenant still requires a separately authorized accounting-data backfill; no tax/account mapping was mutated in this pass.
+- Budget returns now use scenario Finance-dimension values rather than retired account-identity segment lookups. Submitted returns visibly route reviewers to the shared Finance Approval Inbox, and scenario submission remains unavailable until every return is approved.
+- Migration `20261001030000_AddBudgetReturnDistributionDimension` was explicitly authorized, transactionally applied to `RHEMAERP_BOOKV2_UAT_20260922`, and verified in migration history with its nullable column, foreign key, and both filtered unique indexes. The one pre-existing return remains intentionally unassigned because no reliable department evidence exists to infer a backfill.
+- Focused approval/remediation regression gate: **29 passed, 0 failed, 0 skipped** (`BudgetServiceHardeningTests`, the AP primary-book regression, and `FinanceDemoPrerequisiteSeederTests`). Focused Finance-budget frontend lint passed.
+- Unrelated HR and external-portal working-tree changes are user-owned and must remain unstaged. The authorized next action is a Finance-only commit, push of the existing branch, and creation of a new PR against `master`; prior PRs #285 and #290 from the same branch are already merged.
+
+## Final PR readiness gate — 1 October 2026
+
+- Account-classification governance was reconciled to the current book manifest: `BASE` is the active posting-enabled primary book; `IFRS_ADJUSTMENTS` and `USD_PARALLEL` remain configuring and non-posting. Legacy-account adoption tests now include the two protected USD translation accounts and assert that only `BASE` mappings are executable.
+- Draft-to-Active classification activation remains allowed when accounting book, code, core type, and parent are unchanged, even when an ancestor is referenced by a Draft/Submitted statement layout. Structural reparenting, deactivation, and retirement remain blocked until the live draft mapping is updated.
+- Classification authority regression: **46 passed, 0 failed, 0 skipped**.
+- Final combined remediation gate excluding the unrelated AP partner-charge baseline: **242 passed, 0 failed, 0 skipped** across segment identity, classification authority, budgeting, demo prerequisites, posting engine, FX governance, Ghana statutory tax, and tax-rule governance.
+- The five excluded AP partner-charge failures are unchanged baseline behavior: their test file is identical to `HEAD`, and the failing `ValidateSourceDrivenLineTypes` guard is outside this remediation diff. They reject service/inventory line types on manual non-PO invoices and are disclosed separately rather than represented as remediation regressions.
+- The local `ErpSystem.Api` process was stopped to release build outputs for the final source rebuild; no database or tenant accounting data was changed by the gate.

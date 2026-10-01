@@ -15,7 +15,10 @@ export enum TaxCategory {
     Withholding = 'Withholding',
     VatWithholding = 'VatWithholding',
     Levy = 'Levy',
-    Excise = 'Excise'
+    Exempt = 'Exempt',
+    ZeroRated = 'ZeroRated',
+    OutOfScope = 'OutOfScope',
+    ReverseCharge = 'ReverseCharge'
 }
 
 export enum TaxCalculationMethod {

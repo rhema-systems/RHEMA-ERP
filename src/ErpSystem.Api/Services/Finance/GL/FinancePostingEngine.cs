@@ -155,14 +155,27 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 _context.ChangeTracker.Clear();
 
                 var racedPosting = await FindExistingPostingAsync(tenantId, validation, accountingEventContext: null, cancellationToken);
-                if (racedPosting != null && request.ReturnExistingOnDuplicate)
+                if (racedPosting != null)
                 {
-                    await RecordDuplicatePostingAuditAsync(tenantId, validation, racedPosting, cancellationToken);
-                    return ToResult(racedPosting, wasDuplicate: true);
+                    if (request.ReturnExistingOnDuplicate)
+                    {
+                        await RecordDuplicatePostingAuditAsync(tenantId, validation, racedPosting, cancellationToken);
+                        return ToResult(racedPosting, wasDuplicate: true);
+                    }
+
+                    throw new InvalidOperationException("This source document/action has already been posted.", ex);
                 }
 
+                _logger.LogError(ex,
+                    "Finance posting persistence failed and was rolled back for tenant {TenantId}, source {SourceModule}/{SourceDocumentType}/{SourceDocumentId}, action {PostingAction}, book {AccountingBookCode}.",
+                    tenantId,
+                    validation.SourceModule,
+                    validation.SourceDocumentType,
+                    validation.SourceDocumentId,
+                    validation.PostingAction,
+                    validation.AccountingBookCode);
                 throw new InvalidOperationException(
-                    "Finance posting failed. The source document/action may have already been posted by another request.",
+                    "FINANCE_POSTING_PERSISTENCE_FAILED: Posting was rolled back because ledger evidence could not be saved. No Primary or Parallel ledger posting was committed. Review the server log for the underlying database constraint and retry after correcting it.",
                     ex);
             }
         });
@@ -974,6 +987,17 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         if (books.Count == 0) return Array.Empty<ParallelReplica>();
 
         var sourceAccountIds = primaryJournal.Transactions.Select(item => item.AccountId).Distinct().ToArray();
+        var persistedSnapshotIds = primaryJournal.Transactions
+            .Where(item => item.FinanceDimensionSnapshotId.HasValue && item.FinanceDimensionSnapshot is null)
+            .Select(item => item.FinanceDimensionSnapshotId!.Value)
+            .Distinct()
+            .ToArray();
+        var persistedSnapshots = persistedSnapshotIds.Length == 0
+            ? new Dictionary<Guid, FinanceDimensionSnapshot>()
+            : await _context.FinanceDimensionSnapshots.AsNoTracking()
+                .Include(item => item.Items)
+                .Where(item => item.TenantId == tenantId && persistedSnapshotIds.Contains(item.Id) && !item.IsDeleted)
+                .ToDictionaryAsync(item => item.Id, cancellationToken);
         var replicas = new List<ParallelReplica>(books.Count);
         foreach (var book in books)
         {
@@ -1005,6 +1029,16 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             {
                 var debit = RoundMoney(source.DebitAmount * rate.Rate);
                 var credit = RoundMoney(source.CreditAmount * rate.Rate);
+                FinanceDimensionSnapshot? sourceSnapshot = source.FinanceDimensionSnapshot;
+                if (source.FinanceDimensionSnapshotId.HasValue && sourceSnapshot is null
+                    && !persistedSnapshots.TryGetValue(source.FinanceDimensionSnapshotId.Value, out sourceSnapshot))
+                    throw new InvalidOperationException(
+                        $"PARALLEL_DIMENSION_EVIDENCE_MISSING: Source line {source.LineNumber} has no resolvable immutable dimension snapshot.");
+                var replicaSnapshot = sourceSnapshot is null
+                    ? null
+                    : CloneParallelDimensionSnapshot(sourceSnapshot, tenantId, now, postedByUserId);
+                if (replicaSnapshot is not null)
+                    _context.FinanceDimensionSnapshots.Add(replicaSnapshot);
                 return new AccountTransaction
                 {
                     Id = Guid.NewGuid(), TenantId = tenantId, AccountId = source.AccountId,
@@ -1018,7 +1052,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                     ExchangeRateId = rate.Id, ExchangeRate = rate.Rate,
                     ExchangeRateSource = rate.Source, ExchangeRateDate = rate.Date,
                     FinanceDimensionSetId = source.FinanceDimensionSetId,
-                    FinanceDimensionSnapshotId = source.FinanceDimensionSnapshotId,
+                    FinanceDimensionSnapshotId = replicaSnapshot?.Id,
                     SourceModule = source.SourceModule, SourceDocumentId = source.SourceDocumentId,
                     SourceDocumentLineId = source.SourceDocumentLineId,
                     SourceDocumentType = source.SourceDocumentType,
@@ -1139,6 +1173,54 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             replicas.Add(new ParallelReplica(book, journal, eventRow));
         }
         return replicas;
+    }
+
+    private FinanceDimensionSnapshot CloneParallelDimensionSnapshot(
+        FinanceDimensionSnapshot source,
+        Guid tenantId,
+        DateTime now,
+        Guid? actorId)
+    {
+        var clone = new FinanceDimensionSnapshot
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            FinanceDimensionSetId = source.FinanceDimensionSetId,
+            CombinationHashSnapshot = source.CombinationHashSnapshot,
+            DisplayValueSnapshot = source.DisplayValueSnapshot,
+            SnapshotSource = "ParallelReplica", SnapshotCapturedAt = now,
+            SnapshotQuality = source.SnapshotQuality,
+            HistoricalNameReconstructed = source.HistoricalNameReconstructed,
+            RuleEvidenceHash = source.RuleEvidenceHash,
+            ProducerModule = source.ProducerModule,
+            SourceRoute = source.SourceRoute,
+            SourceDocumentType = source.SourceDocumentType,
+            ContractVersion = source.ContractVersion,
+            CreatedAt = now, CreatedBy = _currentUserService.UserName, CreatedById = actorId
+        };
+        foreach (var item in source.Items)
+        {
+            clone.Items.Add(new FinanceDimensionSnapshotItem
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, FinanceDimensionSnapshotId = clone.Id,
+                FinanceDimensionDefinitionId = item.FinanceDimensionDefinitionId,
+                FinanceDimensionValueId = item.FinanceDimensionValueId,
+                DimensionCodeSnapshot = item.DimensionCodeSnapshot,
+                DimensionNameSnapshot = item.DimensionNameSnapshot,
+                DimensionValueCodeSnapshot = item.DimensionValueCodeSnapshot,
+                DimensionValueNameSnapshot = item.DimensionValueNameSnapshot,
+                FinanceDimensionAccountRuleId = item.FinanceDimensionAccountRuleId,
+                RuleFamilyIdSnapshot = item.RuleFamilyIdSnapshot,
+                RuleVersionSnapshot = item.RuleVersionSnapshot,
+                RuleTypeSnapshot = item.RuleTypeSnapshot,
+                RuleEffectiveDateSnapshot = item.RuleEffectiveDateSnapshot,
+                RuleExpiryDateSnapshot = item.RuleExpiryDateSnapshot,
+                SnapshotSource = "ParallelReplica", SnapshotCapturedAt = now,
+                SnapshotQuality = item.SnapshotQuality,
+                HistoricalNameReconstructed = item.HistoricalNameReconstructed,
+                CreatedAt = now, CreatedBy = _currentUserService.UserName, CreatedById = actorId
+            });
+        }
+        return clone;
     }
 
     private async Task<ParallelRate> ResolveParallelRateAsync(Guid tenantId, string sourceCurrency,

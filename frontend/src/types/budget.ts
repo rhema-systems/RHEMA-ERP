@@ -61,6 +61,10 @@ export interface BudgetReturn {
     budgetScenarioId: string;
     budgetScenarioName?: string;
     segmentValueId?: string;
+    distributionDimensionValueId?: string;
+    distributionDimensionDefinitionId?: string;
+    distributionDimensionCode?: string;
+    distributionDimensionName?: string;
     assignedToUserId?: string;
     approverUserId?: string;
     status: BudgetReturnStatus;
@@ -133,6 +137,7 @@ export interface UpdateBudgetScenarioDto {
 export interface CreateBudgetReturnDto {
     budgetScenarioId: string;
     segmentValueId?: string;
+    distributionDimensionValueId?: string;
     assignedToUserId?: string;
     approverUserId?: string;
     notes?: string;

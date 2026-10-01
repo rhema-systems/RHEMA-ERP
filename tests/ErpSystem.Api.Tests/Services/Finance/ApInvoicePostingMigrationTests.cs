@@ -373,6 +373,48 @@ public sealed partial class ApInvoicePostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-APPosting")]
     [Trait("Category", "AccountsPayable")]
+    public async Task PostingRequest_ShouldUseTheTenantDefaultPrimaryBookCode()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var primaryBook = await db.AccountingBooks.SingleAsync(book =>
+            book.TenantId == tenantId && book.IsDefault && !book.IsDeleted);
+        primaryBook.IsDefault = false;
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "BASE",
+            Name = "Ghana Statutory Primary",
+            Purpose = "Primary",
+            BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
+            IsDefault = true,
+            IsActive = true,
+            AllowsPosting = true
+        });
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+        var build = typeof(VendorInvoiceService).GetMethod(
+            "BuildApInvoicePostingRequestAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        var request = await (Task<FinancePostingRequestV2Dto>)build.Invoke(service, new object?[]
+        {
+            fixture.Invoice,
+            Array.Empty<Guid>(),
+            null,
+            CancellationToken.None
+        })!;
+
+        request.AccountingBookCode.Should().Be("BASE");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
     public async Task LineTradeDiscounts_ShouldReduceExpenseAndRetainSourceDimensionCombinations()
     {
         var tenantId = Guid.NewGuid();

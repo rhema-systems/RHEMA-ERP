@@ -9380,7 +9380,19 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     budgetReturn.SegmentValueId
                 })
                 .IsUnique()
-                .HasFilter("[IsDeleted] = 0");
+                .HasFilter("[IsDeleted] = 0 AND [SegmentValueId] IS NOT NULL");
+            entity.HasIndex(budgetReturn => new
+                {
+                    budgetReturn.TenantId,
+                    budgetReturn.BudgetScenarioId,
+                    budgetReturn.DistributionDimensionValueId
+                })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [DistributionDimensionValueId] IS NOT NULL");
+            entity.HasOne(budgetReturn => budgetReturn.DistributionDimensionValue)
+                .WithMany()
+                .HasForeignKey(budgetReturn => budgetReturn.DistributionDimensionValueId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(budgetReturn => budgetReturn.AssignedToUser)
                 .WithMany()
                 .HasForeignKey(budgetReturn => budgetReturn.AssignedToUserId)

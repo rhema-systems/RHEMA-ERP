@@ -49,7 +49,8 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
         {
             var currencies = await _unitOfWork.Repository<Currency>()
                 .GetQueryable(c => c.TenantId == TenantId)
-                .OrderBy(c => c.CurrencyCode)
+                .OrderByDescending(c => c.IsBaseCurrency)
+                .ThenBy(c => c.CurrencyCode)
                 .ToListAsync(cancellationToken);
 
             return currencies.Select(MapToDto).ToList();
@@ -59,7 +60,8 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
         {
             var currencies = await _unitOfWork.Repository<Currency>()
                 .GetQueryable(c => c.TenantId == TenantId && c.IsActive && !c.IsDeleted)
-                .OrderBy(c => c.CurrencyCode)
+                .OrderByDescending(c => c.IsBaseCurrency)
+                .ThenBy(c => c.CurrencyCode)
                 .ToListAsync(cancellationToken);
 
             return currencies.Select(MapToDto).ToList();
@@ -103,7 +105,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
         public async Task<CurrencyDto> CreateCurrencyAsync(CreateCurrencyDto dto, CancellationToken cancellationToken = default)
         {
             var currencyCode = NormalizeCurrencyCode(dto.CurrencyCode, "Currency code");
-            var shouldCreateInitialRate = dto.CreateInitialExchangeRate && !dto.IsBaseCurrency;
+            ValidateIsoMinorUnits(currencyCode, dto.DecimalPlaces);
 
             if (dto.IsBaseCurrency)
             {
@@ -112,31 +114,27 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                     "The currency register cannot bypass the governed functional-currency change control.");
             }
 
+            if (dto.CreateInitialExchangeRate)
+            {
+                throw new InvalidOperationException(
+                    "Initial exchange rates cannot be created from the currency register. " +
+                    "Create the currency first, then submit dated source evidence through Finance > Exchange Rates.");
+            }
+
             if (!await IsCodeUniqueAsync(currencyCode, null, cancellationToken))
                 throw new InvalidOperationException($"Currency with code '{currencyCode}' already exists.");
 
-            if (shouldCreateInitialRate && (!dto.InitialExchangeRate.HasValue || dto.InitialExchangeRate.Value <= 0))
-                throw new InvalidOperationException("Initial exchange rate must be greater than zero.");
-
-            var committed = false;
-            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-
-            try
+            Currency? currency = null;
+            await _unitOfWork.ExecuteInTransactionAsync(async operationToken =>
             {
-                if (dto.IsBaseCurrency)
-                {
-                    var existingBaseCurrency = await _unitOfWork.Repository<Currency>()
-                        .FirstOrDefaultAsync(c => c.TenantId == TenantId && c.IsBaseCurrency && !c.IsDeleted);
-
-                    if (existingBaseCurrency != null)
-                    {
-                        existingBaseCurrency.IsBaseCurrency = false;
-                        await _unitOfWork.Repository<Currency>().UpdateAsync(existingBaseCurrency);
-                    }
-                }
+                _unitOfWork.ClearChangeTracker();
+                // Recheck inside the serializable, retryable transaction so concurrent requests
+                // cannot create the same tenant currency after the optimistic preflight above.
+                if (!await IsCodeUniqueAsync(currencyCode, null, operationToken))
+                    throw new InvalidOperationException($"Currency with code '{currencyCode}' already exists.");
 
                 var now = DateTime.UtcNow;
-                var currency = new Currency
+                currency = new Currency
                 {
                     Id = Guid.NewGuid(),
                     TenantId = TenantId,
@@ -147,12 +145,12 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                     PluralName = string.IsNullOrWhiteSpace(dto.PluralName) ? null : dto.PluralName.Trim(),
                     DecimalPlaces = dto.DecimalPlaces,
                     RoundingMethod = dto.RoundingMethod,
-                    RoundingPrecision = dto.RoundingPrecision,
+                    RoundingPrecision = MinorUnitPrecision(dto.DecimalPlaces),
                     SymbolPosition = dto.SymbolPosition,
                     DecimalSeparator = dto.DecimalSeparator,
                     ThousandsSeparator = dto.ThousandsSeparator,
                     DigitGrouping = dto.DigitGrouping,
-                    IsBaseCurrency = dto.IsBaseCurrency,
+                    IsBaseCurrency = false,
                     CurrencyClassification = dto.CurrencyClassification,
                     GeographicRegion = dto.GeographicRegion,
                     AutoRetrieveExchangeRate = dto.AutoRetrieveExchangeRate,
@@ -166,51 +164,10 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 };
 
                 await _unitOfWork.Repository<Currency>().AddAsync(currency);
+            }, cancellationToken);
 
-                if (shouldCreateInitialRate)
-                {
-                    // ExchangeRateService validates pair overlap and records audit/workflow.
-                    // Save the new currency inside this transaction first so that validation can see the target currency.
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-                    var baseCurrencyCode = await ResolveInitialRateBaseCurrencyCodeAsync(currency.CurrencyCode, cancellationToken);
-                    await _exchangeRateService.CreateExchangeRateAsync(new CreateExchangeRateDto
-                    {
-                        BaseCurrencyCode = baseCurrencyCode,
-                        TargetCurrencyCode = currency.CurrencyCode,
-                        Rate = dto.InitialExchangeRate!.Value,
-                        EffectiveDate = (dto.InitialExchangeRateDate ?? now).Date,
-                        RateType = dto.InitialExchangeRateType,
-                        RateSource = dto.InitialExchangeRateSource,
-                        SourceReference = dto.InitialExchangeRateSourceReference,
-                        IsActive = true,
-                        ApprovalStatus = "Approved"
-                    }, cancellationToken);
-                }
-
-                await _unitOfWork.CommitAsync(cancellationToken);
-                committed = true;
-
-                _logger.LogInformation("Currency {CurrencyCode} created by {User}", currency.CurrencyCode, UserName);
-
-                return MapToDto(currency);
-            }
-            catch
-            {
-                if (!committed)
-                {
-                    try
-                    {
-                        await _unitOfWork.RollbackAsync(cancellationToken);
-                    }
-                    catch (InvalidOperationException rollbackException)
-                    {
-                        _logger.LogDebug(rollbackException, "Currency creation rollback was skipped because no transaction was active.");
-                    }
-                }
-
-                throw;
-            }
+            _logger.LogInformation("Currency {CurrencyCode} created by {User}", currency!.CurrencyCode, UserName);
+            return MapToDto(currency);
         }
 
         public async Task<CurrencyDto> UpdateAsync(Guid id, UpdateCurrencyDto dto, CancellationToken cancellationToken = default)
@@ -235,6 +192,10 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             currency.AutoRetrieveExchangeRate = dto.AutoRetrieveExchangeRate;
             currency.ExchangeRateUpdateFrequency = dto.ExchangeRateUpdateFrequency;
             currency.IsActive = dto.IsActive;
+            if (dto.CountryCode is not null)
+                currency.CountryCode = string.IsNullOrWhiteSpace(dto.CountryCode) ? null : dto.CountryCode.Trim().ToUpperInvariant();
+            if (dto.CountryName is not null)
+                currency.CountryName = string.IsNullOrWhiteSpace(dto.CountryName) ? null : dto.CountryName.Trim();
             currency.UpdatedAt = DateTime.UtcNow;
             currency.UpdatedBy = UserName;
             
@@ -471,29 +432,6 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 .AnyAsync(cancellationToken);
         }
 
-        private async Task<string> ResolveInitialRateBaseCurrencyCodeAsync(string targetCurrencyCode, CancellationToken cancellationToken)
-        {
-            var baseCurrencyCode = NormalizeCurrencyCode(await _tenantSettingsService.GetBaseCurrencyAsync(), "Base currency");
-
-            if (baseCurrencyCode == targetCurrencyCode)
-                throw new InvalidOperationException("Initial exchange rates are only created for non-base currencies.");
-
-            var baseCurrencyExists = await _unitOfWork.Repository<Currency>()
-                .GetQueryable(c => c.TenantId == TenantId
-                    && c.CurrencyCode == baseCurrencyCode
-                    && c.IsActive
-                    && !c.IsDeleted)
-                .AnyAsync(cancellationToken);
-
-            if (!baseCurrencyExists)
-            {
-                throw new InvalidOperationException(
-                    $"Base currency '{baseCurrencyCode}' must be configured before creating an initial exchange rate.");
-            }
-
-            return baseCurrencyCode;
-        }
-
         private static string NormalizeCurrencyCode(string currencyCode, string fieldName)
         {
             if (string.IsNullOrWhiteSpace(currencyCode))
@@ -505,6 +443,39 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
 
             return normalized;
         }
+
+        private static void ValidateIsoMinorUnits(string currencyCode, int decimalPlaces)
+        {
+            var expected = ExpectedIsoMinorUnits(currencyCode);
+            if (expected.HasValue && decimalPlaces != expected.Value)
+            {
+                throw new InvalidOperationException(
+                    $"{currencyCode} uses {expected.Value} decimal place(s) under ISO 4217; the currency precision cannot be overridden.");
+            }
+        }
+
+        private static decimal MinorUnitPrecision(int decimalPlaces) => decimalPlaces switch
+        {
+            0 => 1m,
+            1 => 0.1m,
+            2 => 0.01m,
+            3 => 0.001m,
+            4 => 0.0001m,
+            _ => throw new InvalidOperationException("Currency decimal places must be between 0 and 4.")
+        };
+
+        private static int? ExpectedIsoMinorUnits(string currencyCode) => currencyCode switch
+        {
+            "JPY" or "KRW" or "VND" or "UGX" or "RWF" or "XAF" or "XOF" or "CLP" => 0,
+            "BHD" or "KWD" or "OMR" => 3,
+            "AED" or "ARS" or "AUD" or "BDT" or "BRL" or "CAD" or "CHF" or "CNY"
+                or "COP" or "CZK" or "DKK" or "EGP" or "ETB" or "EUR" or "GBP" or "GHS"
+                or "HKD" or "HUF" or "IDR" or "ILS" or "INR" or "KES" or "LKR" or "MAD"
+                or "MXN" or "MYR" or "NGN" or "NOK" or "NZD" or "PEN" or "PHP" or "PKR"
+                or "PLN" or "QAR" or "RON" or "RUB" or "SAR" or "SEK" or "SGD" or "THB"
+                or "TRY" or "TZS" or "USD" or "ZAR" => 2,
+            _ => null
+        };
 
         private CurrencyDto MapToDto(Currency currency)
         {

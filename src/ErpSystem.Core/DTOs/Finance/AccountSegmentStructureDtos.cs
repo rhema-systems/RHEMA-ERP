@@ -164,6 +164,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string RowVersion { get; set; } = string.Empty;
         public bool IsSystemDefined { get; set; }
         public int AccountUsageCount { get; set; }
+        public int TotalAccountCount { get; set; }
         public bool CanActivate { get; set; }
         public bool CanFreeze { get; set; }
 
@@ -462,6 +463,22 @@ namespace ErpSystem.Core.DTOs.Finance
 
         [MaxLength(500)]
         public string? Reason { get; set; }
+
+        /// <summary>
+        /// Explicitly confirms that activation may append this mandatory segment to every
+        /// existing GL account. Required only when accounts already exist.
+        /// </summary>
+        public bool ConfirmExistingAccountBackfill { get; set; }
+
+        /// <summary>
+        /// Default value assigned to every existing GL account during activation. New accounts
+        /// continue to choose their own value under the active structure.
+        /// </summary>
+        [MaxLength(10)]
+        public string? DefaultSegmentValue { get; set; }
+
+        /// <summary>Optional canonical lookup row for a lookup-backed segment.</summary>
+        public Guid? DefaultSegmentLookupValueId { get; set; }
     }
 
     public sealed class AccountSegmentDeleteDto

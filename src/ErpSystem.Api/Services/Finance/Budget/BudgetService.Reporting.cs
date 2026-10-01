@@ -163,12 +163,15 @@ public partial class BudgetService
         var returns = await _context.BudgetReturns
             .AsNoTracking()
             .Include(budgetReturn => budgetReturn.SegmentValue)
+            .Include(budgetReturn => budgetReturn.DistributionDimensionValue)
             .Include(budgetReturn => budgetReturn.AssignedToUser)
             .Where(budgetReturn =>
                 budgetReturn.TenantId == tenantId
                 && budgetReturn.BudgetScenarioId == scenarioId
                 && !budgetReturn.IsDeleted)
-            .OrderBy(budgetReturn => budgetReturn.SegmentValue!.SegmentValue)
+            .OrderBy(budgetReturn => budgetReturn.DistributionDimensionValue != null
+                ? budgetReturn.DistributionDimensionValue.Code
+                : budgetReturn.SegmentValue!.SegmentValue)
             .ToListAsync();
 
         var includedReturnIds = returns
@@ -405,8 +408,11 @@ public partial class BudgetService
                             {
                                 BudgetReturnId = budgetReturn.Id,
                                 SegmentValueId = budgetReturn.SegmentValueId,
-                                SegmentCode = budgetReturn.SegmentValue?.SegmentValue ?? string.Empty,
-                                SegmentName = budgetReturn.SegmentValue?.Description
+                                SegmentCode = budgetReturn.DistributionDimensionValue?.Code
+                                    ?? budgetReturn.SegmentValue?.SegmentValue
+                                    ?? string.Empty,
+                                SegmentName = budgetReturn.DistributionDimensionValue?.Name
+                                    ?? budgetReturn.SegmentValue?.Description
                                     ?? budgetReturn.SegmentValue?.SegmentValue
                                     ?? "General",
                                 ReturnStatus = budgetReturn.Status,

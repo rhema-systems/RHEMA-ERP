@@ -699,6 +699,7 @@ export interface SegmentStructure {
   lifecycleStatus: 'Draft' | 'Active' | 'Frozen' | 'Retired';
   rowVersion: string;
   accountUsageCount: number;
+  totalAccountCount: number;
   canActivate: boolean;
   canFreeze: boolean;
   isSystemDefined: boolean;

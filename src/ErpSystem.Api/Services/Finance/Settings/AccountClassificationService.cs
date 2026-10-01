@@ -226,13 +226,15 @@ public sealed class AccountClassificationService : IAccountClassificationService
             && (parsed.Status != AccountClassificationStatus.Active || !request.IsPostingClassification))
             throw new InvalidOperationException(
                 "A classification used by enabled account-book assignments must remain active and posting-enabled.");
+        var deactivatesLiveLayoutScope = entity.Status == AccountClassificationStatus.Active
+            && parsed.Status != AccountClassificationStatus.Active;
         if (usedByDraftLayout && (entity.AccountingBookId != request.AccountingBookId
             || !string.Equals(entity.Code, NormalizeCode(request.Code), StringComparison.Ordinal)
             || entity.CoreAccountType != parsed.AccountType
             || entity.ParentClassificationId != request.ParentClassificationId
-            || parsed.Status != AccountClassificationStatus.Active
-            || !request.IsPostingClassification))
-            throw new InvalidOperationException("A classification referenced by a draft financial-statement layout cannot be structurally changed; update the draft mapping first.");
+            || deactivatesLiveLayoutScope))
+            throw new InvalidOperationException(
+                "A classification referenced by a draft financial-statement layout cannot change accounting book, code, core account type, parent, or leave the active state; update the draft mapping first.");
         if (parsed.Status == AccountClassificationStatus.Retired)
             throw new InvalidOperationException("Use the governed retirement operation to retire a classification.");
         entity.AccountingBookId = request.AccountingBookId;

@@ -71,7 +71,7 @@ export default function TaxConfigurationPage() {
                         </Button>
                     </Link>
                     <Button variant="secondary" onClick={async () => {
-                        if (confirm('Are you sure you want to seed default Ghana taxes? This may create duplicates if taxes already exist.')) {
+                        if (confirm('Create or repair the governed Ghana tax defaults? Existing statutory configuration is updated idempotently; tenant account overrides are preserved where valid.')) {
                             try {
                                 setLoading(true);
                                 await taxDataService.seedGhanaTaxes();
@@ -86,7 +86,7 @@ export default function TaxConfigurationPage() {
                         }
                     }}>
                         <Layers className="mr-2 h-4 w-4" />
-                        Seed Ghana Taxes
+                        Create / Repair Ghana Taxes
                     </Button>
                 </div>
             </div>

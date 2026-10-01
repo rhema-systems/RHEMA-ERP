@@ -75,6 +75,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string LifecycleStatus { get; set; } = "Draft";
         public string RowVersion { get; set; } = string.Empty;
         public int AccountUsageCount { get; set; }
+        public int TotalAccountCount { get; set; }
         public bool CanActivate { get; set; }
         public bool CanFreeze { get; set; }
         public bool IsSystemDefined { get; set; }

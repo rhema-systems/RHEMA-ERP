@@ -35,9 +35,19 @@ public sealed class FinanceDemoPrerequisiteSeederTests
             .ToListAsync();
         var componentTaxes = await context.Taxes.Where(tax => componentTaxIds.Contains(tax.Id)).ToListAsync();
         componentTaxes.Should().HaveCount(3);
-        componentTaxes.Should().OnlyContain(tax =>
-            tax.Applicability == TaxApplicability.Purchases && tax.Category == TaxCategory.Standard);
+        componentTaxes.Should().OnlyContain(tax => tax.Applicability == TaxApplicability.Purchases);
+        componentTaxes.Single(tax => tax.Code == "VAT-STD-PUR").Category.Should().Be(TaxCategory.Standard);
+        componentTaxes.Where(tax => tax.Code is "NHIL-PUR" or "GETFUND-PUR")
+            .Should().OnlyContain(tax => tax.Category == TaxCategory.Levy);
         componentTaxes.Should().OnlyContain(tax => tax.TaxReceivableAccountId.HasValue);
+
+        var salesTaxes = await context.Taxes
+            .Where(tax => tax.TenantId == tenantId &&
+                new[] { "NHIL", "GETFUND", "VAT-STD" }.Contains(tax.Code))
+            .ToListAsync();
+        salesTaxes.Should().HaveCount(3);
+        salesTaxes.Should().OnlyContain(tax => tax.TaxPayableAccountId.HasValue,
+            "every sales tax component must have an output-tax control account before AR approval can post it");
 
         var withholdingGroup = await context.TaxGroups.SingleAsync(group =>
             group.TenantId == tenantId && group.Code == "WHT-SERVICES");
@@ -62,18 +72,18 @@ public sealed class FinanceDemoPrerequisiteSeederTests
             rate.TenantId == tenantId && rate.BaseCurrencyCode == "GHS" && rate.TargetCurrencyCode == "USD");
         // ExchangeRate.Rate follows the canonical source/base -> target convention:
         // 1 GHS = Rate USD. InverseRate is therefore the GHS value of one USD.
-        usd.Rate.Should().Be(0.08m);
-        usd.InverseRate.Should().Be(12.5m);
+        usd.Rate.Should().Be(0.085397m);
+        usd.InverseRate.Should().Be(11.7100m);
 
         var eur = await context.ExchangeRates.SingleAsync(rate =>
             rate.TenantId == tenantId && rate.BaseCurrencyCode == "GHS" && rate.TargetCurrencyCode == "EUR");
-        eur.Rate.Should().Be(0.076m);
-        eur.InverseRate.Should().Be(13.157895m);
+        eur.Rate.Should().Be(0.075310m);
+        eur.InverseRate.Should().Be(13.2785m);
 
         var gbp = await context.ExchangeRates.SingleAsync(rate =>
             rate.TenantId == tenantId && rate.BaseCurrencyCode == "GHS" && rate.TargetCurrencyCode == "GBP");
-        gbp.Rate.Should().Be(0.063m);
-        gbp.InverseRate.Should().Be(15.873016m);
+        gbp.Rate.Should().Be(0.064392m);
+        gbp.InverseRate.Should().Be(15.5298m);
     }
 
     [Fact]
@@ -89,6 +99,87 @@ public sealed class FinanceDemoPrerequisiteSeederTests
         source.Should().NotContain("FA-2024-EQP-001");
         source.Should().NotContain("FA-2024-EQP-002");
         source.Should().NotContain("FA-2024-VEH-001");
+    }
+
+    [Fact]
+    public async Task StandardFinanceSeed_ShouldProvisionEveryGovernedFixedAssetAndFinanceSettingsGlDefault()
+    {
+        await using var context = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var baseDate = new DateTime(2026, 1, 1);
+        var seeder = new FinanceDataSeeder(context, NullLogger<FinanceDataSeeder>.Instance);
+        var chartMethod = typeof(FinanceDataSeeder).GetMethod(
+            "GetStandardChartOfAccounts",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        var categoryMethod = typeof(FinanceDataSeeder).GetMethod(
+            "SeedFixedAssetCategoriesAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        var settingsMethod = typeof(FinanceDataSeeder).GetMethod(
+            "SeedFinanceSettingsAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        chartMethod.Should().NotBeNull();
+        categoryMethod.Should().NotBeNull();
+        settingsMethod.Should().NotBeNull();
+        var accounts = (List<Account>)chartMethod!.Invoke(seeder, new object[] { tenantId, baseDate })!;
+        context.Accounts.AddRange(accounts);
+        await context.SaveChangesAsync();
+
+        accounts.Select(account => account.AccountCode).Should().Contain(new[]
+        {
+            "1030", "1090", "1210", "1540", "1545", "1580", "1595",
+            "2050", "2510", "3200", "4930", "4935", "4940", "5010",
+            "6310", "6320", "6330", "6610", "6700"
+        });
+
+        await (Task)categoryMethod!.Invoke(seeder, new object[] { tenantId, baseDate })!;
+        await (Task)settingsMethod!.Invoke(seeder, new object[] { tenantId, baseDate })!;
+        await context.SaveChangesAsync();
+
+        var categories = await context.FixedAssetCategories
+            .Where(category => category.TenantId == tenantId && !category.IsDeleted)
+            .ToListAsync();
+        categories.Should().NotBeEmpty();
+        categories.Should().OnlyContain(category =>
+            category.GainOnDisposalAccountId.HasValue
+            && category.LossOnDisposalAccountId.HasValue
+            && category.DisposalProceedsClearingAccountId.HasValue
+            && category.RevaluationSurplusAccountId.HasValue
+            && category.RevaluationLossAccountId.HasValue
+            && category.ImpairmentLossAccountId.HasValue
+            && category.AccumulatedImpairmentAccountId.HasValue
+            && category.ImpairmentReversalAccountId.HasValue
+            && category.AucAccountId.HasValue);
+
+        var settings = await context.FinanceSettings.SingleAsync(item => item.TenantId == tenantId);
+        settings.ReturnToVendorClearingAccountId.Should().NotBeNull();
+        settings.PurchaseReturnVarianceAccountId.Should().NotBeNull();
+        settings.RetainedEarningsAccountId.Should().NotBeNull();
+        settings.UnrealizedGainLossAccountId.Should().NotBeNull();
+        settings.UnrealizedFxGainAccountId.Should().NotBeNull();
+        settings.UnrealizedFxLossAccountId.Should().NotBeNull();
+        settings.RealizedGainLossAccountId.Should().NotBeNull();
+        settings.RealizedFxGainAccountId.Should().NotBeNull();
+        settings.RealizedFxLossAccountId.Should().NotBeNull();
+        settings.SuspenseAccountId.Should().NotBeNull();
+        settings.SegmentClearingAccountId.Should().NotBeNull();
+        settings.ControlAccountArId.Should().NotBeNull();
+        settings.ControlAccountApId.Should().NotBeNull();
+        settings.SupplierAdvanceAccountId.Should().NotBeNull();
+        settings.CustomerAdvanceAccountId.Should().NotBeNull();
+        settings.ControlAccountInventoryId.Should().NotBeNull();
+        settings.ControlAccountPayrollId.Should().NotBeNull();
+        settings.ControlAccountTaxId.Should().NotBeNull();
+        settings.ControlAccountCOGSId.Should().NotBeNull();
+        settings.ControlAccountGRVAccrualId.Should().NotBeNull();
+        settings.DiscountAllowedAccountId.Should().NotBeNull();
+        settings.DiscountReceivedAccountId.Should().NotBeNull();
+        settings.MigrationClearingAccountId.Should().NotBeNull();
+        settings.LeaseRouAssetAccountId.Should().NotBeNull();
+        settings.LeaseLiabilityAccountId.Should().NotBeNull();
+        settings.LeaseInterestExpenseAccountId.Should().NotBeNull();
+        settings.WriteOffExpenseAccountId.Should().NotBeNull();
+        settings.WriteOffRecoveryAccountId.Should().NotBeNull();
     }
 
     [Fact]

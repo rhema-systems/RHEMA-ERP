@@ -107,12 +107,18 @@ public sealed class AccountSegmentStructureService : IAccountSegmentStructureSer
                 throw new InvalidOperationException("Only a draft account-number segment can be activated.");
             ValidateDefinition(item.SegmentName, item.SegmentCode, item.SegmentPosition, item.SegmentLength, item.DataType);
             await EnsureUniqueAsync(item.Id, item.SegmentCode, item.SegmentPosition, item.IsNaturalAccount, cancellationToken);
-            await EnsureActivationReadyAsync(item, cancellationToken);
+            var activation = await PrepareActivationAsync(item, dto, cancellationToken);
             var before = Snapshot(item);
             item.LifecycleStatus = AccountSegmentLifecycleStatus.Active; item.IsActive = true;
             item.UpdatedAt = DateTime.UtcNow; item.UpdatedBy = UserName;
             await _db.SaveChangesAsync(cancellationToken);
-            await RecordAuditAsync(FinanceAuditEvents.AccountSegmentStructureActivated, item, before, Snapshot(item), dto.Reason, cancellationToken);
+            await BackfillActivatedSegmentAsync(item, activation, cancellationToken);
+            await RecordAuditAsync(FinanceAuditEvents.AccountSegmentStructureActivated, item, before, new
+            {
+                Segment = Snapshot(item),
+                ExistingAccountsBackfilled = activation.Accounts.Count,
+                DefaultSegmentValue = activation.DefaultValue
+            }, dto.Reason, cancellationToken);
             return (await GetByIdAsync(item.Id, cancellationToken))!;
         }, cancellationToken);
 
@@ -165,12 +171,6 @@ public sealed class AccountSegmentStructureService : IAccountSegmentStructureSer
         return true;
     }, cancellationToken);
 
-    public async Task RegenerateAccountNumbersAsync(CancellationToken cancellationToken = default)
-    {
-        if (await _db.AccountSegmentValues.AnyAsync(value => value.TenantId == TenantId && !value.IsDeleted, cancellationToken))
-            throw new InvalidOperationException("Bulk identity regeneration is prohibited after account identities exist; use a governed remediation workflow.");
-    }
-
     private IQueryable<AccountSegmentStructure> Query() => _db.AccountSegmentStructures.AsNoTracking()
         .AsSplitQuery().Include(item => item.LookupValues.Where(value => !value.IsDeleted))
         .Where(item => item.TenantId == TenantId && !item.IsDeleted);
@@ -178,12 +178,17 @@ public sealed class AccountSegmentStructureService : IAccountSegmentStructureSer
     private async Task<IReadOnlyList<AccountSegmentStructureDto>> MapAsync(IEnumerable<AccountSegmentStructure> items, CancellationToken ct)
     {
         var materialized = items.ToList(); var ids = materialized.Select(item => item.Id).ToArray();
-        var counts = await _db.AccountSegmentValues.AsNoTracking().Where(value => ids.Contains(value.SegmentStructureId) && !value.IsDeleted)
-            .GroupBy(value => value.SegmentStructureId).Select(group => new { Id = group.Key, Count = group.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
-        return materialized.Select(item => Map(item, counts.GetValueOrDefault(item.Id))).ToList();
+        var counts = await _db.AccountSegmentValues.AsNoTracking().Where(value => value.TenantId == TenantId
+                && ids.Contains(value.SegmentStructureId) && !value.IsDeleted)
+            .GroupBy(value => value.SegmentStructureId)
+            .Select(group => new { Id = group.Key, Count = group.Select(value => value.AccountId).Distinct().Count() })
+            .ToDictionaryAsync(x => x.Id, x => x.Count, ct);
+        var totalAccounts = await _db.Accounts.AsNoTracking()
+            .CountAsync(account => account.TenantId == TenantId && !account.IsDeleted, ct);
+        return materialized.Select(item => Map(item, counts.GetValueOrDefault(item.Id), totalAccounts)).ToList();
     }
 
-    private static AccountSegmentStructureDto Map(AccountSegmentStructure item, int usage) => new()
+    private static AccountSegmentStructureDto Map(AccountSegmentStructure item, int usage, int totalAccounts) => new()
     {
         Id = item.Id, TenantId = item.TenantId, SegmentName = item.SegmentName, SegmentCode = item.SegmentCode,
         SegmentPosition = item.SegmentPosition, SegmentLength = item.SegmentLength, DataType = item.DataType,
@@ -192,10 +197,13 @@ public sealed class AccountSegmentStructureService : IAccountSegmentStructureSer
         LifecycleStatus = item.LifecycleStatus.ToString(), IsSystemDefined = item.IsSystemDefined,
         RowVersion = Convert.ToBase64String(item.RowVersion ?? Array.Empty<byte>()), Description = item.Description,
         LookupValuesCount = item.LookupValues.Count(value => !value.IsDeleted), AccountUsageCount = usage,
+        TotalAccountCount = totalAccounts,
         CanBeModified = item.LifecycleStatus == AccountSegmentLifecycleStatus.Draft && usage == 0,
         CanActivate = item.LifecycleStatus == AccountSegmentLifecycleStatus.Draft,
         CanFreeze = item.LifecycleStatus == AccountSegmentLifecycleStatus.Active,
-        RestrictionWarning = usage > 0 ? "This segment forms part of an existing account identity." : null,
+        RestrictionWarning = usage < totalAccounts
+            ? $"Structured identity coverage is incomplete: {usage} of {totalAccounts} GL accounts are assigned."
+            : usage > 0 ? "This segment forms part of every existing account identity." : null,
         LookupValues = item.LookupValues.Where(value => !value.IsDeleted).OrderBy(value => value.DisplayOrder).Select(value => new SegmentLookupValueSummaryDto
         { Id = value.Id, SegmentValue = value.SegmentValue, Description = value.Description, IsActive = value.IsActive, DisplayOrder = value.DisplayOrder }).ToList(),
         CreatedBy = item.CreatedBy ?? "system", CreatedAt = item.CreatedAt, UpdatedBy = item.UpdatedBy, UpdatedAt = item.UpdatedAt
@@ -250,34 +258,139 @@ public sealed class AccountSegmentStructureService : IAccountSegmentStructureSer
                 definition.SegmentLength, definition.DataType);
     }
 
-    private async Task EnsureActivationReadyAsync(AccountSegmentStructure candidate, CancellationToken ct)
+    private async Task<ActivationPreparation> PrepareActivationAsync(
+        AccountSegmentStructure candidate,
+        AccountSegmentLifecycleTransitionDto dto,
+        CancellationToken ct)
     {
+        SegmentLookupValue? defaultLookup = null;
         if (candidate.LookupTableRequired)
         {
-            var values = await _db.SegmentLookupValues.AsNoTracking().Where(value =>
+            var values = await _db.SegmentLookupValues.Where(value =>
                 value.TenantId == TenantId && value.SegmentStructureId == candidate.Id
-                && value.IsActive && !value.IsDeleted).Select(value => value.SegmentValue).ToListAsync(ct);
+                && value.IsActive && !value.IsDeleted).ToListAsync(ct);
             if (values.Count == 0)
                 throw new InvalidOperationException("A lookup-backed account-number segment requires at least one active value before activation.");
             foreach (var value in values)
             {
-                if (value.Length != candidate.SegmentLength || !MatchesDataType(candidate.DataType, value))
-                    throw new InvalidOperationException($"Lookup value '{value}' does not satisfy the segment length or data type.");
+                if (value.SegmentValue.Length != candidate.SegmentLength || !MatchesDataType(candidate.DataType, value.SegmentValue))
+                    throw new InvalidOperationException($"Lookup value '{value.SegmentValue}' does not satisfy the segment length or data type.");
             }
+
+            if (dto.DefaultSegmentLookupValueId.HasValue)
+                defaultLookup = values.SingleOrDefault(value => value.Id == dto.DefaultSegmentLookupValueId.Value)
+                    ?? throw new InvalidOperationException("The selected activation default is not an active lookup value for this segment.");
         }
 
-        var futureIds = await _db.AccountSegmentStructures.AsNoTracking().Where(item =>
+        var activeDefinitions = await _db.AccountSegmentStructures.AsNoTracking().Where(item =>
                 item.TenantId == TenantId && item.IsActive && !item.IsDeleted)
-            .Select(item => item.Id).ToListAsync(ct);
-        futureIds.Add(candidate.Id);
-        var futureSet = futureIds.ToHashSet();
-        var accountSets = await _db.Accounts.AsNoTracking().Where(account => account.TenantId == TenantId && !account.IsDeleted)
-            .Select(account => account.SegmentValues.Where(value => !value.IsDeleted).Select(value => value.SegmentStructureId).ToList())
+            .OrderBy(item => item.SegmentPosition).ToListAsync(ct);
+        var futurePositions = activeDefinitions.Select(item => item.SegmentPosition).Append(candidate.SegmentPosition).OrderBy(value => value).ToList();
+        if (!futurePositions.SequenceEqual(Enumerable.Range(1, futurePositions.Count)))
+            throw new InvalidOperationException("Activating this segment would leave a gap in the mandatory account-number structure positions.");
+
+        var accounts = await _db.Accounts
+            .Include(account => account.SegmentValues.Where(value => !value.IsDeleted))
+            .Where(account => account.TenantId == TenantId && !account.IsDeleted)
+            .OrderBy(account => account.AccountNumber)
             .ToListAsync(ct);
-        if (accountSets.Any(values => values.Count != futureSet.Count || !values.All(futureSet.Contains)))
+        if (accounts.Count == 0)
+            return new ActivationPreparation(accounts, null, null);
+
+        if (!dto.ConfirmExistingAccountBackfill)
             throw new InvalidOperationException(
-                "The segment cannot be activated until every existing GL account has exactly the resulting active identity set.");
+                $"Activation makes this segment mandatory for {accounts.Count} existing GL accounts. Confirm the governed backfill and supply one default value.");
+        if (string.IsNullOrWhiteSpace(dto.Reason))
+            throw new InvalidOperationException("A reason is required when activation changes existing GL account identities.");
+        var defaultValue = (dto.DefaultSegmentValue ?? defaultLookup?.SegmentValue ?? string.Empty).Trim().ToUpperInvariant();
+        if (defaultValue.Length != candidate.SegmentLength || !MatchesDataType(candidate.DataType, defaultValue))
+            throw new InvalidOperationException($"The activation default must contain exactly {candidate.SegmentLength} valid {candidate.DataType} characters.");
+        if (candidate.LookupTableRequired)
+        {
+            defaultLookup ??= await _db.SegmentLookupValues.SingleOrDefaultAsync(value =>
+                value.TenantId == TenantId && value.SegmentStructureId == candidate.Id && value.IsActive && !value.IsDeleted
+                && value.SegmentValue == defaultValue, ct);
+            if (defaultLookup == null || !string.Equals(defaultLookup.SegmentValue, defaultValue, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The activation default must be an active configured lookup value for this segment.");
+        }
+        else if (dto.DefaultSegmentLookupValueId.HasValue)
+            throw new InvalidOperationException("A lookup value ID cannot be supplied for a free-form segment.");
+
+        if (await _db.AccountTransactions.AsNoTracking().AnyAsync(transaction =>
+                transaction.TenantId == TenantId && !transaction.IsDeleted, ct))
+            throw new InvalidOperationException(
+                "Account-number structure activation is blocked after accounting transactions exist. Use a separately approved historical identity migration.");
+
+        var activeIds = activeDefinitions.Select(definition => definition.Id).ToHashSet();
+        var incomplete = accounts.Where(account =>
+        {
+            var assigned = account.SegmentValues.Select(value => value.SegmentStructureId).ToList();
+            return assigned.Count != activeIds.Count || assigned.Distinct().Count() != activeIds.Count || assigned.Any(id => !activeIds.Contains(id));
+        }).Select(account => $"{account.AccountNumber} ({account.Id})").Take(20).ToList();
+        if (incomplete.Count > 0)
+            throw new InvalidOperationException(
+                $"Activation is blocked because existing GL accounts do not have the current active identity set: {string.Join(", ", incomplete)}. Reconcile them before extending the structure.");
+
+        return new ActivationPreparation(accounts, defaultValue, defaultLookup);
     }
+
+    private async Task BackfillActivatedSegmentAsync(
+        AccountSegmentStructure candidate,
+        ActivationPreparation preparation,
+        CancellationToken ct)
+    {
+        if (preparation.Accounts.Count == 0) return;
+        var now = DateTime.UtcNow;
+        foreach (var account in preparation.Accounts)
+        {
+            var submitted = account.SegmentValues.Select(value => new AccountSegmentValueCreateDto
+            {
+                AccountId = account.Id,
+                SegmentStructureId = value.SegmentStructureId,
+                SegmentPosition = value.SegmentPosition,
+                SegmentValue = value.SegmentValue,
+                SegmentLookupValueId = value.SegmentLookupValueId,
+                IsLocked = value.IsLocked,
+                EffectiveDate = value.EffectiveDate,
+                EndDate = value.EndDate
+            }).ToList();
+            submitted.Add(new AccountSegmentValueCreateDto
+            {
+                AccountId = account.Id,
+                SegmentStructureId = candidate.Id,
+                SegmentPosition = candidate.SegmentPosition,
+                SegmentValue = preparation.DefaultValue!,
+                SegmentLookupValueId = preparation.DefaultLookup?.Id,
+                EffectiveDate = now
+            });
+            var identity = await _identity.ValidateAndComposeAsync(TenantId, submitted,
+                existingAccountId: account.Id, cancellationToken: ct);
+            var normalized = identity.Values.Single(value => value.SegmentStructureId == candidate.Id);
+            account.AccountNumber = identity.AccountNumber;
+            account.UpdatedAt = now;
+            account.UpdatedBy = UserName;
+            _db.AccountSegmentValues.Add(new AccountSegmentValue
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                AccountId = account.Id,
+                SegmentStructureId = candidate.Id,
+                SegmentValue = normalized.SegmentValue,
+                SegmentLookupValueId = normalized.SegmentLookupValueId,
+                SegmentValueDescription = preparation.DefaultLookup?.Description,
+                SegmentPosition = candidate.SegmentPosition,
+                EffectiveDate = now,
+                CreatedAt = now,
+                CreatedBy = UserName
+            });
+        }
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private sealed record ActivationPreparation(
+        IReadOnlyList<Account> Accounts,
+        string? DefaultValue,
+        SegmentLookupValue? DefaultLookup);
 
     private async Task<int> UsageCountAsync(Guid id, CancellationToken ct) =>
         await _db.AccountSegmentValues.CountAsync(item => item.TenantId == TenantId && item.SegmentStructureId == id && !item.IsDeleted, ct);
