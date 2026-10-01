@@ -95,9 +95,14 @@ function Protect-OpenSshFile {
 }
 
 function New-DeploymentSshKey {
-    Assert-True ($SshPrivateKeyPath -notmatch '["\r\n]') `
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    Assert-True ($Path -notmatch '["\r\n]') `
         'SshPrivateKeyPath contains unsupported characters.'
-    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $SshPrivateKeyPath))
+    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $Path))
 
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = (Get-Command ssh-keygen.exe -ErrorAction Stop).Source
@@ -106,7 +111,7 @@ function New-DeploymentSshKey {
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
     $startInfo.Arguments = '-q -t ed25519 -N "" ' +
-        '-C "rhema-erp-github-actions" -f "' + $SshPrivateKeyPath + '"'
+        '-C "rhema-erp-github-actions" -f "' + $Path + '"'
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
     try {
@@ -124,12 +129,70 @@ function New-DeploymentSshKey {
     }
 }
 
+function Read-SshPublicKey {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    Assert-True ($Path -notmatch '["\r\n]') `
+        'SshPrivateKeyPath contains unsupported characters.'
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = (Get-Command ssh-keygen.exe -ErrorAction Stop).Source
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.Arguments = '-y -f "' + $Path + '"'
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        [void]$process.Start()
+        $process.StandardInput.Close()
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $stdout = $stdoutTask.GetAwaiter().GetResult().Trim()
+        $stderr = $stderrTask.GetAwaiter().GetResult().Trim()
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            PublicKey = $stdout
+            Error = $stderr
+        }
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
+function Repair-DeploymentSshKey {
+    $replacementPath = "$SshPrivateKeyPath.replacement-$([Guid]::NewGuid().ToString('N'))"
+    try {
+        New-DeploymentSshKey -Path $replacementPath
+        $replacement = Read-SshPublicKey -Path $replacementPath
+        Assert-True ($replacement.ExitCode -eq 0 -and
+            $replacement.PublicKey -match '^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp\d+)\s+[A-Za-z0-9+/=]+') `
+            "The replacement deployment key failed validation. $($replacement.Error)"
+        Copy-Item -LiteralPath $replacementPath -Destination $SshPrivateKeyPath -Force
+        Copy-Item -LiteralPath "$replacementPath.pub" `
+            -Destination "$SshPrivateKeyPath.pub" -Force
+    }
+    finally {
+        foreach ($temporaryPath in @($replacementPath, "$replacementPath.pub")) {
+            if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
+                Remove-Item -LiteralPath $temporaryPath -Force
+            }
+        }
+    }
+}
+
 function Initialize-DeploymentSshIdentity {
     Assert-True ($SshUser -ieq $env:USERNAME) `
         "Run this initializer as the target SSH user '$SshUser'."
     if (-not (Test-Path -LiteralPath $SshPrivateKeyPath -PathType Leaf)) {
         Write-Output 'Creating a dedicated GitHub Actions deployment identity.'
-        New-DeploymentSshKey
+        New-DeploymentSshKey -Path $SshPrivateKeyPath
     }
 
     Assert-True (Test-Path -LiteralPath $SshPrivateKeyPath -PathType Leaf) `
@@ -140,10 +203,21 @@ function Initialize-DeploymentSshIdentity {
         Protect-OpenSshFile -Path $publicKeyPath -AdministratorsOnly
     }
 
-    $publicKey = (& ssh-keygen.exe -y -f $SshPrivateKeyPath | Out-String).Trim()
-    Assert-True ($LASTEXITCODE -eq 0 -and
-        $publicKey -match '^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp\d+)\s+[A-Za-z0-9+/=]+$') `
-        'The deployment SSH private key is invalid or encrypted.'
+    $keyRead = Read-SshPublicKey -Path $SshPrivateKeyPath
+    if ($keyRead.ExitCode -ne 0 -or
+        $keyRead.PublicKey -notmatch '^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp\d+)\s+[A-Za-z0-9+/=]+') {
+        Write-Warning 'The dedicated deployment key is unusable; replacing it with a verified unencrypted key.'
+        Repair-DeploymentSshKey
+        Protect-OpenSshFile -Path $SshPrivateKeyPath
+        if (Test-Path -LiteralPath $publicKeyPath -PathType Leaf) {
+            Protect-OpenSshFile -Path $publicKeyPath -AdministratorsOnly
+        }
+        $keyRead = Read-SshPublicKey -Path $SshPrivateKeyPath
+    }
+    Assert-True ($keyRead.ExitCode -eq 0 -and
+        $keyRead.PublicKey -match '^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp\d+)\s+[A-Za-z0-9+/=]+') `
+        "The deployment SSH private key is invalid or encrypted. $($keyRead.Error)"
+    $publicKey = $keyRead.PublicKey
 
     $sshdConfigPath = 'C:\ProgramData\ssh\sshd_config'
     Assert-True (Test-Path -LiteralPath $sshdConfigPath -PathType Leaf) `
@@ -328,8 +402,9 @@ finally {
 $privateKey = Get-Content -LiteralPath $SshPrivateKeyPath -Raw
 Assert-True ($privateKey -match '-----BEGIN (OPENSSH|RSA|EC) PRIVATE KEY-----') `
     'The deployment SSH key does not contain a supported private-key header.'
-& ssh-keygen.exe -y -f $SshPrivateKeyPath | Out-Null
-Assert-True ($LASTEXITCODE -eq 0) 'The deployment SSH private key is invalid or encrypted.'
+$keyRead = Read-SshPublicKey -Path $SshPrivateKeyPath
+Assert-True ($keyRead.ExitCode -eq 0) `
+    "The deployment SSH private key became unreadable. $($keyRead.Error)"
 
 try {
     Set-GitHubSecretFromMemory -Name 'SYNCFUSION_LICENSE' -Value $syncfusionLicense
