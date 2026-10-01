@@ -83,8 +83,11 @@ browser/device sign-in; use a repository administrator account with Actions
 enabled. If the dedicated deployment key does not exist, the bootstrap creates
 an Ed25519 identity under `C:\RhemaERP\secrets`, authorizes it through the active
 Windows OpenSSH administrator key file, and restricts the key files to SYSTEM and
-Administrators. The final check queues only the release-contract job with build
-and deployment disabled. It does not build or deploy the application.
+Administrators. If Windows OpenSSH Server is absent, it installs the Windows
+capability, configures key-only access for the deployment account on TCP 2222,
+validates the server configuration, and creates the named inbound firewall rule.
+The final check queues only the release-contract job with build and deployment
+disabled. It does not build or deploy the application.
 
 Do not generate `VPS_SSH_KNOWN_HOSTS` inside the workflow. Verify the host key
 through an independent trusted channel before saving it. The workflow requires

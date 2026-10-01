@@ -5,6 +5,7 @@ param(
     [string]$VpsHost = '63.141.230.56',
     [ValidateRange(1, 65535)]
     [int]$SshPort = 2222,
+    [ValidatePattern('^[A-Za-z0-9_.-]+$')]
     [string]$SshUser = 'Administrator',
     [uri]$PublicBaseUrl = 'https://63.141.230.56',
     [string]$SshPrivateKeyPath =
@@ -74,6 +75,139 @@ function Get-GitHubCliPath {
     Assert-True (Test-Path -LiteralPath $portablePath -PathType Leaf) `
         'The portable GitHub CLI installation did not produce gh.exe.'
     return $portablePath
+}
+
+function Initialize-WindowsOpenSshServer {
+    $principal = [Security.Principal.WindowsPrincipal]::new(
+        [Security.Principal.WindowsIdentity]::GetCurrent())
+    Assert-True ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) `
+        'Run this initializer from an elevated Windows PowerShell session.'
+
+    $sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
+    if ($null -eq $sshdService) {
+        Write-Output 'Windows OpenSSH Server is unavailable; installing the Windows capability.'
+        $capability = Get-WindowsCapability -Online |
+            Where-Object Name -Like 'OpenSSH.Server*' |
+            Select-Object -First 1
+        Assert-True ($null -ne $capability) `
+            'Windows OpenSSH Server capability is unavailable on this VPS.'
+        if ($capability.State -ne 'Installed') {
+            $capability = Add-WindowsCapability -Online -Name $capability.Name
+        }
+        Assert-True ($capability.State -eq 'Installed') `
+            'Windows could not install the OpenSSH Server capability.'
+        $sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
+    }
+    Assert-True ($null -ne $sshdService) `
+        'The Windows OpenSSH Server service was not registered after installation.'
+
+    $sshdExecutable = @(
+        (Get-Command sshd.exe -ErrorAction SilentlyContinue).Source,
+        (Join-Path $env:WINDIR 'System32\OpenSSH\sshd.exe')
+    ) | Where-Object {
+        -not [string]::IsNullOrWhiteSpace($_) -and
+        (Test-Path -LiteralPath $_ -PathType Leaf)
+    } | Select-Object -First 1
+    Assert-True (-not [string]::IsNullOrWhiteSpace($sshdExecutable)) `
+        'sshd.exe was not found after installing Windows OpenSSH Server.'
+
+    $script:SshdConfigPath = 'C:\ProgramData\ssh\sshd_config'
+    $serviceDetails = Get-CimInstance Win32_Service -Filter "Name='sshd'" `
+        -ErrorAction SilentlyContinue
+    if ($null -ne $serviceDetails -and
+        $serviceDetails.PathName -match '(?i)(?:^|\s)-f\s+(?:"([^"]+)"|(\S+))') {
+        $customConfigPath = if ($matches[1]) { $matches[1] } else { $matches[2] }
+        if (-not [string]::IsNullOrWhiteSpace($customConfigPath)) {
+            $script:SshdConfigPath = [Environment]::ExpandEnvironmentVariables(
+                $customConfigPath)
+        }
+    }
+
+    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $script:SshdConfigPath))
+    if (Test-Path -LiteralPath $script:SshdConfigPath -PathType Leaf) {
+        $configuration = Get-Content -LiteralPath $script:SshdConfigPath -Raw
+    }
+    else {
+        $defaultConfigPath = Join-Path $env:WINDIR `
+            'System32\OpenSSH\sshd_config_default'
+        $configuration = if (Test-Path -LiteralPath $defaultConfigPath -PathType Leaf) {
+            Get-Content -LiteralPath $defaultConfigPath -Raw
+        }
+        else {
+            "Subsystem sftp sftp-server.exe`r`n"
+        }
+    }
+
+    $blockStart = '# BEGIN RHEMA ERP GITHUB ACTIONS SSH'
+    $blockEnd = '# END RHEMA ERP GITHUB ACTIONS SSH'
+    $managedBlock = @"
+$blockStart
+Port $SshPort
+PubkeyAuthentication yes
+Match User $SshUser
+    AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys
+    PubkeyAuthentication yes
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    AuthenticationMethods publickey
+Match all
+$blockEnd
+"@
+    $managedPattern = '(?ms)^' + [regex]::Escape($blockStart) +
+        '.*?^' + [regex]::Escape($blockEnd) + '\s*'
+    if ($configuration -match $managedPattern) {
+        $configuration = [regex]::Replace(
+            $configuration,
+            $managedPattern,
+            $managedBlock + [Environment]::NewLine,
+            1)
+    }
+    else {
+        $configuration = $managedBlock + [Environment]::NewLine + $configuration
+    }
+    [IO.File]::WriteAllText(
+        $script:SshdConfigPath,
+        $configuration,
+        [Text.UTF8Encoding]::new($false))
+
+    & $sshdExecutable -t -f $script:SshdConfigPath
+    Assert-True ($LASTEXITCODE -eq 0) `
+        "Windows OpenSSH rejected its managed configuration: $($script:SshdConfigPath)"
+    & ssh-keygen.exe -A
+    Assert-True ($LASTEXITCODE -eq 0) 'Windows OpenSSH host-key preparation failed.'
+
+    Set-Service -Name sshd -StartupType Automatic
+    $sshdService = Get-Service -Name sshd
+    if ($sshdService.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running) {
+        Restart-Service -Name sshd -Force
+    }
+    else {
+        Start-Service -Name sshd
+    }
+    $sshdService = Get-Service -Name sshd
+    $sshdService.WaitForStatus(
+        [System.ServiceProcess.ServiceControllerStatus]::Running,
+        [TimeSpan]::FromSeconds(30))
+
+    $firewallDisplayName = "RhemaERP GitHub Actions SSH $SshPort"
+    $firewallRule = Get-NetFirewallRule -DisplayName $firewallDisplayName `
+        -ErrorAction SilentlyContinue
+    if ($null -eq $firewallRule) {
+        New-NetFirewallRule `
+            -DisplayName $firewallDisplayName `
+            -Direction Inbound `
+            -Action Allow `
+            -Protocol TCP `
+            -LocalPort $SshPort `
+            -Profile Any | Out-Null
+    }
+    else {
+        $firewallRule | Set-NetFirewallRule -Enabled True -Action Allow | Out-Null
+        $firewallRule | Get-NetFirewallPortFilter |
+            Set-NetFirewallPortFilter -Protocol TCP -LocalPort $SshPort | Out-Null
+    }
+
+    Write-Output "Windows OpenSSH Server is ready on TCP $SshPort."
 }
 
 function Protect-OpenSshFile {
@@ -219,13 +353,12 @@ function Initialize-DeploymentSshIdentity {
         "The deployment SSH private key is invalid or encrypted. $($keyRead.Error)"
     $publicKey = $keyRead.PublicKey
 
-    $sshdConfigPath = 'C:\ProgramData\ssh\sshd_config'
+    $sshdConfigPath = $script:SshdConfigPath
     Assert-True (Test-Path -LiteralPath $sshdConfigPath -PathType Leaf) `
         "OpenSSH server configuration was not found: $sshdConfigPath"
     $sshdConfig = Get-Content -LiteralPath $sshdConfigPath -Raw
-    $usesAdministratorKeys =
-        $sshdConfig -match '(?im)^\s*Match\s+Group\s+administrators\s*$' -and
-        $sshdConfig -match '(?im)^\s*AuthorizedKeysFile\s+(?:__PROGRAMDATA__|%PROGRAMDATA%)/ssh/administrators_authorized_keys\s*$'
+    $usesAdministratorKeys = $sshdConfig -match
+        '(?im)^\s*AuthorizedKeysFile\s+(?:__PROGRAMDATA__|%PROGRAMDATA%)/ssh/administrators_authorized_keys\s*$'
     $authorizedKeysPath = if ($usesAdministratorKeys) {
         'C:\ProgramData\ssh\administrators_authorized_keys'
     }
@@ -322,11 +455,12 @@ Assert-True ($PublicBaseUrl.IsAbsoluteUri -and $PublicBaseUrl.Scheme -eq 'https'
     -not $PublicBaseUrl.UserInfo -and -not $PublicBaseUrl.Query -and
     -not $PublicBaseUrl.Fragment -and $PublicBaseUrl.AbsolutePath -eq '/') `
     'PublicBaseUrl must be an HTTPS origin without a path, query, credentials, or fragment.'
-Assert-True ($null -ne (Get-Command ssh-keygen.exe -ErrorAction SilentlyContinue)) `
-    'Required command is unavailable: ssh-keygen.exe'
-Assert-True ($null -ne (Get-Command ssh.exe -ErrorAction SilentlyContinue)) `
-    'Required command is unavailable: ssh.exe'
 $script:GitHubCliPath = Get-GitHubCliPath
+Initialize-WindowsOpenSshServer
+Assert-True ($null -ne (Get-Command ssh-keygen.exe -ErrorAction SilentlyContinue)) `
+    'Required command is unavailable after OpenSSH installation: ssh-keygen.exe'
+Assert-True ($null -ne (Get-Command ssh.exe -ErrorAction SilentlyContinue)) `
+    'Required command is unavailable after OpenSSH installation: ssh.exe'
 Initialize-DeploymentSshIdentity
 $sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
 Assert-True ($null -ne $sshdService -and $sshdService.Status -eq 'Running') `
