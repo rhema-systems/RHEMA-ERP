@@ -123,6 +123,10 @@ foreach ($contract in @('DeployOnly', 'ArtifactDirectory',
 }
 Assert-Test (-not $deploy.Contains("NODE_OPTIONS = '--max-old-space-size=8192'")) `
     'The legacy deployer still overrides the build wrapper heap with 8 GB.'
+Assert-Test $deploy.Contains('$script:ArtifactCommit = $ExpectedCommit.ToLowerInvariant()') `
+    'Deploy-only reuse does not separate the current orchestration commit from the artifact commit.'
+Assert-Test $deploy.Contains('if ($manifest.commit -ne $script:ArtifactCommit)') `
+    'Deploy-only validation does not bind the manifest to the reused artifact commit.'
 Assert-Test $deploy.Contains('Set-WindowsProcessArguments -StartInfo $startInfo') `
     'The deployer does not use its Windows PowerShell 5.1 process-argument adapter.'
 Assert-Test (-not $deploy.Contains('$startInfo.ArgumentList.Add(')) `
