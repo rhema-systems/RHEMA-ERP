@@ -301,9 +301,17 @@ public class CalibrationSessionService : ICalibrationSessionService
         // Only those waiting for calibration (E-b): a link on one already calibrated read as this
         // session's calibration of it, and the commit skips what its session calibrated. A panel
         // restating a calibrated appraisal reaches it through its adjustment.
+        //
+        // One holder at a time (performance closure E-g2, D-81): an appraisal another panel links is taken when that
+        // panel no longer sits — completed and never committed, it pinned the appraisal to a panel that had sat, and
+        // every later opening passed it over. One a sitting panel holds stays with that panel.
         var scoped = await GetScopedAppraisalsAsync(entity, cancellationToken);
+        var holders = await HoldersAsync(scoped, sessionId, cancellationToken);
         var linked = 0;
-        foreach (var appraisal in scoped.Where(a => a.CalibrationSessionId == null && !a.IsCalibrated))
+        foreach (var appraisal in scoped.Where(a => !a.IsCalibrated
+                     && (a.CalibrationSessionId == null
+                         || !holders.TryGetValue(a.CalibrationSessionId.Value, out var holder)
+                         || !IsSitting(holder.Status))))
         {
             appraisal.CalibrationSessionId = sessionId;
             await _appraisalRepository.UpdateAsync(appraisal);
@@ -969,6 +977,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
         // Where each appraisal is, by the same gates every other write is held to (B1).
         var gateStates = await _lifecycle.GetStatesAsync(scopedIds, cancellationToken);
+        var holders = await HoldersAsync(scoped, sessionId, cancellationToken);
 
         foreach (var appraisal in scoped)
         {
@@ -985,7 +994,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
             gateStates.TryGetValue(appraisal.Id, out var gateState);
             managers.TryGetValue(appraisal.Id, out var manager);
-            var skip = CommitSkipReason(session, appraisal, gateState, adjustedHere, manager?.SubmittedDate);
+            var skip = CommitSkipReason(session, appraisal, gateState, adjustedHere, manager?.SubmittedDate, HolderOf(appraisal, holders));
             if (skip != null)
             {
                 // Opening the session linked every appraisal in its scope to it; one it does not
@@ -1070,10 +1079,24 @@ public class CalibrationSessionService : ICalibrationSessionService
     /// </summary>
     private static string? CommitSkipReason(
         CalibrationSession session, PerformanceAppraisal appraisal, AppraisalGateState? state,
-        bool adjustedHere, DateTime? managerSubmittedDate)
+        bool adjustedHere, DateTime? managerSubmittedDate, PanelHolder? holder)
     {
         if (appraisal.IsCalibrated && appraisal.CalibrationSessionId == session.Id)
             return "Already calibrated by this session: what has happened to it since stands.";
+
+        // One holder at a time (performance closure E-g2, D-81): another panel still sitting over the appraisal decides
+        // it — two panels each restated one score, and the last commit won; and a panel that sat after this one decides
+        // it — an old panel committed late overwrote the newer one's calibration. A panel that sat before this one does
+        // not stop it: a later panel restating a calibrated appraisal through its own adjustment is how one is corrected.
+        if (holder is { } h)
+        {
+            if (IsSitting(h.Status))
+                return $"Held by the panel '{h.Name}', still sitting: that panel decides it.";
+            if ((h.CompletedDate ?? DateTime.MinValue) > (session.CompletedDate ?? DateTime.MaxValue))
+                return appraisal.IsCalibrated
+                    ? $"Calibrated by the panel '{h.Name}', which sat after this one: its calibration stands."
+                    : $"Held by the panel '{h.Name}', which sat after this one: that panel decides it.";
+        }
 
         switch (appraisal.Status)
         {
@@ -1110,7 +1133,37 @@ public class CalibrationSessionService : ICalibrationSessionService
     }
 
     /// <summary>What a manager evaluation contributes to calibration: its total, and when it was last submitted.</summary>
-    private sealed record ManagerEvaluationFacts(decimal? Total, DateTime? SubmittedDate);
+    /// <summary>
+    /// A submitted manager evaluation's total and when it was last submitted. <paramref name="Reevaluating"/>: HR returned
+    /// it — it holds a total from its earlier submission and is open again — so it has no total to show until the manager
+    /// submits again (performance closure E-g2, D-82: the grid read the old total as the manager's proposal).
+    /// </summary>
+    private sealed record ManagerEvaluationFacts(decimal? Total, DateTime? SubmittedDate, bool Reevaluating);
+
+    /// <summary>The panel that links an appraisal, when it is not the session at hand.</summary>
+    private sealed record PanelHolder(string Name, CalibrationStatus Status, DateTime? CompletedDate);
+
+    private static bool IsSitting(CalibrationStatus status) => status is CalibrationStatus.Pending or CalibrationStatus.InProgress;
+
+    /// <summary>The panels other than <paramref name="sessionId"/> that link any of <paramref name="appraisals"/>, by id.</summary>
+    private async Task<Dictionary<Guid, PanelHolder>> HoldersAsync(
+        IEnumerable<PerformanceAppraisal> appraisals, Guid sessionId, CancellationToken cancellationToken)
+    {
+        var ids = appraisals
+            .Where(a => a.CalibrationSessionId is Guid other && other != sessionId)
+            .Select(a => a.CalibrationSessionId!.Value)
+            .Distinct()
+            .ToList();
+        if (ids.Count == 0) return new Dictionary<Guid, PanelHolder>();
+
+        var tenantId = GetTenantId();
+        return await _sessionRepository.GetQueryable()
+            .Where(s => s.TenantId == tenantId && ids.Contains(s.Id))
+            .ToDictionaryAsync(s => s.Id, s => new PanelHolder(s.SessionName, s.Status, s.CompletedDate), cancellationToken);
+    }
+
+    private static PanelHolder? HolderOf(PerformanceAppraisal appraisal, Dictionary<Guid, PanelHolder> holders)
+        => appraisal.CalibrationSessionId is Guid holderId && holders.TryGetValue(holderId, out var holder) ? holder : null;
 
     private async Task<Dictionary<Guid, ManagerEvaluationFacts>> ManagerEvaluationsAsync(
         List<Guid> appraisalIds, CancellationToken cancellationToken)
@@ -1121,7 +1174,10 @@ public class CalibrationSessionService : ICalibrationSessionService
                 .Select(e => new { e.AppraisalId, e.TotalScore, e.SubmittedDate })
                 .ToListAsync(cancellationToken))
             .GroupBy(x => x.AppraisalId)
-            .ToDictionary(g => g.Key, g => new ManagerEvaluationFacts(g.Max(x => x.TotalScore), g.Max(x => x.SubmittedDate)));
+            .ToDictionary(g => g.Key, g => new ManagerEvaluationFacts(
+                g.Where(x => x.SubmittedDate != null).Max(x => x.TotalScore),
+                g.Max(x => x.SubmittedDate),
+                g.All(x => x.SubmittedDate == null) && g.Any(x => x.TotalScore != null)));
 
     /// <summary>
     /// Writes item-level panel decisions onto the manager's criterion scores. A criterion the
@@ -1200,6 +1256,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
         // Where each row is, so it can say what a commit would do with it (E-b).
         var gateStates = await _lifecycle.GetStatesAsync(appraisalIds, cancellationToken);
+        var holders = await HoldersAsync(appraisals, session.Id, cancellationToken);
 
         var managerIds = appraisals
             .Where(a => a.Employee?.ManagerId != null)
@@ -1241,7 +1298,9 @@ public class CalibrationSessionService : ICalibrationSessionService
             // an appraisal HR returned showed the old panel's result as the new panel's starting point.
             managers.TryGetValue(appraisal.Id, out var manager);
             var managerTotal = manager?.Total;
-            var preCalibration = appraisal.PreCalibrationScore ?? managerTotal ?? appraisal.OverallScore;
+            // Returned by HR (E-g2, D-82): no proposal and no starting point until the manager submits again.
+            var reevaluating = manager?.Reevaluating == true;
+            var preCalibration = reevaluating ? null : appraisal.PreCalibrationScore ?? managerTotal ?? appraisal.OverallScore;
 
             gateStates.TryGetValue(appraisal.Id, out var gateState);
             var adjustedHere = appraisalAdjustments.Any(a => a.AdjustedScore.HasValue && (a.IsOverall || a.CriterionKey().HasValue));
@@ -1256,6 +1315,7 @@ public class CalibrationSessionService : ICalibrationSessionService
                 DepartmentName = appraisal.Employee?.OrganizationUnit?.Name,
                 AppraisalStatus = appraisal.Status,
                 ManagerProposedScore = managerTotal,
+                ManagerReevaluating = reevaluating,
                 PreCalibrationScore = preCalibration,
                 CalibratedScore = calibratedScore,
                 ScoreAdjustment = calibratedScore.HasValue && preCalibration.HasValue
@@ -1263,7 +1323,7 @@ public class CalibrationSessionService : ICalibrationSessionService
                     : null,
                 AdjustmentRationale = latestOverall?.Rationale,
                 IsCalibrated = appraisal.IsCalibrated,
-                CommitSkipReason = CommitSkipReason(session, appraisal, gateState, adjustedHere, manager?.SubmittedDate),
+                CommitSkipReason = CommitSkipReason(session, appraisal, gateState, adjustedHere, manager?.SubmittedDate, HolderOf(appraisal, holders)),
                 ManagerName = appraisal.Employee?.ManagerId != null
                     && managerNameById.TryGetValue(appraisal.Employee.ManagerId.Value, out var managerName)
                         ? managerName

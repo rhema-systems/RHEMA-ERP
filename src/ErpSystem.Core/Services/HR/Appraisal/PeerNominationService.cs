@@ -691,6 +691,64 @@ public class PeerNominationService : IPeerNominationService
     }
 
     /// <inheritdoc/>
+    /// <summary>The reason a nomination carries when its peer has left before it was approved (D-83).</summary>
+    internal const string LeaverRejectionReason = "No longer at work";
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<(PeerNomination Nomination, string PeerName)>> StageLeaverRejectionsAsync(
+        IReadOnlyCollection<PeerNomination> nominations, Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var pending = nominations.Where(n => n.NominationStatus == PeerNominationStatus.Pending).ToList();
+        if (pending.Count == 0) return Array.Empty<(PeerNomination, string)>();
+
+        var peerIds = pending.Select(n => n.PeerEmployeeId).Distinct().ToList();
+        // Deleted employees too: one no longer on the books has left as surely as an inactive one.
+        var peers = await _employeeRepository.GetQueryableIncludingDeleted(e => e.TenantId == tenantId && peerIds.Contains(e.Id))
+            .Select(e => new { e.Id, Name = e.FirstName + " " + e.LastName, AtWork = e.IsActive && !e.IsDeleted })
+            .ToListAsync(cancellationToken);
+        var atWork = peers.Where(p => p.AtWork).Select(p => p.Id).ToHashSet();
+        var names = peers.ToDictionary(p => p.Id, p => p.Name);
+
+        var rejected = new List<(PeerNomination, string)>();
+        foreach (var nomination in pending.Where(n => !atWork.Contains(n.PeerEmployeeId)))
+        {
+            // Tracked: the caller's unit of work saves it (see StageApprovalAsync on why no UpdateAsync).
+            nomination.NominationStatus = PeerNominationStatus.Rejected;
+            nomination.RejectionReason = LeaverRejectionReason;
+            rejected.Add((nomination, names.TryGetValue(nomination.PeerEmployeeId, out var name) ? name : "A peer"));
+        }
+        return rejected;
+    }
+
+    /// <inheritdoc/>
+    public async Task NotifyLeaversRejectedAsync(Guid appraisalId, IReadOnlyCollection<string> peerNames, CancellationToken cancellationToken = default)
+    {
+        if (peerNames.Count == 0) return;
+        var tenantId = GetTenantId();
+        var appraisal = await _appraisalRepository.GetQueryable()
+            .Where(a => a.Id == appraisalId && a.TenantId == tenantId)
+            .Include(a => a.AppraisalCycle)
+            .Include(a => a.Employee)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(cancellationToken);
+        if (appraisal is null) return;
+
+        // As for any rejection: the appraisee may now be below the cycle's minimum and is the one to nominate again.
+        await NotifyQuietlyAsync(new[]
+        {
+            new AppraisalNotificationRequest(
+                appraisal.EmployeeId,
+                AppraisalNotificationType.ActionRequired,
+                $"{peerNames.Count} of your peer nomination(s) were not approved",
+                $"Reason: {string.Join(", ", peerNames)} {(peerNames.Count == 1 ? "is" : "are")} no longer at work. Nominate a replacement if you are now below the minimum.",
+                appraisal.AppraisalCycle?.CycleName,
+                $"/me/performance/appraisals/{appraisal.Id}",
+                appraisal.Id,
+                appraisal.Employee?.FullName,
+                NotificationUrgency.Warning),
+        }, cancellationToken);
+    }
+
     public async Task NotifyApprovedAsync(
         Guid appraisalId,
         IReadOnlyCollection<PeerNomination> approved,

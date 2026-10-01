@@ -453,6 +453,39 @@ public sealed class PerformanceAppraisalDataSeeder
             await _context.SaveChangesAsync(cancellationToken);
             totalCreated++;
 
+            // The form's snapshot, as generation writes it (performance closure E-g2, D-86): the four scored items, their
+            // weights, the KPI targets and the bands. These appraisals were written without one, so their forms opened
+            // empty (the system guide's Rule 8) and every rebuild recreated them so. The free-text question carries no
+            // weight and is not snapshotted, as generation skips it.
+            foreach (var item in templateItems)
+            {
+                var measured = item.KpiDefinitionId != null && item.KpiTargetValue != null;
+                _context.PerformanceAppraisalCriterionConfigs.Add(new PerformanceAppraisalCriterionConfig
+                {
+                    TenantId = tenantId,
+                    PerformanceAppraisalId = appraisal.Id,
+                    TemplateItemId = item.Id,
+                    WeightUsed = item.Weight,
+                    AppraisalTemplateSectionId = item.AppraisalTemplateSectionId,
+                    SectionWeightUsed = item.AppraisalTemplateSectionId == kpiSection.Id ? kpiSection.Weight : competencySection.Weight,
+                    KpiTargetValue = measured ? item.KpiTargetValue : null,
+                    KpiMinValue = measured ? item.KpiMinValue : null,
+                    KpiMaxValue = measured ? item.KpiMaxValue : null,
+                    KpiTargetSource = measured ? KpiTargetSource.Template : null,
+                    GradeRanges = gradeData.Select(g => new PerformanceAppraisalCriterionConfigGradeRange
+                    {
+                        TenantId = tenantId,
+                        GradeDefinitionId = grades[g.Name].Id,
+                        LowScore = (int)g.Min,
+                        HighScore = (int)g.Max,
+                        CreatedAt = now
+                    }).ToList(),
+                    CreatedAt = now
+                });
+                totalCreated += 1 + gradeData.Length;
+            }
+            await _context.SaveChangesAsync(cancellationToken);
+
             var goal1 = new EmployeeGoal
             {
                 TenantId = tenantId,

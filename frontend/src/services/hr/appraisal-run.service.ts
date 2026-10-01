@@ -300,6 +300,18 @@ class PerformanceAppraisalService {
     return apiService.post<PerformanceAppraisal>(`${this.baseUrl}/${appraisalId}/withdraw`, data);
   }
 
+  /**
+   * Rebuilds the appraisal's form — its criterion snapshot — from its own template, before anyone
+   * has scored it (performance closure E-g2, D-86): Draft or Active, its cycle open, its template
+   * approved; 422 otherwise, 403 on your own appraisal.
+   */
+  rebuildForm(appraisalId: string): Promise<{ appraisalId: string; rows: number; message: string }> {
+    return apiService.post<{ appraisalId: string; rows: number; message: string }>(
+      `${this.baseUrl}/${appraisalId}/rebuild-form`,
+      {},
+    );
+  }
+
   // ── Employee acknowledgment ──────────────────────────────────────────────────────
 
   /**

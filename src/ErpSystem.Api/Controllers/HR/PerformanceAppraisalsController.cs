@@ -22,6 +22,7 @@ public class PerformanceAppraisalsController : ControllerBase
     private readonly IPerformanceAppraisalService _appraisalService;
     private readonly IPeerNominationService _peerNominationService;
     private readonly IAppraisalWithdrawalService _withdrawals;
+    private readonly IEffectiveAppraisalConfigurationService _configuration;
     private readonly ICurrentUserService _currentUserService;
     private readonly IHrControlledDocumentService _hrDocuments;
     private readonly ICentralDocumentRepositoryFileService _centralDocuments;
@@ -33,6 +34,7 @@ public class PerformanceAppraisalsController : ControllerBase
         IPerformanceAppraisalService appraisalService,
         IPeerNominationService peerNominationService,
         IAppraisalWithdrawalService withdrawals,
+        IEffectiveAppraisalConfigurationService configuration,
         ICurrentUserService currentUserService,
         IHrControlledDocumentService hrDocuments,
         ICentralDocumentRepositoryFileService centralDocuments,
@@ -43,6 +45,7 @@ public class PerformanceAppraisalsController : ControllerBase
         _appraisalService = appraisalService;
         _peerNominationService = peerNominationService;
         _withdrawals = withdrawals;
+        _configuration = configuration;
         _currentUserService = currentUserService;
         _hrDocuments = hrDocuments;
         _centralDocuments = centralDocuments;
@@ -1396,6 +1399,43 @@ public class PerformanceAppraisalsController : ControllerBase
     /// Draft, Active, or Governance before it is final (D-52). A withdrawn appraisal leaves every
     /// count and keeps what was written, without a score. Not the appraisee's own (403).
     /// </summary>
+    /// <summary>
+    /// Rebuilds the appraisal's form — its criterion snapshot — from its own template, before anyone has scored it
+    /// (performance closure E-g2, D-86). HR's; refused on the officer's own appraisal (403), and on one already scored,
+    /// not a draft or active, on a cycle that is not open, or with no approved template (422).
+    /// </summary>
+    [HttpPost("{id:guid}/rebuild-form")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
+    public async Task<IActionResult> RebuildForm(Guid id, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var rows = await _configuration.RebuildSnapshotAsync(id, _currentUserService.EmployeeId, cancellationToken);
+            return Ok(new { appraisalId = id, rows, message = $"The form was rebuilt from its template: {rows} row(s)." });
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "rebuilding the appraisal's form");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error rebuilding the form of appraisal {Id}", id);
+            return StatusCode(500, new { message = "An error occurred while rebuilding the appraisal's form." });
+        }
+    }
+
     [HttpPost("{id:guid}/withdraw")]
     [ProducesResponseType(typeof(PerformanceAppraisalDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

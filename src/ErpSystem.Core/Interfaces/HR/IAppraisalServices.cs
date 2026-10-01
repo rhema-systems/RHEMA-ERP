@@ -391,6 +391,18 @@ public interface IPeerNominationService
     /// <summary>Tells each approved peer they have been asked for feedback, with the due date. Best-effort.</summary>
     Task NotifyApprovedAsync(
         Guid appraisalId, IReadOnlyCollection<PeerNomination> approved, DateTime? dueDate, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Rejects the pending nominations among <paramref name="nominations"/> whose peer is no longer at work — inactive, or
+    /// no longer on the books — with the reason <c>No longer at work</c>, on the caller's unit of work (performance closure
+    /// E-g2, D-83: HR's advance approved them, made the leaver an evaluation and asked them for feedback). Returns the
+    /// rejected nominations and their peers' names; the caller saves, then calls <see cref="NotifyLeaversRejectedAsync"/>.
+    /// </summary>
+    Task<IReadOnlyList<(PeerNomination Nomination, string PeerName)>> StageLeaverRejectionsAsync(
+        IReadOnlyCollection<PeerNomination> nominations, Guid tenantId, CancellationToken cancellationToken = default);
+
+    /// <summary>Tells the appraisee which of their nominations were rejected because the peer has left. Best-effort.</summary>
+    Task NotifyLeaversRejectedAsync(Guid appraisalId, IReadOnlyCollection<string> peerNames, CancellationToken cancellationToken = default);
 }
 
 #endregion Peer Nomination
@@ -1253,6 +1265,15 @@ public interface IEffectiveAppraisalConfigurationService
     /// template (no re-resolution); omit it to let the service resolve automatically.
     /// </summary>
     Task SnapshotConfigAsync(Guid performanceAppraisalId, Guid employeeId, Guid cycleId, Guid? templateId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Rebuilds an appraisal's criterion snapshot — the form's rows, weights, targets and bands — from its own template
+    /// (performance closure E-g2, D-86: an appraisal generated or seeded without one opened empty, and nothing could
+    /// rebuild it). Only while nobody has scored it: Draft or Active, its cycle open, no evaluation submitted and no score
+    /// saved, its template approved. The template rows it had are replaced whole; the goal rows are rebuilt. Refused to
+    /// the appraisee (<paramref name="actorEmployeeId"/>). Returns the number of template rows written.
+    /// </summary>
+    Task<int> RebuildSnapshotAsync(Guid performanceAppraisalId, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 }
 
 #endregion Effective Appraisal Configuration

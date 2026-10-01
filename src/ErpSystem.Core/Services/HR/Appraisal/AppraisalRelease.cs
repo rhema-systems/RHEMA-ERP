@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Services.HR.Appraisal;
@@ -40,6 +41,26 @@ public static class AppraisalRelease
             && (!requireHrReview || hrApproved),
         _ => false,
     };
+
+    /// <summary>
+    /// Whether an appraisal's outcome stands for a withdrawal (performance closure E-g2, D-84): released to the employee.
+    /// The withdrawal read the settle's "final", which waits for HR's sign-off — so in a cycle without HR review an
+    /// outcome the employee could already read was never final, and a leaver's exit withdrew it. Every final appraisal is
+    /// released. Reads the HR reviews and the cycle's settings; with the settings not loaded it falls back to "final".
+    /// </summary>
+    public static bool StandsForWithdrawal(PerformanceAppraisal appraisal)
+    {
+        if (AppraisalScoreService.IsFinal(appraisal)) return true;
+        var settings = appraisal.AppraisalCycle?.AppraisalSettings;
+        if (settings == null) return false;
+        return IsReleased(
+            appraisal.Status,
+            appraisal.IsCalibrated,
+            appraisal.HRReviews.Any(r => r.ReviewCompletedDate != null && r.IsApproved),
+            appraisal.AppealRemandedDate != null,
+            settings.RequireCalibration,
+            settings.RequireHRReview);
+    }
 
     /// <summary>
     /// Withholds the outcome from the appraisee's own view of an unreleased appraisal: every

@@ -2657,6 +2657,12 @@ public class HRReviewDto
     /// Withdraw button reads it; the server decides again on the write.
     /// </summary>
     public bool CanWithdraw { get; set; }
+
+    /// <summary>
+    /// Its form has no rows and nobody has scored it, so HR may rebuild the form from its template (performance closure
+    /// E-g2, D-86). The page's *Rebuild form* button reads it; the server decides again on the write.
+    /// </summary>
+    public bool CanRebuildForm { get; set; }
 }
 
 /// <summary>
@@ -5831,6 +5837,11 @@ public class CalibrationMatrixRowDto
     public AppraisalStatus AppraisalStatus { get; set; }
     /// <summary>The manager's own evaluation total, before any calibration.</summary>
     public decimal? ManagerProposedScore { get; set; }
+    /// <summary>
+    /// HR returned the appraisal to its manager, who has not submitted again: there is no proposal or starting point to
+    /// show (performance closure E-g2, D-82 — the grid read the returned evaluation's old total).
+    /// </summary>
+    public bool ManagerReevaluating { get; set; }
     public decimal? PreCalibrationScore { get; set; }
 
     /// <summary>

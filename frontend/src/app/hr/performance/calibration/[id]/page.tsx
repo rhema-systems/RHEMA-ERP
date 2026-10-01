@@ -528,7 +528,16 @@ export default function CalibrationSessionDetailPage() {
                             {row.managerName ?? '—'}
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
-                            {score(row.managerProposedScore)}
+                            {row.managerReevaluating ? (
+                              <span
+                                className="text-xs text-muted-foreground"
+                                title="HR returned this appraisal to the manager; the earlier total no longer stands."
+                              >
+                                Being re-evaluated
+                              </span>
+                            ) : (
+                              score(row.managerProposedScore)
+                            )}
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
                             {score(row.preCalibrationScore)}
@@ -782,7 +791,9 @@ export default function CalibrationSessionDetailPage() {
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <div className="text-muted-foreground">Manager proposed</div>
-                <div className="tabular-nums">{score(adjustRow?.managerProposedScore)}</div>
+                <div className="tabular-nums">
+                  {adjustRow?.managerReevaluating ? 'Being re-evaluated' : score(adjustRow?.managerProposedScore)}
+                </div>
               </div>
               <div>
                 <div className="text-muted-foreground">Pre-calibration</div>

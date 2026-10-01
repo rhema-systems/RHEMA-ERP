@@ -279,6 +279,7 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         var actions = new List<string>();
         var now     = DateTime.UtcNow;
         IReadOnlyList<PeerNomination> approvedByAdvance = Array.Empty<PeerNomination>();
+        IReadOnlyList<string> leaversRejected = Array.Empty<string>();
 
         // The advance is work on the appraisal, as a first save is: a Draft one is opened.
         if (appraisal.Status == AppraisalStatus.Draft)
@@ -347,9 +348,19 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
                     .Where(n => n.NominationStatus == PeerNominationStatus.Pending)
                     .ToList();
 
-                approvedByAdvance = await _peerNominations.StageApprovalAsync(appraisal, pending, null, ct);
+                // A peer who has left is not asked (performance closure E-g2, D-83): their nomination is rejected with
+                // the reason, and the rest approved. The advance approved it, made the leaver an evaluation and asked them.
+                var rejected = await _peerNominations.StageLeaverRejectionsAsync(pending, appraisal.TenantId, ct);
+                leaversRejected = rejected.Select(r => r.PeerName).ToList();
+                var rejectedIds = rejected.Select(r => r.Nomination.Id).ToHashSet();
 
-                actions.Add($"Approved {approvedByAdvance.Count} pending nomination(s), each peer asked for their feedback. Minimum peer requirement bypassed by HR.");
+                approvedByAdvance = await _peerNominations.StageApprovalAsync(
+                    appraisal, pending.Where(n => !rejectedIds.Contains(n.Id)).ToList(), null, ct);
+
+                var rejectedNote = leaversRejected.Count == 0
+                    ? string.Empty
+                    : $" Rejected {leaversRejected.Count}: {string.Join(", ", leaversRejected)} — no longer at work.";
+                actions.Add($"Approved {approvedByAdvance.Count} pending nomination(s), each peer asked for their feedback.{rejectedNote} Minimum peer requirement bypassed by HR.");
                 actions.Add($"Waived peer nomination: {state.Block.Reason}.");
                 break;
             }
@@ -528,8 +539,10 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         await _advanceLogRepository.AddAsync(auditLog);
         await _unitOfWork.SaveChangesAsync(ct);
 
-        // The peers the advance approved are asked, as an approval by the manager asks them (D-39).
+        // The peers the advance approved are asked, as an approval by the manager asks them (D-39); the appraisee hears of
+        // a nomination rejected because its peer has left (D-83).
         await _peerNominations.NotifyApprovedAsync(appraisalId, approvedByAdvance, null, ct);
+        await _peerNominations.NotifyLeaversRejectedAsync(appraisalId, leaversRejected, ct);
 
         // HR's waiver of goal setting locked the agreed set, so the appraisal's goals section
         // follows it (closure plan L2): one row per locked goal, when the template has one.

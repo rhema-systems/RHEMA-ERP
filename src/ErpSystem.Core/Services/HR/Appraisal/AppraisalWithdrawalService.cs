@@ -110,14 +110,21 @@ public class AppraisalWithdrawalService : IAppraisalWithdrawalService
         var withdrawn = 0;
         foreach (var appraisal in open)
         {
-            if (AppraisalScoreService.IsFinal(appraisal))
+            if (AppraisalRelease.StandsForWithdrawal(appraisal))
             {
                 // D-52: its result stands. It waits only for the acknowledgment the leaver will not
-                // give, and HR's audited advance takes it past that.
-                _logger.LogInformation(
-                    "Leaver {EmployeeId}: appraisal {AppraisalId} ({Number}) is final and is not withdrawn; " +
-                    "HR's advance takes it past the acknowledgment.",
-                    employeeId, appraisal.Id, appraisal.AppraisalNumber);
+                // give, and HR's audited advance takes it past that. Released counts (E-g2, D-84): in a
+                // cycle without HR review the outcome the leaver had read was withdrawn.
+                if (AppraisalScoreService.IsFinal(appraisal))
+                    _logger.LogInformation(
+                        "Leaver {EmployeeId}: appraisal {AppraisalId} ({Number}) is final and is not withdrawn; " +
+                        "HR's advance takes it past the acknowledgment.",
+                        employeeId, appraisal.Id, appraisal.AppraisalNumber);
+                else
+                    _logger.LogInformation(
+                        "Leaver {EmployeeId}: appraisal {AppraisalId} ({Number}) is released to the employee and is not withdrawn; " +
+                        "HR's advance takes it past the acknowledgment.",
+                        employeeId, appraisal.Id, appraisal.AppraisalNumber);
                 continue;
             }
 
@@ -159,6 +166,13 @@ public class AppraisalWithdrawalService : IAppraisalWithdrawalService
                    (appraisal.IsCalibrated ? " and the panel has calibrated it" : string.Empty) +
                    ", so it is final and its result stands. An appraisal is withdrawn before it is final; " +
                    "HR's advance takes a final one past the employee's acknowledgment.";
+
+        // Released stands too (E-g2, D-84): the employee has read its outcome.
+        if (AppraisalRelease.StandsForWithdrawal(appraisal))
+            return "Its outcome has been released to the employee" +
+                   (appraisal.IsCalibrated ? " after calibration" : string.Empty) +
+                   ", so its result stands. An appraisal is withdrawn before its outcome is released; " +
+                   "HR's advance takes it past the employee's acknowledgment.";
 
         return null;
     }

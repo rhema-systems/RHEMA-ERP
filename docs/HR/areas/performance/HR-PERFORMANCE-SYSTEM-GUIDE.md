@@ -78,6 +78,12 @@ names someone, and goes with its target; a journal note keeps whom it is about a
 once and is then the record; a development plan is deleted only as a draft; a recommendation is decided once; a full
 interim review scores each goal once and is never finalised by its own appraisee; a closed calibration panel stays as
 it was; Manager-mode nominations close once the appraisal leaves Active; a withdrawn appraisal takes no file.
+**And for lane E, slice E-g2** (calibration, release, the HR reviewer and the form repair, 2026-10-01): Rule 8 and
+chapters 29–31 — one calibration panel holds an appraisal at a time (a panel that no longer sits gives its appraisals
+up to the next; a commit skips one another sitting panel holds, or one a later panel calibrated), and the grid shows
+*Being re-evaluated* with no number after HR's return; HR's advance rejects a nomination whose peer has left; an
+outcome released to the employee is not withdrawn; the HR reviewer is never the appraisee or their line manager, and
+the review names whoever signs or returns it; HR can rebuild an empty form that nobody has scored.
 **The database was rebuilt on 2026-09-29**: Rule 2, Rule 9, the demo tables and the Efua arithmetic give its figures (Efua 88.56, Cynthia 87.00, Efua's appeal window to 6 October). The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
 **Seventh in the series**, after Recruitment, Employees, Leave, Attendance & Time, Company Schedule and Staff Travel.
 
@@ -383,6 +389,11 @@ snapshot**. Open any evaluation screen on one and you get:
 > snapshot — HR needs to check the template assigned to this employee.*
 
 Every other appraisal on the database — 102 of them — carries its snapshot and opens correctly.
+
+> **Changed 2026-10-01** (closure E-g2, D-86). HR's review page now offers **Rebuild form** on an appraisal whose form
+> is empty and that nobody has scored: it rebuilds the form from the appraisal's own approved template. Until the five
+> are repaired on this database (on the user's go), the rule stands as written; a rebuild of the database seeds them
+> with their forms.
 
 **Never open an appraisal whose number starts `APR-2026-00`.** The real ones are numbered
 `APR-2026-APC2026-TDC/00017-0034`: cycle code, employee number, sequence. If you sort or search, sort
@@ -3795,7 +3806,9 @@ be edited — its due date and instructions — or removed.
 > another**: the counts, the maximum and the self-evaluation's rule count pending and approved ones
 > only (with one peer allowed, a rejection stranded the employee). In **Manager** mode the manager's
 > nominations are approved as they are made — the peer is asked at once — and nobody is asked to
-> approve them. **HR's advance past peer nomination** approves the pending nominations the same way,
+> approve them. **HR's advance past peer nomination** approves the pending nominations the same way —
+> *since closure E-g2* rejecting, with the reason *No longer at work*, any whose peer has left (the appraisee is told,
+> as for any rejection, and the advance's message names it) —
 > forms and notices (it set the status alone, so its "approved" peers had no form). **The peer sees the
 > nomination's due date and the nominator's instructions** — on this database *9 Oct*, where the list
 > showed the cycle's *20 Nov*. **The peer reads a nomination once it is approved**, and their own lists
@@ -4169,7 +4182,8 @@ Leave one blank to leave it alone."*
 | Cancel | `POST …/{id}/cancel` `{ reason }` — from Pending or InProgress; the reason heads the meeting notes; the appraisals it holds are released *(since 2026-09-30; `POST …/start` is gone)* |
 | Close | `POST …/{id}/complete` — adjustments refused afterwards; the panel is notified |
 | **Commit** | `POST …/{id}/apply-adjustments` — **only from Completed, and irreversible**; once per appraisal, and only an evaluation submitted before the panel closed |
-| Grid | `GET …/{id}/matrix` — **every appraisal the session covers, not only the adjusted ones**; each row carries `commitSkipReason` |
+| Grid | `GET …/{id}/matrix` — **every appraisal the session covers, not only the adjusted ones**; each row carries `commitSkipReason`. *Since closure E-g2* a row HR returned to its manager reads *Being re-evaluated* — no manager proposal, no pre-calibration figure (it read the returned total) — until the manager submits again (`managerReevaluating`) |
+| One holder *(since E-g2, D-81)* | An opening takes the scope's uncalibrated appraisals no sitting panel holds — one a completed, never-committed panel held is taken (every later opening passed it over). A commit skips an appraisal another panel still sits over (*Held by the panel '…', still sitting*) and one a panel that sat after it calibrated (*… which sat after this one*): two panels each restated one score, and an old panel committed late overwrote the newer one |
 | Per-criterion detail | `GET …/{id}/appraisals/{appraisalId}/criteria` — a *read*, so panellists get it, not just HR; **404 for an appraisal outside the session's scope** (any session id used to open any appraisal's criteria) |
 | Adjustments | `GET/POST/PUT/DELETE …/{id}/adjustments[/{id}]` — **422 while the session is Pending, Completed or Cancelled** (the removal too, since 2026-09-30), and 422 if the appraisal is outside scope; an edit changes the score and rationale, and 422s a body naming another appraisal or criterion |
 | Panel | `…/{id}/participants[/{id}]`, `PATCH …/attendance` — *since closure E-g1* **422 once the session has completed or been cancelled** (the screen hid the controls and the service took the writes; the remove and attendance routes answered 500 to a refusal) |
@@ -4406,7 +4420,8 @@ you type something.
 | Assign HR reviewer | `POST …/{id}/progress-to-hr-review` — a repair route, offered only when no reviewer was resolved at submission time |
 | Correct dates | `PUT api/PerformanceAppraisals/{id}` — the year and the dates; **422** once final |
 | Remove | `DELETE api/PerformanceAppraisals/{id}` — **`HR.Performance.Admin`**; **422** once anything in it counts |
-| **Withdraw** | `POST …/{id}/withdraw { reason }` — HR write; **400** without a reason, **403** on your own appraisal, **422** once it is final (Completed, Closed, Appealed, or signed off in governance) or already withdrawn |
+| **Withdraw** | `POST …/{id}/withdraw { reason }` — HR write; **400** without a reason, **403** on your own appraisal, **422** once it is final (Completed, Closed, Appealed, or signed off in governance), *since closure E-g2* once its outcome is released to the employee (in a cycle without HR review, at the acknowledgment — a leaver's exit leaves it standing too), or already withdrawn |
+| **Rebuild form** *(since E-g2, D-86)* | `POST …/{id}/rebuild-form` — HR write; offered (`canRebuildForm`) only on a Draft or Active appraisal with an empty form nobody has scored; rebuilds it from the appraisal's own approved template. **403** on your own, **422** once anything is submitted or a draft holds scores, on a cycle not open, or with no approved template |
 
 **The 422s Finalise can answer**, in the order they are checked: self evaluation outstanding · manager
 evaluation outstanding · fewer than the minimum peer reviews · **the calibration gate** *(Rule 3 — the
@@ -4414,7 +4429,9 @@ only one the button does not pre-empt)*.
 
 **The HR reviewer is assigned automatically** when the manager submits: the profile's *Default HR
 reviewer* if one is set, otherwise the **least-loaded** active HR employee, found by position title or
-organisation unit containing "HR". On this database Kwasi's assigned reviewer is **Esi Vanderpuye**, not
+organisation unit containing "HR". *Since closure E-g2 (D-85)* never the appraisee or their line manager (the
+default included), and the review is re-pointed to whoever signs it off or returns it — the record names the
+officer who acted, not the one assigned; after a return, the reviewer is told again when the manager re-submits. On this database Kwasi's assigned reviewer is **Esi Vanderpuye**, not
 Akpene Amoah — and `hr.head` can still finalise, because the endpoint is gated on the HR **write**
 policy rather than on being the named reviewer. Worth knowing; not worth mentioning on stage.
 

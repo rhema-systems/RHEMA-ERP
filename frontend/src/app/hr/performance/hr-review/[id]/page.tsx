@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
-import { Ban, CheckCircle2, Clock, Loader2, Pencil, RotateCcw, Trash2, TriangleAlert, Undo2 } from 'lucide-react';
+import { Ban, CheckCircle2, Clock, Hammer, Loader2, Pencil, RotateCcw, Trash2, TriangleAlert, Undo2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -55,6 +55,10 @@ import type { EvaluationSummary } from '@/types/hr/appraisal-run';
  * someone who left, or should not have been appraised — from Draft, Active, or Governance before it
  * is final. It leaves every count and queue; what was written stays on this page without a score.
  * A leaver's appraisal is withdrawn by the exit itself.
+ *
+ * **Rebuild form** (performance closure E-g2, D-86) appears only on an appraisal whose form has no
+ * rows and that nobody has scored — one generated or seeded without its criterion snapshot, which
+ * opens empty to everyone. It rebuilds the form from the appraisal's own approved template.
  *
  * The precondition panel is the important part of this screen. Finalising with a leg
  * outstanding is refused with 422, so what is missing is shown before the button is pressed
@@ -209,6 +213,17 @@ export default function HRReviewDetailPage() {
       toast({ title: 'Could not withdraw', description: e.message, variant: 'destructive' }),
   });
 
+  const rebuildForm = useMutation({
+    mutationFn: () => performanceAppraisalService.rebuildForm(appraisalId),
+    onSuccess: (r) => {
+      toast({ title: 'Form rebuilt', description: r.message });
+      queryClient.invalidateQueries({ queryKey: ['hr', 'appraisal-record', appraisalId] });
+      refresh();
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Could not rebuild the form', description: e.message, variant: 'destructive' }),
+  });
+
   /**
    * Repair route for an appraisal that reached HR with no reviewer assigned — normally the
    * manager's submission does this. Offered only when it is actually needed.
@@ -298,6 +313,21 @@ export default function HRReviewDetailPage() {
               <Button variant="ghost" onClick={() => setWithdrawOpen(true)}>
                 <Ban className="mr-2 h-4 w-4" />
                 Withdraw
+              </Button>
+            )}
+            {data.canRebuildForm && (
+              <Button
+                variant="outline"
+                onClick={() => rebuildForm.mutate()}
+                disabled={rebuildForm.isPending}
+                title="Its form has no rows: rebuild it from the appraisal's template"
+              >
+                {rebuildForm.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Hammer className="mr-2 h-4 w-4" />
+                )}
+                Rebuild form
               </Button>
             )}
             {!data.isFinalized && !withdrawn && (

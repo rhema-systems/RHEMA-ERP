@@ -958,6 +958,11 @@ export interface HRReview {
    * reader's own appraisal. The server decides again on the write.
    */
   canWithdraw: boolean;
+  /**
+   * Its form has no rows and nobody has scored it, so HR may rebuild the form from its template
+   * (performance closure E-g2, D-86). The server decides again on the write.
+   */
+  canRebuildForm?: boolean;
 }
 
 export interface HRReviewListItem {

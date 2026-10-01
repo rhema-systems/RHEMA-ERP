@@ -90,9 +90,13 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    2026-10-01** (`run-final-lifecycle.mjs` 1185/1185 twice; regression 3719/3728; lane E's E-g1 State block — a definition
    in use is not deleted and keeps what decides results, the grade scale has no gaps, a template names live definitions, a
    journal note keeps whom it is about and the date written, a check-in is held once, only a draft plan is deleted, a
-   recommendation is decided once). **Slice E-g2 is next** — calibration's two sessions and the grid after a return, HR's
-   advance and a leaver peer, "final" against "released", E11 and E12: ask its questions first (the E-g source check has the
-   findings), and § 5's first *Added by lane E-g1* row — a graded scale cannot be replaced — joins them. **Before a long run,
+   recommendation is decided once). ~~Slice **E-g2** (calibration, release, the HR reviewer, the form repair)~~ **Done
+   2026-10-01** (decided first: § 1p D-81–D-87; `run-final-lifecycle.mjs` 1271/1271 twice; regression 3811/3820; lane E's
+   E-g2 State block — one panel holds an appraisal, the grid reads no number after a return, HR's advance rejects a leaver
+   peer, a released outcome stands, the HR reviewer is never the appraisee or line manager and the review names who acts, HR
+   rebuilds an empty form; D-87's scale per profile is in § 6's batch 2). **Two writes await the user's go:** the clean-up
+   of the four rows E-g2's first run wrote about two real HR officers, and the repair of UAT's five Rule 8 forms. **Lane E
+   is complete; lane F is next** — source-check it first. **Before a long run,
    check free RAM and the stuck email queue** (§ 5, the second E-e row): either one starves SQL Server's query memory and
    reads time out at 30 s.
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
@@ -268,6 +272,18 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | D-75 | **PIP numbering and the plan's own rules** — the recommendation handler numbers `PIP-APR-…` and skips the service's rules; approve and reject act from any status on the no-definition path; the plan's subject records their own outcome; the outcome value is unchecked; the number index is neither unique nor per tenant | **Folded, no migration**: the handler numbers `PIP-yyyy-NNNN` through the service's rule and keeps its checks (one live plan, an HR owner, a supervisor who is not the employee); approve and reject act on a pending plan only; the subject (HR included) does not complete, decide or delete their own plan; the outcome is checked. The number race goes to migration batch 2 | E-f, batch 2 |
 | D-76 | **Beyond the rows (E-f)** | **Folded:** goal link ids checked (company, unit and parent goal, library, KPI — tenant, existence, same cycle; a parent the same employee's and not itself; the manager id server-set; P-22 closed as by design; a progress entry's review event the goal's appraisal's); the PIP goal PUT binds its validated DTO (percent 0–100), text lengths checked, the seven goal and meeting routes answer 422/404 not 500; a conversation's review event belongs to its appraisal, and the type error lists every type. **Not folded:** a final review held before its step (§ 5) | E-f |
 
+### 1p. Decisions for slice E-g2 — settled with the user, 2026-10-01 (after E-g1, on the E-g source check and three more surveys)
+
+| # | Question | Decision (2026-10-01) | Affects |
+|---|---|---|---|
+| D-81 | **Two panels over one appraisal** — an opening passes over an appraisal any session links, a Completed-but-uncommitted one included; a commit never asks whether another panel holds it, so two panels each restate one score and the last commit wins; a late commit of an old panel overwrites a newer panel's calibration | **One holder, no schema.** An opening also takes an appraisal held by a panel no longer sitting (not calibrated); a commit takes only an appraisal it holds or nobody holds — one another sitting panel holds, or another panel calibrated, is skipped with the reason, shown on the grid | E-g2 |
+| D-82 | **The grid after HR's return** — *Manager proposed* and the pre-calibration column read the returned evaluation's old total | **Re-evaluating, no number** until the manager submits again | E-g2 |
+| D-83 | **HR's advance and a peer who has left** — the advance approves every pending nomination, a leaver's included (an evaluation made, the leaver asked) | **Reject it, approve the rest** — rejected with the reason *no longer at work*, the appraisee told as for any rejection; the advance's message names it | E-g2 |
+| D-84 | **"Final" against "released"** — in a cycle without HR review an outcome released to the employee is not final by the withdrawal rule, so a leaver's exit withdraws it | **Withdrawal reads "released"** — the exit, HR's withdraw and the Withdraw button treat a released outcome as standing; publishing keeps its timing | E-g2 |
+| D-85 | **The HR reviewer (E11)** — beyond asserting the at-work rule: the appraisee or their line manager can be assigned; the record names the assigned reviewer, not the officer who signs or returns; the return path never reads the profile's default; the reviewer is not told again after a re-submit | **All four folded**, no new column — never the appraisee or the line manager (default and pool); the HR review is re-pointed to whoever signs or returns; the return reads the default; the reviewer told again on re-submit. The pool is asserted with fixture candidates whose planted numbers sort first, deactivated in the teardown | E-g2 |
+| D-86 | **Snapshot repair (E12)** — nothing rebuilds a missing criterion snapshot; UAT's five Rule 8 appraisals open empty, and the seeder recreates them so | **A repair door, the seeder and the five** — an HR action rebuilds the snapshot of an appraisal nobody has scored (Draft or Active, cycle open, its own approved template); the seeder writes the five's snapshot; UAT's five repaired through the action on the user's go | E-g2, S |
+| D-87 | **A graded scale cannot be replaced** (E-g1's consequence of D-78) | **A scale per settings profile, in migration batch 2** — grades keyed to a profile, the resolver reading the appraisal's cycle's scale; E-g1's freeze stays | batch 2 (§ 6) |
+
 ### 1o. Decisions from slice E-g's source check — settled with the user, 2026-10-01
 
 | # | Question | Decision (2026-10-01) | Affects |
@@ -289,7 +305,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ☑ 2026-09-29 — L-a 157/157 twice; L-b 244/244 twice; L-c 261/261 twice (one suite holds L-b and L-c); staged |
 | C | One appeal machine | 2 days (+0.5–1, D-36) | D-22, D-34, D-35, D-36, D-37, D-38 | ☑ **complete 2026-09-30**; C10 was batch 1's. Two slices (D-36): C-a ☑ — 209/209 twice, regression 2089/2098, committed effb567f5. C-b ☑ — source-checked (§ 1f D-37, D-38), `run-final-appeals.mjs` 397/397 twice, regression 2309/2318; staged |
 | D | Peer nomination and evaluation integrity | 1 day (1.5–2, the source check) | D-39, D-40, D-41 | ☑ 2026-09-30 — source-checked (§ 1g); `run-final-nominations.mjs` 186/186 twice, regression 2496/2505; staged |
-| E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | ~12 days (D-42; was 4) | D-10, D-14, D-17, D-20, D-42–D-58 | ◐ source-checked 2026-09-30 (§ 1h); seven slices E-a…E-g. E-a ☑ (130/130 twice, regression 2631/2640), E-b ☑ (`run-final-lifecycle.mjs` 276/276 twice, regression 2777/2786), E-c ☑ (source-checked, § 1i; 391/391 twice, regression 2892/2901; D-14's migration on UAT), E-d split in two (§ 1j): E-d1 ☑ (542/542 twice, regression 3043/3052), E-d2 split in two (§ 1k): E-d2a ☑ (601/601 twice, regression 3104/3113), E-d2b ☑ (source-checked, § 1l; 706/706 twice, regression 3226/3235), E-e ☑ (source-checked, § 1m; 821/821 twice, regression 3352/3361), E-f ☑ (source-checked, § 1n; 1016/1016 twice, regression 3549/3558), E-g split in two (§ 1o): E-g1 ☑ (1185/1185 twice, regression 3719/3728); staged. E-g2 next |
+| E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | ~12 days (D-42; was 4) | D-10, D-14, D-17, D-20, D-42–D-58 | ◐ source-checked 2026-09-30 (§ 1h); seven slices E-a…E-g. E-a ☑ (130/130 twice, regression 2631/2640), E-b ☑ (`run-final-lifecycle.mjs` 276/276 twice, regression 2777/2786), E-c ☑ (source-checked, § 1i; 391/391 twice, regression 2892/2901; D-14's migration on UAT), E-d split in two (§ 1j): E-d1 ☑ (542/542 twice, regression 3043/3052), E-d2 split in two (§ 1k): E-d2a ☑ (601/601 twice, regression 3104/3113), E-d2b ☑ (source-checked, § 1l; 706/706 twice, regression 3226/3235), E-e ☑ (source-checked, § 1m; 821/821 twice, regression 3352/3361), E-f ☑ (source-checked, § 1n; 1016/1016 twice, regression 3549/3558), E-g split in two (§ 1o): E-g1 ☑ (1185/1185 twice, regression 3719/3728), E-g2 ☑ (§ 1p; 1271/1271 twice, regression 3811/3820); staged. **Lane E complete** — F next |
 | F | Recommendations, proposals, probation, PIP chain, segregation of duties | 2.5 days | D-12, D-19; **F1 waits on D-18** (the finish plan's lane 9) | ☐ |
 | G | Notifications on the platform topics | 5 days | D-21, D-28 | ☐ |
 | H | Nightly sweep and the advance path | 2.5 days | D-16, D-21 | ☐ |
@@ -2262,9 +2278,11 @@ not HR's; offered for the cross-module register). No suite was affected.
       - `OverallPeriodScore` is shown as context on the year-end manager form, or dropped.
       - P-5's truncation exists only in the seeder (`PerformanceAppraisalDataSeeder.cs:133`), so it
         moves to S1.
-- [ ] E11 Lane 11's "the HR reviewer must be at work" rule in `AssignHRReviewerAsync` (2c73a55a9) is
+- [x] E11 *(lane E-g2, 2026-10-01 — asserted on UAT with fixture pool candidates; and never the appraisee or line manager, the
+      review re-pointed to who acts, the return reading the default, the re-submit telling the reviewer, D-85)* Lane 11's "the HR reviewer must be at work" rule in `AssignHRReviewerAsync` (2c73a55a9) is
       built but has never been run: assert it (finish plan :1576-1577).
-- [ ] E12 **Snapshot repair (P-13).**
+- [x] E12 **Snapshot repair (P-13).** *(the first bullet in E-c; the repair door, the seeder and — on the user's go — UAT's
+      five in lane E-g2, 2026-10-01, D-86)*
       - Generation stops swallowing snapshot failures (`AppraisalCycleService.cs:1366-1377`): the
         appraisal is not created, and the failure is reported to the caller.
       - An HR action rebuilds a missing criterion snapshot for an appraisal no evaluation has scored.
@@ -2468,9 +2486,10 @@ with each:
       recommendation decided once, an interim finalise that counts each goal once and is not HR's own — D-80); § 5's closed
       panel, empty exclusion, Manager-mode nominations past Active and attachment on a withdrawn appraisal. D-45's three
       items go to batch 2.
-- [ ] **Slice E-g2 — calibration, release and the reviewer.** § 5's two sessions over one appraisal and the grid after a
-      return; HR's advance and a peer who has left; "final" against "released"; E11's assertions (positives on UAT); E12's
-      repair action (UAT's Rule 8 five on the user's go) and the seeder. Its questions are asked when it starts.
+- [x] **Slice E-g2 — calibration, release and the reviewer.** *(2026-10-01 — the E-g2 source check and State blocks below the
+      E-g1 ones; § 1p D-81–D-87; 1271/1271 twice, regression 3811/3820.)* § 5's two sessions over one appraisal and the grid
+      after a return; HR's advance and a peer who has left; "final" against "released"; E11's assertions and four folded
+      findings; E12's repair door and the seeder (UAT's Rule 8 five on the user's go); D-87 to batch 2.
 
 **E-a State (2026-09-30): DONE — built, verified on UAT, staged.** No migration. What exists now:
 - **The raw status routes** — `AppraisalLifecycle.EnsureRawTransition`: `PATCH {id}/status` and the workflow
@@ -3505,6 +3524,87 @@ sections'), with its own template TG and grades G0 and an inactive one, deleted 
 one is not deleted (+1, 340). The demo pack: 060 puts a held check-in's missing notes back through the update, not a second
 complete.
 
+**E-g2 source check (2026-10-01, after E-g1; line numbers as of `56c81f126`).** Three more read-only surveys over E-g2's rows —
+calibration, the advance and release, the HR reviewer and the snapshot — each claim then read again in source; UAT counted
+(the demo's two panels committed, 4 calibrated; no completed-uncommitted link anywhere; 22 harness sessions sitting; the demo
+profile with no default HR reviewer, its four HR reviews on four officers; no pending nomination naming a leaver; the five
+Rule 8 appraisals Active, no snapshot, no evaluation). The user settled seven questions (§ 1p, D-81–D-87). What they found:
+- **Calibration.** An opening links `CalibrationSessionId == null && !IsCalibrated` (CSS :306) — any link, whatever its
+  panel's status, is passed over, and a completed panel releases nothing (only cancel, delete, a commit's skipped rows, HR's
+  return, the withdrawal and HR's advance do). `CommitSkipReason` (:1071) never asks about another panel's link, so a commit
+  restates and takes an appraisal a sitting panel holds, and a late commit of an old panel restates one a newer panel
+  calibrated; nothing stops two panels over one scope. The grid's manager total (:1115) reads the returned evaluation's
+  `TotalScore` (HR's return clears only `SubmittedDate`), and the pre-calibration column falls back to it.
+- **HR's advance** approves every pending nomination through `StageApprovalAsync` (AWS :350) with no at-work check — the
+  leaver gets an evaluation and a notice. A peer is "at work" on `IsActive` alone (not StaffStatus). **"Final"**:
+  `IsFinal` (ASS :365) demands an HR approval even where the cycle has no HR review; the exit (AWithS :113), the withdraw
+  (:157) and the screen's `CanWithdraw` (PAS :4336) read it; `IsReleased` is the outcome rule the reads use.
+- **The HR reviewer** (PAS :4072-4131): the default, then a tenant-wide pool by post or unit name, least load, then number —
+  excluding neither the appraisee nor the line manager; an existing HR evaluation is returned unchanged
+  (`EnsureHRReviewEvaluationAsync` :4767), so whoever signs, the assignee is recorded; the return loads no settings (:4665);
+  a re-submit after a return tells nobody. **The snapshot**: `SnapshotConfigAsync` has one caller (generation) and no
+  repair; re-generation skips existing appraisals; the seeder writes the five with none.
+
+**E-g2 State (2026-10-01): DONE — built, verified on UAT, staged.** No migration. What exists now:
+- **One panel holds an appraisal (D-81)** — `CalibrationSessionService`: an opening takes the scope's uncalibrated appraisals
+  that no *sitting* panel holds (`HoldersAsync`, `IsSitting`); `CommitSkipReason` skips an appraisal another panel still
+  sits over (*Held by the panel '…', still sitting*) and one a panel that sat after this one holds or calibrated (*… which sat
+  after this one*), on the commit and on the grid.
+- **The grid after a return (D-82)** — `ManagerEvaluationFacts.Reevaluating`: a manager evaluation open again with a total
+  from before (HR's return) has no total; the row's `ManagerReevaluating` is set, and *Manager proposed* and the pre-calibration
+  column read nothing — *Being re-evaluated* on the grid and the adjust dialog.
+- **HR's advance and a leaver (D-83)** — `IPeerNominationService.StageLeaverRejectionsAsync` rejects, with *No longer at work*,
+  the pending nominations whose peer is inactive or off the books; the rest are approved; the advance's message adds
+  *Rejected n: names — no longer at work*; `NotifyLeaversRejectedAsync` tells the appraisee, as a manager's rejection does.
+- **Released stands (D-84)** — `AppraisalRelease.StandsForWithdrawal` (final, or released by the cycle's own rules): the exit,
+  HR's withdraw (*Its outcome has been released to the employee …*) and `CanWithdraw` read it; the exit logs *is released to the
+  employee and is not withdrawn*. Publishing is unchanged.
+- **The HR reviewer (D-85)** — never the appraisee or their line manager, as the default or from the pool;
+  `RepointHRReviewToActor` names the officer who signs off or returns (the evaluation and the review record); the return loads
+  the settings; `NotifyHRReviewerAsync` tells the reviewer again when the manager re-submits after a return.
+- **The form repair (D-86)** — `IEffectiveAppraisalConfigurationService.RebuildSnapshotAsync` and
+  `POST api/PerformanceAppraisals/{id}/rebuild-form` (HR write): a Draft or Active appraisal, its cycle open, nothing submitted
+  and no score saved, its own template approved — the template rows replaced whole, the goal rows rebuilt; refused to the
+  appraisee (403). `HRReviewDto.CanRebuildForm` (an empty form nobody scored) shows *Rebuild form* on HR's review page. The
+  seeder writes the five Rule 8 appraisals' snapshot (their four scored items, weights, targets and bands).
+- **D-87** — recorded in § 6, batch 2.
+
+**Where the build refines the rows** (each deliberate; say if one should go back):
+1. **A commit skips another panel's calibration only when that panel sat later** — not every appraisal another panel
+   calibrated: a later panel restating a calibrated appraisal through its own adjustment is E-b's correction path, and the
+   order (each panel's completion) tells a late old commit from a correction.
+2. **The leaver check also catches a peer no longer on the books** (deleted), not only an inactive one.
+3. **The re-submit notice goes to the reviewer of record** — after a return that is the officer who returned it (D-85's
+   re-point).
+4. **The repair replaces the template rows whole** and rebuilds the goal rows; it does not patch a partial snapshot.
+
+**Verified** (Staging API on `ErpSystemDB_UAT`, the build; no pending migration):
+- `run-final-lifecycle.mjs` — **the first run found a harness defect, at a cost**: 1268/1270, its two failures the HR-reviewer
+  pool test, which assumed fixture candidates numbered to sort first would always win. Least load comes before the number,
+  so once each candidate held one review, two fixture HR reviews went to **real HR officers with none — Akpene Amoah
+  (TDC/00009) and Fiifi Mensah (TDC/00037)**: two open HR evaluations (on fixture appraisals the teardown then withdrew) and
+  two "You have been assigned HR review" appraisal notifications. Fixed in the harness (four candidates, every pooled
+  assignment on one holding none, and an SQL check that no real officer holds a fixture review); the clean-up of those four
+  rows is a script awaiting the user's go (`eg2-pool-cleanup.sql`, below). Then **1271/1271 on the next run and 1271/1271 in
+  the regression** — E-g1's 1185 and E-g2's 86: eg2-setup (6), eg2-cal (37), eg2-final (10), eg2-hr (18), eg2-snap (15).
+- Regression (`run-all.mjs`, fifteen suites): **3811/3820** — E-g1's 3719/3728 plus exactly the 92 new (86 lifecycle, 6
+  nominations — lane D 193); slice E's 9 the same stale; no call over 10 s; no other real officer assigned (SQL, after every run).
+- hr-portal slice 5 **49/49**. W3 slice 10 not run.
+- API log: **no 5xx**; 284 database `ERR` pairs, all defect #23's payroll-profile FK, and the reconciliation's TDC/00052 twice.
+- What the runs wrote: no demo row changed (the grade scale field for field; the demo's records 0 changed; the new-looking rows
+  are portal slice 5's fixture); 330 approval requests to the 9 real HR and Manager holders (§ 5's first E-e row — three
+  lifecycle runs this time); the "SLA breach" notices in the same window are the ticketing module's own sweep. Every
+  pool candidate is inactive afterwards; no harness login is active and no harness cycle is open.
+- Frontend: scoped `tsc` over the five changed files, 0 errors; ESLint clean. Not browser-walked (§ 5).
+- Demo: APC2026's ten reads byte-identical before and after, and to E-g1's capture. UAT's five Rule 8 appraisals are
+  offered *Rebuild form* (template approved, cycle open) — **not repaired yet: on the user's go**.
+
+**Harness changes in the slice:** `setup.mjs`'s lifecycle fixture gains posts CX, XR, HG and LCHR (the pool's), profiles HG and
+LA, cycles CX, XR and HG (Drafts the section opens), cx1/cx2 with logins and xr1, xr2, hgA–hgE, hgP, pool1–pool4 and hgGone
+without — `poolCandidates` is switched off in the suite's finally; its nominations fixture gains PeerGone (no login).
+`run-final-lifecycle.mjs` gains E-g2's 86 in a block of its own; `run-final-nominations.mjs`'s d39 plants NA at three peers
+(put back after), has PeerGone leave before HR's advance and asserts the rejection (+6, 193).
+
 ### Lane F — Recommendations, proposals, probation, PIP chain, segregation of duties
 
 - [ ] F1 Extend-Probation handler passes `CurrentUserProvider.EmployeeId` (refuse with a message
@@ -4174,8 +4274,8 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | The E-a screens (HR's review page) not browser-walked | 1 page | K |
 | *Added by lane E-b (2026-09-30):* | | |
 | ~~A participant can be added, removed or marked on a completed or cancelled session — the screen hides it; the service does not refuse~~ | `AddParticipantAsync`, `RemoveParticipantAsync`, `RecordAttendanceAsync` | E-g — done in lane E-g1, 2026-10-01 (refused 422; the remove and attendance routes answered 500 to a rule) |
-| Two sessions over one appraisal: a completed but uncommitted session keeps its links, so the next opening passes those appraisals over; a commit does not skip an appraisal another sitting session holds | `OpenSessionAsync`, `CommitSkipReason` | E-g2 |
-| After HR's return, the grid's *Manager proposed* reads the old total until the manager re-submits (the evaluation keeps its `TotalScore`) | `ManagerEvaluationsAsync` | E-g2 |
+| ~~Two sessions over one appraisal: a completed but uncommitted session keeps its links, so the next opening passes those appraisals over; a commit does not skip an appraisal another sitting session holds~~ | `OpenSessionAsync`, `CommitSkipReason` | E-g2 — done in lane E-g2, 2026-10-01 (one holder, D-81: an opening takes what a panel no longer sitting held; a commit skips what another sitting panel holds, or a later panel calibrated) |
+| ~~After HR's return, the grid's *Manager proposed* reads the old total until the manager re-submits (the evaluation keeps its `TotalScore`)~~ | `ManagerEvaluationsAsync` | E-g2 — done in lane E-g2, 2026-10-01 (*Being re-evaluated*, no proposal and no pre-calibration figure, D-82) |
 | A cancel tells no one — nor was the panel told it had been convened | `CancelSessionAsync` | G |
 | A session's particulars edit and its delete have no screen (`update`, `remove` have no caller) | `calibration.service.ts` | I |
 | The E-b screen (the calibration session page) not browser-walked | 1 page | K |
@@ -4189,9 +4289,9 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | ~~Opening a cycle with no targets skips the overlap check, and a target added to an open cycle is never checked~~ | `OpenCycleAsync` | E-d2b — done in lane E-d2b, 2026-09-30 (generation runs the overlap check over whoever it would create — in another open cycle's scope, or holding an unwithdrawn appraisal there, D-60 — and the open reads held appraisals too) |
 | The E-c screens (the cycle list's edit dialog, the target dialog, the Coverage and Progress tabs) not browser-walked | 2 pages | K |
 | *Added by lane E-d1 (2026-09-30):* | | |
-| HR's advance approves a pending nomination whose peer has left — the nomination and the explicit approval refuse one; the advance's approval path does not check | `StageApprovalAsync` (the advance) | E-g2 |
+| ~~HR's advance approves a pending nomination whose peer has left — the nomination and the explicit approval refuse one; the advance's approval path does not check~~ | `StageApprovalAsync` (the advance) | E-g2 — done in lane E-g2, 2026-10-01 (rejected, *No longer at work*, the rest approved, D-83) |
 | ~~Manager mode takes nominations on a Governance or an Appealed appraisal ("until it is completed or closed"); only Withdrawn was added~~ | `NominationsEditable` | E-g — done in lane E-g1, 2026-10-01 (both modes: Draft or Active) |
-| A leaver's appraisal waiting only for the acknowledgment, in a cycle without HR review, is not final by the settle's rule (no sign-off), so the exit withdraws it — though its outcome was already released to the employee | `AppraisalScoreService.IsFinal` against `AppraisalRelease.IsReleased` | E-g2 (one reading of "final") |
+| ~~A leaver's appraisal waiting only for the acknowledgment, in a cycle without HR review, is not final by the settle's rule (no sign-off), so the exit withdraws it — though its outcome was already released to the employee~~ | `AppraisalScoreService.IsFinal` against `AppraisalRelease.IsReleased` | E-g2 — done in lane E-g2, 2026-10-01 (the withdrawal reads "released", `AppraisalRelease.StandsForWithdrawal`, D-84) |
 | ~~A withdrawn appraisal's unheld conversations and open review events stay as rows — refused, and off every queue — not cancelled; `AppraisalReviewStatus.Cancelled` has no writer~~ | `AppraisalConversationService`, `AppraisalReviewEventService` | E-f — done 2026-10-01 (D-74: the withdrawal removes the unheld conversations and cancels the open events; Cancelled closes an event) |
 | ~~An attachment can still be added to a withdrawn appraisal (the add checks nothing; the delete refuses)~~ | `PerformanceAppraisalService.AddAttachmentAsync` | E-g — done in lane E-g1, 2026-10-01 (refused; a completed one still takes evidence; the delete's refusal names the status) |
 | A staff movement's `BasedOnAppraisalId` is taken unchecked — the tenant, the employee, a withdrawn appraisal | `StaffMovement` (mapper :352, :387) | J |
@@ -4244,6 +4344,11 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | UAT's demo journal notes carry the day they were saved — the create overwrote the dates the demo pack wrote; a rebuild sends them, and no backfill was run (a write beyond the fixtures) | `PerformanceJournalEntries` | S (on the user's go) |
 | The template item routes answer a definition refusal 409 and the band route 400 — their existing mapping for every rule; the definition screens answer 422 | `AppraisalTemplatesController` | J (one code per rule kind) |
 | The E-g1 screens (the grade, KPI and criteria hints, the company and unit goal delete dialogs, the exclusion dialog's check, the check-in page without *Update a goal* once held) not browser-walked | 7 files | K |
+| *Added by lane E-g2 (2026-10-01):* | | |
+| The HR reviewer is assigned — and, after a return, told again — at the manager's submission, before calibration in an *AfterCalibration* cycle, so the notice can come before the appraisal reaches HR | `ProgressToHRReviewAsync` (called from the manager's submit) | B (assign at the HR step) |
+| Nothing stops two panels being opened over one scope; D-81 makes the second hold nothing and commit nothing the first still holds, but it sits and appears in the lists | `CreateAsync` / `OpenSessionAsync` | J (refuse, or say so at opening) |
+| The HR-reviewer pool is tenant-wide and matched on "HR" in a post title or unit name — a harness can only test it with fixture candidates that hold no open review and sort first (E-g2's first run gave two fixture reviews to real officers) | `AssignHRReviewerAsync`; the lifecycle suite's eg2-hr | K (keep the guard check) |
+| The E-g2 screens (the calibration grid's *Being re-evaluated*, HR's review page's *Rebuild form*) not browser-walked | 2 files | K |
 
 ---
 
@@ -4375,7 +4480,14 @@ table there. Backfills are for databases that already hold data.
     generation from the template item's `KpiDefinition.TolerancePercent` and read by
     `KpiAchievementPercent` (B2's tolerance bullet, moved here). Existing rows: backfill from the
     definition or leave null (= no tolerance, today's scoring) — decide at the scaffold; the demo is
-    re-baselined once, after it.
+    re-baselined once, after it;
+  - **a grade scale per settings profile** (D-87, from E-g1's D-78): grades keyed to a profile (an
+    `AppraisalSettingsId` on `AppraisalGradeDefinitions`, or a `GradeScale` table the profile points to),
+    the scale an appraisal was graded on kept with it, and `PerformanceRatingResolver`, the goal rows'
+    `TenantScaleAsync` and the grade screen's overlap and gap checks reading the appraisal's cycle's
+    scale (the resolver's cache keyed by it). Existing grades go to every existing profile's scale (or to
+    one shared scale the profiles point to) — decide at the scaffold. E-g1's freeze stays: a graded
+    scale is replaced by a new profile's scale, not edited.
 - **Batch 3: withdrawn by the review** (D-21). `AppraisalNotification` stays: it is the record for
   people without a login.
 

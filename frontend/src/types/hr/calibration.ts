@@ -152,6 +152,11 @@ export interface CalibrationMatrixRow {
   appraisalStatus: AppraisalStatus;
   /** The manager's own evaluation total, before any calibration. */
   managerProposedScore?: number | null;
+  /**
+   * HR returned the appraisal to its manager, who has not submitted again — no proposal and no
+   * pre-calibration figure until they do (performance closure E-g2, D-82).
+   */
+  managerReevaluating?: boolean;
   preCalibrationScore?: number | null;
   /**
    * A calibrated appraisal's settled score — unless this session is still proposing another for

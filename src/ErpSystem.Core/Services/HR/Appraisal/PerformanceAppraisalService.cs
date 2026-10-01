@@ -4005,11 +4005,15 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 
         // Check if HR evaluation already exists
         var existingHREvaluation = appraisal.EvaluatorEvaluations
-            .Any(e => e.EvaluatorRole == EvaluatorRole.HR);
+            .FirstOrDefault(e => e.EvaluatorRole == EvaluatorRole.HR);
 
-        if (existingHREvaluation)
+        if (existingHREvaluation != null)
         {
             _logger.LogWarning("HR evaluation already exists for appraisal {AppraisalId}", appraisalId);
+            // Back from HR's return (performance closure E-g2, D-85): the manager has submitted again, and the reviewer
+            // is told — the review was already assigned, so nobody was.
+            if (existingHREvaluation.SubmittedDate == null)
+                await NotifyHRReviewerAsync(appraisal, existingHREvaluation.EvaluatorId, resubmitted: true, cancellationToken);
             return false;
         }
 
@@ -4040,6 +4044,14 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         _logger.LogInformation("HR review successfully assigned for appraisal {AppraisalId} to HR reviewer {HRReviewerId}",
             appraisalId, hrEval.EvaluatorId);
 
+        await NotifyHRReviewerAsync(appraisal, hrEval.EvaluatorId, resubmitted: false, cancellationToken);
+
+        return true;
+    }
+
+    /// <summary>Tells the HR reviewer an appraisal is theirs to review — first assigned, or back after HR's return.</summary>
+    private async Task NotifyHRReviewerAsync(PerformanceAppraisal appraisal, Guid reviewerId, bool resubmitted, CancellationToken cancellationToken)
+    {
         var employeeName = await _employeeRepository.GetQueryable()
             .Where(e => e.Id == appraisal.EmployeeId && e.TenantId == GetTenantId())
             .Select(e => e.FullName)
@@ -4048,18 +4060,20 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         await NotifyQuietlyAsync(new[]
         {
             new AppraisalNotificationRequest(
-                hrEval.EvaluatorId,
+                reviewerId,
                 AppraisalNotificationType.ActionRequired,
-                $"You have been assigned HR review for {employeeName ?? "an employee"}",
-                "The manager evaluation is in. Review the scores and finalise or return the appraisal.",
+                resubmitted
+                    ? $"{employeeName ?? "An employee"}'s appraisal is back for your HR review"
+                    : $"You have been assigned HR review for {employeeName ?? "an employee"}",
+                resubmitted
+                    ? "The manager has revised the evaluation after HR's return. Review it and finalise or return the appraisal."
+                    : "The manager evaluation is in. Review the scores and finalise or return the appraisal.",
                 appraisal.AppraisalCycle?.CycleName,
-                $"/hr/performance/hr-review/{appraisalId}",
-                appraisalId,
+                $"/hr/performance/hr-review/{appraisal.Id}",
+                appraisal.Id,
                 employeeName,
                 NotificationUrgency.Warning),
         }, cancellationToken);
-
-        return true;
     }
 
     /// <summary>
@@ -4077,8 +4091,25 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         // probation is a contract status, not an availability). Both steps here asked for Active
         // only, so an HR officer on probation was never assigned — and on a tenant whose HR staff
         // were all imported onto probation, nobody was, and the appraisal had no HR reviewer.
+        //
+        // Never the appraisee or their line manager (performance closure E-g2, D-85): the HR review checks the manager's
+        // evaluation of the appraisee, and either could be assigned — by the default or by the pool. An HR officer
+        // assigned their own was told so, and could not act on it.
+        var lineManagerId = appraisal.Employee?.ManagerId
+            ?? await _employeeRepository.GetQueryable()
+                .Where(e => e.Id == appraisal.EmployeeId)
+                .Select(e => e.ManagerId)
+                .FirstOrDefaultAsync(cancellationToken);
+        var excluded = new List<Guid> { appraisal.EmployeeId };
+        if (lineManagerId is Guid lm && lm != Guid.Empty) excluded.Add(lm);
+
         var configuredId = appraisal.AppraisalCycle?.AppraisalSettings?.DefaultHRReviewerId;
-        if (configuredId.HasValue && configuredId.Value != Guid.Empty)
+        if (configuredId.HasValue && configuredId.Value != Guid.Empty && excluded.Contains(configuredId.Value))
+        {
+            _logger.LogWarning("Configured DefaultHRReviewerId {Id} is appraisal {AppraisalId}'s appraisee or line manager; " +
+                               "falling back to load-based assignment.", configuredId.Value, appraisal.Id);
+        }
+        else if (configuredId.HasValue && configuredId.Value != Guid.Empty)
         {
             var configured = await _employeeRepository.GetQueryable()
                 .FirstOrDefaultAsync(e => e.TenantId == GetTenantId() && e.Id == configuredId.Value && e.IsActive
@@ -4097,7 +4128,8 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             .Include(e => e.Position)
             .Include(e => e.OrganizationUnit)
             .Where(e => e.TenantId == GetTenantId() && e.IsActive
-                        && (e.StaffStatus == StaffStatus.Active || e.StaffStatus == StaffStatus.Probation))
+                        && (e.StaffStatus == StaffStatus.Active || e.StaffStatus == StaffStatus.Probation)
+                        && !excluded.Contains(e.Id))
             .Where(e =>
                 (e.Position != null && (e.Position.Title.Contains("HR") || e.Position.Title.Contains("Human Resource"))) ||
                 (e.OrganizationUnit != null && e.OrganizationUnit.Name.Contains("HR")))
@@ -4333,7 +4365,12 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
             WithdrawnByName = appraisal.WithdrawnBy?.FullName,
             CanWithdraw = !isAppraiseeViewing
                 && appraisal.Status is AppraisalStatus.Draft or AppraisalStatus.Active or AppraisalStatus.Governance
-                && !AppraisalScoreService.IsFinal(appraisal),
+                && !AppraisalRelease.StandsForWithdrawal(appraisal),
+            // An empty form nobody has scored (E-g2, D-86) — the seeded and snapshot-less appraisals.
+            CanRebuildForm = !isAppraiseeViewing
+                && appraisal.Status is AppraisalStatus.Draft or AppraisalStatus.Active
+                && !appraisal.CriterionConfigs.Any(c => c.TemplateItemId != null)
+                && !appraisal.EvaluatorEvaluations.Any(e => e.SubmittedDate != null || e.CriterionScores.Any()),
         };
     }
 
@@ -4572,6 +4609,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         // together, so we can never leave a finalized appraisal with a NULL OverallScore. Safe under
         // the retrying execution strategy (the mutations are idempotent on a retry).
         var hrReviewRecord = await EnsureHRReviewRecordAsync(appraisal, hrEval.EvaluatorId, cancellationToken);
+        RepointHRReviewToActor(appraisal, hrEval, hrReviewRecord, reviewerId, "signed off");
 
         AppraisalSyncResult? sync = null;
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
@@ -4662,8 +4700,10 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
     /// <param name="reviewerId">The HR employee returning it — used only when no HR review record exists yet.</param>
     public async Task<HRReviewDto> ReturnToManagerAsync(Guid appraisalId, ReturnAppraisalDto dto, Guid? reviewerId = null, CancellationToken cancellationToken = default)
     {
+        // The settings too (performance closure E-g2, D-85): an assignment made here read no default HR reviewer.
         var appraisal = await TenantAppraisalQuery()
             .Include(a => a.AppraisalCycle)
+                .ThenInclude(c => c.AppraisalSettings)
             .Include(a => a.Employee)
             .Include(a => a.EvaluatorEvaluations)
             .FirstOrDefaultAsync(a => a.Id == appraisalId, cancellationToken);
@@ -4692,6 +4732,7 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 
         var hrEval = await EnsureHRReviewEvaluationAsync(appraisal, reviewerId, cancellationToken);
         var hrReviewRecord = await EnsureHRReviewRecordAsync(appraisal, hrEval.EvaluatorId, cancellationToken);
+        RepointHRReviewToActor(appraisal, hrEval, hrReviewRecord, reviewerId, "returned");
 
         hrEval.OverallNotes = dto.HRRemarks;
         // The sign-off is explicitly not given — on the HR evaluation too, which the review page reads
@@ -4746,6 +4787,26 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
 
         // Return updated HR review
         return await GetHRReviewAsync(appraisalId, null, cancellationToken);
+    }
+
+    /// <summary>
+    /// The HR review names the officer who acts on it (performance closure E-g2, D-85): an officer signing off or
+    /// returning an appraisal another was assigned was recorded as the assignee — the evaluation and the review record
+    /// kept the assignment, and the signer was in neither. The tracked rows are changed; the caller saves them.
+    /// </summary>
+    private void RepointHRReviewToActor(
+        PerformanceAppraisal appraisal, EvaluatorEvaluation hrEval, AppraisalHRReview hrReviewRecord, Guid? actorId, string action)
+    {
+        if (actorId is not Guid actor || actor == Guid.Empty) return;
+
+        if (hrEval.EvaluatorId != actor)
+        {
+            _logger.LogInformation("Appraisal {AppraisalId}'s HR review, assigned to {Assigned}, {Action} by {Actor}: it now names them",
+                appraisal.Id, hrEval.EvaluatorId, action, actor);
+            hrEval.EvaluatorId = actor;
+        }
+        if (hrReviewRecord.ReviewedByHRId != actor)
+            hrReviewRecord.ReviewedByHRId = actor;
     }
 
     /// <summary>
