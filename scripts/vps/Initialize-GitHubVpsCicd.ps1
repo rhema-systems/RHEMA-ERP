@@ -7,7 +7,8 @@ param(
     [int]$SshPort = 2222,
     [string]$SshUser = 'Administrator',
     [uri]$PublicBaseUrl = 'https://63.141.230.56',
-    [string]$SshPrivateKeyPath = (Join-Path $env:USERPROFILE '.ssh\id_rsa'),
+    [string]$SshPrivateKeyPath =
+        'C:\RhemaERP\secrets\github-actions-vps-deployment',
     [string]$ApiServiceXmlPath = 'C:\RhemaERP\services\api\RhemaERPAPI.xml',
     [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string]$GitHubCliVersion = '2.102.0',
@@ -75,6 +76,115 @@ function Get-GitHubCliPath {
     return $portablePath
 }
 
+function Protect-OpenSshFile {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+        [switch]$AdministratorsOnly
+    )
+
+    $grants = if ($AdministratorsOnly) {
+        @('*S-1-5-18:F', '*S-1-5-32-544:F')
+    }
+    else {
+        $currentUserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        @('*S-1-5-18:F', "*$currentUserSid`:F")
+    }
+    & icacls.exe $Path '/inheritance:r' '/grant:r' @grants | Out-Null
+    Assert-True ($LASTEXITCODE -eq 0) "Could not protect OpenSSH file: $Path"
+}
+
+function New-DeploymentSshKey {
+    Assert-True ($SshPrivateKeyPath -notmatch '["\r\n]') `
+        'SshPrivateKeyPath contains unsupported characters.'
+    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $SshPrivateKeyPath))
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = (Get-Command ssh-keygen.exe -ErrorAction Stop).Source
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.Arguments = '-q -t ed25519 -N "" ' +
+        '-C "rhema-erp-github-actions" -f "' + $SshPrivateKeyPath + '"'
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        [void]$process.Start()
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        [void]$stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        Assert-True ($process.ExitCode -eq 0) `
+            "Could not create the GitHub Actions deployment key. $($stderr.Trim())"
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
+function Initialize-DeploymentSshIdentity {
+    Assert-True ($SshUser -ieq $env:USERNAME) `
+        "Run this initializer as the target SSH user '$SshUser'."
+    if (-not (Test-Path -LiteralPath $SshPrivateKeyPath -PathType Leaf)) {
+        Write-Output 'Creating a dedicated GitHub Actions deployment identity.'
+        New-DeploymentSshKey
+    }
+
+    Assert-True (Test-Path -LiteralPath $SshPrivateKeyPath -PathType Leaf) `
+        "Deployment SSH private key could not be created: $SshPrivateKeyPath"
+    Protect-OpenSshFile -Path $SshPrivateKeyPath
+    $publicKeyPath = "$SshPrivateKeyPath.pub"
+    if (Test-Path -LiteralPath $publicKeyPath -PathType Leaf) {
+        Protect-OpenSshFile -Path $publicKeyPath -AdministratorsOnly
+    }
+
+    $publicKey = (& ssh-keygen.exe -y -P '' -f $SshPrivateKeyPath | Out-String).Trim()
+    Assert-True ($LASTEXITCODE -eq 0 -and
+        $publicKey -match '^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp\d+)\s+[A-Za-z0-9+/=]+$') `
+        'The deployment SSH private key is invalid or encrypted.'
+
+    $sshdConfigPath = 'C:\ProgramData\ssh\sshd_config'
+    Assert-True (Test-Path -LiteralPath $sshdConfigPath -PathType Leaf) `
+        "OpenSSH server configuration was not found: $sshdConfigPath"
+    $sshdConfig = Get-Content -LiteralPath $sshdConfigPath -Raw
+    $usesAdministratorKeys =
+        $sshdConfig -match '(?im)^\s*Match\s+Group\s+administrators\s*$' -and
+        $sshdConfig -match '(?im)^\s*AuthorizedKeysFile\s+(?:__PROGRAMDATA__|%PROGRAMDATA%)/ssh/administrators_authorized_keys\s*$'
+    $authorizedKeysPath = if ($usesAdministratorKeys) {
+        'C:\ProgramData\ssh\administrators_authorized_keys'
+    }
+    else {
+        Join-Path $env:USERPROFILE '.ssh\authorized_keys'
+    }
+    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $authorizedKeysPath))
+    $existingLines = if (Test-Path -LiteralPath $authorizedKeysPath -PathType Leaf) {
+        @(Get-Content -LiteralPath $authorizedKeysPath)
+    }
+    else {
+        @()
+    }
+    $publicKeyParts = @($publicKey -split '\s+')
+    $keyIdentity = "$($publicKeyParts[0]) $($publicKeyParts[1])"
+    $alreadyAuthorized = $existingLines | Where-Object {
+        ([string]$_).Trim().StartsWith("$keyIdentity ") -or
+        ([string]$_).Trim() -ceq $keyIdentity
+    }
+    if (-not $alreadyAuthorized) {
+        [string[]]$updatedLines = @($existingLines) +
+            @("$keyIdentity rhema-erp-github-actions")
+        [IO.File]::WriteAllLines(
+            $authorizedKeysPath,
+            $updatedLines,
+            [Text.UTF8Encoding]::new($false))
+    }
+    Protect-OpenSshFile -Path $authorizedKeysPath `
+        -AdministratorsOnly:$usesAdministratorKeys
+
+    Write-Output "GitHub Actions deployment identity is authorized for $SshUser."
+}
+
 function Get-ApiServiceEnvironment {
     $values = @{}
     if (Test-Path -LiteralPath $ApiServiceXmlPath) {
@@ -140,9 +250,13 @@ Assert-True ($PublicBaseUrl.IsAbsoluteUri -and $PublicBaseUrl.Scheme -eq 'https'
     'PublicBaseUrl must be an HTTPS origin without a path, query, credentials, or fragment.'
 Assert-True ($null -ne (Get-Command ssh-keygen.exe -ErrorAction SilentlyContinue)) `
     'Required command is unavailable: ssh-keygen.exe'
+Assert-True ($null -ne (Get-Command ssh.exe -ErrorAction SilentlyContinue)) `
+    'Required command is unavailable: ssh.exe'
 $script:GitHubCliPath = Get-GitHubCliPath
-Assert-True (Test-Path -LiteralPath $SshPrivateKeyPath -PathType Leaf) `
-    "Deployment SSH private key was not found: $SshPrivateKeyPath"
+Initialize-DeploymentSshIdentity
+$sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
+Assert-True ($null -ne $sshdService -and $sshdService.Status -eq 'Running') `
+    'The Windows OpenSSH server service is not running.'
 
 & $script:GitHubCliPath auth status --hostname github.com 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {
@@ -180,6 +294,36 @@ Assert-True ($publicKeyParts.Count -ge 2 -and
     $publicKeyParts[1] -match '^[A-Za-z0-9+/=]+$') `
     'The OpenSSH server public host key has an unexpected format.'
 $knownHosts = "[$VpsHost]:$SshPort $($publicKeyParts[0]) $($publicKeyParts[1])"
+
+$loopbackKnownHostsPath = Join-Path ([IO.Path]::GetTempPath()) `
+    "rhema-ci-known-hosts-$([Guid]::NewGuid().ToString('N'))"
+try {
+    $loopbackKnownHosts =
+        "[127.0.0.1]:$SshPort $($publicKeyParts[0]) $($publicKeyParts[1])"
+    [IO.File]::WriteAllText(
+        $loopbackKnownHostsPath,
+        $loopbackKnownHosts + [Environment]::NewLine,
+        [Text.UTF8Encoding]::new($false))
+    $sshArguments = @(
+        '-i', $SshPrivateKeyPath,
+        '-p', [string]$SshPort,
+        '-o', 'BatchMode=yes',
+        '-o', 'IdentitiesOnly=yes',
+        '-o', 'StrictHostKeyChecking=yes',
+        '-o', "UserKnownHostsFile=$loopbackKnownHostsPath",
+        '-o', 'ConnectTimeout=15',
+        "$SshUser@127.0.0.1",
+        'cmd.exe /d /c exit 0'
+    )
+    & ssh.exe @sshArguments
+    Assert-True ($LASTEXITCODE -eq 0) `
+        'The dedicated deployment key could not authenticate to the local OpenSSH service.'
+}
+finally {
+    if (Test-Path -LiteralPath $loopbackKnownHostsPath) {
+        Remove-Item -LiteralPath $loopbackKnownHostsPath -Force
+    }
+}
 
 $privateKey = Get-Content -LiteralPath $SshPrivateKeyPath -Raw
 Assert-True ($privateKey -match '-----BEGIN (OPENSSH|RSA|EC) PRIVATE KEY-----') `
