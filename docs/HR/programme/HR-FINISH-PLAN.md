@@ -72,6 +72,17 @@ its appraisals; the panel's decisions stay on what they restated; and the grid s
 **Next: slice E-c**, cycle rules and D-14. The closure plan's START HERE block and § 2 carry the live
 state.
 
+▶ **Staff travel final closure (added 2026-10-01) has its own plan:**
+`docs/HR/areas/travel/HR-STAFF-TRAVEL-FINAL-CLOSURE-PLAN.md` — eleven lanes (0 → migration batch 1 →
+1 → 10), twelve decisions taken with the user the same day, one migration batch. Three passes over the
+code: the first review (findings A–F), an independent second review (every High finding held; seven
+corrections; O-1…O-18 — among them that a line manager cannot approve travel, a claim filed without
+its advance pays in full, and policy supersession is date-blind) and a Fleet review (FX-1…FX-9: the
+company-vehicle "reservation" is a draft nobody approves). It owns this plan's **D-29** row (unchanged:
+the rule register stays read-only), **lane 10's travel sweep** (its lane 8), **lane 9's travel-policy
+door** (its D-3: HR is granted `HR.Travel.Admin`, narrowed in code) and **row 9.19** (its lane 7). The
+user accepted it and **development is held until the user says go**.
+
 ▶ **Lane 11 (added 2026-09-25): probation is not absence.** About 1,800 long-serving staff on the
 demo database are on probation, because the employee import has no confirmation date. Two code sites
 also shut probationers out. The user asked for it as a fix separate from round 5, **not to be
@@ -1138,7 +1149,9 @@ Each was a deliberate deferral with a trigger, not an oversight.
       things belong in it — the approval guard on rule writes, a filtered unique index on
       `(TenantId, PolicyId, RuleCode)` instead of the revive-on-re-add, and mapping
       `RuleType × ExpenseCategory` onto real booking and claim fields, which is a product decision.
-      Until then the five endpoints stay withheld and are **not** gaps.
+      Until then the five endpoints stay withheld and are **not** gaps. **Kept by the travel final
+      closure (2026-10-01) as a standing assumption** — that closure enforces the policy's own caps
+      (its D-1) and leaves the rule register read-only.
 
 ### Blocked outside HR — track, do not schedule
 
@@ -1457,6 +1470,11 @@ is wrong; the letter is the likelier. Decide with TDC which unit the flat figure
 > SCHEDULED run is the real test: leave's died for want of a signed-in user while every manual run
 > passed. The other ten sweeps are as described below.
 
+> **2026-10-01: staff travel's sweep is owned by the travel final closure, lane 8**
+> (`docs/HR/areas/travel/HR-STAFF-TRAVEL-FINAL-CLOSURE-PLAN.md`). Correction to the paragraph below: the
+> travel sweep does tell somebody — the HR role, in the app — through its own notification topics; it
+> tells no traveller, approver or finance desk. Lane 8 moves it onto leave's pattern.
+
 **Found building round 4, lane K-a, and verified before it was written down:** eleven HR reminder
 sweeps — asset, certification expiry, discipline, identification expiry, leave, probation,
 separation, SHE, staff movement, staff travel, team — run nightly, claim their items in a dispatch
@@ -1651,8 +1669,11 @@ every HR/SHE entity a user can create has at least one seeded row; 48 system-gen
 `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` § 25 item 1. Either link a TenantAdmin login to an
 employee or grant the `HR` role the `HR.*.Admin` tier. **Probation's door is settled (2026-10-01, the performance
 closure's D-99):** extension goes the way confirmation does — a request decided by the probation's confirming authority
-through the workflow — and HR is not granted the probation tier; it is built in that closure's lane F (F1). Training
-budgets and plans, travel policies, talent reviews and the vacancy reconcile are still owed. Until then the demo seeds
+through the workflow — and HR is not granted the probation tier; it is built in that closure's lane F (F1). **Travel's
+door is settled (2026-10-01, the travel final closure's D-3):** the HR role is granted `HR.Travel.Admin`, narrowed in
+code — a second officer authorises a booking above the policy cap (its D-8), a policy's author cannot approve it, and
+every delete is status-guarded; built in that closure's lane 4. Training budgets and plans, talent reviews and the
+vacancy reconcile are still owed. Until then the demo seeds
 `TrainingBudgetTransactions`, `StaffMovementApprovalLevels` and `ProbationExtensions` directly.
 
 **HR-owned defects found by the build (each reproduced twice; payloads in the agents' reports):**
@@ -1677,7 +1698,7 @@ budgets and plans, travel policies, talent reviews and the vacancy reconcile are
 | 9.16 | SHE / medical FK guards | `SheHazardCorrectiveActions.CorrectiveActionTemplateId`, several `UploadedById`/`ConductedById`/`EmployeeId` columns, `MedicalInsuranceClaims.MedicalExpenseClaimId`, `MedicalInsurancePolicyDependents (PolicyId, DependentId)` unvalidated → 500 not 404/409 | medium |
 | 9.17 | `POST /onboarding-plans/tasks/{id}/complete` | gated `HR.Orientation.Write`; a new starter cannot tick their own task (Book 1 §6 step 5 implies they can) | medium |
 | 9.18 | `DELETE /safety/incidents/witnesses/{id}` | needs `HR.She.Admin` while the POST needs Write | low |
-| 9.19 | `POST /staff-travel/compliance/risk-assessments/{id}/acknowledge` | gated `HR.Travel.Write` but the service demands the traveller; no self-service door — dead path for ordinary travellers | medium |
+| 9.19 | `POST /staff-travel/compliance/risk-assessments/{id}/acknowledge` | gated `HR.Travel.Write` but the service demands the traveller; no self-service door — dead path for ordinary travellers. **Owned by the travel final closure, lane 7 (E1)** | medium |
 | 9.20 | asset requisitions | an approved requisition cannot be edited, withdrawn or rejected (all 409) | low |
 | 9.21 | `StaffDemotion.GradeLevelDecrease` / `StaffPromotion.GradeLevelIncrease` | silently recomputed from optional grade ids → 0 | low |
 | 9.22 | disciplinary termination | raises an `EmployeeSeparation` in Draft with no effective date | low |

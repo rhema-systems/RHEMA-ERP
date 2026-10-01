@@ -3,7 +3,8 @@
 **Status:** written 2026-09-17 from the source — page components, forms, the eight controllers, the
 services, the policy guard, the EF model, the workflow definitions, the seeded permission map and
 the two demo scenarios. It describes what the code is built to do. Where a screen offers something
-the server will refuse, the step says so rather than smoothing it over.
+the server will refuse, the step says so rather than smoothing it over. **The open work on every
+finding in § 19 is tracked in `HR-STAFF-TRAVEL-FINAL-CLOSURE-PLAN.md` (2026-10-01).**
 
 **Scope:** the whole **Staff Travel** group of the HR sidebar — all six menu items — plus the six
 screens that hang off them without a menu entry, the **two setup areas** under Administration →
@@ -2477,6 +2478,13 @@ the module's argument.
 ---
 
 ## 19. What this walk found
+
+> ⚠ **The live state of every finding below is now kept in
+> `HR-STAFF-TRAVEL-FINAL-CLOSURE-PLAN.md` (2026-10-01)** — its § 3d places each T-finding in a lane, as
+> deferred, or as already fixed. Three statements here were already wrong when that review re-read the
+> code: **T-5** (Finance's conversion was fixed on 2026-09-10), **T-53** (the reminder sweep has been
+> hosted daily since 2026-08-17) and **T-28** (the server does refuse to cancel a Cancelled, Completed
+> or Closed request). This section is the record of the walk, not a to-do list.
 
 **Fifty-eight findings.** This is the most complete module in HR by some distance — it was built as
 twelve slices with 506 harness assertions and two closure slices on top, and the density of
