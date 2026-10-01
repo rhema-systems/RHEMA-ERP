@@ -35,6 +35,65 @@ build host and sends only verified artifacts to the VPS. The VPS does not run
 frontend service remains `npm run start -- -p 3001`; standalone conversion is a
 separate Phase 2 decision.
 
+### GitHub Actions CI/CD
+
+`.github/workflows/ci-cd.yml` is the authoritative Windows-service pipeline.
+Pull requests and pushes to `master` run the migration, artifact, packaging and
+deploy-only contracts. A manual run can build one immutable release and, only
+when `deploy_to_test_vps` is explicitly selected, activate that same artifact on
+the test VPS. The deploy job is bound to the `test-vps` GitHub environment and
+refuses deployment from any branch other than `master`.
+
+The workflow deliberately does not build Docker images. It uses the same
+`Build-RhemaRelease.ps1` and `Deploy-RhemaVps.ps1 -DeployOnly` path documented
+below, keeps nested release ZIPs uncompressed during GitHub artifact transport,
+and retains sanitized deployment evidence for 30 days.
+
+Configure these repository variables once:
+
+- `VPS_HOST` — `63.141.230.56` for the current test VPS;
+- `VPS_SSH_PORT` — `2222`;
+- `VPS_SSH_USER` — `Administrator`;
+- `VPS_PUBLIC_BASE_URL` — `https://63.141.230.56`.
+
+Configure these repository or `test-vps` environment secrets once:
+
+- `SYNCFUSION_LICENSE` — the protected build-time Syncfusion key;
+- `VPS_SSH_PRIVATE_KEY` — the private key for the restricted deployment identity;
+- `VPS_SSH_KNOWN_HOSTS` — a trusted `[host]:port` OpenSSH known-hosts entry.
+
+After this CI/CD change is merged and pulled into the release checkout, an
+administrator can configure all of the variables, encrypted secrets, pinned
+host key, `test-vps` environment and workflow state without printing protected
+values:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\vps\Initialize-GitHubVpsCicd.ps1
+```
+
+Run that bootstrap directly on the test VPS. It reads the already protected
+Syncfusion value from the API service configuration, uses the existing deployment
+identity, derives the known-hosts entry from the VPS's own OpenSSH public host key,
+and writes secrets to GitHub through standard input. It does not build or deploy.
+
+Do not generate `VPS_SSH_KNOWN_HOSTS` inside the workflow. Verify the host key
+through an independent trusted channel before saving it. The workflow requires
+strict host-key checking and never prints or uploads these secrets.
+
+The VPS API service configuration must retain `UatBootstrap__SharedPassword` only
+when an explicitly requested UAT preparation may need to create missing accounts.
+Normal application deployment neither runs operational UAT seeds nor requests an
+initial test-account password. An unattended UAT preparation fails during
+read-only preflight before backup or service interruption when missing accounts
+require a password and the protected setting is absent.
+
+To build without deployment, run **Windows VPS CI/CD** from GitHub Actions with
+`build_release=true` and `deploy_to_test_vps=false`. To build once and deploy that
+exact release, set both inputs to `true`. Deployment keeps migration probes,
+backups, application rollback, readiness checks, public API/assets/CORS checks,
+and the headless browser smoke test.
+
 ### Build host requirements
 
 - clean checkout of the exact release commit;
@@ -413,12 +472,16 @@ backup steps. A failure during packaging occurs before fresh database creation
 or service changes. Do not use this retry to bypass a later migration/cutover
 failure; inspect that deployment's evidence first.
 
-### Procurement, Inventory and QS deployment seeds
+### Explicit Procurement, Inventory and QS UAT preparation
 
-Test deployments automatically run the operational baseline. Fresh cutovers run
-`seed-deployment-uat` (base plus operational seeds) twice before changing services,
-and verify stable identities and master data. Later ordinary deployments run
-`seed-operational-uat` after migrations and verify its database results.
+Normal existing-database deployments do not run module UAT seeds. Pass
+`-PrepareOperationalUat` only for an explicitly requested shared Procurement,
+Inventory and QS test-data preparation; that path runs `seed-operational-uat`
+after migrations and verifies its database results. The QS wrapper adds this
+switch only when `-PrepareQsUat` is selected. Fresh test-database cutovers remain
+an explicit provisioning operation and run `seed-deployment-uat` (base plus
+operational seeds) twice before changing services, then verify stable identities
+and master data against the fresh target.
 
 | Area | Dedicated usernames |
 |---|---|
