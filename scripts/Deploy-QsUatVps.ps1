@@ -133,6 +133,17 @@ try {
 
     if(-not $releaseCommit){throw 'Could not resolve the release commit.'}
 
+    if(-not $LegacyFullBuild) {
+        $preflightArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',
+            (Join-Path $PSScriptRoot 'Deploy-RhemaVps.ps1'),
+            '-Environment','Test','-LocalVps','-PreflightOnly',
+            '-PublicBaseUrl',$publicOrigin,'-ExpectedCommit',$releaseCommit)
+        Invoke-QsTimedStep 'Validate VPS before release build' {
+            & $powershell @preflightArguments
+            if($LASTEXITCODE -ne 0){throw 'VPS preflight failed before release build.'}
+        }
+    }
+
     if($LegacyFullBuild) {
         $now=[DateTime]::UtcNow.ToString('o')
         $timings.Add([ordered]@{
@@ -155,6 +166,7 @@ try {
             Environment='Test'
             PublicBaseUrl=[uri]$publicOrigin
             ExpectedCommit=$releaseCommit
+            ArchiveCompressionLevel='Fastest'
         }
         if($CleanBuild){$buildParameters.CleanBuild=$true}
         if($ReuseFrontendBuildFromCommit) {

@@ -14,6 +14,22 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  vps-release-contract:
+    name: VPS release safety contract
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Verify migration probes and fast artifact packaging
+      shell: powershell
+      run: |
+        .\scripts\vps\Test-CanonicalMigrationPreflight.ps1
+        .\scripts\vps\Test-RhemaZipPackage.ps1
+        .\scripts\vps\Test-RhemaReleaseArtifactFlow.ps1
+        .\scripts\vps\Test-QsUatVpsDeployment.ps1
+
   # Job 1: Code Quality & Security Scanning
   code-quality:
     name: 🔍 Code Quality & Security

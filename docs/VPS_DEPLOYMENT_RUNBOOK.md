@@ -230,6 +230,26 @@ Do not use `-CleanBuild` during a routine deployment; it deliberately discards
 the persistent Next.js compilation cache. `-LegacyFullBuild` keeps the original
 all-in-one deployer available for an explicit diagnostic or recovery run.
 
+The release builder packages both artifacts with Windows `tar.exe` in ZIP mode.
+It avoids the multi-hour PowerShell `Compress-Archive -Optimal` pass and keeps a
+managed .NET ZIP fallback for older hosts. Both archives retain SHA-256 and
+entry-level validation before activation.
+
+The one-command QS wrapper now runs `Deploy-RhemaVps.ps1 -PreflightOnly` before
+building. Missing migration probes, retained-data blockers, service drift, or VPS
+configuration errors therefore stop before npm, .NET publish, or Next.js work.
+Guard probes run again after the API is stopped and immediately before migration
+startup. The Windows CI release-contract job rejects future guarded migrations
+without source-hash-pinned coverage.
+
+If a complete build passed but activation failed only because of a deployment-script
+or preflight defect, retain that release directory. After the fix is merged and the
+VPS checkout is clean and current, `Complete-RhemaReleasePackaging.ps1` can promote
+the already-built ZIPs to the new script-only commit. It verifies ancestry, confirms
+that `src` and `frontend` build inputs did not change, validates archive contents,
+and recomputes both hashes before rewriting the manifest. It refuses reuse when any
+application input changed.
+
 For the explicitly authorized QS UAT configuration auto-approval, run:
 
 ```powershell

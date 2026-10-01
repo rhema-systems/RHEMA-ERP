@@ -1544,6 +1544,11 @@ function Invoke-Apply {
                 (Join-Path $ApiRoot 'logs'), (Join-Path $ApiRoot 'secure-file-storage')
             )
         }
+        Invoke-RemoteTimedStep 'Recheck migration guards after API stop' {
+            # Close the gap between the initial preflight and migration startup.
+            # The packaged probes are read-only and source-hash pinned.
+            Invoke-CanonicalMigrationPreflight
+        }
         Invoke-RemoteTimedStep 'Start API, run migrations, and wait for liveness' {
             Start-ApiWithControlledMigrations $apiStartedAt
         }

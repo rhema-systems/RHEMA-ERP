@@ -9,6 +9,8 @@ param(
     [ValidatePattern('^[0-9a-fA-F]{7,40}$')]
     [string]$ReuseFrontendBuildFromCommit,
     [string]$OutputDirectory,
+    [ValidateSet('Optimal', 'Fastest', 'NoCompression')]
+    [string]$ArchiveCompressionLevel = 'Fastest',
     [switch]$CleanBuild
 )
 
@@ -18,6 +20,8 @@ $env:GIT_TERMINAL_PROMPT = '0'
 $env:GCM_INTERACTIVE = 'Never'
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repositoryRoot = Split-Path -Parent $scriptRoot
+. (Join-Path $scriptRoot 'vps\New-RhemaZipPackage.ps1')
+. (Join-Path $scriptRoot 'vps\New-RhemaVpsPreflightHelper.ps1')
 $frontendRoot = Join-Path $repositoryRoot 'frontend'
 $releaseRoot = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     Join-Path $repositoryRoot 'artifacts\vps-releases'
@@ -185,24 +189,22 @@ function Clear-NextOutputPreservingCache {
         Remove-Item -Recurse -Force
 }
 
-function New-ZipPackage {
-    param([string]$Source, [string]$Destination)
-    if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force }
-    Compress-Archive -Path (Join-Path $Source '*') -DestinationPath $Destination `
-        -CompressionLevel Optimal
-}
-
 function Get-ZipEntryNames {
     param([string]$Path)
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead($Path)
-    try { return @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') }) }
+    try {
+        return @($archive.Entries | ForEach-Object {
+            $_.FullName.Replace('\', '/') -replace '^\./', ''
+        })
+    }
     finally { $archive.Dispose() }
 }
 
 Push-Location $repositoryRoot
 $runStarted = [DateTime]::UtcNow
 try {
+    Assert-RhemaMigrationGuardCoverage -RepositoryRoot $repositoryRoot | Out-Null
     Assert-True ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) `
         'Release construction requires a Windows x64 build host.'
     Assert-True ($env:PROCESSOR_ARCHITECTURE -in @('AMD64', 'x86_64')) `
@@ -412,9 +414,13 @@ try {
 
     $apiZip = Join-Path $releaseDirectory 'api.zip'
     $frontendZip = Join-Path $releaseDirectory 'frontend.zip'
-    Invoke-TimedStep 'Artifact compression' {
-        New-ZipPackage -Source $apiOutput -Destination $apiZip
-        New-ZipPackage -Source $frontendOutput -Destination $frontendZip
+    Invoke-TimedStep 'API artifact packaging' {
+        New-RhemaZipPackage -Source $apiOutput -Destination $apiZip `
+            -CompressionLevel Fastest
+    } | Out-Null
+    Invoke-TimedStep 'Frontend artifact packaging' {
+        New-RhemaZipPackage -Source $frontendOutput -Destination $frontendZip `
+            -CompressionLevel $ArchiveCompressionLevel
     } | Out-Null
     $apiEntries = Get-ZipEntryNames $apiZip
     $frontendEntries = Get-ZipEntryNames $frontendZip
@@ -464,6 +470,8 @@ try {
             npm = $npmVersion
             next = $runtimeNext.version
             configuredNodeHeapMb = $heapMb
+            archiveCompressionLevel = $ArchiveCompressionLevel
+            archivePackagingEngine = 'WindowsTarWithManagedZipFallback'
         }
         api = [ordered]@{
             file = 'api.zip'
