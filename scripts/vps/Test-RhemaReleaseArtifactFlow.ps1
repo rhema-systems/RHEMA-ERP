@@ -177,6 +177,7 @@ foreach ($contract in @('SYNCFUSION_LICENSE', 'VPS_SSH_PRIVATE_KEY',
         'windows_amd64.zip',
         'AE64E556ECC240B200F7EBA60D550E4BB60D78E860E69DD88C449405B86067F4',
         'Get-AuthenticodeSignature', 'auth login',
+        'Test-GitHubCliAuthentication',
         'OpenSSH.Server', 'RhemaERP GitHub Actions SSH',
         'AuthenticationMethods publickey', 'Repair-OpenSshServerPermissions',
         'Set-OpenSshDirectoryPermissions',
@@ -203,6 +204,9 @@ Assert-Test (-not $ciBootstrap.Contains("-P '' -f `$SshPrivateKeyPath")) `
     'GitHub CI/CD bootstrap uses an empty native argument that Windows PowerShell drops.'
 Assert-Test (-not $ciBootstrap.Contains('KbdInteractiveAuthentication')) `
     'GitHub CI/CD bootstrap uses an unsupported Windows OpenSSH setting.'
+Assert-Test (-not $ciBootstrap.Contains(
+        '& $script:GitHubCliPath auth status --hostname github.com')) `
+    'GitHub CI/CD bootstrap still lets unauthenticated gh stderr terminate Windows PowerShell.'
 $strictDirectoryAclIndex =
     $ciBootstrap.IndexOf('$security.SetAccessRuleProtection($true, $false)')
 $directoryAclRepairIndex =
