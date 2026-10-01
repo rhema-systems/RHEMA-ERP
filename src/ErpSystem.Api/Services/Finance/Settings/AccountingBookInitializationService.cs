@@ -412,6 +412,12 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
                 throw new InvalidOperationException("Only a Delta or Parallel book with a governed base book can prepare inherited structure.");
             if (book.LifecycleStatus is not (AccountingBookLifecycleStatus.Configuring or AccountingBookLifecycleStatus.Initializing))
                 throw new InvalidOperationException("Derived-book structure may be prepared only while the book is Configuring or Initializing.");
+            if (book.IsActive || book.AllowsPosting)
+                throw new InvalidOperationException("Structure preparation requires a non-posting book.");
+            if (await _db.AccountingBookInitializations.AnyAsync(item => item.TenantId == TenantId
+                && item.AccountingBookId == book.Id && !item.IsDeleted
+                && (item.InitializationStatus == AccountingBookInitializationStatus.PendingApproval || item.InitializationStatus == AccountingBookInitializationStatus.Approved), cancellationToken))
+                throw new InvalidOperationException("Structure cannot change while initialization evidence is pending approval or approved.");
 
             var baseBook = await _db.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(item => item.Id == book.BaseAccountingBookId.Value
                 && item.TenantId == TenantId && !item.IsDeleted, cancellationToken)
@@ -429,7 +435,10 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
                     && !item.IsDeleted && item.IsEnabled)
                 .OrderBy(item => item.AccountId).ToListAsync(cancellationToken);
             if (sourceMappings.Count == 0 || sourceMappings.Any(item => item.Account == null || item.Account.IsDeleted
+                || item.Account.TenantId != TenantId
                 || item.AccountClassification == null || item.AccountClassification.IsDeleted
+                || item.AccountClassification.TenantId != TenantId || item.AccountClassification.AccountingBookId != baseBook.Id
+                || !item.AccountClassification.IsPostingClassification || item.AccountClassification.CoreAccountType != item.Account.AccountType
                 || item.AccountClassification.Status != AccountClassificationStatus.Active))
                 throw new InvalidOperationException("The base book must have complete enabled account mappings with active classifications before derived structure can be prepared.");
 
@@ -439,10 +448,12 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             var sourceById = sourceClassifications.ToDictionary(item => item.Id);
             var targetByCode = targetClassifications.ToDictionary(item => item.Code, StringComparer.Ordinal);
             var clonedBySourceId = new Dictionary<Guid, AccountClassification>();
+            var resolving = new HashSet<Guid>();
 
             AccountClassification ResolveClassification(AccountClassification source)
             {
                 if (clonedBySourceId.TryGetValue(source.Id, out var resolved)) return resolved;
+                if (!resolving.Add(source.Id)) throw new InvalidOperationException("The source classification hierarchy contains a cycle.");
                 AccountClassification? parent = null;
                 if (source.ParentClassificationId.HasValue)
                 {
@@ -482,6 +493,7 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
                     resolved.UpdatedBy = ActorName();
                 }
                 clonedBySourceId[source.Id] = resolved;
+                resolving.Remove(source.Id);
                 return resolved;
             }
 
@@ -548,10 +560,10 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         CancellationToken cancellationToken)
     {
         var available = classifications.ToList();
-        var equity = available.FirstOrDefault(item => item.Code == "EQUITY")
+        var equity = available.FirstOrDefault(item => item.Code == "EQUITY" && item.IsPostingClassification && item.CoreAccountType == AccountType.Equity)
             ?? available.FirstOrDefault(item => item.IsPostingClassification && item.CoreAccountType == AccountType.Equity)
             ?? throw new InvalidOperationException("PARALLEL_CTA_CLASSIFICATION_REQUIRED: The inherited structure has no active posting Equity classification.");
-        var rounding = available.FirstOrDefault(item => item.Code == "OTHER_EXPENSE")
+        var rounding = available.FirstOrDefault(item => item.Code == "OTHER_EXPENSE" && item.IsPostingClassification && item.CoreAccountType == AccountType.Expense)
             ?? available.FirstOrDefault(item => item.IsPostingClassification && item.CoreAccountType == AccountType.Expense)
             ?? throw new InvalidOperationException("PARALLEL_ROUNDING_CLASSIFICATION_REQUIRED: The inherited structure has no active posting Expense classification.");
         var currency = book.FunctionalCurrencyCode

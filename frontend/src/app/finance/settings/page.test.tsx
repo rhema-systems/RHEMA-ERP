@@ -11,6 +11,7 @@ vi.mock('@/services/finance/finance-data.service', () => ({
     financeDataService: {
         getFinanceSettings: vi.fn(),
         getAccounts: vi.fn(),
+        getFiscalYears: vi.fn().mockResolvedValue([]),
         updateFinanceSettings: vi.fn(),
     },
 }));
@@ -63,6 +64,15 @@ async function openPage() {
 }
 
 describe('Finance Settings supplier return mappings', () => {
+    it('exposes and persists an eligible customer advance liability mapping', async () => {
+        await openPage();
+        fireEvent.click(screen.getByRole('combobox', { name: 'Customer Advance Account' }));
+        expect(screen.queryByRole('option', { name: /Inventory/ })).not.toBeInTheDocument();
+        fireEvent.click(await screen.findByRole('option', { name: '2100 - Accrual Liability' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
+        await waitFor(() => expect(financeDataService.updateFinanceSettings).toHaveBeenCalledWith(expect.objectContaining({ customerAdvanceAccountId: 'liability' })));
+        await waitFor(() => expect(screen.getByRole('combobox', { name: 'Customer Advance Account' })).toHaveTextContent('2100 - Accrual Liability'));
+    });
     it('loads both saved mappings while preserving the existing locked Inventory control', async () => {
         await openPage();
         expect(screen.getByRole('combobox', { name: 'Supplier Returns Clearing' }))

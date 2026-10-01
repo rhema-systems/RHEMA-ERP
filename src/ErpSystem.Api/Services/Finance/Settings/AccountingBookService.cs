@@ -473,7 +473,12 @@ public sealed class AccountingBookService : IAccountingBookService
             {
                 if (_initialization == null)
                     throw new InvalidOperationException("Derived-book structure provisioning is unavailable.");
-                await _initialization.EnsureDeltaStructureAsync(book.Id, ct);
+                // Configuration may already have frozen, independently reviewed initialization.
+                // Never mutate that structure as a side effect of the lifecycle decision.
+                var frozenInitialization = await _db.AccountingBookInitializations.AnyAsync(item => item.TenantId == TenantId
+                    && item.AccountingBookId == book.Id && !item.IsDeleted
+                    && (item.InitializationStatus == AccountingBookInitializationStatus.PendingApproval || item.InitializationStatus == AccountingBookInitializationStatus.Approved), ct);
+                if (!frozenInitialization) await _initialization.EnsureDeltaStructureAsync(book.Id, ct);
             }
             ApplyPostingFlags(book); ClearPending(book, true);
             if (target is AccountingBookLifecycleStatus.Active or AccountingBookLifecycleStatus.Suspended)

@@ -65,6 +65,7 @@ import { useToast } from '@/hooks/use-toast';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { financialStatementLayoutDataService } from '@/services/finance/financial-statement-layout-data.service';
 import { resolveFinancialStatementLayoutPermissions } from './permissions';
+import { StatementLayoutDraftEditor } from '@/components/finance/statement-layout-draft-editor';
 import type {
     AccountingBook,
     AccountClassification,
@@ -88,8 +89,16 @@ const today = new Date().toISOString().slice(0, 10);
 const yearStart = `${new Date().getFullYear()}-01-01`;
 
 function errorMessage(error: unknown, fallback: string) {
+    const validation = validationFromError(error);
+    if (validation) return validation.issues.filter(issue => issue.severity === 'Error').map(issue => `${issue.rowCode ? `${issue.rowCode}: ` : ''}${issue.message}`).join(' ') || fallback;
     if (error instanceof Error && error.message) return error.message;
     return fallback;
+}
+
+function validationFromError(error: unknown): FinancialStatementLayoutValidationResultDto | null {
+    if (!error || typeof error !== 'object' || !('response' in error)) return null;
+    const response = error.response as Partial<FinancialStatementLayoutValidationResultDto> | undefined;
+    return response && Array.isArray(response.issues) ? response as FinancialStatementLayoutValidationResultDto : null;
 }
 
 function formatDate(value?: string) {
@@ -697,6 +706,7 @@ function LayoutDetailDialog({
     const [audit, setAudit] = useState<FinancialStatementLayoutAuditEventDto[]>([]);
     const [classifications, setClassifications] = useState<AccountClassification[]>([]);
     const [classificationSelections, setClassificationSelections] = useState<Record<string, string>>({});
+    const [designing, setDesigning] = useState(false);
     const [selectedVersionId, setSelectedVersionId] = useState('');
     const [validation, setValidation] = useState<FinancialStatementLayoutValidationResultDto | null>(null);
     const [loading, setLoading] = useState(false);
@@ -765,7 +775,7 @@ function LayoutDetailDialog({
         [layout, selectedVersionId],
     );
 
-    useEffect(() => setValidation(null), [selectedVersionId]);
+    useEffect(() => { setValidation(null); setDesigning(false); }, [selectedVersionId]);
 
     const runAction = async (action: () => Promise<void>, success: string) => {
         try {
@@ -774,12 +784,15 @@ function LayoutDetailDialog({
             toast({ title: success });
             await load();
             onChanged();
+            return true;
         } catch (error) {
+            setValidation(validationFromError(error));
             toast({
                 title: 'Action failed',
                 description: errorMessage(error, 'The layout changed or the action was rejected. Refresh and retry.'),
                 variant: 'destructive',
             });
+            return false;
         } finally {
             setBusy(false);
         }
@@ -963,7 +976,11 @@ function LayoutDetailDialog({
 
     return (
         <>
-            <Dialog open={open} onOpenChange={onOpenChange}>
+            <Dialog open={open} onOpenChange={value => {
+                if (!value && designing) {
+                    setConfirmation({ title: 'Discard unsaved design changes?', description: 'The saved Draft is unchanged. Close only if you want to discard your local row edits.', action: async () => { setDesigning(false); onOpenChange(false); } });
+                } else onOpenChange(value);
+            }}>
                 <DialogContent className="grid h-[94vh] max-w-6xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden p-0">
                     <DialogHeader className="border-b px-6 py-5">
                         <DialogTitle className="flex flex-wrap items-center gap-2">
@@ -983,8 +1000,8 @@ function LayoutDetailDialog({
                             <div className="border-b px-6">
                                 <TabsList className="h-12 bg-transparent">
                                     <TabsTrigger value="versions">Versions and rows</TabsTrigger>
-                                    <TabsTrigger value="settings">Layout settings</TabsTrigger>
-                                    <TabsTrigger value="audit">Audit trail</TabsTrigger>
+                                    <TabsTrigger value="settings" disabled={designing}>Layout settings</TabsTrigger>
+                                    <TabsTrigger value="audit" disabled={designing}>Audit trail</TabsTrigger>
                                 </TabsList>
                             </div>
                             <TabsContent value="versions" className="m-0 min-h-0">
@@ -993,7 +1010,7 @@ function LayoutDetailDialog({
                                         <div className="flex flex-wrap items-end justify-between gap-3">
                                             <div className="min-w-64 space-y-2">
                                                 <Label>Version under review</Label>
-                                                <Select value={selectedVersionId} onValueChange={setSelectedVersionId}>
+                                                <Select value={selectedVersionId} onValueChange={setSelectedVersionId} disabled={designing || busy}>
                                                     <SelectTrigger><SelectValue /></SelectTrigger>
                                                     <SelectContent>
                                                         {[...layout.versions].sort((a, b) => b.versionNumber - a.versionNumber).map((version) => (
@@ -1004,14 +1021,14 @@ function LayoutDetailDialog({
                                                     </SelectContent>
                                                 </Select>
                                             </div>
-                                            <div className="flex flex-wrap gap-2">
+                                            <fieldset disabled={designing} className="flex flex-wrap gap-2">
                                                 {canManage && !layout.isProtectedStandard ? <Button variant="outline" onClick={createDraft} disabled={busy || !layout.isActive || layout.versions.some((version) => version.status === 'Draft' || version.status === 'Submitted')}><Archive className="mr-2 h-4 w-4" />Create next Draft</Button> : null}
                                                 {canManage && !layout.isProtectedStandard ? <Button variant="outline" onClick={validate} disabled={busy || !selectedVersion}><ClipboardCheck className="mr-2 h-4 w-4" />Validate</Button> : null}
                                                 {canRun && !layout.isProtectedStandard ? <Button variant="outline" onClick={() => setPreviewOpen(true)} disabled={!selectedVersion}><Eye className="mr-2 h-4 w-4" />Run preview</Button> : null}
                                                 {selectedVersion ? <Button variant="outline" onClick={() => void exportVersion('json')} disabled={busy}><FileJson className="mr-2 h-4 w-4" />JSON</Button> : null}
                                                 {selectedVersion ? <Button variant="outline" onClick={() => void exportVersion('xlsx')} disabled={busy}><FileSpreadsheet className="mr-2 h-4 w-4" />Excel</Button> : null}
                                                 {canManage && !layout.isProtectedStandard && selectedVersion?.status === 'Draft' ? <Button onClick={requestSubmission} disabled={busy}><ShieldCheck className="mr-2 h-4 w-4" />Submit for approval</Button> : null}
-                                            </div>
+                                            </fieldset>
                                         </div>
 
                                         {selectedVersion ? (
@@ -1060,10 +1077,16 @@ function LayoutDetailDialog({
                                             <Card>
                                                 <CardHeader>
                                                     <CardTitle className="text-base">Sequenced row definition</CardTitle>
-                                                    <CardDescription>Read-only inspection. Make structural changes through a controlled import.</CardDescription>
+                                                    <CardDescription>Design Draft rows here, or use a controlled import. Submitted and published versions remain read-only.</CardDescription>
+                                                    {canManage && !layout.isProtectedStandard && selectedVersion.status === 'Draft' && !designing && <Button variant="outline" disabled={busy} onClick={() => setDesigning(true)}>Design draft rows</Button>}
                                                 </CardHeader>
                                                 <CardContent className="p-0">
-                                                    <div className="overflow-x-auto">
+                                                    {designing && <StatementLayoutDraftEditor key={selectedVersion.id} initialRows={selectedVersion.rows.map(toRowInput)} classifications={classifications} busy={busy} onCancel={() => setDesigning(false)} onSave={async rows => {
+                                                        const saved = await runAction(() => financialStatementLayoutDataService.replaceDraftRows(selectedVersion.id, selectedVersion.revision, rows).then(() => undefined), 'Draft design saved');
+                                                        if (saved) { setDesigning(false); setValidation(null); }
+                                                        return saved;
+                                                    }} />}
+                                                    <div className={designing ? 'hidden' : 'overflow-x-auto'}>
                                                         <table className="w-full text-sm">
                                                             <thead className="bg-muted/50">
                                                                 <tr>

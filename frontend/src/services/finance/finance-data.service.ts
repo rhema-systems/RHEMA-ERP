@@ -392,6 +392,10 @@ class FinanceDataService {
     );
   }
 
+  async prepareAccountingBookStructure(accountingBookId: string): Promise<import('@/types/finance').DeltaBookStructurePreparation> {
+    return apiService.post(`/finance/accounting-books/${accountingBookId}/initialization/structure`, {});
+  }
+
   async configureAccountingBookInitialization(
     accountingBookId: string,
     request: Record<string, unknown>
