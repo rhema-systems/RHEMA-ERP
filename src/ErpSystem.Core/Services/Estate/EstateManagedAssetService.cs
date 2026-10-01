@@ -47,7 +47,10 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                     || item.IsPublishedToExternalPortal == query.PublishedToExternalPortal.Value)
                 && (query.PortalListingCandidates != true
                     || item.IsPublishedToExternalPortal
-                    || item.ExternalListingType != "None"));
+                    || item.ExternalListingType != "None")
+                && (string.IsNullOrEmpty(query.ExternalListingStatus)
+                    || (query.ExternalListingStatus != "PendingPublication"
+                        && item.ExternalListingStatus == query.ExternalListingStatus)));
 
         if (normalizedSearch != null)
         {
@@ -1572,12 +1575,10 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             && (asset.AssetType == EstateManagedAssetType.Property
                 || asset.AssetType == EstateManagedAssetType.Facility))
         {
-            if (asset.SourceType != EstateManagedAssetSourceType.Imported
-                && (asset.SourceType != EstateManagedAssetSourceType.ProjectUnit
-                    || !asset.IsPublishedFromProject))
+            if (!IsPropertyPortalSourceAllowed(asset.SourceType, asset.IsPublishedFromProject))
             {
                 throw new InvalidOperationException(
-                    "Only imported or project-handoff property can be sent to Portal Listings.");
+                    "Only manually registered, imported, or project-handoff property can be sent to Portal Listings.");
             }
 
             if (asset.Status != EstateManagedAssetStatus.Available)
@@ -1618,8 +1619,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             }
             if (asset.AssetType == EstateManagedAssetType.Land && request.ExternalGroundRentRequired is null)
                 throw new InvalidOperationException("Select whether annual ground rent is required before publishing this land listing.");
-            if (asset.AssetType == EstateManagedAssetType.Land && request.ExternalGroundRentRequired == true && asset.GroundRentPayable is not > 0m)
-                throw new InvalidOperationException("Assess and approve annual ground rent before publishing this land listing.");
+            if (request.ExternalGroundRentRequired == true && asset.GroundRentPayable is not > 0m)
+                throw new InvalidOperationException("Assess and approve annual ground rent before publishing this listing.");
         }
 
         if (request.IsPublishedToExternalPortal && includesSale && !salePrice.HasValue)
@@ -1753,6 +1754,10 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         CentralDocumentReference = document.CentralDocumentReference,
         PublishedToCentralDmsAt = document.PublishedToCentralDmsAt
     };
+
+    internal static bool IsPropertyPortalSourceAllowed(EstateManagedAssetSourceType sourceType, bool isPublishedFromProject) =>
+        sourceType is EstateManagedAssetSourceType.Manual or EstateManagedAssetSourceType.Imported
+        || (sourceType == EstateManagedAssetSourceType.ProjectUnit && isPublishedFromProject);
 
     private static EstateManagedAssetType ResolveAssetType(string? unitType)
     {

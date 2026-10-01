@@ -183,6 +183,7 @@
     <Compile Include="Services\Estate\EstateBoundaryGeometryTests.cs" />
     <Compile Include="Services\Estate\EstateWorkflowIntegrationRegressionTests.cs" />
     <Compile Include="Services\Estate\EstateRentPenaltyStatusTests.cs" />
+    <Compile Include="Services\Estate\GroundRentAssessmentTests.cs" />
     <Compile Include="Services\Estate\FacilitiesDutyRosterScheduleTests.cs" />
     <Compile Include="Services\Estate\FacilitiesComplaintHandoffServiceTests.cs" />
     <Compile Include="Services\Estate\FacilitiesProviderSelectionServiceTests.cs" />

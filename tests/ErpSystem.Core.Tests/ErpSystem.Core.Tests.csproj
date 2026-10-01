@@ -195,6 +195,7 @@
     <Compile Include="Services\Inventory\E2E012CycleCountFinanceLifecycleTests.Recovery.cs" />
     <Compile Include="Services\Inventory\PhysicalCountPostingEligibilityTests.cs" />
     <Compile Include="Services\Inventory\InventoryOptionalApprovalTests.cs" />
+    <Compile Include="Services\Estate\EstatePropertyPortalSourceTests.cs" />
     <Compile Include="Services\Inventory\PurchaseReturnLifecycleTests.cs" />
     <Compile Include="Services\Inventory\WarehouseDefaultLocationServiceTests.cs" />
     <Compile Include="Services\Inventory\StockAdjustmentLocationValuationTests.cs" />

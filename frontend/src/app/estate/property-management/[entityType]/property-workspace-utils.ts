@@ -43,6 +43,10 @@ export function leaseExpiryDate(asset: EstateManagedAsset): Date | null {
   return new Date(Date.UTC(year, month, day));
 }
 
+export function isFullTermLease(asset: EstateManagedAsset): boolean {
+  return asset.externalListingType?.toLowerCase().includes('lease') === true;
+}
+
 export function leaseExpiryAlert(asset: EstateManagedAsset, asOf = new Date()) {
   if (!isOccupiedLike(asset)) return null;
   const expiry = leaseExpiryDate(asset);

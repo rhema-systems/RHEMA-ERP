@@ -4,6 +4,7 @@ import { EstateManagedAssetStatus, type EstateManagedAsset } from '@/services/es
 import {
   assetMatchesWorkspacePrefill,
   buildPropertyWorkspaceHref,
+  isFullTermLease,
   leaseExpiryAlert,
   leaseExpiryDate,
 } from './property-workspace-utils';
@@ -43,6 +44,20 @@ describe('property workspace prefill links', () => {
 });
 
 describe('lease expiry', () => {
+  it('keeps a 60-year lease end separate from billing dates', () => {
+    const lease = {
+      ...asset,
+      dateOfTenancy: '2026-10-01T00:00:00Z',
+      leaseTermYears: 60,
+      externalListingType: 'Lease',
+      nextRentBillingDate: undefined,
+    } as EstateManagedAsset;
+
+    expect(isFullTermLease(lease)).toBe(true);
+    expect(leaseExpiryDate(lease)?.toISOString().slice(0, 10)).toBe('2086-10-01');
+    expect(isFullTermLease({ ...lease, externalListingType: 'Rent' })).toBe(false);
+  });
+
   it('clamps month-end terms and flags active leases near expiry', () => {
     const rental = {
       ...asset,

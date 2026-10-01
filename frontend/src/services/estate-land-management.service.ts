@@ -357,6 +357,7 @@ export interface EstateManagedAssetQuery {
   availableForLease?: boolean;
   availableForSale?: boolean;
   portalListingCandidates?: boolean;
+  externalListingStatus?: string;
   publishedToExternalPortal?: boolean;
   skip?: number;
   take?: number;
@@ -472,6 +473,7 @@ const buildManagedAssetQueryParams = (query: EstateManagedAssetQuery) => ({
   availableForLease: query.availableForLease,
   availableForSale: query.availableForSale,
   portalListingCandidates: query.portalListingCandidates,
+  externalListingStatus: query.externalListingStatus,
   publishedToExternalPortal: query.publishedToExternalPortal,
   skip: query.skip,
   take: query.take || 250,
@@ -560,7 +562,8 @@ export class EstateLandManagementService {
   async getPortalListingDemarcations(
     search?: string,
     skip = 0,
-    take = 300
+    take = 300,
+    externalListingStatus?: string
   ): Promise<EstateManagedAsset[]> {
     const response = await apiService.get<ApiListResponse<EstateManagedAsset>>(
       '/estate/managed-assets/portal-listing-demarcations',
@@ -568,6 +571,7 @@ export class EstateLandManagementService {
         search: search || undefined,
         skip,
         take,
+        externalListingStatus,
       }
     );
 

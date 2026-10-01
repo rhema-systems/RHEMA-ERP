@@ -1231,6 +1231,7 @@ export default function FacilitiesProcedureWorkspacePage() {
             entityType={procedure.entityType}
             defaultTitle={procedure.title}
             workspaceType="Case Workflow"
+            intakeFields={showComplaintIntakeRegister ? workspace.intakeFields : undefined}
           />
         </>
       ) : hasConfiguredWorkflow && !operatingMode ? (

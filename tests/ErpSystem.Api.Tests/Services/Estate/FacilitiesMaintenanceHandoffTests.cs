@@ -62,6 +62,51 @@ public sealed class FacilitiesMaintenanceHandoffTests
     }
 
     [Fact]
+    public async Task MaintenanceIntakeRequiresSelectedEstateProperty()
+    {
+        var tenantId = Guid.NewGuid();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        await using var db = new ApplicationDbContext(options, tenantId);
+
+        var action = () => ProcedureCaseService.EnsureFacilitiesMaintenancePropertyForIntakeAsync(
+            db, tenantId, new Dictionary<string, string?> { ["propertyUnit"] = "ASR-001" });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Select a property from the Estate property register*");
+    }
+
+    [Fact]
+    public async Task MaintenanceIntakeAcceptsOnlyMatchingEstateProperty()
+    {
+        var tenantId = Guid.NewGuid();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        await using var db = new ApplicationDbContext(options, tenantId);
+        var property = new EstateManagedAsset
+        {
+            TenantId = tenantId, AssetCode = "ASR-005", ProjectUnitCode = "UNIT-5", Name = "Apartment 5"
+        };
+        db.EstateManagedAssets.Add(property);
+        await db.SaveChangesAsync();
+
+        var fields = new Dictionary<string, string?>
+        {
+            ["propertyUnit"] = "DIFFERENT-UNIT",
+            ["estateManagedAssetId"] = property.Id.ToString()
+        };
+        var mismatched = () => ProcedureCaseService.EnsureFacilitiesMaintenancePropertyForIntakeAsync(
+            db, tenantId, fields);
+        await mismatched.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*does not match*");
+
+        fields["propertyUnit"] = property.ProjectUnitCode;
+        var matching = () => ProcedureCaseService.EnsureFacilitiesMaintenancePropertyForIntakeAsync(
+            db, tenantId, fields);
+        await matching.Should().NotThrowAsync();
+    }
+
+    [Fact]
     public async Task SelectedEstatePropertyCreatesAndReusesMaintenanceAsset()
     {
         var tenantId = Guid.NewGuid();

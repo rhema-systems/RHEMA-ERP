@@ -150,6 +150,17 @@ const FACILITIES_SYSTEM_FIELD_KEYS = new Set([
   'estateManagedAssetId',
 ]);
 
+const FACILITIES_COMPLAINT_CREATE_FIELD_KEYS = new Set([
+  'contactReference',
+  'complaintCategory',
+  'priority',
+  'serviceImpact',
+  'incidentDate',
+  'targetDate',
+  'complaintDescription',
+  'desiredResolution',
+]);
+
 const HIDDEN_LINK_FIELD_KEYS = new Set([
   'estateManagedAssetId',
   'customerBusinessPartnerId',
@@ -631,6 +642,7 @@ export function ProcedureCaseWorkspace({
   const [legalAssetContextError, setLegalAssetContextError] = React.useState<string | null>(null);
   const [estateAssetSearch, setEstateAssetSearch] = React.useState(
     searchParams.get('field_propertyNumber') ||
+      searchParams.get('field_propertyUnit') ||
       searchParams.get('field_housePlotShopNumber') ||
       searchParams.get('field_unitNumber') ||
       ''
@@ -699,7 +711,11 @@ export function ProcedureCaseWorkspace({
   const isFacilitiesMaintenanceOrComplaint =
     module === 'Facilities' && FACILITIES_LINKED_ASSET_ENTITY_TYPES.has(entityType);
   const isFacilitiesMaintenance = module === 'Facilities' && entityType === 'EstateFacilityMaintenance';
-  const isFacilitiesMaintenanceRegister = isFacilitiesMaintenance && !detailOnly;
+  const isFacilitiesComplaint = module === 'Facilities' && entityType === 'EstateFacilityComplaint';
+  const isFacilitiesCaseRegister = isFacilitiesMaintenanceOrComplaint && !detailOnly;
+  const complaintCreateFields = isFacilitiesComplaint
+    ? intakeFields.filter((field) => FACILITIES_COMPLAINT_CREATE_FIELD_KEYS.has(field.key))
+    : [];
   const isMaintenanceHandoffStage = isFacilitiesMaintenance && selectedCase?.currentStageName === 'Maintenance Handoff Review';
   const isLinkedLegalMatter =
     module === 'Legal' && Boolean(originatingPropertyCaseId);
@@ -1156,7 +1172,7 @@ export function ProcedureCaseWorkspace({
       if (targetCaseId) {
         const detail = await procedureCaseService.getCase(targetCaseId);
         setSelectedCase(detail);
-        if (isFacilitiesMaintenanceRegister && requestedCaseId) setIsCaseDialogOpen(true);
+        if (isFacilitiesCaseRegister && requestedCaseId) setIsCaseDialogOpen(true);
       } else if (!targetCaseId) {
         setSelectedCase(null);
       }
@@ -1175,7 +1191,7 @@ export function ProcedureCaseWorkspace({
     module,
     registerOnly,
     requestedCaseId,
-    isFacilitiesMaintenanceRegister,
+    isFacilitiesCaseRegister,
   ]);
 
   React.useEffect(() => {
@@ -1311,6 +1327,16 @@ export function ProcedureCaseWorkspace({
       window.clearTimeout(timer);
     };
   }, [entityType, estateAssetSearch, isCreateDialogOpen, module, selectedCase]);
+
+  React.useEffect(() => {
+    const assetId = newEstateFields.estateManagedAssetId;
+    if (!isFacilitiesMaintenance || !isCreateDialogOpen || !assetId || selectedEstateAsset?.id === assetId) return;
+    let active = true;
+    void estateLandManagementService.getManagedAsset(assetId)
+      .then((asset) => { if (active) setSelectedEstateAsset(asset); })
+      .catch(() => { if (active) setSelectedEstateAsset(null); });
+    return () => { active = false; };
+  }, [isCreateDialogOpen, isFacilitiesMaintenance, newEstateFields.estateManagedAssetId, selectedEstateAsset?.id]);
 
   React.useEffect(() => {
     if (module !== 'Legal' || !isCreateDialogOpen) return;
@@ -1556,8 +1582,15 @@ export function ProcedureCaseWorkspace({
       setError('Select the property linked to this Legal matter.');
       return;
     }
-    if (isFacilitiesMaintenance && !newEstateFields.propertyUnit) {
-      setError('Select the property for this maintenance case.');
+    if (isFacilitiesMaintenanceOrComplaint && (!newEstateFields.propertyUnit || !newEstateFields.estateManagedAssetId)) {
+      setError('Select a property from the Estate property register for this Facilities case.');
+      return;
+    }
+    if (isFacilitiesComplaint && complaintCreateFields.length > 0
+        && (!newCase.applicantName.trim()
+          || !newEstateFields.complaintCategory?.trim()
+          || !newEstateFields.complaintDescription?.trim())) {
+      setError('Enter the complainant, complaint category, and description.');
       return;
     }
 
@@ -1573,10 +1606,12 @@ export function ProcedureCaseWorkspace({
         organizationLevelId: selectedNewCaseDepartment.organizationLevelId,
         organizationUnitId: selectedNewCaseDepartment.id,
         receivedDate: newCase.receivedDate,
-        description: newCase.description,
+        description: isFacilitiesComplaint
+          ? newEstateFields.complaintDescription || newCase.description
+          : newCase.description,
         fieldValues: module === 'Legal'
           ? { ...prefilledFieldValues, ...newLegalFields, applicantName: newCase.applicantName }
-          : module === 'Estate' || isFacilitiesMaintenance
+          : module === 'Estate' || isFacilitiesMaintenanceOrComplaint
             ? { ...prefilledFieldValues, ...newEstateFields, applicantName: newCase.applicantName }
           : prefilledFieldValues,
         hasIntakeAttachment: Boolean(intakeAttachmentMode === 'upload' ? intakeAttachmentFile : intakeDmsRecordId),
@@ -1612,7 +1647,7 @@ export function ProcedureCaseWorkspace({
       });
       await loadCases(created.id);
       setIsCreateDialogOpen(false);
-      if (isFacilitiesMaintenanceRegister) {
+      if (isFacilitiesCaseRegister) {
         setSelectedCase(attachedCase);
         setIsCaseDialogOpen(true);
         setNewEstateFields({});
@@ -1739,7 +1774,7 @@ export function ProcedureCaseWorkspace({
       propertyUnit: estateAssetReference(asset),
       estateManagedAssetId: asset.id,
       location: asset.location || asset.town || '',
-      issueDescription: newCase.description,
+      ...(isFacilitiesMaintenance ? { issueDescription: newCase.description } : {}),
     }));
   };
 
@@ -2796,15 +2831,15 @@ export function ProcedureCaseWorkspace({
           ) : null}
         </div>
       ) : null}
-      {isFacilitiesMaintenance ? (
+      {isFacilitiesMaintenanceOrComplaint ? (
         <div className="space-y-2">
           <label className="text-xs font-medium" htmlFor="new-facilities-asset-search">Property / unit / plot</label>
           <Input id="new-facilities-asset-search" placeholder="Search the Estate property register" value={estateAssetSearch} onChange={(event) => setEstateAssetSearch(event.target.value)} />
-          <Select value={selectedEstateAsset?.id || undefined} onValueChange={(value) => {
+          <Select value={newEstateFields.estateManagedAssetId || undefined} onValueChange={(value) => {
             const asset = estateAssetOptions.find((item) => item.id === value);
             if (asset) applyFacilitiesAssetToNewCase(asset);
           }}>
-            <SelectTrigger aria-label="Property"><SelectValue placeholder="Select property" /></SelectTrigger>
+            <SelectTrigger aria-label="Property" aria-required="true"><SelectValue placeholder="Select property" /></SelectTrigger>
             <SelectContent>
               {estateAssetOptions.map((asset) => <SelectItem key={asset.id} value={asset.id}>{estateAssetLabel(asset)}</SelectItem>)}
             </SelectContent>
@@ -2814,7 +2849,7 @@ export function ProcedureCaseWorkspace({
       {module === 'Legal' ? <label className="text-xs font-medium" htmlFor="new-legal-applicant">Applicant / party name</label> : null}
       <Input
         id="new-legal-applicant"
-        placeholder="Applicant / party name"
+        placeholder={isFacilitiesComplaint ? 'Complainant name' : 'Applicant / party name'}
         value={newCase.applicantName}
         onChange={(event) => {
           const applicantName = event.target.value;
@@ -2854,6 +2889,29 @@ export function ProcedureCaseWorkspace({
                   disabled={field.key === 'propertyNumber' && Boolean(newLegalFields.estateManagedAssetId)}
                   onChange={(event) => setNewLegalFields((current) => ({ ...current, [field.key]: event.target.value }))}
                 />
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {complaintCreateFields.length > 0 ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {complaintCreateFields.map((field) => (
+            <div key={field.key} className={field.type === 'textarea' ? 'space-y-1.5 sm:col-span-2' : 'space-y-1.5'}>
+              <label className="text-xs font-medium" htmlFor={`new-complaint-${field.key}`}>{field.label}</label>
+              {field.type === 'select' && field.options?.length ? (
+                <Select value={newEstateFields[field.key] || undefined}
+                  onValueChange={(value) => setNewEstateFields((current) => ({ ...current, [field.key]: value }))}>
+                  <SelectTrigger id={`new-complaint-${field.key}`}><SelectValue placeholder={field.label} /></SelectTrigger>
+                  <SelectContent>{field.options.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent>
+                </Select>
+              ) : field.type === 'textarea' ? (
+                <Textarea id={`new-complaint-${field.key}`} value={newEstateFields[field.key] || ''}
+                  onChange={(event) => setNewEstateFields((current) => ({ ...current, [field.key]: event.target.value }))} />
+              ) : (
+                <Input id={`new-complaint-${field.key}`} type={field.type === 'date' ? 'date' : 'text'}
+                  value={newEstateFields[field.key] || ''}
+                  onChange={(event) => setNewEstateFields((current) => ({ ...current, [field.key]: event.target.value }))} />
               )}
             </div>
           ))}
@@ -2935,7 +2993,7 @@ export function ProcedureCaseWorkspace({
         }
       />
       {module === 'Legal' ? <label className="text-xs font-medium" htmlFor="new-legal-description">Description</label> : null}
-      <Textarea
+      {complaintCreateFields.length === 0 ? <Textarea
         id="new-legal-description"
         placeholder={isFacilitiesMaintenance ? 'Problem description' : 'Description'}
         value={newCase.description}
@@ -2946,7 +3004,7 @@ export function ProcedureCaseWorkspace({
             description: event.target.value,
           });
         }}
-      />
+      /> : null}
       <Button
         className="w-full gap-2"
         onClick={() => void createCase()}
@@ -3068,7 +3126,7 @@ export function ProcedureCaseWorkspace({
                               </Badge>
                             </td>
                             <td className="px-3 py-3 text-right align-top">
-                              {isFacilitiesMaintenanceRegister ? (
+                              {isFacilitiesCaseRegister ? (
                                 <Button type="button" size="sm" variant="outline" className="gap-2" onClick={() => {
                                   setIsCaseDialogOpen(true);
                                   void selectCase(procedureCase.id);
@@ -3103,7 +3161,7 @@ export function ProcedureCaseWorkspace({
               </div>
               ) : null}
 
-              {allowsManualCaseCreation && !registerOnly && !detailOnly && !isFacilitiesMaintenanceRegister ? (
+              {allowsManualCaseCreation && !registerOnly && !detailOnly && !isFacilitiesCaseRegister ? (
                 <div className="rounded-md border border-border bg-background p-4">
                   <h2 className="text-sm font-semibold">
                     {terminology.createHeading}
@@ -3112,9 +3170,9 @@ export function ProcedureCaseWorkspace({
                 </div>
               ) : null}
             {!registerOnly && selectedCase ? (
-              <CaseDetailContainer modal={isFacilitiesMaintenanceRegister} open={isCaseDialogOpen} onOpenChange={setIsCaseDialogOpen} title={selectedCase.referenceNumber || selectedCase.title}>
+              <CaseDetailContainer modal={isFacilitiesCaseRegister} open={isCaseDialogOpen} onOpenChange={setIsCaseDialogOpen} title={selectedCase.referenceNumber || selectedCase.title}>
               <div className="space-y-4">
-                {isFacilitiesMaintenanceRegister && error ? <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p> : null}
+                {isFacilitiesCaseRegister && error ? <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p> : null}
                 <div className="rounded-md border border-border bg-background p-4">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div>
@@ -3195,7 +3253,7 @@ export function ProcedureCaseWorkspace({
                   <TabsContent value="stage" className="space-y-4">
                 <div className="rounded-md border border-border bg-background p-4">
                   <div className="mb-3 flex items-center justify-between gap-2">
-                    <h2 className="text-sm font-semibold">{isFacilitiesMaintenance ? selectedCase.currentStageName : 'Intake'}</h2>
+                    <h2 className="text-sm font-semibold">{isFacilitiesMaintenanceOrComplaint ? selectedCase.currentStageName : 'Intake'}</h2>
                     <Button
                       size="sm"
                       variant="outline"
@@ -4042,7 +4100,7 @@ export function ProcedureCaseWorkspace({
               </div>
               </CaseDetailContainer>
             ) : (
-              !isFacilitiesMaintenanceRegister && <div className="rounded-md border border-border bg-background p-8 text-center text-sm text-muted-foreground">
+              !isFacilitiesCaseRegister && <div className="rounded-md border border-border bg-background p-8 text-center text-sm text-muted-foreground">
                 {terminology.selectMessage}
               </div>
             )}
@@ -4061,8 +4119,8 @@ export function ProcedureCaseWorkspace({
               </DialogDescription>
             ) : null}
           </DialogHeader>
-          {module === 'Legal' && error ? (
-            <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p>
+          {(module === 'Legal' || isFacilitiesMaintenanceOrComplaint) && error ? (
+            <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p>
           ) : null}
           {renderCreateCaseForm()}
         </DialogContent>

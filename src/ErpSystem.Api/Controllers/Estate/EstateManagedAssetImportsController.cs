@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Data;
 using System.Text.Json;
 using ClosedXML.Excel;
 using ErpSystem.Core.Entities.Estate;
@@ -20,7 +21,7 @@ public sealed class EstateManagedAssetImportsController : ControllerBase
     private const long MaxFileBytes = 10 * 1024 * 1024;
     private static readonly (string Key, string Label)[] Fields =
     [
-        ("assetCode", "Asset code"), ("recordType", "Record type"), ("name", "Name"),
+        ("assetCode", "Asset code"), ("recordType", "Asset type"), ("name", "Name"),
         ("status", "Occupancy status"), ("location", "Location"), ("description", "Description"),
         ("unitType", "Unit type"), ("projectCode", "Project code"), ("blockName", "Block"),
         ("floorLabel", "Floor"), ("propertyFileReference", "Property file reference"),
@@ -288,11 +289,18 @@ public sealed class EstateManagedAssetImportsController : ControllerBase
             await executionStrategy.ExecuteAsync(async () =>
             {
                 await using var transaction = _db.Database.IsRelational()
-                    ? await _db.Database.BeginTransactionAsync()
+                    ? await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable)
                     : null;
                 var codes = result.Rows.Select(row => row.AssetCode).ToList();
                 if (await _db.EstateManagedAssets.AnyAsync(item => item.TenantId == tenantId && !item.IsDeleted && codes.Contains(item.AssetCode)))
                     throw new ImportConflictException("An asset code was imported by another user. Preview the spreadsheet again.");
+                var existingNames = await _db.EstateManagedAssets.AsNoTracking()
+                    .Where(item => item.TenantId == tenantId && !item.IsDeleted)
+                    .Select(item => item.Name).ToListAsync();
+                var existingNameSet = existingNames.Select(NormalizeAssetName)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (result.Rows.Any(row => existingNameSet.Contains(NormalizeAssetName(row.Name))))
+                    throw new ImportConflictException("An asset name already exists in the register. Preview the spreadsheet again.");
 
                 _db.EstateManagedAssets.AddRange(result.Rows);
                 await _db.SaveChangesAsync();
@@ -305,7 +313,7 @@ public sealed class EstateManagedAssetImportsController : ControllerBase
         }
         catch (DbUpdateException)
         {
-            return Conflict(new { success = false, message = "An asset code already exists. Preview the spreadsheet again." });
+            return Conflict(new { success = false, message = "An asset code or name already exists. Preview the spreadsheet again." });
         }
         return Ok(new { success = true, importedCount = result.Rows.Count });
     }
@@ -342,6 +350,7 @@ public sealed class EstateManagedAssetImportsController : ControllerBase
         var tenantId = _currentUser.TenantId;
         if (!tenantId.HasValue || tenantId.Value == Guid.Empty) return (rows, ["Select a tenant before importing."]);
         var seenCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var seenSurveyPlans = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var lastRow = worksheet.LastRowUsed()?.RowNumber() ?? 1;
         if (lastRow - 1 > MaxRows) return (rows, [$"Import no more than {MaxRows} rows at a time."]);
@@ -349,6 +358,11 @@ public sealed class EstateManagedAssetImportsController : ControllerBase
             .Where(item => item.TenantId == tenantId && !item.IsDeleted)
             .Select(item => item.AssetCode).ToListAsync();
         var existingCodeSet = existingCodes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var existingNames = await _db.EstateManagedAssets.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted)
+            .Select(item => item.Name).ToListAsync();
+        var existingNameSet = existingNames.Select(NormalizeAssetName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var existingSurveyPlans = await _db.EstateManagedAssets.AsNoTracking()
             .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.AssetType == EstateManagedAssetType.Land && item.SurveyPlanNumber != null)
             .Select(item => item.SurveyPlanNumber!).ToListAsync();
@@ -369,13 +383,14 @@ public sealed class EstateManagedAssetImportsController : ControllerBase
             var recordType = Get("recordType");
             var land = recordType.Equals("Land", StringComparison.OrdinalIgnoreCase);
             var facility = recordType.Equals("Facility", StringComparison.OrdinalIgnoreCase);
-            var property = new[] { "Property", "Apartment", "Flat", "Store", "Shop", "Office", "Warehouse", "Unit" }
-                .Contains(recordType, StringComparer.OrdinalIgnoreCase);
+            var property = recordType.Equals("Property", StringComparison.OrdinalIgnoreCase);
             if (code.Length is 0 or > 80) rowErrors.Add("Asset code is required (maximum 80 characters)");
             else if (!seenCodes.Add(code) || existingCodeSet.Contains(code)) rowErrors.Add("Asset code already exists");
             if (name.Length is 0 or > 240) rowErrors.Add("Name is required (maximum 240 characters)");
+            else if (!seenNames.Add(NormalizeAssetName(name)) || existingNameSet.Contains(NormalizeAssetName(name)))
+                rowErrors.Add("Name already exists in this workbook or the asset register");
             if (location.Length is 0 or > 500) rowErrors.Add("Location is required (maximum 500 characters)");
-            if (!land && !facility && !property) rowErrors.Add("Record type must be Land, Property, Facility, Apartment, Store, Office, or another supported unit type");
+            if (!land && !facility && !property) rowErrors.Add("Asset type must be Land, Property, or Facility; put Apartment, Office, Shop, or Warehouse in Unit type");
             if (land)
             {
                 foreach (var key in LandRequired)
@@ -422,7 +437,7 @@ public sealed class EstateManagedAssetImportsController : ControllerBase
                 Id = Guid.NewGuid(), TenantId = tenantId.Value, AssetCode = code, Name = name,
                 AssetType = land ? EstateManagedAssetType.Land : facility ? EstateManagedAssetType.Facility : EstateManagedAssetType.Property,
                 Status = land ? EstateManagedAssetStatus.LandBank : status, SourceType = EstateManagedAssetSourceType.Imported,
-                Location = location, Description = Get("description"), UnitType = unitType.Length > 0 ? unitType : land || facility || recordType == "Property" ? null : recordType,
+                Location = location, Description = Get("description"), UnitType = unitType.Length > 0 ? unitType : null,
                 ProjectCode = Get("projectCode"), BlockName = Get("blockName"), FloorLabel = Get("floorLabel"),
                 PropertyFileReference = Get("propertyFileReference"), Purpose = Get("purpose"),
                 ZoningClassification = Get("zoningClassification"), PlanningComplianceStatus = Get("planningComplianceStatus"),
@@ -480,6 +495,9 @@ public sealed class EstateManagedAssetImportsController : ControllerBase
     };
 
     private static string Normalize(string value) => new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    private static string NormalizeAssetName(string value) =>
+        string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
     private static void AddLandTemplateSampleRows(IXLWorksheet worksheet, IReadOnlyList<string> headerKeys)
     {
