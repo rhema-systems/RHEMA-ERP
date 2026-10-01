@@ -166,6 +166,10 @@ Assert-Test (-not $workflow.Contains('docker/build-push-action')) `
     'The active Windows VPS workflow still builds unused Docker images.'
 Assert-Test (-not $workflow.Contains('docker compose')) `
     'The active Windows VPS workflow still invokes the unused Docker deployment path.'
+Assert-Test (-not $workflow.Contains("-P ''")) `
+    'The active Windows VPS workflow passes an empty native argument that Windows PowerShell drops.'
+Assert-Test ($workflow.Contains('$keygenProcess.StandardInput.Close()')) `
+    'The active Windows VPS workflow can prompt indefinitely for an encrypted SSH key.'
 Assert-Test (-not (Test-Path (Join-Path $repositoryRoot `
             '.github\workflows\deploy-environments.yml'))) `
     'The obsolete Docker environment deployment workflow is still active.'

@@ -228,8 +228,32 @@ jobs:
           [IO.File]::WriteAllText($knownHostsPath, $knownHosts, $utf8)
           & icacls.exe $keyPath /inheritance:r /grant:r "$env:USERNAME`:(R)" | Out-Null
           if ($LASTEXITCODE -ne 0) { throw 'Could not restrict the CI SSH private key.' }
-          & ssh-keygen.exe -y -P '' -f $keyPath | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw 'The configured CI SSH private key is invalid.' }
+
+          $keygenStartInfo = [Diagnostics.ProcessStartInfo]::new()
+          $keygenStartInfo.FileName = (Get-Command ssh-keygen.exe -ErrorAction Stop).Source
+          $keygenStartInfo.UseShellExecute = $false
+          $keygenStartInfo.CreateNoWindow = $true
+          $keygenStartInfo.RedirectStandardInput = $true
+          $keygenStartInfo.RedirectStandardOutput = $true
+          $keygenStartInfo.RedirectStandardError = $true
+          $keygenStartInfo.Arguments = '-y -f "' + $keyPath + '"'
+          $keygenProcess = [Diagnostics.Process]::new()
+          $keygenProcess.StartInfo = $keygenStartInfo
+          try {
+            [void]$keygenProcess.Start()
+            $keygenProcess.StandardInput.Close()
+            $keygenOutputTask = $keygenProcess.StandardOutput.ReadToEndAsync()
+            $keygenErrorTask = $keygenProcess.StandardError.ReadToEndAsync()
+            $keygenProcess.WaitForExit()
+            [void]$keygenOutputTask.GetAwaiter().GetResult()
+            $keygenError = $keygenErrorTask.GetAwaiter().GetResult().Trim()
+            if ($keygenProcess.ExitCode -ne 0) {
+              throw "The configured CI SSH private key is invalid or encrypted. $keygenError"
+            }
+          }
+          finally {
+            $keygenProcess.Dispose()
+          }
           "key_path=$keyPath" >> $env:GITHUB_OUTPUT
 
       - name: Preflight SSH connection without changing the VPS
