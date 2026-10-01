@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Finance
 {
@@ -138,6 +139,10 @@ namespace ErpSystem.Core.DTOs.Finance
         [Required]
         [MaxLength(500)]
         public string Reason { get; set; } = string.Empty;
+
+        [Required]
+        public FinanceReversalDatePolicy ReversalDatePolicy { get; set; } =
+            FinanceReversalDatePolicy.CurrentOpenPeriod;
 
         public DateTime? ReversalDate { get; set; }
     }

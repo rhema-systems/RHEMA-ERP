@@ -133,6 +133,7 @@ export interface FiscalPeriod {
   periodNumber: number;
   periodCode: string;
   periodName: string;
+  periodType?: PeriodType;
   startDate: string;
   endDate: string;
   periodStatus: PeriodStatus;

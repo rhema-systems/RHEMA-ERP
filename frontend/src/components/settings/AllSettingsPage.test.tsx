@@ -64,8 +64,7 @@ describe('AllSettingsPage', () => {
       'Ratio Definitions',
     ]);
     expect(finance?.links.filter(link => link.group === 'Fiscal & Close').map(link => link.title)).toEqual([
-      'Fiscal Calendar Setup',
-      'Fiscal Years',
+      'Fiscal Calendar',
       'Fiscal Periods',
        'Close Templates',
      ]);
@@ -74,6 +73,7 @@ describe('AllSettingsPage', () => {
       'UoM Schedules',
       'Warehouses & Locations',
       'Issue Accounting & Asset Custody',
+      'Physical Count Decisions',
     ]);
     expect(modules?.cards.find(card => card.title === 'Inventory')?.links.map(link => link.title))
       .not.toContain('Inventory Items');
@@ -149,6 +149,7 @@ describe('AllSettingsPage', () => {
       'UoM Schedules',
       'Warehouses & Locations',
       'Issue Accounting & Asset Custody',
+      'Physical Count Decisions',
     ]);
     expect(sections.flatMap(section => section.cards).flatMap(card => card.links).map(link => link.title))
       .not.toContain('Policy Profiles');

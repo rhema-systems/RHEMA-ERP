@@ -521,7 +521,11 @@ namespace ErpSystem.Api.Controllers.Finance
                 if (request == null || string.IsNullOrWhiteSpace(request.Reason))
                     return BadRequest("A reversal reason is required.");
 
-                var reversedEntry = await _journalEntryService.ReverseJournalEntryAsync(id, request.Reason, request.ReversalDate);
+                var reversedEntry = await _journalEntryService.ReverseJournalEntryAsync(
+                    id,
+                    request.Reason,
+                    request.ReversalDatePolicy,
+                    request.ReversalDate);
                 return Ok(reversedEntry);
             }
             catch (ArgumentException ex)

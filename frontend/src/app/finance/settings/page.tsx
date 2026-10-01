@@ -718,7 +718,7 @@ export default function FinanceSettingsPage() {
                 <CardContent className="space-y-5">
                     <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
-                            <Label>Reversal date policy</Label>
+                            <Label>Default source-document reversal policy</Label>
                             <Select
                                 value={formData.reversalDatePolicy ?? 'CurrentOpenPeriod'}
                                 onValueChange={value => setFormData({ ...formData, reversalDatePolicy: value as UpdateFinanceSettingsDto['reversalDatePolicy'] })}
@@ -730,7 +730,7 @@ export default function FinanceSettingsPage() {
                                 </SelectContent>
                             </Select>
                             <p className="text-xs text-muted-foreground">
-                                Closed history is never reopened implicitly; corrections fall forward to the latest open period.
+                                Applies to AP, AR, cash, opening-balance, and asset corrections. Manual journal reversals require the user to choose timing on the transaction.
                             </p>
                         </div>
                         <div className="space-y-2">
@@ -907,12 +907,12 @@ export default function FinanceSettingsPage() {
                 </CardContent>
             </Card>
 
-            {/* Default Accounts */}
+            {/* System Accounts */}
             < Card >
                 <CardHeader>
-                    <CardTitle>Default Accounts</CardTitle>
+                    <CardTitle>System Accounts</CardTitle>
                     <CardDescription>
-                        Configure default GL accounts for system operations
+                        Configure GL accounts used by automated Finance operations
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">

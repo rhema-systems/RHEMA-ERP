@@ -4,6 +4,7 @@ using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ErpSystem.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261001231335_AddFiscalYearTenantYearInvariant")]
+    partial class AddFiscalYearTenantYearInvariant
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -18062,16 +18065,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("EnforceFinanceAccessScopes")
                         .HasColumnType("bit");
 
-                    b.Property<int>("ExchangeRateDisplayDecimalPlaces")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(6);
-
-                    b.Property<int>("ExchangeRateInputDecimalPlaces")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(10);
-
                     b.Property<DateTime?>("ExpirationDate")
                         .HasColumnType("datetime2");
 
@@ -18084,22 +18077,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("FunctionalCurrencyLockedReason")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
-
-                    b.Property<bool>("InvoiceRoundingEnabled")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("InvoiceRoundingGainAccountId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal?>("InvoiceRoundingIncrement")
-                        .HasPrecision(18, 6)
-                        .HasColumnType("decimal(18,6)");
-
-                    b.Property<Guid?>("InvoiceRoundingLossAccountId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("InvoiceRoundingMethod")
-                        .HasColumnType("int");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -18154,11 +18131,6 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
-                    b.Property<int>("ReportDisplayDecimalPlaces")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(2);
-
                     b.Property<bool>("RequireBankDepositPrimaryEvidence")
                         .HasColumnType("bit");
 
@@ -18191,14 +18163,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("SegmentClearingAccountId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<decimal>("SettlementToleranceAmount")
-                        .HasPrecision(20, 4)
-                        .HasColumnType("decimal(20,4)");
-
-                    b.Property<decimal>("SettlementTolerancePercentage")
-                        .HasPrecision(9, 6)
-                        .HasColumnType("decimal(9,6)");
-
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -18219,28 +18183,8 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
-                    b.Property<int>("TaxPercentageDecimalPlaces")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(4);
-
-                    b.Property<decimal?>("TaxRoundingIncrement")
-                        .HasPrecision(18, 6)
-                        .HasColumnType("decimal(18,6)");
-
-                    b.Property<int>("TaxRoundingMethod")
-                        .HasColumnType("int");
-
-                    b.Property<int>("TaxRoundingScope")
-                        .HasColumnType("int");
-
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("UnitPriceDecimalPlaces")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(4);
 
                     b.Property<Guid?>("UnrealizedFxGainAccountId")
                         .HasColumnType("uniqueidentifier");
@@ -18295,10 +18239,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("DiscountReceivedAccountId");
 
-                    b.HasIndex("InvoiceRoundingGainAccountId");
-
-                    b.HasIndex("InvoiceRoundingLossAccountId");
-
                     b.HasIndex("LeaseInterestExpenseAccountId");
 
                     b.HasIndex("LeaseLiabilityAccountId");
@@ -18339,14 +18279,6 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("FinanceSettings", null, t =>
                         {
                             t.HasCheckConstraint("CK_FinanceSettings_BaseCurrencyCanonical_C3", "[IsDeleted] = 1 OR (DATALENGTH([BaseCurrency]) = 6 AND [BaseCurrency] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]')");
-
-                            t.HasCheckConstraint("CK_FinanceSettings_InvoiceRoundingReadiness", "[InvoiceRoundingEnabled] = 0");
-
-                            t.HasCheckConstraint("CK_FinanceSettings_PrecisionGovernance", "[UnitPriceDecimalPlaces] BETWEEN 0 AND 6 AND [ExchangeRateInputDecimalPlaces] BETWEEN 6 AND 10 AND [ExchangeRateDisplayDecimalPlaces] BETWEEN 6 AND 10 AND [TaxPercentageDecimalPlaces] BETWEEN 0 AND 4 AND [ReportDisplayDecimalPlaces] BETWEEN 0 AND 4 AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingScope] = 0 AND [InvoiceRoundingMethod] IN (0, 1, 2)");
-
-                            t.HasCheckConstraint("CK_FinanceSettings_RoundingIncrements", "([TaxRoundingIncrement] IS NULL OR [TaxRoundingIncrement] > 0) AND ([InvoiceRoundingIncrement] IS NULL OR [InvoiceRoundingIncrement] > 0)");
-
-                            t.HasCheckConstraint("CK_FinanceSettings_SettlementTolerance", "[SettlementToleranceAmount] >= 0 AND [SettlementTolerancePercentage] BETWEEN 0 AND 100");
 
                             t.HasCheckConstraint("CK_FinanceSettings_TDC0504ApMatchTolerances", "[ApInvoicePriceTolerancePercent] BETWEEN 0 AND 100 AND [ApInvoiceQuantityTolerancePercent] BETWEEN 0 AND 100");
 
@@ -30781,9 +30713,6 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
-
-                    b.Property<decimal?>("RoundingIncrement")
-                        .HasColumnType("decimal(18,6)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -191298,16 +191227,6 @@ namespace ErpSystem.Data.Migrations
                         .WithMany()
                         .HasForeignKey("DiscountReceivedAccountId");
 
-                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", "InvoiceRoundingGainAccount")
-                        .WithMany()
-                        .HasForeignKey("InvoiceRoundingGainAccountId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", "InvoiceRoundingLossAccount")
-                        .WithMany()
-                        .HasForeignKey("InvoiceRoundingLossAccountId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("ErpSystem.Core.Entities.Finance.Account", "LeaseInterestExpenseAccount")
                         .WithMany()
                         .HasForeignKey("LeaseInterestExpenseAccountId");
@@ -191407,10 +191326,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("DiscountAllowedAccount");
 
                     b.Navigation("DiscountReceivedAccount");
-
-                    b.Navigation("InvoiceRoundingGainAccount");
-
-                    b.Navigation("InvoiceRoundingLossAccount");
 
                     b.Navigation("LeaseInterestExpenseAccount");
 

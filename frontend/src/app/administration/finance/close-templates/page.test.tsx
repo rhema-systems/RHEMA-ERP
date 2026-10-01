@@ -78,7 +78,7 @@ describe('FinanceCloseTemplatesPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /view steps/i }));
 
-    const dialog = screen.getByRole('dialog', { name: 'TDC month-end close v1' });
+    const dialog = screen.getByRole('dialog', { name: 'TDC period-end close v1' });
     expect(within(dialog).getByText('10. Reconcile AP control')).toBeInTheDocument();
     expect(within(dialog).getByText('20. Review trial balance')).toBeInTheDocument();
     expect(within(dialog).getByText(/depends on:/i)).toHaveTextContent('AP_CONTROL_RECONCILIATION');

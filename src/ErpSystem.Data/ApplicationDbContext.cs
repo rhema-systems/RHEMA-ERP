@@ -3170,6 +3170,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<FiscalYear>(entity =>
         {
             entity.ToTable("FiscalYears");
+            entity.HasIndex(e => new { e.TenantId, e.Year })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
             entity.HasOne(e => e.NextFiscalYear)
                 .WithOne(e => e.PreviousFiscalYear)
                 .HasForeignKey<FiscalYear>(e => e.NextFiscalYearId)

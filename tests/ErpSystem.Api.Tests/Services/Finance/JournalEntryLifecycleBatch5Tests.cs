@@ -15,6 +15,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Moq;
+using System.Text.Json;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
@@ -443,6 +444,140 @@ public sealed partial class JournalEntryLifecycleBatch5Tests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-5")]
+    [Trait("Category", "JournalLifecycle")]
+    public async Task PostedJournal_ReversalShouldHonorUserSelectedOriginalPeriodPolicy()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var (debitAccount, creditAccount) = await SeedTenantPeriodAndAccountsAsync(db, tenantId);
+        var baseBook = await db.AccountingBooks.SingleAsync(book => book.Code == "IFRS");
+        baseBook.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+        baseBook.FunctionalCurrencyCode = "GHS";
+        await db.SaveChangesAsync();
+        var audit = CreateAuditMock();
+        var service = CreateJournalService(db, tenantId, audit: audit);
+        var journal = await service.CreateJournalEntryAsync(CreateJournalDto(debitAccount.Id, creditAccount.Id));
+        await service.UpdateApprovalStatusAsync(journal.Id, "Approved", "Approved", Guid.NewGuid());
+        await service.PostJournalEntryAsync(journal.Id);
+        var original = await db.JournalEntries.SingleAsync(entry => entry.Id == journal.Id);
+
+        var reversal = await service.ReverseJournalEntryAsync(
+            journal.Id,
+            "Reverse in the original open period",
+            FinanceReversalDatePolicy.OriginalDocumentPeriodIfOpen,
+            new DateTime(2026, 7, 20));
+
+        reversal.TransactionDate.Date.Should().Be(original.EntryDate.Date);
+        audit.Verify(x => x.LogUserActionAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                FinanceAuditEvents.JournalReversed,
+                "Finance.JournalEntry",
+                journal.Id.ToString(),
+                It.IsAny<object?>(),
+                It.Is<object?>(payload => AuditPayloadContains(
+                    payload,
+                    FinanceReversalDatePolicy.OriginalDocumentPeriodIfOpen,
+                    reversal.TransactionDate.Date)),
+                It.IsAny<string?>(),
+                It.IsAny<string?>()),
+            Times.Once);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-5")]
+    [Trait("Category", "JournalLifecycle")]
+    public async Task PostedJournal_OriginalPeriodPolicyShouldFallForwardWhenOriginalPeriodIsClosed()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var (debitAccount, creditAccount) = await SeedTenantPeriodAndAccountsAsync(db, tenantId);
+        var baseBook = await db.AccountingBooks.SingleAsync(book => book.Code == "IFRS");
+        baseBook.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+        baseBook.FunctionalCurrencyCode = "GHS";
+        await db.SaveChangesAsync();
+        var audit = CreateAuditMock();
+        var service = CreateJournalService(db, tenantId, audit: audit);
+        var journal = await service.CreateJournalEntryAsync(CreateJournalDto(debitAccount.Id, creditAccount.Id));
+        await service.UpdateApprovalStatusAsync(journal.Id, "Approved", "Approved", Guid.NewGuid());
+        await service.PostJournalEntryAsync(journal.Id);
+
+        var originalPeriod = await db.FiscalPeriods.SingleAsync();
+        originalPeriod.IsOpen = false;
+        originalPeriod.IsClosed = true;
+        originalPeriod.PeriodStatus = "Closed";
+        var fallbackPeriod = new FiscalPeriod
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalYearId = originalPeriod.FiscalYearId,
+            PeriodName = "August 2026",
+            PeriodCode = "2026-08",
+            PeriodNumber = 8,
+            PeriodType = PeriodType.Monthly,
+            StartDate = new DateTime(2026, 8, 1),
+            EndDate = new DateTime(2026, 8, 31),
+            PeriodDays = 31,
+            PeriodStatus = "Open",
+            IsOpen = true
+        };
+        db.FiscalPeriods.Add(fallbackPeriod);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, fallbackPeriod, baseBook.Code);
+        await db.SaveChangesAsync();
+
+        var reversal = await service.ReverseJournalEntryAsync(
+            journal.Id,
+            "Fall forward from closed original period",
+            FinanceReversalDatePolicy.OriginalDocumentPeriodIfOpen,
+            new DateTime(2026, 7, 20));
+
+        reversal.TransactionDate.Date.Should().BeOnOrAfter(fallbackPeriod.StartDate);
+        reversal.TransactionDate.Date.Should().BeOnOrBefore(fallbackPeriod.EndDate);
+        audit.Verify(x => x.LogUserActionAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                FinanceAuditEvents.JournalReversed,
+                "Finance.JournalEntry",
+                journal.Id.ToString(),
+                It.IsAny<object?>(),
+                It.Is<object?>(payload => AuditPayloadContains(
+                    payload,
+                    FinanceReversalDatePolicy.OriginalDocumentPeriodIfOpen,
+                    reversal.TransactionDate.Date)),
+                It.IsAny<string?>(),
+                It.IsAny<string?>()),
+            Times.Once);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-5")]
+    [Trait("Category", "JournalLifecycle")]
+    public async Task PostedJournal_CurrentOpenPeriodPolicyShouldRejectDateOutsideCurrentOpenPeriod()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var (debitAccount, creditAccount) = await SeedTenantPeriodAndAccountsAsync(db, tenantId);
+        var baseBook = await db.AccountingBooks.SingleAsync(book => book.Code == "IFRS");
+        baseBook.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+        baseBook.FunctionalCurrencyCode = "GHS";
+        await db.SaveChangesAsync();
+        var service = CreateJournalService(db, tenantId);
+        var journal = await service.CreateJournalEntryAsync(CreateJournalDto(debitAccount.Id, creditAccount.Id));
+        await service.UpdateApprovalStatusAsync(journal.Id, "Approved", "Approved", Guid.NewGuid());
+        await service.PostJournalEntryAsync(journal.Id);
+
+        var action = () => service.ReverseJournalEntryAsync(
+            journal.Id,
+            "Invalid requested date",
+            FinanceReversalDatePolicy.CurrentOpenPeriod,
+            new DateTime(2026, 8, 1));
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*current open period*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-5")]
     [Trait("Category", "JournalInquiry")]
     public async Task GetJournalEntriesAsync_ShouldFilterProcurementSource_AndExposeSourceLineage()
     {
@@ -620,7 +755,8 @@ public sealed partial class JournalEntryLifecycleBatch5Tests
         Guid? currentUserId = null,
         Mock<INotificationService>? notification = null,
         IFinanceBudgetControlService? budgetControl = null,
-        IWorkflowService? approvalWorkflow = null)
+        IWorkflowService? approvalWorkflow = null,
+        Mock<IAuditLogService>? audit = null)
     {
         var currentUser = CreateCurrentUser(tenantId, currentUserId);
         var engine = new FinancePostingEngine(db, currentUser.Object, Mock.Of<ILogger<FinancePostingEngine>>());
@@ -630,7 +766,7 @@ public sealed partial class JournalEntryLifecycleBatch5Tests
         gl.Setup(x => x.GenerateJournalEntryNumberAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => $"JE-2026-{sequence++:0000}");
 
-        var audit = new Mock<IAuditLogService>();
+        audit ??= CreateAuditMock();
         audit.Setup(x => x.LogUserActionAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<string>(),
@@ -664,6 +800,35 @@ public sealed partial class JournalEntryLifecycleBatch5Tests
             engine,
             budgetControl: budgetControl,
             approvalWorkflow: approvalWorkflow);
+    }
+
+    private static Mock<IAuditLogService> CreateAuditMock()
+    {
+        var audit = new Mock<IAuditLogService>();
+        audit.Setup(x => x.LogUserActionAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<object?>(),
+                It.IsAny<object?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>()))
+            .Returns(Task.CompletedTask);
+        return audit;
+    }
+
+    private static bool AuditPayloadContains(
+        object? payload,
+        FinanceReversalDatePolicy policy,
+        DateTime effectiveDate)
+    {
+        var json = JsonSerializer.Serialize(payload);
+        return json.Contains($"\"reversalDatePolicy\":{(int)policy}", StringComparison.Ordinal) &&
+               json.Contains(
+                   $"\"effectiveReversalDate\":\"{effectiveDate:yyyy-MM-dd}",
+                   StringComparison.Ordinal);
     }
 
     private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId, Guid? currentUserId = null)
