@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Card,
   CardContent,
@@ -71,6 +72,7 @@ import {
 import {
   estateGroundRentService,
   type GroundRentAccount,
+  type GroundRentIncomeAccountOption,
 } from '@/services/estate-ground-rent.service';
 import { useManagedAssetsPage } from './use-managed-assets-page';
 import { leaseExpiryAlert, leaseExpiryDate } from './property-workspace-utils';
@@ -250,6 +252,11 @@ export function LeaseSetupWorkspace() {
   const [groundRentAccounts, setGroundRentAccounts] = React.useState<
     GroundRentAccount[]
   >([]);
+  const [groundRentIncomeAccounts, setGroundRentIncomeAccounts] = React.useState<GroundRentIncomeAccountOption[]>([]);
+  const [groundRentApplies, setGroundRentApplies] = React.useState(false);
+  const [groundRentFrequency, setGroundRentFrequency] = React.useState<'Annual' | 'Monthly'>('Annual');
+  const [groundRentRatePerAcre, setGroundRentRatePerAcre] = React.useState('');
+  const [groundRentIncomeAccountId, setGroundRentIncomeAccountId] = React.useState('');
   const [registerSearch, setRegisterSearch] = React.useState('');
   const [selectedAssetId, setSelectedAssetId] = React.useState('');
   const [customerId, setCustomerId] = React.useState('');
@@ -289,7 +296,7 @@ export function LeaseSetupWorkspace() {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const [availableAssets, activeCustomers, billingAccounts] =
+      const [availableAssets, activeCustomers, billingAccounts, groundRentOptions] =
         await Promise.all([
           estateLandManagementService.getManagedAssets({
             statuses: [
@@ -301,6 +308,7 @@ export function LeaseSetupWorkspace() {
           }),
           businessPartnerService.getActivePartners('Customer'),
           estateGroundRentService.getAccounts().catch(() => []),
+          estateGroundRentService.getOptions().catch(() => ({ assets: [], incomeAccounts: [] })),
         ]);
 
       setAssets(
@@ -315,10 +323,12 @@ export function LeaseSetupWorkspace() {
       );
       setCustomers(activeCustomers);
       setGroundRentAccounts(billingAccounts);
+      setGroundRentIncomeAccounts(groundRentOptions.incomeAccounts);
     } catch {
       setAssets([]);
       setCustomers([]);
       setGroundRentAccounts([]);
+      setGroundRentIncomeAccounts([]);
       setLoadError(
         'Unable to load available properties, customers, and the Lease Register.'
       );
@@ -337,6 +347,15 @@ export function LeaseSetupWorkspace() {
   );
   const currency = selectedAsset?.currency || 'GHS';
   const plotSizeAcres = getPlotSizeAcres(selectedAsset);
+  const enteredGroundRentRate = Number(groundRentRatePerAcre);
+  const annualGroundRent = groundRentRatePerAcre.trim()
+    ? plotSizeAcres != null && enteredGroundRentRate > 0
+      ? Math.ceil(plotSizeAcres * enteredGroundRentRate)
+      : null
+    : selectedAsset?.groundRentPayable ?? null;
+  const groundRentPerPeriod = annualGroundRent == null
+    ? null
+    : Math.round((annualGroundRent / (groundRentFrequency === 'Monthly' ? 12 : 1)) * 100) / 100;
   const signedAgreementReference = propertyFileReference.trim();
   const leaseStartDate = rightOfEntryDate || dateOfTenancy;
   const signedReferenceNeedsDate =
@@ -363,6 +382,10 @@ export function LeaseSetupWorkspace() {
     setLeaseTermYears('');
     setPropertyFileReference('');
     setSignedAgreementFile(null);
+    setGroundRentApplies(false);
+    setGroundRentFrequency('Annual');
+    setGroundRentRatePerAcre('');
+    setGroundRentIncomeAccountId('');
     setFileInputResetKey((current) => current + 1);
   };
 
@@ -370,6 +393,10 @@ export function LeaseSetupWorkspace() {
     setSelectedAssetId(assetId);
     const asset = assets.find((item) => item.id === assetId);
     setLeaseTermYears(leaseYearsFromListingTerm(asset?.externalLeaseTermMonths));
+    setGroundRentApplies(asset?.assetType === EstateManagedAssetType.Land && asset.externalGroundRentRequired === true);
+    setGroundRentRatePerAcre('');
+    setGroundRentFrequency('Annual');
+    setGroundRentIncomeAccountId('');
   };
 
   const saveLeaseSetup = async () => {
@@ -399,6 +426,17 @@ export function LeaseSetupWorkspace() {
     ) {
       toast.error('Lease term must be a whole number between 1 and 999.');
       return;
+    }
+
+    if (groundRentApplies && selectedAsset.assetType === EstateManagedAssetType.Land) {
+      if (!leaseStartDate || !annualGroundRent || annualGroundRent <= 0) {
+        toast.error('Enter the lease start date and a valid annual ground-rent assessment or rate per acre.');
+        return;
+      }
+      if (!groundRentIncomeAccountId) {
+        toast.error('Select a ground-rent income account.');
+        return;
+      }
     }
 
     setIsSaving(true);
@@ -431,6 +469,38 @@ export function LeaseSetupWorkspace() {
         }
       );
 
+      let groundRentSetupError: string | null = null;
+      if (groundRentApplies && savedLease.assetType === EstateManagedAssetType.Land) {
+        try {
+          const account = await estateGroundRentService.saveAccount({
+            estateManagedAssetId: savedLease.id,
+            customerBusinessPartnerId: selectedCustomer.id,
+            paymentFrequency: groundRentFrequency,
+            calculationMethod: groundRentRatePerAcre.trim() ? 'RatePerAcre' : 'ApprovedAssessment',
+            annualAmount: annualGroundRent,
+            ratePerAcre: groundRentRatePerAcre.trim() ? enteredGroundRentRate : null,
+            currencyCode: savedLease.currency || 'GHS',
+            nextDueDate: leaseStartDate,
+            paymentTermsDays: 30,
+            reviewFrequencyMonths: 12,
+            nextReviewDate: null,
+            escalationMethod: 'None',
+            escalationValue: 0,
+            gracePeriodDays: 30,
+            penaltyMethod: 'None',
+            penaltyValue: 0,
+            penaltyCapAmount: null,
+            groundRentIncomeAccountId,
+            autoPostInvoices: false,
+            status: savedLease.status === EstateManagedAssetStatus.Leased ? 'Active' : 'Held',
+            notes: null,
+          });
+          setGroundRentAccounts((current) => [account, ...current.filter((item) => item.id !== account.id)]);
+        } catch (error: unknown) {
+          groundRentSetupError = error instanceof Error ? error.message : 'Ground-rent setup failed.';
+        }
+      }
+
       setAssets((current) =>
         current.filter((asset) => asset.id !== selectedAsset.id)
       );
@@ -440,9 +510,13 @@ export function LeaseSetupWorkspace() {
       ]);
       clearForm();
       setIsCreateDialogOpen(false);
-      toast.success(
-        'Lease setup saved and the asset was reserved. Continue Occupancy, Handover, Billing, and Records handoffs as required.'
-      );
+      if (groundRentSetupError) {
+        toast.error(`Lease saved, but ground-rent billing was not set up: ${groundRentSetupError}`);
+      } else {
+        toast.success(groundRentApplies
+          ? 'Lease setup saved. Ground-rent billing is kept separate from the lease charge.'
+          : 'Lease setup saved.');
+      }
     } catch (error: unknown) {
       toast.error(
         error instanceof Error ? error.message : 'Unable to save lease setup.'
@@ -601,36 +675,36 @@ export function LeaseSetupWorkspace() {
               <div className="font-medium text-foreground">
                 Status after save: {leaseStatusPreview}
               </div>
-              <p className="mt-1">
-                Ground-rent billing remains held until there is a
-                signed agreement reference and an agreement start / move-in
-                date. Move-in / Handover then marks the lease active.
-              </p>
+              {groundRentApplies ? <p className="mt-1">
+                Ground-rent billing remains held until there is a signed agreement
+                reference and an agreement start / move-in date. Move-in / Handover
+                then marks the lease active.
+              </p> : null}
             </div>
           </div>
         ) : null}
 
-        <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
+        {selectedAsset?.assetType === EstateManagedAssetType.Land ? (
+        <div className="space-y-4 border-t pt-4">
           <div>
             <div className="flex items-center gap-2 font-medium">
               <Landmark className="h-4 w-4 text-primary" />
-              Land Ground Rent Assessment
+              Ground rent
             </div>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Ground rent applies to land leases only and is kept separate from
-              apartment or house rent.
-            </p>
+            <label className="mt-3 flex items-center gap-2 text-sm" htmlFor="lease-ground-rent-applies">
+              <Checkbox id="lease-ground-rent-applies" checked={groundRentApplies} onCheckedChange={(checked) => setGroundRentApplies(checked === true)} />
+              Ground rent applies to this lease
+            </label>
           </div>
 
+          {groundRentApplies ? <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-md border bg-background p-3">
               <div className="text-xs text-muted-foreground">
                 Plot size used
               </div>
               <div className="mt-1 font-semibold">
-                {selectedAsset?.assetType !== EstateManagedAssetType.Land
-                  ? 'Not applicable'
-                  : plotSizeAcres == null
+                {plotSizeAcres == null
                   ? 'Not recorded'
                   : `${plotSizeAcres.toFixed(4)} acres`}
               </div>
@@ -640,9 +714,7 @@ export function LeaseSetupWorkspace() {
                 Approved rate per acre
               </div>
               <div className="mt-1 font-semibold">
-                {selectedAsset?.assetType !== EstateManagedAssetType.Land
-                  ? 'Not applicable'
-                  : selectedAsset?.groundRentRatePerAcre == null
+                {selectedAsset.groundRentRatePerAcre == null
                   ? 'Not recorded'
                   : formatMoney(selectedAsset.groundRentRatePerAcre, currency)}
               </div>
@@ -652,9 +724,7 @@ export function LeaseSetupWorkspace() {
                 Ground rent computed
               </div>
               <div className="mt-1 font-semibold">
-                {selectedAsset?.assetType !== EstateManagedAssetType.Land
-                  ? 'Not applicable'
-                  : selectedAsset?.groundRentComputed == null
+                {selectedAsset.groundRentComputed == null
                   ? 'Not recorded'
                   : formatMoney(selectedAsset.groundRentComputed, currency)}
               </div>
@@ -664,18 +734,44 @@ export function LeaseSetupWorkspace() {
                 Ground rent payable
               </div>
               <div className="mt-1 font-semibold">
-                {selectedAsset?.assetType !== EstateManagedAssetType.Land
-                  ? 'Not applicable'
-                  : selectedAsset?.groundRentPayable == null
+                {selectedAsset.groundRentPayable == null
                   ? 'Not recorded'
                   : formatMoney(selectedAsset.groundRentPayable, currency)}
               </div>
             </div>
           </div>
 
-          {selectedAsset &&
-          selectedAsset.assetType === EstateManagedAssetType.Land &&
-          selectedAsset.groundRentPayable == null ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="lease-ground-rent-rate">Rate per acre (optional)</Label>
+              <Input id="lease-ground-rent-rate" type="number" min="0.01" step="0.01" value={groundRentRatePerAcre}
+                onChange={(event) => setGroundRentRatePerAcre(event.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="lease-ground-rent-frequency">Billing frequency</Label>
+              <Select value={groundRentFrequency} onValueChange={(value) => setGroundRentFrequency(value as 'Annual' | 'Monthly')}>
+                <SelectTrigger id="lease-ground-rent-frequency"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="Annual">Annual</SelectItem><SelectItem value="Monthly">Monthly</SelectItem></SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="lease-ground-rent-income">Ground-rent income account</Label>
+              <Select value={groundRentIncomeAccountId} onValueChange={setGroundRentIncomeAccountId}>
+                <SelectTrigger id="lease-ground-rent-income"><SelectValue placeholder="Select income account" /></SelectTrigger>
+                <SelectContent>{groundRentIncomeAccounts.map((account) => (
+                  <SelectItem key={account.id} value={account.id}>{account.accountNumber} - {account.accountName}</SelectItem>
+                ))}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Ground rent per {groundRentFrequency === 'Monthly' ? 'month' : 'year'}</Label>
+              <div className="flex h-10 items-center border-b text-sm font-medium">
+                {groundRentPerPeriod == null ? 'Assessment required' : formatMoney(groundRentPerPeriod, currency)}
+              </div>
+            </div>
+          </div>
+
+          {selectedAsset.groundRentPayable == null && !groundRentRatePerAcre.trim() ? (
             <div className="space-y-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
               <p className="text-sm">
                 No approved ground-rent assessment is recorded for this asset.
@@ -691,7 +787,9 @@ export function LeaseSetupWorkspace() {
               </div>
             </div>
           ) : null}
+        </> : null}
         </div>
+        ) : null}
 
         <div className="flex flex-wrap justify-end gap-2">
           <Button

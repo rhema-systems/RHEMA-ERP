@@ -1,6 +1,8 @@
 using System.Text.Json;
 using ClosedXML.Excel;
 using ErpSystem.Api.Controllers.Estate;
+using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Http;
@@ -52,7 +54,7 @@ public sealed class EstateManagedAssetImportTests
         var mapping = JsonSerializer.Serialize(headers.ToDictionary(key => key, key => key));
 
         Assert.IsType<OkObjectResult>(await controller.Commit(file, mapping));
-        var asset = Assert.Single(await db.EstateManagedAssets.ToListAsync());
+        var asset = Assert.Single(await db.EstateManagedAssets.Where(item => item.AssetCode == "LAND-001").ToListAsync());
         Assert.Equal(ErpSystem.Core.Enums.EstateManagedAssetType.Land, asset.AssetType);
         Assert.Equal(ErpSystem.Core.Enums.EstateManagedAssetStatus.LandBank, asset.Status);
         Assert.Equal(1000m, asset.AreaSquareMeters);
@@ -63,7 +65,7 @@ public sealed class EstateManagedAssetImportTests
     }
 
     [Fact]
-    public async Task ValidApartmentImportsIntoPropertyRegisterAsAvailable()
+    public async Task PropertyWithApartmentUnitTypeImportsAsAvailable()
     {
         var tenantId = Guid.NewGuid();
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -76,13 +78,14 @@ public sealed class EstateManagedAssetImportTests
 
         using var workbook = new XLWorkbook();
         var sheet = workbook.AddWorksheet("Properties");
-        var headers = new[] { "assetCode", "recordType", "name", "status", "location" };
+        var headers = new[] { "assetCode", "recordType", "name", "status", "location", "unitType" };
         for (var index = 0; index < headers.Length; index++) sheet.Cell(1, index + 1).Value = headers[index];
         sheet.Cell(2, 1).Value = "APT-001";
-        sheet.Cell(2, 2).Value = "Apartment";
+        sheet.Cell(2, 2).Value = "Property";
         sheet.Cell(2, 3).Value = "First apartment";
         sheet.Cell(2, 4).Value = "Available";
         sheet.Cell(2, 5).Value = "Accra";
+        sheet.Cell(2, 6).Value = "Apartment";
         using var stream = new MemoryStream();
         workbook.SaveAs(stream);
         var file = new FormFile(stream, 0, stream.Length, "file", "properties.xlsx");
@@ -116,12 +119,13 @@ public sealed class EstateManagedAssetImportTests
         var headers = new[] { "assetCode", "recordType", "name", "status", "location" };
         for (var index = 0; index < headers.Length; index++) sheet.Cell(1, index + 1).Value = headers[index];
         sheet.Cell(2, 1).Value = "APT-001";
-        sheet.Cell(2, 2).Value = "Apartment";
+        sheet.Cell(2, 2).Value = "Property";
         sheet.Cell(2, 3).Value = "First apartment";
         sheet.Cell(2, 4).Value = "Available";
         sheet.Cell(2, 5).Value = "Accra";
         sheet.Cell(3, 1).Value = "OFF-002";
         sheet.Cell(3, 2).Value = "Office";
+        sheet.Cell(3, 3).Value = "Second office";
         sheet.Cell(3, 4).Value = "Available";
         sheet.Cell(3, 5).Value = "Accra";
         using var stream = new MemoryStream();
@@ -132,8 +136,86 @@ public sealed class EstateManagedAssetImportTests
         var preview = Assert.IsType<OkObjectResult>(await controller.Preview(file, mapping));
         using var previewJson = JsonDocument.Parse(JsonSerializer.Serialize(preview.Value));
         Assert.False(previewJson.RootElement.GetProperty("success").GetBoolean());
-        Assert.Contains("Row 3", previewJson.RootElement.GetProperty("errors")[0].GetString());
+        Assert.Contains(previewJson.RootElement.GetProperty("errors").EnumerateArray(),
+            error => error.GetString()!.Contains("Row 3: Asset type must be Land, Property, or Facility"));
 
+        Assert.IsType<BadRequestObjectResult>(await controller.Commit(file, mapping));
+        Assert.Empty(await db.EstateManagedAssets.ToListAsync());
+    }
+
+    [Fact]
+    public async Task ImportRejectsNameAlreadyUsedByAnotherAssetType()
+    {
+        var tenantId = Guid.NewGuid();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        await using var db = new ApplicationDbContext(options, tenantId);
+        db.EstateManagedAssets.Add(new EstateManagedAsset
+        {
+            TenantId = tenantId, AssetCode = "LAND-EXISTING", Name = "Central Plaza",
+            AssetType = EstateManagedAssetType.Land
+        });
+        await db.SaveChangesAsync();
+        var user = new Mock<ICurrentUserService>();
+        user.SetupGet(item => item.TenantId).Returns(tenantId);
+        var controller = new EstateManagedAssetImportsController(db, user.Object);
+
+        using var workbook = new XLWorkbook();
+        var sheet = workbook.AddWorksheet("Facilities");
+        var headers = new[] { "assetCode", "recordType", "name", "status", "location" };
+        for (var index = 0; index < headers.Length; index++) sheet.Cell(1, index + 1).Value = headers[index];
+        sheet.Cell(2, 1).Value = "FAC-NEW";
+        sheet.Cell(2, 2).Value = "Facility";
+        sheet.Cell(2, 3).Value = "  central  plaza ";
+        sheet.Cell(2, 4).Value = "Available";
+        sheet.Cell(2, 5).Value = "Accra";
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        var file = new FormFile(stream, 0, stream.Length, "file", "facilities.xlsx");
+        var mapping = JsonSerializer.Serialize(headers.ToDictionary(key => key, key => key));
+
+        var preview = Assert.IsType<OkObjectResult>(await controller.Preview(file, mapping));
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(preview.Value));
+        Assert.Contains(json.RootElement.GetProperty("errors").EnumerateArray(),
+            error => error.GetString()!.Contains("Name already exists"));
+        Assert.IsType<BadRequestObjectResult>(await controller.Commit(file, mapping));
+        Assert.Single(await db.EstateManagedAssets.ToListAsync());
+    }
+
+    [Fact]
+    public async Task ImportRejectsDuplicateNamesAcrossWorkbookRows()
+    {
+        var tenantId = Guid.NewGuid();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        await using var db = new ApplicationDbContext(options, tenantId);
+        var user = new Mock<ICurrentUserService>();
+        user.SetupGet(item => item.TenantId).Returns(tenantId);
+        var controller = new EstateManagedAssetImportsController(db, user.Object);
+
+        using var workbook = new XLWorkbook();
+        var sheet = workbook.AddWorksheet("Properties");
+        var headers = new[] { "assetCode", "recordType", "name", "status", "location" };
+        for (var index = 0; index < headers.Length; index++) sheet.Cell(1, index + 1).Value = headers[index];
+        sheet.Cell(2, 1).Value = "PROP-001";
+        sheet.Cell(2, 2).Value = "Property";
+        sheet.Cell(2, 3).Value = "Harbour Office";
+        sheet.Cell(2, 4).Value = "Available";
+        sheet.Cell(2, 5).Value = "Tema";
+        sheet.Cell(3, 1).Value = "FAC-002";
+        sheet.Cell(3, 2).Value = "Facility";
+        sheet.Cell(3, 3).Value = "harbour  office";
+        sheet.Cell(3, 4).Value = "Available";
+        sheet.Cell(3, 5).Value = "Tema";
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        var file = new FormFile(stream, 0, stream.Length, "file", "properties.xlsx");
+        var mapping = JsonSerializer.Serialize(headers.ToDictionary(key => key, key => key));
+
+        var preview = Assert.IsType<OkObjectResult>(await controller.Preview(file, mapping));
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(preview.Value));
+        Assert.Contains(json.RootElement.GetProperty("errors").EnumerateArray(),
+            error => error.GetString()!.Contains("Row 3: Name already exists"));
         Assert.IsType<BadRequestObjectResult>(await controller.Commit(file, mapping));
         Assert.Empty(await db.EstateManagedAssets.ToListAsync());
     }

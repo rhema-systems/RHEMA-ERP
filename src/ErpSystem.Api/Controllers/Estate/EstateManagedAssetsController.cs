@@ -58,6 +58,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
         [FromQuery] bool? availableForLease = null,
         [FromQuery] bool? availableForSale = null,
         [FromQuery] bool? portalListingCandidates = null,
+        [FromQuery] string? externalListingStatus = null,
         [FromQuery] bool? publishedToExternalPortal = null,
         [FromQuery] int skip = 0,
         [FromQuery] int take = 100)
@@ -71,6 +72,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
             AvailableForLease = availableForLease,
             AvailableForSale = availableForSale,
             PortalListingCandidates = portalListingCandidates,
+            ExternalListingStatus = externalListingStatus,
             PublishedToExternalPortal = publishedToExternalPortal,
             Skip = skip,
             Take = take
@@ -190,6 +192,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
     [HttpGet("portal-listing-demarcations")]
     public async Task<IActionResult> GetPortalListingDemarcations(
         [FromQuery] string? search = null,
+        [FromQuery] string? externalListingStatus = null,
         [FromQuery] int skip = 0,
         [FromQuery] int take = 300)
     {
@@ -211,6 +214,21 @@ public sealed class EstateManagedAssetsController : ControllerBase
                 && !item.EstateManagedAsset.IsDeleted
                 && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
                 && (item.IsPublishedToExternalPortal || item.ExternalListingType != "None"));
+
+        if (externalListingStatus == "PendingPublication")
+        {
+            query = query.Where(item => !item.IsPublishedToExternalPortal
+                && item.ExternalListingStatus == "Draft");
+        }
+        else if (externalListingStatus == "Draft")
+        {
+            query = query.Where(item => item.IsPublishedToExternalPortal
+                && item.ExternalListingStatus == "Draft");
+        }
+        else if (!string.IsNullOrWhiteSpace(externalListingStatus))
+        {
+            query = query.Where(item => item.ExternalListingStatus == externalListingStatus);
+        }
 
         if (normalizedSearch != null)
         {

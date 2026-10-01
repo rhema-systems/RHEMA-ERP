@@ -28,7 +28,9 @@ import {
   estateAssetStatusLabels,
   formatEstateDate,
   formatEstateMoney,
+  isFullTermLease,
   isLandAsset,
+  leaseExpiryDate,
   occupantName,
   propertyReference,
   sourceReference,
@@ -45,12 +47,16 @@ function isRentalBillingReady(asset: EstateManagedAsset) {
   );
   return (
     hasActiveLease &&
+    !isFullTermLease(asset) &&
     hasBillingStartDate &&
     Boolean(asset.propertyFileReference)
   );
 }
 
 function rentalCharge(asset: EstateManagedAsset) {
+  if (isFullTermLease(asset)) {
+    return `Full-term lease ${formatEstateMoney(asset.externalListingPrice, asset.externalListingCurrency || asset.currency || 'GHS')}`;
+  }
   const amount = asset.externalMonthlyRent ?? asset.externalListingPrice;
   return amount != null
     ? `Rent ${formatEstateMoney(
@@ -315,7 +321,8 @@ export function BillingServiceChargeWorkspace() {
                     <TableHead>Status</TableHead>
                     <TableHead>Charge</TableHead>
                     <TableHead>Billing readiness</TableHead>
-                    <TableHead>Next date</TableHead>
+                    <TableHead>Billing status</TableHead>
+                    <TableHead>Next invoice / lease end</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -323,6 +330,7 @@ export function BillingServiceChargeWorkspace() {
                   {displayedBillableAssets.map((asset) => {
                     const account = accountByAssetId.get(asset.id);
                     const land = isLandAsset(asset);
+                    const fullTermLease = isFullTermLease(asset);
                     const ready = land
                       ? Boolean(account?.canGenerateInvoice)
                       : isRentalBillingReady(asset);
@@ -333,15 +341,27 @@ export function BillingServiceChargeWorkspace() {
                         <TableCell><div className="font-medium">{asset.name}</div><div className="text-xs text-muted-foreground">{propertyReference(asset)}</div></TableCell>
                         <TableCell>{occupantName(asset)}</TableCell>
                         <TableCell><Badge variant="secondary">{estateAssetStatusLabels[asset.status]}</Badge></TableCell>
-                        <TableCell>{land ? `Ground rent ${formatEstateMoney(account?.amountPerPeriod ?? asset.groundRentPayable, account?.currencyCode || asset.currency || 'GHS')}` : <div><div>{rentalCharge(asset)}</div>{asset.externalGroundRentRequired || account ? <div className="mt-1 text-xs">Ground rent: {account ? formatEstateMoney(account.amountPerPeriod, account.currencyCode) : 'Setup needed'}</div> : null}<div className="mt-1 text-xs text-muted-foreground">{asset.rentPenaltyMethod && asset.rentPenaltyMethod !== 'None' ? `${asset.rentPenaltyMethod} penalty after ${asset.rentGracePeriodDays} day${asset.rentGracePeriodDays === 1 ? '' : 's'}` : 'No late-payment penalty configured'}</div></div>}</TableCell>
-                        <TableCell>{rentBillingActive ? <Badge variant="secondary">{asset.autoGenerateRentInvoices ? 'Active' : 'Paused'}</Badge> : ready ? <Badge>Ready</Badge> : <Badge variant="outline">{account?.invoiceHoldReason || 'Needs setup / hold'}</Badge>}</TableCell>
-                        <TableCell>{!land && account ? <div><div>Rent: {formatEstateDate(asset.nextRentBillingDate)}</div><div className="text-xs text-muted-foreground">Ground: {formatEstateDate(account.nextDueDate)}</div></div> : formatEstateDate(account?.nextDueDate || asset.nextRentBillingDate || asset.rightOfEntryDate || asset.dateOfTenancy)}</TableCell>
+                        <TableCell>{land
+                          ? `Ground rent ${formatEstateMoney(account?.amountPerPeriod ?? asset.groundRentPayable, account?.currencyCode || asset.currency || 'GHS')}${account ? ` / ${account.paymentFrequency.toLowerCase()}` : ''}`
+                          : <div><div>{rentalCharge(asset)}</div>{asset.externalGroundRentRequired || account ? <div className="mt-1 text-xs">Ground rent: {account ? `${formatEstateMoney(account.amountPerPeriod, account.currencyCode)} / ${account.paymentFrequency.toLowerCase()}` : 'Setup needed'}</div> : null}<div className="mt-1 text-xs text-muted-foreground">{asset.rentPenaltyMethod && asset.rentPenaltyMethod !== 'None' ? `${asset.rentPenaltyMethod} penalty after ${asset.rentGracePeriodDays} day${asset.rentGracePeriodDays === 1 ? '' : 's'}` : 'No late-payment penalty configured'}</div></div>}</TableCell>
+                        <TableCell>{fullTermLease && !land ? <Badge variant="outline">One-time lease charge</Badge> : rentBillingActive ? <Badge variant="secondary">{asset.autoGenerateRentInvoices ? 'Active' : 'Paused'}</Badge> : ready ? <Badge>Ready</Badge> : <Badge variant="outline">{account?.invoiceHoldReason || 'Needs setup / hold'}</Badge>}</TableCell>
+                        <TableCell>
+                          {fullTermLease && !land ? <Badge variant="outline">Estate invoice not linked</Badge>
+                            : land ? <Badge variant={account?.charges.length ? 'secondary' : 'outline'}>{account?.charges.length ? 'Billed' : 'Not started billing'}</Badge>
+                              : <div className="space-y-1"><Badge variant={asset.lastRentInvoiceId ? 'secondary' : 'outline'}>{asset.lastRentInvoiceId ? 'Billed' : 'Not started billing'}</Badge>{account ? <div className="text-xs text-muted-foreground">Ground rent: {account.charges.length ? 'Billed' : 'Not started billing'}</div> : null}</div>}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {land ? <div>{account ? `${account.charges.length ? 'Next' : 'First'} ground rent: ${formatEstateDate(account.nextDueDate)}` : 'Ground rent not scheduled'}</div>
+                            : <div>{fullTermLease ? 'One-time lease invoice via Estate' : `Next rent: ${formatEstateDate(asset.nextRentBillingDate || asset.rightOfEntryDate || asset.dateOfTenancy)}`}</div>}
+                          {!land && account ? <div className="text-xs text-muted-foreground">{account.charges.length ? 'Next' : 'First'} ground rent: {formatEstateDate(account.nextDueDate)}</div> : null}
+                          {leaseExpiryDate(asset) ? <div className="text-xs text-muted-foreground">Lease ends: {formatEstateDate(leaseExpiryDate(asset)?.toISOString())}</div> : null}
+                        </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
                             {land || asset.externalGroundRentRequired || account ? (
                               <Button asChild size="sm" variant="outline"><Link href={`/estate/property-management/EstatePropertyManagementGroundRent?assetId=${encodeURIComponent(asset.id)}`}>Ground rent</Link></Button>
                             ) : null}
-                            {!land && ready && !rentBillingActive ? (
+                            {!land && !fullTermLease && ready && !rentBillingActive ? (
                               <Button
                                 type="button"
                                 size="sm"

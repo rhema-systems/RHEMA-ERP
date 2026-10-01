@@ -2,10 +2,11 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   Building2,
   Database,
+  Ellipsis,
+  Eye,
   Globe2,
   Loader2,
   MapPin,
@@ -27,6 +28,20 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Select,
   SelectContent,
@@ -130,7 +145,6 @@ function getCurrentLesseeOrOwner(asset: EstateManagedAsset) {
 }
 
 export function PropertyUnitRegister() {
-  const router = useRouter();
   const [searchDraft, setSearchDraft] = React.useState('');
   const [search, setSearch] = React.useState('');
   const [typeFilter, setTypeFilter] = React.useState('all');
@@ -139,6 +153,7 @@ export function PropertyUnitRegister() {
     null
   );
   const [importOpen, setImportOpen] = React.useState(false);
+  const [viewAsset, setViewAsset] = React.useState<EstateManagedAsset | null>(null);
 
   React.useEffect(() => {
     const importType = new URLSearchParams(window.location.search).get(
@@ -204,9 +219,7 @@ export function PropertyUnitRegister() {
       toast.success(
         'Property sent to Portal Listings for commercial setup.'
       );
-      router.push(
-        `/estate/property-management/listings?assetId=${encodeURIComponent(asset.id)}`
-      );
+      await loadAssets();
     } catch (error: unknown) {
       toast.error(
         error instanceof Error
@@ -298,7 +311,7 @@ export function PropertyUnitRegister() {
           </div>
 
           <form
-            className="grid gap-2 lg:grid-cols-[minmax(16rem,1fr)_13rem_13rem_auto]"
+            className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(12rem,1fr)_11rem_11rem_auto]"
             onSubmit={(event) => {
               event.preventDefault();
               setPage(1);
@@ -380,177 +393,104 @@ export function PropertyUnitRegister() {
 
           {!isLoading && !loadError && assets.length > 0 ? (
             <div className="rounded-md border">
-              <Table>
+              <Table className="table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Property no.</TableHead>
-                    <TableHead>Property / unit</TableHead>
-                    <TableHead>Location</TableHead>
-                    <TableHead>Use</TableHead>
-                    <TableHead>Size</TableHead>
-                    <TableHead>Lessee / owner</TableHead>
-                    <TableHead>Lease record</TableHead>
-                    <TableHead>File reference</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Source</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="w-[50%] sm:w-[38%] md:w-[32%]">Property / unit</TableHead>
+                    <TableHead className="hidden md:table-cell md:w-[28%]">Location</TableHead>
+                    <TableHead className="w-[34%] sm:w-[22%] md:w-[17%]">Status</TableHead>
+                    <TableHead className="hidden sm:table-cell sm:w-[26%] md:w-[17%]">Portal</TableHead>
+                    <TableHead className="w-[16%] text-right sm:w-[14%] md:w-[6%]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {assets.map((asset) => {
-                    const lesseeOrOwner = getCurrentLesseeOrOwner(asset);
                     const isPortalListing =
                       asset.externalListingType !== 'None';
-                    const canSendProjectProperty =
-                      (asset.sourceType === EstateManagedAssetSourceType.Imported ||
-                        (asset.sourceType === EstateManagedAssetSourceType.ProjectUnit &&
-                          asset.isPublishedFromProject)) &&
-                      asset.status === EstateManagedAssetStatus.Available &&
-                      (asset.assetType === EstateManagedAssetType.Property ||
-                        asset.assetType === EstateManagedAssetType.Facility);
+                    const portalSendUnavailableReason =
+                      asset.assetType === EstateManagedAssetType.Land
+                        ? 'List land through a demarcation.'
+                        : asset.status !== EstateManagedAssetStatus.Available
+                          ? 'Set the property status to Available first.'
+                          : asset.sourceType !== EstateManagedAssetSourceType.Manual &&
+                              asset.sourceType !== EstateManagedAssetSourceType.Imported &&
+                              (asset.sourceType !== EstateManagedAssetSourceType.ProjectUnit ||
+                                !asset.isPublishedFromProject)
+                            ? 'Register or import the property, or publish it from Projects first.'
+                            : null;
 
                     return (
                       <TableRow key={asset.id}>
-                        <TableCell className="font-medium">
-                          <div>{asset.assetCode}</div>
-                          {asset.projectUnitCode &&
-                          asset.projectUnitCode !== asset.assetCode ? (
-                            <div className="text-xs text-muted-foreground">
-                              Unit {asset.projectUnitCode}
-                            </div>
-                          ) : null}
-                        </TableCell>
-                        <TableCell>
-                          <div className="min-w-48 font-medium">
+                        <TableCell className="min-w-0">
+                          <div className="truncate font-medium" title={getPropertyName(asset)}>
                             {getPropertyName(asset)}
                           </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {asset.unitType || typeLabels[asset.assetType]}
+                          <div className="truncate text-xs text-muted-foreground" title={asset.assetCode}>
+                            {asset.assetCode} · {asset.unitType || typeLabels[asset.assetType]}
+                          </div>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          <div className="flex min-w-0 items-center gap-1.5" title={getLocation(asset) || 'Not recorded'}>
+                            <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <span className="truncate">{getLocation(asset) || 'Not recorded'}</span>
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex min-w-40 items-start gap-1.5">
-                            <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                            <span>{getLocation(asset) || 'Not recorded'}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {asset.purpose ||
-                            asset.zoningClassification ||
-                            'Not recorded'}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap">
-                          {formatArea(asset)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="min-w-36">
-                            {lesseeOrOwner || 'Not linked'}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="min-w-44 space-y-0.5 text-xs">
-                            {asset.dateOfTenancy ? (
-                              <div>
-                                Tenancy: {formatDate(asset.dateOfTenancy)}
-                              </div>
-                            ) : null}
-                            {asset.leaseTermYears ? (
-                              <div>Lease: {asset.leaseTermYears} years</div>
-                            ) : null}
-                            {asset.groundRentPayable != null ? (
-                              <div>
-                                Ground rent payable: {formatGroundRent(asset)}
-                              </div>
-                            ) : null}
-                            {!asset.dateOfTenancy &&
-                            !asset.leaseTermYears &&
-                            asset.groundRentPayable == null ? (
-                              <span className="text-muted-foreground">
-                                Not recorded
-                              </span>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="min-w-32">
-                            {asset.propertyFileReference || 'Not recorded'}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="secondary">
+                          <Badge variant="secondary" className="max-w-full whitespace-normal text-center">
                             {statusLabels[asset.status]}
                           </Badge>
                         </TableCell>
-                        <TableCell>
-                          <div className="min-w-32">
-                            {sourceLabels[asset.sourceType]}
-                          </div>
-                          {asset.projectCode ? (
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {asset.projectCode}
-                            </div>
-                          ) : null}
+                        <TableCell className="hidden sm:table-cell">
+                          <Badge variant="outline" className="max-w-full whitespace-normal text-center">
+                            {isPortalListing ? asset.externalListingStatus || 'Draft' : 'Not sent'}
+                          </Badge>
                         </TableCell>
-                        <TableCell>
-                          <div className="flex items-center justify-end gap-1">
-                            <Button asChild variant="ghost" size="icon" title="Manage property status" aria-label={`Manage status for ${asset.name}`}>
-                              <Link href={`/estate/property-management/EstatePropertyManagementOccupancyAvailability?assetId=${encodeURIComponent(asset.id)}`}>
-                                <Settings2 className="h-4 w-4" />
-                              </Link>
-                            </Button>
-                            {isPortalListing ? (
-                              <div className="flex min-w-56 justify-end gap-2">
-                                {asset.status === EstateManagedAssetStatus.Available ? (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    disabled={sendingListingId === asset.id}
-                                    onClick={() =>
-                                      router.push(
-                                        `/estate/property-management/listings?assetId=${encodeURIComponent(asset.id)}`
-                                      )
-                                    }
-                                  >
-                                    <Globe2 className="mr-2 h-3.5 w-3.5" />
-                                    Open listing
-                                  </Button>
-                                ) : null}
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={sendingListingId === asset.id}
-                                  onClick={() => void recallFromPortalListings(asset)}
-                                >
-                                  {sendingListingId === asset.id ? (
-                                    <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                                  ) : null}
-                                  Recall
-                                </Button>
-                              </div>
-                            ) : canSendProjectProperty ? (
-                              <div className="flex min-w-44 justify-end">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                disabled={sendingListingId === asset.id}
-                                onClick={() =>
-                                  void sendProjectPropertyToPortalListings(asset)
-                                }
-                              >
-                                {sendingListingId === asset.id ? (
-                                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <Globe2 className="mr-2 h-3.5 w-3.5" />
-                                )}
-                                Send to portal
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button type="button" variant="ghost" size="icon" aria-label={`Actions for ${asset.name}`} title="Actions" disabled={sendingListingId === asset.id}>
+                                {sendingListingId === asset.id
+                                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                                  : <Ellipsis className="h-4 w-4" />}
                               </Button>
-                              </div>
-                            ) : (
-                              <span className="block min-w-32 px-3 text-right text-muted-foreground">
-                                —
-                              </span>
-                            )}
-                          </div>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onSelect={() => setViewAsset(asset)}>
+                                <Eye className="mr-2 h-4 w-4" /> View details
+                              </DropdownMenuItem>
+                              <DropdownMenuItem asChild>
+                                <Link href={`/estate/property-management/EstatePropertyManagementOccupancyAvailability?assetId=${encodeURIComponent(asset.id)}`}>
+                                  <Settings2 className="mr-2 h-4 w-4" /> Manage status
+                                </Link>
+                              </DropdownMenuItem>
+                              {isPortalListing && asset.status === EstateManagedAssetStatus.Available ? (
+                                <DropdownMenuItem asChild>
+                                  <Link href={`/estate/property-management/listings?assetId=${encodeURIComponent(asset.id)}`}>
+                                    <Globe2 className="mr-2 h-4 w-4" /> Open listing
+                                  </Link>
+                                </DropdownMenuItem>
+                              ) : null}
+                              {isPortalListing ? (
+                                <DropdownMenuItem onSelect={() => void recallFromPortalListings(asset)}>
+                                  <Globe2 className="mr-2 h-4 w-4" /> Recall from portal
+                                </DropdownMenuItem>
+                              ) : (
+                                <>
+                                  <DropdownMenuItem
+                                    disabled={Boolean(portalSendUnavailableReason)}
+                                    onSelect={() => void sendProjectPropertyToPortalListings(asset)}
+                                  >
+                                    <Globe2 className="mr-2 h-4 w-4" /> Send to portal
+                                  </DropdownMenuItem>
+                                  {portalSendUnavailableReason ? (
+                                    <DropdownMenuLabel className="max-w-56 whitespace-normal text-xs font-normal text-muted-foreground">
+                                      {portalSendUnavailableReason}
+                                    </DropdownMenuLabel>
+                                  ) : null}
+                                </>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </TableCell>
                       </TableRow>
                     );
@@ -562,6 +502,39 @@ export function PropertyUnitRegister() {
           {totalPages > 1 ? <Pagination currentPage={page} totalPages={totalPages} totalItems={totalItems} pageSize={pageSize} onPageChange={setPage} /> : null}
         </CardContent>
       </Card>
+      <Dialog open={Boolean(viewAsset)} onOpenChange={(open) => { if (!open) setViewAsset(null); }}>
+        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{viewAsset?.name || 'Property details'}</DialogTitle>
+            <DialogDescription className="sr-only">Managed asset details</DialogDescription>
+          </DialogHeader>
+          {viewAsset ? (
+            <dl className="grid gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
+              {[
+                ['Property no.', viewAsset.assetCode],
+                ['Asset type', typeLabels[viewAsset.assetType]],
+                ['Location', getLocation(viewAsset) || 'Not recorded'],
+                ['Use', viewAsset.purpose || viewAsset.zoningClassification || 'Not recorded'],
+                ['Size', formatArea(viewAsset)],
+                ['Lessee / owner', getCurrentLesseeOrOwner(viewAsset) || 'Not linked'],
+                ['Tenancy date', formatDate(viewAsset.dateOfTenancy) || 'Not recorded'],
+                ['Lease term', viewAsset.leaseTermYears ? `${viewAsset.leaseTermYears} years` : 'Not recorded'],
+                ['Ground rent payable', formatGroundRent(viewAsset) || 'Not recorded'],
+                ['File reference', viewAsset.propertyFileReference || 'Not recorded'],
+                ['Source', sourceLabels[viewAsset.sourceType]],
+                ['Project code', viewAsset.projectCode || 'Not recorded'],
+                ['Status', statusLabels[viewAsset.status]],
+                ['Portal listing', viewAsset.externalListingType !== 'None' ? viewAsset.externalListingStatus || 'Draft' : 'Not sent'],
+              ].map(([label, value]) => (
+                <div key={label} className="min-w-0 border-b pb-2">
+                  <dt className="text-xs text-muted-foreground">{label}</dt>
+                  <dd className="mt-1 break-words font-medium">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+        </DialogContent>
+      </Dialog>
       <EstateAssetImportDialog open={importOpen} onOpenChange={setImportOpen} onImported={() => void loadAssets()} />
     </div>
   );

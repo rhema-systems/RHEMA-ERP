@@ -10,6 +10,7 @@ import {
   EyeOff,
   Home,
   Loader2,
+  MoreHorizontal,
   RefreshCw,
   Search,
 } from 'lucide-react';
@@ -27,6 +28,12 @@ import {
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
 import { Label } from '@/components/ui/label';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Select,
   SelectContent,
@@ -495,27 +502,26 @@ export function OccupancyAvailabilityWorkspace() {
                           </div>
                         </TableCell>
                         <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => chooseAsset(asset)}
-                            >
-                              Update
-                            </Button>
-                            <Button asChild size="sm" variant="ghost">
-                              <Link href={buildHandoverHref(asset)}>
-                                Handover
-                              </Link>
-                            </Button>
-                            <Button asChild size="sm" variant="ghost">
-                              <Link href={buildBillingHref(asset)}>
-                                <CreditCard className="mr-1 h-3.5 w-3.5" />
-                                Billing
-                              </Link>
-                            </Button>
-                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button type="button" size="icon" variant="ghost" title={`Actions for ${asset.name}`} aria-label={`Actions for ${asset.name}`}>
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onSelect={() => chooseAsset(asset)}>
+                                Update status
+                              </DropdownMenuItem>
+                              <DropdownMenuItem asChild>
+                                <Link href={buildHandoverHref(asset)}>Handover</Link>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem asChild>
+                                <Link href={buildBillingHref(asset)}>
+                                  <CreditCard className="mr-2 h-4 w-4" /> Billing
+                                </Link>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </TableCell>
                       </TableRow>
                     ))}

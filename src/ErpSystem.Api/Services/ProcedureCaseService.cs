@@ -304,6 +304,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                         && (item.PartnerType == "Customer" || item.PartnerType == "Both"))))
                 throw new InvalidOperationException("Select an active customer for this Legal matter.");
         }
+        if (module == "Facilities" && entityType == "EstateFacilityMaintenance")
+        {
+            await EnsureFacilitiesMaintenancePropertyForIntakeAsync(_db, tenantId, request.FieldValues);
+        }
         var workspace = await BuildWorkspaceSeedAsync(module, entityType);
         EnsurePublishedWorkflowForProcedureCase(module, entityType, workspace.WorkflowDefinitionId, "opening");
         var firstStage = workspace.Stages.FirstOrDefault() ?? new StageSeed(0, "Open", null, null, null, []);
@@ -2211,6 +2215,32 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             throw new InvalidOperationException("Select a Maintenance type before creating the maintenance handoff.");
         if (!new[] { "Low", "Medium", "High" }.Contains(FieldValue(procedureCase, "priority")?.Trim(), StringComparer.OrdinalIgnoreCase))
             throw new InvalidOperationException("Select Low, Medium, or High priority before creating the maintenance handoff.");
+    }
+
+    internal static async Task EnsureFacilitiesMaintenancePropertyForIntakeAsync(
+        ApplicationDbContext db,
+        Guid tenantId,
+        IDictionary<string, string?>? fieldValues)
+    {
+        var propertyUnit = fieldValues is not null && fieldValues.TryGetValue("propertyUnit", out var reference)
+            ? reference
+            : null;
+        var assetIdValue = fieldValues is not null && fieldValues.TryGetValue("estateManagedAssetId", out var linkedId)
+            ? linkedId
+            : null;
+        if (string.IsNullOrWhiteSpace(propertyUnit)
+            || !Guid.TryParse(assetIdValue, out var assetId))
+        {
+            throw new InvalidOperationException("Select a property from the Estate property register before creating the maintenance case.");
+        }
+
+        var matches = await db.EstateManagedAssets.AsNoTracking().AnyAsync(asset =>
+            asset.TenantId == tenantId && asset.Id == assetId && !asset.IsDeleted
+            && (asset.AssetCode == propertyUnit || asset.ProjectUnitCode == propertyUnit));
+        if (!matches)
+        {
+            throw new InvalidOperationException("The selected Estate property does not match this maintenance case. Select the property again.");
+        }
     }
 
     private async Task CreateMaintenanceJobCardForFacilitiesHandoffAsync(

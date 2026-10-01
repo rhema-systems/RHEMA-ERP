@@ -322,6 +322,7 @@ public class EstateManagedAssetQuery
     public bool? AvailableForSale { get; set; }
     public bool? AvailableForSaleOrLease { get; set; }
     public bool? PortalListingCandidates { get; set; }
+    public string? ExternalListingStatus { get; set; }
     public bool? PublishedToExternalPortal { get; set; }
     public int Skip { get; set; }
     public int Take { get; set; } = 100;
