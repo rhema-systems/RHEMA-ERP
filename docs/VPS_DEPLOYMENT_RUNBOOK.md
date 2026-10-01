@@ -80,8 +80,11 @@ bootstrap downloads the pinned portable GitHub CLI release, verifies both its
 SHA-256 digest and GitHub Authenticode signature, and installs it under
 `C:\RhemaERP\tools\github-cli`. If authentication is absent, it starts GitHub's
 browser/device sign-in; use a repository administrator account with Actions
-enabled. The final check queues only the release-contract job with build and
-deployment disabled. It does not build or deploy the application.
+enabled. If the dedicated deployment key does not exist, the bootstrap creates
+an Ed25519 identity under `C:\RhemaERP\secrets`, authorizes it through the active
+Windows OpenSSH administrator key file, and restricts the key files to SYSTEM and
+Administrators. The final check queues only the release-contract job with build
+and deployment disabled. It does not build or deploy the application.
 
 Do not generate `VPS_SSH_KNOWN_HOSTS` inside the workflow. Verify the host key
 through an independent trusted channel before saving it. The workflow requires
