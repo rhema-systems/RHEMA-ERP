@@ -26,6 +26,16 @@ public class BudgetReturn : TenantEntity
     public virtual SegmentLookupValue? SegmentValue { get; set; }
 
     /// <summary>
+    /// Finance transaction-dimension value used to distribute this worksheet (for example,
+    /// DEPARTMENT=DEPT-FIN). This is deliberately separate from the legacy account-number
+    /// segment value retained above for historical returns.
+    /// </summary>
+    public Guid? DistributionDimensionValueId { get; set; }
+
+    [ForeignKey(nameof(DistributionDimensionValueId))]
+    public virtual FinanceDimensionValue? DistributionDimensionValue { get; set; }
+
+    /// <summary>
     /// User assigned to prepare this budget return.
     /// </summary>
     public Guid? AssignedToUserId { get; set; }

@@ -9,6 +9,7 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
@@ -65,6 +66,9 @@ public sealed class GhanaStatutoryTaxEngineTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         SeedTenant(db, tenantId);
+        var payable = SeedAccount(db, tenantId, "2200", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
+        var receivable = SeedAccount(db, tenantId, "1140", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
+        await db.SaveChangesAsync();
         var currentUser = CreateCurrentUser(tenantId);
         var config = new TaxConfigurationService(db, currentUser.Object, Mock.Of<ILogger<TaxConfigurationService>>());
         await config.SeedGhanaTaxesAsync();
@@ -85,6 +89,40 @@ public sealed class GhanaStatutoryTaxEngineTests
 
         var covid = await db.Taxes.SingleAsync(t => t.TenantId == tenantId && t.Code == "COVID");
         covid.IsActive.Should().BeFalse();
+        var currentTaxes = await db.Taxes
+            .Where(t => t.TenantId == tenantId && new[] { "VAT", "NHIL", "GETFL" }.Contains(t.Code))
+            .ToListAsync();
+        currentTaxes.Should().OnlyContain(t => t.EffectiveFrom == new DateTime(2026, 1, 1));
+        currentTaxes.Should().OnlyContain(t => t.TaxPayableAccountId == payable.Id);
+        currentTaxes.Should().OnlyContain(t => t.TaxReceivableAccountId == receivable.Id);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-GhanaTax")]
+    [Trait("Category", "Tax")]
+    public async Task RecoverablePurchaseTax_ShouldRequireReceivableControlAccount()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        await db.SaveChangesAsync();
+        var service = new TaxConfigurationService(db, CreateCurrentUser(tenantId).Object, Mock.Of<ILogger<TaxConfigurationService>>());
+
+        var act = () => service.CreateTaxAsync(new CreateTaxDto
+        {
+            Code = "INPUT-VAT",
+            Name = "Input VAT",
+            Rate = 15m,
+            EffectiveFrom = new DateTime(2026, 1, 1),
+            Applicability = TaxApplicability.Purchases,
+            Category = TaxCategory.Standard,
+            IsActive = true,
+            IsInputTaxDeductible = true
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("A recoverable purchase tax requires an active tax receivable account before it can be used.");
+        (await db.Taxes.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -146,6 +184,7 @@ public sealed class GhanaStatutoryTaxEngineTests
             Name = "Value Added Tax",
             Rate = 15m,
             EffectiveFrom = new DateTime(2026, 7, 1),
+            IsInputTaxDeductible = false,
             TaxPayableAccountId = otherAccount.Id
         });
         await crossTenantAccount.Should().ThrowAsync<InvalidOperationException>()
@@ -356,15 +395,12 @@ public sealed class GhanaStatutoryTaxEngineTests
             TaxReceivableAccountId = replacementReceivable.Id
         });
 
-        await service.UpdateTaxAsync(created.Id, new UpdateTaxDto
+        var clearRecoverableAccount = () => service.UpdateTaxAsync(created.Id, new UpdateTaxDto
         {
             ClearTaxReceivableAccount = true
         });
-
-        var cleared = await db.Set<Tax>()
-            .AsNoTracking()
-            .FirstAsync(t => t.Id == created.Id);
-        cleared.TaxReceivableAccountId.Should().BeNull();
+        await clearRecoverableAccount.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("A recoverable purchase tax requires an active tax receivable account before it can be used.");
 
         await service.DeleteTaxAsync(created.Id);
 
@@ -684,7 +720,8 @@ public sealed class GhanaStatutoryTaxEngineTests
             Mock.Of<ILogger<InvoiceService>>(),
             CreateDocumentNumberingService(),
             postingEngine,
-            auditService);
+            auditService,
+            sourceBookAuthority: new FinanceSourceBookAuthorityService(db, currentUser.Object));
     }
 
     private static VendorPaymentService CreateApPaymentService(ApplicationDbContext db, Guid tenantId)
@@ -711,7 +748,21 @@ public sealed class GhanaStatutoryTaxEngineTests
                     TaxableBase = request.TaxableBase,
                     WithholdingAmount = 5m,
                     TaxPayableAccountId = configuredTax.TaxPayableAccountId,
-                    CalculationNote = "Statutory posting regression fixture"
+                    CalculationNote = "Statutory posting regression fixture",
+                    StatutoryFxEvidence = request.InvoiceSettlements.Select(settlement =>
+                        new WhtStatutoryFxEvidenceDto
+                        {
+                            VendorInvoiceId = settlement.VendorInvoiceId,
+                            CurrencyCode = "GHS",
+                            GrossSettlementAmount = settlement.GrossSettlementAmount,
+                            NetTaxableBaseAmount = settlement.GrossSettlementAmount,
+                            GhsTaxableBaseAmount = settlement.GrossSettlementAmount,
+                            ExchangeRateId = settlement.ExchangeRateId,
+                            ExchangeRateToGhs = 1m,
+                            RecognitionDate = request.PaymentDate.Date,
+                            RateSource = "Functional currency",
+                            SourceReference = "GHS functional currency"
+                        }).ToList()
                 });
         var invoicePaymentSod = new Mock<IProcurementInvoicePaymentSodService>();
         invoicePaymentSod
@@ -757,7 +808,8 @@ public sealed class GhanaStatutoryTaxEngineTests
             auditService,
             withholdingTaxService: withholdingService.Object,
             procurementControlEvents: procurementControlEvents.Object,
-            invoicePaymentSod: invoicePaymentSod.Object);
+            invoicePaymentSod: invoicePaymentSod.Object,
+            sourceBookAuthorities: new FinanceSourceBookAuthorityService(db, currentUser.Object));
     }
 
     private static PaymentService CreateArPaymentService(ApplicationDbContext db, Guid tenantId)
@@ -777,7 +829,8 @@ public sealed class GhanaStatutoryTaxEngineTests
             Mock.Of<IFinanceAccessScopeService>(),
             new FinanceReversalPolicyService(db, currentUser.Object),
             postingEngine,
-            auditService);
+            auditService,
+            sourceBookAuthority: new FinanceSourceBookAuthorityService(db, currentUser.Object));
     }
 
     private static IDocumentNumberingService CreateDocumentNumberingService()
@@ -960,6 +1013,24 @@ public sealed class GhanaStatutoryTaxEngineTests
         });
 
         db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        // The invoice is already at the governed posting boundary in this fixture.
+        // Retain the exact primary-book authority that a normal submit/approve flow
+        // freezes before PostAsync; production must not infer a book for a legacy row.
+        var authority = await new FinanceSourceBookAuthorityService(db, CreateCurrentUser(tenantId).Object)
+            .FreezeInitialPrimaryAsync(new FinanceSourceBookAuthorityFreezeRequest
+            {
+                OriginModuleCode = FinanceModuleLockCatalog.Finance,
+                SourceDocumentType = "CustomerInvoice",
+                SourceDocumentId = invoice.Id,
+                PostingAction = "Post",
+                EffectiveDate = invoice.InvoiceDate.Date,
+                TransactionCurrencyCode = invoice.CurrencyCode,
+                FreezeStage = FinanceSourceBookAuthorityFreezeStages.Authorized,
+                SourceWorkflowEntityType = "Invoice"
+            });
+        invoice.SourceBookAuthorityId = authority.AuthorityId;
         await db.SaveChangesAsync();
         return new ArInvoiceFixture(invoice, taxReceivable, taxPayable);
     }

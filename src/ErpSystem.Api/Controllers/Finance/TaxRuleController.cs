@@ -24,8 +24,8 @@ namespace ErpSystem.Api.Controllers.Finance
     /// **Domain Responsibility:**
     /// - Tax rules define the conditions under which specific tax groups (and their component tax rates) apply
     ///   to financial transactions such as invoices, purchase orders, and service billings
-    /// - Each rule binds a <see cref="TaxGroup"/> to a set of matching criteria including transaction type,
-    ///   product category, customer type, and service type
+    /// - Each rule binds a <see cref="TaxGroup"/> to supported matching criteria: transaction type and
+    ///   the canonical customer classification stored on the Business Partner
     /// - Rules are evaluated by priority order during tax calculation to determine which taxes apply
     ///
     /// **Tax Rule Lifecycle:**
@@ -49,6 +49,14 @@ namespace ErpSystem.Api.Controllers.Finance
     [Authorize]
     public class TaxRuleController : ControllerBase
     {
+        private static readonly HashSet<string> CanonicalCustomerTypes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Retail",
+            "Wholesale",
+            "Corporate",
+            "Government",
+            "Non-Profit"
+        };
         private readonly ApplicationDbContext _context;
         private readonly ITaxConfigurationService _taxService;
         private readonly ICurrentUserService _currentUserService;
@@ -434,6 +442,10 @@ namespace ErpSystem.Api.Controllers.Finance
                 return "Tax rule priority cannot be negative.";
             if (dto.TaxGroupId == Guid.Empty)
                 return "Tax group is required.";
+            if (dto.ProductCategoryId.HasValue || dto.ServiceType != null)
+                return "Product category and service type conditions are not supported by the tax calculation request. Use transaction type and customer type only.";
+            if (dto.CustomerType != null && !CanonicalCustomerTypes.Contains(dto.CustomerType))
+                return $"Customer type must be one of: {string.Join(", ", CanonicalCustomerTypes)}.";
             return null;
         }
 

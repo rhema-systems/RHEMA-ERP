@@ -16,7 +16,14 @@ const governedFailureTitle = (code: string, fallbackTitle: string): string => {
 const rawErrorMessage = (error: unknown, fallback: string): string => {
     const candidate = error as any;
     const details = candidate?.response?.data ?? candidate?.response ?? candidate;
-    const message = details?.detail || details?.error || details?.message || candidate?.message || fallback;
+    const validationIssues = Array.isArray(details?.issues)
+        ? details.issues
+            .filter((issue: any) => issue?.severity === 'Error' && typeof issue?.message === 'string')
+            .map((issue: any) => issue?.rowCode ? `Row ${issue.rowCode} — ${issue.message}` : issue.message)
+        : [];
+    const message = validationIssues.length > 0
+        ? validationIssues.join(' ')
+        : details?.detail || details?.error || details?.message || candidate?.message || fallback;
     return details?.code && !String(message).includes(details.code)
         ? `${message} (${details.code})`
         : message;

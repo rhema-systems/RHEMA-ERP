@@ -106,7 +106,6 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
         {
             var currencyCode = NormalizeCurrencyCode(dto.CurrencyCode, "Currency code");
             ValidateIsoMinorUnits(currencyCode, dto.DecimalPlaces);
-            var shouldCreateInitialRate = dto.CreateInitialExchangeRate && !dto.IsBaseCurrency;
 
             if (dto.IsBaseCurrency)
             {
@@ -115,11 +114,15 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                     "The currency register cannot bypass the governed functional-currency change control.");
             }
 
+            if (dto.CreateInitialExchangeRate)
+            {
+                throw new InvalidOperationException(
+                    "Initial exchange rates cannot be created from the currency register. " +
+                    "Create the currency first, then submit dated source evidence through Finance > Exchange Rates.");
+            }
+
             if (!await IsCodeUniqueAsync(currencyCode, null, cancellationToken))
                 throw new InvalidOperationException($"Currency with code '{currencyCode}' already exists.");
-
-            if (shouldCreateInitialRate && (!dto.InitialExchangeRate.HasValue || dto.InitialExchangeRate.Value <= 0))
-                throw new InvalidOperationException("Initial exchange rate must be greater than zero.");
 
             Currency? currency = null;
             await _unitOfWork.ExecuteInTransactionAsync(async operationToken =>
@@ -161,27 +164,6 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 };
 
                 await _unitOfWork.Repository<Currency>().AddAsync(currency);
-
-                if (shouldCreateInitialRate)
-                {
-                    // Persist inside the same transaction so the exchange-rate validation can see
-                    // the new currency. The outer unit of work remains responsible for commit.
-                    await _unitOfWork.SaveChangesAsync(operationToken);
-
-                    var baseCurrencyCode = await ResolveInitialRateBaseCurrencyCodeAsync(currency.CurrencyCode, operationToken);
-                    await _exchangeRateService.CreateExchangeRateAsync(new CreateExchangeRateDto
-                    {
-                        BaseCurrencyCode = baseCurrencyCode,
-                        TargetCurrencyCode = currency.CurrencyCode,
-                        Rate = dto.InitialExchangeRate!.Value,
-                        EffectiveDate = (dto.InitialExchangeRateDate ?? now).Date,
-                        RateType = dto.InitialExchangeRateType,
-                        RateSource = dto.InitialExchangeRateSource,
-                        SourceReference = dto.InitialExchangeRateSourceReference,
-                        IsActive = true,
-                        ApprovalStatus = "Approved"
-                    }, operationToken);
-                }
             }, cancellationToken);
 
             _logger.LogInformation("Currency {CurrencyCode} created by {User}", currency!.CurrencyCode, UserName);
@@ -448,29 +430,6 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             return !await _unitOfWork.Repository<Currency>()
                 .GetQueryable(c => c.TenantId == TenantId && c.CurrencyCode == currencyCode && c.Id != excludeId && !c.IsDeleted)
                 .AnyAsync(cancellationToken);
-        }
-
-        private async Task<string> ResolveInitialRateBaseCurrencyCodeAsync(string targetCurrencyCode, CancellationToken cancellationToken)
-        {
-            var baseCurrencyCode = NormalizeCurrencyCode(await _tenantSettingsService.GetBaseCurrencyAsync(), "Base currency");
-
-            if (baseCurrencyCode == targetCurrencyCode)
-                throw new InvalidOperationException("Initial exchange rates are only created for non-base currencies.");
-
-            var baseCurrencyExists = await _unitOfWork.Repository<Currency>()
-                .GetQueryable(c => c.TenantId == TenantId
-                    && c.CurrencyCode == baseCurrencyCode
-                    && c.IsActive
-                    && !c.IsDeleted)
-                .AnyAsync(cancellationToken);
-
-            if (!baseCurrencyExists)
-            {
-                throw new InvalidOperationException(
-                    $"Base currency '{baseCurrencyCode}' must be configured before creating an initial exchange rate.");
-            }
-
-            return baseCurrencyCode;
         }
 
         private static string NormalizeCurrencyCode(string currencyCode, string fieldName)

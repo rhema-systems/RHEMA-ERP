@@ -400,7 +400,7 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
                         </BreadcrumbItem>
                         <BreadcrumbSeparator />
                         <BreadcrumbItem>
-                            <BreadcrumbPage>{budgetReturn.segmentValueName || 'Budget Worksheet'}</BreadcrumbPage>
+                            <BreadcrumbPage>{budgetReturn.distributionDimensionName || budgetReturn.segmentValueName || 'Budget Worksheet'}</BreadcrumbPage>
                         </BreadcrumbItem>
                     </BreadcrumbList>
                 </Breadcrumb>
@@ -408,7 +408,7 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
                 <div className="flex items-center justify-between">
                     <div>
                         <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-                            {budgetReturn.segmentValueName}
+                            {budgetReturn.distributionDimensionName || budgetReturn.segmentValueName || 'Unassigned distribution'}
                             <Badge variant={isEditable ? 'outline' : 'secondary'} className={isEditable ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : ''}>
                                 {budgetReturn.status}
                             </Badge>

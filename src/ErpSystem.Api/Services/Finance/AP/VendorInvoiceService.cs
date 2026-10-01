@@ -3500,6 +3500,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                 postingLines[i].LineNumber = i + 1;
             }
 
+            var accountingBookCode = invoice.LeaseScheduleLineId.HasValue
+                ? invoice.LeaseAccountingBookCode!
+                : await ResolvePrimaryAccountingBookCodeAsync(invoice.TenantId, cancellationToken);
+
             return new FinancePostingRequestV2Dto
             {
                 SourceModule = "AP",
@@ -3511,9 +3515,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Description = $"Vendor invoice {invoice.InvoiceNumber} - {invoice.SupplierName}",
                 PostingDate = invoice.InvoiceDate,
                 JournalType = "AP Invoice",
-                AccountingBookCode = invoice.LeaseScheduleLineId.HasValue
-                    ? invoice.LeaseAccountingBookCode!
-                    : "IFRS",
+                AccountingBookCode = accountingBookCode,
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"AP:VendorInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
@@ -3621,6 +3623,10 @@ namespace ErpSystem.Api.Services.Finance.AP
             for (var index = 0; index < postingLines.Count; index++)
                 postingLines[index].LineNumber = index + 1;
 
+            var accountingBookCode = await ResolvePrimaryAccountingBookCodeAsync(
+                invoice.TenantId,
+                cancellationToken);
+
             return new FinancePostingRequestV2Dto
             {
                 SourceModule = "AP",
@@ -3632,13 +3638,38 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Description = $"AP opening balance {invoice.InvoiceNumber} - {invoice.SupplierName}",
                 PostingDate = invoice.InvoiceDate,
                 JournalType = "AP Opening Balance",
-                AccountingBookCode = "IFRS",
+                AccountingBookCode = accountingBookCode,
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"AP:VendorInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
                 Lines = postingLines,
                 TaxCalculationSnapshots = Array.Empty<FinanceTaxCalculationSnapshotDto>()
             };
+        }
+
+        private async Task<string> ResolvePrimaryAccountingBookCodeAsync(
+            Guid tenantId,
+            CancellationToken cancellationToken)
+        {
+            var books = await _unitOfWork.Repository<AccountingBook>()
+                .GetQueryable(book =>
+                    book.TenantId == tenantId &&
+                    book.IsDefault &&
+                    book.IsActive &&
+                    book.AllowsPosting &&
+                    !book.IsDeleted &&
+                    book.BookType == AccountingBookType.PrimaryFull &&
+                    book.LifecycleStatus == AccountingBookLifecycleStatus.Active)
+                .AsNoTracking()
+                .Take(2)
+                .Select(book => new { book.Id, book.Code })
+                .ToListAsync(cancellationToken);
+
+            if (books.Count != 1)
+                throw new InvalidOperationException(
+                    "Exactly one active, posting-enabled default primary accounting book is required for AP invoice posting.");
+
+            return books[0].Code;
         }
 
         private async Task<BusinessPartner> ResolveInvoiceSupplierForPostingAsync(VendorInvoice invoice, CancellationToken cancellationToken)

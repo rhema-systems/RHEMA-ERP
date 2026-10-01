@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Building2, Edit, Filter, Loader2, Plus, Upload } from 'lucide-react';
+import { ArrowRight, Building2, Edit, Filter, Loader2, Plus, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -72,6 +72,25 @@ export default function FixedAssetRegisterPage() {
       Rejected: 'destructive',
     };
     return <Badge variant={variants[status] || 'default'}>{status}</Badge>;
+  };
+
+  const getLifecycleGuidance = (status: FixedAssetStatus) => {
+    const guidance: Record<FixedAssetStatus, { label: string; action: string }> = {
+      Draft: { label: 'Submit capitalization proposal', action: 'Continue setup' },
+      PendingApproval: { label: 'Await independent approval', action: 'View approval' },
+      Rejected: { label: 'Revise and resubmit proposal', action: 'Resolve rejection' },
+      Acquired: { label: 'Post approved capitalization', action: 'Post capitalization' },
+      Capitalized: { label: 'Activate the asset', action: 'Activate asset' },
+      Active: { label: 'Asset is in service', action: 'Manage asset' },
+      OnHold: { label: 'Review and resume lifecycle', action: 'Review hold' },
+      UnderConstruction: { label: 'Complete construction/capitalization', action: 'Manage AUC' },
+      HeldForSale: { label: 'Complete disposal workflow', action: 'Manage disposal' },
+      FullyDepreciated: { label: 'Review retention or disposal', action: 'Review asset' },
+      Disposed: { label: 'Lifecycle complete', action: 'View asset' },
+      WrittenOff: { label: 'Lifecycle complete', action: 'View asset' },
+    };
+
+    return guidance[status];
   };
 
   if (loading) {
@@ -159,6 +178,10 @@ export default function FixedAssetRegisterPage() {
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
                 <SelectItem value="Draft">Draft</SelectItem>
+                <SelectItem value="PendingApproval">Pending Approval</SelectItem>
+                <SelectItem value="Rejected">Rejected</SelectItem>
+                <SelectItem value="Acquired">Acquired</SelectItem>
+                <SelectItem value="Capitalized">Capitalized</SelectItem>
                 <SelectItem value="Active">Active</SelectItem>
                 <SelectItem value="FullyDepreciated">Fully Depreciated</SelectItem>
                 <SelectItem value="Disposed">Disposed</SelectItem>
@@ -187,18 +210,21 @@ export default function FixedAssetRegisterPage() {
                 <TableHead>Purchase Date</TableHead>
                 <TableHead className="text-right">Net Book Value</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Next Step</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredAssets.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                     No fixed assets found.
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredAssets.map((asset) => (
+                filteredAssets.map((asset) => {
+                  const lifecycle = getLifecycleGuidance(asset.status);
+                  return (
                   <TableRow key={asset.id}>
                     <TableCell className="font-mono">{asset.assetCode}</TableCell>
                     <TableCell className="font-medium">{asset.name}</TableCell>
@@ -213,15 +239,22 @@ export default function FixedAssetRegisterPage() {
                     </TableCell>
                     <TableCell className="text-right">{formatMoney(asset.netBookValue)}</TableCell>
                     <TableCell>{getStatusBadge(asset.status)}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{lifecycle.label}</TableCell>
                     <TableCell className="text-right">
                       <Link href={`/finance/fixed-assets/register/${asset.id}/edit`}>
-                        <Button variant="ghost" size="icon" aria-label="Edit asset">
-                          <Edit className="h-4 w-4" />
+                        <Button variant="outline" size="sm" aria-label={`${lifecycle.action}: ${asset.name}`}>
+                          {asset.status === 'Active' || asset.status === 'Disposed' || asset.status === 'WrittenOff' ? (
+                            <Edit className="mr-2 h-4 w-4" />
+                          ) : (
+                            <ArrowRight className="mr-2 h-4 w-4" />
+                          )}
+                          {lifecycle.action}
                         </Button>
                       </Link>
                     </TableCell>
                   </TableRow>
-                ))
+                  );
+                })
               )}
             </TableBody>
           </Table>

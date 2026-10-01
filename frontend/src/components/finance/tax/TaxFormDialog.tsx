@@ -181,9 +181,12 @@ export function TaxFormDialog({ open, tax, accounts, accountsLoading = false, on
             onOpenChange(false);
         } catch (error) {
             console.error('Failed to save tax:', error);
+            const description = error instanceof Error
+                ? error.message
+                : 'The tax configuration could not be saved. Please try again.';
             toast({
-                title: 'Error',
-                description: 'Failed to save tax.',
+                title: 'Unable to save tax',
+                description,
                 variant: 'destructive',
             });
         } finally {
@@ -284,8 +287,12 @@ export function TaxFormDialog({ open, tax, accounts, accountsLoading = false, on
                                 <SelectContent>
                                     <SelectItem value={TaxCategory.Standard}>Standard</SelectItem>
                                     <SelectItem value={TaxCategory.Withholding}>Withholding</SelectItem>
+                                    <SelectItem value={TaxCategory.VatWithholding}>VAT Withholding</SelectItem>
                                     <SelectItem value={TaxCategory.Levy}>Levy</SelectItem>
-                                    <SelectItem value={TaxCategory.Excise}>Excise</SelectItem>
+                                    <SelectItem value={TaxCategory.Exempt}>Exempt</SelectItem>
+                                    <SelectItem value={TaxCategory.ZeroRated}>Zero-rated</SelectItem>
+                                    <SelectItem value={TaxCategory.OutOfScope}>Out of scope</SelectItem>
+                                    <SelectItem value={TaxCategory.ReverseCharge}>Reverse charge / import VAT</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>

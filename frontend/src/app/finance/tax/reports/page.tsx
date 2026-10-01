@@ -191,9 +191,10 @@ export default function TaxReportsPage() {
                         <div>
                             <h4 className="font-semibold mb-2">Standard Taxes</h4>
                             <ul className="space-y-1 text-muted-foreground">
-                                <li>• VAT: 15% (Simple on base amount)</li>
-                                <li>• NHIL: 2.5% (Compound on base)</li>
-                                <li>• GETFL: 2.5% (Compound on base + NHIL)</li>
+                                <li>• VAT: 15% of the taxable base</li>
+                                <li>• NHIL: 2.5% of the same taxable base</li>
+                                <li>• GETFund: 2.5% of the same taxable base</li>
+                                <li className="font-medium">• Combined standard charge: 20% (effective 1 January 2026)</li>
                             </ul>
                         </div>
                         <div>

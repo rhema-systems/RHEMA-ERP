@@ -12,7 +12,10 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
+using ErpSystem.Web.Services;
 using FluentAssertions;
+using System.Collections;
+using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
@@ -178,6 +181,56 @@ public sealed class FxFunctionalCurrencyGovernanceTests
     }
 
     [Theory]
+    [InlineData("Average")]
+    [InlineData("MonthEnd")]
+    [InlineData("QuarterEnd")]
+    [InlineData("YearEnd")]
+    [InlineData("Fixed")]
+    [InlineData("GhanaStatutory")]
+    [Trait("Batch", "FinanceGoLive-FXFoundation")]
+    [Trait("Category", "FX")]
+    public async Task NeutralAccountingRateTypesRejectBuyingAndSellingQuotes(string rateType)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        SeedCurrency(db, tenantId, "GHS", isBase: true);
+        SeedCurrency(db, tenantId, "USD", isBase: false);
+        await db.SaveChangesAsync();
+
+        var action = () => CreateExchangeRateService(db, tenantId).CreateExchangeRateAsync(new CreateExchangeRateDto
+        {
+            BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = "USD",
+            Rate = 0.08m,
+            EffectiveDate = new DateTime(2026, 9, 30),
+            RateType = rateType,
+            QuoteSide = ExchangeRateQuoteSide.Buying.ToString(),
+            RateSource = "Bank of Ghana",
+            SourceReference = "BoG regression evidence"
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*must use the Mid / Reference quote side*");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    public void FinanceWorkflowCatalogueIncludesExchangeRateApproval()
+    {
+        var seedMethod = typeof(DatabaseSeedingService).GetMethod(
+            "GetFinanceWorkflowSeedSpecs",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        seedMethod.Should().NotBeNull();
+        var entityCodes = ((IEnumerable)seedMethod!.Invoke(null, null)!)
+            .Cast<object>()
+            .Select(spec => spec.GetType().GetProperty("EntityCode")!.GetValue(spec)?.ToString());
+
+        entityCodes.Should().Contain("ExchangeRate");
+    }
+
+    [Theory]
     [InlineData("MonthEnd", "2026-08-15", "actual calendar month-end")]
     [InlineData("QuarterEnd", "2026-08-31", "configured fiscal quarter-end")]
     [InlineData("YearEnd", "2026-08-31", "configured fiscal year-end")]
@@ -305,6 +358,21 @@ public sealed class FxFunctionalCurrencyGovernanceTests
         SeedCurrency(db, tenantId, "GHS", isBase: true);
         SeedCurrency(db, tenantId, "USD", isBase: false);
         var settings = SeedFinanceSettings(db, tenantId, "GHS");
+        var accountingBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "IFRS",
+            Name = "IFRS Primary",
+            Purpose = "Primary",
+            BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
+            IsDefault = true,
+            IsActive = true,
+            AllowsPosting = true
+        };
+        db.AccountingBooks.Add(accountingBook);
         db.FinancePostingEvents.Add(new FinancePostingEvent
         {
             Id = Guid.NewGuid(),
@@ -316,7 +384,8 @@ public sealed class FxFunctionalCurrencyGovernanceTests
             PostingStatus = "Posted",
             PostingDate = new DateTime(2026, 7, 1),
             FunctionalCurrencyCode = "GHS",
-            BookClassification = "IFRS"
+            BookClassification = accountingBook.Code,
+            AccountingBookId = accountingBook.Id
         });
         await db.SaveChangesAsync();
 
@@ -642,7 +711,7 @@ public sealed class FxFunctionalCurrencyGovernanceTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FXFoundation")]
     [Trait("Category", "FX")]
-    public async Task CurrencyAndInitialExchangeRateAreCreatedAsOneGovernedOperation()
+    public async Task CurrencyRegisterRejectsInitialRateShortcutWithoutPersistingPartialData()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -650,7 +719,7 @@ public sealed class FxFunctionalCurrencyGovernanceTests
         SeedCurrency(db, tenantId, "GHS", isBase: true);
         await db.SaveChangesAsync();
 
-        var result = await CreateCurrencyService(db, tenantId).CreateCurrencyAsync(new CreateCurrencyDto
+        var create = () => CreateCurrencyService(db, tenantId).CreateCurrencyAsync(new CreateCurrencyDto
         {
             CurrencyCode = "USD",
             NumericCode = "840",
@@ -665,12 +734,13 @@ public sealed class FxFunctionalCurrencyGovernanceTests
             InitialExchangeRateSourceReference = "UAT-2026-09-30"
         });
 
-        result.CurrencyCode.Should().Be("USD");
-        var rate = await db.ExchangeRates.SingleAsync(item => item.TenantId == tenantId);
-        rate.BaseCurrencyCode.Should().Be("GHS");
-        rate.TargetCurrencyCode.Should().Be("USD");
-        rate.Rate.Should().Be(15.25m);
-        rate.EffectiveDate.Should().Be(new DateTime(2026, 9, 30));
+        await create.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Finance > Exchange Rates*");
+
+        (await db.Currencies.CountAsync(item => item.TenantId == tenantId && item.CurrencyCode == "USD"))
+            .Should().Be(0);
+        (await db.ExchangeRates.CountAsync(item => item.TenantId == tenantId))
+            .Should().Be(0);
     }
 
     [Fact]

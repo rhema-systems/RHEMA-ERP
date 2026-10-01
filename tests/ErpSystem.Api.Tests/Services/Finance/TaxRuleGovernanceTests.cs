@@ -89,6 +89,56 @@ public sealed class TaxRuleGovernanceTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Theory]
+    [InlineData("Individual")]
+    [InlineData("Foreign")]
+    [Trait("Batch", "FinanceGoLive-Tax")]
+    [Trait("Category", "Tax")]
+    public async Task CustomerTypeMustMatchCanonicalBusinessPartnerClassification(string customerType)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var group = SeedGroup(db, tenantId);
+        await db.SaveChangesAsync();
+        var (controller, _) = CreateController(db, tenantId);
+
+        var result = await controller.CreateTaxRule(new CreateTaxRuleDto
+        {
+            Name = "Invalid customer classification",
+            Priority = 1,
+            TaxGroupId = group.Id,
+            CustomerType = customerType,
+            IsActive = true
+        });
+
+        result.Result.Should().BeOfType<BadRequestObjectResult>();
+        (await db.TaxRules.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-Tax")]
+    [Trait("Category", "Tax")]
+    public async Task UnsupportedRuleCriteriaMustFailClosedAtConfigurationBoundary()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var group = SeedGroup(db, tenantId);
+        await db.SaveChangesAsync();
+        var (controller, _) = CreateController(db, tenantId);
+
+        var result = await controller.CreateTaxRule(new CreateTaxRuleDto
+        {
+            Name = "Unsupported service rule",
+            Priority = 1,
+            TaxGroupId = group.Id,
+            ServiceType = "Consulting",
+            IsActive = true
+        });
+
+        result.Result.Should().BeOfType<BadRequestObjectResult>();
+        (await db.TaxRules.CountAsync()).Should().Be(0);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

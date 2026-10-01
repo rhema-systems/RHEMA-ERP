@@ -437,15 +437,15 @@ public sealed class AccountingBookClassificationAuthorityTests
         await seeder.SeedAsync(tenantId, new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc));
         var firstClassifications = await db.AccountClassifications.CountAsync();
         var firstMappings = await db.AccountAccountingBooks.CountAsync();
-        var adminCash = await db.AccountClassifications.SingleAsync(item => item.Code == "CASH" && item.AccountingBook!.Code == "IFRS");
+        var adminCash = await db.AccountClassifications.SingleAsync(item => item.Code == "CASH" && item.AccountingBook!.Code == "BASE");
         adminCash.DefaultRevaluationTreatment = RevaluationTreatment.Exclude;
         adminCash.SystemRole = null;
         adminCash.UpdatedBy = "finance.admin";
-        var legacyBank = await db.AccountClassifications.SingleAsync(item => item.Code == "BANK" && item.AccountingBook!.Code == "IFRS");
+        var legacyBank = await db.AccountClassifications.SingleAsync(item => item.Code == "BANK" && item.AccountingBook!.Code == "BASE");
         legacyBank.SystemRole = null;
         var cashAccountId = await db.Accounts.Where(item => item.AccountCode == "1000").Select(item => item.Id).SingleAsync();
         var reviewedMapping = await db.AccountAccountingBooks.Include(item => item.AccountingBook)
-            .SingleAsync(item => item.AccountId == cashAccountId && item.AccountingBook.Code == "IFRS");
+            .SingleAsync(item => item.AccountId == cashAccountId && item.AccountingBook.Code == "BASE");
         reviewedMapping.AccountClassificationId = await db.AccountClassifications
             .Where(item => item.AccountingBookId == reviewedMapping.AccountingBookId && item.Code == "ASSET_OTHER")
             .Select(item => item.Id).SingleAsync();
@@ -461,7 +461,7 @@ public sealed class AccountingBookClassificationAuthorityTests
         adminCash.SystemRole.Should().BeNull("administrator-managed classifications must not be rewritten");
         legacyBank.SystemRole.Should().Be(AccountClassificationSystemRole.Bank,
             "untouched classifications created by an older manifest must receive their canonical role");
-        (await db.AccountClassifications.Where(item => item.Code == "CASH" && item.AccountingBook!.Code != "IFRS")
+        (await db.AccountClassifications.Where(item => item.Code == "CASH" && item.AccountingBook!.Code != "BASE")
             .AllAsync(item => item.DefaultRevaluationTreatment == RevaluationTreatment.Include)).Should().BeTrue();
         (await db.AccountClassifications.Where(item => item.Code == "EXPENSE")
             .Select(item => item.DefaultRevaluationTreatment).Distinct().SingleAsync())
@@ -475,8 +475,15 @@ public sealed class AccountingBookClassificationAuthorityTests
         (await db.AccountClassifications.Where(item => item.Code == "CASH")
             .AllAsync(item => item.ParentClassificationId != null)).Should().BeTrue();
         (await db.AccountAccountingBooks.Include(item => item.AccountingBook)
+            .Where(item => item.AccountingBook.Code != "BASE")
             .AllAsync(item => !item.IsEnabled && !item.AccountingBook.IsActive && !item.AccountingBook.AllowsPosting))
-            .Should().BeTrue("the manifest prepares exact lineage but never approves fresh Configuring books for posting");
+            .Should().BeTrue("the manifest prepares exact lineage but never approves derived Configuring books for posting");
+        (await db.AccountAccountingBooks.Include(item => item.AccountingBook)
+            .Where(item => item.IsEnabled)
+            .AllAsync(item => item.AccountingBook.Code == "BASE"
+                && item.AccountingBook.IsActive
+                && item.AccountingBook.AllowsPosting))
+            .Should().BeTrue("only the governed primary book may be executable after seeding");
         FinanceClassificationManifestSeeder.ResolveReviewedClassificationCode("5000", AccountType.Expense)
             .Should().Be("COST_OF_SALES");
     }
@@ -499,7 +506,7 @@ public sealed class AccountingBookClassificationAuthorityTests
         var seeder = new FinanceClassificationManifestSeeder(db, NullLogger.Instance);
         await seeder.SeedAsync(tenantId, new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc));
         var mapping = await db.AccountAccountingBooks.Include(item => item.AccountingBook)
-            .SingleAsync(item => item.Account!.AccountCode == "7110" && item.AccountingBook!.Code == "IFRS");
+            .SingleAsync(item => item.Account!.AccountCode == "7110" && item.AccountingBook!.Code == "IFRS_ADJUSTMENTS");
         var broadClassification = await db.AccountClassifications.SingleAsync(item =>
             item.AccountingBookId == mapping.AccountingBookId && item.Code == "EXPENSE");
         broadClassification.CreatedBy = "System (FIN-CLASSIFICATION-1.0)";
@@ -569,6 +576,8 @@ public sealed class AccountingBookClassificationAuthorityTests
         {
             db.Tenants.Add(new Tenant { Id = tenantId, Code = $"T-{tenantId:N}"[..20], Name = "Tenant", BaseCurrency = "GHS", Status = TenantStatus.Active });
             var book = SeedBook(db, tenantId);
+            book.Code = "BASE";
+            book.Name = "Ghana Statutory Primary";
             var revenue = SeedClassification(db, tenantId, book.Id, "REVENUE", AccountType.Revenue);
             var expense = SeedClassification(db, tenantId, book.Id, "EXPENSE", AccountType.Expense);
             revenue.CreatedBy = expense.CreatedBy = "System (FIN-CLASSIFICATION-1.0)";
@@ -593,7 +602,7 @@ public sealed class AccountingBookClassificationAuthorityTests
         foreach (var tenantId in tenants)
         {
             var rows = await db.AccountAccountingBooks.Include(item => item.Account).Include(item => item.AccountClassification)
-                .Where(item => item.TenantId == tenantId && item.AccountingBook.Code == "IFRS").ToListAsync();
+                .Where(item => item.TenantId == tenantId && item.AccountingBook.Code == "BASE").ToListAsync();
             rows.Single(item => item.Account.AccountCode == "4210").AccountClassification!.Code.Should().Be("REVENUE_DEDUCTIONS");
             rows.Single(item => item.Account.AccountCode == "5000").AccountClassification!.Code.Should().Be("COST_OF_SALES");
             rows.Single(item => item.Account.AccountCode == "7110").AccountClassification!.Code.Should().Be("EXPENSE");
@@ -821,6 +830,10 @@ public sealed class AccountingBookClassificationAuthorityTests
         root.IsPostingClassification = false;
         var classification = SeedClassification(db, tenantId, book.Id, "EXPENSE", AccountType.Expense);
         classification.ParentClassificationId = root.Id;
+        var draftGroup = SeedClassification(db, tenantId, book.Id, "CURRENT_EXPENSES", AccountType.Expense);
+        draftGroup.ParentClassificationId = root.Id;
+        draftGroup.Status = AccountClassificationStatus.Draft;
+        draftGroup.IsPostingClassification = false;
         var active = SeedAccount(db, tenantId, "6100", AccountType.Expense);
         var historical = SeedAccount(db, tenantId, "6200", AccountType.Expense);
         db.AccountAccountingBooks.AddRange(
@@ -908,6 +921,18 @@ public sealed class AccountingBookClassificationAuthorityTests
             "a descendant-inclusive Draft selector on the parent governs this classification");
         classificationSummary.CanRetire.Should().BeFalse(
             "the list contract should not offer an action that the retirement command will reject");
+
+        var activationRequest = Request(draftGroup, book.Id, root.Id);
+        activationRequest.Status = nameof(AccountClassificationStatus.Active);
+        draftGroup.AccountingBookId.Should().Be(activationRequest.AccountingBookId);
+        draftGroup.Code.Should().Be(activationRequest.Code);
+        draftGroup.CoreAccountType.ToString().Should().Be(activationRequest.CoreAccountType);
+        draftGroup.ParentClassificationId.Should().Be(activationRequest.ParentClassificationId);
+        draftGroup.Status.Should().Be(AccountClassificationStatus.Draft);
+        var activatedGroup = await service.UpdateAsync(draftGroup.Id, activationRequest);
+        activatedGroup.Status.Should().Be(nameof(AccountClassificationStatus.Active));
+        activatedGroup.IsPostingClassification.Should().BeFalse(
+            "a descendant-inclusive layout selector must not force hierarchy groups to become posting leaves");
 
         var reparent = () => service.UpdateAsync(classification.Id, Request(classification, book.Id));
         await reparent.Should().ThrowAsync<InvalidOperationException>()
@@ -1022,11 +1047,14 @@ public sealed class AccountingBookClassificationAuthorityTests
         repeated.WasCreated.Should().BeFalse();
         repeated.AccountId.Should().Be(created.AccountId);
         repeated.ClassificationCode.Should().Be("CASH");
-        repeated.AccountingBookCodes.Should().BeEmpty(
-            "freshly configured books are not executable until governed activation allows posting");
-        (await db.Accounts.CountAsync()).Should().Be(1);
-        (await db.AccountAccountingBooks.CountAsync()).Should().Be(3);
-        (await db.AccountAccountingBooks.AllAsync(item => !item.IsEnabled)).Should().BeTrue();
+        repeated.AccountingBookCodes.Should().ContainSingle()
+            .Which.Should().Be("BASE", "the governed primary book is active while derived books remain configuring");
+        (await db.Accounts.CountAsync()).Should().Be(3,
+            "the manifest also provisions protected USD translation and rounding accounts");
+        (await db.AccountAccountingBooks.CountAsync()).Should().Be(5);
+        (await db.AccountAccountingBooks.CountAsync(item => item.IsEnabled)).Should().Be(1);
+        (await db.AccountAccountingBooks.Include(item => item.AccountingBook)
+            .Where(item => item.IsEnabled).AllAsync(item => item.AccountingBook.Code == "BASE")).Should().BeTrue();
     }
 
     [Theory]
@@ -1066,15 +1094,18 @@ public sealed class AccountingBookClassificationAuthorityTests
         adopted.WasCreated.Should().BeFalse();
         repeated.AccountId.Should().Be(legacyId);
         repeated.WasCreated.Should().BeFalse();
-        var account = await db.Accounts.Include(item => item.SegmentValues).SingleAsync();
+        var account = await db.Accounts.Include(item => item.SegmentValues)
+            .SingleAsync(item => item.AccountCode == accountCode);
         account.AccountNumber.Should().NotBe(accountCode);
         account.IsSegmented.Should().BeTrue();
         account.SegmentValues.Where(item => !item.IsDeleted).Should().HaveCount(2);
         adopted.ClassificationCode.Should().Be(expectedClassification);
-        adopted.AccountingBookCodes.Should().BeEmpty(
-            "freshly configured books are not executable until governed activation allows posting");
-        (await db.AccountAccountingBooks.CountAsync()).Should().Be(3);
-        (await db.AccountAccountingBooks.AllAsync(item => !item.IsEnabled)).Should().BeTrue();
+        adopted.AccountingBookCodes.Should().ContainSingle()
+            .Which.Should().Be("BASE", "the governed primary book is active while derived books remain configuring");
+        (await db.AccountAccountingBooks.CountAsync()).Should().Be(5);
+        (await db.AccountAccountingBooks.CountAsync(item => item.IsEnabled)).Should().Be(1);
+        (await db.AccountAccountingBooks.Include(item => item.AccountingBook)
+            .Where(item => item.IsEnabled).AllAsync(item => item.AccountingBook.Code == "BASE")).Should().BeTrue();
     }
 
     [Fact]

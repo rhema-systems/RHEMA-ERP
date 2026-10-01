@@ -65,26 +65,31 @@ export default function NewBankDepositPage() {
         }).catch(error => toast.error(error instanceof Error ? error.message : 'Could not load banking queue.'));
     }, []);
 
+    const selectedBank = useMemo(
+        () => banks.find(item => item.id === form.bankAccountId),
+        [banks, form.bankAccountId],
+    );
+
     const visibleEntries = useMemo(() => {
-        const bank = banks.find(item => item.id === form.bankAccountId);
         const term = search.trim().toLowerCase();
         return entries.filter(entry =>
-            (!bank || entry.currency === bank.currency) &&
+            (!selectedBank || entry.currency === selectedBank.currency) &&
             (!term || [entry.entryNumber, entry.counterpartyName, entry.referenceNumber, entry.description, entry.liquidityAccountName]
                 .some(value => value?.toLowerCase().includes(term))),
         );
-    }, [banks, entries, form.bankAccountId, search]);
+    }, [entries, search, selectedBank]);
 
     const totals = useMemo(() => {
         let receipts = 0;
         let deductions = 0;
         entries.forEach(entry => {
+            if (selectedBank && entry.currency !== selectedBank.currency) return;
             const amount = selected[entry.id] ?? 0;
             if (entry.direction === 'Increase') receipts += amount;
             else deductions += amount;
         });
         return { receipts, deductions, net: receipts - deductions };
-    }, [entries, selected]);
+    }, [entries, selected, selectedBank]);
 
     const dimensionLines = useMemo(() => {
         const bank = banks.find(item => item.id === form.bankAccountId);
@@ -159,7 +164,10 @@ export default function NewBankDepositPage() {
         try {
             const deposit = await cashManagementDataService.createBankDeposit({
                 ...form,
-                allocations: entries.filter(entry => selected[entry.id] > 0).map(entry => ({
+                allocations: entries.filter(entry =>
+                    selected[entry.id] > 0
+                    && (!selectedBank || entry.currency === selectedBank.currency),
+                ).map(entry => ({
                     liquidityAccountEntryId: entry.id,
                     allocationType: entry.direction === 'Increase' ? 'Receipt' : 'Deduction',
                     amount: selected[entry.id],
@@ -200,7 +208,7 @@ export default function NewBankDepositPage() {
             <Card>
                 <CardHeader><CardTitle>Deposit header</CardTitle><CardDescription>One deposit represents one expected bank-statement line.</CardDescription></CardHeader>
                 <CardContent className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2"><Label>Destination bank</Label><Select required value={form.bankAccountId} onValueChange={bankAccountId => setForm({ ...form, bankAccountId })}><SelectTrigger><SelectValue placeholder="Select bank account" /></SelectTrigger><SelectContent>{banks.map(bank => <SelectItem key={bank.id} value={bank.id}>{bank.bankName} — {bank.accountName} ({bank.currency})</SelectItem>)}</SelectContent></Select></div>
+                    <div className="space-y-2"><Label>Destination bank</Label><Select required value={form.bankAccountId} onValueChange={bankAccountId => { setForm({ ...form, bankAccountId }); setSelected({}); }}><SelectTrigger><SelectValue placeholder="Select bank account" /></SelectTrigger><SelectContent>{banks.map(bank => <SelectItem key={bank.id} value={bank.id}>{bank.bankName} — {bank.accountName} ({bank.currency})</SelectItem>)}</SelectContent></Select></div>
                     <div className="space-y-2"><Label>Deposit date</Label><Input required type="date" value={form.depositDate} onChange={event => setForm({ ...form, depositDate: event.target.value })} />{includesChequeReceipt && expectedClearingDate && <p className="text-xs text-muted-foreground">Expected cheque clearing: {expectedClearingDate.toLocaleDateString()} ({chequeClearingPeriodDays} calendar day(s), advisory only).</p>}</div>
                     <div className="space-y-2"><Label>Deposit slip / bank reference</Label><Input required maxLength={100} value={form.depositReference} onChange={event => setForm({ ...form, depositReference: event.target.value })} /></div>
                     <div className="space-y-2"><Label>Policy</Label><Input disabled value={setup?.depositPolicy === 'ControlledNetBanking' ? 'Controlled net banking' : 'Deposit intact'} /></div>
@@ -312,9 +320,9 @@ export default function NewBankDepositPage() {
             </Card>
             <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-4 border bg-background p-4 shadow-sm">
                 <div className="flex gap-6 text-sm">
-                    <div><p className="text-muted-foreground">Receipts</p><p className="font-semibold text-green-700">GHS {totals.receipts.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
-                    <div><p className="text-muted-foreground">Deductions</p><p className="font-semibold text-red-600">GHS {totals.deductions.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
-                    <div><p className="text-muted-foreground">Net to bank</p><p className="text-xl font-bold">GHS {totals.net.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
+                    <div><p className="text-muted-foreground">Receipts</p><p className="font-semibold text-green-700">{selectedBank?.currency ?? '—'} {totals.receipts.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
+                    <div><p className="text-muted-foreground">Deductions</p><p className="font-semibold text-red-600">{selectedBank?.currency ?? '—'} {totals.deductions.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
+                    <div><p className="text-muted-foreground">Net to bank</p><p className="text-xl font-bold">{selectedBank?.currency ?? '—'} {totals.net.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
                 </div>
                 <Button disabled={saving || !form.bankAccountId || !form.depositReference || totals.net <= 0}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save draft</Button>
             </div>

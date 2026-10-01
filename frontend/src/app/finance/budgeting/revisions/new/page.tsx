@@ -119,7 +119,7 @@ export default function NewBudgetRevisionPage() {
                             key,
                             segmentValueId: budgetReturn.segmentValueId,
                             financeDimensionSetId: entry.financeDimensionSetId,
-                            label: `${budgetReturn.segmentValueName ?? 'General'} · ${assignmentLabel}`,
+                            label: `${budgetReturn.distributionDimensionName ?? budgetReturn.segmentValueName ?? 'Unassigned distribution'} · ${assignmentLabel}`,
                             assignments: entry.dimensionAssignments,
                         });
                     }

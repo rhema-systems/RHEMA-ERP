@@ -943,6 +943,15 @@ function LayoutDetailDialog({
 
     const removeMapping = async (rowId: string, mappingId: string) => {
         if (!selectedVersion) return;
+        const sourceRow = selectedVersion.rows.find((row) => row.id === rowId);
+        if (sourceRow?.rowType === 'Account' && sourceRow.mappings.length === 1) {
+            toast({
+                title: 'Replacement mapping required',
+                description: 'An account row must retain at least one mapping. Add the replacement mapping first, then remove the old mapping.',
+                variant: 'destructive',
+            });
+            return;
+        }
         const rows = selectedVersion.rows.map((source) => ({
             ...toRowInput(source),
             mappings: source.id === rowId

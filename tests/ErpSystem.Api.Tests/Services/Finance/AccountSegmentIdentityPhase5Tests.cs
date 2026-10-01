@@ -276,7 +276,7 @@ public sealed class AccountSegmentIdentityPhase5Tests
     }
 
     [Fact]
-    public async Task Activation_RejectsAnExistingAccountWithoutTheResultingExactSegmentSet()
+    public async Task Activation_WithExistingAccounts_RequiresExplicitGovernedBackfill()
     {
         await using var db = CreateContext();
         var tenant = NewTenant("TDC");
@@ -299,7 +299,47 @@ public sealed class AccountSegmentIdentityPhase5Tests
         await service.Invoking(item => item.ActivateAsync(segment.Id, new AccountSegmentLifecycleTransitionDto
         {
             RowVersion = Convert.ToBase64String(segment.RowVersion)
-        })).Should().ThrowAsync<InvalidOperationException>().WithMessage("*every existing GL account*");
+        })).Should().ThrowAsync<InvalidOperationException>().WithMessage("*Confirm the governed backfill*");
+    }
+
+    [Fact]
+    public async Task Activation_WithGovernedDefault_BackfillsExistingAccountsAndRecomposesNumbers()
+    {
+        await using var db = CreateContext();
+        var fixture = await SeedStructureAsync(db, "TDC");
+        var account = AddAccountWithIdentity(db, fixture, "TDC-6100");
+        var branch = Structure(fixture.TenantId, "BRANCH", 3, 3, false, true);
+        branch.LifecycleStatus = AccountSegmentLifecycleStatus.Draft;
+        branch.IsActive = false;
+        branch.RowVersion = [2];
+        var branchValue = new SegmentLookupValue
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, SegmentStructureId = branch.Id,
+            SegmentValue = "ACC", Description = "Head office", IsActive = true
+        };
+        db.AccountSegmentStructures.Add(branch);
+        db.SegmentLookupValues.Add(branchValue);
+        await db.SaveChangesAsync();
+        var service = StructureService(db, fixture.TenantId, Audit());
+
+        var activated = await service.ActivateAsync(branch.Id, new AccountSegmentLifecycleTransitionDto
+        {
+            RowVersion = Convert.ToBase64String(branch.RowVersion),
+            Reason = "Extend the account identity using the approved head-office default.",
+            ConfirmExistingAccountBackfill = true,
+            DefaultSegmentLookupValueId = branchValue.Id
+        });
+
+        activated.LifecycleStatus.Should().Be("Active");
+        activated.AccountUsageCount.Should().Be(1);
+        activated.TotalAccountCount.Should().Be(1);
+        db.ChangeTracker.Clear();
+        var stored = await db.Accounts.Include(item => item.SegmentValues).SingleAsync(item => item.Id == account.Id);
+        stored.AccountNumber.Should().Be("TDC-6100-ACC");
+        stored.SegmentValues.Should().ContainSingle(value =>
+            value.SegmentStructureId == branch.Id
+            && value.SegmentValue == "ACC"
+            && value.SegmentLookupValueId == branchValue.Id);
     }
 
     [Fact]

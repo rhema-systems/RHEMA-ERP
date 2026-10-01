@@ -67,9 +67,7 @@ export default function TaxRulesPage() {
         priority: 0,
         taxGroupId: '',
         transactionType: '',
-        productCategoryId: '', // Placeholder
         customerType: '',
-        serviceType: '',
         isActive: true
     });
 
@@ -107,7 +105,6 @@ export default function TaxRulesPage() {
             taxGroupId: '',
             transactionType: '',
             customerType: '',
-            serviceType: '',
             isActive: true
         });
         setIsDialogOpen(true);
@@ -121,9 +118,7 @@ export default function TaxRulesPage() {
             priority: rule.priority,
             taxGroupId: rule.taxGroupId,
             transactionType: rule.transactionType || '',
-            productCategoryId: rule.productCategoryId || '',
             customerType: rule.customerType || '',
-            serviceType: rule.serviceType || '',
             isActive: rule.isActive
         });
         setIsDialogOpen(true);
@@ -147,17 +142,13 @@ export default function TaxRulesPage() {
                 priority: Number(formData.priority) || 0,
                 taxGroupId: formData.taxGroupId,
                 transactionType: formData.transactionType || null as any,
-                productCategoryId: formData.productCategoryId || null as any,
                 customerType: formData.customerType || null as any,
-                serviceType: formData.serviceType || null as any,
                 isActive: formData.isActive ?? true
             };
 
             // Clean up empty strings to nulls for optional fields if API expects null
             if (!payload.transactionType) delete payload.transactionType;
-            if (!payload.productCategoryId) delete payload.productCategoryId;
             if (!payload.customerType) delete payload.customerType;
-            if (!payload.serviceType) delete payload.serviceType;
 
             if (editingRule) {
                 await taxDataService.updateTaxRule(editingRule.id, payload);
@@ -304,10 +295,10 @@ export default function TaxRulesPage() {
                                                     {rule.customerType && (
                                                         <Badge variant="outline" className="text-xs">Cust: {rule.customerType}</Badge>
                                                     )}
-                                                    {rule.serviceType && (
-                                                        <Badge variant="outline" className="text-xs">Svc: {rule.serviceType}</Badge>
+                                                    {(rule.serviceType || rule.productCategoryId) && (
+                                                        <Badge variant="destructive" className="text-xs">Unsupported legacy condition</Badge>
                                                     )}
-                                                    {!rule.transactionType && !rule.customerType && !rule.serviceType && (
+                                                    {!rule.transactionType && !rule.customerType && !rule.serviceType && !rule.productCategoryId && (
                                                         <span className="text-xs text-muted-foreground">No specific conditions (Match All)</span>
                                                     )}
                                                 </div>
@@ -432,24 +423,18 @@ export default function TaxRulesPage() {
                                         </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="Any">Any</SelectItem>
-                                            <SelectItem value="Individual">Individual</SelectItem>
+                                            <SelectItem value="Retail">Retail</SelectItem>
+                                            <SelectItem value="Wholesale">Wholesale</SelectItem>
                                             <SelectItem value="Corporate">Corporate</SelectItem>
-                                            <SelectItem value="Foreign">Foreign</SelectItem>
                                             <SelectItem value="Government">Government</SelectItem>
+                                            <SelectItem value="Non-Profit">Non-Profit</SelectItem>
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                {/* Service Type and Product Category can be text inputs or sophisticated selectors later */}
-                                <div className="space-y-2">
-                                    <Label htmlFor="serviceType">Service Type (Optional)</Label>
-                                    <Input
-                                        id="serviceType"
-                                        value={formData.serviceType || ''}
-                                        onChange={(e) => setFormData({ ...formData, serviceType: e.target.value })}
-                                        placeholder="Specific service code"
-                                    />
-                                </div>
                             </div>
+                            <p className="mt-3 text-sm text-muted-foreground">
+                                Rules currently evaluate transaction type and the Business Partner&apos;s customer classification only.
+                            </p>
                         </div>
 
                         <div className="flex items-center space-x-2 pt-2">

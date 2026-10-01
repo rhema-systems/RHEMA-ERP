@@ -364,80 +364,50 @@ public class FinanceDataSeeder
 
     private async Task SeedExchangeRatesAsync(Guid tenantId, DateTime baseDate)
     {
-        var effectiveDate = new DateTime(2024, 12, 15, 0, 0, 0, DateTimeKind.Utc);
+        // Scenario-aligned BoG daily mid rates. The entity retains the canonical accounting
+        // direction (GHS -> foreign currency); user-facing screens display the inverse
+        // provider convention (one unit of foreign currency -> GHS).
+        var effectiveDate = new DateTime(2026, 9, 30, 0, 0, 0, DateTimeKind.Utc);
         var systemUserId = Guid.Parse("00000000-0000-0000-0000-000000000001"); // System user
 
-        // GHS to USD
-        if (!await _context.ExchangeRates.AnyAsync(r => 
-            r.BaseCurrencyCode == "GHS" && r.TargetCurrencyCode == "USD" && r.TenantId == tenantId))
+        var sourceReference = "https://www.bog.gov.gh/treasury-and-the-markets/daily-interbank-fx-rates/ (30 Sep 2026)";
+        var seeds = new[]
         {
-            await _context.ExchangeRates.AddAsync(new ExchangeRate
-            {
-                Id = Guid.Parse("00000002-0001-0001-0001-000000000001"),
-                TenantId = tenantId,
-                BaseCurrencyCode = "GHS",
-                TargetCurrencyCode = "USD",
-                // Canonical direction: 1 source/base currency = Rate target currency.
-                Rate = 0.08m,
-                InverseRate = 12.5m,
-                RateType = ExchangeRateType.Daily,
-                EffectiveDate = effectiveDate,
-                RateSource = "Bank of Ghana",
-                IsActive = true,
-                IsManualEntry = false,
-                CreatedByUserId = systemUserId,
-                CreatedDate = effectiveDate,
-                CreatedAt = effectiveDate,
-                CreatedBy = "System"
-            });
-        }
+            (Id: Guid.Parse("00000002-0001-0001-0001-000000000001"), Code: "USD", Mid: 11.7100m),
+            (Id: Guid.Parse("00000002-0001-0001-0001-000000000002"), Code: "EUR", Mid: 13.2785m),
+            (Id: Guid.Parse("00000002-0001-0001-0001-000000000003"), Code: "GBP", Mid: 15.5298m)
+        };
 
-        // GHS to EUR
-        if (!await _context.ExchangeRates.AnyAsync(r => 
-            r.BaseCurrencyCode == "GHS" && r.TargetCurrencyCode == "EUR" && r.TenantId == tenantId))
+        foreach (var seed in seeds)
         {
-            await _context.ExchangeRates.AddAsync(new ExchangeRate
+            var rate = await _context.ExchangeRates.SingleOrDefaultAsync(item =>
+                item.TenantId == tenantId && item.Id == seed.Id);
+            if (rate == null)
             {
-                Id = Guid.Parse("00000002-0001-0001-0001-000000000002"),
-                TenantId = tenantId,
-                BaseCurrencyCode = "GHS",
-                TargetCurrencyCode = "EUR",
-                Rate = 0.076m,
-                InverseRate = 13.157895m,
-                RateType = ExchangeRateType.Daily,
-                EffectiveDate = effectiveDate,
-                RateSource = "Bank of Ghana",
-                IsActive = true,
-                IsManualEntry = false,
-                CreatedByUserId = systemUserId,
-                CreatedDate = effectiveDate,
-                CreatedAt = effectiveDate,
-                CreatedBy = "System"
-            });
-        }
+                rate = new ExchangeRate { Id = seed.Id, TenantId = tenantId };
+                await _context.ExchangeRates.AddAsync(rate);
+            }
 
-        // GHS to GBP
-        if (!await _context.ExchangeRates.AnyAsync(r => 
-            r.BaseCurrencyCode == "GHS" && r.TargetCurrencyCode == "GBP" && r.TenantId == tenantId))
-        {
-            await _context.ExchangeRates.AddAsync(new ExchangeRate
-            {
-                Id = Guid.Parse("00000002-0001-0001-0001-000000000003"),
-                TenantId = tenantId,
-                BaseCurrencyCode = "GHS",
-                TargetCurrencyCode = "GBP",
-                Rate = 0.063m,
-                InverseRate = 15.873016m,
-                RateType = ExchangeRateType.Daily,
-                EffectiveDate = effectiveDate,
-                RateSource = "Bank of Ghana",
-                IsActive = true,
-                IsManualEntry = false,
-                CreatedByUserId = systemUserId,
-                CreatedDate = effectiveDate,
-                CreatedAt = effectiveDate,
-                CreatedBy = "System"
-            });
+            rate.BaseCurrencyCode = "GHS";
+            rate.TargetCurrencyCode = seed.Code;
+            rate.Rate = decimal.Round(1m / seed.Mid, 6, MidpointRounding.AwayFromZero);
+            rate.InverseRate = seed.Mid;
+            rate.RateType = ExchangeRateType.Daily;
+            rate.QuoteSide = ExchangeRateQuoteSide.Mid;
+            rate.EffectiveDate = effectiveDate;
+            rate.EndDate = null;
+            rate.RateSource = "Bank of Ghana";
+            rate.APIEndpoint = "https://www.bog.gov.gh/treasury-and-the-markets/daily-interbank-fx-rates/";
+            rate.APIResponseMetadata = sourceReference;
+            rate.IsActive = true;
+            rate.IsManualEntry = false;
+            rate.ApprovalStatus = RateApprovalStatus.Approved;
+            rate.ApprovalDate = effectiveDate;
+            rate.ApprovedByUserId = systemUserId;
+            rate.CreatedByUserId = systemUserId;
+            rate.CreatedDate = effectiveDate;
+            rate.CreatedAt = effectiveDate;
+            rate.CreatedBy = "System";
         }
 
         _logger.LogInformation("Exchange rates seeded");
@@ -1066,7 +1036,7 @@ public class FinanceDataSeeder
         // trial balance, detailed ledger and account card disagree on a fresh database. All GL
         // accounts now start at zero; opening positions must enter through the controlled opening-
         // balance workspace so debit/credit evidence and subledger reconciliation are retained.
-        return new List<Account>
+        var accounts = new List<Account>
         {
             // ===== ASSETS =====
             new Account
@@ -1988,6 +1958,69 @@ public class FinanceDataSeeder
                 CreatedBy = "System"
             }
         };
+
+        accounts.AddRange(GetFinanceOperationalDefaultAccounts(tenantId, baseDate));
+        return accounts;
+    }
+
+    private static IEnumerable<Account> GetFinanceOperationalDefaultAccounts(Guid tenantId, DateTime baseDate)
+    {
+        return new[]
+        {
+            NewAccount("1030", "Supplier Advances", AccountType.Asset, "Current Assets", "Prepayments and Advances", false, true),
+            NewAccount("1090", "Inter-segment Clearing", AccountType.Asset, "Current Assets", "Clearing Accounts", true, false),
+            NewAccount("1210", "Return-to-Vendor Clearing", AccountType.Asset, "Current Assets", "Inventory Clearing", true, false),
+            NewAccount("1540", "Assets Under Construction / Capital Work in Progress", AccountType.Asset, "Fixed Assets", "Assets Under Construction", true, false),
+            NewAccount("1545", "Right-of-Use Assets", AccountType.Asset, "Fixed Assets", "Leased Assets", true, false),
+            NewAccount("1580", "Asset Disposal Proceeds Clearing", AccountType.Asset, "Current Assets", "Clearing Accounts", true, false),
+            NewAccount("1595", "Accumulated Impairment", AccountType.Asset, "Fixed Assets", "Contra Assets", true, false),
+            NewAccount("2050", "Customer Advances", AccountType.Liability, "Current Liabilities", "Contract Liabilities", true, false),
+            NewAccount("2510", "Lease Liabilities", AccountType.Liability, "Non-Current Liabilities", "Lease Liabilities", true, false),
+            NewAccount("3200", "Asset Revaluation Surplus", AccountType.Equity, "Equity", "Other Comprehensive Income", true, false),
+            NewAccount("4930", "Gain on Disposal of Fixed Assets", AccountType.Revenue, "Other Income", "Asset Disposals", false, false),
+            NewAccount("4935", "Impairment Reversal Income", AccountType.Revenue, "Other Income", "Asset Impairment", false, false),
+            NewAccount("4940", "Write-off Recoveries", AccountType.Revenue, "Other Income", "Recoveries", false, false),
+            NewAccount("5010", "Purchase Return Cost Variance", AccountType.Expense, "Cost of Sales", "Purchase Returns", false, false, true),
+            NewAccount("6310", "Loss on Disposal of Fixed Assets", AccountType.Expense, "Other Expenses", "Asset Disposals", false, false),
+            NewAccount("6320", "Asset Revaluation Loss", AccountType.Expense, "Other Expenses", "Asset Revaluation", false, false),
+            NewAccount("6330", "Asset Impairment Loss", AccountType.Expense, "Other Expenses", "Asset Impairment", false, false),
+            NewAccount("6610", "Lease Interest Expense", AccountType.Expense, "Finance Costs", "Lease Accounting", false, false),
+            NewAccount("6700", "Inventory and Receivable Write-off Expense", AccountType.Expense, "Other Expenses", "Write-offs", false, false, true)
+        };
+
+        Account NewAccount(
+            string code,
+            string name,
+            AccountType type,
+            string category,
+            string subCategory,
+            bool control,
+            bool multiCurrency,
+            bool budgetTracking = false) => new()
+        {
+            Id = Guid.Parse($"00000005-{code}-0000-0000-000000000001"),
+            TenantId = tenantId,
+            AccountCode = code,
+            AccountNumber = code,
+            AccountName = name,
+            AccountType = type,
+            AccountCategory = category,
+            AccountSubCategory = subCategory,
+            Description = $"System Finance default account for {name.ToLowerInvariant()} workflows.",
+            CurrencyCode = "GHS",
+            IsMultiCurrency = multiCurrency,
+            IsSegmented = false,
+            IsIFRSClassified = true,
+            IsBaseClassified = true,
+            IsLocalClassified = true,
+            AllowDirectPosting = false,
+            IsControlAccount = control,
+            IsSystemAccount = true,
+            BudgetTrackingEnabled = budgetTracking,
+            Status = AccountStatus.Active,
+            CreatedAt = baseDate,
+            CreatedBy = "System (Finance Operational Defaults 1.0)"
+        };
     }
 
     #endregion
@@ -1996,17 +2029,11 @@ public class FinanceDataSeeder
 
     private async Task SeedFixedAssetCategoriesAsync(Guid tenantId, DateTime baseDate)
     {
-        if (await _context.FixedAssetCategories.AnyAsync(c => c.TenantId == tenantId))
-        {
-            _logger.LogInformation("Fixed asset categories already exist. Skipping.");
-            return;
-        }
-
         var categories = new List<FixedAssetCategory>
         {
             new FixedAssetCategory
             {
-                Id = Guid.NewGuid(),
+                Id = Guid.Parse("00000007-0001-0000-0000-000000000001"),
                 TenantId = tenantId,
                 Name = "Buildings",
                 Code = "FA-BLDG",
@@ -2017,12 +2044,21 @@ public class FinanceDataSeeder
                 AssetAccountId = Guid.Parse("00000005-1510-0000-0000-000000000001"),
                 AccumulatedDepreciationAccountId = Guid.Parse("00000005-1590-0000-0000-000000000001"),
                 DepreciationExpenseAccountId = Guid.Parse("00000005-6300-0000-0000-000000000001"),
+                GainOnDisposalAccountId = Guid.Parse("00000005-4930-0000-0000-000000000001"),
+                LossOnDisposalAccountId = Guid.Parse("00000005-6310-0000-0000-000000000001"),
+                DisposalProceedsClearingAccountId = Guid.Parse("00000005-1580-0000-0000-000000000001"),
+                RevaluationSurplusAccountId = Guid.Parse("00000005-3200-0000-0000-000000000001"),
+                RevaluationLossAccountId = Guid.Parse("00000005-6320-0000-0000-000000000001"),
+                ImpairmentLossAccountId = Guid.Parse("00000005-6330-0000-0000-000000000001"),
+                AccumulatedImpairmentAccountId = Guid.Parse("00000005-1595-0000-0000-000000000001"),
+                ImpairmentReversalAccountId = Guid.Parse("00000005-4935-0000-0000-000000000001"),
+                AucAccountId = Guid.Parse("00000005-1540-0000-0000-000000000001"),
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
             new FixedAssetCategory
             {
-                Id = Guid.NewGuid(),
+                Id = Guid.Parse("00000007-0002-0000-0000-000000000001"),
                 TenantId = tenantId,
                 Name = "Equipment",
                 Code = "FA-EQP",
@@ -2033,12 +2069,21 @@ public class FinanceDataSeeder
                 AssetAccountId = Guid.Parse("00000005-1520-0000-0000-000000000001"),
                 AccumulatedDepreciationAccountId = Guid.Parse("00000005-1590-0000-0000-000000000001"),
                 DepreciationExpenseAccountId = Guid.Parse("00000005-6300-0000-0000-000000000001"),
+                GainOnDisposalAccountId = Guid.Parse("00000005-4930-0000-0000-000000000001"),
+                LossOnDisposalAccountId = Guid.Parse("00000005-6310-0000-0000-000000000001"),
+                DisposalProceedsClearingAccountId = Guid.Parse("00000005-1580-0000-0000-000000000001"),
+                RevaluationSurplusAccountId = Guid.Parse("00000005-3200-0000-0000-000000000001"),
+                RevaluationLossAccountId = Guid.Parse("00000005-6320-0000-0000-000000000001"),
+                ImpairmentLossAccountId = Guid.Parse("00000005-6330-0000-0000-000000000001"),
+                AccumulatedImpairmentAccountId = Guid.Parse("00000005-1595-0000-0000-000000000001"),
+                ImpairmentReversalAccountId = Guid.Parse("00000005-4935-0000-0000-000000000001"),
+                AucAccountId = Guid.Parse("00000005-1540-0000-0000-000000000001"),
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
             new FixedAssetCategory
             {
-                Id = Guid.NewGuid(),
+                Id = Guid.Parse("00000007-0003-0000-0000-000000000001"),
                 TenantId = tenantId,
                 Name = "Vehicles",
                 Code = "FA-VEH",
@@ -2049,13 +2094,60 @@ public class FinanceDataSeeder
                 AssetAccountId = Guid.Parse("00000005-1530-0000-0000-000000000001"),
                 AccumulatedDepreciationAccountId = Guid.Parse("00000005-1590-0000-0000-000000000001"),
                 DepreciationExpenseAccountId = Guid.Parse("00000005-6300-0000-0000-000000000001"),
+                GainOnDisposalAccountId = Guid.Parse("00000005-4930-0000-0000-000000000001"),
+                LossOnDisposalAccountId = Guid.Parse("00000005-6310-0000-0000-000000000001"),
+                DisposalProceedsClearingAccountId = Guid.Parse("00000005-1580-0000-0000-000000000001"),
+                RevaluationSurplusAccountId = Guid.Parse("00000005-3200-0000-0000-000000000001"),
+                RevaluationLossAccountId = Guid.Parse("00000005-6320-0000-0000-000000000001"),
+                ImpairmentLossAccountId = Guid.Parse("00000005-6330-0000-0000-000000000001"),
+                AccumulatedImpairmentAccountId = Guid.Parse("00000005-1595-0000-0000-000000000001"),
+                ImpairmentReversalAccountId = Guid.Parse("00000005-4935-0000-0000-000000000001"),
+                AucAccountId = Guid.Parse("00000005-1540-0000-0000-000000000001"),
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             }
         };
 
-        await _context.FixedAssetCategories.AddRangeAsync(categories);
-        _logger.LogInformation($"Seeded {categories.Count} fixed asset categories");
+        var existingByCode = await _context.FixedAssetCategories
+            .Where(category => category.TenantId == tenantId && !category.IsDeleted)
+            .ToDictionaryAsync(category => category.Code);
+        var created = 0;
+        var backfilled = 0;
+        foreach (var definition in categories)
+        {
+            if (!existingByCode.TryGetValue(definition.Code, out var category))
+            {
+                await _context.FixedAssetCategories.AddAsync(definition);
+                created++;
+                continue;
+            }
+
+            var systemManaged = !string.IsNullOrWhiteSpace(category.CreatedBy)
+                && category.CreatedBy.StartsWith("System", StringComparison.OrdinalIgnoreCase);
+            if (!systemManaged) continue;
+
+            var changed = false;
+            if (!category.GainOnDisposalAccountId.HasValue) { category.GainOnDisposalAccountId = definition.GainOnDisposalAccountId; changed = true; }
+            if (!category.LossOnDisposalAccountId.HasValue) { category.LossOnDisposalAccountId = definition.LossOnDisposalAccountId; changed = true; }
+            if (!category.DisposalProceedsClearingAccountId.HasValue) { category.DisposalProceedsClearingAccountId = definition.DisposalProceedsClearingAccountId; changed = true; }
+            if (!category.RevaluationSurplusAccountId.HasValue) { category.RevaluationSurplusAccountId = definition.RevaluationSurplusAccountId; changed = true; }
+            if (!category.RevaluationLossAccountId.HasValue) { category.RevaluationLossAccountId = definition.RevaluationLossAccountId; changed = true; }
+            if (!category.ImpairmentLossAccountId.HasValue) { category.ImpairmentLossAccountId = definition.ImpairmentLossAccountId; changed = true; }
+            if (!category.AccumulatedImpairmentAccountId.HasValue) { category.AccumulatedImpairmentAccountId = definition.AccumulatedImpairmentAccountId; changed = true; }
+            if (!category.ImpairmentReversalAccountId.HasValue) { category.ImpairmentReversalAccountId = definition.ImpairmentReversalAccountId; changed = true; }
+            if (!category.AucAccountId.HasValue) { category.AucAccountId = definition.AucAccountId; changed = true; }
+            if (!changed) continue;
+
+            category.UpdatedAt = baseDate;
+            category.UpdatedBy = "System (Finance Operational Defaults 1.0)";
+            backfilled++;
+        }
+
+        _logger.LogInformation(
+            "Ensured fixed asset category defaults: {CreatedCount} created and {BackfilledCount} system categories backfilled.",
+            created,
+            backfilled);
+
     }
 
     #endregion
@@ -2551,6 +2643,8 @@ public class FinanceDataSeeder
             CoaConfigurationLocked = false,
             BaseCurrency = "GHS",
             AccountSeparator = "-",
+            ReturnToVendorClearingAccountId = Guid.Parse("00000005-1210-0000-0000-000000000001"),
+            PurchaseReturnVarianceAccountId = Guid.Parse("00000005-5010-0000-0000-000000000001"),
             RetainedEarningsAccountId = Guid.Parse("00000005-3100-0000-0000-000000000001"),
             UnrealizedGainLossAccountId = Guid.Parse("00000005-7100-0000-0000-000000000001"),
             UnrealizedFxGainAccountId = Guid.Parse("00000005-7100-0000-0000-000000000001"),
@@ -2559,15 +2653,24 @@ public class FinanceDataSeeder
             RealizedFxGainAccountId = Guid.Parse("00000005-7200-0000-0000-000000000001"),
             RealizedFxLossAccountId = Guid.Parse("00000005-7210-0000-0000-000000000001"),
             SuspenseAccountId = Guid.Parse("00000005-9999-0000-0000-000000000001"),
+            SegmentClearingAccountId = Guid.Parse("00000005-1090-0000-0000-000000000001"),
             ControlAccountArId = Guid.Parse("00000005-1100-0000-0000-000000000001"),
             ControlAccountApId = Guid.Parse("00000005-2000-0000-0000-000000000001"),
+            SupplierAdvanceAccountId = Guid.Parse("00000005-1030-0000-0000-000000000001"),
+            CustomerAdvanceAccountId = Guid.Parse("00000005-2050-0000-0000-000000000001"),
             ControlAccountInventoryId = Guid.Parse("00000005-1200-0000-0000-000000000001"),
             ControlAccountPayrollId = Guid.Parse("00000005-2120-0000-0000-000000000001"),
             ControlAccountTaxId = Guid.Parse("00000005-2200-0000-0000-000000000001"),
+            ControlAccountCOGSId = Guid.Parse("00000005-5000-0000-0000-000000000001"),
             ControlAccountGRVAccrualId = Guid.Parse("00000005-2110-0000-0000-000000000001"),
             DiscountAllowedAccountId = Guid.Parse("00000005-4210-0000-0000-000000000001"),
             DiscountReceivedAccountId = Guid.Parse("00000005-4910-0000-0000-000000000001"),
             MigrationClearingAccountId = Guid.Parse("00000005-1990-0000-0000-000000000001"),
+            LeaseRouAssetAccountId = Guid.Parse("00000005-1545-0000-0000-000000000001"),
+            LeaseLiabilityAccountId = Guid.Parse("00000005-2510-0000-0000-000000000001"),
+            LeaseInterestExpenseAccountId = Guid.Parse("00000005-6610-0000-0000-000000000001"),
+            WriteOffExpenseAccountId = Guid.Parse("00000005-6700-0000-0000-000000000001"),
+            WriteOffRecoveryAccountId = Guid.Parse("00000005-4940-0000-0000-000000000001"),
             CreatedAt = baseDate,
             CreatedBy = "System"
         };
@@ -2580,6 +2683,32 @@ public class FinanceDataSeeder
         {
             var updated = false;
 
+            updated |= SetMissing(
+                () => settings.RetainedEarningsAccountId,
+                value => settings.RetainedEarningsAccountId = value,
+                "00000005-3100-0000-0000-000000000001");
+            updated |= SetMissing(
+                () => settings.UnrealizedGainLossAccountId,
+                value => settings.UnrealizedGainLossAccountId = value,
+                "00000005-7100-0000-0000-000000000001");
+            updated |= SetMissing(
+                () => settings.RealizedGainLossAccountId,
+                value => settings.RealizedGainLossAccountId = value,
+                "00000005-7200-0000-0000-000000000001");
+            updated |= SetMissing(
+                () => settings.SuspenseAccountId,
+                value => settings.SuspenseAccountId = value,
+                "00000005-9999-0000-0000-000000000001");
+
+            updated |= SetMissing(
+                () => settings.ReturnToVendorClearingAccountId,
+                value => settings.ReturnToVendorClearingAccountId = value,
+                "00000005-1210-0000-0000-000000000001");
+            updated |= SetMissing(
+                () => settings.PurchaseReturnVarianceAccountId,
+                value => settings.PurchaseReturnVarianceAccountId = value,
+                "00000005-5010-0000-0000-000000000001");
+
             if (!settings.ControlAccountArId.HasValue)
             {
                 settings.ControlAccountArId = Guid.Parse("00000005-1100-0000-0000-000000000001");
@@ -2591,6 +2720,15 @@ public class FinanceDataSeeder
                 settings.ControlAccountApId = Guid.Parse("00000005-2000-0000-0000-000000000001");
                 updated = true;
             }
+
+            updated |= SetMissing(
+                () => settings.SupplierAdvanceAccountId,
+                value => settings.SupplierAdvanceAccountId = value,
+                "00000005-1030-0000-0000-000000000001");
+            updated |= SetMissing(
+                () => settings.CustomerAdvanceAccountId,
+                value => settings.CustomerAdvanceAccountId = value,
+                "00000005-2050-0000-0000-000000000001");
 
             if (!settings.ControlAccountInventoryId.HasValue)
             {
@@ -2615,6 +2753,11 @@ public class FinanceDataSeeder
                 settings.ControlAccountGRVAccrualId = Guid.Parse("00000005-2110-0000-0000-000000000001");
                 updated = true;
             }
+
+            updated |= SetMissing(
+                () => settings.ControlAccountCOGSId,
+                value => settings.ControlAccountCOGSId = value,
+                "00000005-5000-0000-0000-000000000001");
 
             // Move tenants that still have the old generic default to the dedicated GRV control account.
             if (settings.ControlAccountGRVAccrualId == Guid.Parse("00000005-2100-0000-0000-000000000001"))
@@ -2641,6 +2784,31 @@ public class FinanceDataSeeder
                 updated = true;
             }
 
+            updated |= SetMissing(
+                () => settings.SegmentClearingAccountId,
+                value => settings.SegmentClearingAccountId = value,
+                "00000005-1090-0000-0000-000000000001");
+            updated |= SetMissing(
+                () => settings.LeaseRouAssetAccountId,
+                value => settings.LeaseRouAssetAccountId = value,
+                "00000005-1545-0000-0000-000000000001");
+            updated |= SetMissing(
+                () => settings.LeaseLiabilityAccountId,
+                value => settings.LeaseLiabilityAccountId = value,
+                "00000005-2510-0000-0000-000000000001");
+            updated |= SetMissing(
+                () => settings.LeaseInterestExpenseAccountId,
+                value => settings.LeaseInterestExpenseAccountId = value,
+                "00000005-6610-0000-0000-000000000001");
+            updated |= SetMissing(
+                () => settings.WriteOffExpenseAccountId,
+                value => settings.WriteOffExpenseAccountId = value,
+                "00000005-6700-0000-0000-000000000001");
+            updated |= SetMissing(
+                () => settings.WriteOffRecoveryAccountId,
+                value => settings.WriteOffRecoveryAccountId = value,
+                "00000005-4940-0000-0000-000000000001");
+
             if (!settings.UnrealizedFxGainAccountId.HasValue)
             {
                 settings.UnrealizedFxGainAccountId = Guid.Parse("00000005-7100-0000-0000-000000000001");
@@ -2666,6 +2834,13 @@ public class FinanceDataSeeder
             }
 
             return updated;
+
+            static bool SetMissing(Func<Guid?> get, Action<Guid> set, string accountId)
+            {
+                if (get().HasValue) return false;
+                set(Guid.Parse(accountId));
+                return true;
+            }
         }
     }
 
@@ -2678,10 +2853,10 @@ public class FinanceDataSeeder
         var systemUserId = Guid.Parse("00000000-0000-0000-0000-000000000001"); 
 
         // 1.1 NHIL (2.5%)
-        var nhil = await GetOrCreateTaxAsync(tenantId, "NHIL", "National Health Insurance Levy", 2.5m, TaxApplicability.Sales, TaxCategory.Standard, false, baseDate, systemUserId);
+        var nhil = await GetOrCreateTaxAsync(tenantId, "NHIL", "National Health Insurance Levy", 2.5m, TaxApplicability.Sales, TaxCategory.Levy, false, baseDate, systemUserId);
         
         // 1.2 GETFund (2.5%)
-        var getfund = await GetOrCreateTaxAsync(tenantId, "GETFUND", "GETFund Levy", 2.5m, TaxApplicability.Sales, TaxCategory.Standard, false, baseDate, systemUserId);
+        var getfund = await GetOrCreateTaxAsync(tenantId, "GETFUND", "GETFund Levy", 2.5m, TaxApplicability.Sales, TaxCategory.Levy, false, baseDate, systemUserId);
         
         // 1.3 COVID-19 (1%) - retained inactive for historical transactions only.
         var covid = await GetOrCreateTaxAsync(tenantId, "COVID19", "COVID-19 Health Recovery Levy", 1.0m, TaxApplicability.Sales, TaxCategory.Standard, false, baseDate, systemUserId);
@@ -2693,7 +2868,7 @@ public class FinanceDataSeeder
         }
         
         // 1.4 VAT Standard (15%)
-        var vatStd = await GetOrCreateTaxAsync(tenantId, "VAT-STD", "Value Added Tax (Standard)", 15.0m, TaxApplicability.Sales, TaxCategory.Standard, true, baseDate, systemUserId);
+        var vatStd = await GetOrCreateTaxAsync(tenantId, "VAT-STD", "Value Added Tax (Standard)", 15.0m, TaxApplicability.Sales, TaxCategory.Standard, false, baseDate, systemUserId);
         
         // 1.5 WHT 7.5% (Services)
         var whtServices = await GetOrCreateTaxAsync(tenantId, "WHT-SERV", "Withholding Tax (Services)", 7.5m, TaxApplicability.Purchases, TaxCategory.Withholding, false, baseDate, systemUserId, 2000m);
@@ -2715,13 +2890,17 @@ public class FinanceDataSeeder
         // as an AP profile's default tax schedule would calculate a supplier deduction as an
         // invoice-line tax. These purchase components instead post deductible input tax to the
         // dedicated receivable control account while WHT remains governed by the AP WHT defaults.
-        var purchaseNhil = await GetOrCreateTaxAsync(tenantId, "NHIL-PUR", "NHIL on Purchases", 2.5m, TaxApplicability.Purchases, TaxCategory.Standard, false, baseDate, systemUserId);
-        var purchaseGetfund = await GetOrCreateTaxAsync(tenantId, "GETFUND-PUR", "GETFund Levy on Purchases", 2.5m, TaxApplicability.Purchases, TaxCategory.Standard, false, baseDate, systemUserId);
+        var purchaseNhil = await GetOrCreateTaxAsync(tenantId, "NHIL-PUR", "NHIL on Purchases", 2.5m, TaxApplicability.Purchases, TaxCategory.Levy, true, baseDate, systemUserId);
+        var purchaseGetfund = await GetOrCreateTaxAsync(tenantId, "GETFUND-PUR", "GETFund Levy on Purchases", 2.5m, TaxApplicability.Purchases, TaxCategory.Levy, true, baseDate, systemUserId);
         var purchaseVat = await GetOrCreateTaxAsync(tenantId, "VAT-STD-PUR", "Input VAT (Standard)", 15.0m, TaxApplicability.Purchases, TaxCategory.Standard, true, baseDate, systemUserId);
 
         var taxPayableAccountId = Guid.Parse("00000005-2200-0000-0000-000000000001");
         var taxReceivableAccountId = Guid.Parse("00000005-1130-0000-0000-000000000001");
         var inputVatReceivableAccountId = Guid.Parse("00000005-1140-0000-0000-000000000001");
+        foreach (var outputTax in new[] { nhil, getfund, vatStd })
+        {
+            outputTax.TaxPayableAccountId ??= taxPayableAccountId;
+        }
         foreach (var purchaseWht in new[] { whtServices, whtGoods, whtWorks })
         {
             // Preserve tenant overrides. These are baseline defaults only for installations that

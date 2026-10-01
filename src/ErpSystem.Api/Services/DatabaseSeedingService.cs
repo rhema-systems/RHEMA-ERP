@@ -2584,6 +2584,8 @@ namespace ErpSystem.Web.Services
                     "Bank reconciliation approval for month-end bank sign-off."),
                 new("OpeningBalanceBatch", "Opening Balance Batch", typeof(OpeningBalanceBatch).FullName, "Opening Balance Approval",
                     "Controlled migration opening-balance approval before posting to GL through the Finance posting engine."),
+                new("ExchangeRate", "Exchange Rate", typeof(ExchangeRate).FullName, "Exchange Rate Approval",
+                    "Independent Finance approval of exchange-rate source evidence before the rate can be used in accounting or statutory conversion."),
 
                 // Fixed assets
                 new("FixedAsset", "Fixed Asset", typeof(FixedAsset).FullName, "Fixed Asset Approval",

@@ -12394,6 +12394,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("BudgetScenarioId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("DistributionDimensionValueId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -12457,11 +12460,17 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("BudgetScenarioId");
 
+                    b.HasIndex("DistributionDimensionValueId");
+
                     b.HasIndex("SegmentValueId");
 
                     b.HasIndex("TenantId", "BudgetScenarioId", "SegmentValueId")
                         .IsUnique()
-                        .HasFilter("[IsDeleted] = 0");
+                        .HasFilter("[IsDeleted] = 0 AND [SegmentValueId] IS NOT NULL");
+
+                    b.HasIndex("TenantId", "BudgetScenarioId", "DistributionDimensionValueId")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0 AND [DistributionDimensionValueId] IS NOT NULL");
 
                     b.ToTable("BudgetReturns");
                 });
@@ -189241,6 +189250,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceDimensionValue", "DistributionDimensionValue")
+                        .WithMany()
+                        .HasForeignKey("DistributionDimensionValueId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.SegmentLookupValue", "SegmentValue")
                         .WithMany()
                         .HasForeignKey("SegmentValueId");
@@ -189256,6 +189270,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("AssignedToUser");
 
                     b.Navigation("BudgetScenario");
+
+                    b.Navigation("DistributionDimensionValue");
 
                     b.Navigation("SegmentValue");
 

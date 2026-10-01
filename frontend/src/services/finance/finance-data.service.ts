@@ -1679,11 +1679,16 @@ class FinanceDataService {
   async activateSegmentStructure(
     id: string,
     rowVersion: string,
-    reason?: string
+    options?: {
+      reason?: string;
+      confirmExistingAccountBackfill?: boolean;
+      defaultSegmentValue?: string;
+      defaultSegmentLookupValueId?: string;
+    }
   ): Promise<SegmentStructure> {
     return apiService.post<SegmentStructure>(
       `/finance/segments/${id}/activate`,
-      { rowVersion, reason }
+      { rowVersion, ...options }
     );
   }
 
@@ -1750,10 +1755,6 @@ class FinanceDataService {
     }[]
   ): Promise<void> {
     return apiService.post('/finance/segments/reorder', reorderList);
-  }
-
-  async regenerateAccountNumbers(): Promise<void> {
-    return apiService.post('/finance/segments/regenerate', {});
   }
 
   // ===== ACCOUNT CURRENCY LINKS =====
