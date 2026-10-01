@@ -441,11 +441,14 @@ function Invoke-RemoteHelper {
             $helperArguments += "-$key"
             $helperArguments += [string]$value
         }
-        $output = @(& powershell.exe @helperArguments 2>&1 | ForEach-Object {
+        $liveOutput = [System.Collections.Generic.List[string]]::new()
+        & powershell.exe @helperArguments 2>&1 | ForEach-Object {
             $line = [string]$_
             if ($line.StartsWith('FRESH_PROGRESS|')) { Write-Host $line.Substring(15) }
-            else { $line }
-        })
+            else { Write-Host $line }
+            if (-not [string]::IsNullOrWhiteSpace($line)) { $liveOutput.Add($line) }
+        }
+        $output = @($liveOutput)
         if ($LASTEXITCODE -ne 0) {
             $summary = ($output | Select-Object -Last 20) -join [Environment]::NewLine
             throw "Local VPS $Action failed.$([Environment]::NewLine)$summary"
