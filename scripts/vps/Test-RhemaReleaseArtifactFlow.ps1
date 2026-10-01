@@ -174,7 +174,12 @@ $ciBootstrap = Get-Content $ciBootstrapPath -Raw
 foreach ($contract in @('SYNCFUSION_LICENSE', 'VPS_SSH_PRIVATE_KEY',
         'VPS_SSH_KNOWN_HOSTS', 'VPS_PUBLIC_BASE_URL',
         'C:\ProgramData\ssh\ssh_host_ed25519_key.pub',
-        'workflow enable ci-cd.yml', 'GITHUB_VPS_CICD|CONFIGURED')) {
+        'windows_amd64.zip',
+        'AE64E556ECC240B200F7EBA60D550E4BB60D78E860E69DD88C449405B86067F4',
+        'Get-AuthenticodeSignature', 'auth login',
+        'workflow enable ci-cd.yml', 'build_release=false',
+        'GITHUB_VPS_CICD|CONFIGURED',
+        'GITHUB_VPS_CICD|CONTRACT_VALIDATION_QUEUED')) {
     Assert-Test $ciBootstrap.Contains($contract) `
         "GitHub CI/CD bootstrap is missing contract: $contract"
 }

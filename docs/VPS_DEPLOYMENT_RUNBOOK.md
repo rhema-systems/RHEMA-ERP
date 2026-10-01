@@ -75,7 +75,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 Run that bootstrap directly on the test VPS. It reads the already protected
 Syncfusion value from the API service configuration, uses the existing deployment
 identity, derives the known-hosts entry from the VPS's own OpenSSH public host key,
-and writes secrets to GitHub through standard input. It does not build or deploy.
+and writes secrets to GitHub through standard input. If `gh.exe` is absent, the
+bootstrap downloads the pinned portable GitHub CLI release, verifies both its
+SHA-256 digest and GitHub Authenticode signature, and installs it under
+`C:\RhemaERP\tools\github-cli`. If authentication is absent, it starts GitHub's
+browser/device sign-in; use a repository administrator account with Actions
+enabled. The final check queues only the release-contract job with build and
+deployment disabled. It does not build or deploy the application.
 
 Do not generate `VPS_SSH_KNOWN_HOSTS` inside the workflow. Verify the host key
 through an independent trusted channel before saving it. The workflow requires

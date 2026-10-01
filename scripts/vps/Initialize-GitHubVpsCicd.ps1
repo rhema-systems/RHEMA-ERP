@@ -8,7 +8,13 @@ param(
     [string]$SshUser = 'Administrator',
     [uri]$PublicBaseUrl = 'https://63.141.230.56',
     [string]$SshPrivateKeyPath = (Join-Path $env:USERPROFILE '.ssh\id_rsa'),
-    [string]$ApiServiceXmlPath = 'C:\RhemaERP\services\api\RhemaERPAPI.xml'
+    [string]$ApiServiceXmlPath = 'C:\RhemaERP\services\api\RhemaERPAPI.xml',
+    [ValidatePattern('^\d+\.\d+\.\d+$')]
+    [string]$GitHubCliVersion = '2.102.0',
+    [ValidatePattern('^[A-Fa-f0-9]{64}$')]
+    [string]$GitHubCliSha256 =
+        'AE64E556ECC240B200F7EBA60D550E4BB60D78E860E69DD88C449405B86067F4',
+    [string]$GitHubCliDirectory = 'C:\RhemaERP\tools\github-cli'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,6 +23,56 @@ $ProgressPreference = 'SilentlyContinue'
 function Assert-True {
     param([bool]$Condition, [string]$Message)
     if (-not $Condition) { throw $Message }
+}
+
+function Get-GitHubCliPath {
+    $installed = Get-Command gh.exe -ErrorAction SilentlyContinue
+    if ($null -ne $installed) {
+        return $installed.Source
+    }
+
+    $portablePath = Join-Path $GitHubCliDirectory 'gh.exe'
+    if (Test-Path -LiteralPath $portablePath -PathType Leaf) {
+        return $portablePath
+    }
+
+    Write-Output "GitHub CLI is unavailable; installing verified portable v$GitHubCliVersion."
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $downloadUri =
+        "https://github.com/cli/cli/releases/download/v$GitHubCliVersion/gh_${GitHubCliVersion}_windows_amd64.zip"
+    $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) `
+        "rhema-gh-$([Guid]::NewGuid().ToString('N'))"
+    $archivePath = Join-Path $temporaryRoot 'github-cli.zip'
+    $extractPath = Join-Path $temporaryRoot 'extract'
+    try {
+        [void][IO.Directory]::CreateDirectory($temporaryRoot)
+        Invoke-WebRequest -UseBasicParsing -Uri $downloadUri -OutFile $archivePath
+        $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+        Assert-True ($actualHash -ceq $GitHubCliSha256.ToUpperInvariant()) `
+            'The downloaded GitHub CLI archive failed its pinned SHA-256 check.'
+
+        Expand-Archive -LiteralPath $archivePath -DestinationPath $extractPath
+        $executables = @(Get-ChildItem -LiteralPath $extractPath -Filter gh.exe `
+                -File -Recurse)
+        Assert-True ($executables.Count -eq 1) `
+            "Expected one gh.exe in the verified archive; found $($executables.Count)."
+        $signature = Get-AuthenticodeSignature -FilePath $executables[0].FullName
+        Assert-True ($signature.Status -eq [System.Management.Automation.SignatureStatus]::Valid -and
+            $signature.SignerCertificate.Subject -match 'O="?GitHub, Inc\."?') `
+            'The downloaded GitHub CLI executable does not have a valid GitHub signature.'
+
+        [void][IO.Directory]::CreateDirectory($GitHubCliDirectory)
+        Copy-Item -LiteralPath $executables[0].FullName -Destination $portablePath -Force
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryRoot) {
+            Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
+        }
+    }
+
+    Assert-True (Test-Path -LiteralPath $portablePath -PathType Leaf) `
+        'The portable GitHub CLI installation did not produce gh.exe.'
+    return $portablePath
 }
 
 function Get-ApiServiceEnvironment {
@@ -49,7 +105,7 @@ function Set-GitHubSecretFromMemory {
         "Protected value for $Name is empty."
 
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = (Get-Command gh.exe -ErrorAction Stop).Source
+    $startInfo.FileName = $script:GitHubCliPath
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardInput = $true
@@ -82,18 +138,26 @@ Assert-True ($PublicBaseUrl.IsAbsoluteUri -and $PublicBaseUrl.Scheme -eq 'https'
     -not $PublicBaseUrl.UserInfo -and -not $PublicBaseUrl.Query -and
     -not $PublicBaseUrl.Fragment -and $PublicBaseUrl.AbsolutePath -eq '/') `
     'PublicBaseUrl must be an HTTPS origin without a path, query, credentials, or fragment.'
-foreach ($command in @('gh.exe', 'ssh-keygen.exe')) {
-    Assert-True ($null -ne (Get-Command $command -ErrorAction SilentlyContinue)) `
-        "Required command is unavailable: $command"
-}
+Assert-True ($null -ne (Get-Command ssh-keygen.exe -ErrorAction SilentlyContinue)) `
+    'Required command is unavailable: ssh-keygen.exe'
+$script:GitHubCliPath = Get-GitHubCliPath
 Assert-True (Test-Path -LiteralPath $SshPrivateKeyPath -PathType Leaf) `
     "Deployment SSH private key was not found: $SshPrivateKeyPath"
 
-& gh.exe auth status --hostname github.com | Out-Null
+& $script:GitHubCliPath auth status --hostname github.com 2>$null | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning 'GitHub CLI authentication is required once. Complete the browser/device sign-in.'
+    & $script:GitHubCliPath auth login --hostname github.com --git-protocol https --web
+}
+& $script:GitHubCliPath auth status --hostname github.com | Out-Null
 Assert-True ($LASTEXITCODE -eq 0) 'GitHub CLI is not authenticated.'
-$resolvedRepository = (& gh.exe repo view $Repository --json nameWithOwner --jq '.nameWithOwner').Trim()
-Assert-True ($LASTEXITCODE -eq 0 -and $resolvedRepository -ceq $Repository) `
+$repositoryAccess = & $script:GitHubCliPath repo view $Repository `
+    --json nameWithOwner,viewerPermission | ConvertFrom-Json
+Assert-True ($LASTEXITCODE -eq 0 -and
+    $repositoryAccess.nameWithOwner -ceq $Repository) `
     "GitHub repository access could not be verified for $Repository."
+Assert-True ($repositoryAccess.viewerPermission -ceq 'ADMIN') `
+    'The authenticated GitHub account must be a repository administrator.'
 
 $serviceEnvironment = Get-ApiServiceEnvironment
 $syncfusionLicense = [string]$serviceEnvironment['Syncfusion__LicenseKey']
@@ -142,17 +206,20 @@ $repositoryVariables = [ordered]@{
     VPS_PUBLIC_BASE_URL = $PublicBaseUrl.GetLeftPart([UriPartial]::Authority)
 }
 foreach ($variable in $repositoryVariables.GetEnumerator()) {
-    & gh.exe variable set $variable.Key --body ([string]$variable.Value) --repo $Repository
+    & $script:GitHubCliPath variable set $variable.Key `
+        --body ([string]$variable.Value) --repo $Repository
     Assert-True ($LASTEXITCODE -eq 0) "Could not configure repository variable $($variable.Key)."
 }
 
-& gh.exe api --method PUT "repos/$Repository/environments/test-vps" | Out-Null
+& $script:GitHubCliPath api --method PUT "repos/$Repository/environments/test-vps" | Out-Null
 Assert-True ($LASTEXITCODE -eq 0) 'Could not create or update the test-vps GitHub environment.'
-& gh.exe workflow enable ci-cd.yml --repo $Repository
+& $script:GitHubCliPath workflow enable ci-cd.yml --repo $Repository
 Assert-True ($LASTEXITCODE -eq 0) 'Could not enable the Windows VPS CI/CD workflow.'
 
-$secretNames = @(& gh.exe api "repos/$Repository/actions/secrets" --jq '.secrets[].name')
-$variableNames = @(& gh.exe api "repos/$Repository/actions/variables" --jq '.variables[].name')
+$secretNames = @(& $script:GitHubCliPath api "repos/$Repository/actions/secrets" `
+        --jq '.secrets[].name')
+$variableNames = @(& $script:GitHubCliPath api "repos/$Repository/actions/variables" `
+        --jq '.variables[].name')
 foreach ($requiredSecret in @('SYNCFUSION_LICENSE', 'VPS_SSH_PRIVATE_KEY',
         'VPS_SSH_KNOWN_HOSTS')) {
     Assert-True ($requiredSecret -in $secretNames) `
@@ -164,5 +231,11 @@ foreach ($requiredVariable in @('VPS_HOST', 'VPS_SSH_PORT', 'VPS_SSH_USER',
         "GitHub did not confirm repository variable $requiredVariable."
 }
 
+& $script:GitHubCliPath workflow run ci-cd.yml --repo $Repository --ref master `
+    -f build_release=false -f deploy_to_test_vps=false
+Assert-True ($LASTEXITCODE -eq 0) `
+    'GitHub rejected the contract-only workflow validation. Confirm Actions are enabled for the authenticated account.'
+
 Write-Output 'GITHUB_VPS_CICD|CONFIGURED'
+Write-Output 'GITHUB_VPS_CICD|CONTRACT_VALIDATION_QUEUED'
 Write-Output 'No application release was built or deployed.'
