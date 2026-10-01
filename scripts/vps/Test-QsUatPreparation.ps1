@@ -191,8 +191,16 @@ if($PasswordSource -in @('Prompt','PromptAfterBlank')){Write-Output ('PROMPT_COU
 
  $wrapper=Join-Path $scripts 'Deploy-QsUatVps.ps1'
  Copy-Item -LiteralPath (Join-Path $repositoryRoot 'scripts\Deploy-QsUatVps.ps1') -Destination $wrapper
+ [IO.File]::WriteAllText((Join-Path $scripts 'Build-RhemaRelease.ps1'),@'
+param([string]$Environment,[uri]$PublicBaseUrl,[string]$ExpectedCommit)
+Add-Content -LiteralPath $env:RHEMA_QS_PREP_LOG -Value 'Build'
+$artifact=Join-Path (Split-Path -Parent $PSScriptRoot) 'fake-release'
+[void][IO.Directory]::CreateDirectory($artifact)
+[IO.File]::WriteAllText((Join-Path $artifact 'release-manifest.json'),'{}')
+Write-Output ('RELEASE_ARTIFACT_DIRECTORY|'+$artifact)
+'@)
  [IO.File]::WriteAllText((Join-Path $scripts 'Deploy-RhemaVps.ps1'),@'
-param([string]$Environment,[switch]$LocalVps,[string]$ExpectedCommit,[string]$PublicBaseUrl)
+param([string]$Environment,[switch]$LocalVps,[string]$ExpectedCommit,[string]$PublicBaseUrl,[switch]$DeployOnly,[string]$ArtifactDirectory)
 Add-Content -LiteralPath $env:RHEMA_QS_PREP_LOG -Value 'Deploy'
 exit ([int]$env:RHEMA_QS_PREP_DEPLOY_EXIT)
 '@)
@@ -211,14 +219,14 @@ Add-Content -LiteralPath $env:RHEMA_QS_PREP_LOG -Value 'Report'
 exit 0
 '@)
  foreach($case in @(
-  @{Name='deploy-failed';Deploy=4;Seed=0;Exit=1;Steps='Deploy'},
-  @{Name='preparation-failed';Deploy=0;Seed=7;Exit=1;Steps='Deploy,Prepare'},
-  @{Name='prepared';Deploy=0;Seed=0;Exit=0;Steps='Deploy,Prepare,Report'},
-   @{Name='auto-approved';Deploy=0;Seed=0;Exit=0;Steps='Deploy,Prepare,AutoApprove,Report'},
-   @{Name='auto-reconciled';Deploy=0;Seed=0;Exit=0;Steps='Deploy,Prepare,AutoApprove,Reconcile,Report'}
+  @{Name='deploy-failed';Deploy=4;Seed=0;Exit=1;Steps='Build,Deploy'},
+  @{Name='preparation-failed';Deploy=0;Seed=7;Exit=1;Steps='Build,Deploy,Prepare'},
+  @{Name='prepared';Deploy=0;Seed=0;Exit=0;Steps='Build,Deploy,Prepare,Report'},
+   @{Name='auto-approved';Deploy=0;Seed=0;Exit=0;Steps='Build,Deploy,Prepare,AutoApprove,Report'},
+   @{Name='auto-reconciled';Deploy=0;Seed=0;Exit=0;Steps='Build,Deploy,Prepare,AutoApprove,Reconcile,Report'}
  )) {
   $log=Join-Path $testRoot ($case.Name+'.log')
-  $wrapperArgs=@('-PrepareQsUat','-ExpectedDatabase','RhemaERP_VpsTest_GuardTest')
+  $wrapperArgs=@('-PrepareQsUat','-ExpectedDatabase','RhemaERP_VpsTest_GuardTest','-ExpectedCommit','1111111111111111111111111111111111111111')
    if($case.Name -in @('auto-approved','auto-reconciled')){$wrapperArgs+='-AutoApproveQsUat'}
    if($case.Name -eq 'auto-reconciled'){$wrapperArgs+='-ReconcileUnapprovedQsDrafts'}
   $child=Invoke-QsTestChild -File $wrapper -Arguments $wrapperArgs -Environment @{RHEMA_QS_PREP_LOG=$log;RHEMA_QS_PREP_DEPLOY_EXIT=$case.Deploy;RHEMA_QS_PREP_SEED_EXIT=$case.Seed}

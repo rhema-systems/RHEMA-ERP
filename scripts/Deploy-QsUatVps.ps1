@@ -5,7 +5,12 @@ param(
     [ValidatePattern('^[0-9a-fA-F]{7,40}$')]
     [string]$ExpectedCommit,
     [uri]$PublicBaseUrl='https://63.141.230.56',
+    [string]$ArtifactDirectory,
     [switch]$UpdateSource,
+    [switch]$CleanBuild,
+    [ValidatePattern('^[0-9a-fA-F]{7,40}$')]
+    [string]$ReuseFrontendBuildFromCommit,
+    [switch]$LegacyFullBuild,
     [switch]$PrepareQsUat,
     [switch]$AutoApproveQsUat,
     [switch]$ReconcileUnapprovedQsDrafts
@@ -17,6 +22,8 @@ $repositoryRoot=Split-Path -Parent $PSScriptRoot
 $deploymentPassed=$false
 $preparationRunning=$false
 $locationPushed=$false
+$releaseCommit=$null
+$releaseArtifactDirectory=$null
 $runStartedUtc=[DateTime]::UtcNow
 $timings=[System.Collections.Generic.List[object]]::new()
 
@@ -68,6 +75,15 @@ function Write-QsTimingEvidence {
     }
 }
 try {
+    if($LegacyFullBuild -and ($ArtifactDirectory -or $CleanBuild -or $ReuseFrontendBuildFromCommit)) {
+        throw 'LegacyFullBuild cannot be combined with ArtifactDirectory, CleanBuild, or ReuseFrontendBuildFromCommit.'
+    }
+    if($ArtifactDirectory -and ($CleanBuild -or $ReuseFrontendBuildFromCommit)) {
+        throw 'ArtifactDirectory already identifies a completed build and cannot be combined with build options.'
+    }
+    if($CleanBuild -and $ReuseFrontendBuildFromCommit) {
+        throw 'CleanBuild cannot be combined with ReuseFrontendBuildFromCommit.'
+    }
     if($AutoApproveQsUat -and !$PrepareQsUat){throw 'AutoApproveQsUat requires PrepareQsUat.'}
     if($ReconcileUnapprovedQsDrafts -and !$AutoApproveQsUat){throw 'ReconcileUnapprovedQsDrafts requires AutoApproveQsUat.'}
     if($PrepareQsUat -and $ExpectedDatabase -cnotmatch '^RhemaERP_VpsTest_[A-Za-z0-9_]+$') {
@@ -97,6 +113,7 @@ try {
             if($ExpectedCommit -and -not $head.StartsWith($ExpectedCommit,[StringComparison]::OrdinalIgnoreCase)) {
                 throw "Release checkout $head does not match ExpectedCommit $ExpectedCommit."
             }
+            $script:releaseCommit=$head
         }
     } else {
         $now=[DateTime]::UtcNow.ToString('o')
@@ -104,13 +121,70 @@ try {
             name='Source checkout update';scope='QS wrapper';status='NotRequested'
             startedUtc=$now;completedUtc=$now;durationSeconds=0
         })
+        if($ExpectedCommit) {
+            $releaseCommit=$ExpectedCommit
+        } else {
+            $releaseCommit=(& git rev-parse HEAD).Trim()
+            if($LASTEXITCODE -ne 0 -or $releaseCommit -notmatch '^[0-9a-f]{40}$') {
+                throw 'Could not resolve the release commit.'
+            }
+        }
     }
+
+    if(-not $releaseCommit){throw 'Could not resolve the release commit.'}
+
+    if($LegacyFullBuild) {
+        $now=[DateTime]::UtcNow.ToString('o')
+        $timings.Add([ordered]@{
+            name='Build immutable release once';scope='QS wrapper';status='LegacyDeployer'
+            startedUtc=$now;completedUtc=$now;durationSeconds=0
+        })
+    } elseif($ArtifactDirectory) {
+        $releaseArtifactDirectory=[IO.Path]::GetFullPath($ArtifactDirectory)
+        if(-not (Test-Path -LiteralPath (Join-Path $releaseArtifactDirectory 'release-manifest.json'))) {
+            throw "Release manifest was not found in ArtifactDirectory: $releaseArtifactDirectory"
+        }
+        $now=[DateTime]::UtcNow.ToString('o')
+        $timings.Add([ordered]@{
+            name='Build immutable release once';scope='QS wrapper';status='Reused'
+            startedUtc=$now;completedUtc=$now;durationSeconds=0
+        })
+        Write-Output "RELEASE_ARTIFACT_REUSED|$releaseArtifactDirectory"
+    } else {
+        $buildParameters=@{
+            Environment='Test'
+            PublicBaseUrl=[uri]$publicOrigin
+            ExpectedCommit=$releaseCommit
+        }
+        if($CleanBuild){$buildParameters.CleanBuild=$true}
+        if($ReuseFrontendBuildFromCommit) {
+            $buildParameters.ReuseFrontendBuildFromCommit=$ReuseFrontendBuildFromCommit
+        }
+        $buildOutput=@(Invoke-QsTimedStep 'Build immutable release once' {
+            & (Join-Path $PSScriptRoot 'Build-RhemaRelease.ps1') @buildParameters
+        })
+        $buildOutput | Out-Host
+        $artifactMarkers=@($buildOutput | ForEach-Object {[string]$_} |
+            Where-Object {$_ -like 'RELEASE_ARTIFACT_DIRECTORY|*'})
+        if($artifactMarkers.Count -ne 1) {
+            throw 'Release build did not return exactly one artifact directory.'
+        }
+        $releaseArtifactDirectory=[IO.Path]::GetFullPath(
+            $artifactMarkers[0].Substring('RELEASE_ARTIFACT_DIRECTORY|'.Length))
+        if(-not (Test-Path -LiteralPath (Join-Path $releaseArtifactDirectory 'release-manifest.json'))) {
+            throw 'Release build marker points to a directory without a manifest.'
+        }
+    }
+
     $deployArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',
         (Join-Path $PSScriptRoot 'Deploy-RhemaVps.ps1'),
         '-Environment','Test','-LocalVps','-PublicBaseUrl',$publicOrigin)
-    if($ExpectedCommit){$deployArguments+=@('-ExpectedCommit',$ExpectedCommit)}
+    $deployArguments+=@('-ExpectedCommit',$releaseCommit)
+    if(-not $LegacyFullBuild) {
+        $deployArguments+=@('-DeployOnly','-ArtifactDirectory',$releaseArtifactDirectory)
+    }
     # Keep the child interactive so its existing secure credential prompt works.
-    Invoke-QsTimedStep 'Deploy verified ERP release' {
+    Invoke-QsTimedStep 'Activate verified ERP release' {
         & $powershell @deployArguments
         if($LASTEXITCODE -ne 0){throw 'Deployment command failed.'}
     }

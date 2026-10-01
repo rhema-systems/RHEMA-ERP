@@ -482,6 +482,9 @@ try {
     [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 10),
         (New-Object Text.UTF8Encoding($false)))
     Write-Host "`nRELEASE_BUILD_PASSED|$releaseId|$manifestPath" -ForegroundColor Green
+    # Machine-readable output consumed by the one-command VPS wrapper. Keep the
+    # human-readable marker above for operators and existing transcripts.
+    Write-Output "RELEASE_ARTIFACT_DIRECTORY|$releaseDirectory"
 } finally {
     Write-BuildTimingSummary
     Restore-ProcessEnvironment

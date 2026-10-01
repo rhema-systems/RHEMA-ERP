@@ -58,6 +58,8 @@ foreach ($contract in @('CleanBuild', '.next-production', "'cache'", 'npm.cmd', 
         'resourcesBefore', 'resourcesAfter', 'completedUtc')) {
     Assert-Test $build.Contains($contract) "Release builder is missing contract: $contract"
 }
+Assert-Test $build.Contains('RELEASE_ARTIFACT_DIRECTORY|') `
+    'Release builder does not expose its immutable artifact directory to the optimized wrapper.'
 Assert-Test $build.Contains(
     "Select-String -Pattern 'localhost:5000|localhost:53484|localhost:7095'") `
     'Compiled URL validation leaves -Pattern without its argument in Windows PowerShell.'
@@ -102,7 +104,8 @@ foreach ($contract in @("Join-Path `$RhemaRoot 'releases'", 'VERSIONED_RELEASE|'
 }
 
 $qsDeploy = Get-Content $qsDeployPath -Raw
-foreach ($contract in @('Deploy verified ERP release',
+foreach ($contract in @('Build immutable release once', 'Activate verified ERP release',
+        'DeployOnly', 'ArtifactDirectory', 'LegacyFullBuild',
         'Validate and optionally update source checkout', 'UpdateSource', '--ff-only',
         'Prepare QS UAT data and decisions', 'Generate QS UAT readiness evidence',
         'QS DEPLOYMENT TIMING SUMMARY (slowest first)', 'slowestSteps')) {

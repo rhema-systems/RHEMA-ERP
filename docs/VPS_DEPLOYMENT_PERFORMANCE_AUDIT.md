@@ -17,7 +17,7 @@ Phase 1 already supports the preferred build-once flow:
 5. activate the API, run startup migrations, activate the frontend, and run health/browser checks.
 6. Roll back application files automatically after a failed post-activation verification. Database backups are retained and are not automatically restored by an application-only rollback.
 
-The current `Deploy-QsUatVps.ps1` wrapper still invokes the legacy all-in-one deployment unless its caller separately follows the build-once/deploy-only runbook. This wrapper now records deployment, QS preparation and readiness as separate durations so a long QS seed is no longer hidden inside the total elapsed time.
+`Deploy-QsUatVps.ps1` now performs the build-once/deploy-only flow itself. Its default path creates one immutable release, activates that verified artifact, and records build, activation, QS preparation, and readiness as separate durations. Passing the completed release directory with `-ArtifactDirectory` retries activation without rebuilding. `-LegacyFullBuild` retains the prior all-in-one path for an explicit full deployment.
 
 ## Baseline evidence
 
