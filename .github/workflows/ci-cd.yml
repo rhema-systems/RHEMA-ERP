@@ -17,6 +17,21 @@ on:
         required: true
         type: boolean
         default: false
+      reuse_release_run_id:
+        description: Prior successful build run ID to redeploy without rebuilding
+        required: false
+        type: string
+        default: ''
+      reuse_release_artifact_name:
+        description: Immutable release artifact name from the prior build run
+        required: false
+        type: string
+        default: ''
+      reuse_release_commit:
+        description: Exact 40-character commit recorded in the reused release manifest
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -59,7 +74,8 @@ jobs:
     name: Build immutable Windows release once
     if: >-
       github.event_name == 'workflow_dispatch' &&
-      (inputs.build_release || inputs.deploy_to_test_vps)
+      (inputs.build_release || inputs.deploy_to_test_vps) &&
+      inputs.reuse_release_run_id == ''
     needs: vps-release-contract
     runs-on: windows-latest
     timeout-minutes: 120
@@ -166,9 +182,11 @@ jobs:
   deploy-test-vps:
     name: Activate verified release on Windows test VPS
     if: >-
+      always() &&
       github.event_name == 'workflow_dispatch' &&
       inputs.deploy_to_test_vps &&
-      needs.build-release.result == 'success'
+      ((inputs.reuse_release_run_id == '' && needs.build-release.result == 'success') ||
+       (inputs.reuse_release_run_id != '' && needs.build-release.result == 'skipped'))
     needs: build-release
     runs-on: windows-latest
     timeout-minutes: 90
@@ -180,9 +198,10 @@ jobs:
       VPS_SSH_PORT: ${{ vars.VPS_SSH_PORT }}
       VPS_SSH_USER: ${{ vars.VPS_SSH_USER }}
       VPS_PUBLIC_BASE_URL: ${{ vars.VPS_PUBLIC_BASE_URL }}
+      DEPLOY_EXPECTED_COMMIT: ${{ inputs.reuse_release_run_id != '' && inputs.reuse_release_commit || github.sha }}
 
     steps:
-      - name: Check out the deployed commit
+      - name: Check out the deployment scripts
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -193,11 +212,35 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Download the exact verified release
+      - name: Validate reused immutable release coordinates
+        if: inputs.reuse_release_run_id != ''
+        shell: powershell
+        run: |
+          if ('${{ inputs.reuse_release_run_id }}' -notmatch '^\d+$') {
+            throw 'reuse_release_run_id must be a numeric GitHub Actions run ID.'
+          }
+          if ('${{ inputs.reuse_release_artifact_name }}' -notmatch '^rhema-vps-[a-zA-Z0-9-]+$') {
+            throw 'reuse_release_artifact_name is not a Rhema immutable release artifact.'
+          }
+          if ('${{ inputs.reuse_release_commit }}' -notmatch '^[0-9a-fA-F]{40}$') {
+            throw 'reuse_release_commit must be the exact 40-character artifact commit.'
+          }
+
+      - name: Download the exact release built by this run
+        if: inputs.reuse_release_run_id == ''
         uses: actions/download-artifact@v4
         with:
           name: ${{ needs.build-release.outputs.artifact_name }}
           path: ${{ runner.temp }}/rhema-vps-release
+
+      - name: Download a verified release built by the prior run
+        if: inputs.reuse_release_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.reuse_release_artifact_name }}
+          path: ${{ runner.temp }}/rhema-vps-release
+          run-id: ${{ inputs.reuse_release_run_id }}
+          github-token: ${{ github.token }}
 
       - name: Configure pinned SSH identity
         id: ssh
@@ -284,7 +327,7 @@ jobs:
             -Environment Test `
             -DeployOnly `
             -ArtifactDirectory $artifactDirectory `
-            -ExpectedCommit $env:GITHUB_SHA `
+            -ExpectedCommit $env:DEPLOY_EXPECTED_COMMIT `
             -VpsHost $env:VPS_HOST `
             -SshPort ([int]$env:VPS_SSH_PORT) `
             -SshUser $env:VPS_SSH_USER `

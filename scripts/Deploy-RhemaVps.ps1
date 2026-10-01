@@ -313,6 +313,58 @@ function ConvertTo-SingleQuotedPowerShellLiteral {
     return "'" + $Value.Replace("'", "''") + "'"
 }
 
+function ConvertTo-WindowsProcessArgument {
+    param([AllowEmptyString()][string]$Value)
+
+    if ($null -eq $Value -or $Value.Length -eq 0) { return '""' }
+    if ($Value -notmatch '[\s"]') { return $Value }
+
+    # ProcessStartInfo.ArgumentList is unavailable in Windows PowerShell 5.1.
+    # Quote according to the Windows CommandLineToArgvW rules so paths with
+    # spaces, embedded quotes, and trailing backslashes retain their value.
+    $builder = [Text.StringBuilder]::new()
+    [void]$builder.Append('"')
+    $backslashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') {
+            $backslashes++
+            continue
+        }
+        if ($character -eq '"') {
+            if ($backslashes -gt 0) {
+                [void]$builder.Append((('\' * (($backslashes * 2) + 1)) -join ''))
+            }
+            else {
+                [void]$builder.Append('\')
+            }
+            [void]$builder.Append('"')
+        }
+        else {
+            if ($backslashes -gt 0) {
+                [void]$builder.Append((('\' * $backslashes) -join ''))
+            }
+            [void]$builder.Append($character)
+        }
+        $backslashes = 0
+    }
+    if ($backslashes -gt 0) {
+        [void]$builder.Append((('\' * ($backslashes * 2)) -join ''))
+    }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+function Set-WindowsProcessArguments {
+    param(
+        [System.Diagnostics.ProcessStartInfo]$StartInfo,
+        [string[]]$Arguments
+    )
+
+    $StartInfo.Arguments = (@($Arguments | ForEach-Object {
+        ConvertTo-WindowsProcessArgument ([string]$_)
+    }) -join ' ')
+}
+
 function Get-SyncfusionLicenseKey {
     foreach ($name in @('SYNCFUSION_LICENSE', 'Syncfusion__LicenseKey')) {
         foreach ($scope in @('Process', 'User', 'Machine')) {
@@ -385,11 +437,9 @@ if ($null -eq $node) { throw 'The protected Syncfusion API license is not config
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
-    foreach ($argument in (Get-SshArguments)) {
-        [void]$startInfo.ArgumentList.Add($argument)
-    }
-    [void]$startInfo.ArgumentList.Add(
-        "powershell.exe -NoLogo -NoProfile -NonInteractive -OutputFormat Text -ExecutionPolicy Bypass -EncodedCommand $encoded")
+    $processArguments = @(Get-SshArguments)
+    $processArguments += "powershell.exe -NoLogo -NoProfile -NonInteractive -OutputFormat Text -ExecutionPolicy Bypass -EncodedCommand $encoded"
+    Set-WindowsProcessArguments -StartInfo $startInfo -Arguments $processArguments
 
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
@@ -483,11 +533,9 @@ function Invoke-RemoteHelper {
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
-    foreach ($argument in $sshArguments) {
-        [void]$startInfo.ArgumentList.Add($argument)
-    }
-    [void]$startInfo.ArgumentList.Add(
-        "powershell.exe -NoLogo -NoProfile -NonInteractive -OutputFormat Text -ExecutionPolicy Bypass -EncodedCommand $encoded")
+    $processArguments = @($sshArguments)
+    $processArguments += "powershell.exe -NoLogo -NoProfile -NonInteractive -OutputFormat Text -ExecutionPolicy Bypass -EncodedCommand $encoded"
+    Set-WindowsProcessArguments -StartInfo $startInfo -Arguments $processArguments
 
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
