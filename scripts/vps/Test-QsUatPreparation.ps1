@@ -192,7 +192,7 @@ if($PasswordSource -in @('Prompt','PromptAfterBlank')){Write-Output ('PROMPT_COU
  $wrapper=Join-Path $scripts 'Deploy-QsUatVps.ps1'
  Copy-Item -LiteralPath (Join-Path $repositoryRoot 'scripts\Deploy-QsUatVps.ps1') -Destination $wrapper
  [IO.File]::WriteAllText((Join-Path $scripts 'Build-RhemaRelease.ps1'),@'
-param([string]$Environment,[uri]$PublicBaseUrl,[string]$ExpectedCommit)
+param([string]$Environment,[uri]$PublicBaseUrl,[string]$ExpectedCommit,[string]$ArchiveCompressionLevel)
 Add-Content -LiteralPath $env:RHEMA_QS_PREP_LOG -Value 'Build'
 $artifact=Join-Path (Split-Path -Parent $PSScriptRoot) 'fake-release'
 [void][IO.Directory]::CreateDirectory($artifact)
@@ -200,7 +200,8 @@ $artifact=Join-Path (Split-Path -Parent $PSScriptRoot) 'fake-release'
 Write-Output ('RELEASE_ARTIFACT_DIRECTORY|'+$artifact)
 '@)
  [IO.File]::WriteAllText((Join-Path $scripts 'Deploy-RhemaVps.ps1'),@'
-param([string]$Environment,[switch]$LocalVps,[string]$ExpectedCommit,[string]$PublicBaseUrl,[switch]$DeployOnly,[string]$ArtifactDirectory)
+param([string]$Environment,[switch]$LocalVps,[string]$ExpectedCommit,[string]$PublicBaseUrl,[switch]$PreflightOnly,[switch]$DeployOnly,[string]$ArtifactDirectory)
+if($PreflightOnly){Add-Content -LiteralPath $env:RHEMA_QS_PREP_LOG -Value 'Preflight';exit 0}
 Add-Content -LiteralPath $env:RHEMA_QS_PREP_LOG -Value 'Deploy'
 exit ([int]$env:RHEMA_QS_PREP_DEPLOY_EXIT)
 '@)
@@ -219,11 +220,11 @@ Add-Content -LiteralPath $env:RHEMA_QS_PREP_LOG -Value 'Report'
 exit 0
 '@)
  foreach($case in @(
-  @{Name='deploy-failed';Deploy=4;Seed=0;Exit=1;Steps='Build,Deploy'},
-  @{Name='preparation-failed';Deploy=0;Seed=7;Exit=1;Steps='Build,Deploy,Prepare'},
-  @{Name='prepared';Deploy=0;Seed=0;Exit=0;Steps='Build,Deploy,Prepare,Report'},
-   @{Name='auto-approved';Deploy=0;Seed=0;Exit=0;Steps='Build,Deploy,Prepare,AutoApprove,Report'},
-   @{Name='auto-reconciled';Deploy=0;Seed=0;Exit=0;Steps='Build,Deploy,Prepare,AutoApprove,Reconcile,Report'}
+  @{Name='deploy-failed';Deploy=4;Seed=0;Exit=1;Steps='Preflight,Build,Deploy'},
+  @{Name='preparation-failed';Deploy=0;Seed=7;Exit=1;Steps='Preflight,Build,Deploy,Prepare'},
+  @{Name='prepared';Deploy=0;Seed=0;Exit=0;Steps='Preflight,Build,Deploy,Prepare,Report'},
+   @{Name='auto-approved';Deploy=0;Seed=0;Exit=0;Steps='Preflight,Build,Deploy,Prepare,AutoApprove,Report'},
+   @{Name='auto-reconciled';Deploy=0;Seed=0;Exit=0;Steps='Preflight,Build,Deploy,Prepare,AutoApprove,Reconcile,Report'}
  )) {
   $log=Join-Path $testRoot ($case.Name+'.log')
   $wrapperArgs=@('-PrepareQsUat','-ExpectedDatabase','RhemaERP_VpsTest_GuardTest','-ExpectedCommit','1111111111111111111111111111111111111111')

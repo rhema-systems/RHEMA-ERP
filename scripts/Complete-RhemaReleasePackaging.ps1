@@ -46,13 +46,16 @@ function Assert-Ancestor {
 
 function Get-ZipNames {
     param([IO.Compression.ZipArchive]$Archive)
-    return @($Archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
+    return @($Archive.Entries | ForEach-Object {
+        $_.FullName.Replace('\', '/') -replace '^\./', ''
+    })
 }
 
 function Get-ZipEntry {
     param([IO.Compression.ZipArchive]$Archive, [string]$Name)
     $matching = @($Archive.Entries | Where-Object {
-        [string]::Equals($_.FullName.Replace('\', '/'), $Name,
+        $normalizedName = $_.FullName.Replace('\', '/') -replace '^\./', ''
+        [string]::Equals($normalizedName, $Name,
             [StringComparison]::OrdinalIgnoreCase)
     })
     Assert-True ($matching.Count -eq 1) "ZIP is missing or duplicates $Name."
@@ -105,8 +108,13 @@ try {
         if (-not $recoverableManifest) {
             try {
                 $priorManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-                $recoverableManifest = $priorManifest.packagingRecovered -eq $true -and
+                $sourceMatches = if ($priorManifest.packagingRecovered -eq $true) {
                     $priorManifest.artifactSourceCommit -eq $artifactCommit
+                } else {
+                    $priorManifest.commit -eq $artifactCommit
+                }
+                $recoverableManifest = $sourceMatches -and
+                    $priorManifest.frontendBuildCommit -eq $frontendCommit
             } catch { $recoverableManifest = $false }
         }
         $_.Name.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -and
@@ -167,8 +175,9 @@ try {
             'Service worker cache identity does not match the release ID.'
 
         foreach ($entry in @($frontendArchive.Entries | Where-Object {
-            $_.FullName -match '^\.next/(static|server)/' -and
-            $_.FullName -match '\.(js|json|html|txt|rsc)$'
+            $normalizedName = $_.FullName.Replace('\', '/') -replace '^\./', ''
+            $normalizedName -match '^\.next/(static|server)/' -and
+            $normalizedName -match '\.(js|json|html|txt|rsc)$'
         })) {
             $stream = $entry.Open()
             $reader = New-Object IO.StreamReader($stream, (New-Object Text.UTF8Encoding($false)), $true)
@@ -216,6 +225,7 @@ try {
             npm = $npmVersion
             next = $nextPackage.version
             configuredNodeHeapMb = 12288
+            archivePackagingEngine = 'ReusedVerifiedZip'
         }
         api = [ordered]@{
             file = 'api.zip'; bytes = (Get-Item $apiZip).Length; sha256 = $hashes.api

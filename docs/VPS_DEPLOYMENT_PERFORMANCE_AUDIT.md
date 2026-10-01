@@ -10,14 +10,23 @@ Dockerfiles, Compose files and Docker CI jobs exist, but they are not used by th
 
 Phase 1 already supports the preferred build-once flow:
 
-1. Build on a controlled Windows x64 host with `Build-RhemaRelease.ps1`.
-2. Produce versioned `api.zip`, `frontend.zip` and `release-manifest.json` files.
-3. Deploy them with `Deploy-RhemaVps.ps1 -DeployOnly -ArtifactDirectory ...`.
-4. Back up the application and database.
-5. activate the API, run startup migrations, activate the frontend, and run health/browser checks.
-6. Roll back application files automatically after a failed post-activation verification. Database backups are retained and are not automatically restored by an application-only rollback.
+1. Run the remote service, configuration, database and migration preflight.
+2. Build on a controlled Windows x64 host with `Build-RhemaRelease.ps1`.
+3. Produce versioned `api.zip`, `frontend.zip` and `release-manifest.json` files.
+4. Deploy them with `Deploy-RhemaVps.ps1 -DeployOnly -ArtifactDirectory ...`.
+5. Back up the application and database.
+6. Recheck migration guards after stopping the API, then run migrations, activate the frontend, and run health/browser checks.
+7. Roll back application files automatically after a failed post-activation verification. Database backups are retained and are not automatically restored by an application-only rollback.
 
 `Deploy-QsUatVps.ps1` now performs the build-once/deploy-only flow itself. Its default path creates one immutable release, activates that verified artifact, and records build, activation, QS preparation, and readiness as separate durations. Passing the completed release directory with `-ArtifactDirectory` retries activation without rebuilding. `-LegacyFullBuild` retains the prior all-in-one path for an explicit full deployment.
+
+Artifact creation uses Windows `tar.exe` in ZIP mode instead of PowerShell
+`Compress-Archive`. `System.IO.Compression.ZipFile.CreateFromDirectory` remains a
+fallback for hosts without the native command. A local representative benchmark
+containing 7,325 files and 133.5 MB completed in 10.6 seconds with native `tar.exe`,
+compared with 89.5 seconds through the managed ZIP API. Standard ZIP extraction,
+SHA-256 verification, immutable release validation, backups, and rollback remain
+unchanged.
 
 ## Baseline evidence
 
@@ -35,15 +44,22 @@ The repository contains a completed deployment record for commit `2659e506` with
 | Migration preflight | 5.37 |
 | Service and database verification | 4.68 |
 
-The more recent console evidence supplied by the operator records:
+Earlier console evidence supplied by the operator records:
 
 | Build sub-stage | Seconds |
 |---|---:|
 | Next.js production build | 1,227.4 |
 | Production dependency preparation | 294.8 |
-| Artifact compression | 309.3 |
+| Artifact compression | 309.3 in the prior run; more than 2 hours in the 2026-10-01 interrupted run |
 
-Those three build sub-stages total 1,831.5 seconds (30 minutes 31.5 seconds), before npm restore, Syncfusion preparation, API publish, hashing and activation. They do not explain a four-hour end-to-end run. No retained evidence currently accounts for the remaining hours, so attributing them to Docker, migrations, backup, network, or QS seeding would be speculation. The added instrumentation is intended to produce that missing evidence on the next real deployment.
+The 2026-10-01 run then supplied the missing evidence: `Build immutable release once`
+took 11,814 seconds (3 hours 16 minutes 54 seconds), and the console remained in
+PowerShell `Compress-Archive` for more than two hours after the Next.js build and
+dependency staging had completed. Activation failed 30.8 seconds later because two
+new guarded migrations lacked reviewed preflight coverage. The changes in this
+release target both measured failures: native ZIP packaging replaces
+`Compress-Archive`, and probe coverage plus live VPS preflight now run before the
+expensive build.
 
 ## Findings
 
@@ -92,6 +108,9 @@ Parallel builds are not recommended until that evidence exists. The current API 
 ## Instrumentation implemented
 
 - Every recorded stage now includes start time, completion time, duration and status.
+- The one-command QS path completes live VPS and migration preflight before beginning the build.
+- Guarded migrations from `20260930000700` onward require source-hash-pinned probe coverage and a reviewed guard classification during build and CI.
+- Canonical migration probes run again after the API stops and immediately before migration startup.
 - Build stages include resource snapshots before and after each operation.
 - Remote backup, package hashing, extraction, staging, API file activation, migration/startup, frontend activation, seed and verification operations emit structured timing records with resource snapshots.
 - Deployment evidence imports remote timing records and includes a `slowestSteps` array.
@@ -119,5 +138,11 @@ No production VPS deployment was run during this audit, so a before-versus-after
 - `scripts/Deploy-RhemaVps.ps1`
 - `scripts/Deploy-QsUatVps.ps1`
 - `scripts/vps/Invoke-RhemaVpsRemote.ps1`
+- `scripts/vps/New-RhemaVpsPreflightHelper.ps1`
+- `scripts/vps/GhanaEstateMigrationPreflight.sql`
+- `scripts/vps/New-RhemaZipPackage.ps1`
+- `scripts/vps/Test-CanonicalMigrationPreflight.ps1`
+- `scripts/vps/Test-RhemaZipPackage.ps1`
 - `scripts/vps/Test-RhemaReleaseArtifactFlow.ps1`
+- `.github/workflows/ci-cd.yml`
 - `docs/VPS_DEPLOYMENT_PERFORMANCE_AUDIT.md`

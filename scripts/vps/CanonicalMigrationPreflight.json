@@ -200,6 +200,21 @@
           "sourceSha256": "EE2BE207977293AB566645626C02B1629ADC273597B0ADE2CC1F93D74A874506"
         }
       ]
+    },
+    {
+      "sqlFile": "GhanaEstateMigrationPreflight.sql",
+      "migrations": [
+        {
+          "id": "20260930000700_GhanaStatutoryWhtFxEvidence",
+          "sourceSha256": "B9DCB4A65CA685619E4EE18452A3732DEEAE4E09FDDADEE033C981A9D275A090",
+          "guardKind": "down-only"
+        },
+        {
+          "id": "20260930202402_UniqueEstateLandDemarcationChildReference",
+          "sourceSha256": "D5A33D702F66ACC7485F4825DB103F83A574390D76EE489B6CE3864272FE1642",
+          "guardKind": "data-precondition"
+        }
+      ]
     }
   ]
 }

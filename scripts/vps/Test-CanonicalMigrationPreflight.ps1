@@ -11,6 +11,10 @@ $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('rhema-preflight-' + [guid]::N
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 $output = Join-Path $testRoot 'Invoke-RhemaVpsRemote.ps1'
 try {
+    $manifest = Get-Content -Raw `
+        (Join-Path $PSScriptRoot 'CanonicalMigrationPreflight.json') | ConvertFrom-Json
+    $expectedProbeCount = @($manifest.probes).Count
+    $expectedCoverageCount = @($manifest.probes.migrations).Count
     New-RhemaVpsPreflightHelper -RepositoryRoot $repositoryRoot -OutputPath $output | Out-Null
     $errors = $null; $tokens = $null
     $ast = [Management.Automation.Language.Parser]::ParseFile($output, [ref]$tokens, [ref]$errors)
@@ -31,7 +35,9 @@ try {
     }
     $result = @(Invoke-CanonicalMigrationPreflight)
     $coverage = @($result | Where-Object { $_ -like 'GUARD_COVERAGE|*' })
-    if ($script:probeCalls -ne 8 -or $coverage.Count -ne 31 -or @($coverage | Select-Object -Unique).Count -ne 31) {
+    if ($script:probeCalls -ne $expectedProbeCount -or
+        $coverage.Count -ne $expectedCoverageCount -or
+        @($coverage | Select-Object -Unique).Count -ne $expectedCoverageCount) {
         throw 'Successful preflight did not execute all probes and report exact coverage.'
     }
     $script:probeCalls=0; $script:blockProbe=$true; $blocked=$false
@@ -39,12 +45,13 @@ try {
         if ($_.Exception.Message -notlike '*Test retained transaction=3*') { throw }
         $blocked=$true
     }
-    if (-not $blocked -or $script:probeCalls -ne 8) { throw 'Retained data did not fail closed after all probes.' }
+    if (-not $blocked -or $script:probeCalls -ne $expectedProbeCount) {
+        throw 'Retained data did not fail closed after all probes.'
+    }
 
     # Verify a changed migration cannot inherit a previously reviewed coverage ID.
     $fixture = Join-Path $testRoot 'fixture'
     New-Item -ItemType Directory -Path (Join-Path $fixture 'scripts\vps'),(Join-Path $fixture 'src\ErpSystem.Data\Migrations') -Force | Out-Null
-    $manifest = Get-Content -Raw (Join-Path $PSScriptRoot 'CanonicalMigrationPreflight.json') | ConvertFrom-Json
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'CanonicalMigrationPreflight.json'),(Join-Path $PSScriptRoot 'Invoke-RhemaVpsRemote.ps1') -Destination (Join-Path $fixture 'scripts\vps')
     foreach($probe in $manifest.probes) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $probe.sqlFile) -Destination (Join-Path $fixture 'scripts\vps')
@@ -74,7 +81,32 @@ try {
         $blocked=$true
     }
     if (-not $blocked) { throw 'Changed helper guard was not rejected.' }
-    Write-Host 'PASS: packaged PowerShell helper, all 31 coverage IDs, retained-data rejection, and migration/helper stale-review rejection.'
+    Copy-Item -LiteralPath `
+        (Join-Path $repositoryRoot "src\ErpSystem.Data\Migrations\$guardFile") `
+        -Destination (Join-Path $fixture 'src\ErpSystem.Data\Migrations') -Force
+    [IO.File]::WriteAllText(
+        (Join-Path $fixture 'src\ErpSystem.Data\Migrations\20991231235959_UnreviewedGuard.cs'),
+        'migrationBuilder.Sql("THROW 59999, ''fixture'', 1;");')
+    $blocked=$false
+    try { Assert-RhemaMigrationGuardCoverage -RepositoryRoot $fixture | Out-Null } catch {
+        if ($_.Exception.Message -notlike '*20991231235959_UnreviewedGuard*') { throw }
+        $blocked=$true
+    }
+    if (-not $blocked) { throw 'Unreviewed guarded migration was not rejected before release build.' }
+
+    $ghanaEstateSql = [IO.File]::ReadAllText(
+        (Join-Path $PSScriptRoot 'GhanaEstateMigrationPreflight.sql'))
+    foreach ($contract in @(
+            'SET @GhanaWhtApplied = CASE WHEN EXISTS',
+            'EstateLandReference.UnresolvedAfterBackfill',
+            'EstateLandReference.DuplicateProjectedReference',
+            'DATALENGTH(ProjectedReference) > 240',
+            'parcel.ParentDemarcationId IS NULL AND asset.Id IS NOT NULL')) {
+        if (-not $ghanaEstateSql.Contains($contract)) {
+            throw "Ghana/Estate preflight is missing contract: $contract"
+        }
+    }
+    Write-Host "PASS: packaged PowerShell helper, all $expectedCoverageCount coverage IDs, retained-data rejection, stale-review rejection, and pre-build guard-coverage enforcement."
 
     if ($SqlServer) {
         if (-not $CanonicalDatabase -or -not $LegacyDatabase) { throw 'Both test database names are required.' }

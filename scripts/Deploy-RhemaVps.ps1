@@ -4,6 +4,7 @@ param(
     [string]$Environment = 'Test',
 
     [switch]$DryRun,
+    [switch]$PreflightOnly,
     [switch]$DeployOnly,
     [string]$ArtifactDirectory,
     [switch]$ReuseVerifiedArtifacts,
@@ -37,6 +38,7 @@ $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepositoryRoot = Split-Path -Parent $ScriptRoot
 $RemoteHelperLocalPath = Join-Path $ScriptRoot 'vps\Invoke-RhemaVpsRemote.ps1'
 . (Join-Path $ScriptRoot 'vps\New-RhemaVpsPreflightHelper.ps1')
+. (Join-Path $ScriptRoot 'vps\New-RhemaZipPackage.ps1')
 . (Join-Path $ScriptRoot 'vps\Set-StagedFrontendRuntime.ps1')
 $BrowserSmokePath = Join-Path $ScriptRoot 'vps\Test-RhemaVpsBrowserSmoke.mjs'
 $ReleaseRoot = Join-Path $RepositoryRoot 'artifacts\vps-releases'
@@ -827,11 +829,14 @@ function New-ReleaseArtifacts {
     foreach ($zip in @($apiZip, $frontendZip)) {
         if (Test-Path $zip) { Remove-Item -LiteralPath $zip -Force }
     }
-    Invoke-Step -Name 'Compress API and frontend artifacts' -Scope 'Build host' -Operation {
-        Compress-Archive -Path (Join-Path $apiOutput '*') -DestinationPath $apiZip `
-            -CompressionLevel Optimal
-        Compress-Archive -Path (Join-Path $frontendOutput '*') `
-            -DestinationPath $frontendZip -CompressionLevel Optimal
+    Invoke-Step -Name 'Package API artifact' -Scope 'Build host' -Operation {
+        New-RhemaZipPackage -Source $apiOutput -Destination $apiZip `
+            -CompressionLevel Fastest
+    } | Out-Null
+    Invoke-Step -Name 'Package frontend artifact' -Scope 'Build host' -Operation {
+        $frontendCompressionLevel = if ($LocalVps) { 'NoCompression' } else { 'Fastest' }
+        New-RhemaZipPackage -Source $frontendOutput -Destination $frontendZip `
+            -CompressionLevel $frontendCompressionLevel
     } | Out-Null
 
     $apiInfo = Get-Item $apiZip
@@ -1036,6 +1041,7 @@ function Write-RunResult {
         schemaVersion = 1
         status = $Status
         dryRun = [bool]$DryRun
+        preflightOnly = [bool]$PreflightOnly
         freshDatabase = $FreshDatabaseName
         environment = $Environment
         deploymentId = $DeploymentId
@@ -1051,7 +1057,13 @@ function Write-RunResult {
         slowestSteps = @($StepResults | Sort-Object durationSeconds -Descending)
         failure = $Failure
     }
-    $name = if ($DryRun) { "dry-run-$DeploymentId.json" } else { "deployment-$DeploymentId.json" }
+    $name = if ($PreflightOnly) {
+        "preflight-$DeploymentId.json"
+    } elseif ($DryRun) {
+        "dry-run-$DeploymentId.json"
+    } else {
+        "deployment-$DeploymentId.json"
+    }
     $path = Join-Path $ReleaseDirectory $name
     [System.IO.File]::WriteAllText(
         $path, ($result | ConvertTo-Json -Depth 10),
@@ -1065,6 +1077,10 @@ $applicationApplyCompleted = $false
 $priorOperationalPassword = [Environment]::GetEnvironmentVariable('UatBootstrap__SharedPassword', 'Process')
 $operationalPasswordPrompted = $false
 try {
+    Assert-True (-not ($PreflightOnly -and ($DryRun -or $DeployOnly -or
+                $ReuseVerifiedArtifacts -or $ReuseApiOutputFromCommit -or
+                $ReuseFrontendBuildFromCommit -or $FreshDatabaseName))) `
+        'PreflightOnly cannot be combined with deployment, build-reuse, dry-run, or fresh-database options.'
     Assert-True (-not ($DeployOnly -and $DryRun)) `
         'DeployOnly applies a verified artifact and cannot be combined with DryRun.'
     Assert-True (-not ($DeployOnly -and $ReuseVerifiedArtifacts)) `
@@ -1111,7 +1127,14 @@ try {
 
     $script:DeploymentStamp = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')
     $releaseManifest = $null
-    if ($DeployOnly) {
+    if ($PreflightOnly) {
+        $deploymentId = "$($script:ShortCommit)-$($script:DeploymentStamp)"
+        $releaseDirectory = Join-Path $ReleaseRoot "preflights\$deploymentId"
+        $runDirectory = $releaseDirectory
+        Assert-SafeChildPath $releaseDirectory $ReleaseRoot
+        New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
+    }
+    elseif ($DeployOnly) {
         $releaseDirectory = [IO.Path]::GetFullPath($ArtifactDirectory)
         $releaseManifest = Test-ReleaseManifest (Join-Path $releaseDirectory 'release-manifest.json')
         Assert-True ($null -ne $releaseManifest) `
@@ -1171,6 +1194,14 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
         Assert-True ($preflight -contains "FRESH_TARGET_READY|$FreshDatabaseName") 'Fresh database preflight did not confirm an absent target.'
         $migrationState = [ordered]@{ mode = 'FreshDatabase'; target = $FreshDatabaseName; provisioned = $false }
     } else { $migrationState = Compare-MigrationState $preflight $DryRun }
+
+    if ($PreflightOnly) {
+        $resultPath = Write-RunResult 'Passed' $deploymentId $releaseDirectory `
+            $null $migrationState $null
+        Write-Host "`nPREFLIGHT ONLY PASSED: $resultPath" -ForegroundColor Green
+        Write-Host 'No release was built, no database was changed, and no service was restarted.'
+        exit 0
+    }
 
     if ($DryRun) {
         if ($FreshDatabaseName) {
