@@ -190,5 +190,7 @@ Assert-Test (-not $ciBootstrap.Contains('Write-Output $syncfusionLicense')) `
     'GitHub CI/CD bootstrap can print the Syncfusion license.'
 Assert-Test (-not $ciBootstrap.Contains('Write-Output $privateKey')) `
     'GitHub CI/CD bootstrap can print the SSH private key.'
+Assert-Test (-not $ciBootstrap.Contains("-P '' -f `$SshPrivateKeyPath")) `
+    'GitHub CI/CD bootstrap uses an empty native argument that Windows PowerShell drops.'
 
 Write-Output 'PASS|Phase 1 release flow: one-time Syncfusion assets, persistent build cache, prebuilt deploy-only artifacts, environment identity, versioned releases, and application-only rollback.'
