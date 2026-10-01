@@ -180,6 +180,7 @@ foreach ($contract in @('SYNCFUSION_LICENSE', 'VPS_SSH_PRIVATE_KEY',
         'OpenSSH.Server', 'RhemaERP GitHub Actions SSH',
         'AuthenticationMethods publickey', 'Repair-OpenSshServerPermissions',
         'Set-OpenSshDirectoryPermissions',
+        '[Security.AccessControl.FileSecurity]::new()',
         'SetAccessRuleProtection($true, $false)',
         'SyslogFacility LOCAL0', 'Get-OpenSshServiceSid',
         'Get-OpenSshStartupEvidence', 'Ensure-OpenSshServiceRunning',
@@ -213,6 +214,9 @@ Assert-Test ($strictDirectoryAclIndex -ge 0 -and $directoryAclRepairIndex -ge 0 
 Assert-Test (-not $ciBootstrap.Contains(
         "& icacls.exe `$directory '/inheritance:r' '/grant:r'")) `
     'GitHub CI/CD bootstrap still retains unrelated explicit OpenSSH directory grants.'
+Assert-Test (-not $ciBootstrap.Contains(
+        "& icacls.exe `$Path '/inheritance:r' '/grant:r'")) `
+    'GitHub CI/CD bootstrap still retains unrelated explicit OpenSSH file grants.'
 $hostKeyPreparationIndex = $ciBootstrap.IndexOf('& ssh-keygen.exe -A')
 $sshdValidationIndex = $ciBootstrap.IndexOf('& $sshdExecutable -t')
 Assert-Test ($hostKeyPreparationIndex -ge 0 -and
