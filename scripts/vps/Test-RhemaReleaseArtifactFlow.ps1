@@ -195,5 +195,10 @@ Assert-Test (-not $ciBootstrap.Contains('Write-Output $privateKey')) `
     'GitHub CI/CD bootstrap can print the SSH private key.'
 Assert-Test (-not $ciBootstrap.Contains("-P '' -f `$SshPrivateKeyPath")) `
     'GitHub CI/CD bootstrap uses an empty native argument that Windows PowerShell drops.'
+$hostKeyPreparationIndex = $ciBootstrap.IndexOf('& ssh-keygen.exe -A')
+$sshdValidationIndex = $ciBootstrap.IndexOf('& $sshdExecutable -t')
+Assert-Test ($hostKeyPreparationIndex -ge 0 -and
+    $sshdValidationIndex -gt $hostKeyPreparationIndex) `
+    'GitHub CI/CD bootstrap validates sshd before generating required host keys.'
 
 Write-Output 'PASS|Phase 1 release flow: one-time Syncfusion assets, persistent build cache, prebuilt deploy-only artifacts, environment identity, versioned releases, and application-only rollback.'
