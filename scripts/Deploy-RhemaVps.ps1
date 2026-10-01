@@ -587,7 +587,7 @@ function Test-ReleaseManifest {
     if (-not (Test-Path -LiteralPath $ManifestPath)) { return $null }
     try {
         $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
-        if ($manifest.commit -ne $script:Commit) { return $null }
+        if ($manifest.commit -ne $script:ArtifactCommit) { return $null }
         if ($DeployOnly -and $manifest.schemaVersion -ne 2) { return $null }
         if ($DeployOnly -and $manifest.environment -ne $Environment) { return $null }
         if ($manifest.publicBaseUrl -ne $PublicBaseUrl) { return $null }
@@ -1161,10 +1161,18 @@ try {
 
     $script:Commit = (& git rev-parse HEAD).Trim()
     $script:ShortCommit = $script:Commit.Substring(0, 8)
+    $script:ArtifactCommit = $script:Commit
     if (-not [string]::IsNullOrWhiteSpace($ExpectedCommit)) {
-        Assert-True ($script:Commit.StartsWith($ExpectedCommit,
-                [System.StringComparison]::OrdinalIgnoreCase)) `
-            "HEAD $($script:Commit) does not match ExpectedCommit $ExpectedCommit."
+        if ($DeployOnly) {
+            Assert-True ($ExpectedCommit -match '^[0-9a-fA-F]{40}$') `
+                'DeployOnly requires the exact 40-character artifact commit.'
+            $script:ArtifactCommit = $ExpectedCommit.ToLowerInvariant()
+        }
+        else {
+            Assert-True ($script:Commit.StartsWith($ExpectedCommit,
+                    [System.StringComparison]::OrdinalIgnoreCase)) `
+                "HEAD $($script:Commit) does not match ExpectedCommit $ExpectedCommit."
+        }
     }
     $dirty = @(& git status --porcelain)
     if (-not $AllowDirtyWorktree) {
@@ -1336,7 +1344,7 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
     $backupOutput = @(Invoke-Step 'Create and verify application and SQL backups' {
         Invoke-RemoteHelper $remoteHelperPath 'Backup' @{
             DeploymentId = $deploymentId
-            ExpectedCommit = $script:Commit
+            ExpectedCommit = $script:ArtifactCommit
         }
     })
     Import-RemoteTimings $backupOutput
@@ -1361,7 +1369,7 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
         Invoke-RemoteHelper $remoteHelperPath 'Apply' @{
             FreshDatabaseName = $FreshDatabaseName
             DeploymentId = $deploymentId
-            ExpectedCommit = $script:Commit
+            ExpectedCommit = $script:ArtifactCommit
             ExpectedBuildId = $releaseManifest.buildId
             ExpectedCacheVersion = $releaseManifest.cacheVersion
             ReleaseId = $(if ($releaseManifest.releaseId) { $releaseManifest.releaseId } else { $deploymentId })
@@ -1412,7 +1420,7 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
     if ($FreshDatabaseName) {
         $completeFreshOutput = @(Invoke-Step 'Complete verified fresh database cutover' {
             Invoke-RemoteHelper $remoteHelperPath 'CompleteFresh' @{
-                DeploymentId = $deploymentId; ExpectedCommit = $script:Commit; FreshDatabaseName = $FreshDatabaseName
+                DeploymentId = $deploymentId; ExpectedCommit = $script:ArtifactCommit; FreshDatabaseName = $FreshDatabaseName
             }
         })
         $completeFreshOutput | Out-Host
@@ -1442,7 +1450,7 @@ catch {
         try {
             $rollbackFreshOutput = @(Invoke-Step 'Restore original application and database connection' {
                 Invoke-RemoteHelper $remoteHelperPath 'RollbackFresh' @{
-                    DeploymentId = $deploymentId; ExpectedCommit = $script:Commit; FreshDatabaseName = $FreshDatabaseName
+                    DeploymentId = $deploymentId; ExpectedCommit = $script:ArtifactCommit; FreshDatabaseName = $FreshDatabaseName
                 }
             })
             $rollbackFreshOutput | Out-Host
