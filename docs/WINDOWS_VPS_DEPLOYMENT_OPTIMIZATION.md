@@ -10,7 +10,7 @@ The active test VPS runs the ERP as three Windows services:
 
 The release process builds immutable API and frontend ZIP files, verifies and
 backs up the application and SQL database, applies migrations, activates the
-Windows services, seeds missing operational UAT data, and runs API, browser,
+Windows services, optionally seeds explicitly requested operational UAT data, and runs API, browser,
 asset, CORS, and database checks. Docker files in the repository are not part
 of this deployment path.
 
@@ -44,8 +44,9 @@ measured activation costs.
 - Release-tree copies use a conservative 16-thread `robocopy` mode.
 - Remote stages emit start, pass, and fail markers immediately, so a long step
   is visible rather than appearing frozen.
-- Backups, migration guards, service rollback, database integrity checks,
-  operational seeding, and public/browser health checks remain in place.
+- Backups, migration guards, service rollback, database integrity checks, and
+  public/browser health checks remain in place. Operational UAT seeding is an
+  explicit preparation option and is not part of a normal application release.
 
 An existing 83.4 MB frontend release containing 7,599 files and expanding to
 0.514 GB was extracted with the new native path in 9.65 seconds on the

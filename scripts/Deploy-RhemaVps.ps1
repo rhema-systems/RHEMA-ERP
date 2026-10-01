@@ -16,6 +16,7 @@ param(
     [string]$ReuseFrontendOutputDirectory = '.next',
     [switch]$SkipBrowserSmoke,
     [switch]$LocalVps,
+    [switch]$PrepareOperationalUat,
     [ValidatePattern('^RhemaERP_[A-Za-z0-9_]{1,119}$')]
     [string]$FreshDatabaseName,
     [switch]$AllowDirtyWorktree,
@@ -1233,7 +1234,7 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
         exit 0
     }
 
-    if ($preflight -contains 'UAT_CREDENTIAL|REQUIRED') {
+    if ($PrepareOperationalUat -and $preflight -contains 'UAT_CREDENTIAL|REQUIRED') {
         Assert-True ([bool]$LocalVps) 'Set protected UatBootstrap__SharedPassword on the VPS or run with -LocalVps for the secure account-password prompt.'
     }
 
@@ -1292,7 +1293,7 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
     })
     Import-RemoteTimings $backupOutput
 
-    if ($preflight -contains 'UAT_CREDENTIAL|REQUIRED') {
+    if ($PrepareOperationalUat -and $preflight -contains 'UAT_CREDENTIAL|REQUIRED') {
         $secureOperationalPassword = Read-Host 'Initial password for NEW Procurement, Inventory and QS test accounts (existing passwords are preserved)' -AsSecureString
         $passwordPointer = [IntPtr]::Zero
         try {
@@ -1327,7 +1328,7 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
     Import-RemoteTimings $applyOutput
     $applicationApplyCompleted = $true
 
-    if (-not $FreshDatabaseName) {
+    if ($PrepareOperationalUat -and -not $FreshDatabaseName) {
         $seedOutput = @(Invoke-Step 'Seed and verify Procurement, Inventory and QS baseline' {
             Invoke-RemoteHelper $remoteHelperPath 'SeedOperational' @{ DeploymentId=$deploymentId }
         })

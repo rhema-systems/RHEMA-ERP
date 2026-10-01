@@ -192,6 +192,7 @@ try {
         (Join-Path $PSScriptRoot 'Deploy-RhemaVps.ps1'),
         '-Environment','Test','-LocalVps','-PublicBaseUrl',$publicOrigin)
     $deployArguments+=@('-ExpectedCommit',$releaseCommit)
+    if($PrepareQsUat){$deployArguments+='-PrepareOperationalUat'}
     if(-not $LegacyFullBuild) {
         $deployArguments+=@('-DeployOnly','-ArtifactDirectory',$releaseArtifactDirectory)
     }

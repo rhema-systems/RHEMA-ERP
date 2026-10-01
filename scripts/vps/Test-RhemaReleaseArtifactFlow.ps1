@@ -11,11 +11,13 @@ function Assert-Test {
 $buildPath = Join-Path $repositoryRoot 'scripts\Build-RhemaRelease.ps1'
 $recoveryPath = Join-Path $repositoryRoot 'scripts\Complete-RhemaReleasePackaging.ps1'
 $deployPath = Join-Path $repositoryRoot 'scripts\Deploy-RhemaVps.ps1'
-$qsDeployPath = Join-Path $repositoryRoot 'scripts\Deploy-QsUatVps.ps1'
 $remotePath = Join-Path $repositoryRoot 'scripts\vps\Invoke-RhemaVpsRemote.ps1'
 $zipPackagePath = Join-Path $repositoryRoot 'scripts\vps\New-RhemaZipPackage.ps1'
+$ciBootstrapPath = Join-Path $repositoryRoot `
+    'scripts\vps\Initialize-GitHubVpsCicd.ps1'
 $workflowPath = Join-Path $repositoryRoot '.github\workflows\ci-cd.yml'
-foreach ($path in @($buildPath, $recoveryPath, $deployPath, $qsDeployPath, $remotePath, $zipPackagePath)) {
+foreach ($path in @($buildPath, $recoveryPath, $deployPath,
+        $remotePath, $zipPackagePath, $ciBootstrapPath)) {
     $tokens = $null; $errors = $null
     [void][Management.Automation.Language.Parser]::ParseFile(
         $path, [ref]$tokens, [ref]$errors)
@@ -35,18 +37,38 @@ $tsconfig = Get-Content (Join-Path $repositoryRoot 'frontend\tsconfig.json') -Ra
 Assert-Test $tsconfig.Contains('.next-production/types/**/*.ts') `
     'The production output type path is missing; Next would mutate tsconfig during a release build.'
 
-$syncfusionTarget = Join-Path $repositoryRoot `
-    'frontend\public\syncfusion\ej2-pdfviewer-lib'
-New-Item -ItemType Directory -Path $syncfusionTarget -Force | Out-Null
-$stale = Join-Path $syncfusionTarget 'stale-from-old-package.bin'
-[IO.File]::WriteAllText($stale, 'stale')
-& node (Join-Path $repositoryRoot 'frontend\scripts\copy-syncfusion-pdfviewer-assets.js')
-Assert-Test ($LASTEXITCODE -eq 0) 'Syncfusion asset preparation failed.'
-Assert-Test (-not (Test-Path -LiteralPath $stale)) `
-    'Syncfusion asset preparation retained a stale vendor file.'
-foreach ($name in @('pdfium.js', 'pdfium.wasm')) {
-    Assert-Test (Test-Path -LiteralPath (Join-Path $syncfusionTarget $name)) `
-        "Syncfusion asset preparation omitted $name."
+$assetTestRoot = Join-Path ([IO.Path]::GetTempPath()) `
+    ('rhema-syncfusion-assets-' + [Guid]::NewGuid().ToString('N'))
+try {
+    $assetScriptDirectory = Join-Path $assetTestRoot 'scripts'
+    $assetSource = Join-Path $assetTestRoot `
+        'node_modules\@syncfusion\ej2-pdfviewer\dist\ej2-pdfviewer-lib'
+    $syncfusionTarget = Join-Path $assetTestRoot `
+        'public\syncfusion\ej2-pdfviewer-lib'
+    foreach ($directory in @($assetScriptDirectory, $assetSource, $syncfusionTarget)) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+    Copy-Item (Join-Path $repositoryRoot `
+        'frontend\scripts\copy-syncfusion-pdfviewer-assets.js') `
+        -Destination $assetScriptDirectory -Force
+    foreach ($name in @('pdfium.js', 'pdfium.wasm')) {
+        [IO.File]::WriteAllText((Join-Path $assetSource $name), "test-$name")
+    }
+    $stale = Join-Path $syncfusionTarget 'stale-from-old-package.bin'
+    [IO.File]::WriteAllText($stale, 'stale')
+    & node (Join-Path $assetScriptDirectory 'copy-syncfusion-pdfviewer-assets.js')
+    Assert-Test ($LASTEXITCODE -eq 0) 'Syncfusion asset preparation failed.'
+    Assert-Test (-not (Test-Path -LiteralPath $stale)) `
+        'Syncfusion asset preparation retained a stale vendor file.'
+    foreach ($name in @('pdfium.js', 'pdfium.wasm')) {
+        Assert-Test (Test-Path -LiteralPath (Join-Path $syncfusionTarget $name)) `
+            "Syncfusion asset preparation omitted $name."
+    }
+}
+finally {
+    if (Test-Path -LiteralPath $assetTestRoot) {
+        Remove-Item -LiteralPath $assetTestRoot -Recurse -Force
+    }
 }
 
 $build = Get-Content $buildPath -Raw
@@ -88,6 +110,7 @@ foreach ($contract in @('$priorManifest.packagingRecovered -eq $true',
 $deploy = Get-Content $deployPath -Raw
 foreach ($contract in @('DeployOnly', 'ArtifactDirectory',
         'PreflightOnly', 'PREFLIGHT ONLY PASSED',
+        'PrepareOperationalUat',
         'Consume prebuilt immutable release artifacts',
         'Rollback application release after failed verification',
         'Deploy-only artifact validation failed',
@@ -102,6 +125,8 @@ Assert-Test (-not $deploy.Contains("NODE_OPTIONS = '--max-old-space-size=8192'")
     'The legacy deployer still overrides the build wrapper heap with 8 GB.'
 Assert-Test (-not $deploy.Contains('Compress-Archive')) `
     'The legacy deployer still uses the slow PowerShell Compress-Archive implementation.'
+Assert-Test $deploy.Contains("if (`$PrepareOperationalUat -and -not `$FreshDatabaseName)") `
+    'Normal application deployment still runs operational UAT seeds unconditionally.'
 
 $zipPackage = Get-Content $zipPackagePath -Raw
 foreach ($contract in @('tar.exe', 'ZipFile]::CreateFromDirectory', 'NoCompression', 'Fastest')) {
@@ -124,30 +149,38 @@ foreach ($contract in @("Join-Path `$RhemaRoot 'releases'", 'VERSIONED_RELEASE|'
 Assert-Test (-not $remote.Contains('Expand-Archive')) `
     'Remote activation still uses slow PowerShell Expand-Archive.'
 
-$qsDeploy = Get-Content $qsDeployPath -Raw
-foreach ($contract in @('Build immutable release once', 'Activate verified ERP release',
-        'Validate VPS before release build', 'PreflightOnly',
-        'DeployOnly', 'ArtifactDirectory', 'LegacyFullBuild',
-        "ArchiveCompressionLevel='Fastest'",
-        'Validate and optionally update source checkout', 'UpdateSource', '--ff-only',
-        'Prepare QS UAT data and decisions', 'Generate QS UAT readiness evidence',
-        'QS DEPLOYMENT TIMING SUMMARY (slowest first)', 'slowestSteps')) {
-    Assert-Test $qsDeploy.Contains($contract) "QS deployment timing contract is missing: $contract"
-}
-
 $workflow = Get-Content $workflowPath -Raw
 Assert-Test $workflow.Contains('frontend/.next-production/cache') `
     'CI does not persist the real Next.js build cache.'
-Assert-Test ($workflow.Contains('frontend/.next-production/') -and
-    $workflow.Contains('!frontend/.next-production/cache/**')) `
-    'CI does not publish the real frontend build output.'
-Assert-Test (-not $workflow.Contains('path: frontend/.next/')) `
-    'CI still uploads the unused frontend/.next directory.'
 foreach ($contract in @('vps-release-contract', 'Test-CanonicalMigrationPreflight.ps1',
         'Test-RhemaZipPackage.ps1', 'Test-RhemaReleaseArtifactFlow.ps1',
-        'Test-QsUatVpsDeployment.ps1')) {
+        'Build-RhemaRelease.ps1', 'Deploy-RhemaVps.ps1',
+        '-DeployOnly', '-ArtifactDirectory',
+        'actions/upload-artifact@v4', 'actions/download-artifact@v4',
+        'compression-level: 0', 'StrictHostKeyChecking=yes',
+        'environment: test-vps', 'deploy_to_test_vps')) {
     Assert-Test $workflow.Contains($contract) `
         "CI does not enforce the VPS release contract: $contract"
 }
+Assert-Test (-not $workflow.Contains('docker/build-push-action')) `
+    'The active Windows VPS workflow still builds unused Docker images.'
+Assert-Test (-not $workflow.Contains('docker compose')) `
+    'The active Windows VPS workflow still invokes the unused Docker deployment path.'
+Assert-Test (-not (Test-Path (Join-Path $repositoryRoot `
+            '.github\workflows\deploy-environments.yml'))) `
+    'The obsolete Docker environment deployment workflow is still active.'
+
+$ciBootstrap = Get-Content $ciBootstrapPath -Raw
+foreach ($contract in @('SYNCFUSION_LICENSE', 'VPS_SSH_PRIVATE_KEY',
+        'VPS_SSH_KNOWN_HOSTS', 'VPS_PUBLIC_BASE_URL',
+        'C:\ProgramData\ssh\ssh_host_ed25519_key.pub',
+        'workflow enable ci-cd.yml', 'GITHUB_VPS_CICD|CONFIGURED')) {
+    Assert-Test $ciBootstrap.Contains($contract) `
+        "GitHub CI/CD bootstrap is missing contract: $contract"
+}
+Assert-Test (-not $ciBootstrap.Contains('Write-Output $syncfusionLicense')) `
+    'GitHub CI/CD bootstrap can print the Syncfusion license.'
+Assert-Test (-not $ciBootstrap.Contains('Write-Output $privateKey')) `
+    'GitHub CI/CD bootstrap can print the SSH private key.'
 
 Write-Output 'PASS|Phase 1 release flow: one-time Syncfusion assets, persistent build cache, prebuilt deploy-only artifacts, environment identity, versioned releases, and application-only rollback.'

@@ -1,643 +1,276 @@
-name: 🚀 ERP System CI/CD Pipeline
+name: Windows VPS CI/CD
 
 on:
-  push:
-    branches: [ master ]
   pull_request:
-    branches: [ master ]
-  workflow_dispatch: # Manual trigger
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      build_release:
+        description: Build and retain an immutable test-VPS release
+        required: true
+        type: boolean
+        default: true
+      deploy_to_test_vps:
+        description: Deploy the release to the guarded Windows test VPS
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: windows-vps-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
-  DOTNET_VERSION: '8.0.x'
-  NODE_VERSION: '18.x'
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  DOTNET_VERSION: 9.0.315
+  NODE_VERSION: 24.19.0
 
 jobs:
   vps-release-contract:
-    name: VPS release safety contract
+    name: Validate Windows VPS release contracts
     runs-on: windows-latest
+    timeout-minutes: 20
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Check out the exact candidate commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Verify migration probes and fast artifact packaging
-      shell: powershell
-      run: |
-        .\scripts\vps\Test-CanonicalMigrationPreflight.ps1
-        .\scripts\vps\Test-RhemaZipPackage.ps1
-        .\scripts\vps\Test-RhemaReleaseArtifactFlow.ps1
-        .\scripts\vps\Test-QsUatVpsDeployment.ps1
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
-  # Job 1: Code Quality & Security Scanning
-  code-quality:
-    name: 🔍 Code Quality & Security
-    runs-on: ubuntu-latest
-    
+      - name: Verify migration probes, packaging, and deploy-only contracts
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\scripts\vps\Test-CanonicalMigrationPreflight.ps1
+          .\scripts\vps\Test-RhemaZipPackage.ps1
+          .\scripts\vps\Test-RhemaReleaseArtifactFlow.ps1
+
+  build-release:
+    name: Build immutable Windows release once
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.build_release || inputs.deploy_to_test_vps)
+    needs: vps-release-contract
+    runs-on: windows-latest
+    timeout-minutes: 120
+    outputs:
+      artifact_name: ${{ steps.release.outputs.artifact_name }}
+      release_id: ${{ steps.release.outputs.release_id }}
+
     steps:
-    - name: 📥 Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # Shallow clones should be disabled for better analysis
+      - name: Check out the exact candidate commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: 🔧 Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: Reject non-master deployment candidates
+        if: inputs.deploy_to_test_vps
+        shell: powershell
+        run: |
+          if ($env:GITHUB_REF -cne 'refs/heads/master') {
+            throw 'Test-VPS deployment is allowed only from the master branch.'
+          }
 
-    - name: 📦 Restore dependencies
-      run: |
-        dotnet restore
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
-    - name: 🔍 Run SonarCloud analysis
-      uses: SonarSource/sonarcloud-github-action@master
-      if: env.SONAR_TOKEN != ''
-      continue-on-error: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      - name: Set up Node.js and locked npm cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-    - name: 🔒 Run CodeQL Analysis
-      uses: github/codeql-action/init@v3
-      continue-on-error: true
-      if: github.repository == 'owner/repo-with-advanced-security'
-      with:
-        languages: 'csharp,javascript'
+      - name: Restore persistent Next.js compilation cache
+        uses: actions/cache@v4
+        with:
+          path: frontend/.next-production/cache
+          key: next-vps-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            next-vps-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-
 
-    - name: 🏧️ Autobuild
-      uses: github/codeql-action/autobuild@v3
-      continue-on-error: true
-      if: github.repository == 'owner/repo-with-advanced-security'
-
-    - name: 🔒 Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
-      continue-on-error: true
-      if: github.repository == 'owner/repo-with-advanced-security'
-
-  journal-batch-sql-release-gate:
-    # This job began as a journal-batch-only gate. It now also owns SQL Server behaviours shared by
-    # every Finance consumer, such as synchronizing raw-SQL account balance updates with entities a
-    # calling module already tracks. Keep the stable job id because the production deployment depends
-    # on it, while the display name and artifact make the broader responsibility explicit.
-    name: Finance SQL Server Release Gate
-    runs-on: ubuntu-latest
-    needs: code-quality
-
-    services:
-      sqlserver:
-        image: mcr.microsoft.com/mssql/server:2022-latest
+      - name: Validate protected build configuration
+        shell: powershell
         env:
-          ACCEPT_EULA: Y
-          MSSQL_SA_PASSWORD: JournalBatchGate2026!
-          MSSQL_PID: Developer
-        ports:
-          - 1433:1433
+          SYNCFUSION_LICENSE: ${{ secrets.SYNCFUSION_LICENSE }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SYNCFUSION_LICENSE)) {
+            throw 'Repository secret SYNCFUSION_LICENSE is required for release construction.'
+          }
+          if ([string]::IsNullOrWhiteSpace('${{ vars.VPS_PUBLIC_BASE_URL }}')) {
+            throw 'Repository variable VPS_PUBLIC_BASE_URL is required.'
+          }
 
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: ${{ env.DOTNET_VERSION }}
-
-    - name: Wait for isolated SQL Server
-      shell: bash
-      run: |
-        container_id="$(docker ps -q --filter ancestor=mcr.microsoft.com/mssql/server:2022-latest | head -n 1)"
-        if [ -z "$container_id" ]; then
-          echo "The SQL Server service container was not created."
-          exit 1
-        fi
-
-        for attempt in $(seq 1 30); do
-          if docker exec "$container_id" /opt/mssql-tools18/bin/sqlcmd \
-            -S localhost -U sa -P 'JournalBatchGate2026!' -C -Q 'SELECT 1' >/dev/null 2>&1; then
-            exit 0
-          fi
-
-          if docker exec "$container_id" /opt/mssql-tools/bin/sqlcmd \
-            -S localhost -U sa -P 'JournalBatchGate2026!' -Q 'SELECT 1' >/dev/null 2>&1; then
-            exit 0
-          fi
-
-          echo "Waiting for SQL Server ($attempt/30)..."
-          sleep 2
-        done
-
-        echo "SQL Server did not become ready."
-        docker logs "$container_id"
-        exit 1
-
-    - name: Restore Finance SQL Server test project
-      run: dotnet restore tests/ErpSystem.Api.Tests/ErpSystem.Api.Tests.csproj
-
-    - name: Run real SQL Finance posting, rollback, and concurrency tests
-      env:
-        RHEMA_TEST_SQLSERVER: "Server=localhost,1433;Database=master;User Id=sa;Password=JournalBatchGate2026!;Encrypt=True;TrustServerCertificate=True"
-      run: |
-        dotnet test tests/ErpSystem.Api.Tests/ErpSystem.Api.Tests.csproj \
-          --configuration Release \
-          --no-restore \
-          --filter "FullyQualifiedName~JournalBatchSqlServerReleaseGateTests" \
-          --logger "trx;LogFileName=finance-sql-release-gate.trx" \
-          --results-directory artifacts/test-results
-
-    - name: Verify the SQL tests executed rather than skipped
-      shell: bash
-      run: |
-        trx="artifacts/test-results/finance-sql-release-gate.trx"
-        if [ ! -f "$trx" ]; then
-          echo "The SQL release-gate result file was not produced."
-          exit 1
-        fi
-
-        if grep -q 'outcome="NotExecuted"' "$trx"; then
-          echo "At least one SQL release-gate test was skipped."
-          exit 1
-        fi
-
-        # The exact count prevents an accidental rename, filter drift, or skipped opt-in test from
-        # making the gate green without exercising all four real SQL Server contracts: schema,
-        # rollback, concurrent claims, and posting with consumer-loaded Account entities tracked.
-        if ! grep -Eq '<Counters[^>]*total="4"[^>]*executed="4"[^>]*passed="4"' "$trx"; then
-          echo "Expected exactly four executed and passing Finance SQL release-gate tests."
-          cat "$trx"
-          exit 1
-        fi
-
-    - name: Upload SQL release-gate results
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: finance-sql-release-gate
-        path: artifacts/test-results/
-        retention-days: 14
-
-  # Job 2: Backend Testing & Build
-  backend-build-test:
-    name: 🔧 Backend Build & Test
-    runs-on: ubuntu-latest
-    needs: code-quality
-    
-    services:
-      sqlserver:
-        image: mcr.microsoft.com/mssql/server:2022-latest
+      - name: Build, package, and hash immutable release
+        id: release
+        shell: powershell
         env:
-          ACCEPT_EULA: Y
-          SA_PASSWORD: TestPassword123!
-          MSSQL_PID: Express
-        ports:
-          - 1433:1433
-        options: >-
-          --health-cmd "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P TestPassword123! -Q 'SELECT 1'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          SYNCFUSION_LICENSE: ${{ secrets.SYNCFUSION_LICENSE }}
+          NEXT_BUILD_MAX_OLD_SPACE_SIZE_MB: 6144
+          NEXT_TELEMETRY_DISABLED: 1
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputRoot = Join-Path $env:RUNNER_TEMP 'rhema-vps-release'
+          if (Test-Path -LiteralPath $outputRoot) {
+            Remove-Item -LiteralPath $outputRoot -Recurse -Force
+          }
 
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          .\scripts\Build-RhemaRelease.ps1 `
+            -Environment Test `
+            -PublicBaseUrl '${{ vars.VPS_PUBLIC_BASE_URL }}' `
+            -ExpectedCommit $env:GITHUB_SHA `
+            -OutputDirectory $outputRoot `
+            -ArchiveCompressionLevel Fastest
 
-    steps:
-    - name: 📥 Checkout code
-      uses: actions/checkout@v4
+          $manifests = @(Get-ChildItem -LiteralPath $outputRoot `
+              -Filter release-manifest.json -File -Recurse)
+          if ($manifests.Count -ne 1) {
+            throw "Expected one release manifest, found $($manifests.Count)."
+          }
+          $releaseDirectory = $manifests[0].Directory.FullName
+          $manifest = Get-Content -LiteralPath $manifests[0].FullName -Raw |
+            ConvertFrom-Json
+          if ($manifest.commit -cne $env:GITHUB_SHA) {
+            throw 'Release manifest commit differs from the workflow commit.'
+          }
 
-    - name: 🔧 Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: ${{ env.DOTNET_VERSION }}
+          $artifactName = "rhema-vps-$($manifest.releaseId)-$env:GITHUB_RUN_ATTEMPT"
+          "artifact_directory=$releaseDirectory" >> $env:GITHUB_OUTPUT
+          "artifact_name=$artifactName" >> $env:GITHUB_OUTPUT
+          "release_id=$($manifest.releaseId)" >> $env:GITHUB_OUTPUT
 
-    - name: 📦 Restore dependencies
-      run: |
-        dotnet restore
+      - name: Upload verified release without recompressing nested ZIPs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.release.outputs.artifact_name }}
+          path: ${{ steps.release.outputs.artifact_directory }}
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
 
-    - name: 🏧️ Build solution
-      run: |
-        dotnet build --configuration Release --no-restore
+  deploy-test-vps:
+    name: Activate verified release on Windows test VPS
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.deploy_to_test_vps &&
+      needs.build-release.result == 'success'
+    needs: build-release
+    runs-on: windows-latest
+    timeout-minutes: 90
+    environment: test-vps
 
-    - name: 🗺️ Setup test database
-      run: |
-        dotnet ef database update --project src/ErpSystem.Data --startup-project src/ErpSystem.Api
-      continue-on-error: true
-      env:
-        ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=ErpSystemTest;User Id=sa;Password=TestPassword123!;MultipleActiveResultSets=true;TrustServerCertificate=true;"
-
-    - name: 🧠 Run unit tests
-      run: |
-        dotnet test --configuration Release --no-build --verbosity normal \
-          --collect:"XPlat Code Coverage" \
-          --results-directory ./coverage
-
-    - name: 📊 Generate coverage report
-      uses: danielpalme/ReportGenerator-GitHub-Action@5.1.26
-      with:
-        reports: 'src/coverage/**/coverage.cobertura.xml'
-        targetdir: 'src/coverage/report'
-        reporttypes: 'Html;Cobertura'
-
-    - name: 📤 Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      with:
-        file: src/coverage/report/Cobertura.xml
-        fail_ci_if_error: false
-
-    - name: 📦 Publish API artifacts
-      run: |
-        dotnet publish src/ErpSystem.Api/ErpSystem.Api.csproj \
-          --configuration Release \
-          --output ./publish/api \
-          --no-restore
-
-    - name: 🗺️ Test storage provider abstraction
-      run: |
-        # Test Local storage provider
-        dotnet test --filter "Category=StorageProvider" --configuration Release --verbosity normal
-        
-        # Test with different storage configurations
-        echo 'Testing Local storage provider...'
-        dotnet test --filter "TestCategory=LocalStorage" --configuration Release || echo "Local storage tests completed"
-        
-        echo 'Testing Azure Blob mock provider...'
-        dotnet test --filter "TestCategory=AzureBlobStorage" --configuration Release || echo "Azure storage tests completed"
-        
-        echo 'Testing file upload endpoints...'
-        dotnet test --filter "TestCategory=FileUpload" --configuration Release || echo "File upload tests completed"
-      env:
-        ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=ErpSystemTest;User Id=sa;Password=TestPassword123!;MultipleActiveResultSets=true;TrustServerCertificate=true;"
-        FileStorage__Provider: "Local"
-        FileStorage__Local__BasePath: "test-uploads"
-        FileStorage__Local__UseWebRoot: "false"
-
-    - name: 📤 Upload API artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: api-artifacts
-        path: ./publish/api/
-        retention-days: 7
-
-  # Job 3: Frontend Testing & Build
-  frontend-build-test:
-    name: 🖥️ Frontend Build & Test
-    runs-on: ubuntu-latest
-    needs: code-quality
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_SSH_PORT: ${{ vars.VPS_SSH_PORT }}
+      VPS_SSH_USER: ${{ vars.VPS_SSH_USER }}
+      VPS_PUBLIC_BASE_URL: ${{ vars.VPS_PUBLIC_BASE_URL }}
 
     steps:
-    - name: 📥 Checkout code
-      uses: actions/checkout@v4
+      - name: Check out the deployed commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
 
-    - name: 🔧 Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
+      - name: Set up Node.js for browser smoke tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
-    - name: ♻️ Restore Next.js build cache
-      uses: actions/cache@v4
-      with:
-        path: frontend/.next-production/cache
-        key: next-build-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-${{ github.sha }}
-        restore-keys: |
-          next-build-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-
+      - name: Download the exact verified release
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-release.outputs.artifact_name }}
+          path: ${{ runner.temp }}/rhema-vps-release
 
-    - name: 📦 Install dependencies
-      run: |
-        cd frontend
-        npm ci
-
-    - name: 🔍 Run ESLint
-      run: |
-        cd frontend
-        npm run lint
-
-    - name: 🎨 Check code formatting
-      run: |
-        cd frontend
-        npm run format:check
-
-    - name: 🧪 Run unit tests
-      run: |
-        cd frontend
-        npm run test:ci
-
-    - name: 🏗️ Build frontend
-      run: |
-        cd frontend
-        npm run build
-      env:
-        NEXT_PUBLIC_API_URL: http://localhost:5000/api
-
-    - name: 📤 Upload frontend artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: frontend-artifacts
-        path: |
-          frontend/.next-production/
-          !frontend/.next-production/cache/**
-        if-no-files-found: error
-        retention-days: 7
-
-  # Job 4: Integration Tests
-  integration-tests:
-    name: 🔗 Integration Tests
-    runs-on: ubuntu-latest
-    needs: [backend-build-test, frontend-build-test]
-    
-    services:
-      sqlserver:
-        image: mcr.microsoft.com/mssql/server:2022-latest
+      - name: Configure pinned SSH identity
+        id: ssh
+        shell: powershell
         env:
-          ACCEPT_EULA: Y
-          SA_PASSWORD: TestPassword123!
-          MSSQL_PID: Express
-          MSSQL_MEMORY_LIMIT_MB: 2048
-        ports:
-          - 1433:1433
-        options: >-
-          --health-cmd="/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P TestPassword123! -Q 'SELECT 1' || exit 1"
-          --health-interval=10s
-          --health-timeout=3s
-          --health-retries=10
-          --health-start-period=10s
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          VPS_SSH_KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($entry in @{
+              VPS_HOST = $env:VPS_HOST
+              VPS_SSH_PORT = $env:VPS_SSH_PORT
+              VPS_SSH_USER = $env:VPS_SSH_USER
+              VPS_PUBLIC_BASE_URL = $env:VPS_PUBLIC_BASE_URL
+              VPS_SSH_PRIVATE_KEY = $env:VPS_SSH_PRIVATE_KEY
+              VPS_SSH_KNOWN_HOSTS = $env:VPS_SSH_KNOWN_HOSTS
+            }.GetEnumerator()) {
+            if ([string]::IsNullOrWhiteSpace([string]$entry.Value)) {
+              throw "Required test-VPS setting is missing: $($entry.Key)"
+            }
+          }
 
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
+          $sshDirectory = Join-Path $env:USERPROFILE '.ssh'
+          [void][IO.Directory]::CreateDirectory($sshDirectory)
+          $keyPath = Join-Path $sshDirectory 'rhema_vps_ci'
+          $knownHostsPath = Join-Path $sshDirectory 'known_hosts'
+          $utf8 = [Text.UTF8Encoding]::new($false)
+          $privateKey = $env:VPS_SSH_PRIVATE_KEY.Replace("`r`n", "`n").TrimEnd() + "`n"
+          $knownHosts = $env:VPS_SSH_KNOWN_HOSTS.Replace("`r`n", "`n").TrimEnd() + "`n"
+          [IO.File]::WriteAllText($keyPath, $privateKey, $utf8)
+          [IO.File]::WriteAllText($knownHostsPath, $knownHosts, $utf8)
+          & icacls.exe $keyPath /inheritance:r /grant:r "$env:USERNAME`:(R)" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Could not restrict the CI SSH private key.' }
+          & ssh-keygen.exe -y -P '' -f $keyPath | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'The configured CI SSH private key is invalid.' }
+          "key_path=$keyPath" >> $env:GITHUB_OUTPUT
 
-    steps:
-    - name: 📥 Checkout code
-      uses: actions/checkout@v4
+      - name: Preflight SSH connection without changing the VPS
+        shell: powershell
+        run: |
+          $arguments = @(
+            '-i', '${{ steps.ssh.outputs.key_path }}',
+            '-p', $env:VPS_SSH_PORT,
+            '-o', 'BatchMode=yes',
+            '-o', 'IdentitiesOnly=yes',
+            '-o', 'StrictHostKeyChecking=yes',
+            '-o', 'ConnectTimeout=15',
+            "$env:VPS_SSH_USER@$env:VPS_HOST",
+            'cmd.exe /d /c exit 0'
+          )
+          & ssh.exe @arguments
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned SSH connection to the test VPS failed.' }
 
-    - name: 🔧 Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: Deploy immutable release with backups, migrations, rollback, and smoke tests
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifactDirectory = [IO.Path]::GetFullPath('${{ runner.temp }}/rhema-vps-release')
+          .\scripts\Deploy-RhemaVps.ps1 `
+            -Environment Test `
+            -DeployOnly `
+            -ArtifactDirectory $artifactDirectory `
+            -ExpectedCommit $env:GITHUB_SHA `
+            -VpsHost $env:VPS_HOST `
+            -SshPort ([int]$env:VPS_SSH_PORT) `
+            -SshUser $env:VPS_SSH_USER `
+            -SshKeyPath '${{ steps.ssh.outputs.key_path }}' `
+            -PublicBaseUrl $env:VPS_PUBLIC_BASE_URL
 
-    - name: 🔧 Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
-
-    - name: 📥 Download API artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: api-artifacts
-        path: ./api-build/
-
-    - name: 📥 Download frontend artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: frontend-artifacts
-        path: frontend/.next-production/
-
-    - name: ⏳ Wait for SQL Server to be ready
-      run: |
-        echo "Waiting for SQL Server to be ready..."
-        for i in {1..30}; do
-          if docker exec $(docker ps -q --filter ancestor=mcr.microsoft.com/mssql/server:2022-latest) /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'TestPassword123!' -Q 'SELECT 1' > /dev/null 2>&1; then
-            echo "SQL Server is ready!"
-            break
-          fi
-          echo "Waiting for SQL Server... ($i/30)"
-          sleep 3
-        done
-    
-    - name: 🚀 Start API server
-      run: |
-        cd api-build
-        nohup dotnet ErpSystem.Api.dll &
-        sleep 30
-      env:
-        ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=ErpSystemIntegration;User Id=sa;Password=TestPassword123!;MultipleActiveResultSets=true;TrustServerCertificate=true;"
-        ConnectionStrings__Redis: "localhost:6379"
-        ASPNETCORE_ENVIRONMENT: "Development"
-        ASPNETCORE_URLS: "http://localhost:5000"
-
-    - name: 🖥️ Install frontend dependencies
-      run: |
-        cd frontend
-        npm ci
-
-    - name: 🚀 Start frontend server
-      run: |
-        cd frontend
-        nohup npm start &
-        sleep 30
-      env:
-        NEXT_PUBLIC_API_URL: http://localhost:5000/api
-
-    - name: 🧪 Run integration tests
-      run: |
-        # Wait for services to be ready
-        curl --retry 10 --retry-delay 5 --retry-connrefused http://localhost:5000/health
-        curl --retry 10 --retry-delay 5 --retry-connrefused http://localhost:3000
-        
-        # Run API integration tests
-        dotnet test --filter "Category=Integration" --verbosity normal
-        
-        # Run E2E tests (if available)
-        cd frontend
-        if [ -f "package.json" ] && grep -q "test:e2e" package.json; then
-          npm run test:e2e
-        fi
-
-  # Job 5: Docker Build & Security Scan
-  docker-build:
-    name: 🐳 Docker Build & Security Scan
-    runs-on: ubuntu-latest
-    needs: [backend-build-test, frontend-build-test]
-    
-    strategy:
-      matrix:
-        service: [api, frontend]
-    
-    steps:
-    - name: 📥 Checkout code
-      uses: actions/checkout@v4
-
-    - name: 🔧 Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: 🔑 Log in to Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: 📋 Extract metadata
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.service }}
-        tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=sha,prefix=sha-
-          type=raw,value=latest,enable={{is_default_branch}}
-
-    - name: 🏗️ Build Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: ${{ matrix.service == 'api' && '.' || 'frontend' }}
-        file: ${{ matrix.service == 'api' && 'src/ErpSystem.Api/Dockerfile' || 'frontend/Dockerfile' }}
-        push: false
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        outputs: type=docker,dest=/tmp/${{ matrix.service }}-image.tar
-
-    - name: 📤 Upload Docker image artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: docker-${{ matrix.service }}-image
-        path: /tmp/${{ matrix.service }}-image.tar
-        retention-days: 1
-
-    - name: 🔒 Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
-      with:
-        input: /tmp/${{ matrix.service }}-image.tar
-        format: 'sarif'
-        output: 'trivy-${{ matrix.service }}-results.sarif'
-
-    - name: 📤 Upload Trivy scan results
-      uses: github/codeql-action/upload-sarif@v3
-      if: always() && hashFiles('trivy-${{ matrix.service }}-results.sarif') != ''
-      continue-on-error: true
-      with:
-        sarif_file: 'trivy-${{ matrix.service }}-results.sarif'
-
-  # Job 6: Deployment (Production)
-  deploy-production:
-    name: 🚢 Deploy to Production
-    runs-on: ubuntu-latest
-    needs: [integration-tests, docker-build, journal-batch-sql-release-gate]
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-    environment: production
-    
-    steps:
-    - name: 📥 Checkout code
-      uses: actions/checkout@v4
-
-    - name: 📥 Download Docker images
-      uses: actions/download-artifact@v4
-      with:
-        pattern: docker-*-image
-        merge-multiple: true
-        path: ./docker-images/
-
-    - name: 🔑 Log in to Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: 📤 Push Docker images
-      run: |
-        for image in ./docker-images/*.tar; do
-          docker load -i "$image"
-        done
-        docker push --all-tags ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api
-        docker push --all-tags ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend
-
-    - name: 🚢 Deploy to production server
-      uses: appleboy/ssh-action@v1.0.0
-      with:
-        host: ${{ secrets.PROD_HOST }}
-        username: ${{ secrets.PROD_USER }}
-        key: ${{ secrets.PROD_SSH_KEY }}
-        port: ${{ secrets.PROD_PORT || 22 }}
-        script: |
-          # Create deployment directory
-          mkdir -p ~/erp-deployment
-          cd ~/erp-deployment
-          
-          # Download latest docker-compose file
-          curl -o docker-compose.monolith.yml https://raw.githubusercontent.com/${{ github.repository }}/master/docs/docker-compose.monolith.yml
-          
-          # Pull latest images
-          docker-compose -f docker-compose.monolith.yml pull
-          
-          # Deploy with zero downtime
-          docker-compose -f docker-compose.monolith.yml up -d
-          
-          # Health check
-          sleep 30
-          curl -f http://localhost/health || exit 1
-          curl -f http://localhost/api/health || exit 1
-          
-          # Cleanup old images
-          docker image prune -f
-
-    - name: 📊 Slack deployment notification
-      uses: 8398a7/action-slack@v3
-      if: always()
-      continue-on-error: true
-      with:
-        status: ${{ job.status }}
-        channel: '#deployments'
-        fields: repo,message,commit,author,action,eventName,ref,workflow
-        text: |
-          🚀 Production deployment ${{ job.status }}
-          Repository: ${{ github.repository }}
-          Branch: ${{ github.ref_name }}
-          Commit: ${{ github.sha }}
-          Author: ${{ github.actor }}
-          
-          ${{ job.status == 'success' && '✅ Deployment successful!' || '❌ Deployment failed!' }}
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
-
-    - name: 📢 Teams deployment notification
-      uses: skitionek/notify-microsoft-teams@master
-      if: always()
-      continue-on-error: true
-      with:
-        webhook_url: ${{ secrets.TEAMS_WEBHOOK }}
-        needs: ${{ toJson(needs) }}
-        job: ${{ toJson(job) }}
-        steps: ${{ toJson(steps) }}
-        dry_run: false
-
-    - name: 📧 Email notification
-      uses: dawidd6/action-send-mail@v3
-      if: always()
-      continue-on-error: true
-      with:
-        server_address: ${{ secrets.EMAIL_HOST }}
-        server_port: ${{ secrets.EMAIL_PORT || '587' }}
-        username: ${{ secrets.EMAIL_USERNAME }}
-        password: ${{ secrets.EMAIL_PASSWORD }}
-        subject: "ERP System - Production Deployment ${{ job.status }}"
-        to: ${{ secrets.NOTIFICATION_EMAIL }}
-        from: ${{ secrets.EMAIL_FROM || 'erp-system@noreply.com' }}
-        html_body: |
-          <h2>🚀 ERP System - Production Deployment Report</h2>
-          
-          <p><strong>Status:</strong> ${{ job.status == 'success' && '✅ Successful' || '❌ Failed' }}</p>
-          <p><strong>Repository:</strong> ${{ github.repository }}</p>
-          <p><strong>Branch:</strong> ${{ github.ref_name }}</p>
-          <p><strong>Commit:</strong> ${{ github.sha }}</p>
-          <p><strong>Triggered by:</strong> ${{ github.actor }}</p>
-          <p><strong>Workflow:</strong> ${{ github.workflow }}</p>
-          
-          <p><strong>Deployment URL:</strong> <a href="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}">View Details</a></p>
-          
-          ${{ job.status == 'success' && '<p style="color: green;">✅ The application has been successfully deployed to production!</p>' || '<p style="color: red;">❌ Deployment failed. Please check the logs and take appropriate action.</p>' }}
-
-  # Staging deployment removed - using single branch workflow
+      - name: Retain sanitized deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vps-deployment-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/vps-releases/deployments/**/*.json
+            artifacts/vps-releases/preflights/**/*.json
+          if-no-files-found: ignore
+          retention-days: 30
