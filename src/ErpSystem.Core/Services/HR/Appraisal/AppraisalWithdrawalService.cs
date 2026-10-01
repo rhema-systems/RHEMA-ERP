@@ -36,6 +36,8 @@ public class AppraisalWithdrawalService : IAppraisalWithdrawalService
 
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly IGenericRepository<AppraisalOutcomeRecommendation> _recommendationRepository;
+    private readonly IGenericRepository<AppraisalConversation> _conversationRepository;
+    private readonly IGenericRepository<AppraisalReviewEvent> _reviewEventRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ICurrentUserService _currentUser;
     private readonly IUnitOfWork _unitOfWork;
@@ -44,6 +46,8 @@ public class AppraisalWithdrawalService : IAppraisalWithdrawalService
     public AppraisalWithdrawalService(
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
         IGenericRepository<AppraisalOutcomeRecommendation> recommendationRepository,
+        IGenericRepository<AppraisalConversation> conversationRepository,
+        IGenericRepository<AppraisalReviewEvent> reviewEventRepository,
         ICurrentUserProvider currentUserProvider,
         ICurrentUserService currentUser,
         IUnitOfWork unitOfWork,
@@ -51,6 +55,8 @@ public class AppraisalWithdrawalService : IAppraisalWithdrawalService
     {
         _appraisalRepository = appraisalRepository;
         _recommendationRepository = recommendationRepository;
+        _conversationRepository = conversationRepository;
+        _reviewEventRepository = reviewEventRepository;
         _currentUserProvider = currentUserProvider;
         _currentUser = currentUser;
         _unitOfWork = unitOfWork;
@@ -194,6 +200,23 @@ public class AppraisalWithdrawalService : IAppraisalWithdrawalService
             recommendation.ApprovedDate = now;
             recommendation.ResolutionNotes = note.Length > 1000 ? note[..1000] : note;
         }
+
+        // Decision D-74: the appraisal's diary empties. A conversation booked and not yet held will
+        // not be held — it goes, with nothing lost, since nothing was recorded at it; a held one is
+        // the appraisal's history and stays. An open review event is Cancelled, which closes it:
+        // they stayed as rows, still listed as "Overdue" on some screens.
+        var unheld = await _conversationRepository.GetQueryable()
+            .Where(c => c.TenantId == appraisal.TenantId && c.AppraisalId == appraisal.Id && !c.IsCompleted)
+            .ToListAsync(cancellationToken);
+        foreach (var conversation in unheld)
+            await _conversationRepository.DeleteAsync(conversation);
+
+        var openEvents = await _reviewEventRepository.GetQueryable()
+            .Where(r => r.TenantId == appraisal.TenantId && r.PerformanceAppraisalId == appraisal.Id
+                     && r.Status != AppraisalReviewStatus.Completed && r.Status != AppraisalReviewStatus.Cancelled)
+            .ToListAsync(cancellationToken);
+        foreach (var reviewEvent in openEvents)
+            reviewEvent.Status = AppraisalReviewStatus.Cancelled;
     }
 
     /// <summary>The employee acting, when a person is: the nightly host and a service login have none.</summary>

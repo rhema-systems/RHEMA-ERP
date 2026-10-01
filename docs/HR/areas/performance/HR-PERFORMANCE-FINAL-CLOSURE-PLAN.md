@@ -81,9 +81,13 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    `run-final-lifecycle.mjs` 821/821 twice; regression 3352/3361; lane E's E-e State block — a template locked while
    anyone is scored on it or an open cycle has it, links pinned, a profile in use kept as it is and copied to change;
    every suite's teardown switches off the logins it minted, and the user cleaned UAT's notification backlog).
-   **Slice E-f (goals, PIPs, conversations) is next** — source-check it first, and read § 5's *Added by lane E-c* to
-   *E-e* rows. **Before a long run, check free RAM and the stuck email queue** (§ 5, the second E-e row): either one
-   starves SQL Server's query memory and reads time out at 30 s.
+   ~~Slice **E-f** (goals, PIPs, conversations)~~ **Done 2026-10-01** (source-checked first: § 1n D-71–D-76;
+   `run-final-lifecycle.mjs` 1016/1016 twice; regression 3549/3558; lane E's E-f State block — the at-risk lists watch
+   every agreed goal, a goal goes before it is agreed and unlock restores its year, a PIP's meetings carry a stored status
+   and a closed plan takes no writes, the appraisee reads their conversations and writes none). **Slice E-g (definitions
+   and the rest) is next** — source-check it first, and read § 5's *Added by lane E-c* to *E-f* rows. **Before a long run,
+   check free RAM and the stuck email queue** (§ 5, the second E-e row): either one starves SQL Server's query memory and
+   reads time out at 30 s.
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
    set holds its count, the three documents in this folder carry the new state, and the slice is
    staged (the user commits).
@@ -244,7 +248,18 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | D-67 | **When a settings profile is frozen** (E3 said "while an Open cycle uses it"; Draft cycles hold appraisals, and finished appraisals read visibility, anonymity, the appeal window and the outcome settings live) | **Once any appraisal uses it** — on any cycle running under it, finished and withdrawn ones included — its rules are frozen, compared field by field as the appraisals read them. Its name, deadline-risk bands, workload threshold and default HR reviewer stay editable (they change nothing an appraisal holds). Rules change on a **clone** (new `POST …/{id}/clone`), made the default or chosen by the next cycle; make-default is not guarded | E-e |
 | D-68 | **The cycle↔template links** (the PUT re-pointed cycle and template unchecked; removing an open cycle's link released the lock; a closed cycle's links stayed writable; a template on a Draft cycle could be deleted) | **Links pinned.** A template can be **added** to an open cycle (for people not yet generated); a link is removed, switched off or re-prioritised only while no appraisal in its cycle is scored on its template; the PUT never re-points (a different template is a new link); a closed cycle's links are frozen; a cycle takes each template once. A template on any cycle is not deleted (it comes off first), and its sections, items and bands go with a delete. Generation and the coverage preview refuse a template that is not approved | E-e |
 | D-69 | **The harness's logins** (every suite mints logins and leaves them active; a role-routed workflow step notifies every holder — 907 per template submission at E-d2b, eight demo personas among them) | **Switched off by SQL, and a one-off.** Each suite's teardown sets `IsActive = 0` on the logins that run minted, by id (hr-portal slice 5 likewise); a one-off switches off every existing harness login on UAT (`@e2e.local` and hr-portal's `a25v_`) — the user runs it or allows it. An inactive login gets no role notification; the reconciliation sweep leaves an admin's deactivation alone | E-e, S8 |
-| D-70 | **Beyond the rows** (each verified in source) | **Folded in:** the section and item PUTs refuse a body moving the row to another template or section (it moved them, past that template's lock and across tenants); a level template covers that level's employees (it matched everyone — no level template on UAT); the profile's field checks (each weight 0–1 — the `[Range(0,1)]` int-bounds trap —, the pool name's length, enum values, the default HR reviewer an employee of the tenant); the demo's free-text question built with the template by the performance seeder (an EF step added it to the approved, in-use template). **Folded regardless:** approve/reject preconditions, the duplicate-link guard, the lock's 409 on every template route (four answered 500), "can appeal" on the list and the appeal page reading the cycle (E-d2b residue). **Left to their lanes:** the two-actor rule on template approval (D-12, F); the profile PUT's missing concurrency token and racy name check (J) | E-e |
+| D-70 | **Beyond the rows (E-e)** (each verified in source) | **Folded in:** the section and item PUTs refuse a body moving the row to another template or section (it moved them, past that template's lock and across tenants); a level template covers that level's employees (it matched everyone — no level template on UAT); the profile's field checks (each weight 0–1 — the `[Range(0,1)]` int-bounds trap —, the pool name's length, enum values, the default HR reviewer an employee of the tenant); the demo's free-text question built with the template by the performance seeder (an EF step added it to the approved, in-use template). **Folded regardless:** approve/reject preconditions, the duplicate-link guard, the lock's 409 on every template route (four answered 500), "can appeal" on the list and the appeal page reading the cycle (E-d2b residue). **Left to their lanes:** the two-actor rule on template approval (D-12, F); the profile PUT's missing concurrency token and racy name check (J) | E-e |
+
+### 1n. Decisions from slice E-f's source check — settled with the user, 2026-10-01
+
+| # | Question | Decision (2026-10-01) | Affects |
+|---|---|---|---|
+| D-71 | **The at-risk goal lists** — rule 2 (behind the straight line) is unreachable behind two pre-filters (due within 14 days under 60 %, or marked at risk), and widening them naively admits drafts and puts every live goal on the manager's tab, which does not filter | **Every agreed goal**: both lists admit agreed goals not completed (Approved, running, at risk; never drafts, pending or rejected), the manager's tab lists only goals at risk, and the tiles and columns count the same rule. The demo's list goes from 1 to 19 — the untouched approved goals at 0 % are behind at 75 % of the year | E-f |
+| D-72 | **Goal deletes, progress and unlock** — the owner deletes an agreed goal, even a completed one; the goal PUT writes progress past the entries; an entry edit can make a sent-back goal look agreed; deleting the latest entry does not carry back; unlock sets Approved whatever the progress; HR unlocks its own goal | **Before agreement only**: the owner deletes a goal not yet agreed (draft, pending, rejected) — an agreed goal is sent back first — and a delete takes its progress entries; the PUT no longer writes progress; entry edits are refused on goals not agreed, and deleting the latest entry carries back; unlock restores In progress, Completed or Approved from the progress; HR cannot unlock its own goal | E-f |
+| D-73 | **PIP review meetings** — `PipReviewMeeting.Status` (batch 1) has no writer, no DTO and no cancel route; "held" is "the date has passed" | **Stored, with writers**: booked = Scheduled; *Record meeting* = Held (a live plan, not a future date); a new Cancel = Cancelled (not a held one); a cancelled meeting takes no edits; the reads use the stored value, and *Next* skips cancelled ones. UAT backfill by § 6's rule (past = held: one demo meeting) as a script for the user. Closed plans take no writes, and an approved plan's goals stay frozen (D-46) | E-f |
+| D-74 | **Who writes an appraisal conversation** — the appraisee books, edits, holds and deletes their own (two helpers admit them, and the booker becomes the scheduler); a held conversation's delete moves the appraisal back; type and ids come from the body; the held date is always today | **The line manager, the conversation's scheduler or conductor, or HR when not the subject** — create, edit, hold, delete; the appraisee reads. Type, appraisal, scheduler and conductor are pinned (the scheduler is who booked, the conductor who marks it held); the held date can be stated (not future, default today); a held conversation is never deleted. On withdrawal, unheld conversations are removed and open review events Cancelled (and Cancelled closes an event) | E-f |
+| D-75 | **PIP numbering and the plan's own rules** — the recommendation handler numbers `PIP-APR-…` and skips the service's rules; approve and reject act from any status on the no-definition path; the plan's subject records their own outcome; the outcome value is unchecked; the number index is neither unique nor per tenant | **Folded, no migration**: the handler numbers `PIP-yyyy-NNNN` through the service's rule and keeps its checks (one live plan, an HR owner, a supervisor who is not the employee); approve and reject act on a pending plan only; the subject (HR included) does not complete, decide or delete their own plan; the outcome is checked. The number race goes to migration batch 2 | E-f, batch 2 |
+| D-76 | **Beyond the rows (E-f)** | **Folded:** goal link ids checked (company, unit and parent goal, library, KPI — tenant, existence, same cycle; a parent the same employee's and not itself; the manager id server-set; P-22 closed as by design; a progress entry's review event the goal's appraisal's); the PIP goal PUT binds its validated DTO (percent 0–100), text lengths checked, the seven goal and meeting routes answer 422/404 not 500; a conversation's review event belongs to its appraisal, and the type error lists every type. **Not folded:** a final review held before its step (§ 5) | E-f |
 
 ---
 
@@ -258,7 +273,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ☑ 2026-09-29 — L-a 157/157 twice; L-b 244/244 twice; L-c 261/261 twice (one suite holds L-b and L-c); staged |
 | C | One appeal machine | 2 days (+0.5–1, D-36) | D-22, D-34, D-35, D-36, D-37, D-38 | ☑ **complete 2026-09-30**; C10 was batch 1's. Two slices (D-36): C-a ☑ — 209/209 twice, regression 2089/2098, committed effb567f5. C-b ☑ — source-checked (§ 1f D-37, D-38), `run-final-appeals.mjs` 397/397 twice, regression 2309/2318; staged |
 | D | Peer nomination and evaluation integrity | 1 day (1.5–2, the source check) | D-39, D-40, D-41 | ☑ 2026-09-30 — source-checked (§ 1g); `run-final-nominations.mjs` 186/186 twice, regression 2496/2505; staged |
-| E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | ~12 days (D-42; was 4) | D-10, D-14, D-17, D-20, D-42–D-58 | ◐ source-checked 2026-09-30 (§ 1h); seven slices E-a…E-g. E-a ☑ (130/130 twice, regression 2631/2640), E-b ☑ (`run-final-lifecycle.mjs` 276/276 twice, regression 2777/2786), E-c ☑ (source-checked, § 1i; 391/391 twice, regression 2892/2901; D-14's migration on UAT), E-d split in two (§ 1j): E-d1 ☑ (542/542 twice, regression 3043/3052), E-d2 split in two (§ 1k): E-d2a ☑ (601/601 twice, regression 3104/3113), E-d2b ☑ (source-checked, § 1l; 706/706 twice, regression 3226/3235), E-e ☑ (source-checked, § 1m; 821/821 twice, regression 3352/3361); staged. E-f next |
+| E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | ~12 days (D-42; was 4) | D-10, D-14, D-17, D-20, D-42–D-58 | ◐ source-checked 2026-09-30 (§ 1h); seven slices E-a…E-g. E-a ☑ (130/130 twice, regression 2631/2640), E-b ☑ (`run-final-lifecycle.mjs` 276/276 twice, regression 2777/2786), E-c ☑ (source-checked, § 1i; 391/391 twice, regression 2892/2901; D-14's migration on UAT), E-d split in two (§ 1j): E-d1 ☑ (542/542 twice, regression 3043/3052), E-d2 split in two (§ 1k): E-d2a ☑ (601/601 twice, regression 3104/3113), E-d2b ☑ (source-checked, § 1l; 706/706 twice, regression 3226/3235), E-e ☑ (source-checked, § 1m; 821/821 twice, regression 3352/3361), E-f ☑ (source-checked, § 1n; 1016/1016 twice, regression 3549/3558); staged. E-g next |
 | F | Recommendations, proposals, probation, PIP chain, segregation of duties | 2.5 days | D-12, D-19; **F1 waits on D-18** (the finish plan's lane 9) | ☐ |
 | G | Notifications on the platform topics | 5 days | D-21, D-28 | ☐ |
 | H | Nightly sweep and the advance path | 2.5 days | D-16, D-21 | ☐ |
@@ -2160,7 +2175,9 @@ not HR's; offered for the cross-module register). No suite was affected.
       - **P-7:** the editor's freeze mirrors the server rule instead of freezing on any assignment
         (`administration/hr/performance/templates/[id]/page.tsx:134-138`); the assignment DTO
         (DTO :3773-3789) carries the cycle status.
-- [ ] E5 **Goals:**
+- [x] E5 **Goals:** *(lane E-f, 2026-10-01 — every bullet: unlock restores from the progress, the dead lock path deleted
+      (the "two paths" premise was wrong), the edit and re-parenting rules were L-a's, P-22 closed as by design, rule 2
+      reachable — and D-71/D-72/D-76's delete, progress and link rules; the E-f State block.)*
       - `UnlockGoalAsync` (:512-521) restores `InProgress` when progress exists, else `Approved`.
         Today it leaves `Status=Locked`, so the goal can never take progress again.
       - `EmployeeGoalService.LockGoalAsync` (:499) delegates to the workflow command (two lock
@@ -2185,7 +2202,8 @@ not HR's; offered for the cross-module register). No suite was affected.
         `061:228` calls `/start` (S3).
       - **P-41:** the grid reads the appraisal's settled and calibrated overall, not the adjustment
         record (`GetCalibrationMatrixAsync`, CSS :875-876, :896).
-- [ ] E7 **PIP:**
+- [x] E7 **PIP:** *(lane E-f, 2026-10-01 — every bullet; the Active-plan edit stays a refusal and an approved plan's goals
+      are frozen too (D-46, D-73); the numbering race is batch 2's; the E-f State block.)*
       - Goals, meetings and progress (:778-872) are refused on closed plans.
       - `UpdateAsync` (:483-516) on an Active plan is refused or re-approved; body re-parenting goes
         in P5. *(Lane P5 made it a draft-only edit and stopped the re-parenting: an Active plan is
@@ -2194,7 +2212,9 @@ not HR's; offered for the cross-module register). No suite was affected.
       - Meetings get a stored status (P-57, batch 1 column; backfill rule in § 6).
       - `UpdatePipGoalProgress` honours status and percent at create (P-55: status is forced to
         NotStarted at :787, and the create DTO has no percent, DTO :5209-5228).
-- [ ] E8 **Conversations:**
+- [x] E8 **Conversations:** *(lane E-f, 2026-10-01 — every bullet, through write helpers of their own (create used a second
+      helper, and the booker became the scheduler), plus the stated held date and the withdrawn residue (D-74); the E-f
+      State block.)*
       - The write policy is manager, conductor or HR only: drop `Appraisal.EmployeeId == me` from
         the write branch of `CanAccessConversationAsync`.
       - The DTO cannot re-parent `AppraisalId` (MAP :2347) or change `Type`.
@@ -2416,7 +2436,8 @@ with each:
       assignment PUT pinned; `IsLocked` and its reason on the template DTO, read by the editor (P-7). The
       settings profile refused while any live appraisal uses it, with a clone door (D-46). Harness:
       `run-final-scoring`'s A0 freeze, `run-final-settings` :639, :672.
-- [ ] **Slice E-f — goals, PIPs, conversations.** E5: the dead methods, unlock's status, P-22, the risk
+- [x] **Slice E-f — goals, PIPs, conversations.** *(2026-10-01 — the E-f source check and State blocks below the E-e ones;
+      § 1n D-71–D-76; `run-final-lifecycle.mjs` 1016/1016 twice, regression 3549/3558.)* E5: the dead methods, unlock's status, P-22, the risk
       pre-filters (the demo's at-risk list changes), the goal PUT's progress, the delete rule, link ids,
       HR's own unlock. E7: writes to a closed plan and to an approved plan's goals refused (D-46), 422s,
       numbering, meeting status (writers, DTO, a UAT backfill), P-55. E8: the write rule (the line
@@ -3192,6 +3213,157 @@ TE and scratch TX, all its own). `run-final-settings.mjs`: B8's mid-cycle change
 named), W4 renamed and copied, the change then planted by SQL (D-63's pattern) — +8; the invalid update moved to a scratch
 profile nobody uses and its text asserted — +3 (375).
 
+**E-f source check (2026-10-01, after E-e; line numbers as of `2abd9c613`).** Four read-only surveys — the goals backend,
+the PIP backend, conversations with the withdrawn residue, and the harness / demo pack / screens — then every claim that
+decides the build read again in source, and UAT's own rows counted; the user settled six questions (§ 1n, D-71–D-76).
+What they found:
+- **E5, goals.** Unlock changed the status only from the old Locked one, and always to Approved (EGS :626) — a goal at 60 %,
+  or a completed one, came back untouched; migration batch 1 had stamped Locked on every goal locked at the time (UAT
+  has none, its rebuild came after). **"Two lock paths" is a wrong premise**: `EmployeeGoalService.LockGoalAsync` had no
+  caller, nor had the old submit / approve / reject (dead, with `ValidateGoalWeightTotalAsync`). The approved-goal edit and
+  the re-parenting were done in L-a. **P-22 is by design** — the library link records where the wording came from (the
+  screens say so); the real defect was that no link id was checked. **Rule 2 of `GoalRiskEvaluator` was unreachable**: both
+  pre-filters admitted only goals marked at risk and running goals due within 14 days under 60 % — rule 1's own test — so
+  an approved goal nobody had touched was never on either list, and the manager's tab returned every candidate unfiltered.
+  Also live: the goal PUT wrote progress past the entries (MAP :1771 — no entry, no recorder, no status); the owner could
+  delete an agreed goal, even a completed one, and the delete left its entries; link ids (company, unit and parent goal,
+  library, KPI, the submitted-to manager, an entry's review event) were saved as sent — another tenant's shown by name, a
+  missing one a foreign-key 500; HR could unlock its own goal (`CanManageGoalAsync` tested the desk first); an entry edit on
+  a goal sent back carried its status onto the goal — a goal the owner had changed read agreed again with no manager; and
+  deleting the latest entry did not carry back.
+- **E7, PIPs** (all 20 on UAT Active — 1 demo, 19 harness). A closed plan took every write: new meetings, goal edits,
+  progress, replies, attachments. The Active-plan terms edit was done (P5), but goal add, edit and delete still changed an
+  approved plan's terms (D-46). The handler numbered `PIP-APR-{date}-{hex}`, outside the tenant's sequence, and skipped the
+  service's rules (one live plan; a supervisor fallback that could name the employee); the service's claimed race
+  protection is not real — the index is neither unique nor per tenant. **P-57: nothing wrote a meeting's status** — no DTO
+  carried it, no cancel route existed, and every reader took "held" to mean "the date has passed" (on UAT one demo meeting is
+  past). **P-55:** a new goal's status was forced to Not started and its percent and notes had nowhere to go. Beyond the
+  rows: with no published definition, approve and reject acted from any status — reject sent a plan in force back to Draft,
+  where it could be deleted; the plan's subject (an HR officer) could record their own outcome; the outcome number was cast
+  unchecked; the PIP goal PUT bound a model with no limits (150 % stored, 1000 or a long title a 500); seven goal and meeting
+  routes answered 500 to a refusal.
+- **E8, conversations.** The appraisee could book, edit, hold and delete their own — through the API and from the screens;
+  dropping one clause was not enough, since create used a second helper and whoever booked became the scheduler. Deleting a
+  held conversation moved the appraisal back (the gates read held ones) and could undo HR's audited advance. `Type`, the
+  scheduler, the conductor and the review event were copied from the body; the held date was always today. Withdrawn
+  residue: a withdrawn appraisal's conversations and review events could still be deleted; some lists showed its unheld
+  conversations as Overdue; `AppraisalReviewStatus.Cancelled` had no writer and no reader.
+- **The harness and demo:** no suite had the appraisee write a conversation; four checks pinned old behaviour (settings'
+  edit-with-no-type 400, and three that survive the build as written); 061 sent `conductedById` and every held conversation
+  read "held on build day"; 060's PIP goals were sent with 30 % (dropped) and its past meeting would stay Scheduled.
+- **The screens:** the appraisee was offered Save and Mark held; Edit, Delete and Unlock showed on goals the server would
+  refuse; the meeting page offered Record on a closed plan and had no Cancel; the Reviews tab read "Absent" for a meeting not
+  yet held; the team at-risk tile would disagree with its overview column once rule 2 was reachable.
+
+**Not folded (§ 5):** a final review held before its step (the transition report flags it; nothing refuses it); the PIP
+number race (batch 2's unique per-tenant index); a review event's own `ConversationId` cross-link.
+
+**E-f State (2026-10-01): DONE — built, verified on UAT, staged.** No migration (the meeting status column is batch 1's).
+What exists now:
+- **The at-risk rule (D-71)** — `GoalSetRules.RiskWatched` (Approved, In progress, On track, At risk and the old Locked):
+  the evaluator watches only those, both lists' pre-filters admit exactly those, and the manager's At risk tab lists what
+  the evaluator flags, sorted by severity. The overview's and the progress tab's at-risk counts, and the HR goals tile
+  (`GetGoalSummaryAsync`), count by the evaluator. On the demo the org-wide list goes from 1 goal to 19 (17 approved and
+  untouched behind the straight line, 1 in progress behind it, 1 marked at risk).
+- **Goals (D-72, D-76)** — `EmployeeGoalService`: a goal is deleted only before it is agreed (draft, pending, sent back)
+  and not locked, its progress entries with it; the PUT writes no progress (`UpdateEmployeeGoalDto` has none); an entry is
+  corrected or removed only on an agreed goal, and correcting or removing the latest carries the goal back
+  (`CarryBackToGoal` — while the goal still shows that entry's percent); unlock refuses the goal's own employee (403, the
+  desk included) and restores the Locked or Approved status from the progress (`GoalSetRules.RunningStatusFromProgress` —
+  Completed at 100 %, In progress with progress or entries, else Approved). `EnsureLinksBelongAsync` checks the company and
+  unit goal (the cycle's), the parent (the same employee's, in the cycle, never itself or a goal under it), the library item
+  and the KPI (the tenant's) — on an edit only a link that changes; an entry's review event is its goal's appraisal's. The
+  create no longer takes a submitted-to manager. The dead submit / approve / reject / lock and the weight check are gone.
+- **PIPs (D-73, D-75, D-76)** — `PerformanceImprovementPlanService`: a closed plan (Completed, Unsuccessful, Cancelled) takes
+  no meeting, goal, progress, reply or document; a plan's goals change only while it is a draft (out for approval: recall
+  first; in force: frozen); progress is recorded on a draft (its start) and while in force. A meeting is booked Scheduled;
+  `RecordReviewMeetingAsync` (*Record meeting*) makes it Held — a plan in force, not before its date; `CancelReviewMeetingAsync`
+  (`POST api/PipMeeting/{id}/cancel?pipId=`) makes a booked one Cancelled; a cancelled meeting takes no edit or reply, a held
+  one is not cancelled or deleted. Every read takes the stored status (the DTO, the meeting form and schedule, the plan's
+  detail and its next meeting, the dashboard's held and next). A new goal keeps the status, percent and notes it is sent
+  with (P-55); the goal PUT's request carries the entity's limits. Approve and reject act on a plan awaiting approval only;
+  the subject — HR included — is refused approve, reject, the outcome and delete (`PipAccess.IsSubjectAsync`, 403); the
+  outcome is one of the list. `PipNumbering` numbers every plan `PIP-yyyy-NNNN`, deleted drafts' numbers kept; the
+  recommendation handler uses it, raises no second plan for an employee on one (the recommendation stays Approved), never
+  names the employee as supervisor, and makes the approving HR officer the plan's owner.
+- **Conversations (D-74, D-76)** — `AppraisalConversationsController`: create, edit, hold and delete are the line manager's,
+  the conversation's scheduler's or conductor's, or the desk's — never the subject's, tested before the desk; reads are as
+  before. The scheduler is the booker and the conductor whoever marks it held, from the token; an edit carries the date,
+  agenda, notes and review event only (`UpdateAppraisalConversationDto` lost the type, appraisal, actors and held state); the
+  held date can be stated, not in the future; a held conversation is never deleted, nor one of a withdrawn appraisal; a
+  review event named is the appraisal's; the type error lists every type; the DTO names the appraisee. The line manager's
+  diary carries their reports' conversations. `AppraisalWithdrawalService` removes the unheld conversations and cancels the
+  open review events, and every review-event write refuses a Cancelled one; its delete refuses a withdrawn appraisal's.
+- **422s and 404s** — the PIP goal routes, the plan controller's meeting update and delete, and the meeting controller's
+  create, update, record, comment and the new cancel answer 422 to a rule and 404 with a body to an unknown id (500s
+  before); the goal and meeting reads 404 an unknown plan; a goal link refused 422.
+- **The screens** — the goals list offers Delete only before agreement and Unlock never on the viewer's own goal; the goal
+  page amends entries only on an agreed goal and words the lock as it works; the self-service edit keeps the goal's cycle
+  and sends no progress; the at-risk page names the three rules and what they watch; the PIP page shows each review's
+  status (attendance once held) and hides Schedule, Record outcome and the status select from the subject; the meeting page
+  offers Record only on a booked meeting of a plan in force (disabled before its date), Cancel on a booked one, Save until
+  the plan closes, and says why when it is read-only; the conversation page is read-only to the appraisee, shows the type
+  fixed and takes the held date; the appraisal page's Schedule is hidden from the appraisee.
+
+**Where the build refines the rows** (each deliberate; say if one should go back):
+1. **A held PIP meeting is not deleted** — D-73 named the cancel; the delete was the same hole as the conversations' (D-74).
+2. **Closed means documents too** — D-73's "closed plans take no writes" covers the attachment upload and delete (§ 5: a
+   closing letter goes on before the outcome); the delete now asks the record first, then removes the file.
+3. **Unlock also corrects an Approved goal with progress** (the demo seeder's 55 % / 48 % goals): the status its progress
+   gives it, as for the old Locked one.
+4. **The carry-back respects check-ins** — a check-in moves a goal's progress without an entry, so an amendment carries back
+   only while the goal still shows the amended entry's percent (§ 5).
+5. **The line manager's diary** now includes their reports' conversations — with the conductor fixed at hold, one HR booked
+   would otherwise be in nobody's diary.
+6. **The PIP goal clamp keeps decimals** (62.5 % was stored as 62), and a meeting's PUT keeps a held meeting's date in the past.
+7. **The PIP goal PUT keeps its request shape** — `PipGoalRequest` carries the limits (the screens send it), rather than
+   binding `UpdatePipGoalDto`, which needs ids no caller sends.
+
+**Verified** (Staging API on `ErpSystemDB_UAT`, the build; no pending migration — 105 in code, all 105 in UAT's history):
+- `run-final-lifecycle.mjs` **1016/1016 on its first run, and 1016/1016 again in the regression** — E-a…E-e's 821, three more
+  in ed-write (the withdrawn appraisal's unheld conversation gone, its review event Cancelled, the event's delete refused),
+  and E-f's 192 on cycle FG: ef-risk (20), ef-goal (49), ef-links (19), ef-pip (73), ef-conv (30), the set-up (2, with the
+  teardown's check). Apart from the set-up steps, each asserts what the old code did not do — it listed no untouched
+  approved goal and counted the AtRisk status alone, wrote progress through the goal PUT, let an agreed goal be deleted and
+  left its entries, let a sent-back goal's entry be corrected, kept a removed entry's percent, unlocked to Approved whatever
+  the progress, let HR unlock its own goal, saved any link id, dropped a PIP goal's status and percent, approved a draft and
+  re-approved or rejected a plan in force, let an approved plan's goals change, read a past meeting as held, had no cancel,
+  took every write on a closed plan, numbered `PIP-APR-…`, raised a second plan, let the subject decide their own plan,
+  closed on an undefined outcome, let the appraisee book, edit, hold and delete their own conversation, took the actors from
+  the body, held on today only, and deleted a held conversation — established by reading the old code, not by running it.
+- Regression (`run-all.mjs`, fifteen suites, 134 s): interim reviews 134/134, attachments 66/66, slice C 53/53, slice D
+  27/27, **slice E 19/28 — the same 9 stale**, gates 33/33, lane A 188/188, lane P 339/339, lane B1 257/257, lane L-a
+  158/158, lanes L-b/L-c 297/297, **lane B2 377/377**, lane C 398/398, lane D 187/187, **lane E 1016/1016**. **3549/3558** —
+  E-e's 3352/3361 plus exactly the 197 new (195 lifecycle, 2 settings); no assertion lost; no call over 10 s. Afterwards
+  only APC2026 is Open, no harness login is active, and the runs' PIP drafts are deleted (their closed plans stay, as the
+  privacy suite's do).
+- hr-portal slice 5 **49/49 on UAT**. W3 slice 10 (whose unlock probe the survey flagged) was **not run**: it takes the
+  tenant's first two employees as subjects, real staff on UAT; its probe is settled in source — the goal lookup answers 404
+  before the caller's employee is read.
+- API log: **no 5xx response at all**; 204 `ERR` lines, every one defect #23's payroll-profile FK (one per fixture
+  employee), and the HR/Identity reconciliation's TDC/00052 twice.
+- The runs' notifications to real users: 260 template approvals and 30 PIP approval requests to the 9 HR and Manager
+  holders (§ 5, the first E-e row — PIP submissions now feed it too).
+- Frontend: scoped `tsc` over the changed files, 0 errors; ESLint clean. Not browser-walked (§ 5).
+- Demo: APC2026 captured on this build before the runs and after them all — its 107 phases, calendar, coverage preview,
+  targets, in-scope list (102), progress, HR dashboard and review desk byte-identical to E-e's capture and to each other.
+  What the screens show differently: HR's org-wide at-risk list for APC2026 lists **19 goals** (it listed 1), and head.dev's
+  team tab more than Turnaround; the demo PIP's reviews show their status — 28 Sep *Held* (after the backfill below; it read
+  *Scheduled*) and 30 Oct *Scheduled*, the next meeting; its three goals stay *Not started* with
+  no percent (made before P-55; a rebuild sends 30 % In progress); the demo conversations read as before, the appraisee now
+  named — their held dates stay the build day until a rebuild sends 061's stated dates.
+
+**UAT write beyond the fixtures (run on the user's request, after a verified COPY_ONLY backup,
+`ErpSystemDB_UAT_preEfPipBackfill_20261001.bak`):** the demo PIP's one past review meeting — PIP-2026-0001's, 28 September —
+moved Scheduled → Held (`ef-pip-backfill.sql`, § 6's rule; asserted count 1, committed). The plan's next meeting now reads
+30 October.
+
+**Harness changes in the slice:** `setup.mjs`'s lifecycle fixture gains post FG, cycle FG (profile LG, a Draft its section
+opens) and f1, f2 and fHr with logins; `run-final-lifecycle.mjs` gains E-f's 192 and re-asserts ed-write's withdrawn
+conversation and review event (+3); `run-final-settings.mjs`: the edit with no type is accepted and an edit naming another
+type leaves it (+2, 377). The demo pack: 061 sends no `conductedById` and states each held date (the scheduled one); 060
+sends no `conductedById` and records any past review still Scheduled as held.
+
 ### Lane F — Recommendations, proposals, probation, PIP chain, segregation of duties
 
 - [ ] F1 Extend-Probation handler passes `CurrentUserProvider.EmployeeId` (refuse with a message
@@ -3787,7 +3959,7 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | Calibration-completed notice tells participants to "commit", which only HR can do | CSS :264-295 | G |
 | Conversation scheduled by the employee does not tell the manager; PIP meeting notice to employee only | `AppraisalConversationService.cs:185`; PIP :192-206 | G |
 | ~~Nothing told in Manager nomination mode~~ | PNS :464-489 | D/G — done in lane D, 2026-09-30 (the peers are told at approval) |
-| PIP handler numbering `PIP-APR-…` vs `PIP-yyyy-NNNN` | `PipRecommendationHandler.cs:103` | E7 |
+| ~~PIP handler numbering `PIP-APR-…` vs `PIP-yyyy-NNNN`~~ | `PipRecommendationHandler.cs:103` | E7 — done in lane E-f, 2026-10-01 (`PipNumbering`, shared with the service; the race is batch 2's) |
 | ~~`AppraisalCycleTarget.EstimatedEmployeeCount` client-supplied; `ActiveEmployeeCount` can go negative~~ | MAP :1044; entity :647 | E2 — done in lane E-c, 2026-09-30 (the count is resolved live, D-47; the estimate stays HR's planning figure) |
 | `PerformanceAppraisal.DevelopmentPlanId/RankInPosition/RankInUnit/NextAppraisalDate` never computed | entity | J (N5 computes `DevelopmentPlanId`) |
 | ~~`EmployeeAcknowledgmentComments` written only by manual advance~~ | AWS :605 | E1 — done in lane E-a, 2026-09-30 (the acknowledgment keeps its comment) |
@@ -3812,7 +3984,7 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | P-8 activation demands bands on a weight-0 free-text item; submit-for-approval too | `AppraisalTemplateService.cs:922-931, :323` | L4 |
 | P-11 goal-risk thresholds tenant-wide | `GoalRiskSetting.cs:19-56` | v2 |
 | P-13 generation repairs nothing; ~~snapshot failures swallowed~~ | `AppraisalCycleService.cs:623-631, :1366-1377` | E12 — the swallowing copy, the dead `CreateAppraisalInstancesAsync`, was deleted in lane E-c; the repair action remains |
-| P-22 goal-library link fixed at creation | DTO :4258 | E5 |
+| ~~P-22 goal-library link fixed at creation~~ | DTO :4258 | E5 — closed as by design in lane E-f, 2026-10-01 (it records where the wording came from; the link is now checked at create, D-76) |
 | P-24 at-risk filters by the employee's unit and level | `AtRiskGoalsQueryService.cs:155-159` | kept — disclosed on screen (:176) |
 | P-25 no export on the at-risk list | `AtRiskGoalsController.cs:65` | D-23 (catalogue programme) |
 | ~~P-41 calibration grid reads the adjustment record~~ | CSS :875-876, :896 | E6 — done in lane E-b, 2026-09-30 |
@@ -3879,7 +4051,7 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | HR's advance approves a pending nomination whose peer has left — the nomination and the explicit approval refuse one; the advance's approval path does not check | `StageApprovalAsync` (the advance) | E-g |
 | Manager mode takes nominations on a Governance or an Appealed appraisal ("until it is completed or closed"); only Withdrawn was added | `NominationsEditable` | E-g |
 | A leaver's appraisal waiting only for the acknowledgment, in a cycle without HR review, is not final by the settle's rule (no sign-off), so the exit withdraws it — though its outcome was already released to the employee | `AppraisalScoreService.IsFinal` against `AppraisalRelease.IsReleased` | E-g (one reading of "final") |
-| A withdrawn appraisal's unheld conversations and open review events stay as rows — refused, and off every queue — not cancelled; `AppraisalReviewStatus.Cancelled` has no writer | `AppraisalConversationService`, `AppraisalReviewEventService` | E-f |
+| ~~A withdrawn appraisal's unheld conversations and open review events stay as rows — refused, and off every queue — not cancelled; `AppraisalReviewStatus.Cancelled` has no writer~~ | `AppraisalConversationService`, `AppraisalReviewEventService` | E-f — done 2026-10-01 (D-74: the withdrawal removes the unheld conversations and cancels the open events; Cancelled closes an event) |
 | An attachment can still be added to a withdrawn appraisal (the add checks nothing; the delete refuses) | `PerformanceAppraisalService.AddAttachmentAsync` | E-g |
 | A staff movement's `BasedOnAppraisalId` is taken unchecked — the tenant, the employee, a withdrawn appraisal | `StaffMovement` (mapper :352, :387) | J |
 | The employee's own response route answers a rule with 400 and a bare string; HR's answers 422 with `{ message }` | `PerformanceAppraisalsMeController.AddMyResponse` | J |
@@ -3906,7 +4078,7 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | No suite runs the deadline sweep with `AutoLockOnDeadline` off — the lifecycle suite's LD proves it on | `AdvanceOverdueAppraisalsAsync` | B7 / S |
 | The E-d2b screens (the cycle page's *Generate* on an open cycle only, its warning card's reasons and competing-cycles badge; the self-evaluation banner) not browser-walked | 2 pages | K |
 | *Added by lane E-e (2026-10-01):* | | |
-| **The tenant's own HR and Manager holders still receive every harness run's approval notifications** — the demo personas and the seeded `manager` (1 HR, 9 Manager on UAT). D-69 stopped the harness logins piling up (the teardown switches off what a run mints; the 2,465 earlier ones are off), not the real recipients: each regression adds some 25 template approvals to their bells. Cleared on 2026-10-01 (2,950 rows, by the user's `clean-apply2.sql`); it refills with every run | UAT, `dev-harness` | S8 (a teardown that clears the run's notifications for non-harness recipients — the user's call) |
+| **The tenant's own HR and Manager holders still receive every harness run's approval notifications** — the demo personas and the seeded `manager` (1 HR, 9 Manager on UAT). D-69 stopped the harness logins piling up (the teardown switches off what a run mints; the 2,465 earlier ones are off), not the real recipients: each regression adds some 25 template approvals to their bells. Cleared on 2026-10-01 (2,950 rows, by the user's `clean-apply2.sql`); it refills with every run — E-f's verification added 260 template approvals and 30 PIP approval requests to the nine | UAT, `dev-harness` | S8 (a teardown that clears the run's notifications for non-harness recipients — the user's call) |
 | **The platform's notification processor rescanned the stuck email queue every few seconds** — some 126,000 Pending/Failed emails (UAT has no SMTP): its `TOP … ORDER BY` claim waited 20 s and more for query memory (`RESOURCE_SEMAPHORE`), with the clean-up's table-wide `UPDATE`, and starved heavy reads — 11 timed-out 500s in E-e's regression and lifecycle run 3 (the manager's form, the calibration grid), on a machine with 1.2 GB free. Dead-lettered on 2026-10-01 (126,816 rows); it refills while UAT runs without SMTP | `UnifiedNotificationService` (claim), UAT | cross-module #33; S8 |
 | A calibration grid read that fails reads as an empty grid, so a check of what the grid *no longer* lists passes vacuously (`ed-read`: "no longer lists wd1 or wd3" passed while the read 500'd) | `run-final-lifecycle.mjs` `gridOf` | S (assert the read) |
 | The template list's *Edit* dialog offers the scope fields on a locked template; the server refuses a scope change (409, with the reason) | `templates/page.tsx` | I |
@@ -3916,6 +4088,15 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | The profile's validate-weights endpoint allows ±0.01 where a save allows ±0.005; the create DTO defaults `MinPeerEvaluators` to 0 where the entity says 1; the PUT is a full replace with no concurrency token and a racy name check (D-70) | `AppraisalSettingsService`, DTOs | J |
 | The demo seeder's free-text question is proven by reading, not by a rebuild from empty | `PerformanceAppraisalDataSeeder` | S10 (the next rebuild) |
 | The E-e screens (the template editor's lock and banners, the template list's *Locked* column and *Remove*, the settings editor's in-use lock and *Copy*, the cycle page's pinned rows and fixed template on edit) not browser-walked | 7 files | K |
+| *Added by lane E-f (2026-10-01):* | | |
+| **A final review can be held before its step** — a FinalReview marked held during goal setting passes the final gate later; the transition report flags it (`AppraisalGates` :419), nothing refuses it (D-76, not folded) | `AppraisalConversationService.CompleteAsync` | B (a step check on hold) |
+| **Two PIPs created at the same moment can take the same number** — `PipNumbering` reads the taken numbers and picks the next; the `PipNumber` index is neither unique nor per tenant (D-75) | `ApplicationDbContext.HR` :3644 | batch 2 (a filtered unique index on `TenantId, PipNumber`) |
+| A review event's own `ConversationId` is copied from the body unchecked — the conversation side is checked since E-f (D-76), the event side is not | `AppraisalReviewEventService`, MAP | J |
+| A goal's progress also moves through check-ins, which record no progress entry; an entry correction or removal carries back only while the goal still shows that entry's percent (a later check-in leaves it alone), and with no entry left a goal falls to 0 % even if a check-in had moved it | `EmployeeGoalService.CarryBackToGoal`, `CheckInService` | J (one progress ledger) |
+| Deleting a parent goal leaves its children pointing at a deleted row (the delete takes the goal's entries, not its children's link) | `EmployeeGoalService.DeleteAsync` | J |
+| A closed PIP's documents are frozen too (D-73's "no writes") — HR cannot file a closing letter after the outcome; attach it before | `PerformanceImprovementPlanService` attachments | F (say if a closed plan should take documents) |
+| The demo check-in note still says *"Turnaround is the one at-risk goal"*; with D-71 head.dev's team tab lists more | `hr-demo-smoke/scenarios/060-performance.mjs` :202 | S |
+| The E-f screens (the goals list's Delete / Unlock, the goal page's entry amendments and unlock, the at-risk page, the PIP page's Reviews status and subject-hidden actions, the meeting page's Record / Cancel / closed banner, the conversation page's appraisee view, type and held date, the appraisal page's Schedule) not browser-walked | 11 files | K |
 
 ---
 
@@ -4011,7 +4192,10 @@ table there. Backfills are for databases that already hold data.
     - `PipReviewMeeting.Status` (`PipMeetingStatus` Scheduled/Held/Cancelled) and
       `AppraisalTemplateSection.Kind` (`AppraisalSectionKind`) carry model defaults (1) so the
       scaffold emits them. Meeting writers stay with E7: a meeting held before E7 lands stays
-      Scheduled.
+      Scheduled. *(E7 built in E-f, 2026-10-01. UAT's 2026-09-29 rebuild came after batch 1, so its
+      backfill never saw the demo pack's meetings: the one past demo meeting was moved to Held by
+      `ef-pip-backfill.sql` on 2026-10-01 — the same rule, asserted count 1, after a COPY_ONLY backup —
+      and 060 records any past review still Scheduled as held from now on.)*
     - The code still keyed by template item reads the now-nullable id through
       `CriterionTemplateKey.TemplateKey()` (29 call sites in PAS, PES and CSS), which throws, naming
       the row, if a goal row ever reaches it. **Lane L3's worklist is `grep TemplateKey(`.**
@@ -4032,6 +4216,9 @@ table there. Backfills are for databases that already hold data.
   - `SalaryReviewProposal` / `EmploymentActionProposal`: `SubmittedById` + `SubmittedDate` (F3),
     `ActionedById` (Employee FK, null) + `ActionedDate` (F5);
   - an author column on `PerformanceImprovementPlan` (F3);
+  - a filtered unique index on `PerformanceImprovementPlans (TenantId, PipNumber)` replacing the global
+    non-unique one (D-75, E-f's § 5 row) — existing duplicates resolved first in the same guarded
+    script (UAT: check by tenant; the handler's old `PIP-APR-…` numbers are distinct);
   - `EmploymentActionProposal.SourcePipId` (null FK) and `EffectiveDate` (D-19);
   - the `PerformanceSweepRun` and `PerformanceSweepDispatch` tables;
   - the `AppraisalOutcomeRecommendation` filtered unique index (appraisal, type) where not

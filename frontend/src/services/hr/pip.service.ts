@@ -223,8 +223,16 @@ class PipMeetingService {
     return apiService.put<PipMeetingForm>(`${this.baseUrl}/${id}`, form);
   }
 
+  /** Record meeting: saves the record and stores the meeting as Held (closure D-73). */
   complete(id: string, form: PipMeetingForm): Promise<PipMeetingForm> {
     return apiService.post<PipMeetingForm>(`${this.baseUrl}/${id}/complete`, form);
+  }
+
+  /** Cancel a booked meeting that will not take place; never a held one (closure D-73). */
+  cancel(id: string, pipId: string): Promise<PipReviewMeeting> {
+    return apiService.post<PipReviewMeeting>(
+      `${this.baseUrl}/${id}/cancel?pipId=${encodeURIComponent(pipId)}`,
+    );
   }
 
   getSchedule(pipId: string): Promise<PipMeetingSchedule> {

@@ -562,7 +562,11 @@ export default function ManagerEvaluationPage() {
         </TabsContent>
 
         <TabsContent value="conversations" className="mt-4">
-          <ConversationsPanel appraisalId={appraisalId} canSchedule />
+          {/* The appraisee books none of their own conversations — an HR officer included (D-74). */}
+          <ConversationsPanel
+            appraisalId={appraisalId}
+            canSchedule={user?.employeeId !== context.employeeId}
+          />
         </TabsContent>
       </Tabs>
 

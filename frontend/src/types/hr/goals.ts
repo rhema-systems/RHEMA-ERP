@@ -481,9 +481,12 @@ export interface CreateEmployeeGoal {
   dueDate: string;
 }
 
+/**
+ * No progressPercent (performance closure D-72): a goal's progress is what its progress entries say.
+ * The edit wrote it straight onto the goal, and both forms sent back the value they had loaded.
+ */
 export type UpdateEmployeeGoal = Omit<CreateEmployeeGoal, 'goalLibraryId'> & {
   id: string;
-  progressPercent: number;
 };
 
 export interface EmployeeGoalSummary {

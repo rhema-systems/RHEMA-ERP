@@ -175,6 +175,10 @@ public interface IPerformanceImprovementPlanService
     Task<IEnumerable<PipReviewMeetingDto>> GetReviewMeetingsAsync(Guid pipId, CancellationToken cancellationToken = default);
     Task<PipReviewMeetingDto?> GetReviewMeetingByIdAsync(Guid meetingId, CancellationToken cancellationToken = default);
     Task<PipReviewMeetingDto> UpdateReviewMeetingAsync(Guid pipId, UpdatePipReviewMeetingDto updateDto, CancellationToken cancellationToken = default);
+    // Decision D-73: a meeting's status is stored. Record writes the record and makes it Held (a plan
+    // in force, not ahead of its date); Cancel makes a booked one Cancelled (never a held one).
+    Task<PipReviewMeetingDto> RecordReviewMeetingAsync(Guid pipId, UpdatePipReviewMeetingDto updateDto, CancellationToken cancellationToken = default);
+    Task<PipReviewMeetingDto> CancelReviewMeetingAsync(Guid pipId, Guid meetingId, CancellationToken cancellationToken = default);
     // P13: the plan's subject only (actorEmployeeId from the token); UnauthorizedAccessException otherwise.
     Task<PipReviewMeetingDto> SetEmployeeCommentsAsync(Guid pipId, Guid meetingId, Guid actorEmployeeId, string? comments, CancellationToken cancellationToken = default);
     Task<bool> DeleteReviewMeetingAsync(Guid pipId, Guid meetingId, CancellationToken cancellationToken = default);
@@ -894,12 +898,10 @@ public interface IEmployeeGoalService
     Task<PagedResult<EmployeeGoalDto>> GetPagedAsync(int pageNumber, int pageSize, Guid? employeeId = null, Guid? cycleId = null, CancellationToken cancellationToken = default);
     Task<EmployeeGoalDto> CreateAsync(CreateEmployeeGoalDto createDto, CancellationToken cancellationToken = default);
     Task<EmployeeGoalDto> UpdateAsync(UpdateEmployeeGoalDto updateDto, CancellationToken cancellationToken = default);
+    /// <summary>A goal not yet agreed (draft, pending or rejected) goes, with its progress entries (decision D-72).</summary>
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
-    // Approval workflow
-    Task<EmployeeGoalDto> SubmitForApprovalAsync(Guid goalId, Guid managerId, CancellationToken cancellationToken = default);
-    Task<EmployeeGoalDto> ApproveGoalAsync(Guid goalId, Guid managerId, string? feedback = null, CancellationToken cancellationToken = default);
-    Task<EmployeeGoalDto> RejectGoalAsync(Guid goalId, Guid managerId, string? feedback = null, CancellationToken cancellationToken = default);
+    // Submit, approve, reject and lock are IGoalWorkflowCommandService's (the bespoke goal workflow).
 
     // Progress tracking
     /// <summary>recordedById comes from the caller's token — never from the payload.</summary>
@@ -909,9 +911,9 @@ public interface IEmployeeGoalService
     Task<GoalProgressEntryDto> UpdateProgressEntryAsync(Guid goalId, UpdateGoalProgressEntryDto dto, Guid? actorEmployeeId, bool actorIsDesk, CancellationToken cancellationToken = default);
     Task<bool> DeleteProgressEntryAsync(Guid goalId, Guid entryId, Guid? actorEmployeeId, bool actorIsDesk, CancellationToken cancellationToken = default);
 
-    // Lock management (goals locked at start of evaluation phase)
-    Task<bool> LockGoalAsync(Guid goalId, CancellationToken cancellationToken = default);
-    Task<bool> UnlockGoalAsync(Guid goalId, CancellationToken cancellationToken = default);
+    // Unlock (the lock is the goal workflow's). actorEmployeeId comes from the token: nobody unlocks
+    // their own goal, the HR desk included (decision D-72).
+    Task<bool> UnlockGoalAsync(Guid goalId, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 
     // Summaries
     Task<EmployeeGoalSummaryDto> GetGoalSummaryAsync(Guid employeeId, Guid cycleId, CancellationToken cancellationToken = default);
@@ -1082,10 +1084,14 @@ public interface IAppraisalConversationService
     Task<IEnumerable<AppraisalConversationDto>> GetScheduledByManagerAsync(Guid managerId, CancellationToken cancellationToken = default);
     /// <summary>Conversations about a given employee, keyed on the appraisal rather than the scheduler.</summary>
     Task<IEnumerable<AppraisalConversationDto>> GetByAppraiseeAsync(Guid employeeId, CancellationToken cancellationToken = default);
-    Task<AppraisalConversationDto> CreateAsync(CreateAppraisalConversationDto createDto, CancellationToken cancellationToken = default);
+    // Decision D-74: actorEmployeeId is the caller's employee, from the token — the scheduler on
+    // create, the conductor on complete. Who may write is the controller's rule.
+    Task<AppraisalConversationDto> CreateAsync(CreateAppraisalConversationDto createDto, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
     Task<AppraisalConversationDto> UpdateAsync(UpdateAppraisalConversationDto updateDto, CancellationToken cancellationToken = default);
+    /// <summary>An unheld conversation only; a held one is the appraisal's record (D-74).</summary>
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<AppraisalConversationDto> CompleteAsync(Guid conversationId, string? postMeetingNotes, string? keyTakeaways, CancellationToken cancellationToken = default);
+    /// <summary>heldDate: when it was held — not in the future; today when null (D-74).</summary>
+    Task<AppraisalConversationDto> CompleteAsync(Guid conversationId, string? postMeetingNotes, string? keyTakeaways, DateTime? heldDate, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 }
 
 #endregion Appraisal Conversation

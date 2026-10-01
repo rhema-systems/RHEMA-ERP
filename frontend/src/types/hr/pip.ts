@@ -33,6 +33,22 @@ export type PipStatus =
   | 'Unsuccessful'
   | 'Cancelled';
 
+/**
+ * A review meeting's stored status (closure D-73): booked = Scheduled, *Record meeting* = Held, the
+ * Cancel action = Cancelled. It used to be worked out from the date — past meant held.
+ */
+export type PipMeetingStatus = 'Scheduled' | 'Held' | 'Cancelled';
+
+/** The numbers behind `PipMeetingStatus` — what the meeting form's `status` carries. */
+export const PIP_MEETING_STATUS_VALUES: Record<PipMeetingStatus, number> = {
+  Scheduled: 1,
+  Held: 2,
+  Cancelled: 3,
+};
+
+/** A plan that takes no more writes: its outcome recorded, or cancelled (D-73). */
+export const PIP_CLOSED_STATUSES: readonly PipStatus[] = ['Completed', 'Unsuccessful', 'Cancelled'];
+
 export type PipOutcome =
   | 'PerformanceImproved'
   | 'Extended'
@@ -172,6 +188,7 @@ export interface PipReviewMeeting extends AuditFields {
   tenantId: string;
   pipId: string;
   meetingDate: string;
+  status: PipMeetingStatus;
   employeeAttended: boolean;
   progressNotes: string;
   issuesDiscussed?: string | null;
@@ -194,9 +211,13 @@ export interface PipAttachment {
 export interface PipMeetingSummary {
   meetingId: string;
   meetingDate: string;
+  /** Stored (D-73). */
+  status: PipMeetingStatus;
+  /** Means something once the meeting is Held. */
   employeeAttended: boolean;
   conductedByName: string;
   progressNotesPreview: string;
+  /** Held. */
   isCompleted: boolean;
 }
 
@@ -302,13 +323,16 @@ export interface PipGoalMeetingUpdate {
  * The meeting form. Both a read and a write shape — the server hands back the same object it
  * takes, with the PIP context filled in.
  *
- * ⚠ `status` and `completedOn` are presentational: a meeting has no stored status, and the
- * server derives "held" from the meeting date being in the past.
+ * `status` is the stored `PipMeetingStatus` as a number — 1 Scheduled, 2 Held, 3 Cancelled
+ * (closure D-73) — and is read only: Record meeting and Cancel write it. `completedOn` is
+ * presentational (the response to Record meeting); nothing stores it.
  */
 export interface PipMeetingForm {
   meetingId?: string | null;
   pipId: string;
   pipNumber: string;
+  /** The plan's status — meetings are written while it is in force, never once closed (D-73). */
+  pipStatus: PipStatus;
   /** The plan's subject — the only person who writes `employeeComments` (P13). */
   employeeId: string;
   employeeName: string;
@@ -337,6 +361,7 @@ export interface PipMeetingScheduleItem {
   meetingId: string;
   meetingNumber: number;
   meetingDate: string;
+  /** The stored status as a number: 1 Scheduled, 2 Held, 3 Cancelled (D-73). */
   status: number;
   employeeAttended: boolean;
   conductedByName: string;

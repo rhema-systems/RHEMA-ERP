@@ -25,9 +25,9 @@ namespace ErpSystem.Core.Services.HR.Appraisal;
 /// this service makes no identity checks.
 ///
 /// ── Two-phase pipeline ──────────────────────────────────────────────────────
-/// Phase 1 (SQL):  Pre-filter candidates using indexed columns —
-///                 Status, DueDate, ProgressPercent.
-///                 This is a wide net: it may include goals that the evaluator
+/// Phase 1 (SQL):  Pre-filter candidates on Status — the agreed goals not yet
+///                 completed (GoalSetRules.RiskWatched, decision D-71).
+///                 This is a wide net: it includes goals that the evaluator
 ///                 will later mark as NOT at risk (false positives are fine here).
 /// Phase 2 (memory): IGoalRiskEvaluator applies the full configurable ruleset
 ///                 per row.  Only confirmed at-risk goals are returned.
@@ -86,22 +86,22 @@ public sealed class AtRiskGoalsQueryService : IAtRiskGoalsQueryService
         var utcNow       = _clock.UtcNow;
         var today        = DateOnly.FromDateTime(utcNow);
         var riskSettings = await _riskSettingsProvider.GetActiveAsync(cancellationToken);
-        var cutoffDate   = today.AddDays(riskSettings.DaysRemainingThreshold);
 
         _logger.LogDebug(
             "AtRiskGoalsQueryService.GetOrgWideAtRiskGoalsAsync: cycleId={CycleId}, " +
             "unitId={OrgUnitId}, levelId={OrgLevelId}, today={Today}, " +
-            "cutoff={Cutoff}, minProgress={MinProgress}",
+            "daysThreshold={Days}, minProgress={MinProgress}, tolerance={Tolerance}",
             request.AppraisalCycleId,
             request.OrganizationUnitId,
             request.OrganizationLevelId,
-            today, cutoffDate, riskSettings.MinimumProgressPercent);
+            today, riskSettings.DaysRemainingThreshold, riskSettings.MinimumProgressPercent,
+            riskSettings.ExpectedProgressTolerancePercent);
 
         // ── Phase 1: SQL pre-filter ───────────────────────────────────────────
         // Builds a single JOIN query; optional org filters fold into the WHERE.
-        // Pre-filter widens the candidate set using indexed columns; the evaluator
-        // (Phase 2) is the authoritative gate for at-risk classification.
-        var query = BuildCandidateQuery(request, cutoffDate, riskSettings.MinimumProgressPercent, GetTenantId());
+        // The agreed, unfinished goals of the cycle; the evaluator (Phase 2) is the
+        // authoritative gate for at-risk classification.
+        var query = BuildCandidateQuery(request, GetTenantId());
         var raw   = await query.ToListAsync(cancellationToken);
 
         _logger.LogDebug(
@@ -135,16 +135,18 @@ public sealed class AtRiskGoalsQueryService : IAtRiskGoalsQueryService
     /// <see cref="AtRiskGoalsRequest.OrganizationLevelId"/> filters are composed
     /// into the IQueryable before materialisation — EF Core folds them into SQL.
     ///
-    /// The pre-filter is intentionally loose (includes Status == AtRisk as-is,
-    /// plus InProgress/OnTrack within the cutoff window) to avoid missed detections;
-    /// Phase 2 narrows the set using the full evaluator ruleset.
+    /// The pre-filter admits every agreed goal not yet completed (<see cref="GoalSetRules.RiskWatched"/>);
+    /// Phase 2 decides with the full evaluator ruleset. It used to admit only goals marked at risk and
+    /// running goals due within the window under the minimum — rule 1's own test — so rule 2 (behind
+    /// the straight line) never changed who was listed, and an approved goal nobody had touched was
+    /// never on it (performance closure D-71).
     /// </summary>
     private IQueryable<OrgRawGoalRow> BuildCandidateQuery(
         AtRiskGoalsRequest request,
-        DateOnly           cutoffDate,
-        decimal            minProgressPercent,
         Guid               tenantId)
     {
+        var watched = GoalSetRules.RiskWatched;
+
         // SECURITY note: no ManagerId scope here — intentional for org-wide view.
         // Access control is at the controller level.
         var employees = _employeeRepo.GetQueryable()
@@ -163,14 +165,7 @@ public sealed class AtRiskGoalsQueryService : IAtRiskGoalsQueryService
             join e in employees on g.EmployeeId equals e.Id
             where g.TenantId == tenantId
                && g.AppraisalCycleId == request.AppraisalCycleId
-               && (
-                      g.Status == GoalStatus.AtRisk
-                      || (
-                             (g.Status == GoalStatus.InProgress || g.Status == GoalStatus.OnTrack)
-                             && g.DueDate <= cutoffDate
-                             && g.ProgressPercent < minProgressPercent
-                         )
-                  )
+               && watched.Contains(g.Status)
             select new OrgRawGoalRow
             {
                 GoalId               = g.Id,

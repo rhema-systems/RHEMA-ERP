@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
-import { CheckCircle2, MessageSquarePlus, Save, TriangleAlert } from 'lucide-react';
+import { Ban, CheckCircle2, MessageSquarePlus, Save, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -26,7 +26,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { formatDate } from '@/lib/hr/attendance-format';
 import { pipMeetingService } from '@/services/hr/pip.service';
 import { GOAL_PROGRESS_STATUS_OPTIONS, type GoalProgressStatus } from '@/types/hr/goals';
-import type { PipMeetingForm } from '@/types/hr/pip';
+import { PIP_CLOSED_STATUSES, PIP_MEETING_STATUS_VALUES, type PipMeetingForm } from '@/types/hr/pip';
 
 /**
  * One PIP review meeting.
@@ -37,8 +37,10 @@ import type { PipMeetingForm } from '@/types/hr/pip';
  * progress is recorded in a meeting rather than on the goals tab, so what changed and the
  * conversation that agreed it stay together.
  *
- * ⚠ A meeting has no stored status. "Completed" is derived from its date being in the past, so
- * the Complete button saves the notes and stamps nothing extra — it is a save with a fuller name.
+ * A meeting's status is stored (performance closure D-73): booked = Scheduled, *Record meeting* =
+ * Held (on a plan in force, not before the meeting's date), *Cancel* = Cancelled (never a held
+ * one). A cancelled meeting takes no edits, and a closed plan takes no writes at all, so the
+ * actions below follow the plan's and the meeting's status.
  *
  * Two authors, two parts (performance closure P13): the supervisor's record — what was discussed,
  * goal progress — and the employee's reply, which is theirs alone. The save posts the whole form
@@ -90,6 +92,15 @@ export default function PipMeetingPage() {
       refresh();
     },
     onError: fail('Could not save the meeting'),
+  });
+
+  const cancel = useMutation({
+    mutationFn: () => pipMeetingService.cancel(meetingId, pipId),
+    onSuccess: () => {
+      toast({ title: 'Meeting cancelled' });
+      refresh();
+    },
+    onError: fail('Could not cancel the meeting'),
   });
 
   const addComment = useMutation({
@@ -150,27 +161,61 @@ export default function PipMeetingPage() {
   // round (P13) — the server refuses each the other's write.
   const isSubject = !!user?.employeeId && user.employeeId === form.employeeId;
 
+  // D-73: what each status allows — the server holds the same rules.
+  const planClosed = PIP_CLOSED_STATUSES.includes(form.pipStatus);
+  const planInForce = form.pipStatus === 'Active' || form.pipStatus === 'InProgress';
+  const isScheduled = form.status === PIP_MEETING_STATUS_VALUES.Scheduled;
+  const isHeld = form.status === PIP_MEETING_STATUS_VALUES.Held;
+  const isCancelled = form.status === PIP_MEETING_STATUS_VALUES.Cancelled;
+  const notYetDue = new Date(form.meetingDate).setHours(0, 0, 0, 0) > new Date().setHours(0, 0, 0, 0);
+  const canSave = !planClosed && !isCancelled;
+  const canRecord = planInForce && isScheduled;
+  const canCancel = planInForce && isScheduled;
+  const canReply = !planClosed && !isCancelled;
+  const statusLabel = isHeld ? 'Held' : isCancelled ? 'Cancelled' : 'Scheduled';
+  const busy = save.isPending || cancel.isPending;
+
   return (
     <div className="space-y-6 p-6">
       <PageHeader
         title={`Review ${form.meetingNumber} of ${form.totalScheduledMeetings}`}
-        description={`${form.pipNumber} — ${form.employeeName} · ${formatDate(form.meetingDate)}`}
+        description={`${form.pipNumber} — ${form.employeeName} · ${formatDate(form.meetingDate)} · ${statusLabel}`}
         backHref={`/hr/performance/pip/${pipId}`}
         actions={
-          isSubject ? undefined : (
+          isSubject || !canSave ? undefined : (
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => save.mutate(false)} disabled={save.isPending}>
+            {canCancel && (
+              <Button variant="outline" onClick={() => cancel.mutate()} disabled={busy}>
+                <Ban className="mr-2 h-4 w-4" />
+                Cancel meeting
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => save.mutate(false)} disabled={busy}>
               <Save className="mr-2 h-4 w-4" />
               Save
             </Button>
-            <Button onClick={() => save.mutate(true)} disabled={save.isPending}>
-              <CheckCircle2 className="mr-2 h-4 w-4" />
-              {save.isPending ? 'Saving…' : 'Record meeting'}
-            </Button>
+            {canRecord && (
+              <Button
+                onClick={() => save.mutate(true)}
+                disabled={busy || notYetDue}
+                title={notYetDue ? 'A meeting is recorded as held on or after its date.' : undefined}
+              >
+                <CheckCircle2 className="mr-2 h-4 w-4" />
+                {save.isPending ? 'Saving…' : 'Record meeting'}
+              </Button>
+            )}
           </div>
           )
         }
       />
+
+      {(planClosed || isCancelled) && (
+        <p className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+          {isCancelled
+            ? 'This meeting was cancelled, so it takes no more changes.'
+            : `This plan is closed (${form.pipStatus}), so its meetings are a record and take no more changes.`}
+        </p>
+      )}
 
       <Card>
         <CardHeader>
@@ -313,7 +358,7 @@ export default function PipMeetingPage() {
             </p>
           )}
 
-          {isSubject && (
+          {isSubject && canReply && (
             <div className="space-y-2">
               <Label htmlFor="pm-comment">Your comment</Label>
               <Textarea

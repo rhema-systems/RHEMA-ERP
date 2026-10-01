@@ -622,6 +622,7 @@ public static class AppraisalMappingExtensions
             TenantId = entity.TenantId,
             PipId = entity.PipId,
             MeetingDate = entity.MeetingDate,
+            Status = entity.Status,
             EmployeeAttended = entity.EmployeeAttended,
             ProgressNotes = entity.ProgressNotes,
             IssuesDiscussed = entity.IssuesDiscussed,
@@ -657,7 +658,8 @@ public static class AppraisalMappingExtensions
 
     /// <remarks>
     /// The supervisor's record of the meeting only (P13): not the plan it belongs to, not who
-    /// conducted it, and not the employee's reply.
+    /// conducted it, not the employee's reply, and not its status — the service's record and cancel
+    /// writers own that (decision D-73).
     /// </remarks>
     public static void UpdateEntity(this UpdatePipReviewMeetingDto dto, PipReviewMeeting entity)
     {
@@ -1737,8 +1739,8 @@ public static class AppraisalMappingExtensions
             MaxValue = dto.MaxValue,
             Unit = dto.Unit,
             StartDate = dto.StartDate,
-            DueDate = dto.DueDate,
-            SubmittedToManagerId = dto.SubmittedToManagerId
+            DueDate = dto.DueDate
+            // SubmittedToManagerId is the submit's, from the HR record (performance closure D-76).
         };
     }
 
@@ -1768,7 +1770,7 @@ public static class AppraisalMappingExtensions
         entity.Unit = dto.Unit;
         entity.StartDate = dto.StartDate;
         entity.DueDate = dto.DueDate;
-        entity.ProgressPercent = dto.ProgressPercent;
+        // ProgressPercent is not copied (performance closure D-72): progress is recorded as entries.
 
         // Status, SubmittedToManagerId and ManagerFeedback are deliberately NOT copied from the
         // update payload. They belong to the approval lifecycle, which IGoalWorkflowCommandService
@@ -2252,6 +2254,7 @@ public static class AppraisalMappingExtensions
             TenantId = entity.TenantId,
             AppraisalId = entity.AppraisalId,
             AppraisalNumber = entity.Appraisal?.AppraisalNumber,
+            AppraiseeEmployeeId = entity.Appraisal?.EmployeeId,
             ScheduledById = entity.ScheduledById,
             ScheduledByName = entity.ScheduledBy?.FullName,
             ConductedById = entity.ConductedById,
@@ -2277,8 +2280,7 @@ public static class AppraisalMappingExtensions
         {
             AppraisalId   = dto.AppraisalId,
             ReviewEventId = dto.ReviewEventId,
-            ScheduledById = dto.ScheduledById,
-            ConductedById = dto.ConductedById,
+            // ScheduledById and ConductedById are the service's, from the token (decision D-74).
             // The service refuses a missing or unknown type first (B2); never default one.
             Type          = dto.Type ?? throw new ArgumentException("A conversation needs its type."),
             ScheduledDate = dto.ScheduledDate,
@@ -2286,19 +2288,16 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <remarks>
+    /// The meeting's details only (decision D-74): never its appraisal, type, scheduler, conductor,
+    /// held flag or held date.
+    /// </remarks>
     public static void UpdateEntity(this UpdateAppraisalConversationDto dto, AppraisalConversation entity)
     {
-        entity.AppraisalId = dto.AppraisalId;
-        entity.ScheduledById = dto.ScheduledById;
-        entity.ConductedById = dto.ConductedById;
-        // The service refuses a missing or unknown type first (B2); never default one.
-        entity.Type = dto.Type ?? throw new ArgumentException("A conversation needs its type.");
         entity.ScheduledDate = dto.ScheduledDate;
-        entity.HeldDate = dto.HeldDate;
         entity.Agenda = dto.Agenda;
         entity.PostMeetingNotes = dto.PostMeetingNotes;
         entity.KeyTakeaways = dto.KeyTakeaways;
-        entity.IsCompleted = dto.IsCompleted;
         entity.ReviewEventId = dto.ReviewEventId;
     }
 
@@ -2579,13 +2578,15 @@ public static class AppraisalMappingExtensions
             Description = dto.Description,
             SuccessCriteria = dto.SuccessCriteria,
             DueDate = dto.DueDate,
-            Status = dto.Status
+            Status = dto.Status,
+            ProgressPercent = dto.ProgressPercent,
+            ProgressNotes = dto.ProgressNotes
         };
     }
 
+    /// <remarks>Never re-parents the goal: it stays on the plan it was found under.</remarks>
     public static void UpdateEntity(this UpdatePipGoalDto dto, PipGoal entity)
     {
-        entity.PipId = dto.PipId;
         entity.Title = dto.Title;
         entity.Description = dto.Description;
         entity.SuccessCriteria = dto.SuccessCriteria;

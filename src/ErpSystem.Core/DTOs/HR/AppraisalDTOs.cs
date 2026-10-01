@@ -859,6 +859,8 @@ public class PipReviewMeetingDto : BaseDto
     public Guid TenantId { get; set; }
     public Guid PipId { get; set; }
     public DateTime MeetingDate { get; set; }
+    /// <summary>Stored (decision D-73): Scheduled until recorded as held or cancelled.</summary>
+    public PipMeetingStatus Status { get; set; }
     public bool EmployeeAttended { get; set; }
     public string ProgressNotes { get; set; } = string.Empty;
     public string? IssuesDiscussed { get; set; }
@@ -4479,7 +4481,9 @@ public class CreateEmployeeGoalDto : CreateDtoBase
     [Required]
     public DateOnly DueDate { get; set; }
 
-    public Guid? SubmittedToManagerId { get; set; }
+    // No SubmittedToManagerId (performance closure D-76): the manager a goal goes to is the one the
+    // submit reads from the employee's HR record. The body's id was saved unchecked, so a goal could
+    // be filed in another tenant's employee's approval queue.
 }
 
 public class UpdateEmployeeGoalDto : UpdateDtoBase
@@ -4532,8 +4536,10 @@ public class UpdateEmployeeGoalDto : UpdateDtoBase
     [Required]
     public DateOnly DueDate { get; set; }
 
-    [Range(0, 100)]
-    public decimal ProgressPercent { get; set; }
+    // No ProgressPercent (performance closure D-72): a goal's progress is what its progress entries
+    // say, with who recorded it and when. The edit wrote it straight onto the goal — no entry, no
+    // recorder, no status — and both forms sent back the value they had loaded, so an entry made while
+    // the dialog was open was overwritten on save.
 
     // No Status / SubmittedToManagerId / ManagerFeedback here on purpose. Those move only through
     // the submit / approve / reject / lock commands on EmployeeGoalsController, which enforce the
@@ -5125,6 +5131,11 @@ public class AppraisalConversationDto : BaseDto
     public Guid TenantId { get; set; }
     public Guid AppraisalId { get; set; }
     public string? AppraisalNumber { get; set; }
+    /// <summary>
+    /// The appraisee (decision D-74): they read their conversations and write none, so the screens
+    /// offer Save and Mark held to everyone else on it.
+    /// </summary>
+    public Guid? AppraiseeEmployeeId { get; set; }
     public Guid? ScheduledById { get; set; }
     public string? ScheduledByName { get; set; }
     public Guid? ConductedById { get; set; }
@@ -5144,9 +5155,11 @@ public class CreateAppraisalConversationDto : CreateDtoBase
     [Required]
     public Guid AppraisalId { get; set; }
 
+    /// <summary>One of this appraisal's review events (D-76), when it is logged at one.</summary>
     public Guid? ReviewEventId { get; set; }
-    public Guid? ScheduledById { get; set; }
-    public Guid? ConductedById { get; set; }
+
+    // No ScheduledById / ConductedById (decision D-74): the scheduler is who books it and the
+    // conductor who marks it held, both from the token.
 
     /// <summary>
     /// Which conversation this is — required (performance closure B2). It defaulted to KickOff, so
@@ -5162,23 +5175,15 @@ public class CreateAppraisalConversationDto : CreateDtoBase
     public string? Agenda { get; set; }
 }
 
+/// <remarks>
+/// Decision D-74: the meeting's details only. The type (the employee was told which conversation was
+/// booked; an edit with none wrote 0 — B2), the appraisal (B2), the scheduler and conductor (the
+/// token's), and held with its date (<c>CompleteAsync</c>'s) are not the edit's, so the DTO no longer
+/// carries them; a body that sends them is read without them.
+/// </remarks>
 public class UpdateAppraisalConversationDto : UpdateDtoBase
 {
-    [Required]
-    public Guid AppraisalId { get; set; }
-
-    public Guid? ScheduledById { get; set; }
-    public Guid? ConductedById { get; set; }
-
-    /// <summary>
-    /// Required (performance closure B2): an update that named no type wrote 0, which is no
-    /// conversation type at all — a booked kick-off stopped counting as one.
-    /// </summary>
-    [Required]
-    public ConversationType? Type { get; set; }
-
     public DateTime? ScheduledDate { get; set; }
-    public DateTime? HeldDate { get; set; }
 
     [MaxLength(2000)]
     public string? Agenda { get; set; }
@@ -5189,7 +5194,7 @@ public class UpdateAppraisalConversationDto : UpdateDtoBase
     [MaxLength(2000)]
     public string? KeyTakeaways { get; set; }
 
-    public bool IsCompleted { get; set; }
+    /// <summary>One of this appraisal's review events (D-76), or none.</summary>
     public Guid? ReviewEventId { get; set; }
 }
 
@@ -5608,6 +5613,13 @@ public class CreatePipGoalDto : CreateDtoBase
     public DateOnly DueDate { get; set; }
 
     public GoalProgressStatus Status { get; set; } = GoalProgressStatus.NotStarted;
+
+    /// <summary>The goal's starting point (P-55), as the form sends it.</summary>
+    [Range(0, 100)]
+    public decimal? ProgressPercent { get; set; }
+
+    [MaxLength(2000)]
+    public string? ProgressNotes { get; set; }
 }
 
 public class UpdatePipGoalDto : UpdateDtoBase

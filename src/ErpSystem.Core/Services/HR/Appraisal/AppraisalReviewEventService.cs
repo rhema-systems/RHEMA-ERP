@@ -179,6 +179,17 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         => query.Where(e => e.Appraisal.Status != AppraisalStatus.Withdrawn
                          || e.Status == AppraisalReviewStatus.Completed);
 
+    /// <summary>
+    /// Decision D-74: Cancelled closes an event as Completed does — the withdrawal cancels a withdrawn
+    /// appraisal's open events. Every write tested Completed alone, so a cancelled event could still
+    /// be edited, submitted and completed.
+    /// </summary>
+    private static void EnsureNotCancelled(AppraisalReviewEvent ev)
+    {
+        if (ev.Status == AppraisalReviewStatus.Cancelled)
+            throw new InvalidOperationException("This review event was cancelled, so it takes no more work.");
+    }
+
     // ─── Settings-driven review gates (Phase 2B) ──────────────────────────────
 
     /// <summary>Loads the AppraisalSettings governing a review event (via its cycle), or null.</summary>
@@ -283,6 +294,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
             throw new InvalidOperationException("This review event is not configured as a full appraisal.");
         if (ev.Status == AppraisalReviewStatus.Completed)
             throw new InvalidOperationException("This review event is already completed.");
+        EnsureNotCancelled(ev);
         await EnsureAppraisalTakesWorkAsync(ev.PerformanceAppraisalId, "The interim appraisal cannot be finalised", cancellationToken);
 
         var tenantId = GetTenantId();
@@ -473,6 +485,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
         if (entity.Status == AppraisalReviewStatus.Completed)
             throw new InvalidOperationException("Cannot update a completed review event.");
+        EnsureNotCancelled(entity);
         await EnsureAppraisalTakesWorkAsync(entity.PerformanceAppraisalId, "The review event cannot be changed", cancellationToken);
 
         updateDto.UpdateEntity(entity);
@@ -487,10 +500,10 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
     {
         var entity = await GetOwnedReviewEventAsync(id, cancellationToken);
 
-        // The appraisal's work is done while its cycle is Open (performance closure E-d2b).
-        await AppraisalLiveCycle.EnsureAppraisalCycleOpenAsync(
-            _appraisalRepository.GetQueryable(), GetTenantId(), entity.PerformanceAppraisalId,
-            "The review event cannot be removed", cancellationToken);
+        // The appraisal's work is done while its cycle is Open (performance closure E-d2b), and a
+        // withdrawn appraisal's events are its record — completed ones its history, the rest cancelled
+        // by the withdrawal (D-74). The delete checked the cycle only.
+        await EnsureAppraisalTakesWorkAsync(entity.PerformanceAppraisalId, "The review event cannot be removed", cancellationToken);
 
         await _reviewEventRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -506,6 +519,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
         if (entity.Status == AppraisalReviewStatus.Completed)
             throw new InvalidOperationException("Review event is already completed.");
+        EnsureNotCancelled(entity);
         if (entity.Status == AppraisalReviewStatus.EmployeeSubmitted)
             throw new InvalidOperationException("Employee has already submitted this review event.");
         await EnsureAppraisalTakesWorkAsync(entity.PerformanceAppraisalId, "The review event cannot be submitted", cancellationToken);
@@ -534,6 +548,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
         if (entity.Status == AppraisalReviewStatus.Completed)
             throw new InvalidOperationException("Review event is already completed.");
+        EnsureNotCancelled(entity);
         await EnsureAppraisalTakesWorkAsync(entity.PerformanceAppraisalId, "The review event cannot be completed", cancellationToken);
 
         // Gates: employee self-assessment + goal progress updates when configured.
@@ -567,6 +582,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
         if (ev.Status == AppraisalReviewStatus.Completed)
             throw new InvalidOperationException("This review event is closed; progress can no longer be recorded against it.");
+        EnsureNotCancelled(ev);
         await EnsureAppraisalTakesWorkAsync(ev.PerformanceAppraisalId, "Progress cannot be recorded on the review event", cancellationToken);
 
         var goals = await GetScorableGoalsAsync(ev, new[] { dto.EmployeeGoalId }, cancellationToken);
@@ -636,6 +652,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         Guid? fileUploadRecordId = null, Guid? documentRecordId = null, Guid? documentVersionId = null)
     {
         var ev = await GetOwnedReviewEventAsync(eventId, cancellationToken);
+        EnsureNotCancelled(ev);
         await EnsureAppraisalTakesWorkAsync(ev.PerformanceAppraisalId, "A file cannot be attached to the review event", cancellationToken);
 
         var tenantId = GetTenantId();

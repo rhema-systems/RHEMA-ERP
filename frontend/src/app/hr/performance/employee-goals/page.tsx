@@ -42,6 +42,7 @@ import {
 } from '@/components/ui/table';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
@@ -152,10 +153,17 @@ const PRIORITY_VARIANT: Record<GoalPriority, 'default' | 'secondary' | 'destruct
 const SUBMITTABLE = new Set(['Draft', 'Rejected']);
 /** Everything past approval, which is where a lock becomes possible. */
 const LOCKABLE = new Set(['Approved', 'InProgress', 'AtRisk', 'OnTrack', 'Completed']);
+/**
+ * Not yet agreed with the manager — the goals that can be deleted (closure D-72). An agreed goal is
+ * sent back first.
+ */
+const NOT_AGREED = new Set(['Draft', 'PendingApproval', 'Rejected']);
 
 export default function EmployeeGoalsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { user } = useAuth();
+  const me = user?.employeeId ?? null;
 
   // Empty string rather than null for the ids: both are only ever read inside a query that
   // `enabled` already gates, and a plain string keeps them assignable without assertions.
@@ -278,13 +286,9 @@ export default function EmployeeGoalsPage() {
       };
 
       if (editing) {
-        // Progress is carried through unchanged: it belongs to the progress entries, not
-        // to this form, but the update payload requires a value for it.
-        return employeeGoalService.update(editing.id, {
-          ...content,
-          id: editing.id,
-          progressPercent: editing.progressPercent,
-        });
+        // Progress is not this form's: it belongs to the progress entries (closure D-72), and
+        // sending back the loaded value overwrote any entry made while the dialog was open.
+        return employeeGoalService.update(editing.id, { ...content, id: editing.id });
       }
       // The library link is only ever set at creation — it records where the wording came
       // from and there is nothing to re-point it at afterwards.
@@ -317,7 +321,7 @@ export default function EmployeeGoalsPage() {
           variables.action === 'submit'
             ? 'Sent to the employee’s manager for approval.'
             : variables.action === 'lock'
-              ? 'Goal locked — no further changes.'
+              ? 'Goal locked — what it measures is fixed; progress is still recorded.'
               : 'Goal unlocked.',
       });
     },
@@ -572,6 +576,8 @@ export default function EmployeeGoalsPage() {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
+                                {/* An agreed goal's description, priority and dates stay editable;
+                                    what it measures is refused with the reason (D-30). */}
                                 {!goal.isLocked && (
                                   <DropdownMenuItem onClick={() => openEdit(goal)}>
                                     <Pencil className="mr-2 h-4 w-4" />
@@ -594,7 +600,7 @@ export default function EmployeeGoalsPage() {
                                     Lock
                                   </DropdownMenuItem>
                                 )}
-                                {goal.isLocked && (
+                                {goal.isLocked && goal.employeeId !== me && (
                                   <DropdownMenuItem
                                     onClick={() =>
                                       workflowMutation.mutate({ goal, action: 'unlock' })
@@ -610,7 +616,7 @@ export default function EmployeeGoalsPage() {
                                     Open detail
                                   </Link>
                                 </DropdownMenuItem>
-                                {!goal.isLocked && (
+                                {!goal.isLocked && NOT_AGREED.has(goal.status) && (
                                   <>
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem

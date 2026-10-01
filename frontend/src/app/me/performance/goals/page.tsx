@@ -156,10 +156,9 @@ export default function MyGoalsPage() {
       return editing
         ? employeeGoalService.update(editing.id, {
             id: editing.id,
-            progressPercent: editing.progressPercent,
             // What this form does not show is carried through unchanged. The update replaces every
             // field, so leaving these out cleared the goal's KPI, range, success criteria and
-            // alignment on every edit made here.
+            // alignment on every edit made here. Progress is not the edit's at all (closure D-72).
             kpiDefinitionId: editing.kpiDefinitionId ?? null,
             successCriteria: editing.successCriteria ?? null,
             minValue: editing.minValue ?? null,
@@ -168,6 +167,9 @@ export default function MyGoalsPage() {
             unitGoalId: editing.unitGoalId ?? null,
             parentGoalId: editing.parentGoalId ?? null,
             ...payload,
+            // The goal's own cycle: the picker can be empty ("all cycles") while a goal is edited,
+            // and an empty id read as a move to another cycle, which is refused.
+            appraisalCycleId: editing.appraisalCycleId,
           })
         : employeeGoalService.create(payload);
     },

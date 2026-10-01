@@ -22,6 +22,26 @@ public static class GoalSetRules
         or GoalStatus.Completed or GoalStatus.Locked;
 
     /// <summary>
+    /// Decision D-71: the goals the at-risk rules watch — agreed and not finished. A draft, a goal
+    /// waiting for the manager and a rejected one are not yet anyone's commitment, so they are never at
+    /// risk; a completed one is done. An array so a query's <c>Contains</c> becomes SQL's IN.
+    /// </summary>
+    public static readonly GoalStatus[] RiskWatched =
+    {
+        GoalStatus.Approved, GoalStatus.InProgress, GoalStatus.OnTrack, GoalStatus.AtRisk, GoalStatus.Locked,
+    };
+
+    /// <summary>
+    /// Decision D-72: the status an agreed goal runs in, from its progress — Completed at 100 % or more,
+    /// InProgress once anything is recorded, else Approved. What unlock restores a goal the old lock
+    /// left in the Locked status to, and what a goal falls back to when its progress entries go.
+    /// </summary>
+    public static GoalStatus RunningStatusFromProgress(decimal progressPercent, bool hasEntries) =>
+        progressPercent >= 100 ? GoalStatus.Completed
+        : progressPercent > 0 || hasEntries ? GoalStatus.InProgress
+        : GoalStatus.Approved;
+
+    /// <summary>
     /// Decision D-29: a lock freezes what the goal is — title, measure, target, weight, owner — and
     /// not its year, so the lock is the flag. Nothing sets the Locked status any more; a goal left
     /// in it by the old lock still counts as locked.

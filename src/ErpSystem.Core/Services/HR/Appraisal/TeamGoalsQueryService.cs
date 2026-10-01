@@ -150,7 +150,6 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
 
                 // ── Execution-state counts (progress visibility only) ─────────
                 InProgressCount = cycleGoals.Count(g => g.EmployeeId == e.Id && g.Status == GoalStatus.InProgress),
-                AtRiskCount     = cycleGoals.Count(g => g.EmployeeId == e.Id && g.Status == GoalStatus.AtRisk),
                 CompletedCount  = cycleGoals.Count(g => g.EmployeeId == e.Id && g.Status == GoalStatus.Completed),
 
                 // ── Overdue count ────────────────────────────────────────────
@@ -172,6 +171,12 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
             })
             .ToListAsync(cancellationToken);
 
+        // ── At-risk counts: the At risk tab's rule (performance closure D-71) ─
+        // The column counted the AtRisk status alone while the tab ran the evaluator, so the two
+        // disagreed on the same goals. One more round-trip: the team's watched goals, evaluated here.
+        var atRiskByEmployee = await CountAtRiskByEmployeeAsync(
+            BuildBaseGoalQuery(appraisalCycleId, managerId, tenantId), cancellationToken);
+
         // ── Post-projection: derive IsWeightBalanced + GovernanceStatus ───────
         // Pure in-memory computations — no additional DB round-trip.
         return rawRows.Select(r =>
@@ -189,7 +194,7 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
                 RejectedCount         = r.RejectedCount,
                 LockedCount           = r.LockedCount,
                 InProgressCount       = r.InProgressCount,
-                AtRiskCount           = r.AtRiskCount,
+                AtRiskCount           = atRiskByEmployee.GetValueOrDefault(r.EmployeeId),
                 CompletedCount        = r.CompletedCount,
                 OverdueCount          = r.OverdueCount,
                 TotalWeight           = r.TotalWeight,
@@ -250,31 +255,28 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         var managerId    = ResolveCurrentManagerId();
         var tenantId     = GetTenantId();
         var utcNow       = _clock.UtcNow;
-        var today        = DateOnly.FromDateTime(utcNow);
         var riskSettings = await _riskSettingsProvider.GetActiveAsync(cancellationToken);
-        // Lookahead window driven by configured threshold (default 14 days)
-        var cutoffDate = today.AddDays(riskSettings.DaysRemainingThreshold);
 
         _logger.LogDebug(
-            "TeamGoalsQueryService.GetAtRiskGoalsAsync: managerId={ManagerId}, cycleId={CycleId}, today={Today}, cutoff={Cutoff}, minProgress={MinProgress}",
-            managerId, appraisalCycleId, today, cutoffDate, riskSettings.MinimumProgressPercent);
+            "TeamGoalsQueryService.GetAtRiskGoalsAsync: managerId={ManagerId}, cycleId={CycleId}",
+            managerId, appraisalCycleId);
 
-        // ── At-risk pre-filter ───────────────────────────────────────────────
-        // (a) Status == AtRisk                                   — explicit marker
-        // (b) Status is InProgress/OnTrack
-        //     AND DueDate <= today + DaysRemainingThreshold      — approaching deadline
-        //     AND ProgressPercent < MinimumProgressPercent       — insufficient progress
+        // ── At-risk pre-filter, then the evaluator (performance closure D-71) ──
+        // The candidates are the team's agreed goals not yet completed; the evaluator's three
+        // rules decide, and only the goals it flags are listed — the org-wide list's rule. The
+        // pre-filter used to be rule 1's own test plus the AtRisk marker, so rule 2 (behind the
+        // straight line) never added anyone, and the tab returned every candidate unfiltered.
+        var watched = GoalSetRules.RiskWatched;
         var raw = await BuildBaseGoalQuery(appraisalCycleId, managerId, tenantId)
-            .Where(r =>
-                r.Status == GoalStatus.AtRisk
-                || (
-                    (r.Status == GoalStatus.InProgress || r.Status == GoalStatus.OnTrack)
-                    && r.DueDate <= cutoffDate
-                    && r.ProgressPercent < riskSettings.MinimumProgressPercent
-                ))
+            .Where(r => watched.Contains(r.Status))
             .ToListAsync(cancellationToken);
 
-        return EnrichWithComputedFields(raw, riskSettings, utcNow);
+        return EnrichWithComputedFields(raw, riskSettings, utcNow)
+            .Where(g => g.IsAtRisk)
+            .OrderByDescending(g => g.RiskSeverityScore)
+            .ThenBy(g => g.DaysRemaining)
+            .ThenBy(g => g.EmployeeName)
+            .ToList();
     }
 
     // =========================================================================
@@ -412,6 +414,8 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
         var managerId = ResolveCurrentManagerId();
         var tenantId  = GetTenantId();
         var today     = _clock.TodayUtc;
+        var utcNow    = _clock.UtcNow;
+        var riskSettings = await _riskSettingsProvider.GetActiveAsync(cancellationToken);
 
         _logger.LogDebug(
             "TeamGoalsQueryService.GetTeamGoalProgressAsync: managerId={ManagerId}, cycleId={CycleId}",
@@ -485,7 +489,9 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
                 NotStartedCount        = goals.Count(g => g.Status == GoalStatus.Approved),
                 InProgressCount        = goals.Count(g => g.Status == GoalStatus.InProgress),
                 OnTrackCount           = goals.Count(g => g.Status == GoalStatus.OnTrack),
-                AtRiskCount            = goals.Count(g => g.Status == GoalStatus.AtRisk),
+                // The At risk tab's rule, not the AtRisk status alone (performance closure D-71).
+                AtRiskCount            = goals.Count(g =>
+                    _riskEvaluator.Evaluate(ToMinimalGoalForEvaluation(g), riskSettings, utcNow).IsAtRisk),
                 CompletedCount         = goals.Count(g => g.Status == GoalStatus.Completed),
                 OverdueCount           = overdueCount,
                 AverageProgressPercent = avgProgress,
@@ -630,6 +636,25 @@ public sealed class TeamGoalsQueryService : ITeamGoalsQueryService
                 LockedDate        = r.LockedDate,
             };
         }).ToList();
+    }
+
+    /// <summary>
+    /// How many of each employee's goals the evaluator flags (performance closure D-71): the watched
+    /// goals of <paramref name="goals"/>, evaluated in memory against the tenant's thresholds — the
+    /// rule the At risk tab lists by, so a count and its list agree.
+    /// </summary>
+    private async Task<Dictionary<Guid, int>> CountAtRiskByEmployeeAsync(
+        IQueryable<RawGoalRow> goals, CancellationToken cancellationToken)
+    {
+        var watched      = GoalSetRules.RiskWatched;
+        var utcNow       = _clock.UtcNow;
+        var riskSettings = await _riskSettingsProvider.GetActiveAsync(cancellationToken);
+        var rows = await goals.Where(r => watched.Contains(r.Status)).ToListAsync(cancellationToken);
+
+        return rows
+            .Where(r => _riskEvaluator.Evaluate(ToMinimalGoalForEvaluation(r), riskSettings, utcNow).IsAtRisk)
+            .GroupBy(r => r.EmployeeId)
+            .ToDictionary(g => g.Key, g => g.Count());
     }
 
     /// <summary>

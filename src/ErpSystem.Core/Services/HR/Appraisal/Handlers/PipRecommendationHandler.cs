@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -83,11 +84,30 @@ public class PipRecommendationHandler : IOutcomeRecommendationHandler
             return ("PerformanceImprovementPlan", existing.Id);
         }
 
+        // Decision D-75: the rules a plan created on the PIP screen is held to. One live or in-flight
+        // plan per employee — a second one is not raised; the recommendation stays Approved-not-
+        // Actioned and HR sees why in the log.
+        var blocking = await _pipRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId && p.EmployeeId == appraisal.EmployeeId
+                     && (p.Status == PipStatus.Active || p.Status == PipStatus.InProgress
+                         || p.Status == PipStatus.PendingApproval))
+            .Select(p => p.PipNumber)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (blocking != null)
+        {
+            _logger.LogWarning(
+                "PipRecommendationHandler: employee {EmployeeId} is already on plan {PipNumber}; no second plan raised.",
+                appraisal.EmployeeId, blocking);
+            return null;
+        }
+
         // PIP.SupervisorId is a required Employee FK. Prefer the employee's manager, then the
-        // recommendation approver/recommender. If none can be resolved, leave Approved-not-Actioned.
-        var supervisorId = appraisal.Employee?.ManagerId
-                           ?? (recommendation.ApprovedById is { } a && a != Guid.Empty ? a : (Guid?)null)
-                           ?? (recommendation.RecommendedById is { } r && r != Guid.Empty ? r : (Guid?)null);
+        // recommendation approver/recommender — never the employee themselves (D-75: the fallback
+        // could name them). If none can be resolved, leave Approved-not-Actioned.
+        Guid? NotTheEmployee(Guid? id) => id is Guid g && g != Guid.Empty && g != appraisal.EmployeeId ? g : null;
+        var supervisorId = NotTheEmployee(appraisal.Employee?.ManagerId)
+                           ?? NotTheEmployee(recommendation.ApprovedById)
+                           ?? NotTheEmployee(recommendation.RecommendedById);
         if (supervisorId is null)
         {
             _logger.LogWarning(
@@ -100,10 +120,14 @@ public class PipRecommendationHandler : IOutcomeRecommendationHandler
         var entity = new PerformanceImprovementPlan
         {
             TenantId = tenantId,
-            PipNumber = $"PIP-APR-{now:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}",
+            // The tenant's own sequence, shared with the PIP screen (D-75).
+            PipNumber = await PipNumbering.NextAsync(_pipRepository, tenantId, cancellationToken),
             EmployeeId = appraisal.EmployeeId,
             AppraisalId = appraisal.Id,
             SupervisorId = supervisorId.Value,
+            // The HR officer who approved the outcome owns the plan they set in motion (D-75): the
+            // approval is the desk's. Left empty when that would be the employee.
+            HROwnerId = NotTheEmployee(recommendation.ApprovedById),
             StartDate = now,
             EndDate = now.AddDays(90),
             Status = PipStatus.Draft,

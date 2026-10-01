@@ -61,6 +61,14 @@ a cycle is not deleted, a cycle's template rows are pinned once its appraisals a
 generation refuses an unapproved template; a settings profile in use keeps its rules — changed on a copy —
 while its name, risk bands, workload threshold and default HR reviewer stay editable. Chapter 4's walk
 shows the weights badge on a new, unsaved profile: the demo profile's rules are read-only now.
+**And for lane E, slice E-f** (goals, PIPs and conversations, 2026-10-01): Rule 4, Appendices B, D and F,
+and chapters 17–20, 23 and 36 — the at-risk lists watch every goal agreed with the manager (APC2026's
+list reads 19, not 1), and the manager's tab, tiles and columns count the same rule; a goal is deleted
+only before it is agreed, its edit never changes its progress, an entry is corrected only on an agreed
+goal, and unlock restores the status the progress gives it and is never your own; a PIP's goals change
+only while it is a draft, its reviews are *Scheduled*, *Held* or *Cancelled* (stored), a closed plan takes
+no writes, and its subject neither approves nor closes it; the appraisee reads their conversations and
+writes none, the held date can be stated, and a held conversation is never deleted.
 **The database was rebuilt on 2026-09-29**: Rule 2, Rule 9, the demo tables and the Efua arithmetic give its figures (Efua 88.56, Cynthia 87.00, Efua's appeal window to 6 October). The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
 **Seventh in the series**, after Recruitment, Employees, Leave, Attendance & Time, Company Schedule and Staff Travel.
 
@@ -265,19 +273,24 @@ you improvise: do not open a second appraisal and press Finalise on it.
 
 ---
 
-### Rule 4 — Nine goals sit at 0% progress, and are therefore all "at risk"
+### Rule 4 — Twelve goals sit at 0% progress, and are therefore all "at risk"
 
 Only **Efua Seidu** has recorded progress against her goals. Kojo Fiadzo (`gm.ops`), Kwasi Danquah
-(`head.dev`) and Cynthia Sarpong (`she.officer`) each have three approved goals sitting at **0%**.
+(`head.dev`), Cynthia Sarpong (`she.officer`) and the new hire Kojo Ansah each have three approved goals
+sitting at **0%**.
 
 The risk evaluator's second rule is *behind the run rate*: a goal is flagged when
 `progress + tolerance < expected`, where *expected* is a straight line from start date to due date. On
-17 September 2026, a goal running 1 Jan → 31 Dec is **71.2%** through its life, so with the default
-20-point tolerance anything below **51.2%** is flagged. Nine goals at 0% are flagged, and so are the
-five fixture goals at 48% and Efua's Civil 3D goal at 40%.
+1 October 2026, a goal running 1 Jan → 31 Dec is **75%** through its life, so with the default
+20-point tolerance anything below **55%** is flagged. Twelve goals at 0% are flagged, and so are the
+five fixture goals at 48% and Efua's Civil 3D goal at 40% — with her turnaround goal, flagged by hand,
+nineteen.
 
-**Expect Goals At Risk to read about 16 rows, 0 of them high-severity, across 9 employees.** The exact
-figure moves with today's date — read the tile, do not quote this one.
+**Expect Goals At Risk to read 19 rows on 1 October 2026, 0 of them high-severity, across 10
+employees.** The exact figure moves with today's date (the fixture goals at 55% tip over within days) —
+read the tile, do not quote this one. *(Until performance closure E-f, 2026-10-01, the list read **1**:
+it took in only goals already marked at risk and running goals due within 14 days, so this rule never
+added a goal. It now watches every goal agreed with the manager and not completed — D-71.)*
 
 This is not an embarrassment. It is the best possible illustration of the feature:
 
@@ -2403,9 +2416,9 @@ way")*.
 |---|---|---|
 | The list | `GET api/EmployeeGoals/by-employee/{me}?cycleId=` | |
 | Tiles | `GET api/EmployeeGoals/summary/{employeeId}/{cycleId}` | counts by status, overall progress, set completeness |
-| Save | `POST` / `PUT api/EmployeeGoals[/{id}]` | content only — **an edit never changes status** |
+| Save | `POST` / `PUT api/EmployeeGoals[/{id}]` | content only — **an edit never changes status or progress** *(the PUT carried a progress figure and wrote it onto the goal until performance closure E-f, D-72; progress is what the entries say)*. Its links — company, unit and parent goal, library item, KPI — must be the tenant's, the cycle's and the owner's (422, D-76) |
 | Submit | `POST api/EmployeeGoals/{id}/submit` | 204; **422 when the employee has no manager on their HR record** |
-| Record progress | `POST api/EmployeeGoals/{id}/progress` | writes `GoalProgressEntries`, then **carries the percent and status onto the goal**. Only accepted while approved / in progress / at risk |
+| Record progress | `POST api/EmployeeGoals/{id}/progress` | writes `GoalProgressEntries`, then **carries the percent and status onto the goal**. Only accepted while approved / in progress / at risk. An entry is corrected or removed only while the goal is agreed (not while it is sent back), and removing the latest one carries the previous one back onto the goal (D-72) |
 
 > **No `recordedById` is sent.** The recorder is the signed-in user, stamped server-side. It used to be
 > a picker defaulting to the goal's owner "so HR could record on somebody's behalf" — which is the same
@@ -2473,11 +2486,14 @@ when they don't)* · Overall progress · Awaiting approval.
 
 with a **Locked** badge beside the status where applicable, and a **⋯** menu per row:
 
-* **Edit** *(hidden when locked)*
+* **Edit** *(hidden when locked; on an agreed goal, what it measures is refused with the reason)*
 * **Submit for approval** *(only from Draft or Rejected)*
-* **Lock** *(only from a post-approval status, and not already locked)* / **Unlock**
+* **Lock** *(only from a post-approval status, and not already locked)* / **Unlock** *(never on your own
+  goal — an HR officer included: the lock is the manager's hold on it, D-72)*
 * **Open detail**
-* **Delete** *(hidden when locked)*
+* **Delete** *(only before the goal is agreed — a draft, one waiting for the manager, or one sent back —
+  and not locked; the delete takes its progress entries. An agreed goal is sent back first: the owner
+  could delete even a completed one until performance closure E-f, D-72)*
 
 **The goal dialog** — the fullest form in the module:
 
@@ -2558,8 +2574,9 @@ Dialog hint: *"New goals start as a draft. Submitting is what sends them to the 
 | Submit | `POST …/{id}/submit` | **the owner** |
 | Approve | `POST …/{id}/approve` *(optional feedback)* | **the direct manager** |
 | Reject | `POST …/{id}/reject` — **feedback is mandatory**, a bare rejection is 422 | the direct manager |
-| Lock / Unlock | `POST …/{id}/lock` / `…/unlock` | the direct manager |
-| Progress | `GET/POST/PUT/DELETE …/{id}/progress[/{entryId}]` | |
+| Lock / Unlock | `POST …/{id}/lock` / `…/unlock` | the direct manager (unlock: or the desk, never the goal's own employee — 403). Unlock restores the status the goal's progress gives it — Completed at 100 %, In progress with progress recorded, else Approved (D-72; it always made the old Locked status Approved) |
+| Delete | `DELETE …/{id}` | the owner, the manager or the Admin desk — **a goal not yet agreed only**, with its entries (422 otherwise) |
+| Progress | `GET/POST/PUT/DELETE …/{id}/progress[/{entryId}]` | an entry's corrections and removal: its recorder, or HR when not the goal's owner — on an agreed goal only |
 | Library picker | `GET api/GoalLibrary/selector` | copies title, description and success criteria, and records the template id — which is what the library's usage figures count |
 
 All four lifecycle commands return **204** and take **no ids**: the caller is resolved from the token.
@@ -2570,8 +2587,9 @@ allowed from the current status.
 **P-21.** The desk register offers **Submit** but not **Approve** / **Reject** — those are on the goal
 detail page and on the manager's Team Goals screen. A reasonable split, but it means HR cannot approve
 a goal from the register even in principle.
-**P-22.** The goal library link is set **only at creation**; there is nothing to re-point it at
-afterwards.
+~~**P-22.** The goal library link is set **only at creation**; there is nothing to re-point it at
+afterwards.~~ *Closed as by design (performance closure E-f): the link records where the wording came
+from. The library item named at creation must now exist in the tenant (D-76).*
 
 ---
 
@@ -2603,10 +2621,15 @@ Unbalanced weights.
 |---|---|
 | **Overview** | One row per direct report: Employee · **Governance** · Goals · Draft · Pending · Approved · At risk · Overdue · **Weight** |
 | **Awaiting approval** | The flat goal table, with **Approve** and **Reject** on every row |
-| **At risk** | The same table plus a **Risk** column carrying the reason |
+| **At risk** | The same table plus a **Risk** column carrying the reason — the goals the three rules flag, most severe first |
 | **Overdue** | Live goals past their due date |
 | **Locked** | Goals frozen against change |
 | **Progress** | Employee · Average progress · Goals · Not started · On track · At risk · Completed · Overdue |
+
+> **Changed 2026-10-01** (performance closure E-f, D-71). **The At risk tab, the tile, and the Overview's
+> and Progress tab's At risk counts all apply chapter 20's rules to the team's agreed goals** — so the
+> tile and the column agree. The tab used to return every candidate its pre-filter took in, unfiltered,
+> and the counts read the *At risk* status alone; an approved goal nobody had touched was never on it.
 
 > **Changed 2026-09-29** (performance closure lane L-a, decision D-29). **The Locked tab and the locked
 > count read the lock itself** — the goal's *Locked* flag — and no longer a status nothing writes. **A
@@ -2732,20 +2755,28 @@ indistinguishable on purpose, so the endpoint cannot be used to probe who report
 **As:** `hr.head` · **3 minutes**
 
 ### 📖 What it is
-HR's counterpart to the manager workspace's at-risk tab, with the manager scope removed. **Same two
-rules, same thresholds; only the population differs.** Rows arrive sorted by severity, so the top of
-the list is where to start.
+HR's counterpart to the manager workspace's at-risk tab, with the manager scope removed. **Same three
+rules, same thresholds; only the population differs.** The rules watch **every goal agreed with the
+manager and not yet completed** — approved, in progress, on track or at risk; a draft, a goal waiting for
+approval and a sent-back one are nobody's commitment yet *(performance closure E-f, D-71 — before it, the
+list took in only goals marked at risk and running goals due within 14 days, so the "behind the straight
+line" rule never added a goal and an approved goal nobody had touched never appeared: the demo's list
+read **1**)*. Rows arrive sorted by severity, so the top of the list is where to start.
 
 ### 👁 On the page
 
 Cycle picker, a link out to **Goal Risk Thresholds**, then **four tiles**:
 
-| Tile | Expect today |
+| Tile | Expect on 1 October 2026 |
 |---|---|
-| Goals at risk | **~16** |
+| Goals at risk | **19** *(it moves with the date — Rule 4)* |
 | High severity | **0** |
 | Already overdue | **0** |
-| Employees affected | **9** *(with average progress as the hint)* |
+| Employees affected | **10** *(average progress **17.6%** as the hint)* |
+
+Seventeen of the nineteen are approved goals nobody has recorded against, or the seeded 48 % goals, all
+behind the straight line on a calendar-year goal three-quarters gone; one is Efua's Civil 3D at 40 %
+*In progress*; one is her turnaround goal, flagged at risk by hand.
 
 A filter card: **Organisation level** and **Organisation unit** pickers, with the note *"Filters match
 the employee's own unit and level, not the goal's."*
@@ -2759,14 +2790,15 @@ The three reasons you will see:
 |---|---|---|
 | Low progress near deadline | 70 | within 14 days of due **and** below 60% |
 | Progress behind expected timeline | 60 | progress + 20 < the straight-line expectation |
-| *(manually flagged)* | 50 | a manager ticked "at risk" on a progress entry or check-in |
+| Flagged at risk in a progress update | 50 | a manager ticked "at risk" on a progress entry or check-in |
 
 ### ▶ Walk it
 
 1. Open **Goals At Risk**. Read the tiles.
 
-   💬 *"Sixteen goals across nine people. Zero of them high-severity, none overdue — so nothing is in
-   crisis, but sixteen things are drifting."*
+   💬 *"Nineteen goals across ten people. Zero of them high-severity, none overdue — so nothing is in
+   crisis, but nineteen things are drifting. And notice what is not here: no draft, nothing still waiting
+   for a manager. A goal is only watched once it has been agreed."*
 
 2. Sort your eye down the **Risk** column and read two different reasons aloud.
 
@@ -3054,11 +3086,23 @@ badges and an **Open** link.
 
 ### 👁 On the detail page
 * Header with an **Open the appraisal** link and a **Held and recorded** badge once complete
-* **Before the meeting** — Type · Scheduled for · **Agenda** *("What will be covered, so nobody walks
-  in cold")*
+* **Before the meeting** — Type *(fixed when it is booked)* · Scheduled for · **Agenda** *("What will be
+  covered, so nobody walks in cold")*
 * **After the meeting** — **Notes** *("What was actually discussed")* · **Key takeaways** *("The two or
   three things to act on. These go into the notification the employee gets.")*
-* **Save** while open; **Record as held** to complete
+* **Save** while open; a **Held on** date *(today by default, never later)* and **Mark held** to complete
+* **To the appraisee the page is read-only** — no Save, no Mark held, a note that the manager books and
+  records it *(an HR officer on their own conversation included)*
+
+> **Changed 2026-10-01** (performance closure E-f, D-74). **Who writes a conversation:** the appraisee's
+> line manager, whoever booked or held it, and HR — never the appraisee, who reads it. The appraisee
+> could book, edit, mark held and delete their own (a kick-off is a gate) through the API and from this
+> page. **The booker is the scheduler and whoever marks it held is the conductor**, from the login —
+> both were taken from the request. **The type is fixed when it is booked** (the employee was told which
+> conversation it is). **The held date can be stated** — it was always the day it was marked. **A held
+> conversation is never deleted** — deleting a held kick-off used to move the appraisal back to goal
+> setting. **Withdrawing an appraisal removes its unheld conversations** and cancels its open review
+> events. The line manager's diary now also carries what HR booked for their reports.
 
 **On this database:** fourteen conversations, **all completed** — five kick-offs dated 10 February 2026
 and five mid-years dated 14 July (one of each per track), and four final reviews in September (the
@@ -3116,12 +3160,14 @@ slice B-w it is a condition of the manager's evaluation instead.)*
 | My diary | `GET api/AppraisalConversations/my-diary` |
 | About me | `GET api/AppraisalConversations/mine` |
 | By appraisal *(the panel)* | `GET …/by-appraisal/{appraisalId}` |
-| Schedule | `POST api/AppraisalConversations` — `conductedById` left null so the server stamps the scheduler; **the type is required** *(since B-w — a body without one booked a kick-off)* |
-| Amend | `PUT …/{id}` — **422 once completed**; the type is required, and the conversation stays on its own appraisal *(since B-w — the body's appraisal id used to move it)* |
-| Complete | `POST …/{id}/complete` — the **only** way one closes; stamps the held date and notifies |
+| Schedule | `POST api/AppraisalConversations` — the line manager or HR, never the appraisee (403); the scheduler is the caller, whatever the body names; **the type is required** *(since B-w — a body without one booked a kick-off)*, and an unknown one is refused naming all eight; a review event named must be the appraisal's (422) |
+| Amend | `PUT …/{id}` — **422 once completed**; the date, agenda, notes and review event only — the type, appraisal, scheduler and conductor are not the edit's *(since E-f; the type used to be required and changeable)* |
+| Complete | `POST …/{id}/complete` `{ postMeetingNotes, keyTakeaways, heldDate }` — the **only** way one closes; stamps the held date (stated, not in the future; today when omitted) and the conductor, and notifies |
+| Delete | `DELETE …/{id}` — an **unheld** conversation of an appraisal not withdrawn (422 otherwise) |
 
-Anything keyed on an id is **403** unless the caller is HR, the appraisee, the appraisee's manager, or
-whoever scheduled or is holding the meeting.
+Reading one is **403** unless the caller is HR, the appraisee, the appraisee's manager, or whoever
+scheduled or is holding the meeting; **writing one** is the same list **without the appraisee**
+(closure E-f, D-74).
 
 > **Changed 2026-09-29** (performance closure lane B1). **A held conversation can move the appraisal
 > on.** The kick-off and mid-year conversations the profile requires are part of *goal setting*: the
@@ -3140,6 +3186,10 @@ whoever scheduled or is holding the meeting.
 **P-29.** *My diary* is empty for every persona on this database (Rule 6).
 **P-30.** The conversations **list** cannot schedule — only the panel inside an appraisal can. Correct
 design, but it means an empty diary offers no way forward from the screen you are on.
+**Held on the build day.** Until the next rebuild, the fourteen conversations' held dates are the day
+the demo was built (29 September), not the meeting days — the held date could not be stated before
+closure E-f. The detail page reads *"Held 29 Sep 2026"* under a kick-off scheduled for 10 February; say
+the scheduled date, not the held one. The demo scenario now states each held date.
 
 ---
 
@@ -5034,8 +5084,8 @@ Four tabs:
 | Tab | What is in it |
 |---|---|
 | **The plan** | Six read-only blocks: Performance issues · Expected standards · Improvement actions · Support provided · Measurement criteria · Review schedule and notes |
-| **Goals (3)** | Goal · Due · Progress · Status, with add / edit / remove. *"Each goal is one measurable thing that has to change, with a date and a way of telling."* |
-| **Reviews (8)** | Date · Conducted by · Attended · Notes, plus **Schedule a review** |
+| **Goals (3)** | Goal · Due · Progress · Status, with add / remove **while the plan is a draft** — once approved, its goals are the terms in force and progress is recorded at a review meeting (closure E-f, D-73). *"Each goal is one measurable thing that has to change, with a date and a way of telling."* |
+| **Reviews (2)** | Date · **Status** *(Scheduled, Held or Cancelled — stored)* · Conducted by · Attended *(once held)* · Notes, plus **Schedule a review** *(not shown to the plan's employee)* |
 | **Documents** | *"Meeting records, written warnings and evidence of progress belong here."* Streamed through an authorising endpoint — improvement plans are sensitive employment records, so attachments are **never public URLs** |
 
 And a **Record the outcome** panel: **Outcome** *(Performance improved · Extended · Demotion ·
@@ -5069,8 +5119,14 @@ comment, not a thread."*
 > nor the conductor from it: **whoever books a review holds it**, whatever the body names. The
 > employee sees the record read-only — no Save or Record meeting.
 
-> ⚠ A meeting has **no stored status**. "Completed" is derived from its date being in the past, so the
-> **Complete** button saves the notes and stamps nothing extra. It is a save with a fuller name.
+> **Changed 2026-10-01** (performance closure E-f, D-73). **A meeting's status is stored.** A booked
+> review is *Scheduled*; **Record meeting** saves the record and makes it *Held* — on a plan in force,
+> and not before the meeting's date (the button is disabled until then); **Cancel meeting** makes a
+> booked one *Cancelled* — never a held one, which is the plan's record and is not deleted either. A
+> cancelled meeting takes no edit and no reply. Until E-f a meeting had no stored status: "held" meant
+> only that its date had passed, so a review nobody attended read held, and there was no way to say a
+> meeting would not take place. **A closed plan** (completed, unsuccessful or cancelled) **takes no more
+> writes** — no meeting, goal change, progress, reply or document; the page says so and offers nothing.
 
 ### ▶ Walk it
 
@@ -5091,10 +5147,12 @@ comment, not a thread."*
 
 5. Go to **Goals (3)** and read them: monthly reports by the fifth working day · every scheduled
    inspection attended or reassigned 24 hours ahead · the two coaching sessions completed.
-6. Go to **Reviews (8)** and show the schedule.
+6. Go to **Reviews (2)** and show the schedule — one review held at the end of September, one booked
+   for the end of October.
 
    💬 *"Fortnightly reviews, with a formal one at day forty-five and day ninety. Each of them is its own
-   record, with notes, attendance, and the employee's own comments."*
+   record, with notes, attendance, and the employee's own comments — and each says whether it was held.
+   A date passing does not make a meeting happen; recording it does."*
 
 7. Open one review meeting and show the **Goal progress agreed in this review** block.
 
@@ -5120,11 +5178,11 @@ comment, not a thread."*
 | Prepare | `GET api/Pip/prepare?employeeId=&appraisalId=` |
 | Create | `POST api/Pip` — returns the new id; created as a **Draft** |
 | Amend | `PUT api/Pip/{id}` — **a draft only** (422 otherwise), and the plan's content only: its employee, source appraisal, supervisor, HR owner, status and outcome are never taken from the body (closure P5, 2026-09-29) |
-| Submit / Approve / Reject / Recall | **workflow engine**, `PERFORMANCE_IMPROVEMENT_PLAN`, published; approvers **HR, Manager, TenantAdmin** |
+| Submit / Approve / Reject / Recall | **workflow engine**, `PERFORMANCE_IMPROVEMENT_PLAN`, published; approvers **HR, Manager, TenantAdmin**. Approve and reject act **on a plan awaiting approval only** (422 otherwise — with no definition they acted from any status, so reject could send a plan in force back to Draft), and **never by the plan's own employee**, HR included (403, D-75) |
 | Running states | `PATCH api/Pip/{id}/status` — Draft / PendingApproval / Active are refused; this moves a **live** plan between its running states |
-| Outcome | `POST api/Pip/{id}/outcome` — `Extended` needs `newEndDate` |
-| Goals | `POST api/Pip/{pipId}/goals`, then `PUT`/`DELETE api/Pip/goals/{goalId}` — note the **flat** route once a goal exists |
-| Meetings | `api/PipMeeting` — `prepare`, `schedule`, create, update, `complete`, `schedule/{pipId}`, `{id}/comment` |
+| Outcome | `POST api/Pip/{id}/outcome` — `Extended` needs `newEndDate`; the outcome must be one of the five (422), and the plan's employee cannot record their own (403) |
+| Goals | `POST api/Pip/{pipId}/goals`, then `PUT`/`DELETE api/Pip/goals/{goalId}` — note the **flat** route once a goal exists. **A draft only** (422 otherwise); a new goal keeps the status, percent and notes it is sent with; percent 0–100 and the text limits checked (400) |
+| Meetings | `api/PipMeeting` — `prepare`, `schedule`, create, update, `complete` (*Record meeting* → Held), **`{id}/cancel?pipId=`** (→ Cancelled), `schedule/{pipId}`, `{id}/comment`; every rule refusal 422 (they answered 500) |
 | Attachments | `api/Pip/attachments/{id}/download` — streamed, entitlement checked per request |
 
 **Who can see one:** HR, the employee it is about (once it is in force), the named supervisor and the
@@ -5134,13 +5192,20 @@ two-actor rule — the desk exemption used to come first).
 
 **Only a draft can be deleted.** A plan that has been in force is **cancelled**, not erased.
 
+**Numbering:** every plan is `PIP-yyyy-NNNN` in the tenant's sequence — one raised from an approved
+appraisal outcome too (it was `PIP-APR-{date}-{hex}`); that path also raises no second plan for someone
+already on one, and makes the approving HR officer the plan's owner (closure E-f, D-75).
+
 ### ⚠ Known gaps
-**P-55.** The three PIP goals show **no progress** — the status and percentage supplied when they were
-created were not honoured, so all three read *Not started* with a blank percentage.
-**P-56.** There are **8** review meetings where there should be 2: four identical rows on 14 September
-and four on 15 October, created by repeated runs of the data build. Show one; do not count them out
-loud.
-**P-57.** A review meeting has no stored status — *Completed* is inferred from the date.
+~~**P-55.** The three PIP goals show **no progress** — the status and percentage supplied when they were
+created were not honoured, so all three read *Not started* with a blank percentage.~~ *Fixed in closure
+E-f (2026-10-01) for goals added from now on; the demo's three were made before it and still read
+**Not started**, blank, until the next rebuild sends them 30 % In progress.*
+~~**P-56.** There are **8** review meetings where there should be 2.~~ *The 2026-09-29 rebuild left two —
+28 September and 30 October.*
+~~**P-57.** A review meeting has no stored status — *Completed* is inferred from the date.~~ *Closed in
+E-f: stored, with writers. The demo's 28 September review reads **Held** (backfilled on 2026-10-01) and
+the 30 October one **Scheduled**.*
 
 ---
 
@@ -5554,8 +5619,9 @@ Every route in the module, its gate, and who should open it.
                1 employment action proposal (promotion), Proposed
                PIP-2026-0001  Patrick Appiah · supervisor head.dev · Active · 3 goals
 
-  RISK RULE    14 days / 60% / 20%.  On 17 Sep a calendar-year goal is 71.2% through its life,
-               so anything under ~51% is flagged.  Expect ~16 at-risk goals across 9 people.
+  RISK RULE    14 days / 60% / 20%, over agreed goals only.  On 1 Oct a calendar-year goal is 75%
+               through its life, so anything under 55% is flagged.  Expect 19 at-risk goals across
+               10 people (it moves with the date).
 
   NEVER OPEN   any appraisal numbered APR-2026-001 … 005  (no criterion snapshot — opens empty)
   NEVER PRESS  Delete, anywhere in this module (hr.head has Write, not Admin → 403)
@@ -5627,7 +5693,7 @@ mislabelled soft-skill switch (P-69) and an unenforced goal minimum (P-70). The 
 | ~~**P-50**~~ | ~~The one existing appeal was filed against a **KPI**, which the UI could not have produced~~ — **fixed 2026-09-30** (closure lanes C-a, C-b): the submit checks the list and the page offers KPIs |
 | **P-52** | Every recommendation is already Actioned, so two of the three tabs are empty |
 | **P-53** | Three salary proposals have no figure — intended, but say so if you skip LIVE WRITE 14 |
-| **P-56** | The PIP has **8** review meetings where it should have 2 (duplicates from repeated data builds) |
+| ~~**P-56**~~ | ~~The PIP has **8** review meetings where it should have 2~~ — the 2026-09-29 rebuild left two; since closure E-f each shows whether it was held |
 | **P-58 / P-59** | With four scored appraisals the distributions are a single bar, and *Needs attention* may be empty |
 
 ### Cosmetic and minor
@@ -5643,8 +5709,8 @@ report · **P-30** the conversations list cannot schedule · **P-33** a self-cre
 born Active, a report's is born Draft, from the same button · **P-34** the Outcome tab is empty before
 sign-off · **P-37** uploads 422 without the scanner running · **P-44** finalising cannot be undone ·
 **P-46** acknowledgment does not check for a final conversation · **P-51** only two of six dispatch
-targets have a screen to link to · **P-54** proposals carry no effective date · **P-57** a PIP meeting
-has no stored status · **P-60** the single-advance form wants a pasted GUID.
+targets have a screen to link to · **P-54** proposals carry no effective date · ~~**P-57** a PIP meeting
+has no stored status~~ *(closed in E-f)* · **P-60** the single-advance form wants a pasted GUID.
 
 ---
 
@@ -5676,9 +5742,9 @@ either accept it or rebuild the demonstration database.
 | # | Chapter | What it did | How to reverse it |
 |---|---|---|---|
 | **1** *(opt.)* | 11 | Changed the goal-risk tolerance | Set **Tolerance** back to **20** and save, or press **Reset to defaults** |
-| **2** | 17 | Progress entry on Efua's Civil 3D goal (40% → 55%) | Open `/hr/performance/employee-goals/{id}` → *Progress entries* → delete the newest row. **The goal keeps the 55%** — re-add an entry at 40% to restore it |
-| **3** | 17 | Created a fourth goal for Efua, weight 0 | As `hr.head`, Employee Goals → **⋯** → **Delete** on *Mentor one draughtsman…* *(only while unlocked)* |
-| **4** | 19 | `head.dev` approved that goal | Delete the goal (as above) and it goes with it |
+| **2** | 17 | Progress entry on Efua's Civil 3D goal (40% → 55%) | Open `/hr/performance/employee-goals/{id}` → *Progress entries* → delete the newest row. The goal goes back to **40%**, the entry before it *(since closure E-f — it used to keep the 55%)* |
+| **3** | 17 | Created a fourth goal for Efua, weight 0 | As `hr.head`, Employee Goals → **⋯** → **Delete** on *Mentor one draughtsman…* — only while it is not yet agreed *(a draft or awaiting approval; since closure E-f an agreed goal is not deleted)* |
+| **4** | 19 | `head.dev` approved that goal | As `head.dev`, open the goal → **Send back** with a reason; then delete it as in row 3 (a sent-back goal can be removed) |
 | **5** | 21 | Scheduled a Q4 check-in with Efua | `DELETE api/CheckIns/{id}` — there is no delete button on the screen |
 | **6** | 18 | Aligned Efua's layout goal to the Development unit goal | Edit the goal, set **Aligned to** back to blank |
 | **7** | 23 | Scheduled a Q4 conversation | `DELETE api/AppraisalConversations/{id}` |
@@ -5713,7 +5779,7 @@ steps: they complete what is missing and leave what already exists.
 | **A 403 page after clicking Delete** | `hr.head` has Write, not Admin (Rule 7) | *"Destroying an appraisal instrument is an administrator's act, not HR's."* Move on |
 | **An upload answers 422** | The malware scanner is not running (P-37) | *"Every HR document goes through a scan gate, and with no scanner answering the gate correctly refuses."* Skip the tab |
 | **A screen is empty that you expected to be full** | Check Rule 6 (diary, calibration Open tab), P-31 (interim reviews), P-52 (recommendations tabs) | Say what *would* put a row in it |
-| **The at-risk count is not 16** | It moves with today's date (Rule 4) | Read the tile out loud and explain the rule, not the number |
+| **The at-risk count is not 19** | It moves with today's date (Rule 4) | Read the tile out loud and explain the rule, not the number |
 | **`hr.head` sees no menu under Administration** | You are in window B | Switch windows |
 | **A goal action answers 403** | You are not that employee's direct manager | *"Approval is not a permission here — it is a fact about the reporting line."* |
 | **The workflow tab is empty on a proposal** | It has not been submitted yet | Set the figure, then submit |

@@ -49,6 +49,7 @@ import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalA
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { dateOffset, formatDate, humanizeEnum } from '@/lib/hr/attendance-format';
 import { pipMeetingService, pipService } from '@/services/hr/pip.service';
 import { GOAL_PROGRESS_STATUS_OPTIONS, type GoalProgressStatus } from '@/types/hr/goals';
@@ -78,6 +79,7 @@ export default function PipDetailPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const [goalOpen, setGoalOpen] = useState(false);
   const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
@@ -121,6 +123,9 @@ export default function PipDetailPage() {
   const isDraft = data?.status === 'Draft';
   const isLive = data?.status === 'Active' || data?.status === 'InProgress';
   const hasGoals = (data?.goals.length ?? 0) > 0;
+  // The plan's subject reads it (P4); they never book its reviews or record its outcome — an HR
+  // officer included (closure D-75). The server refuses both.
+  const isSubject = !!user?.employeeId && user.employeeId === data?.employeeId;
 
   /**
    * Submit / approve / reject / recall all come from the engine. This page never sets a status:
@@ -295,7 +300,7 @@ export default function PipDetailPage() {
         actions={
           <div className="flex items-center gap-2">
             <WorkflowApprovalActions {...workflow.actionProps} />
-            {isLive && (
+            {isLive && !isSubject && (
               <>
                 <Button variant="outline" onClick={() => setMeetingOpen(true)}>
                   <CalendarPlus className="mr-2 h-4 w-4" />
@@ -323,7 +328,7 @@ export default function PipDetailPage() {
             <Link href={`/hr/performance/team-appraisals/${data.appraisalId}`}>Open the appraisal</Link>
           </Button>
         )}
-        {isLive && (
+        {isLive && !isSubject && (
           <Select value={data.status} onValueChange={(v) => setStatus.mutate(v as PipStatus)}>
             <SelectTrigger className="ml-auto w-[160px]">
               <SelectValue />
@@ -501,7 +506,7 @@ export default function PipDetailPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-base">Review meetings</CardTitle>
-              {isLive && (
+              {isLive && !isSubject && (
                 <Button size="sm" onClick={() => setMeetingOpen(true)}>
                   <CalendarPlus className="mr-2 h-4 w-4" />
                   Schedule
@@ -523,6 +528,7 @@ export default function PipDetailPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Date</TableHead>
+                      <TableHead>Status</TableHead>
                       <TableHead>Conducted by</TableHead>
                       <TableHead>Attended</TableHead>
                       <TableHead>Notes</TableHead>
@@ -535,11 +541,18 @@ export default function PipDetailPage() {
                         <TableCell className="text-sm">
                           {formatDate(meeting.meetingDate)}
                         </TableCell>
+                        <TableCell>
+                          {/* Stored (closure D-73) — it was the date: past read as held. */}
+                          <StatusBadge status={meeting.status} />
+                        </TableCell>
                         <TableCell className="text-sm">{meeting.conductedByName || '—'}</TableCell>
                         <TableCell>
-                          <StatusBadge
-                            status={meeting.employeeAttended ? 'Attended' : 'Absent'}
-                          />
+                          {/* Attendance is recorded with the meeting: a booked one read "Absent". */}
+                          {meeting.status === 'Held' ? (
+                            <StatusBadge status={meeting.employeeAttended ? 'Attended' : 'Absent'} />
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
                         </TableCell>
                         <TableCell className="max-w-sm text-xs text-muted-foreground">
                           {meeting.progressNotesPreview || '—'}
