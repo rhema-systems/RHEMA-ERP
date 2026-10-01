@@ -170,11 +170,11 @@ $blockEnd
         $configuration,
         [Text.UTF8Encoding]::new($false))
 
+    & ssh-keygen.exe -A
+    Assert-True ($LASTEXITCODE -eq 0) 'Windows OpenSSH host-key preparation failed.'
     & $sshdExecutable -t -f $script:SshdConfigPath
     Assert-True ($LASTEXITCODE -eq 0) `
         "Windows OpenSSH rejected its managed configuration: $($script:SshdConfigPath)"
-    & ssh-keygen.exe -A
-    Assert-True ($LASTEXITCODE -eq 0) 'Windows OpenSSH host-key preparation failed.'
 
     Set-Service -Name sshd -StartupType Automatic
     $sshdService = Get-Service -Name sshd
