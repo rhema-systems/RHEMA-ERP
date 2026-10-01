@@ -24,8 +24,10 @@ import { humanizeEnum } from '@/lib/hr/attendance-format';
  * indicator is scored the same way wherever it appears. Definitions carry no target: the
  * target is per goal, because the same KPI means different numbers for different people.
  *
- * Deactivating keeps a definition out of new goals without touching the goals already
- * using it — the delete is a soft delete and is refused where the API detects usage.
+ * Deactivating keeps a definition out of new goals and template criteria without touching what
+ * already uses it. A definition in use — on a template criterion or an employee goal — is not
+ * deleted and keeps its measurement type; its name, description, unit and tolerance stay editable
+ * (performance closure E-g1 — the comment said the delete was refused, and nothing refused it).
  */
 const kpiSchema = z.object({
   kpiName: z.string().min(1, 'Required').max(200),
@@ -73,7 +75,7 @@ export default function KpiDefinitionsPage() {
         title="KPI definitions"
         singular="KPI definition"
         queryKey={['hr', 'kpi-definitions']}
-        dialogHint="Targets are set per goal — a definition only says how the indicator is measured."
+        dialogHint="Targets are set per goal — a definition only says how the indicator is measured. A definition in use keeps its measurement type."
         emptyDescription="Add the indicators your goals are scored against."
         list={() => kpiDefinitionService.getAll()}
         create={(values) => kpiDefinitionService.create(toPayload(values))}

@@ -146,6 +146,10 @@ public class DevelopmentPlanService : IDevelopmentPlanService
     {
         if (createDto.EndDate is DateOnly end && end < createDto.StartDate)
             throw new InvalidOperationException("The plan's end date cannot be before its start date.");
+        // A plan starts as a draft or live (performance closure E-g1, D-80): the create took any status, so a plan could
+        // be born Completed or Cancelled — closed by nobody, past the author rule on who may close it.
+        if (createDto.PlanStatus is not (DevelopmentPlanStatus.Draft or DevelopmentPlanStatus.Active))
+            throw new InvalidOperationException("A development plan starts as a draft or as active; it is put on hold, completed or cancelled afterwards.");
 
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
@@ -202,6 +206,16 @@ public class DevelopmentPlanService : IDevelopmentPlanService
     {
         var entity = await GetOwnedPlanAsync(id);
         EnsureSubjectMayEnd(entity, actorEmployeeId, "deleting it");
+
+        // Only a draft is deleted (E-g1, D-80): a plan that went live is the record of what was agreed — its progress,
+        // its feedback and its closing are read by the appraisal and the reports. It is cancelled instead.
+        if (entity.PlanStatus != DevelopmentPlanStatus.Draft)
+            throw new InvalidOperationException(entity.PlanStatus switch
+            {
+                DevelopmentPlanStatus.Active => "This plan is active; only a draft is deleted. Cancel it instead.",
+                DevelopmentPlanStatus.OnHold => "This plan is on hold; only a draft is deleted. Cancel it instead.",
+                var closed => $"This plan is {closed.ToString().ToLowerInvariant()}; only a draft is deleted.",
+            });
 
         await _planRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

@@ -86,17 +86,14 @@ public class PeerNominationService : IPeerNominationService
     }
 
     /// <summary>
-    /// Whether nominations may be made, changed or decided on this appraisal: in Employee mode while
-    /// it is Draft or Active, in Manager mode until it is completed or closed — and never once it is
-    /// withdrawn (performance closure E-d1), which Manager mode let through: an approval there created
-    /// a peer evaluation on an appraisal no one would finish, and asked the peer to write it. Only on an
-    /// Open cycle (E-d2b). The caller loads the appraisal's cycle.
+    /// Whether nominations may be made, changed or decided on this appraisal: while it is Draft or Active, in either
+    /// mode — never once it is withdrawn (performance closure E-d1), and only on an Open cycle (E-d2b). Manager mode
+    /// took them "until it is completed or closed", so an appraisal in governance or on appeal could gain a peer whose
+    /// evaluation the score had already settled without (E-g1, § 5). The caller loads the appraisal's cycle.
     /// </summary>
     private static bool NominationsEditable(PerformanceAppraisal appraisal, AppraisalSettings settings)
         => appraisal.AppraisalCycle != null && AppraisalLiveCycle.IsLive(appraisal.AppraisalCycle.Status)
-            && (settings.PeerNominationMode == PeerNominationMode.Employee
-                ? appraisal.Status is AppraisalStatus.Active or AppraisalStatus.Draft
-                : appraisal.Status is not (AppraisalStatus.Completed or AppraisalStatus.Closed or AppraisalStatus.Withdrawn));
+            && appraisal.Status is AppraisalStatus.Active or AppraisalStatus.Draft;
 
     private static void EnsureNominationsEditable(PerformanceAppraisal appraisal, AppraisalSettings settings)
     {
@@ -111,9 +108,7 @@ public class PeerNominationService : IPeerNominationService
                 "This appraisal was withdrawn from its cycle, so its peer nominations are closed.");
 
         // The Employee-mode message said "after self-evaluation submission"; the rule is the status.
-        throw new InvalidOperationException(settings.PeerNominationMode == PeerNominationMode.Employee
-            ? "Peer nominations are closed on this appraisal: it has moved past the evaluations."
-            : "Peer nominations are locked for completed or closed appraisals.");
+        throw new InvalidOperationException("Peer nominations are closed on this appraisal: it has moved past the evaluations.");
     }
 
     /// <summary>

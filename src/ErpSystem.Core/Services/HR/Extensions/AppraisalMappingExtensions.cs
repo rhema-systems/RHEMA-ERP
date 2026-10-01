@@ -1907,7 +1907,8 @@ public static class AppraisalMappingExtensions
         entity.CheckInType = dto.CheckInType;
         entity.Title = dto.Title;
         entity.ScheduledDate = dto.ScheduledDate;
-        entity.ConductedDate = dto.ConductedDate;
+        // The held date is set by the complete, once (performance closure E-g1, D-80): the update copied the body's —
+        // null from a form that never sends it un-held a held check-in, and any date re-dated it.
         entity.Agenda = dto.Agenda;
         entity.SharedNotes = dto.SharedNotes;
         entity.ActionItems = dto.ActionItems;
@@ -2020,9 +2021,8 @@ public static class AppraisalMappingExtensions
 
     public static void UpdateEntity(this UpdatePerformanceJournalEntryDto dto, PerformanceJournalEntry entity)
     {
-        entity.AppraisalCycleId = dto.AppraisalCycleId;
-        entity.SubjectEmployeeId = dto.SubjectEmployeeId;
-        entity.RelatedGoalId = dto.RelatedGoalId;
+        // Whom the note is about, its cycle and its goal stay as written (performance closure E-g1, D-80): the edit moved
+        // a note onto another subject, past the report check the create makes.
         entity.Title = dto.Title;
         entity.Body = dto.Body;
         // The client's update payload has never carried EntryDate, so an unguarded copy

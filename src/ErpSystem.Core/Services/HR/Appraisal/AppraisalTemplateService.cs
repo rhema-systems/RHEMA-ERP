@@ -21,6 +21,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     private readonly IGenericRepository<TemplateItemGradeRange> _gradeRangeRepository;
     private readonly IGenericRepository<AppraisalGradeDefinition> _gradeDefinitionRepository;
     private readonly IGenericRepository<AppraisalCompetency> _competencyRepository;
+    private readonly IGenericRepository<KpiDefinition> _kpiRepository;
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly IGenericRepository<AppraisalCycleTemplate> _cycleTemplateRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
@@ -43,6 +44,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         IGenericRepository<TemplateItemGradeRange> gradeRangeRepository,
         IGenericRepository<AppraisalGradeDefinition> gradeDefinitionRepository,
         IGenericRepository<AppraisalCompetency> competencyRepository,
+        IGenericRepository<KpiDefinition> kpiRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
         IGenericRepository<AppraisalCycleTemplate> cycleTemplateRepository,
         ICurrentUserProvider currentUserProvider,
@@ -57,6 +59,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         _gradeRangeRepository = gradeRangeRepository;
         _gradeDefinitionRepository = gradeDefinitionRepository;
         _competencyRepository = competencyRepository;
+        _kpiRepository = kpiRepository;
         _appraisalRepository = appraisalRepository;
         _cycleTemplateRepository = cycleTemplateRepository;
         _currentUserProvider = currentUserProvider;
@@ -511,6 +514,12 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         if (source == null)
             throw new ArgumentException($"Source template with ID '{sourceTemplateId}' not found.");
 
+        // A band on a deleted grade is not copied (performance closure E-g1, D-79): generation and the forms drop it,
+        // so the copy would carry a band nobody is scored on.
+        var liveGrades = await LiveGradeIdsAsync(
+            source.Sections.SelectMany(s => s.TemplateItems).SelectMany(i => i.GradeRanges).Select(r => r.GradeDefinitionId),
+            cancellationToken);
+
         var clone = new AppraisalTemplate
         {
             TemplateName = dto.NewTemplateName,
@@ -551,7 +560,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
                     TenantId = tenantId
                 };
 
-                foreach (var srcRange in srcItem.GradeRanges)
+                foreach (var srcRange in srcItem.GradeRanges.Where(r => liveGrades.Contains(r.GradeDefinitionId)))
                 {
                     cloneItem.GradeRanges.Add(new TemplateItemGradeRange
                     {
@@ -719,6 +728,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             throw new InvalidOperationException(
                 "This is a goals section: it is filled by each employee's locked goals and takes no items. Add the item to a fixed section.");
 
+        await EnsureItemDefinitionsAsync(dto.CompetencyId, dto.KpiDefinitionId, null, null, cancellationToken);
+
         // Duplicate check: same competency/KPI cannot appear more than once across all sections of the template
         if (dto.CompetencyId.HasValue)
         {
@@ -800,6 +811,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
             throw new InvalidOperationException("An item stays in its section; it cannot be moved to another one.");
 
         var template = await EnsureStructureEditableAsync(entity.Section.AppraisalTemplateId, cancellationToken);
+
+        await EnsureItemDefinitionsAsync(dto.CompetencyId, dto.KpiDefinitionId, entity.CompetencyId, entity.KpiDefinitionId, cancellationToken);
 
         // Duplicate check: same competency/KPI cannot appear more than once across all sections (exclude self)
         if (dto.CompetencyId.HasValue)
@@ -932,13 +945,27 @@ public class AppraisalTemplateService : IAppraisalTemplateService
                 errors.Add($"Score ranges overlap: [{sorted[i].LowScore}–{sorted[i].HighScore}] and [{sorted[i + 1].LowScore}–{sorted[i + 1].HighScore}].");
         }
 
-        if (errors.Count > 0)
-            throw new InvalidOperationException("Grade range validation failed:\n" + string.Join("\n", errors.Select(e => $"  • {e}")));
-
         // ── Replace all existing ranges ────────────────────────────────────
         var existing = await _gradeRangeRepository.GetQueryable()
             .Where(r => r.TenantId == tenantId && r.AppraisalTemplateItemId == itemId)
             .ToListAsync(cancellationToken);
+
+        // Each grade named is this tenant's and not deleted, and one newly added to the item is active — the picker
+        // offers only those (performance closure E-g1, D-79). An unknown id was a 500 from the foreign key; another
+        // tenant's or a deleted one was stored, and generation dropped the band.
+        var named = dto.Ranges.Select(r => r.GradeDefinitionId).Distinct().ToList();
+        var grades = await _gradeDefinitionRepository.GetQueryable()
+            .Where(g => g.TenantId == tenantId && named.Contains(g.Id))
+            .Select(g => new { g.Id, g.GradeName, g.IsActive })
+            .ToListAsync(cancellationToken);
+        if (grades.Count < named.Count)
+            errors.Add("A grade named was not found.");
+        var onItem = existing.Select(r => r.GradeDefinitionId).ToHashSet();
+        foreach (var grade in grades.Where(g => !g.IsActive && !onItem.Contains(g.Id)))
+            errors.Add($"The grade \"{grade.GradeName}\" is inactive; a band cannot be added on it.");
+
+        if (errors.Count > 0)
+            throw new InvalidOperationException("Grade range validation failed:\n" + string.Join("\n", errors.Select(e => $"  • {e}")));
 
         foreach (var old in existing)
             await _gradeRangeRepository.DeleteAsync(old);
@@ -1052,6 +1079,50 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         return template;
     }
 
+    /// <summary>The grades among <paramref name="gradeIds"/> that are this tenant's and not deleted.</summary>
+    private async Task<HashSet<Guid>> LiveGradeIdsAsync(IEnumerable<Guid> gradeIds, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var ids = gradeIds.Distinct().ToList();
+        if (ids.Count == 0) return new HashSet<Guid>();
+        var live = await _gradeDefinitionRepository.GetQueryable()
+            .Where(g => g.TenantId == tenantId && ids.Contains(g.Id))
+            .Select(g => g.Id)
+            .ToListAsync(cancellationToken);
+        return live.ToHashSet();
+    }
+
+    /// <summary>
+    /// The competency or KPI an item names is this tenant's and not deleted, and one newly named is active — the
+    /// pickers offer only those, keeping the item's own (performance closure E-g1, D-79). An unknown id was a 500 from
+    /// the foreign key; another tenant's was stored, and the form read a criterion it could not show.
+    /// </summary>
+    private async Task EnsureItemDefinitionsAsync(Guid? competencyId, Guid? kpiId, Guid? currentCompetencyId, Guid? currentKpiId,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        if (competencyId is Guid cid)
+        {
+            var competency = await _competencyRepository.GetQueryable()
+                .Where(c => c.Id == cid && c.TenantId == tenantId)
+                .Select(c => new { c.CriteriaName, c.IsActive })
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("The competency named was not found.");
+            if (!competency.IsActive && cid != currentCompetencyId)
+                throw new InvalidOperationException($"The competency \"{competency.CriteriaName}\" is inactive; choose an active one.");
+        }
+        if (kpiId is Guid kid)
+        {
+            var kpi = await _kpiRepository.GetQueryable()
+                .Where(k => k.Id == kid && k.TenantId == tenantId)
+                .Select(k => new { k.KpiName, k.IsActive })
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("The KPI named was not found.");
+            if (!kpi.IsActive && kid != currentKpiId)
+                throw new InvalidOperationException($"The KPI \"{kpi.KpiName}\" is inactive; choose an active one.");
+        }
+    }
+
     /// <summary>Nothing changes on a template awaiting a decision: what the approver sees is what is decided.</summary>
     private static void EnsureNotAwaitingApproval(AppraisalTemplate template)
     {
@@ -1114,6 +1185,12 @@ public class AppraisalTemplateService : IAppraisalTemplateService
 
         if (template == null) return;
 
+        // A band on a deleted grade is no band (performance closure E-g1, D-79): generation and the forms drop it, so an
+        // item whose only bands are on deleted grades is scored on nothing.
+        var liveGrades = await LiveGradeIdsAsync(
+            template.Sections.SelectMany(s => s.TemplateItems).SelectMany(i => i.GradeRanges).Select(r => r.GradeDefinitionId),
+            cancellationToken);
+
         var errors = new List<string>();
 
         if (!template.Sections.Any())
@@ -1146,7 +1223,7 @@ public class AppraisalTemplateService : IAppraisalTemplateService
                     if (item.CompetencyId == null && item.KpiDefinitionId == null && item.Weight == 0)
                         continue;
 
-                    if (!item.GradeRanges.Any())
+                    if (!item.GradeRanges.Any(r => liveGrades.Contains(r.GradeDefinitionId)))
                     {
                         var label = item.Competency?.CriteriaName
                                  ?? item.KpiDefinition?.KpiName

@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -16,17 +17,23 @@ namespace ErpSystem.Core.Services.HR;
 public class KpiDefinitionService : IKpiDefinitionService
 {
     private readonly IGenericRepository<KpiDefinition> _kpiDefinitionRepository;
+    private readonly IGenericRepository<AppraisalTemplateItem> _templateItemRepository;
+    private readonly IGenericRepository<EmployeeGoal> _goalRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<KpiDefinitionService> _logger;
 
     public KpiDefinitionService(
         IGenericRepository<KpiDefinition> kpiDefinitionRepository,
+        IGenericRepository<AppraisalTemplateItem> templateItemRepository,
+        IGenericRepository<EmployeeGoal> goalRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<KpiDefinitionService> logger)
     {
         _kpiDefinitionRepository = kpiDefinitionRepository;
+        _templateItemRepository = templateItemRepository;
+        _goalRepository = goalRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -104,9 +111,36 @@ public class KpiDefinitionService : IKpiDefinitionService
         return kpiDefinition.ToDto();
     }
 
+    /// <summary>
+    /// What uses a KPI (performance closure E-g1, D-78): template criteria (a KPI row is measured, not rated) and
+    /// employee goals. Null when nothing does. A criterion under a deleted template or section is not a use.
+    /// </summary>
+    private async Task<string?> DescribeUseAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var criteria = await _templateItemRepository.GetQueryable()
+            .CountAsync(i => i.TenantId == tenantId && i.KpiDefinitionId == id
+                          && !i.Section.IsDeleted && !i.Section.AppraisalTemplate.IsDeleted, cancellationToken);
+        var goals = await _goalRepository.GetQueryable()
+            .CountAsync(g => g.TenantId == tenantId && g.KpiDefinitionId == id, cancellationToken);
+
+        return DefinitionUse.Describe(
+            new DefinitionUse.Use(criteria, "a template criterion", "template criteria"),
+            new DefinitionUse.Use(goals, "an employee goal", "employee goals"));
+    }
+
     public async Task<KpiDefinitionDto> UpdateAsync(UpdateKpiDefinitionDto updateDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(updateDto.Id);
+
+        // While a KPI is in use its measurement type stays as it is (E-g1, D-78): the rows and goals on it are
+        // scored by it, and changing it re-scored what was already measured.
+        if (updateDto.MeasurementType != entity.MeasurementType)
+        {
+            var uses = await DescribeUseAsync(entity.Id, cancellationToken);
+            if (uses != null)
+                throw DefinitionUse.ChangeRefused("KPI", entity.KpiName, uses, "measurement type");
+        }
 
         updateDto.UpdateEntity(entity);
 
@@ -121,6 +155,12 @@ public class KpiDefinitionService : IKpiDefinitionService
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
+
+        // A KPI in use is not deleted (E-g1, D-78): its rows and goals lost what they measure.
+        var uses = await DescribeUseAsync(id, cancellationToken);
+        if (uses != null)
+            throw DefinitionUse.DeleteRefused("KPI", entity.KpiName, uses,
+                "Make it inactive instead, and it is no longer offered for new criteria and goals.");
 
         await _kpiDefinitionRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

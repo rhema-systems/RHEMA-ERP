@@ -21,6 +21,13 @@ public class AppraisalCompetencyController : ControllerBase
         _logger = logger;
     }
 
+    /// <summary>A rule refused the write (performance closure E-g1): answered 422 with the reason.</summary>
+    private IActionResult BusinessRuleRejected(InvalidOperationException ex, string action)
+    {
+        _logger.LogWarning("Appraisal competency rule rejected while {Action}: {Message}", action, ex.Message);
+        return UnprocessableEntity(new { message = ex.Message });
+    }
+
     /// <summary>
     /// Get all appraisal competencies
     /// </summary>
@@ -134,6 +141,10 @@ public class AppraisalCompetencyController : ControllerBase
             var response = await _appraisalCompetencyService.UpdateAsync(updateDto);
             return Ok(response);
         }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "updating");
+        }
         catch (ArgumentException ex)
         {
             return NotFound(ex.Message);
@@ -158,6 +169,10 @@ public class AppraisalCompetencyController : ControllerBase
         {
             var response = await _appraisalCompetencyService.DeleteAsync(id);
             return Ok(response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "deleting");
         }
         catch (ArgumentException ex)
         {

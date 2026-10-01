@@ -159,6 +159,10 @@ public class GoalLibraryController : ControllerBase
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateGoalLibraryDto updateDto, CancellationToken cancellationToken = default)
     {
+        // The body's id was the one updated, whatever the route named (performance closure E-g1).
+        if (id != updateDto.Id)
+            return BadRequest(new { message = "Route id does not match body id." });
+
         try
         {
             var result = await _goalLibraryService.UpdateAsync(updateDto, cancellationToken);
@@ -187,6 +191,10 @@ public class GoalLibraryController : ControllerBase
             var result = await _goalLibraryService.DeleteAsync(id, cancellationToken);
             if (!result) return NotFound(new { message = "Goal library item not found" });
             return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "deleting");
         }
         catch (ArgumentException ex)
         {
@@ -239,6 +247,13 @@ public class GoalLibraryController : ControllerBase
             _logger.LogError(ex, "Error updating active status for goal library item {Id}", id);
             return StatusCode(500, "An error occurred while updating the goal library item");
         }
+    }
+
+    /// <summary>A rule refused the write (performance closure E-g1): answered 422 with the reason.</summary>
+    private IActionResult BusinessRuleRejected(InvalidOperationException ex, string action)
+    {
+        _logger.LogWarning("Goal library rule rejected while {Action}: {Message}", action, ex.Message);
+        return UnprocessableEntity(new { message = ex.Message });
     }
 
     /// <summary>

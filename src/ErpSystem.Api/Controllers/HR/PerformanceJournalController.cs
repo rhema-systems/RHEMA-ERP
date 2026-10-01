@@ -454,6 +454,11 @@ public class PerformanceJournalController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // Made private where the cycle does not allow it (performance closure E-g1, D-80).
+            return BusinessRuleRejected(ex, "setting a journal entry's privacy");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error setting privacy for journal entry {Id}", id);

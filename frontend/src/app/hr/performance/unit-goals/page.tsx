@@ -611,7 +611,10 @@ export default function UnitGoalsPage() {
         title="Delete unit goal?"
         description={
           pendingDelete
-            ? `“${pendingDelete.title}” has ${pendingDelete.employeeGoalsCount} employee goal(s) cascaded from it. They stay, but lose the link.`
+            ? // A goal with anything under it is refused (performance closure E-g1): the copy said they
+              // "stay, but lose the link" — the delete orphaned them.
+              `“${pendingDelete.title}” is deleted only when nothing hangs off it — no employee goal, unit goal cascaded from it or attached file. ` +
+              `It has ${pendingDelete.employeeGoalsCount} employee goal(s) cascaded from it.`
             : ''
         }
         confirmText="Delete"

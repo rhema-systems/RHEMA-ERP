@@ -84,8 +84,15 @@ raised nineteen more, and the user settled all nineteen the same day, each on it
    ~~Slice **E-f** (goals, PIPs, conversations)~~ **Done 2026-10-01** (source-checked first: § 1n D-71–D-76;
    `run-final-lifecycle.mjs` 1016/1016 twice; regression 3549/3558; lane E's E-f State block — the at-risk lists watch
    every agreed goal, a goal goes before it is agreed and unlock restores its year, a PIP's meetings carry a stored status
-   and a closed plan takes no writes, the appraisee reads their conversations and writes none). **Slice E-g (definitions
-   and the rest) is next** — source-check it first, and read § 5's *Added by lane E-c* to *E-f* rows. **Before a long run,
+   and a closed plan takes no writes, the appraisee reads their conversations and writes none). Slice E-g was
+   source-checked the same day and split in two — § 1o (D-77 two slices, D-78 no delete and no meaning change while in use,
+   D-79 and D-80 the rows beyond E9 and E10). ~~Slice **E-g1** (definitions, E10's records, four § 5 rows)~~ **Done
+   2026-10-01** (`run-final-lifecycle.mjs` 1185/1185 twice; regression 3719/3728; lane E's E-g1 State block — a definition
+   in use is not deleted and keeps what decides results, the grade scale has no gaps, a template names live definitions, a
+   journal note keeps whom it is about and the date written, a check-in is held once, only a draft plan is deleted, a
+   recommendation is decided once). **Slice E-g2 is next** — calibration's two sessions and the grid after a return, HR's
+   advance and a leaver peer, "final" against "released", E11 and E12: ask its questions first (the E-g source check has the
+   findings), and § 5's first *Added by lane E-g1* row — a graded scale cannot be replaced — joins them. **Before a long run,
    check free RAM and the stuck email queue** (§ 5, the second E-e row): either one starves SQL Server's query memory and
    reads time out at 30 s.
 3. Build in the order of § 2. A lane is done when its harness suite is green twice, the regression
@@ -261,6 +268,15 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | D-75 | **PIP numbering and the plan's own rules** — the recommendation handler numbers `PIP-APR-…` and skips the service's rules; approve and reject act from any status on the no-definition path; the plan's subject records their own outcome; the outcome value is unchecked; the number index is neither unique nor per tenant | **Folded, no migration**: the handler numbers `PIP-yyyy-NNNN` through the service's rule and keeps its checks (one live plan, an HR owner, a supervisor who is not the employee); approve and reject act on a pending plan only; the subject (HR included) does not complete, decide or delete their own plan; the outcome is checked. The number race goes to migration batch 2 | E-f, batch 2 |
 | D-76 | **Beyond the rows (E-f)** | **Folded:** goal link ids checked (company, unit and parent goal, library, KPI — tenant, existence, same cycle; a parent the same employee's and not itself; the manager id server-set; P-22 closed as by design; a progress entry's review event the goal's appraisal's); the PIP goal PUT binds its validated DTO (percent 0–100), text lengths checked, the seven goal and meeting routes answer 422/404 not 500; a conversation's review event belongs to its appraisal, and the type error lists every type. **Not folded:** a final review held before its step (§ 5) | E-f |
 
+### 1o. Decisions from slice E-g's source check — settled with the user, 2026-10-01
+
+| # | Question | Decision (2026-10-01) | Affects |
+|---|---|---|---|
+| D-77 | **E-g's size** — E9's guards, E10's five, E11, E12 and eight § 5 rows: about twice E-f | **Two slices.** **E-g1** — definitions (E9), E10's no-schema items, and the small § 5 rows (a closed session's panel, an exclusion naming no one, Manager-mode nominations past Active, an attachment on a withdrawn appraisal). **E-g2** — two calibration sessions over one appraisal and the grid after a return, HR's advance and a peer who has left, "final" against "released", E11 and E12 — its questions asked when it starts | E-g1, E-g2 |
+| D-78 | **A definition in use** — every delete is soft, so no foreign key refuses one: a grade in use deleted hides its bands from generation and the forms (later appraisals re-scaled, past E-e's lock), a competency's evidence rule stops applying, a company goal's check-in links vanish; edits that change results are free | **No delete, no meaning change.** A grade, KPI, competency, library item, company goal or unit goal is not deleted while anything points at it (422, naming what); while in use, a grade's score band, rating and active flag, a KPI's measurement type and a competency's evidence rule do not change; names and descriptions stay editable | E-g1 |
+| D-79 | **Beyond the rows (E9)** | **Folded:** template writes check the grades, KPIs and competencies they name (tenant, existence, active — an unknown id was a 500), and activation and the clone leave out bands on deleted grades; the grade scale has no gaps (a score in a gap took the band below), its validation answering 422 (404); company and unit goal create and update check their cycle, strategic and parent goals (they re-pointed unchecked), and the goal library PUT checks route id = body id; a target delete takes its exclusions; the strategic goal's refusal answers 422 (400) | E-g1 |
+| D-80 | **Beyond the rows (E10)** | **Folded:** a journal entry's subject, cycle and goal are pinned on edit (another subject with no report check), its privacy checked when it becomes private, and its date honoured (not in the future); a held check-in is completed once (its held date pinned — the PUT copied it), not deleted, and takes no more goal updates; a development plan is created Draft or Active and deleted only as a Draft; a decided recommendation is not closed again and an approved one not approved again; an interim finalise refuses a goal twice and an empty set, and HR does not finalise its own | E-g1 |
+
 ---
 
 ## 2. Lane status
@@ -273,7 +289,7 @@ The user took every recommendation: seven in two rounds of questions (D-16 was a
 | L | Goal-driven KPI scoring | 7–8 days (D-31; was 5) | D-15, D-16, D-29, D-30, D-31 | ☑ 2026-09-29 — L-a 157/157 twice; L-b 244/244 twice; L-c 261/261 twice (one suite holds L-b and L-c); staged |
 | C | One appeal machine | 2 days (+0.5–1, D-36) | D-22, D-34, D-35, D-36, D-37, D-38 | ☑ **complete 2026-09-30**; C10 was batch 1's. Two slices (D-36): C-a ☑ — 209/209 twice, regression 2089/2098, committed effb567f5. C-b ☑ — source-checked (§ 1f D-37, D-38), `run-final-appeals.mjs` 397/397 twice, regression 2309/2318; staged |
 | D | Peer nomination and evaluation integrity | 1 day (1.5–2, the source check) | D-39, D-40, D-41 | ☑ 2026-09-30 — source-checked (§ 1g); `run-final-nominations.mjs` 186/186 twice, regression 2496/2505; staged |
-| E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | ~12 days (D-42; was 4) | D-10, D-14, D-17, D-20, D-42–D-58 | ◐ source-checked 2026-09-30 (§ 1h); seven slices E-a…E-g. E-a ☑ (130/130 twice, regression 2631/2640), E-b ☑ (`run-final-lifecycle.mjs` 276/276 twice, regression 2777/2786), E-c ☑ (source-checked, § 1i; 391/391 twice, regression 2892/2901; D-14's migration on UAT), E-d split in two (§ 1j): E-d1 ☑ (542/542 twice, regression 3043/3052), E-d2 split in two (§ 1k): E-d2a ☑ (601/601 twice, regression 3104/3113), E-d2b ☑ (source-checked, § 1l; 706/706 twice, regression 3226/3235), E-e ☑ (source-checked, § 1m; 821/821 twice, regression 3352/3361), E-f ☑ (source-checked, § 1n; 1016/1016 twice, regression 3549/3558); staged. E-g next |
+| E | Lifecycle guards (appraisal, cycle, template, settings, goals, calibration, PIP, conversations, definitions) | ~12 days (D-42; was 4) | D-10, D-14, D-17, D-20, D-42–D-58 | ◐ source-checked 2026-09-30 (§ 1h); seven slices E-a…E-g. E-a ☑ (130/130 twice, regression 2631/2640), E-b ☑ (`run-final-lifecycle.mjs` 276/276 twice, regression 2777/2786), E-c ☑ (source-checked, § 1i; 391/391 twice, regression 2892/2901; D-14's migration on UAT), E-d split in two (§ 1j): E-d1 ☑ (542/542 twice, regression 3043/3052), E-d2 split in two (§ 1k): E-d2a ☑ (601/601 twice, regression 3104/3113), E-d2b ☑ (source-checked, § 1l; 706/706 twice, regression 3226/3235), E-e ☑ (source-checked, § 1m; 821/821 twice, regression 3352/3361), E-f ☑ (source-checked, § 1n; 1016/1016 twice, regression 3549/3558), E-g split in two (§ 1o): E-g1 ☑ (1185/1185 twice, regression 3719/3728); staged. E-g2 next |
 | F | Recommendations, proposals, probation, PIP chain, segregation of duties | 2.5 days | D-12, D-19; **F1 waits on D-18** (the finish plan's lane 9) | ☐ |
 | G | Notifications on the platform topics | 5 days | D-21, D-28 | ☐ |
 | H | Nightly sweep and the advance path | 2.5 days | D-16, D-21 | ☐ |
@@ -2221,11 +2237,13 @@ not HR's; offered for the cross-module register). No suite was affected.
       - Deleting a completed gate conversation is refused.
       - The body's `ScheduledById`/`ConductedById` are ignored (controller :230-233). The demo
         pack's `061:145, :261` sends them (S3).
-- [ ] E9 **Definition in-use guards:** grade definitions (`AppraisalGradeDefinitionService.cs:69`),
+- [x] E9 **Definition in-use guards:** *(lane E-g1, 2026-10-01 — every definition, and its meaning while in use (D-78);
+      cycle targets take their exclusions instead of refusing (D-79); template assignments were E-e's)* grade definitions (`AppraisalGradeDefinitionService.cs:69`),
       KPIs (:121), competencies (`AppraisalCriteriaService.cs:120`), goal library (:168), company
       (:153) / unit (:286) goals, cycle targets (:210), template assignments (:171) refuse delete
       while referenced.
-- [ ] E10 **Other:**
+- [x] E10 **Other:** *(lane E-g1, 2026-10-01 — every item that needs no column, and more (D-80); the three that need one
+      are D-45's, for batch 2; the blanket catch went in E-a; P-5 is S1's)*
       - ~~`CheckInService.AddGoalUpdateAsync` (:249-273) checks the goal belongs to the check-in's
         employee.~~ *Done in lane P (with P7): any user could open a check-in about themselves and move
         a colleague's goal through it.*
@@ -2443,11 +2461,16 @@ with each:
       numbering, meeting status (writers, DTO, a UAT backfill), P-55. E8: the write rule (the line
       manager, the conductor or scheduler, the desk when not the subject — create included), `Type` and the
       actor ids pinned, a held conversation not deleted, the held date.
-- [ ] **Slice E-g — definitions and the rest.** E9's eight guards and nine 422s; E10's no-schema items
-      (journal date and privacy, a check-in completed once with its held date pinned, a plan deleted only
-      as a Draft, a decided recommendation not re-closed, a goal counted once in an interim finalise);
-      E11's assertions (positives on UAT); E12's repair action (UAT's Rule 8 five on the user's go).
-      D-45's three items go to batch 2.
+- [x] **Slice E-g1 — definitions, E10's records, four § 5 rows.** *(2026-10-01 — the E-g source check and E-g1 State
+      blocks below the E-f ones; § 1o D-77–D-80.)* E9's guards and their 422s, a definition's meaning frozen while in use;
+      the template, grade-scale, goal-link, library and target rows beyond them (D-79); E10's no-schema items (journal date,
+      subject and privacy, a check-in completed once and kept, a plan created live or draft and deleted only as a draft, a
+      recommendation decided once, an interim finalise that counts each goal once and is not HR's own — D-80); § 5's closed
+      panel, empty exclusion, Manager-mode nominations past Active and attachment on a withdrawn appraisal. D-45's three
+      items go to batch 2.
+- [ ] **Slice E-g2 — calibration, release and the reviewer.** § 5's two sessions over one appraisal and the grid after a
+      return; HR's advance and a peer who has left; "final" against "released"; E11's assertions (positives on UAT); E12's
+      repair action (UAT's Rule 8 five on the user's go) and the seeder. Its questions are asked when it starts.
 
 **E-a State (2026-09-30): DONE — built, verified on UAT, staged.** No migration. What exists now:
 - **The raw status routes** — `AppraisalLifecycle.EnsureRawTransition`: `PATCH {id}/status` and the workflow
@@ -3364,6 +3387,124 @@ conversation and review event (+3); `run-final-settings.mjs`: the edit with no t
 type leaves it (+2, 377). The demo pack: 061 sends no `conductedById` and states each held date (the scheduled one); 060
 sends no `conductedById` and records any past review still Scheduled as held.
 
+**E-g source check (2026-10-01, after E-f; line numbers as of `5bcc2e7f9`).** Four read-only surveys — the definitions (E9),
+the records (E10), the HR reviewer and the snapshot repair (E11, E12), and the § 5 rows with the harness and demo pack — then
+every claim that decides the build read again in source, and UAT's rows counted; the user settled four questions (§ 1o,
+D-77–D-80: two slices). What they found:
+- **E9, definitions.** Six deletes checked nothing — grade, KPI, competency, library item, company goal, unit goal — and every
+  delete is soft, so no foreign key refused one. A grade deleted hid its bands from generation
+  (`EffectiveAppraisalConfigurationService.LoadTemplateAsync` reads a band through its grade, and the soft-delete filter drops
+  a band on a deleted grade) and from the forms (PAS :884, :1322, :1697) — later appraisals re-scaled, past E-e's lock; a
+  competency deleted stopped its evidence rule; a company goal deleted lost its check-ins' objective links; the strategic
+  goal's own guard answered 400; a target delete left its exclusions live. Edits that change results were free (a grade's
+  band and rating, a KPI's measurement type, a competency's evidence rule). Template links were guarded in E-e. On UAT: grades
+  5/5 in use, KPIs 215/218, competencies 237/239, library items 0/3, company goals 2/23, unit goals 20/144, the one strategic
+  goal in use; no row points at a deleted definition today.
+- **Beyond E9:** a score in a gap between two bands took the band below (`PerformanceRatingResolver` reads a band's minimum as
+  its threshold, by design) and nothing refused a gap; the grade PUT answered 404 to its validation (the create 400); template
+  item and band writes took any competency, KPI or grade id — another tenant's stored, an unknown one a foreign-key 500 — and
+  activation and the copy counted a band on a deleted grade; the library PUT updated the body's id; company and unit goal
+  create and update stored any cycle, strategic goal, parent, unit, level and author.
+- **E10, records.** Journal: the create overwrote the date with the time of saving (PJS :169); privacy was checked on the
+  create only, and the privacy PATCH had no rule catch; the PUT copied the cycle, subject, goal and privacy (MAP :2021-2034) —
+  a note moved onto another subject past the create's report check. Check-ins: the complete had no held check (CIS :196-213),
+  the PUT copied the held date (MAP :1910 — the form's null un-held a check-in), a held one was deleted, and took goal updates
+  after. Plans: created at any status (DPS :155) and deleted at any (:201-210). Recommendations: the close refused only an
+  actioned one (AOS :213-230), and an approved one was approved again (:139-141). The interim finalise checked distinct goal
+  ids but recorded and averaged every row (ARES :317, :342-349), completed an empty set at 0, and let the desk through before
+  anything asked whose review it was.
+- **§ 5's eight E-g rows:** four small ones go to E-g1 (a closed session's panel, an exclusion naming no one, Manager-mode
+  nominations past Active, an attachment on a withdrawn appraisal); four to E-g2 (two sessions over one appraisal, the grid
+  after a return, HR's advance and a peer who has left, "final" against "released").
+- **E11, the HR reviewer** — `AssignHRReviewerAsync` (PAS :4057-4116): the configured reviewer when at work, else a pool by
+  post or unit name, least load, lowest number; called only from `EnsureHRReviewEvaluationAsync`. Its positives can be
+  asserted on UAT by SQL; its negatives would reach real HR officers. Beyond it: the appraisee can be assigned, and the
+  sign-off records the assigned reviewer, not the signer. **E12** — `SnapshotConfigAsync` (EACS :110-179) builds one
+  appraisal's snapshot with no route (a second call hits a unique index); the seeder (`PerformanceAppraisalDataSeeder.cs:432-533`)
+  writes the Rule 8 five without one, so a rebuild recreates them empty. Both go to E-g2, with their questions.
+- **The harness and demo:** `run-final-scoring`'s A2 expects 400 from the grade create; `run-final-privacy` :536-537 deletes an
+  Active plan; demo 060:201 completes a held check-in again to put its notes back; the demo's approve calls (061:344, 070:334,
+  100:177) approve only Proposed recommendations.
+
+**E-g1 State (2026-10-01): DONE — built, verified on UAT, staged.** No migration. What exists now:
+- **Definitions in use (D-78)** — `DefinitionUse` (what uses a definition, and the refusals' wording) behind six services: a
+  grade is used by template criteria's bands and by appraisals (their frozen bands, criterion scores, overall grade and score
+  changes); a KPI by template criteria and employee goals; a competency by template criteria and goals' required skills; a
+  library item by goals; a company goal by unit goals, employee goals and check-ins; a unit goal by employee goals, unit goals
+  cascaded from it and its files. One in use is not deleted (422, naming what and how many), and while in use a grade's band,
+  rating and active flag, a KPI's measurement type and a competency's evidence rule do not change; names and descriptions do.
+  A row under a deleted template, section, item, snapshot or evaluation is not a use.
+- **The grade scale (D-79)** — `AppraisalGradeDefinitionService.EnsureNoNewGapAsync`: a create, edit, deactivation or delete
+  that widens the scores no band covers between the lowest and highest band is refused (bands meet edge to edge: the next starts
+  one point above the last one's maximum). Every band rule answers 422 (the edit answered 404, the create 400).
+- **Template writes (D-79)** — `AppraisalTemplateService.EnsureItemDefinitionsAsync` and the band check: a competency, KPI or
+  grade named is the tenant's and not deleted, and one new to the item is active — answered on the routes' existing codes (409
+  on items, 400 on bands); `LiveGradeIdsAsync`: activation counts, and the copy carries, only bands on live grades.
+- **Links (D-79)** — company goals: the cycle and strategic goal are the tenant's, a strategic goal newly linked is active, and a
+  goal with a cascade stays in its cycle. Unit goals: the cycle, unit, level, author (at create) and parents are the tenant's, the
+  parents the same cycle's, no goal under itself; the edit keeps the author; a goal with a cascade stays in its cycle. An edit
+  checks only what it changes. The library PUT checks route id = body id; a target's delete takes its exclusions; an exclusion
+  names someone of the tenant, on add and update; the strategic refusal is 422.
+- **Records (D-80)** — journal: the date written (none is now, a future one refused), whom it is about, its cycle and goal kept on
+  edit (`UpdatePerformanceJournalEntryDto`'s mapper no longer copies them), private only where the cycle allows — on the edit and
+  the privacy PATCH too (422 now caught there) — and its goal is the subject's (or the author's own). Check-ins: completed once,
+  a held one neither deleted nor given a goal update, and the PUT no longer copies the held date. Plans: created Draft or Active,
+  deleted only as a Draft (the author check first). Recommendations: an Approved one is not approved again, a Rejected or
+  Dismissed one not closed again. Interim finalise: the appraisee — HR included — refused, then an empty set and a goal named
+  twice.
+- **§ 5's four** — a completed or cancelled calibration session's panel (add, remove, attendance; 422 caught on all three);
+  exclusions (above, with the dialog's zod check and hint); `NominationsEditable` — Draft or Active in both modes; an attachment
+  refused on a withdrawn appraisal, and the delete's refusal names the status.
+- **The screens** — the grade, KPI and criteria pages say what in use means; the company and unit goal delete dialogs say what
+  blocks a delete (they said the goals "stay, but lose the link"); the exclusion dialog; the check-in page hides *Update a goal*
+  once held.
+
+**Where the build refines the rows** (each deliberate; say if one should go back):
+1. **A grade's uses include criterion scores and score changes** — every place a grade id is recorded, not only bands and the
+   overall grade.
+2. **The gap rule compares before and after** — a scale that already had a gap is not refused for it, and a change that narrows a
+   gap passes.
+3. **A reference already held is kept even if inactive** — only one new to the item (or band set) must be active, so re-saving
+   never fails on the item's own old grade or criterion.
+4. **The unit goal's author is kept silently** on edit, not refused (the gates suite's edit carries it back unchanged).
+5. **The journal's goal check** (the optional one) is built: a note's goal is its subject's, or the author's own.
+6. **The interim two-actor check comes first**, for every caller, before the set checks.
+7. **A completed appraisal still takes evidence** — only a withdrawn one is refused (demo 061 uploads on Completed).
+8. **The company goal delete suggests hiding it** (*Visible to employees*), which stops new alignments.
+
+**Verified** (Staging API on `ErpSystemDB_UAT`, the build; no pending migration — the latest in code,
+`20260930151521_PerformanceClosureRetireCycleInProgress`, is UAT's latest):
+- `run-final-lifecycle.mjs` **1185/1185 on its first run, and 1185/1185 again in the regression** — E-a…E-f's 1016 and E-g1's
+  169: eg1-tpl (25), eg1-defs (43), eg1-links (19), eg1-excl (8), eg1-journal (15), eg1-checkin (15), eg1-plan (9), eg1-rec (9),
+  eg1-interim (8), eg1-cal (11), eg1-nom (2), eg1-att (5) — less the set-up steps, each asserts what the old code did not do,
+  established by reading it. The no-gap rule is **not reachable on UAT** (five bands over 0–100, all in use: any new active band
+  overlaps first) — proved in source only.
+- Regression (`run-all.mjs`, fifteen suites): interim reviews 134/134, attachments 66/66, slice C 53/53, slice D 27/27, **slice E
+  19/28 — the same 9 stale**, gates 33/33, lane A 188/188, **lane P 340/340**, lane B1 257/257, lane L-a 158/158, lanes L-b/L-c
+  297/297, lane B2 377/377, lane C 398/398, lane D 187/187, **lane E 1185/1185**. **3719/3728** — E-f's 3549/3558 plus exactly the
+  170 new (169 lifecycle, 1 privacy); no assertion lost; no call over 10 s.
+- hr-portal slice 5 **49/49 on UAT**. W3 slice 10 not run (real staff as subjects on UAT).
+- API log: **no 5xx response**; 204 database `ERR` pairs, every one defect #23's payroll-profile FK (one per fixture employee),
+  and the HR/Identity reconciliation's TDC/00052 twice.
+- What the runs wrote: no demo row changed — the grade scale field for field, and the demo's journal, check-ins, plans,
+  appraisals, profiles and strategic goal (rows changed since the start: 0); the rows that look new are portal slice 5's own
+  fixture (`A25Ver` / `A25S5`). Notifications to real users: 290 approval requests to the 9 HR and Manager holders (§ 5, the
+  first E-e row — as in E-f), and their email copies (261 to the 8 demo personas' `demo.tdc.local` addresses, undeliverable).
+  Afterwards no harness login is active and no harness cycle is open.
+- Frontend: scoped `tsc` over the seven changed pages, 0 errors; ESLint clean. Not browser-walked (§ 5).
+- Demo: APC2026 captured before the runs and after them all — its 107 phases, calendar, coverage preview, targets, in-scope list
+  (102), progress, HR dashboard and review desk byte-identical to each other and to E-f's capture. What the screens show
+  differently: a demo grade, criterion or KPI cannot be deleted, and a grade's band or rating, a KPI's measurement type or a
+  criterion's evidence rule cannot be changed (all in use); the demo's held check-in cannot be completed again or deleted.
+  **Not repaired:** the demo's journal notes carry the day they were saved, not the dates the demo pack wrote (a rebuild sends
+  them; correcting UAT's would be a write beyond the fixtures).
+
+**Harness changes in the slice:** `run-final-lifecycle.mjs` gains E-g1's 169, in a block of its own (its names would meet earlier
+sections'), with its own template TG and grades G0 and an inactive one, deleted at the end; uploads need the clamd stub.
+`run-final-scoring.mjs`'s four A2 probes expect 422; `run-final-privacy.mjs` writes the scrap plan as a Draft and checks a completed
+one is not deleted (+1, 340). The demo pack: 060 puts a held check-in's missing notes back through the update, not a second
+complete.
+
 ### Lane F — Recommendations, proposals, probation, PIP chain, segregation of duties
 
 - [ ] F1 Extend-Probation handler passes `CurrentUserProvider.EmployeeId` (refuse with a message
@@ -4032,9 +4173,9 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | `probe-lane3-appraisals.mjs` still sends the old header (a probe, not in `run-all`) | dev-harness | S8 |
 | The E-a screens (HR's review page) not browser-walked | 1 page | K |
 | *Added by lane E-b (2026-09-30):* | | |
-| A participant can be added, removed or marked on a completed or cancelled session — the screen hides it; the service does not refuse | `AddParticipantAsync`, `RemoveParticipantAsync`, `RecordAttendanceAsync` | E-g |
-| Two sessions over one appraisal: a completed but uncommitted session keeps its links, so the next opening passes those appraisals over; a commit does not skip an appraisal another sitting session holds | `OpenSessionAsync`, `CommitSkipReason` | E-g |
-| After HR's return, the grid's *Manager proposed* reads the old total until the manager re-submits (the evaluation keeps its `TotalScore`) | `ManagerEvaluationsAsync` | E-g |
+| ~~A participant can be added, removed or marked on a completed or cancelled session — the screen hides it; the service does not refuse~~ | `AddParticipantAsync`, `RemoveParticipantAsync`, `RecordAttendanceAsync` | E-g — done in lane E-g1, 2026-10-01 (refused 422; the remove and attendance routes answered 500 to a rule) |
+| Two sessions over one appraisal: a completed but uncommitted session keeps its links, so the next opening passes those appraisals over; a commit does not skip an appraisal another sitting session holds | `OpenSessionAsync`, `CommitSkipReason` | E-g2 |
+| After HR's return, the grid's *Manager proposed* reads the old total until the manager re-submits (the evaluation keeps its `TotalScore`) | `ManagerEvaluationsAsync` | E-g2 |
 | A cancel tells no one — nor was the panel told it had been convened | `CancelSessionAsync` | G |
 | A session's particulars edit and its delete have no screen (`update`, `remove` have no caller) | `calibration.service.ts` | I |
 | The E-b screen (the calibration session page) not browser-walked | 1 page | K |
@@ -4044,15 +4185,15 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | The coverage preview resolves every other cycle of the same type and year for its overlap card — on UAT some 450 harness Drafts, two queries each, per preview | `ComputeScopeOverlapsAsync` | S8 (teardown) / § 7 item 8 |
 | `GET api/AppraisalCycleTarget/type/{type}` has no caller, and now resolves a live count for each cycle it lists | `AppraisalCycleTargetController` | J |
 | ~~The progress page's *Targeted* is the count of appraisals, not the scope (APC2026: 107 against 102 — the five Rule 8 appraisals)~~ | `GetCycleProgressAsync` | E — done in lane E-d1, 2026-09-30 (*Targeted* reads the scope, 102; *Appraisals* 107 and *Withdrawn* beside it) |
-| An exclusion may name no scope at all, and then leaves out nobody; nothing refuses it | `AddExclusionAsync` | E-g |
+| ~~An exclusion may name no scope at all, and then leaves out nobody; nothing refuses it~~ | `AddExclusionAsync` | E-g — done in lane E-g1, 2026-10-01 (it names someone, of this tenant, on add and update; the dialog checks it and says which named scope decides) |
 | ~~Opening a cycle with no targets skips the overlap check, and a target added to an open cycle is never checked~~ | `OpenCycleAsync` | E-d2b — done in lane E-d2b, 2026-09-30 (generation runs the overlap check over whoever it would create — in another open cycle's scope, or holding an unwithdrawn appraisal there, D-60 — and the open reads held appraisals too) |
 | The E-c screens (the cycle list's edit dialog, the target dialog, the Coverage and Progress tabs) not browser-walked | 2 pages | K |
 | *Added by lane E-d1 (2026-09-30):* | | |
-| HR's advance approves a pending nomination whose peer has left — the nomination and the explicit approval refuse one; the advance's approval path does not check | `StageApprovalAsync` (the advance) | E-g |
-| Manager mode takes nominations on a Governance or an Appealed appraisal ("until it is completed or closed"); only Withdrawn was added | `NominationsEditable` | E-g |
-| A leaver's appraisal waiting only for the acknowledgment, in a cycle without HR review, is not final by the settle's rule (no sign-off), so the exit withdraws it — though its outcome was already released to the employee | `AppraisalScoreService.IsFinal` against `AppraisalRelease.IsReleased` | E-g (one reading of "final") |
+| HR's advance approves a pending nomination whose peer has left — the nomination and the explicit approval refuse one; the advance's approval path does not check | `StageApprovalAsync` (the advance) | E-g2 |
+| ~~Manager mode takes nominations on a Governance or an Appealed appraisal ("until it is completed or closed"); only Withdrawn was added~~ | `NominationsEditable` | E-g — done in lane E-g1, 2026-10-01 (both modes: Draft or Active) |
+| A leaver's appraisal waiting only for the acknowledgment, in a cycle without HR review, is not final by the settle's rule (no sign-off), so the exit withdraws it — though its outcome was already released to the employee | `AppraisalScoreService.IsFinal` against `AppraisalRelease.IsReleased` | E-g2 (one reading of "final") |
 | ~~A withdrawn appraisal's unheld conversations and open review events stay as rows — refused, and off every queue — not cancelled; `AppraisalReviewStatus.Cancelled` has no writer~~ | `AppraisalConversationService`, `AppraisalReviewEventService` | E-f — done 2026-10-01 (D-74: the withdrawal removes the unheld conversations and cancels the open events; Cancelled closes an event) |
-| An attachment can still be added to a withdrawn appraisal (the add checks nothing; the delete refuses) | `PerformanceAppraisalService.AddAttachmentAsync` | E-g |
+| ~~An attachment can still be added to a withdrawn appraisal (the add checks nothing; the delete refuses)~~ | `PerformanceAppraisalService.AddAttachmentAsync` | E-g — done in lane E-g1, 2026-10-01 (refused; a completed one still takes evidence; the delete's refusal names the status) |
 | A staff movement's `BasedOnAppraisalId` is taken unchecked — the tenant, the employee, a withdrawn appraisal | `StaffMovement` (mapper :352, :387) | J |
 | The employee's own response route answers a rule with 400 and a bare string; HR's answers 422 with `{ message }` | `PerformanceAppraisalsMeController.AddMyResponse` | J |
 | The withdrawal tells no one — the appraisee and the manager (lane G's list has it) | `AppraisalWithdrawalService` | G |
@@ -4097,6 +4238,12 @@ meetings, the C# seeders, and every demo-pack or harness break that another lane
 | A closed PIP's documents are frozen too (D-73's "no writes") — HR cannot file a closing letter after the outcome; attach it before | `PerformanceImprovementPlanService` attachments | F (say if a closed plan should take documents) |
 | The demo check-in note still says *"Turnaround is the one at-risk goal"*; with D-71 head.dev's team tab lists more | `hr-demo-smoke/scenarios/060-performance.mjs` :202 | S |
 | The E-f screens (the goals list's Delete / Unlock, the goal page's entry amendments and unlock, the at-risk page, the PIP page's Reviews status and subject-hidden actions, the meeting page's Record / Cancel / closed banner, the conversation page's appraisee view, type and held date, the appraisal page's Schedule) not browser-walked | 11 files | K |
+| *Added by lane E-g1 (2026-10-01):* | | |
+| **A grade scale in use cannot be replaced.** D-78 freezes an in-use grade's band, rating and active flag, and the scale refuses an overlap — so once a cycle is graded, no band can move, none can be retired, and no new one fits. A later year's different scale needs a scale of its own per cycle (or a retire-and-replace door that leaves the graded appraisals their grade) | `AppraisalGradeDefinitionService`, `PerformanceRatingResolver` | decide — E-g2's questions |
+| The no-gap rule cannot be exercised on UAT — its five bands cover 0–100 and are all in use, so a new active band overlaps first; proved in source only | `EnsureNoNewGapAsync` | K (a fresh tenant's scale) |
+| UAT's demo journal notes carry the day they were saved — the create overwrote the dates the demo pack wrote; a rebuild sends them, and no backfill was run (a write beyond the fixtures) | `PerformanceJournalEntries` | S (on the user's go) |
+| The template item routes answer a definition refusal 409 and the band route 400 — their existing mapping for every rule; the definition screens answer 422 | `AppraisalTemplatesController` | J (one code per rule kind) |
+| The E-g1 screens (the grade, KPI and criteria hints, the company and unit goal delete dialogs, the exclusion dialog's check, the check-in page without *Update a goal* once held) not browser-walked | 7 files | K |
 
 ---
 

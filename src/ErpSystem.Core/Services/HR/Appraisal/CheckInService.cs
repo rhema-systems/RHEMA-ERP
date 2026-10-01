@@ -187,6 +187,11 @@ public class CheckInService : ICheckInService
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCheckInAsync(id, cancellationToken);
+        // A held check-in is the record of a conversation that took place (performance closure E-g1, D-80): the delete
+        // took its notes, its goal updates and its attachments — which its own attachment delete refuses to remove.
+        if (entity.ConductedDate is DateTime held)
+            throw new InvalidOperationException(
+                $"This check-in was held on {held:d MMM yyyy}; a held check-in is part of the record and is not deleted.");
         await _checkInRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Check-in deleted: {Id}", id);
@@ -198,6 +203,12 @@ public class CheckInService : ICheckInService
         CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCheckInAsync(checkInId, cancellationToken);
+
+        // Held once (E-g1, D-80): a second complete moved the held date to now and replaced the notes — the private
+        // ones with nothing when the caller was not the conductor. Its notes are edited through the update.
+        if (entity.ConductedDate is DateTime held)
+            throw new InvalidOperationException(
+                $"This check-in was held on {held:d MMM yyyy}; it is completed once. Edit its notes instead.");
 
         entity.ConductedDate = DateTime.UtcNow;
         entity.SharedNotes = sharedNotes;
@@ -277,6 +288,12 @@ public class CheckInService : ICheckInService
     {
         var checkIn = await GetOwnedCheckInAsync(checkInId, cancellationToken);
         var tenantId = GetTenantId();
+
+        // A held check-in's goal updates are what was said in it (E-g1, D-80): one added later moved the goal's
+        // progress and status in the name of a conversation that was over.
+        if (checkIn.ConductedDate is DateTime held)
+            throw new InvalidOperationException(
+                $"This check-in was held on {held:d MMM yyyy} and takes no more goal updates. Record the progress on the goal, or in the next check-in.");
 
         // Only a goal of the person the check-in is about (performance closure P7, E10's add-time
         // check brought forward). Anyone could open a check-in about themselves and, through it,

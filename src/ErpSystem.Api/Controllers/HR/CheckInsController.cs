@@ -428,6 +428,11 @@ public class CheckInsController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // A held check-in is not deleted (performance closure E-g1, D-80).
+            return BusinessRuleRejected(ex, "deleting the check-in");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting check-in {Id}", id);

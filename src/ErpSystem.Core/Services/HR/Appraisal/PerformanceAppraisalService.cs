@@ -601,10 +601,18 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         Guid? fileUploadRecordId = null, Guid? documentRecordId = null, Guid? documentVersionId = null)
     {
         var tenantId = GetTenantId();
-        var appraisalExists = await _appraisalRepository.ExistsAsync(a => a.TenantId == tenantId && a.Id == appraisalId);
+        var status = await _appraisalRepository.GetQueryable()
+            .Where(a => a.TenantId == tenantId && a.Id == appraisalId)
+            .Select(a => (AppraisalStatus?)a.Status)
+            .FirstOrDefaultAsync(cancellationToken);
 
-        if (!appraisalExists)
+        if (status == null)
             throw new ArgumentException("Performance appraisal not found");
+
+        // A withdrawn appraisal takes no more work (performance closure E-g1, § 5): the delete refused to remove a file
+        // from one, and the add took one. A completed one still takes evidence — the record grows; it does not shrink.
+        if (status == AppraisalStatus.Withdrawn)
+            throw new InvalidOperationException("This appraisal was withdrawn from its cycle, so no file can be attached to it.");
 
         await EnsureCycleOpenAsync(appraisalId, "A file cannot be attached to this appraisal", cancellationToken);
 
@@ -682,10 +690,17 @@ public partial class PerformanceAppraisalService : IPerformanceAppraisalService
         if (entity?.PerformanceAppraisal == null)
             throw new ArgumentException("Attachment not found.");
 
-        if (entity.PerformanceAppraisal.Status is AppraisalStatus.Completed or AppraisalStatus.Closed
-            or AppraisalStatus.Withdrawn or AppraisalStatus.Appealed)
+        // The message named every status "complete" — a withdrawn or appealed appraisal is neither (E-g1, § 5).
+        var settled = entity.PerformanceAppraisal.Status switch
+        {
+            AppraisalStatus.Completed or AppraisalStatus.Closed => "is complete",
+            AppraisalStatus.Withdrawn => "was withdrawn from its cycle",
+            AppraisalStatus.Appealed => "is under appeal",
+            _ => null,
+        };
+        if (settled != null)
             throw new InvalidOperationException(
-                "This appraisal is complete, so its attachments are part of the record and cannot be removed.");
+                $"This appraisal {settled}, so its attachments are part of the record and cannot be removed.");
 
         await EnsureCycleOpenAsync(appraisalId, "This attachment cannot be removed", cancellationToken);
 

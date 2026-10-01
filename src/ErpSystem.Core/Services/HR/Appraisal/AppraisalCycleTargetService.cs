@@ -291,10 +291,18 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
         var entity = await GetOwnedAsync(id, cycleId);
         await GetWritableCycleAsync(entity.AppraisalCycleId);
 
+        // The target's exclusions go with it (performance closure E-g1, D-79): they were left behind, live, on a deleted
+        // target — counted by nothing, and listed by the exclusion reads that skip the target.
+        var exclusions = await _exclusionRepository.GetQueryable()
+            .Where(e => e.TenantId == entity.TenantId && e.AppraisalCycleTargetId == id)
+            .ToListAsync(cancellationToken);
+        foreach (var exclusion in exclusions)
+            await _exclusionRepository.DeleteAsync(exclusion);
+
         await _targetRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Appraisal cycle target deleted: {targetId}", id);
+        _logger.LogInformation("Appraisal cycle target deleted: {targetId}, with {exclusions} exclusion(s)", id, exclusions.Count);
 
         return true;
     }
@@ -322,12 +330,39 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
 
     // ─── Exclusions ───────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// An exclusion names whom it leaves out — an employee, a position, a unit or a level — and each id it names is
+    /// this organisation's (performance closure E-g1, § 5 row 4). One naming no one was saved and left out nobody,
+    /// while the list showed it as an exclusion; another tenant's ids were stored. An update checks what it changes.
+    /// </summary>
+    private async Task EnsureExclusionScopeAsync(Guid? levelId, Guid? unitId, Guid? positionId, Guid? employeeId,
+        AppraisalCycleTargetExclusion? stored, CancellationToken cancellationToken)
+    {
+        if (levelId is null && unitId is null && positionId is null && employeeId is null)
+            throw new InvalidOperationException("An exclusion names whom it leaves out: an employee, a position, an organisation unit or a level.");
+
+        var tenantId = GetTenantId();
+        if (levelId is Guid level && level != stored?.OrganizationLevelId
+            && !await _levelRepository.GetQueryable().AnyAsync(l => l.Id == level && l.TenantId == tenantId, cancellationToken))
+            throw new InvalidOperationException("The exclusion's organisation level was not found.");
+        if (unitId is Guid unit && unit != stored?.OrganizationUnitId
+            && !await _unitRepository.GetQueryable().AnyAsync(u => u.Id == unit && u.TenantId == tenantId, cancellationToken))
+            throw new InvalidOperationException("The exclusion's organisation unit was not found.");
+        if (positionId is Guid position && position != stored?.PositionId
+            && !await _positionRepository.GetQueryable().AnyAsync(p => p.Id == position && p.TenantId == tenantId, cancellationToken))
+            throw new InvalidOperationException("The exclusion's position was not found.");
+        if (employeeId is Guid employee && employee != stored?.EmployeeId
+            && !await _employeeRepository.GetQueryable().AnyAsync(e => e.Id == employee && e.TenantId == tenantId, cancellationToken))
+            throw new InvalidOperationException("The exclusion's employee was not found.");
+    }
+
     public async Task<AppraisalCycleTargetExclusionDto> AddExclusionAsync(
         Guid targetId, CreateAppraisalCycleTargetExclusionDto dto, CancellationToken cancellationToken = default)
     {
         var target = await GetOwnedAsync(targetId);
         await GetWritableCycleAsync(target.AppraisalCycleId);
         var tenantId = GetTenantId();
+        await EnsureExclusionScopeAsync(dto.OrganizationLevelId, dto.OrganizationUnitId, dto.PositionId, dto.EmployeeId, null, cancellationToken);
 
         var entity = dto.ToEntity();
         entity.AppraisalCycleTargetId = targetId;
@@ -373,6 +408,7 @@ public class AppraisalCycleTargetService : IAppraisalCycleTargetService
         var target = await GetOwnedAsync(targetId);
         await GetWritableCycleAsync(target.AppraisalCycleId);
         var entity = await GetOwnedExclusionAsync(targetId, dto.Id);
+        await EnsureExclusionScopeAsync(dto.OrganizationLevelId, dto.OrganizationUnitId, dto.PositionId, dto.EmployeeId, entity, cancellationToken);
 
         // The exclusion stays on its target, whatever the body says.
         dto.AppraisalCycleTargetId = targetId;

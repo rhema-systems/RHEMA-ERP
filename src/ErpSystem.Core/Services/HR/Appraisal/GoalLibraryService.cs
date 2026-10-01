@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -168,6 +169,14 @@ public class GoalLibraryService : IGoalLibraryService
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id, cancellationToken);
+
+        // A library item goals were made from is not deleted (performance closure E-g1, D-78): the goals lost where
+        // they came from, and the item's usage read nothing. Deactivating it stops it being offered.
+        var goals = await GetEmployeeGoalUsageCountAsync(id, cancellationToken);
+        var uses = DefinitionUse.Describe(new DefinitionUse.Use(goals, "an employee goal", "employee goals"));
+        if (uses != null)
+            throw DefinitionUse.DeleteRefused("library item", entity.Title, uses,
+                "Make it inactive instead, and it is no longer offered for new goals.");
 
         await _goalLibraryRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

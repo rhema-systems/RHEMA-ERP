@@ -427,6 +427,7 @@ public class CalibrationSessionService : ICalibrationSessionService
     public async Task<CalibrationParticipantDto> AddParticipantAsync(Guid sessionId, CreateCalibrationParticipantDto dto, CancellationToken cancellationToken = default)
     {
         var session = await GetOwnedSessionAsync(sessionId);
+        EnsurePanelOpen(session, "added");
 
         var duplicate = await _participantRepository.ExistsAsync(p =>
             p.CalibrationSessionId == sessionId && p.EmployeeId == dto.EmployeeId);
@@ -461,7 +462,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<bool> RemoveParticipantAsync(Guid sessionId, Guid participantId, CancellationToken cancellationToken = default)
     {
-        await GetOwnedSessionAsync(sessionId);
+        EnsurePanelOpen(await GetOwnedSessionAsync(sessionId), "removed");
         var entity = await _participantRepository.GetQueryable()
             .FirstOrDefaultAsync(p => p.Id == participantId && p.CalibrationSessionId == sessionId, cancellationToken);
 
@@ -476,7 +477,7 @@ public class CalibrationSessionService : ICalibrationSessionService
     public async Task<bool> RecordAttendanceAsync(
         Guid sessionId, Guid participantId, bool attended, CancellationToken cancellationToken = default)
     {
-        await GetOwnedSessionAsync(sessionId);
+        EnsurePanelOpen(await GetOwnedSessionAsync(sessionId), "marked");
         var entity = await _participantRepository.GetQueryable()
             .Include(p => p.Employee)
             .FirstOrDefaultAsync(p => p.Id == participantId && p.CalibrationSessionId == sessionId, cancellationToken);
@@ -534,6 +535,22 @@ public class CalibrationSessionService : ICalibrationSessionService
             .FirstOrDefaultAsync(a => a.Id == entity.Id, cancellationToken);
 
         return entity!.ToDto();
+    }
+
+    /// <summary>
+    /// The panel — who sits on a session and who attended — changes until the session completes or is cancelled
+    /// (performance closure E-g1, § 5): the screen hid the controls on a closed session, and the service took the
+    /// writes, so a completed session's record of who calibrated could be rewritten after the fact.
+    /// </summary>
+    private static void EnsurePanelOpen(CalibrationSession session, string action)
+    {
+        switch (session.Status)
+        {
+            case CalibrationStatus.Completed:
+                throw new InvalidOperationException($"This calibration session has completed: its panel members are no longer {action}.");
+            case CalibrationStatus.Cancelled:
+                throw new InvalidOperationException($"This calibration session is cancelled: its panel members are no longer {action}.");
+        }
     }
 
     /// <summary>

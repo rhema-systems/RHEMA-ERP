@@ -451,6 +451,11 @@ public class CalibrationSessionsController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // A completed or cancelled session's panel (performance closure E-g1): it was a 500.
+            return BusinessRuleRejected(ex, "removing a calibration participant");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error removing participant {ParticipantId} from calibration session {SessionId}", participantId, sessionId);
@@ -475,6 +480,10 @@ public class CalibrationSessionsController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "recording calibration attendance");
         }
         catch (Exception ex)
         {

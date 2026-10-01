@@ -16,7 +16,9 @@ import type { AppraisalCriterion } from '@/types/hr/appraisal';
  * judged against the grade bands the template item defines and nothing else.
  *
  * Deactivating keeps a criterion out of new template items without disturbing the templates
- * already scoring against it.
+ * already scoring against it. A criterion in use — on a template item or a goal's required
+ * skills — is not deleted and keeps its evidence rule (performance closure E-g1); the server
+ * answers 422 with what uses it.
  */
 const criterionSchema = z.object({
   code: z.string().max(50).optional(),
@@ -60,7 +62,7 @@ export default function AppraisalCriteriaPage() {
         title="criteria"
         singular="criterion"
         queryKey={['hr', 'appraisal-criteria']}
-        dialogHint="Describe what the criterion means so two managers grade it the same way."
+        dialogHint="Describe what the criterion means so two managers grade it the same way. A criterion in use keeps its evidence rule."
         emptyDescription="Add the competencies your appraisal forms score."
         list={() => appraisalCriteriaService.getAll()}
         create={(values) => appraisalCriteriaService.create(toPayload(values))}

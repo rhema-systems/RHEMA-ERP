@@ -27,8 +27,11 @@ import { humanizeEnum } from '@/lib/hr/attendance-format';
  *  • **Overall.** The optional band below maps a whole appraisal's score onto a rating. Fill
  *    it in only for the grades that describe an overall outcome; leave it blank on the rest.
  *
- * The overall bands are not validated against each other here, so keep them from overlapping —
- * a score sitting in two bands resolves to whichever is found first.
+ * The server checks the overall bands against each other: no two overlap, and the scale has no
+ * gaps (the next band starts one point above the last one's maximum — a score in a gap took the
+ * band below). A grade in use — on a template criterion's bands or an appraisal — keeps its band,
+ * rating and active flag, and is not deleted; its name and description stay editable. Each refusal
+ * comes back 422 with the reason, which the dialog's error toast shows.
  */
 const gradeSchema = z
   .object({
@@ -89,7 +92,7 @@ export default function AppraisalGradeDefinitionsPage() {
         title="grades"
         singular="grade"
         queryKey={['hr', 'appraisal-grade-definitions']}
-        dialogHint="Score bands here describe an overall appraisal result — per-item bands are set on the template item."
+        dialogHint="Score bands here describe an overall appraisal result — per-item bands are set on the template item. Bands meet edge to edge, and a grade in use keeps its band, rating and status."
         emptyDescription="Add the grades your appraisal forms use."
         list={() => appraisalGradeDefinitionService.getAll()}
         create={(values) => appraisalGradeDefinitionService.create(toPayload(values))}

@@ -297,6 +297,20 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         EnsureNotCancelled(ev);
         await EnsureAppraisalTakesWorkAsync(ev.PerformanceAppraisalId, "The interim appraisal cannot be finalised", cancellationToken);
 
+        // Two actors (performance closure E-g1, D-80): the desk passed the controller's gate before anything asked whose
+        // review it was, so an HR officer could score and finalise their own.
+        if (await GetSubjectEmployeeIdAsync(ev, cancellationToken) == recordedById)
+            throw new InvalidOperationException(
+                "Nobody finalises their own interim appraisal: your manager, or another HR officer, does.");
+
+        // The scores are the period's verdict on the agreed goals (E-g1, D-80): an empty set completed the review with
+        // a period score of 0, and a goal named twice was recorded twice and counted twice in the weighted mean.
+        if (dto.Scores.Count == 0)
+            throw new InvalidOperationException("Score the goals before finalising: a full interim appraisal is the period's verdict on them.");
+        var repeated = dto.Scores.GroupBy(s => s.EmployeeGoalId).Count(g => g.Count() > 1);
+        if (repeated > 0)
+            throw new InvalidOperationException($"Each goal is scored once; {repeated} goal(s) are named more than once.");
+
         var tenantId = GetTenantId();
 
         // The goal ids come from the payload; confirm every one belongs to this review's employee

@@ -107,6 +107,10 @@ public class CompanyGoalsController : ControllerBase
             var result = await _companyGoalService.CreateAsync(createDto, cancellationToken);
             return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
         }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "creating");
+        }
         catch (ArgumentException ex)
         {
             return BadRequest(new { message = ex.Message });
@@ -135,6 +139,10 @@ public class CompanyGoalsController : ControllerBase
             var result = await _companyGoalService.UpdateAsync(updateDto, cancellationToken);
             return Ok(result);
         }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "updating");
+        }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
@@ -158,6 +166,10 @@ public class CompanyGoalsController : ControllerBase
             var result = await _companyGoalService.DeleteAsync(id, cancellationToken);
             if (!result) return NotFound(new { message = "Company goal not found" });
             return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "deleting");
         }
         catch (ArgumentException ex)
         {
@@ -214,6 +226,13 @@ public class CompanyGoalsController : ControllerBase
             _logger.LogError(ex, "Error retrieving cascade stats for company goal {Id}", id);
             return StatusCode(500, "An error occurred while retrieving cascade statistics");
         }
+    }
+
+    /// <summary>A rule refused the write (performance closure E-g1): answered 422 with the reason.</summary>
+    private IActionResult BusinessRuleRejected(InvalidOperationException ex, string action)
+    {
+        _logger.LogWarning("Company goal rule rejected while {Action}: {Message}", action, ex.Message);
+        return UnprocessableEntity(new { message = ex.Message });
     }
 
     /// <summary>

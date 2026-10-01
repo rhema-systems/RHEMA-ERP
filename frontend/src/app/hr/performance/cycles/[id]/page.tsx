@@ -169,14 +169,21 @@ const emptyTarget: TargetForm = {
   isActive: true,
 };
 
-const exclusionSchema = z.object({
-  organizationLevelId: z.string().optional(),
-  organizationUnitId: z.string().optional(),
-  positionId: z.string().optional(),
-  employeeId: z.string().optional(),
-  reason: z.string().min(1, 'Required').max(500),
-  isActive: z.boolean(),
-});
+// An exclusion names whom it leaves out (performance closure E-g1): one naming no one was saved and
+// left out nobody. The server refuses it too (422).
+const exclusionSchema = z
+  .object({
+    organizationLevelId: z.string().optional(),
+    organizationUnitId: z.string().optional(),
+    positionId: z.string().optional(),
+    employeeId: z.string().optional(),
+    reason: z.string().min(1, 'Required').max(500),
+    isActive: z.boolean(),
+  })
+  .refine(
+    (v) => !!(v.employeeId || v.positionId || v.organizationUnitId || v.organizationLevelId),
+    { message: 'Name whom to leave out: an employee, a position, a unit or a level', path: ['employeeId'] },
+  );
 
 type ExclusionForm = z.input<typeof exclusionSchema>;
 
@@ -643,7 +650,7 @@ export default function AppraisalCycleDetailPage() {
                     ['hr', 'appraisal-cycle-targets', id],
                     ['hr', 'appraisal-cycle-coverage', id],
                   ]}
-                  dialogHint="Name whichever scope identifies the people to leave out — an employee, a position, a unit or a level."
+                  dialogHint="Name at least one. The narrowest decides: an employee; else everyone in the position; else the unit and the units beneath it; else the level."
                   emptyDescription="Nobody is excluded from this target group."
                   list={(targetId) => appraisalCycleTargetService.getExclusions(targetId)}
                   create={(targetId, values) =>

@@ -69,6 +69,15 @@ goal, and unlock restores the status the progress gives it and is never your own
 only while it is a draft, its reviews are *Scheduled*, *Held* or *Cancelled* (stored), a closed plan takes
 no writes, and its subject neither approves nor closes it; the appraisee reads their conversations and
 writes none, the held date can be stated, and a held conversation is never deleted.
+**And for lane E, slice E-g1** (definitions, records and four residual rows, 2026-10-01): chapters 5–10, 14–16, 21,
+22, 24, 25, 29, 30 and 34 — a grade, criterion, KPI, library item, company or unit goal in use is not deleted, and what
+decides results (a grade's band, rating and status, a KPI's measurement type, a criterion's evidence rule) does not
+change while it is in use — so the demo's grade bands are now fixed (chapter 6's walk says so); the grade scale has no
+gaps; a template names live, active definitions; company and unit goals name their own cycle's parents; an exclusion
+names someone, and goes with its target; a journal note keeps whom it is about and the date written; a check-in is held
+once and is then the record; a development plan is deleted only as a draft; a recommendation is decided once; a full
+interim review scores each goal once and is never finalised by its own appraisee; a closed calibration panel stays as
+it was; Manager-mode nominations close once the appraisal leaves Active; a withdrawn appraisal takes no file.
 **The database was rebuilt on 2026-09-29**: Rule 2, Rule 9, the demo tables and the Efua arithmetic give its figures (Efua 88.56, Cynthia 87.00, Efua's appeal window to 6 October). The rest of the guide still describes 2026-09-17; the closure plan (`HR-PERFORMANCE-FINAL-CLOSURE-PLAN.md`) tracks what each later lane changes.
 **Seventh in the series**, after Recruitment, Employees, Leave, Attendance & Time, Company Schedule and Staff Travel.
 
@@ -1330,6 +1339,13 @@ but cannot be added to new items."*
 interchangeably in the ported code and both are kept). Writes need `HR.Performance.Write`. The rule
 behind *Require evidence* is `AppraisalEvidence`, asked by the three submissions.
 
+> **Changed 2026-10-01** (closure E-g1, D-78). A criterion **in use** — on a template item, or among a
+> goal's required skills — is **not deleted** (it was a soft delete, and its items dropped out of the
+> forms with its evidence rule), and its *Require evidence* switch does not change: either answers
+> **422** naming what uses it. Its code, name, description and Active switch still change. On this
+> database every demo criterion is on the demo template, so none can be deleted — retire one with
+> *Active* instead.
+
 ### ⚠ Known gaps
 **P-5.** Codes are auto-truncated to 10 characters, which is why *Communication* reads `COMMUNICAT`
 and *Adaptability* reads `ADAPTABILI`. Cosmetic, but visible.
@@ -1368,8 +1384,13 @@ A grade with no band shows *"Item-level only"* in the band column. The dialog ca
 1. Open it. Point at the bands.
 
    💬 *"Efua's final score was 89.4. Eighty-nine point four falls in this band — Exceeds Expectations,
-   76 to 90 — and that is why her appraisal says what it says. The band is data, not code. If the
-   Corporation decides next year that 'Exceeds' starts at 80, this is the one row you change."*
+   76 to 90 — and that is why her appraisal says what it says. The band is data, not code — and once
+   an appraisal has been graded on it, it is fixed: a band that moved would re-grade the people already
+   told their grade."*
+
+   ⚠ *Do not open a grade and change its band or rating live.* Since closure E-g1 every demo grade is in
+   use, so the save is refused (422) — which is the point to make, not a fault. Its name and description
+   still save.
 
 2. Point at the *Item-level only* concept.
 
@@ -1378,7 +1399,8 @@ A grade with no band shows *"Item-level only"* in the band column. The dialog ca
 
 ### ⚙ Behind the page
 `api/AppraisalGradeDefinitions`. `OverallMinScore`/`OverallMaxScore` on `AppraisalGradeDefinitions`;
-the per-item bands live on `TemplateItemGradeRanges`, edited from the template editor.
+the per-item bands live on `TemplateItemGradeRanges`, edited from the template editor. Since closure
+E-g1 every rule on this screen answers **422** with its reason (the edit answered 404, the create 400).
 
 ### ⚠ Known gaps
 **P-6.** ~~The overall bands are **not validated against each other**. Two overlapping bands resolve
@@ -1386,6 +1408,13 @@ to whichever is found first. Keep them tidy by hand.~~ **Fixed 2026-09-29** (clo
 band refuses an overlap with another active band, a half band, a band outside 0–100 or inverted,
 and a band with no mapped rating. One resolver grades everywhere; a score between two published
 ranges (90.5 between 76–90 and 91–100) takes the lower band.
+
+**Since closure E-g1 (2026-10-01, D-78, D-79):** a save that would leave a **gap** in the scale is refused
+(bands meet edge to edge — the next starts one point above the last one's maximum; a score in a gap took
+the band below); and a grade **in use** — on a template item's bands or on any appraisal — is not deleted
+and keeps its band, rating and active flag. **The consequence:** once a cycle has been graded, the scale
+cannot be replaced from this screen — a new band overlaps an active one, and the in-use ones cannot be made
+inactive. Changing the scale for a later year needs a scale of its own per cycle (§ 5 of the closure plan).
 
 ---
 
@@ -1424,8 +1453,11 @@ exact target"* — and **Active**.
    than for a director."*
 
 ### ⚙ Behind the page
-`api/KpiDefinitions` → `KpiDefinitions`. A goal naming one copies `MeasurementType` and `Unit`; the
-delete is a soft delete and is refused where usage is detected.
+`api/KpiDefinitions` → `KpiDefinitions`. A goal naming one copies `MeasurementType` and `Unit`. ~~The
+delete is a soft delete and is refused where usage is detected~~ — nothing refused it. **Since closure
+E-g1 (2026-10-01, D-78)** a KPI **in use** — on a template item or an employee goal — is not deleted and
+keeps its measurement type (**422**, naming what uses it); its name, description, unit, tolerance and
+Active switch still change. A KPI nothing uses is deleted.
 
 ---
 
@@ -1541,13 +1573,13 @@ Four tabs: **Structure**, **Details** (scope + approval dates), **Cycles (1)**, 
 | The template | `GET api/AppraisalTemplates/{id}` | carries `isLocked` and `lockReason` — what the editor's freeze reads (P-7, since E-e) |
 | Structure | `GET …/{id}/sections`, `GET …/sections/{id}/items` | one items query per section — the section read does not carry `gradeRangeCount`, which is what rule 3 needs |
 | Add / edit section | `POST` / `PUT …/{templateId}/sections[/{id}]` | **409** while locked or awaiting approval; since E-e the PUT refuses a body naming another template (it moved the section, past that template's lock) |
-| Add / edit item | `POST` / `PUT …/sections/{sectionId}/items[/{id}]` | **409** if the same criterion or KPI is already on the template, in any section, and while locked or awaiting approval; since E-e the PUT refuses a body naming another section |
+| Add / edit item | `POST` / `PUT …/sections/{sectionId}/items[/{id}]` | **409** if the same criterion or KPI is already on the template, in any section, and while locked or awaiting approval; since E-e the PUT refuses a body naming another section; *since E-g1* also 409 when the criterion or KPI is not this tenant's (an unknown one was a 500) or is inactive and new to the item |
 | Remove section / item | `DELETE …/{templateId}/sections/{id}`, `…/sections/{sectionId}/items/{id}` | **409** while locked (they answered 500 before E-e) |
 | Reorder | `PATCH …/sections/reorder`, `…/items/reorder` | body is a bare array of ids; **409** while locked (they took no lock before E-e) |
-| Grade bands | `PUT api/AppraisalTemplates/items/{itemId}/grade-ranges` | **replace-all**; overlaps and repeated grades are refused (400); **409** while locked |
+| Grade bands | `PUT api/AppraisalTemplates/items/{itemId}/grade-ranges` | **replace-all**; overlaps and repeated grades are refused (400); *since E-g1* so is a grade that is not this tenant's, or inactive and new to the item (400); **409** while locked |
 | Edit (name, scope) | `PUT …/{id}` | the name and description always; a scope change is structural — **409** while locked; activation through it now validates, as below |
-| Activate | `PATCH …/{id}/active-status` | body is a bare boolean; runs the structure validation first — a failure answers **400** with the reasons (it answered 500) |
-| Clone | `POST …/{id}/clone` | the copy lands **inactive and in Draft**, whatever the source was, and its scope is stated on the copy rather than inherited |
+| Activate | `PATCH …/{id}/active-status` | body is a bare boolean; runs the structure validation first — a failure answers **400** with the reasons (it answered 500); *since E-g1* a band on a deleted grade does not count as a band |
+| Clone | `POST …/{id}/clone` | the copy lands **inactive and in Draft**, whatever the source was, and its scope is stated on the copy rather than inherited; *since E-g1* a band on a deleted grade is not copied |
 | Submit / Approve / Reject / Recall | `POST …/{id}/submit-for-approval` etc. | **workflow engine**, `APPRAISAL_TEMPLATE` — published on this database, approvers HR / Manager / TenantAdmin; since E-e approve and reject act on a template awaiting approval only (400 otherwise) |
 | Delete | `DELETE …/{id}` | **`HR.Performance.Admin`** — 403 for `hr.head`; since E-e **409** while locked or on any cycle (generation dropped a deleted template's link, and its people fell to another template or none), and its sections, items and bands go with it |
 
@@ -1618,7 +1650,8 @@ refused, and it is better seen before someone tries.
    being chosen for new company goals. Delete, no."*
 
 ### ⚙ Behind the page
-`api/StrategicGoals` → `StrategicGoals`. `DELETE` answers **400** while company goals still link to it.
+`api/StrategicGoals` → `StrategicGoals`. `DELETE` answers **422** while company goals still link to it (400 until
+closure E-g1). Since E-g1 a company goal linked to one must name a strategic goal of this tenant, active when newly linked.
 
 ---
 
@@ -1663,7 +1696,9 @@ Each row links to a detail page carrying **Goals created / Employees / Cycles** 
 ### ⚙ Behind the page
 `api/GoalLibrary`. Note the paging quirk: the `/{id}/usage` and `/selector` endpoints take **`page`**,
 not `pageNumber` — the two exceptions in the module. The picker dialog on the employee-goal form reads
-`/selector` and shows a pre-rendered `scopeSummary`.
+`/selector` and shows a pre-rendered `scopeSummary`. **Since closure E-g1 (2026-10-01):** an item any goal was
+made from is not deleted (**422** — deactivate it, and it is no longer offered); the edit refuses a body whose id is
+not the route's (it updated the body's).
 
 ### ⚠ Known gaps
 **P-10.** The three library items are not used by any goal on the demo database, so the usage tiles all
@@ -1954,7 +1989,10 @@ two are ignored"* — is what the server does: it keeps the scope the type names
 > targets and exclusions no longer change.
 
 The exclusion dialog: **Employee** picker, **Position**, **Organisation unit**, **Reason** *(required)*,
-**Active**.
+**Active**. *Since closure E-g1 (2026-10-01)* it needs at least one of them — one naming no one was saved and left
+out nobody — and its hint says which decides when several are named: the employee, else everyone in the post, else
+the unit and the units beneath it, else the level; the server refuses an empty one, or an id that is not this
+organisation's (422). Deleting a target takes its exclusions with it (they were left live).
 
 ### 👁 Tab 3 — Templates
 Intro line: *"Each employee gets the most specific one that matches them — position beats unit beats
@@ -2195,9 +2233,12 @@ Priority · Target · Due.
 | Alignment picker elsewhere | `GET api/CompanyGoals/visible/{cycleId}` — **only the visible ones** |
 | Detail cascade counts | `GET api/CompanyGoals/{id}/cascade-stats` |
 | Visibility toggle | `PATCH api/CompanyGoals/{id}/visibility` — body is a bare boolean |
-| Delete | `DELETE api/CompanyGoals/{id}` — **`HR.Performance.Admin`** |
+| Delete | `DELETE api/CompanyGoals/{id}` — **`HR.Performance.Admin`**; since closure E-g1 **422** while a unit goal, an employee goal or a check-in hangs off it (it was a soft delete, and they lost their parent) — hide it instead |
 
-Table: `CompanyGoals`, keyed to `AppraisalCycleId` and optionally `StrategicGoalId`.
+Table: `CompanyGoals`, keyed to `AppraisalCycleId` and optionally `StrategicGoalId`. **Since closure E-g1** the create and
+edit check that both are this tenant's (any id was stored), a strategic goal newly linked is active, and a goal with a
+cascade does not move to another cycle (**422**). The delete dialog says what blocks a delete; it said the aligned goals
+"stay, but lose the link".
 
 ### ⚠ Known gaps
 **P-16.** The list is a projection carrying only a 200-character description preview, so opening the
@@ -2291,6 +2332,7 @@ Goal · Priority · Status · Progress · Due.
 | Tiles / table | `GET api/UnitGoals/dashboard/metrics`, `…/dashboard/paged` |
 | Detail | `GET api/UnitGoals/{id}`, `…/{id}/cascade-stats`, `…/{id}/employee-goals` |
 | Attachments | `GET/POST/DELETE api/UnitGoals/{goalId}/attachments` — uploads go through the controlled scan gate |
+| Create / edit / delete | `POST`, `PUT`, `DELETE api/UnitGoals[/{id}]` — the desk, the author or the unit's head. **Since closure E-g1:** the cycle, unit, level, author and parent goals named are this tenant's and the parents are the same cycle's (any id was stored); a goal is not its own parent or under one of its own; the edit keeps the author; a goal with anything under it — an employee goal, a child unit goal, a file — is not deleted or moved to another cycle (**422**) |
 
 > ⚠ **The attachment entitlement here is weaker than anywhere else in the module**: a unit goal's
 > attachments are readable by **anyone authenticated in the tenant**, because a departmental target is
@@ -2941,7 +2983,7 @@ Note · and a **"This changes the goal"** confirmation line.
 | I run / About me | `GET api/CheckIns/me/conducting`, `GET api/CheckIns/me` | both token-scoped |
 | Direct reports picker | `GET api/PerformanceAppraisals/manager/me/direct-reports` | self-armed |
 | Create | `POST api/CheckIns` | **422 when the cycle's settings profile has check-ins switched off** — a policy decision, not a permission problem |
-| Record as held | `POST api/CheckIns/{id}/complete` | stamps it held, **now**; the three note fields are replaced wholesale |
+| Record as held | `POST api/CheckIns/{id}/complete` | stamps it held, **now**; the three note fields are replaced wholesale. **Once** — since closure E-g1 a held check-in is not completed again (422; it moved the held date and replaced the notes), nor deleted, nor given another goal update, and the page hides *Update a goal* once it is held. Its notes are edited through `PUT api/CheckIns/{id}`, which no longer touches the held date (the form's empty one un-held it) |
 | Goal updates | `GET/POST/PUT/DELETE api/CheckIns/{id}/goal-updates[/{id}]` | writes `CheckInGoalUpdates` **and applies the figures to `EmployeeGoals`** |
 | Objectives | `PUT api/PerformanceLinks/check-ins/{id}/objectives` | **replace-set**; `[]` clears it |
 | Attachments | `GET/POST/DELETE api/CheckIns/{id}/attachments[/{id}]` | a file is removed by whoever attached it, or HR — never as the check-in's subject — and only until the check-in is held (closure P9) |
@@ -3045,6 +3087,13 @@ than labelling itself "private" and leaving the reader to infer who that exclude
 **Two refusals worth knowing:** creating a **private** entry is **422** when the cycle has
 `enablePrivateJournal` switched off; and writing a note **about** somebody who does not report to you is
 **403**.
+
+> **Changed 2026-10-01** (closure E-g1, D-80). The entry's **date is the one written** — the create overwrote it
+> with the time of saving — and a future one is refused; none sent is today. **An edit keeps whom the note is
+> about, its cycle and its goal** (it moved a note onto another person, past the report check above). Making an
+> entry private — by the edit or by *Share / unshare* — is refused where the cycle allows no private journal, as
+> the create was; and a note's goal is a goal of the person it is about. *The demo's notes were saved before this:
+> they carry the day the demo was built, not the dates the demo pack wrote, until a rebuild.*
 
 ### ⚠ Known gaps
 **P-28.** **Every journal entry on this database is dated 14 September 2026**, including the three that
@@ -3273,6 +3322,10 @@ manager can close, and may require a **progress update on every live goal** befo
 > included — and the finalise scored whatever it was sent. Both now take the employee's agreed, locked
 > goals, and a finalise that names any other goal is refused with 422.
 
+> **Changed 2026-10-01** (closure E-g1, D-80). The finalise also refuses **an empty set** (it completed the review
+> with a period score of 0) and **a goal named twice** (it was recorded twice and counted twice in the mean), and
+> **nobody finalises their own** — an HR officer on their own review is refused, though their desk passes the gate.
+
 ### ⚠ Known gaps
 **P-31.** All 102 live checkpoints sit at **Pending** — nobody has submitted one. The *Awaiting manager*
 tile on the cycle's Interim reviews tab therefore reads 0, and the detail pages open with empty
@@ -3375,7 +3428,9 @@ recommendations: somebody ticked "development needed" on a real goal.
 | Skill suggestions | `GET api/PerformanceLinks/employees/{id}/cycles/{cycleId}/skill-suggestions` | |
 
 Business rules answer **422** with a readable message: a completed plan cannot be edited, a shared plan
-cannot go back to draft.
+cannot go back to draft; *since closure E-g1* a plan is created as a draft or active (it could be born completed or
+cancelled, closed by nobody), and **only a draft is deleted** — an active, on-hold, completed or cancelled plan is the
+record of what was agreed (it was deleted at any status); cancel it instead.
 
 ### ⚠ Known gaps
 **P-33.** Creating a plan for **yourself** from the portal makes it **Active** immediately — you do not
@@ -3802,7 +3857,7 @@ it needs changing.*
 | **Goals** | The goal assessment panel in *manager* mode: his conclusion, **with her claim shown read-only above it** |
 | **Assessment & recommendations** | Six narrative boxes, each 2000 characters with a live counter: **Overall comments · Strengths · Areas for improvement · Training needs · Career aspirations · Notes on your recommendations** — then five checkboxes: **Promotion · Salary increment · Training · Performance improvement plan · Termination** |
 | **Peer feedback** | Every peer's scores and comments, attributed — each criterion a peer scored, with its section and weight |
-| **Nominations** | Only when the cycle nominates in *Manager* mode — the manager chooses the peers, and each is asked as soon as they are nominated |
+| **Nominations** | Only when the cycle nominates in *Manager* mode — the manager chooses the peers, and each is asked as soon as they are nominated. *Since closure E-g1* only while the appraisal is a draft or active, as in Employee mode (Manager mode took them "until it is completed or closed" — in governance and on appeal too) |
 | **History** | The employee's score across previous cycles |
 | **Conversations** | The panel that schedules and completes appraisal conversations |
 | **Evidence** | Attachments — *"Evidence behind the ratings — reports, certificates, correspondence. Scanned on upload; max 10 MB."* **Remove** is offered on a file to whoever attached it, or to HR, and on nothing once the appraisal is complete — the server refuses the rest (closure P9, 2026-09-29; it removed anyone's file, at any stage) |
@@ -3911,7 +3966,7 @@ submitted count always, the scores and comments once the manager has submitted.
 | Save / Submit | `POST …/{id}/manager-evaluation` with `isDraft` — **submitting assigns the HR reviewer and moves the appraisal to Governance** |
 | Peer feedback | `GET …/{id}/manager-peer-evaluations` |
 | Nominations | `GET …/{id}/peer-nominations/summary`, `POST …/approve`, `POST …/reject` |
-| Attachments | `GET/POST api/PerformanceAppraisals/{id}/attachments` — the controlled scan gate |
+| Attachments | `GET/POST api/PerformanceAppraisals/{id}/attachments` — the controlled scan gate. *Since closure E-g1* a withdrawn appraisal takes no file (422; the delete already refused one), and the refusal to remove a file names the status — complete, withdrawn or under appeal (it called them all complete) |
 
 > ⚠ Like the self-evaluation, **a rejected save answers 200 with `success: false`**. The screen surfaces
 > the rule rather than claiming success.
@@ -4117,7 +4172,7 @@ Leave one blank to leave it alone."*
 | Grid | `GET …/{id}/matrix` — **every appraisal the session covers, not only the adjusted ones**; each row carries `commitSkipReason` |
 | Per-criterion detail | `GET …/{id}/appraisals/{appraisalId}/criteria` — a *read*, so panellists get it, not just HR; **404 for an appraisal outside the session's scope** (any session id used to open any appraisal's criteria) |
 | Adjustments | `GET/POST/PUT/DELETE …/{id}/adjustments[/{id}]` — **422 while the session is Pending, Completed or Cancelled** (the removal too, since 2026-09-30), and 422 if the appraisal is outside scope; an edit changes the score and rationale, and 422s a body naming another appraisal or criterion |
-| Panel | `…/{id}/participants[/{id}]`, `PATCH …/attendance` |
+| Panel | `…/{id}/participants[/{id}]`, `PATCH …/attendance` — *since closure E-g1* **422 once the session has completed or been cancelled** (the screen hid the controls and the service took the writes; the remove and attendance routes answered 500 to a refusal) |
 | Attachments | `…/{id}/attachments` — HR only, through the scan gate |
 
 **Reads are HR's and the panel's; every write needs an HR role.** *(Changed 2026-09-29, closure lane
@@ -4846,7 +4901,7 @@ record the recommendation became, where that screen exists.
 | Propose | `POST api/AppraisalOutcomeRecommendations` | **the appraisee's own manager, or HR** — 403 otherwise |
 | Approve | `POST …/{id}/approve` | HR. **Idempotent** — an already-actioned recommendation comes back unchanged |
 | Retry | `POST …/{id}/retry-dispatch` | **422 unless the row is Approved-but-not-Actioned** |
-| Reject / Dismiss | `POST …/{id}/reject`, `…/dismiss` | **422 once actioned** — the downstream record already exists |
+| Reject / Dismiss | `POST …/{id}/reject`, `…/dismiss` | **422 once actioned** — the downstream record already exists; *since closure E-g1* **422 once rejected or dismissed** (a second close overwrote who decided it, when and why). An approved one not yet actioned may still be dismissed, and is not approved again (422 — retry its dispatch instead) |
 
 > ⚠ **Approve answers 200 whether or not the dispatch succeeded.** Check the returned `status`.
 > `Actioned` means the downstream record exists and `targetEntityId` points at it; `Approved` means the

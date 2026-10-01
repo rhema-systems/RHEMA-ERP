@@ -65,6 +65,13 @@ public class UnitGoalsController : ControllerBase
         }
     }
 
+    /// <summary>A rule refused the write (performance closure E-g1): answered 422 with the reason.</summary>
+    private IActionResult BusinessRuleRejected(InvalidOperationException ex, string action)
+    {
+        _logger.LogWarning("Unit goal rule rejected while {Action}: {Message}", action, ex.Message);
+        return UnprocessableEntity(new { message = ex.Message });
+    }
+
     /// <summary>
     /// Dashboard-filtered, projection-based paged list for the alignment management UI.
     /// Supports search, priority, orgUnit, linked/unlinked, and manager-scoped access.
@@ -272,6 +279,10 @@ public class UnitGoalsController : ControllerBase
             var result = await _unitGoalService.CreateAsync(createDto, cancellationToken);
             return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
         }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "creating");
+        }
         catch (ArgumentException ex)
         {
             return BadRequest(new { message = ex.Message });
@@ -300,6 +311,10 @@ public class UnitGoalsController : ControllerBase
             var result = await _unitGoalService.UpdateAsync(updateDto, cancellationToken);
             return Ok(result);
         }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "updating");
+        }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
@@ -324,6 +339,10 @@ public class UnitGoalsController : ControllerBase
             var result = await _unitGoalService.DeleteAsync(id, cancellationToken);
             if (!result) return NotFound(new { message = "Unit goal not found" });
             return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "deleting");
         }
         catch (ArgumentException ex)
         {

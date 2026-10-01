@@ -136,6 +136,12 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
         if (entity.Status == RecommendationStatus.Actioned && entity.TargetEntityId.HasValue)
             return ToDto(await GetEntityAsync(id, cancellationToken));
 
+        // Approved once (performance closure E-g1, D-80): a second approval re-stamped the approver and the date over the
+        // first, and dispatched again. An approval whose record was not created is retried, not re-approved.
+        if (entity.Status == RecommendationStatus.Approved)
+            throw new InvalidOperationException(
+                "This recommendation is already approved. If its downstream record was not created, retry the dispatch.");
+
         entity.Status = RecommendationStatus.Approved;
         entity.ApprovedById = approverId == Guid.Empty ? null : approverId;
         entity.ApprovedDate = DateTime.UtcNow;
@@ -216,6 +222,10 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
 
         if (entity.Status == RecommendationStatus.Actioned)
             throw new InvalidOperationException("An actioned recommendation cannot be rejected or dismissed.");
+        // Decided once (E-g1, D-80): closing a closed one again overwrote who decided it, when, and why.
+        if (entity.Status is RecommendationStatus.Rejected or RecommendationStatus.Dismissed)
+            throw new InvalidOperationException(
+                $"This recommendation was already {entity.Status.ToString().ToLowerInvariant()} on {entity.ApprovedDate:d MMM yyyy}.");
 
         entity.Status = status;
         entity.ApprovedById = reviewerId == Guid.Empty ? null : reviewerId;
