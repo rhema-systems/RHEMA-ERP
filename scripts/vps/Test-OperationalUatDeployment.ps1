@@ -110,6 +110,7 @@ exit $RequestedExitCode
     . (Join-Path $PSScriptRoot 'OperationalUatVerification.ps1')
     function Assert-True {param([bool]$Condition,[string]$Message) Assert-Test $Condition $Message}
     function Assert-DeploymentId {}
+    function Invoke-RemoteTimedStep {param([string]$Name,[scriptblock]$Operation) & $Operation}
     function Get-DatabaseConnectionString {return $script:FakeConnection}
     function Get-RhemaOperationalSeedSnapshot {param($ConnectionString,$DatabaseName)
         $script:SnapshotCalls++
@@ -132,6 +133,13 @@ exit $RequestedExitCode
     Assert-Test ($script:CliCalls.Count -eq 1 -and $script:CliCalls[0].Command -eq 'seed-operational-uat' -and
         $script:CliCalls[0].Password -ceq $processSentinel -and $script:SnapshotCalls -eq 1) 'Normal deployment did not seed and verify its explicit active database.'
     Assert-Test ($normalOutput -contains 'OPERATIONAL_SEED|PASS') 'Normal operational verification marker missing.'
+    $DeploymentId='test-normal-no-secret';$script:CliCalls.Clear();$script:SnapshotCalls=0
+    [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword',$null,'Process')
+    $normalNoSecretOutput=@(Invoke-OperationalSeed)
+    Assert-Test ($script:CliCalls.Count -eq 1 -and
+        [string]::IsNullOrEmpty($script:CliCalls[0].Password) -and $script:SnapshotCalls -eq 1) `
+        'Existing operational accounts should reconcile without manufacturing or requiring a password.'
+    Assert-Test ($normalNoSecretOutput -contains 'OPERATIONAL_SEED|PASS') 'Password-free operational reconciliation marker missing.'
     $DeploymentId='test-normal-incomplete';$script:MissingOperationalData=$true;$rejected=$false
     try { Invoke-OperationalSeed | Out-Null } catch {
         $rejected=$_.Exception.Message -like 'Operational UAT readiness failed:*'
@@ -142,6 +150,11 @@ exit $RequestedExitCode
     $normalBranch=$deployAst.Find({param($n) $n -is [Management.Automation.Language.IfStatementAst] -and
         $n.Clauses[0].Item1.Extent.Text -eq '-not $FreshDatabaseName' -and $n.Extent.Text.Contains("'SeedOperational'")},$true)
     Assert-Test ($null -ne $normalBranch) 'Normal deploy orchestration must invoke SeedOperational only outside fresh mode.'
+    $preflightFunction=Find-TestFunction $remoteAst 'Invoke-Preflight'
+    Assert-Test ($preflightFunction.Extent.Text.Contains('Get-RhemaMissingOperationalActorNames') -and
+        $preflightFunction.Extent.Text.Contains('UAT_CREDENTIAL|NOT_REQUIRED') -and
+        $preflightFunction.Extent.Text.Contains('$FreshDatabaseName')) `
+        'Preflight must require a password only for a fresh target or genuinely missing operational actors.'
     $freshCall=$cutoverAst.Find({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-RhemaFreshDatabaseProvisioning'},$true)
     Assert-Test ($freshCall.Extent.Text -match '-OperationalUatPassword\s+\(Get-RhemaOperationalPassword\)') 'Fresh cutover failed to forward protected credential.'
 
@@ -183,14 +196,14 @@ exit $RequestedExitCode
     $helper=Join-Path $testRoot 'packaged-helper.ps1'
     New-RhemaVpsPreflightHelper -RepositoryRoot $repositoryRoot -OutputPath $helper | Out-Null
     $helperAst=Read-TestAst $helper
-    foreach($name in @('Get-RhemaOperationalSeedSnapshot','Assert-RhemaOperationalSeedReadiness','Get-RhemaOperationalPassword','Invoke-OperationalSeed')) {
+    foreach($name in @('Get-RhemaMissingUserNames','Get-RhemaMissingOperationalActorNames','Get-RhemaOperationalSeedSnapshot','Assert-RhemaOperationalSeedReadiness','Get-RhemaOperationalPassword','Invoke-OperationalSeed')) {
         [void](Find-TestFunction $helperAst $name)
     }
     foreach($file in Get-ChildItem -LiteralPath $testRoot -Recurse -File) {
         $text=[IO.File]::ReadAllText($file.FullName)
         Assert-Test (-not $text.Contains($processSentinel) -and -not $text.Contains($serviceSentinel) -and -not $text.Contains($databaseSentinel)) 'A credential was persisted in generated settings/evidence/helper.'
     }
-    Write-Host 'PASS: credential precedence and missing-secret handling; isolated child environment; native-child stripping/restoration; secure prompt after DryRun/build/backup; normal/fresh seed wiring; repeat-fingerprint rejection; secret-free evidence; packaged helper parsing.'
+    Write-Host 'PASS: credential precedence and missing-actor handling; password-free existing-account reconciliation; isolated child environment; native-child stripping/restoration; secure prompt after DryRun/build/backup; normal/fresh seed wiring; repeat-fingerprint rejection; secret-free evidence; packaged helper parsing.'
 } finally {
     [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword',$savedPassword,'Process')
     [Environment]::SetEnvironmentVariable('RHEMA_TEST_UNRELATED_SECRET',$savedUnrelated,'Process')

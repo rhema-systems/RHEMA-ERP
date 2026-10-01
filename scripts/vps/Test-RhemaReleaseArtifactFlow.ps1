@@ -11,9 +11,10 @@ function Assert-Test {
 $buildPath = Join-Path $repositoryRoot 'scripts\Build-RhemaRelease.ps1'
 $recoveryPath = Join-Path $repositoryRoot 'scripts\Complete-RhemaReleasePackaging.ps1'
 $deployPath = Join-Path $repositoryRoot 'scripts\Deploy-RhemaVps.ps1'
+$qsDeployPath = Join-Path $repositoryRoot 'scripts\Deploy-QsUatVps.ps1'
 $remotePath = Join-Path $repositoryRoot 'scripts\vps\Invoke-RhemaVpsRemote.ps1'
 $workflowPath = Join-Path $repositoryRoot '.github\workflows\ci-cd.yml'
-foreach ($path in @($buildPath, $recoveryPath, $deployPath, $remotePath)) {
+foreach ($path in @($buildPath, $recoveryPath, $deployPath, $qsDeployPath, $remotePath)) {
     $tokens = $null; $errors = $null
     [void][Management.Automation.Language.Parser]::ParseFile(
         $path, [ref]$tokens, [ref]$errors)
@@ -53,7 +54,8 @@ Assert-Test (($build | Select-String -Pattern "'ci', '--include=dev'" -AllMatche
 foreach ($contract in @('CleanBuild', '.next-production', "'cache'", 'npm.cmd', "'prune'",
         'release-manifest.json', 'nextPublicApiUrl', 'availablePhysicalMemoryBytes',
         'totalBuildSeconds', 'api.zip', 'frontend.zip', 'ReuseFrontendBuildFromCommit',
-        'git diff --quiet', 'frontendBuildCommit')) {
+        'git diff --quiet', 'frontendBuildCommit', 'BUILD TIMING SUMMARY (slowest first)',
+        'resourcesBefore', 'resourcesAfter', 'completedUtc')) {
     Assert-Test $build.Contains($contract) "Release builder is missing contract: $contract"
 }
 Assert-Test $build.Contains(
@@ -76,7 +78,12 @@ $deploy = Get-Content $deployPath -Raw
 foreach ($contract in @('DeployOnly', 'ArtifactDirectory',
         'Consume prebuilt immutable release artifacts',
         'Rollback application release after failed verification',
-        'Deploy-only artifact validation failed')) {
+        'Deploy-only artifact validation failed',
+        'DEPLOYMENT TIMING SUMMARY (slowest first)', 'REMOTE_TIMING_JSON|',
+        'slowestSteps', 'completedUtc', 'Publish self-contained API',
+        'Restore locked frontend dependencies', 'Build Next.js production application',
+        'Stage frontend runtime and production dependencies',
+        'Compress API and frontend artifacts')) {
     Assert-Test $deploy.Contains($contract) "Deploy-only contract is missing: $contract"
 }
 Assert-Test (-not $deploy.Contains("NODE_OPTIONS = '--max-old-space-size=8192'")) `
@@ -85,8 +92,21 @@ Assert-Test (-not $deploy.Contains("NODE_OPTIONS = '--max-old-space-size=8192'")
 $remote = Get-Content $remotePath -Raw
 foreach ($contract in @("Join-Path `$RhemaRoot 'releases'", 'VERSIONED_RELEASE|',
         'RollbackRelease', 'APPLICATION_ROLLBACK|PASS|DATABASE_UNCHANGED',
-        "['status'] = 'Successful'")) {
+        "['status'] = 'Successful'", 'Get-RemoteResourceSnapshot',
+        'Create compressed SQL COPY_ONLY backup',
+        'Verify SQL backup checksum and restore metadata',
+        'Start API, run migrations, and wait for liveness',
+        'Activate frontend release and wait for readiness',
+        'REMOTE_TIMING_JSON|')) {
     Assert-Test $remote.Contains($contract) "Remote release contract is missing: $contract"
+}
+
+$qsDeploy = Get-Content $qsDeployPath -Raw
+foreach ($contract in @('Deploy verified ERP release',
+        'Validate and optionally update source checkout', 'UpdateSource', '--ff-only',
+        'Prepare QS UAT data and decisions', 'Generate QS UAT readiness evidence',
+        'QS DEPLOYMENT TIMING SUMMARY (slowest first)', 'slowestSteps')) {
+    Assert-Test $qsDeploy.Contains($contract) "QS deployment timing contract is missing: $contract"
 }
 
 $workflow = Get-Content $workflowPath -Raw

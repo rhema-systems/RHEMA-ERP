@@ -157,6 +157,68 @@ ORDER BY RowType,Name;
 '@
 }
 
+function Get-RhemaMissingUserNames {
+    param(
+        [Parameter(Mandatory=$true)][string]$ConnectionString,
+        [Parameter(Mandatory=$true)][string]$DatabaseName,
+        [Parameter(Mandatory=$true)][string[]]$UserNames
+    )
+    $required=@($UserNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+    if($required.Count -eq 0){return @()}
+    foreach($name in $required){
+        if($name -cnotmatch '^[A-Za-z0-9._-]{1,256}$'){throw 'Operational UAT actor name is invalid.'}
+    }
+    $connection=$null;$command=$null
+    try {
+        $builder=New-Object System.Data.SqlClient.SqlConnectionStringBuilder $ConnectionString
+        if([string]::IsNullOrWhiteSpace($DatabaseName) -or $builder.InitialCatalog -cne $DatabaseName){
+            throw 'Explicit database identity does not match the connection.'
+        }
+        $connection=New-Object System.Data.SqlClient.SqlConnection $ConnectionString
+        $connection.Open()
+        $command=$connection.CreateCommand();$command.CommandTimeout=120
+        $values=New-Object 'System.Collections.Generic.List[string]'
+        for($index=0;$index -lt $required.Count;$index++){
+            $parameterName='@User'+$index
+            [void]$values.Add('('+ $parameterName +')')
+            [void]$command.Parameters.Add($parameterName,[System.Data.SqlDbType]::NVarChar,256)
+            $command.Parameters[$parameterName].Value=$required[$index]
+        }
+        [void]$command.Parameters.Add('@ExpectedDatabase',[System.Data.SqlDbType]::NVarChar,128)
+        $command.Parameters['@ExpectedDatabase'].Value=$DatabaseName
+        $command.CommandText=@"
+SET NOCOUNT ON;
+IF DB_NAME()<>@ExpectedDatabase THROW 51998,'Operational actor target mismatch.',1;
+DECLARE @Tenant uniqueidentifier=(SELECT Id FROM dbo.Tenants WHERE Code=N'DEFAULT' AND IsDeleted=0 AND Status=1);
+IF @Tenant IS NULL THROW 51997,'Active DEFAULT tenant is missing.',1;
+DECLARE @Required TABLE(UserName nvarchar(256) PRIMARY KEY);
+INSERT @Required(UserName) VALUES $($values -join ',');
+SELECT r.UserName FROM @Required r
+WHERE NOT EXISTS(SELECT 1 FROM dbo.Users u WHERE u.TenantId=@Tenant AND u.UserName=r.UserName)
+ORDER BY r.UserName;
+"@
+        $missing=New-Object 'System.Collections.Generic.List[string]'
+        $reader=$command.ExecuteReader()
+        try{while($reader.Read()){[void]$missing.Add([string]$reader.GetString(0))}}finally{$reader.Dispose()}
+        return @($missing)
+    }catch{
+        $failure=$_.Exception
+        while($failure.InnerException -and $failure -isnot [System.Data.SqlClient.SqlException]){$failure=$failure.InnerException}
+        $code=if($failure -is [System.Data.SqlClient.SqlException]){[string][int]$failure.Number}else{'unavailable'}
+        throw "Operational UAT actor check failed (SQL number $code). Connection details were not logged."
+    }finally{if($command){$command.Dispose()};if($connection){$connection.Dispose()}}
+}
+
+function Get-RhemaMissingOperationalActorNames {
+    param([Parameter(Mandatory=$true)][string]$ConnectionString,
+          [Parameter(Mandatory=$true)][string]$DatabaseName)
+    return @(Get-RhemaMissingUserNames -ConnectionString $ConnectionString -DatabaseName $DatabaseName -UserNames @(
+        'procurementofficer','procurementapprover','procurementevaluator','tdc0102-checker-201531',
+        'financereviewer','financeapprover','storesofficer','storesmanager',
+        'uat.qs.preparer','uat.qs.reviewer','uat.qs.approver'
+    ))
+}
+
 function Get-RhemaOperationalSeedSnapshot {
     param([Parameter(Mandatory=$true)][string]$ConnectionString,
           [Parameter(Mandatory=$true)][string]$DatabaseName)

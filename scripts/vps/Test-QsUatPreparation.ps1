@@ -104,7 +104,13 @@ public class EnvironmentProbe {
  [IO.File]::WriteAllText((Join-Path $vps 'FreshDatabaseProvisioning.ps1'),@'
 function Invoke-RhemaFreshApiCli {
  param($ApiExecutable,$ContentRoot,$ConnectionString,$Command,$ExpectedQsDatabase,$OperationalUatPassword,$TimeoutSeconds,[switch]$AutoApproveQsUat,[switch]$ReconcileUnapprovedQsDrafts)
- if($Command -ne 'seed-qs-uat' -or $ExpectedQsDatabase -ne 'RhemaERP_VpsTest_GuardTest' -or $OperationalUatPassword -ne 'fake-qs-secret-!42'){throw 'Initializer passed incorrect protected CLI inputs.'}
+ if($Command -ne 'seed-qs-uat' -or $ExpectedQsDatabase -ne 'RhemaERP_VpsTest_GuardTest'){throw 'Initializer passed incorrect protected CLI inputs.'}
+ if([string]::IsNullOrWhiteSpace($OperationalUatPassword) -and $env:RHEMA_QS_EXISTING_ACTORS -ne '1'){
+  $error=New-Object InvalidOperationException 'CLI failed; raw output suppressed.'
+  $error.Data['SafeCliEvidence']=[pscustomobject]@{Command=$Command;ExitCode=17;OutputSha256='sanitized-password-required';GuardCodes=@('QS_UAT_PASSWORD_REQUIRED');QsDecisionCodes=@();QsStages=@('QS_UAT_STAGE|ACTORS');MissingServices=@();SqlErrorNumbers=@();ExceptionTypes=@('System.InvalidOperationException')}
+  throw $error
+ }
+ if(-not [string]::IsNullOrWhiteSpace($OperationalUatPassword) -and $OperationalUatPassword -ne 'fake-qs-secret-!42'){throw 'Initializer passed an unexpected protected password.'}
  if($ReconcileUnapprovedQsDrafts -and !$AutoApproveQsUat){throw 'Unsafe reconciliation combination.'}
  if($env:RHEMA_QS_INIT_FAIL -eq '1'){
   $error=New-Object InvalidOperationException 'CLI failed; raw output suppressed.'
@@ -145,10 +151,11 @@ function Read-Host {
 & $Initializer -ExpectedDatabase $ExpectedDatabase -OutputDirectory $OutputDirectory -AutoApproveQsUat:$AutoApproveQsUat -ReconcileUnapprovedQsDrafts:$ReconcileUnapprovedQsDrafts
 if($PasswordSource -in @('Prompt','PromptAfterBlank')){Write-Output ('PROMPT_COUNT|'+$global:QsPromptCount)}
 '@)
-  foreach($source in @('Process','Service','Prompt','PromptAfterBlank','Mismatch','Failure','AutoApproval','AutoReconcile','FalseSuccess')) {
+  foreach($source in @('Process','Service','ExistingNoPassword','Prompt','PromptAfterBlank','Mismatch','Failure','AutoApproval','AutoReconcile','FalseSuccess')) {
   $outputDirectory=Join-Path $testRoot ('init-'+$source);$launch=Join-Path $testRoot ($source+'-launched.txt')
   $environment=@{RHEMA_QS_INIT_LAUNCH=$launch}
    if($source -in @('Process','Failure','AutoApproval','AutoReconcile','FalseSuccess')){$environment.UatBootstrap__SharedPassword='fake-qs-secret-!42'}
+  if($source -eq 'ExistingNoPassword'){$environment.RHEMA_QS_EXISTING_ACTORS='1'}
   if($source -eq 'Failure'){$environment.RHEMA_QS_INIT_FAIL='1'}
   if($source -eq 'FalseSuccess'){$environment.RHEMA_QS_INIT_FALSE_SUCCESS='1'}
   $target=if($source -eq 'Mismatch'){'RhemaERP_VpsTest_Wrong'}else{'RhemaERP_VpsTest_GuardTest'}
@@ -172,6 +179,7 @@ if($PasswordSource -in @('Prompt','PromptAfterBlank')){Write-Output ('PROMPT_COU
    Assert-QsPreparation ($child.ExitCode -eq 0 -and (Test-Path -LiteralPath $launch)) ('Initializer credential source failed: '+$source)
    if($source -eq 'Prompt'){Assert-QsPreparation ($child.Output.Contains('PROMPT_COUNT|1')) 'Valid prompted password was requested more than once.'}
    if($source -eq 'PromptAfterBlank'){Assert-QsPreparation ($child.Output.Contains('PROMPT_COUNT|2') -and $child.Output.Contains('password cannot be empty')) 'Blank prompted password was not rejected and requested again.'}
+   if($source -eq 'ExistingNoPassword'){Assert-QsPreparation (!$child.Output.Contains('QS_UAT_PASSWORD|REQUIRED_FOR_MISSING_ACTORS')) 'Existing QS actors caused an unnecessary password prompt.'}
    if($source -eq 'AutoApproval'){Assert-QsPreparation ($child.Output.Contains('QS_CONFIGURATION|AUTO_APPROVED_TEST_ONLY')) 'Explicit auto-approval was not verified.'}
    foreach($artifact in Get-ChildItem -LiteralPath $outputDirectory -Recurse -File) {
     $text=Get-Content -LiteralPath $artifact.FullName -Raw
@@ -179,7 +187,7 @@ if($PasswordSource -in @('Prompt','PromptAfterBlank')){Write-Output ('PROMPT_COU
    }
   }
  }
- Write-Output 'PASS|Windows PowerShell initializer: secure prompt with blank-entry retry, process/service secret sources, target rejection before launch, and sanitized artifacts.'
+ Write-Output 'PASS|Windows PowerShell initializer: existing actors need no password; missing actors use one secure prompt with blank-entry retry; process/service secret sources, target rejection before launch, and sanitized artifacts.'
 
  $wrapper=Join-Path $scripts 'Deploy-QsUatVps.ps1'
  Copy-Item -LiteralPath (Join-Path $repositoryRoot 'scripts\Deploy-QsUatVps.ps1') -Destination $wrapper
