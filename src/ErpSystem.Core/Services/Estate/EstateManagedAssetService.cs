@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Projects;
@@ -190,7 +191,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             ? asset.OwnershipHistoryJson
             : JsonSerializer.Serialize(handoff.OwnershipHistory);
         asset.ValuationAmount = handoff.ValuationAmount;
-        asset.Currency = string.IsNullOrWhiteSpace(handoff.Currency) ? "GHS" : handoff.Currency.Trim().ToUpperInvariant();
+        asset.Currency = await ResolveActiveFinanceCurrencyAsync(handoff.Currency);
         asset.IsAvailableForLease = false;
         asset.IsAvailableForSale = false;
         asset.IsPublishedFromProject = false;
@@ -314,7 +315,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.UnitType = TrimOrNull(handoff.UnitType);
         asset.AreaSquareMeters = handoff.AreaSquareMeters;
         asset.ValuationAmount = handoff.ValuationAmount;
-        asset.Currency = string.IsNullOrWhiteSpace(handoff.Currency) ? "GHS" : handoff.Currency.Trim().ToUpperInvariant();
+        asset.Currency = await ResolveActiveFinanceCurrencyAsync(handoff.Currency);
         asset.IsAvailableForLease = handoff.IsAvailableForLease;
         asset.IsAvailableForSale = handoff.IsAvailableForSale;
         asset.IsPublishedFromProject = true;
@@ -408,13 +409,14 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             capitalizedCost = request.ValuationAmount;
         }
 
+        var currency = await ResolveActiveFinanceCurrencyAsync(request.Currency);
         var costBreakdown = new[]
             {
-                request.OwnerConsiderationCost is > 0m ? $"Owner/vendor consideration: {request.Currency} {request.OwnerConsiderationCost.Value:N2}" : null,
-                request.ExternalSurveyorCost is > 0m ? $"External surveyor cost: {request.Currency} {request.ExternalSurveyorCost.Value:N2}" : null,
-                request.StampDutyCost is > 0m ? $"Stamp duty: {request.Currency} {request.StampDutyCost.Value:N2}" : null,
-                request.OtherAcquisitionCost is > 0m ? $"Other acquisition cost: {request.Currency} {request.OtherAcquisitionCost.Value:N2}" : null,
-                $"Total capitalized land cost: {request.Currency} {capitalizedCost:N2}"
+                request.OwnerConsiderationCost is > 0m ? $"Owner/vendor consideration: {currency} {request.OwnerConsiderationCost.Value:N2}" : null,
+                request.ExternalSurveyorCost is > 0m ? $"External surveyor cost: {currency} {request.ExternalSurveyorCost.Value:N2}" : null,
+                request.StampDutyCost is > 0m ? $"Stamp duty: {currency} {request.StampDutyCost.Value:N2}" : null,
+                request.OtherAcquisitionCost is > 0m ? $"Other acquisition cost: {currency} {request.OtherAcquisitionCost.Value:N2}" : null,
+                $"Total capitalized land cost: {currency} {capitalizedCost:N2}"
             }
             .Where(item => !string.IsNullOrWhiteSpace(item));
         var asset = new EstateManagedAsset
@@ -454,7 +456,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             StampDutyCost = request.StampDutyCost,
             OtherAcquisitionCost = request.OtherAcquisitionCost,
             TotalCapitalizedCost = capitalizedCost,
-            Currency = string.IsNullOrWhiteSpace(request.Currency) ? "GHS" : request.Currency.Trim().ToUpperInvariant(),
+            Currency = currency,
             Notes = string.Join(Environment.NewLine, new[]
             {
                 request.Notes.Trim(),
@@ -881,9 +883,9 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         var includesSale = ListingIncludesSale(listingType);
         var includesRecurringCharge = ListingIncludesRecurringCharge(listingType);
         var isLeaseListing = ListingIsLease(listingType);
-        var listingCurrency = string.IsNullOrWhiteSpace(request.ExternalListingCurrency)
-            ? "GHS"
-            : request.ExternalListingCurrency.Trim().ToUpperInvariant();
+        var listingCurrency = await ResolveActiveFinanceCurrencyAsync(
+            request.ExternalListingCurrency,
+            asset.Currency);
         var salePrice = includesSale
             ? request.ExternalSalePrice ?? request.ExternalListingPrice
             : null;
@@ -1640,9 +1642,9 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             : null;
         // Keep the generic listing price populated for older integrations.
         asset.ExternalListingPrice = includesSale ? salePrice : isLeaseListing ? leaseAmount : recurringCharge;
-        asset.ExternalListingCurrency = string.IsNullOrWhiteSpace(request.ExternalListingCurrency)
-            ? "GHS"
-            : request.ExternalListingCurrency.Trim().ToUpperInvariant();
+        asset.ExternalListingCurrency = await ResolveActiveFinanceCurrencyAsync(
+            request.ExternalListingCurrency,
+            asset.Currency);
         asset.ExternalListingNotes = TrimOrNull(request.ExternalListingNotes);
         asset.ExternalPublishedAt = request.IsPublishedToExternalPortal
             ? asset.ExternalPublishedAt ?? DateTime.UtcNow
@@ -2733,6 +2735,56 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             .FirstOrDefault(),
         Notes = asset.Notes
     };
+
+    private async Task<string> ResolveActiveFinanceCurrencyAsync(
+        string? requestedCurrency,
+        string? fallbackCurrency = null)
+    {
+        var currencies = _unitOfWork.Repository<Currency>()
+            .GetQueryable(currency =>
+                currency.TenantId == _currentUserProvider.TenantId
+                && currency.IsActive
+                && !currency.IsDeleted);
+        var normalized = FirstNonBlankOrNull(requestedCurrency, fallbackCurrency)?.ToUpperInvariant();
+
+        if (!string.IsNullOrWhiteSpace(normalized))
+        {
+            var activeCurrency = await currencies
+                .Where(currency => currency.CurrencyCode == normalized)
+                .Select(currency => currency.CurrencyCode)
+                .FirstOrDefaultAsync();
+            if (!string.IsNullOrWhiteSpace(activeCurrency))
+            {
+                return activeCurrency;
+            }
+
+            throw new InvalidOperationException(
+                $"Currency {normalized} is not active in Finance for this tenant.");
+        }
+
+        var baseCurrency = await currencies
+            .Where(currency => currency.IsBaseCurrency)
+            .OrderBy(currency => currency.DisplayOrder)
+            .Select(currency => currency.CurrencyCode)
+            .FirstOrDefaultAsync();
+        if (!string.IsNullOrWhiteSpace(baseCurrency))
+        {
+            return baseCurrency;
+        }
+
+        var firstActiveCurrency = await currencies
+            .OrderBy(currency => currency.DisplayOrder)
+            .ThenBy(currency => currency.CurrencyCode)
+            .Select(currency => currency.CurrencyCode)
+            .FirstOrDefaultAsync();
+        if (!string.IsNullOrWhiteSpace(firstActiveCurrency))
+        {
+            return firstActiveCurrency;
+        }
+
+        throw new InvalidOperationException(
+            "Finance must configure an active currency before Estate can save monetary values.");
+    }
 
     private static string? TrimOrNull(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

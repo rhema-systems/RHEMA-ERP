@@ -47,6 +47,13 @@ import {
 } from '@/services/estate-land-management.service';
 import { getStatusBadgeClassName } from '@/lib/status-badge';
 import { getListingPriceDefaults } from '@/lib/estate-listing-pricing';
+import {
+  DEFAULT_ESTATE_CURRENCY,
+  buildEstateCurrencyOptions,
+  formatEstateCurrencyOption,
+  loadEstateCurrencyContext,
+  type EstateCurrencyReference,
+} from '@/lib/estate-currency';
 
 const LISTINGS_PER_PAGE = 10;
 const LISTING_FETCH_SIZE = 500;
@@ -166,6 +173,12 @@ export default function EstatePropertyListingsPage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [isUploading, setIsUploading] = React.useState(false);
+  const [currencies, setCurrencies] = React.useState<
+    Awaited<ReturnType<typeof loadEstateCurrencyContext>>['activeCurrencies']
+  >([]);
+  const [baseCurrency, setBaseCurrency] = React.useState<EstateCurrencyReference>(
+    DEFAULT_ESTATE_CURRENCY
+  );
   const [form, setForm] = React.useState({
     isPublishedToExternalPortal: false,
     externalListingType: 'Rent',
@@ -175,7 +188,7 @@ export default function EstatePropertyListingsPage() {
     externalLeaseAmount: '',
     externalGroundRentRequired: '',
     externalPremiumChargeRequired: '',
-    externalListingCurrency: 'GHS',
+    externalListingCurrency: DEFAULT_ESTATE_CURRENCY.code,
     externalListingNotes: '',
   });
 
@@ -275,6 +288,23 @@ export default function EstatePropertyListingsPage() {
   }, [loadAssets]);
 
   React.useEffect(() => {
+    let active = true;
+    void loadEstateCurrencyContext().then((context) => {
+      if (!active) return;
+      setCurrencies(context.activeCurrencies);
+      setBaseCurrency(context.baseCurrency);
+      setForm((current) =>
+        current.externalListingCurrency
+          ? current
+          : { ...current, externalListingCurrency: context.baseCurrency.code }
+      );
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
     if (!selected) {
       setDocuments([]);
       return;
@@ -325,7 +355,10 @@ export default function EstatePropertyListingsPage() {
         selected.externalPremiumChargeRequired == null
           ? ''
           : selected.externalPremiumChargeRequired ? 'Yes' : 'No',
-      externalListingCurrency: selected.externalListingCurrency || 'GHS',
+      externalListingCurrency:
+        selected.externalListingCurrency ||
+        selected.currency ||
+        baseCurrency.code,
       externalListingNotes: selected.externalListingNotes || '',
     });
     void loadDocuments(
@@ -333,7 +366,17 @@ export default function EstatePropertyListingsPage() {
         ? selected.parentAssetId || selected.id
         : selected.id
     );
-  }, [loadDocuments, requestedListingType, selected]);
+  }, [baseCurrency.code, loadDocuments, requestedListingType, selected]);
+
+  const listingCurrencyOptions = React.useMemo(
+    () =>
+      buildEstateCurrencyOptions(
+        currencies,
+        baseCurrency,
+        form.externalListingCurrency
+      ),
+    [baseCurrency, currencies, form.externalListingCurrency]
+  );
 
   const orderedAssets = React.useMemo(
     () =>
@@ -913,17 +956,31 @@ export default function EstatePropertyListingsPage() {
                   </div>
                   <div className="space-y-2">
                     <Label>Currency</Label>
-                    <Input
+                    <Select
                       disabled={listingLockedByWorkflow}
                       value={form.externalListingCurrency}
-                      onChange={(event) =>
+                      onValueChange={(value) =>
                         setForm((current) => ({
                           ...current,
-                          externalListingCurrency:
-                            event.target.value.toUpperCase(),
+                          externalListingCurrency: value,
                         }))
                       }
-                    />
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {listingCurrencyOptions.map((code) => (
+                          <SelectItem key={code} value={code}>
+                            {formatEstateCurrencyOption(
+                              currencies,
+                              code,
+                              baseCurrency
+                            )}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 

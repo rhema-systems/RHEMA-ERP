@@ -416,9 +416,17 @@ export const procurementCurrencyService = {
   },
 };
 
+export const estateCurrencyService = {
+  getActive: async (): Promise<CurrencyListDto[]> => {
+    const response = await api.get<CurrencyApiDto[]>('/estate/reference-data/currencies');
+    return normalizeCurrencyList(response ?? []);
+  },
+};
+
 const financeCommonService = {
   paymentTerms: paymentTermService,
   currencies: currencyService,
+  estateCurrencies: estateCurrencyService,
 };
 
 export default financeCommonService;

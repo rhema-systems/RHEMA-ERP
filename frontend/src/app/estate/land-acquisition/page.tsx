@@ -74,6 +74,13 @@ import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalA
 import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowApprovalHistoryPanel';
 import { useAuth } from '@/hooks/use-auth';
 import { usePaginatedItems } from '@/hooks/use-paginated-items';
+import {
+  DEFAULT_ESTATE_CURRENCY,
+  buildEstateCurrencyOptions,
+  formatEstateCurrencyOption,
+  loadEstateCurrencyContext,
+  type EstateCurrencyReference,
+} from '@/lib/estate-currency';
 import type { WorkflowTaskAttachmentDto } from '@/types/workflow';
 import {
   businessPartnerService,
@@ -347,6 +354,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('projectReference', 'Project Reference'),
     field('parcelLocation', 'Location'),
     field('estimatedSize', 'Estimated Size'),
+    field('currency', 'Currency', 'select'),
     field('coordinates', 'Site / Locality Reference'),
     field('vendorName', 'Vendor / Owner'),
     field('acquisitionType', 'Acquisition Type', 'select', [
@@ -409,6 +417,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
       'Internal',
       'External',
     ]),
+    field('currency', 'Currency', 'select'),
     field('surveyorBusinessPartnerId', 'External Surveyor / Vendor'),
     field('surveyorFeeAmount', 'External Surveyor Fee'),
     field('surveyorFeeDueDate', 'Surveyor Fee Due Date', 'date'),
@@ -575,6 +584,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('verificationNotes', 'Verification Notes', 'textarea', undefined, 2),
   ],
   'agreement-negotiation': [
+    field('currency', 'Currency', 'select'),
     field('sellerQuote', 'Seller Quote'),
     field('offerAmount', 'Offer Amount'),
     field('counterOffer', 'Counter Offer'),
@@ -651,6 +661,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     ),
   ],
   'vendor-payment': [
+    field('currency', 'Currency', 'select', undefined, 1, true),
     field('vendorName', 'Vendor / Seller', 'text', undefined, 1, true),
     field('paymentPurpose', 'Payment Purpose', 'text', undefined, 1, true),
     field('agreedAmount', 'Agreed Amount', 'text', undefined, 1, true),
@@ -773,6 +784,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('approvalNotes', 'Approval Notes', 'textarea'),
   ],
   'stamp-duty-assessment': [
+    field('currency', 'Currency', 'select'),
     field('propertyValue', 'Property Value'),
     field('stampDutyAmount', 'Stamp Duty Amount'),
     field('assessmentAuthority', 'Assessment Authority'),
@@ -788,6 +800,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('approvalNotes', 'Approval Notes', 'textarea', undefined, 2),
   ],
   'stamp-duty-payment': [
+    field('currency', 'Currency', 'select', undefined, 1, true),
     field(
       'accountsPayableInvoiceNumber',
       'Payable Request',
@@ -842,6 +855,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('registrationNotes', 'Registration Notes', 'textarea', undefined, 2),
   ],
   'asset-creation': [
+    field('currency', 'Currency', 'select', undefined, 1, true),
     field('assetCode', 'Land Code', 'text', undefined, 1, true),
     field('assetNumber', 'Land Number', 'text', undefined, 1, true),
     field('parcelIdentifier', 'Parcel Identifier', 'text', undefined, 1, true),
@@ -886,6 +900,7 @@ const WORKSPACE_SECTIONS: Partial<
         'projectReference',
         'parcelLocation',
         'estimatedSize',
+        'currency',
         'coordinates',
         'vendorName',
         'acquisitionType',
@@ -952,6 +967,7 @@ const WORKSPACE_SECTIONS: Partial<
         'surveyPlanNumber',
         'mapSheetNumber',
         'surveyorSource',
+        'currency',
         'surveyorBusinessPartnerId',
         'surveyorFeeAmount',
         'surveyorFeeDueDate',
@@ -1121,6 +1137,7 @@ const WORKSPACE_SECTIONS: Partial<
         'Record seller quote, offers, negotiated value, payment type, and terms.',
       keys: [
         'sellerQuote',
+        'currency',
         'offerAmount',
         'counterOffer',
         'negotiatedValue',
@@ -1195,6 +1212,7 @@ const WORKSPACE_SECTIONS: Partial<
       description:
         'Review the seller, approved amount, due date, payment method, and approval reference from the negotiated agreement.',
       keys: [
+        'currency',
         'vendorName',
         'paymentPurpose',
         'agreedAmount',
@@ -1284,6 +1302,7 @@ const WORKSPACE_SECTIONS: Partial<
       description:
         'Record the valuation, duty amount, authority, assessment reference, and date.',
       keys: [
+        'currency',
         'propertyValue',
         'stampDutyAmount',
         'assessmentAuthority',
@@ -1312,6 +1331,7 @@ const WORKSPACE_SECTIONS: Partial<
       description:
         'Payment details are synchronized from the linked Estate payable request and payment.',
       keys: [
+        'currency',
         'accountsPayableInvoiceNumber',
         'accountsPayableInvoiceStatus',
         'accountsPayablePaymentNumber',
@@ -1374,6 +1394,7 @@ const WORKSPACE_SECTIONS: Partial<
       description:
         'Review the costs accumulated in Land Under Acquisition before registering the land in Fixed Assets and Land Bank.',
       keys: [
+        'currency',
         'ownerConsiderationCost',
         'externalSurveyorCost',
         'stampDutyCost',
@@ -1644,16 +1665,27 @@ function workspaceDecimal(value: string | boolean | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function formatMoneyAmount(amount: number, currency = DEFAULT_ESTATE_CURRENCY.code) {
+  try {
+    return new Intl.NumberFormat('en-GH', {
+      style: 'currency',
+      currency,
+    }).format(amount);
+  } catch {
+    return `${currency} ${amount.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
+}
+
 function formatWorkspaceMoney(
   value: string | boolean | undefined,
-  currency = 'GHS'
+  currency = DEFAULT_ESTATE_CURRENCY.code
 ) {
   const amount = workspaceDecimal(value);
   if (amount == null) return '-';
-  return new Intl.NumberFormat('en-GH', {
-    style: 'currency',
-    currency,
-  }).format(amount);
+  return formatMoneyAmount(amount, currency);
 }
 
 function formatWorkspaceDate(value: string | boolean | undefined) {
@@ -3519,6 +3551,7 @@ function AccountsPayableEvidenceDialog({
   subject: string;
   view: 'invoice' | 'receipt';
 }) {
+  const currency = `${values.currency || DEFAULT_ESTATE_CURRENCY.code}`.trim();
   const amountDue = workspaceDecimal(values.amountDue);
   const amountPaid = workspaceDecimal(values.amountPaid) ?? 0;
   const balance =
@@ -3575,14 +3608,14 @@ function AccountsPayableEvidenceDialog({
               />
               <EvidenceField
                 label="Amount due"
-                value={formatWorkspaceMoney(values.amountDue)}
+                value={formatWorkspaceMoney(values.amountDue, currency)}
               />
               <EvidenceField
                 label="Balance"
                 value={
                   balance == null
                     ? '-'
-                    : formatWorkspaceMoney(`${balance}`)
+                    : formatWorkspaceMoney(`${balance}`, currency)
                 }
               />
             </div>
@@ -3617,7 +3650,7 @@ function AccountsPayableEvidenceDialog({
               />
               <EvidenceField
                 label="Amount paid"
-                value={formatWorkspaceMoney(values.amountPaid)}
+                value={formatWorkspaceMoney(values.amountPaid, currency)}
               />
               <EvidenceField
                 label="Payment method"
@@ -3906,6 +3939,12 @@ function WorkspaceDialog({
   const [hrLocationsError, setHrLocationsError] = React.useState<string | null>(
     null
   );
+  const [activeCurrencies, setActiveCurrencies] = React.useState<
+    Parameters<typeof buildEstateCurrencyOptions>[0]
+  >([]);
+  const [baseCurrency, setBaseCurrency] = React.useState<EstateCurrencyReference>(
+    DEFAULT_ESTATE_CURRENCY
+  );
   const [syncingPayable, setSyncingPayable] = React.useState(false);
   const [generationTemplates, setGenerationTemplates] = React.useState<
     CentralDocumentGenerationTemplate[]
@@ -3949,6 +3988,27 @@ function WorkspaceDialog({
     () => sumOtherAcquisitionServices(otherAcquisitionServices),
     [otherAcquisitionServices]
   );
+  const currencyOptions = React.useMemo(
+    () =>
+      buildEstateCurrencyOptions(
+        activeCurrencies,
+        baseCurrency,
+        typeof values.currency === 'string' ? values.currency : null
+      ),
+    [activeCurrencies, baseCurrency, values.currency]
+  );
+  const formatCurrencyOption = React.useCallback(
+    (code: string) => formatEstateCurrencyOption(activeCurrencies, code, baseCurrency),
+    [activeCurrencies, baseCurrency]
+  );
+  const workspaceHasCurrency = React.useMemo(
+    () =>
+      WORKSPACE_FIELDS[stage.workspaceKind].some(
+        (config) => config.key === 'currency'
+      ),
+    [stage.workspaceKind]
+  );
+  const selectedCurrency = `${values.currency || baseCurrency.code || DEFAULT_ESTATE_CURRENCY.code}`.trim();
   const otherAccountsPayableInvoiceId =
     `${values.otherAccountsPayableInvoiceId || ''}`.trim();
   const otherAccountsPayablePaymentId =
@@ -3987,6 +4047,29 @@ function WorkspaceDialog({
     setSelectedTemplateCode('');
     setPayableEvidenceView(null);
   }, [item.id, open, stage.id]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void loadEstateCurrencyContext().then((context) => {
+      if (cancelled) return;
+      setActiveCurrencies(context.activeCurrencies);
+      setBaseCurrency(context.baseCurrency);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!open || !workspaceHasCurrency || `${values.currency || ''}`.trim()) {
+      return;
+    }
+
+    onChange((current) => ({
+      ...current,
+      currency: current.currency || baseCurrency.code || DEFAULT_ESTATE_CURRENCY.code,
+    }));
+  }, [baseCurrency.code, onChange, open, values.currency, workspaceHasCurrency]);
 
   React.useEffect(() => {
     if (
@@ -5120,7 +5203,7 @@ function WorkspaceDialog({
                   <div>
                     <p className="text-xs text-muted-foreground">Service total</p>
                     <p className="font-semibold">
-                      GHS {otherAcquisitionServicesTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {formatMoneyAmount(otherAcquisitionServicesTotal, selectedCurrency)}
                     </p>
                   </div>
                   <div>
@@ -5762,9 +5845,18 @@ function WorkspaceDialog({
                       ) : (
                         <WorkspaceControl
                           key={config.key}
-                          config={config}
+                          config={
+                            config.key === 'currency'
+                              ? { ...config, options: currencyOptions }
+                              : config
+                          }
                           value={values[config.key]}
                           disabled={!workspaceCanEdit || config.readOnly}
+                          formatOption={
+                            config.key === 'currency'
+                              ? formatCurrencyOption
+                              : undefined
+                          }
                           onChange={(value) => {
                             if (!workspaceCanEdit || config.readOnly) return;
                             if (
@@ -6015,11 +6107,13 @@ function WorkspaceControl({
   config,
   value,
   disabled = false,
+  formatOption,
   onChange,
 }: {
   config: WorkspaceField;
   value: string | boolean | undefined;
   disabled?: boolean;
+  formatOption?: (option: string) => string;
   onChange: (value: string | boolean) => void;
 }) {
   const className = config.span === 2 ? 'space-y-2 md:col-span-2' : 'space-y-2';
@@ -6082,7 +6176,7 @@ function WorkspaceControl({
           <SelectContent>
             {(config.options || []).map((option) => (
               <SelectItem key={option} value={option}>
-                {option}
+                {formatOption ? formatOption(option) : option}
               </SelectItem>
             ))}
           </SelectContent>

@@ -10,13 +10,20 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { estateFacilitiesService, type FacilitiesProviderOption, type FacilitiesProviderRate, type FacilitiesProviderRateRequest } from '@/services/estate-facilities.service';
+import {
+  DEFAULT_ESTATE_CURRENCY,
+  buildEstateCurrencyOptions,
+  formatEstateCurrencyOption,
+  loadEstateCurrencyContext,
+  type EstateCurrencyReference,
+} from '@/lib/estate-currency';
 
-const emptyRate = (): FacilitiesProviderRateRequest => ({
+const emptyRate = (currency = DEFAULT_ESTATE_CURRENCY.code): FacilitiesProviderRateRequest => ({
   contractId: null,
   serviceName: '',
   unitOfMeasure: '',
   rate: 0,
-  currency: 'GHS',
+  currency,
   effectiveFrom: new Date().toISOString().slice(0, 10),
   effectiveTo: null,
   isActive: true,
@@ -34,6 +41,34 @@ export function FacilitiesProviderRates({ provider, canManage, onClose }: {
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [formOpen, setFormOpen] = React.useState(false);
   const [form, setForm] = React.useState<FacilitiesProviderRateRequest>(emptyRate);
+  const [currencies, setCurrencies] = React.useState<
+    Awaited<ReturnType<typeof loadEstateCurrencyContext>>['activeCurrencies']
+  >([]);
+  const [baseCurrency, setBaseCurrency] = React.useState<EstateCurrencyReference>(
+    DEFAULT_ESTATE_CURRENCY
+  );
+
+  React.useEffect(() => {
+    let active = true;
+    void loadEstateCurrencyContext().then((context) => {
+      if (!active) return;
+      setCurrencies(context.activeCurrencies);
+      setBaseCurrency(context.baseCurrency);
+      setForm((current) =>
+        !current.currency || current.currency === DEFAULT_ESTATE_CURRENCY.code
+          ? { ...current, currency: context.baseCurrency.code }
+          : current
+      );
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const currencyOptions = React.useMemo(
+    () => buildEstateCurrencyOptions(currencies, baseCurrency, form.currency),
+    [baseCurrency, currencies, form.currency]
+  );
 
   React.useEffect(() => {
     if (!provider) return;
@@ -89,7 +124,7 @@ export function FacilitiesProviderRates({ provider, canManage, onClose }: {
         <DialogHeader><DialogTitle>{provider?.partnerName} service rates</DialogTitle></DialogHeader>
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
         {canManage && !formOpen ? (
-          <div><Button size="sm" onClick={() => { setEditingId(null); setForm(emptyRate()); setFormOpen(true); }}>
+          <div><Button size="sm" onClick={() => { setEditingId(null); setForm(emptyRate(baseCurrency.code)); setFormOpen(true); }}>
             <Plus className="mr-1 h-4 w-4" /> Add rate
           </Button></div>
         ) : null}
@@ -105,8 +140,10 @@ export function FacilitiesProviderRates({ provider, canManage, onClose }: {
               <Input id="provider-rate" type="number" min="0.0001" step="0.0001" required value={form.rate || ''}
                 onChange={(event) => setForm({ ...form, rate: Number(event.target.value) })} /></div>
             <div className="space-y-1"><Label htmlFor="provider-currency">Currency</Label>
-              <Input id="provider-currency" maxLength={3} required value={form.currency}
-                onChange={(event) => setForm({ ...form, currency: event.target.value.toUpperCase() })} /></div>
+              <Select value={form.currency} onValueChange={(value) => setForm({ ...form, currency: value })}>
+                <SelectTrigger id="provider-currency"><SelectValue /></SelectTrigger>
+                <SelectContent>{currencyOptions.map((code) => <SelectItem key={code} value={code}>{formatEstateCurrencyOption(currencies, code, baseCurrency)}</SelectItem>)}</SelectContent>
+              </Select></div>
             <div className="space-y-1"><Label htmlFor="provider-contract">Contract</Label>
               <Select value={form.contractId || 'none'} onValueChange={(value) => {
                 const contract = provider?.contracts.find((item) => item.id === value);
