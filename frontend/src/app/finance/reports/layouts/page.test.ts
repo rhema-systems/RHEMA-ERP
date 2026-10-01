@@ -32,7 +32,7 @@ describe('financial statement layout workspace authorization contract', () => {
         expect(source).toContain('Action permissions do not grant read access.');
         expect(source).toContain('canRun && !layout.isProtectedStandard');
         expect(source).toContain('canManage && !layout.isProtectedStandard');
-        expect(source).toContain("canPublish && !layout.isProtectedStandard && selectedVersion?.status === 'Draft'");
+        expect(source).toContain("canManage && !layout.isProtectedStandard && selectedVersion?.status === 'Draft'");
     });
 
     it('keeps protected standards clone-only and classification editing draft-only', () => {
@@ -40,5 +40,7 @@ describe('financial statement layout workspace authorization contract', () => {
         expect(source).toContain('layout.isProtectedStandard && canManage');
         expect(source).toContain("selectedVersion.status === 'Draft' && row.rowType === 'Account'");
         expect(source).toContain('Add classification mapping');
+        expect(source).toContain('Design draft rows');
+        expect(source).toContain('setValidation(validationFromError(error))');
     });
 });

@@ -14,7 +14,7 @@ vi.mock('@/services/finance/finance-data.service', () => ({ financeDataService: 
     getAccountingBook: vi.fn(), getAccountingBooks: vi.fn(), getAccountingBookPeriods: vi.fn(), getFiscalPeriods: vi.fn(),
     getAccountingBookInitialization: vi.fn(), getAccountingBookActivationReadiness: vi.fn(), createAccountingBookPeriod: vi.fn(),
     requestAccountingBookPeriodTransition: vi.fn(), decideAccountingBookPeriodTransition: vi.fn(), prepareAccountingBookInitialization: vi.fn(),
-    prepareDeltaBookStructure: vi.fn(),
+    prepareDeltaBookStructure: vi.fn(), prepareAccountingBookStructure: vi.fn(),
     configureAccountingBookInitialization: vi.fn(), submitAccountingBookInitialization: vi.fn(), decideAccountingBookInitialization: vi.fn(),
 } }));
 
@@ -104,6 +104,18 @@ describe('accounting book C4 readiness', () => {
         expect(screen.getByLabelText('1000 debit')).toHaveAttribute('readonly');
         expect(screen.getByLabelText('1000 credit')).toHaveAttribute('readonly');
         expect(screen.getByLabelText('1000 adjustment')).toBeDisabled();
+    });
+
+    it('copies a custom parallel structure without requesting activation or posting', async () => {
+        permissions.add('Finance.AccountingBooks.Initialization.Manage');
+        vi.mocked(financeDataService.getAccountingBook).mockResolvedValue({ ...book, baseAccountingBookId: 'primary', baseAccountingBookCode: 'BASE', functionalCurrencyCode: 'USD', lifecycleStatus: 'Configuring' } as never);
+        vi.mocked(financeDataService.prepareAccountingBookStructure).mockResolvedValue({} as never);
+        render(<AccountingBookReadinessPage />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Copy structure from source book' }));
+        await waitFor(() => expect(financeDataService.prepareAccountingBookStructure).toHaveBeenCalledWith('book-1'));
+        expect(financeDataService.configureAccountingBookInitialization).not.toHaveBeenCalled();
+        expect(financeDataService.prepareAccountingBookInitialization).not.toHaveBeenCalled();
+        expect(screen.getByText(/approved Daily \/ Mid rate/)).toBeInTheDocument();
     });
 
     it('lets a full book edit only the governed opening adjustment and derives debit and credit', async () => {

@@ -654,6 +654,60 @@ public sealed class AccountingBookPeriodInitializationC4Tests
         }
     };
 
+    [Theory]
+    [InlineData(AccountingBookLifecycleStatus.Configuring)]
+    [InlineData(AccountingBookLifecycleStatus.Initializing)]
+    public async Task ParallelStructure_CopyPreparesMappingsWithoutActivatingOrPosting(AccountingBookLifecycleStatus status)
+    {
+        await using var db = Context();
+        var state = Seed(db);
+        db.AccountClassifications.Add(Classification(state.TenantId, state.Book.Id, "OTHER_EXPENSE", AccountType.Expense));
+        var equityLeaf = db.AccountClassifications.Local.Single(item => item.Code == "EQUITY");
+        equityLeaf.Code = "RETAINED_EARNINGS";
+        var equityRoot = Classification(state.TenantId, state.Book.Id, "EQUITY", AccountType.Equity);
+        equityRoot.IsPostingClassification = false;
+        equityLeaf.ParentClassificationId = equityRoot.Id;
+        db.AccountClassifications.Add(equityRoot);
+        var parallel = new AccountingBook { TenantId = state.TenantId, Code = "USD_CUSTOM", Name = "Custom USD",
+            Purpose = "Parallel reporting", BookType = AccountingBookType.ParallelFull, LifecycleStatus = status,
+            BaseAccountingBookId = state.Book.Id, FunctionalCurrencyCode = "USD", IsActive = false, AllowsPosting = false,
+            ParallelOpeningMode = ParallelBookOpeningMode.ZeroOpening, ReplicationStartDate = new DateTime(2026, 1, 1) };
+        db.AccountingBooks.Add(parallel);
+        await db.SaveChangesAsync();
+        var service = InitializationService(db, state.TenantId, Guid.NewGuid());
+        await service.EnsureDeltaStructureAsync(parallel.Id);
+        await service.EnsureDeltaStructureAsync(parallel.Id);
+        db.AccountAccountingBooks.Count(item => item.AccountingBookId == parallel.Id).Should().Be(4);
+        db.AccountClassifications.Count(item => item.AccountingBookId == parallel.Id).Should().Be(4);
+        parallel.LifecycleStatus.Should().Be(status);
+        parallel.IsActive.Should().BeFalse();
+        parallel.AllowsPosting.Should().BeFalse();
+        db.JournalEntries.Should().BeEmpty();
+        db.AccountTransactions.Should().BeEmpty();
+        var preparation = await service.PrepareAsync(parallel.Id, "IndependentOpeningBalances", new DateTime(2025, 12, 31), null);
+        preparation.Accounts.Should().HaveCount(4);
+        preparation.Accounts.Should().OnlyContain(item => item.AuthoritativeSignedBalance == 0);
+    }
+
+    [Theory]
+    [InlineData(AccountingBookInitializationStatus.PendingApproval)]
+    [InlineData(AccountingBookInitializationStatus.Approved)]
+    public async Task StructureCopy_RejectsFrozenInitialization(AccountingBookInitializationStatus status)
+    {
+        await using var db = Context();
+        var state = Seed(db);
+        var derived = new AccountingBook { TenantId = state.TenantId, Code = "DELTA_TEST", Name = "Delta", Purpose = "Test",
+            BookType = AccountingBookType.Delta, LifecycleStatus = AccountingBookLifecycleStatus.Initializing,
+            BaseAccountingBookId = state.Book.Id, IsActive = false, AllowsPosting = false };
+        db.AccountingBooks.Add(derived);
+        db.AccountingBookInitializations.Add(new AccountingBookInitialization { TenantId = state.TenantId,
+            AccountingBookId = derived.Id, InitializationStatus = status, IdempotencyKey = "frozen" });
+        await db.SaveChangesAsync();
+        await FluentActions.Awaiting(() => InitializationService(db, state.TenantId, Guid.NewGuid()).EnsureDeltaStructureAsync(derived.Id))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*pending approval or approved*");
+        db.AccountAccountingBooks.Count(item => item.AccountingBookId == derived.Id).Should().Be(0);
+    }
+
     private static State Seed(ApplicationDbContext db)
     {
         var tenant = Guid.NewGuid();

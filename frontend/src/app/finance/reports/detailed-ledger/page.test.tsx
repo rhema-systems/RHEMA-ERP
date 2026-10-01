@@ -22,6 +22,7 @@ vi.mock('@/services/finance/finance-data.service', () => ({
     getFinanceSettings: vi.fn(),
     getAccounts: vi.fn(),
     getAccountingBooks: vi.fn(),
+    getFinanceDimensions: vi.fn(),
     getDetailedLedger: vi.fn(),
   },
 }));
@@ -34,8 +35,9 @@ describe('DetailedLedgerPage report dates', () => {
       coaType: 'Standard',
     } as never);
     vi.mocked(financeDataService.getAccounts).mockResolvedValue([]);
+    vi.mocked(financeDataService.getFinanceDimensions).mockResolvedValue([]);
     vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([
-      { code: 'IFRS', name: 'IFRS' },
+      { code: 'BASE', name: 'Ghana Statutory Primary' },
     ] as never);
     vi.mocked(financeDataService.getDetailedLedger).mockImplementation(
       async (request) =>
@@ -63,7 +65,11 @@ describe('DetailedLedgerPage report dates', () => {
     fireEvent.change(dateInputs[1], { target: { value: '2025-01-31' } });
     fireEvent.click(screen.getByRole('button', { name: 'Run Report' }));
 
-    const expectedDates = { startDate: '2025-01-01', endDate: '2025-01-31' };
+    const expectedDates = {
+      startDate: '2025-01-01',
+      endDate: '2025-01-31',
+      bookClassification: 'BASE',
+    };
     await waitFor(() =>
       expect(financeDataService.getDetailedLedger).toHaveBeenLastCalledWith(
         expect.objectContaining(expectedDates)

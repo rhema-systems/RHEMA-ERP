@@ -1226,6 +1226,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
     private async Task<ParallelRate> ResolveParallelRateAsync(Guid tenantId, string sourceCurrency,
         string targetCurrency, DateTime accountingDate, CancellationToken cancellationToken)
     {
+        var accountingDay = accountingDate.Date;
+        var nextAccountingDay = accountingDay.AddDays(1);
         var rate = await _context.ExchangeRates
             .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive
                 && (item.ApprovalStatus == RateApprovalStatus.Approved
@@ -1233,13 +1235,14 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 && item.BaseCurrencyCode == sourceCurrency && item.TargetCurrencyCode == targetCurrency
                 && item.QuoteSide == ExchangeRateQuoteSide.Mid
                 && item.RateType == ExchangeRateType.Daily
-                && item.EffectiveDate <= accountingDate
-                && (item.EndDate == null || item.EndDate >= accountingDate))
+                && item.EffectiveDate >= accountingDay
+                && item.EffectiveDate < nextAccountingDay
+                && (item.EndDate == null || item.EndDate >= accountingDay))
             .OrderByDescending(item => item.EffectiveDate).ThenByDescending(item => item.Priority)
             .ThenByDescending(item => item.CreatedDate)
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw new InvalidOperationException(
-                $"PARALLEL_EXCHANGE_RATE_REQUIRED: Posting was not completed because the active {targetCurrency} Parallel book requires an approved {sourceCurrency}/{targetCurrency} exchange rate for accounting date {accountingDate:yyyy-MM-dd}. No Primary or Parallel ledger posting was committed. Add and approve the missing rate under Finance > Exchange Rates, then retry the posting action.");
+                $"PARALLEL_EXCHANGE_RATE_REQUIRED: Posting was not completed because the active {targetCurrency} Parallel book requires an approved exact-date Daily {sourceCurrency}/{targetCurrency} exchange rate for accounting date {accountingDate:yyyy-MM-dd}. No Primary or Parallel ledger posting was committed. Add and approve the missing rate under Finance > Exchange Rates, then retry the posting action.");
         // Canonical storage is source-to-target: 1 BaseCurrency = Rate TargetCurrency.
         if (rate.Rate <= 0m)
             throw new InvalidOperationException("PARALLEL_EXCHANGE_RATE_INVALID: Approved Parallel source-to-target rate must be greater than zero.");

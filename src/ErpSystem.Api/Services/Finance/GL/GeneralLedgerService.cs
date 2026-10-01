@@ -749,7 +749,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             return NormalizeBookClassification(bookClassification) switch
             {
                 "IFRS" => account.IFRSLineItem,
-                "LOCAL_STATUTORY" => account.BaseLineItem,
+                "BASE" or "LOCAL_STATUTORY" => account.BaseLineItem,
                 "MANAGEMENT" => account.LocalLineItem,
                 _ => account.IFRSLineItem
             };
@@ -762,10 +762,25 @@ namespace ErpSystem.Api.Services.Finance.GL
             var normalized = (bookClassification ?? "IFRS").Trim().ToUpperInvariant();
             return normalized switch
             {
-                "BASE" or "LOCAL" => "LOCAL_STATUTORY",
+                "LOCAL" or "LOCAL_STATUTORY" or "PRIMARY" => "BASE",
                 "MANAGEMENT" => "MANAGEMENT",
                 _ => normalized
             };
+        }
+
+        private async Task<string> ResolveBookCurrencyCodeAsync(Guid tenantId, string bookClassification)
+        {
+            var functionalCurrencyCode = await _context.AccountingBooks
+                .AsNoTracking()
+                .Where(book => book.TenantId == tenantId
+                    && !book.IsDeleted
+                    && book.Code == bookClassification)
+                .Select(book => book.FunctionalCurrencyCode)
+                .SingleOrDefaultAsync();
+
+            return string.IsNullOrWhiteSpace(functionalCurrencyCode)
+                ? await _tenantSettings.GetBaseCurrencyAsync()
+                : functionalCurrencyCode.Trim().ToUpperInvariant();
         }
 
         private sealed record ClassificationPresentation(string Code, string Name, string? ParentName);
@@ -1695,7 +1710,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 StartDate = startDate,
                 EndDate = request.EndDate.Date,
                 BookClassification = bookClassification,
-                CurrencyCode = await _tenantSettings.GetBaseCurrencyAsync()
+                CurrencyCode = await ResolveBookCurrencyCodeAsync(tenantId, bookClassification)
             };
 
             foreach (var account in accounts)

@@ -17,6 +17,22 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class FinanceSettingsWriteOffMappingTests
 {
+    [Fact]
+    public async Task CustomerAdvance_RequiresTenantActiveDirectPostingLiability()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await FluentActions.Awaiting(() => fixture.Service.UpdateSettingsAsync(new UpdateFinanceSettingsDto { CustomerAdvanceAccountId = fixture.Expense.Id }))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*Customer advance account*Liability*");
+        fixture.Expense.AccountType = AccountType.Liability;
+        await fixture.Context.SaveChangesAsync();
+        var result = await fixture.Service.UpdateSettingsAsync(new UpdateFinanceSettingsDto { CustomerAdvanceAccountId = fixture.Expense.Id });
+        result.CustomerAdvanceAccountId.Should().Be(fixture.Expense.Id);
+        fixture.Expense.AllowDirectPosting = false;
+        await fixture.Context.SaveChangesAsync();
+        await FluentActions.Awaiting(() => fixture.Service.UpdateSettingsAsync(new UpdateFinanceSettingsDto { CustomerAdvanceAccountId = fixture.Expense.Id }))
+            .Should().ThrowAsync<InvalidOperationException>();
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -121,7 +137,14 @@ public sealed class FinanceSettingsWriteOffMappingTests
     {
         await using var fixture = await Fixture.CreateAsync();
         var account = mapping == "expense" ? fixture.Expense : fixture.Recovery;
-        if (defect == "foreign-tenant") account.TenantId = Guid.NewGuid();
+        if (defect == "foreign-tenant")
+        {
+            // TenantId is part of the immutable account key; seed a foreign row rather than mutate it.
+            account = new Account { TenantId = Guid.NewGuid(), AccountCode = "FOREIGN", AccountNumber = "FOREIGN",
+                AccountName = "Foreign account", AccountType = account.AccountType, Status = AccountStatus.Active,
+                AllowDirectPosting = true, CurrencyCode = "GHS" };
+            fixture.Context.Accounts.Add(account);
+        }
         if (defect == "deleted") account.IsDeleted = true;
         if (defect == "inactive") account.Status = AccountStatus.Inactive;
         if (defect == "summary") account.AllowDirectPosting = false;

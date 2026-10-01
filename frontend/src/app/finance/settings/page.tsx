@@ -124,6 +124,7 @@ export default function FinanceSettingsPage() {
         whtStatutoryYearStartMonth: 1,
         whtStatutoryYearStartDay: 1,
         retainedEarningsAccountId: undefined,
+        customerAdvanceAccountId: undefined,
         unrealizedGainLossAccountId: undefined,
         unrealizedFxGainAccountId: undefined,
         unrealizedFxLossAccountId: undefined,
@@ -188,6 +189,7 @@ export default function FinanceSettingsPage() {
                 whtStatutoryYearStartMonth: data.whtStatutoryYearStartMonth ?? 1,
                 whtStatutoryYearStartDay: data.whtStatutoryYearStartDay ?? 1,
                 retainedEarningsAccountId: data.retainedEarningsAccountId,
+                customerAdvanceAccountId: data.customerAdvanceAccountId,
                 unrealizedGainLossAccountId: data.unrealizedGainLossAccountId,
                 unrealizedFxGainAccountId: data.unrealizedFxGainAccountId,
                 unrealizedFxLossAccountId: data.unrealizedFxLossAccountId,
@@ -838,6 +840,14 @@ export default function FinanceSettingsPage() {
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="customerAdvance">Customer Advance Account</Label>
+                        <AccountPicker id="customerAdvance" value={formData.customerAdvanceAccountId}
+                            placeholder="Search customer advance liability accounts..." allowClear={false}
+                            accounts={accounts.filter(a => a.accountType === 'Liability' && a.status === 'Active' && a.allowDirectPosting && !a.isControlAccount)}
+                            onChange={(value) => setFormData({ ...formData, customerAdvanceAccountId: value })} />
+                        <p className="text-xs text-muted-foreground">Required for unapplied AR receipts and customer advances. Select an active, direct-posting liability account.</p>
+                    </div>
                     <div className="space-y-2">
                         <Label htmlFor="retainedEarnings">Retained Earnings Account</Label>
                         <AccountPicker

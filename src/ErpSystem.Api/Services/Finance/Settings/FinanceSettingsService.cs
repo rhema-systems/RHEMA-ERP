@@ -67,6 +67,8 @@ namespace ErpSystem.Api.Services.Finance.Settings
 
             // Validate both requested write-off mappings before mutating any settings. Omitted
             // values preserve the existing mapping, as with the other partial updates.
+            if (dto.CustomerAdvanceAccountId.HasValue)
+                await ValidateReturnAccountAsync(tenantId, dto.CustomerAdvanceAccountId.Value, AccountType.Liability, "Customer advance account");
             if (dto.WriteOffExpenseAccountId.HasValue)
                 await ValidateWriteOffAccountAsync(tenantId, dto.WriteOffExpenseAccountId.Value,
                     AccountType.Expense, "Write-off Expense Account");
@@ -117,6 +119,7 @@ namespace ErpSystem.Api.Services.Finance.Settings
             };
             var beforeControlPolicy = new
             {
+                settings.CustomerAdvanceAccountId,
                 settings.ReversalDatePolicy,
                 settings.MinimumReversalReasonLength,
                 settings.EnforceFinanceAccessScopes,
@@ -478,6 +481,7 @@ namespace ErpSystem.Api.Services.Finance.Settings
 
             var afterControlPolicy = new
             {
+                settings.CustomerAdvanceAccountId,
                 settings.ReversalDatePolicy,
                 settings.MinimumReversalReasonLength,
                 settings.EnforceFinanceAccessScopes,

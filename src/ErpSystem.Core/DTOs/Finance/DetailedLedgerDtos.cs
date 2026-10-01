@@ -17,7 +17,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime StartDate { get; set; } = DateTime.UtcNow.Date;
         public DateTime EndDate { get; set; } = DateTime.UtcNow.Date;
         public List<Guid> AccountIds { get; set; } = new();
-        public string BookClassification { get; set; } = "IFRS";
+        public string BookClassification { get; set; } = "BASE";
         public bool IncludeReversed { get; set; } = true;
         public bool IncludeOpeningBalances { get; set; } = true;
         public List<FinanceSegmentFilterDto> SegmentFilters { get; set; } = new();
@@ -30,7 +30,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime ReportDate { get; set; } = DateTime.UtcNow;
         public DateTime StartDate { get; set; }
         public DateTime EndDate { get; set; }
-        public string BookClassification { get; set; } = "IFRS";
+        public string BookClassification { get; set; } = "BASE";
         public string CurrencyCode { get; set; } = "GHS";
         public List<DetailedLedgerAccountDto> Accounts { get; set; } = new();
         public decimal TotalDebits { get; set; }

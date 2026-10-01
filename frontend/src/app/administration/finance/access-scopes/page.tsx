@@ -116,7 +116,7 @@ export default function FinanceAccessScopesPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => refresh()}><RefreshCw className="mr-2 h-4 w-4" /> Refresh</Button>
-          <Button onClick={openNew}><Plus className="mr-2 h-4 w-4" /> Add Grant</Button>
+          <Button onClick={openNew}><Plus className="mr-2 h-4 w-4" /> Add Scope</Button>
         </div>
       </div>
 
@@ -177,7 +177,7 @@ export default function FinanceAccessScopesPage() {
             <div className="space-y-2 sm:col-span-2"><Label>Audit reason *</Label><Textarea value={form.reason} onChange={event => setForm(current => ({ ...current, reason: event.target.value }))} placeholder="Why this Finance access is needed or being changed" rows={4} /></div>
             {grantError && <p className="text-sm text-destructive sm:col-span-2">{grantError}</p>}
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button><Button onClick={() => saveGrant.mutate()} disabled={Boolean(grantError) || saveGrant.isPending}>Save Grant</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button><Button onClick={() => saveGrant.mutate()} disabled={Boolean(grantError) || saveGrant.isPending}>Save Scope</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
