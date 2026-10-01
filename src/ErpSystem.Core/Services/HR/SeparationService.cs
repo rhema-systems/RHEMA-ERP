@@ -2325,7 +2325,8 @@ public class SeparationService : ISeparationService
 
             // ⚠ A currency the settlement is not stated in cannot simply be added to it. Recorded
             // as uncomputed with the figure in the text, rather than converted here: Finance owns
-            // conversion, and its rates are known to be inverted (see StaffTravelCurrencyBridge).
+            // conversion. (Written while Finance's rates were inverted; Finance fixed them on
+            // 2026-09-10 — converting through HrCurrencyBridge is now possible, and is not done here.)
             var sameCurrency = string.Equals(advance.CurrencyCode, currency, StringComparison.OrdinalIgnoreCase);
 
             Add(SettlementLineCategory.TravelAdvanceRecovery, true,

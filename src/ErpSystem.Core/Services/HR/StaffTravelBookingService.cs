@@ -25,7 +25,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     private readonly IStaffTravelCarRentalBookingRepository _carRentalRepository;
     private readonly IStaffTravelRequestRepository _requestRepository;
     private readonly IFleetTripService _fleetTrips;
-    private readonly StaffTravelCurrencyBridge _currency;
+    private readonly HrCurrencyBridge _currency;
     private readonly StaffTravelPolicyGuard _policyGuard;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
@@ -39,7 +39,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         IStaffTravelCarRentalBookingRepository carRentalRepository,
         IStaffTravelRequestRepository requestRepository,
         IFleetTripService fleetTrips,
-        StaffTravelCurrencyBridge currency,
+        HrCurrencyBridge currency,
         StaffTravelPolicyGuard policyGuard,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,

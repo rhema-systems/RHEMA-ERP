@@ -29,10 +29,12 @@ import {
   TextField,
   TextareaField,
 } from '@/components/hr/employee/tabs/fields';
+import { CurrencyField } from '@/components/hr/common/CurrencyPicker';
 import { useToast } from '@/hooks/use-toast';
 import { countryService } from '@/services/hr/country.service';
-import { financeDataService } from '@/services/finance/finance-data.service';
 import { travelBookingsService } from '@/services/hr/travel-bookings.service';
+import { TravelQueryError } from './TravelQueryError';
+import { fmtTravelMoney as fmtMoney } from './travel-format';
 import type { StaffTravelRequest } from '@/types/hr/travel';
 
 const CABIN_CLASSES = ['Economy', 'PremiumEconomy', 'Business', 'First'] as const;
@@ -65,12 +67,6 @@ const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '
  * the booking. The same reasoning applies to flight segment times server-side.
  */
 const orNull = (v?: string | null) => (v && v.trim() ? v : null);
-const fmtMoney = (amount?: number | null, currency?: string) =>
-  amount === null || amount === undefined
-    ? '—'
-    : new Intl.NumberFormat(undefined, {
-        style: 'currency', currency: currency || 'GHS', currencyDisplay: 'code',
-      }).format(amount);
 
 /** A booking refused for breaching the policy explains itself; the cap is not ours to predict. */
 function useBookingToast() {
@@ -104,12 +100,11 @@ const flightSchema = z.object({
 });
 
 function FlightDialog({
-  requestId, open, onOpenChange, currencyOptions, defaultCurrency,
+  requestId, open, onOpenChange, defaultCurrency,
 }: {
   requestId: string;
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  currencyOptions: { value: string; label: string }[];
   defaultCurrency: string;
 }) {
   const queryClient = useQueryClient();
@@ -176,9 +171,7 @@ function FlightDialog({
             <NumberField form={form} name="taxesAndFees" label="Taxes and fees" />
           </FieldRow>
           <FieldRow>
-            <SelectField
-              form={form} name="currencyCode" label="Currency" required options={currencyOptions}
-            />
+            <CurrencyField form={form} name="currencyCode" label="Currency" required />
             <SelectField
               form={form} name="status" label="Status" required options={options(BOOKING_STATUSES)}
             />
@@ -243,12 +236,11 @@ const hotelSchema = z
   });
 
 function HotelDialog({
-  requestId, open, onOpenChange, currencyOptions, countryOptions, defaultCurrency, defaultCountryId,
+  requestId, open, onOpenChange, countryOptions, defaultCurrency, defaultCountryId,
 }: {
   requestId: string;
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  currencyOptions: { value: string; label: string }[];
   countryOptions: { value: string; label: string }[];
   defaultCurrency: string;
   defaultCountryId: string;
@@ -321,9 +313,7 @@ function HotelDialog({
           </FieldRow>
           <FieldRow>
             <NumberField form={form} name="ratePerNight" label="Rate per night" required />
-            <SelectField
-              form={form} name="currencyCode" label="Currency" required options={currencyOptions}
-            />
+            <CurrencyField form={form} name="currencyCode" label="Currency" required />
           </FieldRow>
 
           <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
@@ -391,17 +381,16 @@ const groundSchema = z
     notes: z.string().max(2000).optional(),
   })
   .refine((v) => v.transportType !== 'CompanyVehicle' || !!v.vehicleAssetId, {
-    message: 'A company vehicle must be named — it reserves a real vehicle through Fleet',
+    message: 'A company vehicle must be named — a draft trip is created for it in Fleet',
     path: ['vehicleAssetId'],
   });
 
 function GroundDialog({
-  requestId, open, onOpenChange, currencyOptions, defaultCurrency,
+  requestId, open, onOpenChange, defaultCurrency,
 }: {
   requestId: string;
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  currencyOptions: { value: string; label: string }[];
   defaultCurrency: string;
 }) {
   const queryClient = useQueryClient();
@@ -442,7 +431,7 @@ function GroundDialog({
         <DialogHeader>
           <DialogTitle>Add ground transport</DialogTitle>
           <DialogDescription>
-            A company vehicle is reserved through Fleet rather than recorded as a note.
+            A company vehicle is recorded in Fleet as a draft trip rather than as a note here.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -468,8 +457,9 @@ function GroundDialog({
                 placeholder="Fleet asset identifier"
               />
               <p className="text-xs text-muted-foreground">
-                This reserves the vehicle in Fleet. Fleet refuses an asset that is not a vehicle, and
-                the reason is shown here. A vehicle picker arrives with the Fleet integration.
+                This creates a draft trip in Fleet for the vehicle. It is not sent to the transport
+                office for approval, so the vehicle is not held for these dates. Fleet refuses an
+                asset that is not a vehicle, and the reason is shown here.
               </p>
             </div>
           )}
@@ -484,9 +474,7 @@ function GroundDialog({
           </FieldRow>
           <FieldRow>
             <NumberField form={form} name="estimatedCost" label="Estimated cost" />
-            <SelectField
-              form={form} name="currencyCode" label="Currency" required options={currencyOptions}
-            />
+            <CurrencyField form={form} name="currencyCode" label="Currency" required />
           </FieldRow>
           <SelectField
             form={form} name="status" label="Status" required options={options(BOOKING_STATUSES)}
@@ -529,12 +517,11 @@ const carSchema = z
   });
 
 function CarRentalDialog({
-  requestId, open, onOpenChange, currencyOptions, defaultCurrency,
+  requestId, open, onOpenChange, defaultCurrency,
 }: {
   requestId: string;
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  currencyOptions: { value: string; label: string }[];
   defaultCurrency: string;
 }) {
   const queryClient = useQueryClient();
@@ -597,9 +584,7 @@ function CarRentalDialog({
           </FieldRow>
           <FieldRow>
             <NumberField form={form} name="dailyRate" label="Daily rate" required />
-            <SelectField
-              form={form} name="currencyCode" label="Currency" required options={currencyOptions}
-            />
+            <CurrencyField form={form} name="currencyCode" label="Currency" required />
           </FieldRow>
 
           <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
@@ -676,35 +661,33 @@ export function TravelBookingsPanel({ request }: { request: StaffTravelRequest }
   const requestId = request.id;
   const [dialog, setDialog] = useState<'flight' | 'hotel' | 'ground' | 'car' | null>(null);
 
-  const { data: currencies } = useQuery({
-    queryKey: ['finance', 'currencies', 'active'],
-    queryFn: () => financeDataService.getCurrencies({ isActive: true }),
-  });
+  // ⚠ The currency list is read through `api/hr/currencies` inside each dialog's CurrencyField.
+  // This panel read `api/finance/currencies`, which answers 403 without a Finance permission, so
+  // no booking could be saved by the HR desk in any currency (travel final closure, lane 0 — O-19).
   const { data: countries } = useQuery({
     queryKey: ['countries', 'active'],
     queryFn: () => countryService.getActive(),
   });
 
-  const { data: flights, isLoading: loadingFlights } = useQuery({
+  const {
+    data: flights, isLoading: loadingFlights, isError: flightsFailed, error: flightsError,
+  } = useQuery({
     queryKey: ['travel-flights', requestId],
     queryFn: () => travelBookingsService.getFlightsByRequest(requestId),
   });
-  const { data: hotels } = useQuery({
+  const { data: hotels, isError: hotelsFailed, error: hotelsError } = useQuery({
     queryKey: ['travel-hotels', requestId],
     queryFn: () => travelBookingsService.getHotelsByRequest(requestId),
   });
-  const { data: ground } = useQuery({
+  const { data: ground, isError: groundFailed, error: groundError } = useQuery({
     queryKey: ['travel-ground', requestId],
     queryFn: () => travelBookingsService.getGroundTransportsByRequest(requestId),
   });
-  const { data: cars } = useQuery({
+  const { data: cars, isError: carsFailed, error: carsError } = useQuery({
     queryKey: ['travel-car-rentals', requestId],
     queryFn: () => travelBookingsService.getCarRentalsByRequest(requestId),
   });
 
-  const currencyOptions = (currencies ?? []).map((c) => ({
-    value: c.currencyCode, label: `${c.currencyCode} — ${c.currencyName}`,
-  }));
   const countryOptions = (countries ?? []).map((c) => ({ value: c.id, label: c.name }));
 
   if (loadingFlights) {
@@ -720,7 +703,9 @@ export function TravelBookingsPanel({ request }: { request: StaffTravelRequest }
       <Section
         title="Flights" icon={Plane} addLabel="Add flight" onAdd={() => setDialog('flight')}
       >
-        {(flights ?? []).length === 0 ? (
+        {flightsFailed && !flights ? (
+          <div className="p-4"><TravelQueryError error={flightsError} what="the flight bookings" /></div>
+        ) : (flights ?? []).length === 0 ? (
           <EmptyState title="No flights" description="Nothing has been booked for this trip." />
         ) : (
           <Table>
@@ -753,7 +738,9 @@ export function TravelBookingsPanel({ request }: { request: StaffTravelRequest }
       </Section>
 
       <Section title="Hotels" icon={BedDouble} addLabel="Add hotel" onAdd={() => setDialog('hotel')}>
-        {(hotels ?? []).length === 0 ? (
+        {hotelsFailed && !hotels ? (
+          <div className="p-4"><TravelQueryError error={hotelsError} what="the hotel bookings" /></div>
+        ) : (hotels ?? []).length === 0 ? (
           <EmptyState title="No hotels" description="No accommodation has been booked." />
         ) : (
           <Table>
@@ -791,7 +778,9 @@ export function TravelBookingsPanel({ request }: { request: StaffTravelRequest }
         title="Ground transport" icon={Bus} addLabel="Add transport"
         onAdd={() => setDialog('ground')}
       >
-        {(ground ?? []).length === 0 ? (
+        {groundFailed && !ground ? (
+          <div className="p-4"><TravelQueryError error={groundError} what="the ground transport" /></div>
+        ) : (ground ?? []).length === 0 ? (
           <EmptyState title="No ground transport" description="Nothing arranged on the ground." />
         ) : (
           <Table>
@@ -829,7 +818,9 @@ export function TravelBookingsPanel({ request }: { request: StaffTravelRequest }
       </Section>
 
       <Section title="Car rentals" icon={Car} addLabel="Add rental" onAdd={() => setDialog('car')}>
-        {(cars ?? []).length === 0 ? (
+        {carsFailed && !cars ? (
+          <div className="p-4"><TravelQueryError error={carsError} what="the car rentals" /></div>
+        ) : (cars ?? []).length === 0 ? (
           <EmptyState title="No car rentals" description="No vehicle has been hired." />
         ) : (
           <Table>
@@ -864,8 +855,8 @@ export function TravelBookingsPanel({ request }: { request: StaffTravelRequest }
       {(flights ?? []).some((f) => f.bookingClass !== 'Economy') && (
         <p className="flex items-start gap-2 text-xs text-muted-foreground">
           <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          A booking above the travel policy&apos;s cap is recorded with the cap that applied and the
-          reason the exception was granted. Open the booking to see both.
+          A booking above the travel policy&apos;s cap is stored with the cap that applied and the
+          reason the exception was granted.
         </p>
       )}
 
@@ -873,14 +864,12 @@ export function TravelBookingsPanel({ request }: { request: StaffTravelRequest }
         requestId={requestId}
         open={dialog === 'flight'}
         onOpenChange={(v) => setDialog(v ? 'flight' : null)}
-        currencyOptions={currencyOptions}
         defaultCurrency={request.currencyCode}
       />
       <HotelDialog
         requestId={requestId}
         open={dialog === 'hotel'}
         onOpenChange={(v) => setDialog(v ? 'hotel' : null)}
-        currencyOptions={currencyOptions}
         countryOptions={countryOptions}
         defaultCurrency={request.currencyCode}
         defaultCountryId={request.destinationCountryId}
@@ -889,14 +878,12 @@ export function TravelBookingsPanel({ request }: { request: StaffTravelRequest }
         requestId={requestId}
         open={dialog === 'ground'}
         onOpenChange={(v) => setDialog(v ? 'ground' : null)}
-        currencyOptions={currencyOptions}
         defaultCurrency={request.currencyCode}
       />
       <CarRentalDialog
         requestId={requestId}
         open={dialog === 'car'}
         onOpenChange={(v) => setDialog(v ? 'car' : null)}
-        currencyOptions={currencyOptions}
         defaultCurrency={request.currencyCode}
       />
     </div>

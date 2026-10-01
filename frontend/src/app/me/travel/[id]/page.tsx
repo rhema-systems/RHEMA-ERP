@@ -19,21 +19,21 @@ import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import {
+  TRAVEL_PRIORITY_LABELS,
+  TRAVEL_PURPOSE_LABELS,
+  TRAVEL_REQUEST_STATUS_LABELS,
+  TRAVEL_RISK_LEVEL_LABELS,
+  TRAVEL_TYPE_LABELS,
+  enumLabel,
+} from '@/components/hr/travel/travel-enums';
+import { fmtTravelMoney as fmtMoney } from '@/components/hr/travel/travel-format';
 import { useToast } from '@/hooks/use-toast';
 import { travelService } from '@/services/hr/travel.service';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '—');
-const humanize = (v: string) => v.replace(/([a-z])([A-Z])/g, '$1 $2');
-
-const fmtMoney = (amount?: number | null, currency?: string) =>
-  amount === null || amount === undefined
-    ? '—'
-    : new Intl.NumberFormat(undefined, {
-        style: 'currency',
-        currency: currency || 'GHS',
-        currencyDisplay: 'code',
-      }).format(amount);
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -64,7 +64,7 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
 
-  const { data: r, isLoading } = useQuery({
+  const { data: r, isLoading, isError, error } = useQuery({
     queryKey: ['my-travel-request', id],
     queryFn: () => travelService.getMineById(id),
     retry: false,
@@ -104,6 +104,14 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
       </div>
     );
   }
+  // A 404 is "not yours" and keeps its own wording; any other failure says the read failed.
+  if (!r && isError && (error as { status?: number } | null)?.status !== 404) {
+    return (
+      <div className="p-6">
+        <TravelQueryError error={error} what="this travel request" />
+      </div>
+    );
+  }
   if (!r) {
     return (
       <div className="p-6">
@@ -115,6 +123,8 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
   const isEditable = r.status === 'Draft' || r.status === 'ReturnedForRevision';
   const isLive = !['Cancelled', 'Rejected', 'Completed', 'Closed'].includes(r.status);
   // Only what the desk chose to share — an internal note is not the traveller's to read.
+  // ⚠ This filter is the only guard until lane 1 of the travel final closure: the self-service
+  // read still returns internal notes to this browser (finding A6).
   const visibleComments = (r.comments ?? []).filter((c) => c.isVisibleToTraveller);
 
   return (
@@ -125,7 +135,7 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
         backHref="/me/travel"
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge status={humanize(r.status)} />
+            <StatusBadge status={enumLabel(TRAVEL_REQUEST_STATUS_LABELS, r.status)} />
             {isEditable && (
               <>
                 <Button
@@ -153,9 +163,9 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
           <CardTitle className="text-base">The trip</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-x-6 md:grid-cols-3">
-          <InfoRow label="Type" value={humanize(r.travelType)} />
-          <InfoRow label="Purpose" value={humanize(r.travelPurpose)} />
-          <InfoRow label="Priority" value={r.priority} />
+          <InfoRow label="Type" value={enumLabel(TRAVEL_TYPE_LABELS, r.travelType)} />
+          <InfoRow label="Purpose" value={enumLabel(TRAVEL_PURPOSE_LABELS, r.travelPurpose)} />
+          <InfoRow label="Priority" value={enumLabel(TRAVEL_PRIORITY_LABELS, r.priority)} />
           <InfoRow
             label="Route"
             value={
@@ -173,7 +183,7 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
           <InfoRow label="Submitted" value={fmtDateTime(r.submittedAt)} />
           <InfoRow label="Visa required" value={r.requiresVisa ? 'Yes' : 'No'} />
           <InfoRow label="Health clearance" value={r.requiresHealthClearance ? 'Yes' : 'No'} />
-          <InfoRow label="Risk level" value={r.riskLevel} />
+          <InfoRow label="Risk level" value={enumLabel(TRAVEL_RISK_LEVEL_LABELS, r.riskLevel)} />
         </CardContent>
       </Card>
 

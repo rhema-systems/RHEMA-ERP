@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/hr/common/PageHeader';
@@ -25,6 +26,20 @@ import { TravelBookingsPanel } from '@/components/hr/travel/TravelBookingsPanel'
 import { TravelCompliancePanel } from '@/components/hr/travel/TravelCompliancePanel';
 import { TravelFinancePanel } from '@/components/hr/travel/TravelFinancePanel';
 import { TravelItineraryPanel } from '@/components/hr/travel/TravelItineraryPanel';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import {
+  ELEVATED_TRAVEL_RISK_LEVELS,
+  TRAVEL_COMMENT_TYPE_LABELS,
+  TRAVEL_INITIATOR_ROLE_LABELS,
+  TRAVEL_PRIORITY_LABELS,
+  TRAVEL_PURPOSE_LABELS,
+  TRAVEL_REQUEST_STATUS_LABELS,
+  TRAVEL_RISK_LEVEL_LABELS,
+  TRAVEL_TYPE_LABELS,
+  enumLabel,
+} from '@/components/hr/travel/travel-enums';
+import { fmtTravelMoney } from '@/components/hr/travel/travel-format';
+import { useTravelAccess } from '@/components/hr/travel/useTravelAccess';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
@@ -33,16 +48,6 @@ import { travelService } from '@/services/hr/travel.service';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '—');
-const humanize = (v: string) => v.replace(/([a-z])([A-Z])/g, '$1 $2');
-
-const fmtMoney = (amount?: number | null, currency?: string) =>
-  amount === null || amount === undefined
-    ? '—'
-    : new Intl.NumberFormat(undefined, {
-        style: 'currency',
-        currency: currency || 'GHS',
-        currencyDisplay: 'code',
-      }).format(amount);
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -66,16 +71,22 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const access = useTravelAccess();
   const [comment, setComment] = useState('');
+  const [internalNote, setInternalNote] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
 
-  const { data: r, isLoading } = useQuery({
+  const { data: r, isLoading, isError, error } = useQuery({
     queryKey: ['travel-request', id],
     queryFn: () => travelService.getById(id),
   });
 
-  const { data: comments } = useQuery({
+  const {
+    data: comments,
+    isError: commentsFailed,
+    error: commentsError,
+  } = useQuery({
     queryKey: ['travel-request-comments', id],
     queryFn: () => travelService.getComments(id),
     enabled: !!r,
@@ -100,7 +111,9 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
     commands: {
       submit: () => travelService.submit(id),
       // No approver id is sent — the server resolves the approver from the token against the
-      // published definition. `approvedBudget` is left to the workflow's own budget prompt.
+      // published definition. ⚠ No amount is sent either, and the server then copies the ESTIMATE
+      // into the approved budget, so that field records no decision. There is no budget prompt
+      // anywhere in the workflow; lane 2 gives the approve dialog one (findings O-9, T-10).
       approve: (ctx) => travelService.approve(id, undefined, ctx.comments || undefined),
       reject: (ctx) => travelService.reject(id, ctx.comments || 'Rejected'),
       afterAction: refresh,
@@ -131,12 +144,15 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
       toast({ variant: 'destructive', title: 'Could not cancel', description: e.message }),
   });
 
+  // ⚠ The composer sent `commentType: 'General'`, which is not a member of the C# enum, so every
+  // comment from this page came back 400 — and it hard-coded the traveller as a reader (travel
+  // final closure, lane 0 — findings A7, T-27). An internal note is now its own type and hidden.
   const addComment = useMutation({
     mutationFn: () =>
       travelService.addComment(id, {
-        commentType: 'General',
+        commentType: internalNote ? 'InternalNote' : 'Comment',
         body: comment.trim(),
-        isVisibleToTraveller: true,
+        isVisibleToTraveller: !internalNote,
       }),
     onSuccess: async () => {
       setComment('');
@@ -150,6 +166,13 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
     return (
       <div className="flex items-center justify-center p-10">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (isError && !r) {
+    return (
+      <div className="p-6">
+        <TravelQueryError error={error} what="this travel request" />
       </div>
     );
   }
@@ -173,7 +196,7 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
         backHref="/hr/travel"
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge status={humanize(r.status)} />
+            <StatusBadge status={enumLabel(TRAVEL_REQUEST_STATUS_LABELS, r.status)} />
             {isEditable && (
               <Button variant="outline" onClick={() => router.push(`/hr/travel/${id}/edit`)}>
                 <Pencil className="mr-2 h-4 w-4" /> Edit
@@ -215,11 +238,11 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
               <InfoRow label="Traveller" value={r.employeeName} />
               <InfoRow
                 label="Raised by"
-                value={`${r.initiatedByName || '—'} (${humanize(r.initiatedByRole)})`}
+                value={`${r.initiatedByName || '—'} (${enumLabel(TRAVEL_INITIATOR_ROLE_LABELS, r.initiatedByRole)})`}
               />
-              <InfoRow label="Type" value={humanize(r.travelType)} />
-              <InfoRow label="Purpose" value={humanize(r.travelPurpose)} />
-              <InfoRow label="Priority" value={r.priority} />
+              <InfoRow label="Type" value={enumLabel(TRAVEL_TYPE_LABELS, r.travelType)} />
+              <InfoRow label="Purpose" value={enumLabel(TRAVEL_PURPOSE_LABELS, r.travelPurpose)} />
+              <InfoRow label="Priority" value={enumLabel(TRAVEL_PRIORITY_LABELS, r.priority)} />
               <InfoRow
                 label="Route"
                 value={
@@ -242,16 +265,16 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
               <CardTitle className="text-base">Cost and risk</CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-x-6 md:grid-cols-3">
-              <InfoRow label="Estimated" value={fmtMoney(r.estimatedTotalCost, r.currencyCode)} />
-              <InfoRow label="Approved budget" value={fmtMoney(r.approvedBudget, r.currencyCode)} />
+              <InfoRow label="Estimated" value={fmtTravelMoney(r.estimatedTotalCost, r.currencyCode)} />
+              <InfoRow label="Approved budget" value={fmtTravelMoney(r.approvedBudget, r.currencyCode)} />
               <InfoRow
                 label="Risk level"
                 value={
                   <span className="flex items-center gap-1.5">
-                    {(r.riskLevel === 'High' || r.riskLevel === 'Extreme') && (
+                    {ELEVATED_TRAVEL_RISK_LEVELS.includes(r.riskLevel) && (
                       <ShieldAlert className="h-3.5 w-3.5 text-destructive" />
                     )}
-                    {r.riskLevel}
+                    {enumLabel(TRAVEL_RISK_LEVEL_LABELS, r.riskLevel)}
                   </span>
                 }
               />
@@ -316,13 +339,29 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
               <Textarea
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
-                placeholder="Add a note for the traveller or the desk…"
+                placeholder={
+                  internalNote ? 'A note for the travel desk only…' : 'A comment the traveller will see…'
+                }
                 rows={3}
               />
-              <div className="flex items-center justify-between gap-3">
-                {/* Authorship is the token's — there is no author field to fill in. */}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="travel-comment-internal"
+                    checked={internalNote}
+                    onCheckedChange={setInternalNote}
+                  />
+                  <Label htmlFor="travel-comment-internal" className="text-sm font-normal">
+                    Internal note
+                  </Label>
+                </div>
+                {/* Authorship is the token's — there is no author field to fill in.
+                    ⚠ "Not shown" is the portal's filter: until lane 1 the self-service read still
+                    returns internal notes to the traveller's browser (finding A6). */}
                 <p className="text-xs text-muted-foreground">
-                  Posted in your name and visible to the traveller.
+                  {internalNote
+                    ? 'Posted in your name. Not shown on the traveller’s portal.'
+                    : 'Posted in your name. The traveller sees it on their portal.'}
                 </p>
                 <Button
                   size="sm"
@@ -335,7 +374,9 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
             </CardContent>
           </Card>
 
-          {(comments ?? []).length === 0 ? (
+          {commentsFailed && !comments ? (
+            <TravelQueryError error={commentsError} what="the comments" />
+          ) : (comments ?? []).length === 0 ? (
             <EmptyState title="No comments" description="Nothing has been said about this trip yet." />
           ) : (
             <div className="space-y-3">
@@ -343,7 +384,14 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
                 <Card key={c.id}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium">{c.authorName || 'Unknown author'}</p>
+                      <p className="text-sm font-medium">
+                        {c.authorName || 'Unknown author'}
+                        {c.commentType !== 'Comment' && c.commentType !== 'InternalNote' && (
+                          <span className="ml-2 text-xs font-normal text-muted-foreground">
+                            {enumLabel(TRAVEL_COMMENT_TYPE_LABELS, c.commentType)}
+                          </span>
+                        )}
+                      </p>
                       <p className="text-xs text-muted-foreground">{fmtDateTime(c.createdAt)}</p>
                     </div>
                     <p className="mt-1 text-sm whitespace-pre-wrap">{c.body}</p>
@@ -360,8 +408,8 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
         </TabsContent>
 
         <TabsContent value="attachments" className="pt-4">
-          {/* Delete is Admin-gated server-side; the button is shown and the refusal surfaced. */}
-          <TravelAttachmentsPanel requestId={id} canDelete />
+          {/* Delete is `HR.Travel.Admin` server-side, so the button shows only to those who hold it. */}
+          <TravelAttachmentsPanel requestId={id} canDelete={access.canAdmin} />
         </TabsContent>
 
         <WorkflowTabContent

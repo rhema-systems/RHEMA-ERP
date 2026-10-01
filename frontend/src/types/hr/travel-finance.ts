@@ -18,11 +18,11 @@
  * | advance `disbursedAt`, claim `paidAt` | the clock, on the action that caused them |
  * | budget `totalCommitted` / `totalActual` / `variance` | the request's bookings and paid claims |
  *
- * ⚠ **There is no GL posting anywhere in here.** Travel disburses advances and pays claims with no
- * accounting artifact at all; an unsettled advance is an employee receivable that appears in no
- * trial balance. That is a known, deliberate deferral (decision D-4) to the Finance sweep after the
- * HR module is complete, registered in `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`. Do not invent an
- * HR-side posting mechanism to fill the gap.
+ * Finance posting (since 2026-09-20, the HR finance posting sweep): `TravelAdvanceDisbursed`,
+ * `TravelClaimApproved` and `TravelClaimPaid` post journals through HR's one posting adapter when a
+ * rule for the event is enabled under HR Settings → Finance posting; without one the record is kept
+ * Unposted. Nothing here posts on its own — read a record's posting through `FinancePostingCard`.
+ * (This header said "there is no GL posting anywhere in here" until the travel final closure.)
  */
 
 import type { AuditFields } from './common';

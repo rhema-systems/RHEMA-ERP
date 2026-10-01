@@ -31,8 +31,10 @@ import {
   SwitchField,
   TextField,
 } from '@/components/hr/employee/tabs/fields';
+import { CurrencyField } from '@/components/hr/common/CurrencyPicker';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import { fmtTravelMoney as fmtMoney } from '@/components/hr/travel/travel-format';
 import { useToast } from '@/hooks/use-toast';
-import { financeDataService } from '@/services/finance/finance-data.service';
 import { travelFinanceService } from '@/services/hr/travel-finance.service';
 import type {
   TravelClaimStatus,
@@ -52,9 +54,8 @@ const PAYMENT_METHODS: TravelPaymentMethod[] = [
 
 /**
  * The verdicts a reviewer can reach. Deliberately the real statuses rather than an approve/reject
- * pair: the claim's status is set outright by the review — it is NOT derived from its lines — and
- * `pay` refuses anything that is not `Approved`, so a screen offering only "approve" would leave
- * partially-approved claims unpayable and stuck.
+ * pair: the claim's status is set outright by the review — it is NOT derived from its lines (lane 3
+ * of the travel final closure derives it). `pay` accepts `Approved` and `PartiallyApproved`.
  */
 const REVIEW_OUTCOMES: { value: TravelClaimStatus; label: string; hint: string }[] = [
   { value: 'Approved', label: 'Approve', hint: 'Everything stands; the claim becomes payable.' },
@@ -76,12 +77,6 @@ const humanize = (v: string) => v.replace(/([a-z])([A-Z])/g, '$1 $2');
 const options = (values: readonly string[]) => values.map((v) => ({ value: v, label: humanize(v) }));
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '—');
-const fmtMoney = (amount?: number | null, currency?: string) =>
-  amount === null || amount === undefined
-    ? '—'
-    : new Intl.NumberFormat(undefined, {
-        style: 'currency', currency: currency || 'GHS', currencyDisplay: 'code',
-      }).format(amount);
 
 const lineSchema = z.object({
   expenseCategory: z.enum(EXPENSE_CATEGORIES as [string, ...string[]]),
@@ -114,15 +109,14 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
   const [paymentMethod, setPaymentMethod] = useState<TravelPaymentMethod>('BankTransfer');
   const [paymentReference, setPaymentReference] = useState('');
 
-  const { data: claim, isLoading } = useQuery({
+  const { data: claim, isLoading, isError, error } = useQuery({
     queryKey: ['travel-claim', id],
     queryFn: () => travelFinanceService.getClaim(id),
   });
 
-  const { data: currencies } = useQuery({
-    queryKey: ['finance', 'currencies', 'active'],
-    queryFn: () => financeDataService.getCurrencies({ isActive: true }),
-  });
+  // ⚠ The currency list is read through `api/hr/currencies` (inside CurrencyField). This page read
+  // `api/finance/currencies`, which answers 403 without a Finance permission, so the HR desk could
+  // add no expense in any currency (travel final closure, lane 0 — finding O-19).
 
   // Needed only to anticipate the recovery in the pay dialog — the claim carries the advance's
   // number but not what is still outstanding on it.
@@ -138,9 +132,20 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
     resolver: zodResolver(lineSchema),
     defaultValues: {
       expenseCategory: 'Meals', expenseDate: '', amountOriginal: 0,
-      currencyOriginal: claim?.currencyCode ?? 'GHS', isPerDiem: false,
+      currencyOriginal: '', isPerDiem: false,
     },
   });
+
+  // ⚠ The currency defaulted to `claim?.currencyCode ?? 'GHS'` in the form's defaults, which are
+  // read once, on the first render — while the claim was still loading. So every expense started
+  // in GHS whatever the claim's currency. The dialog now starts in the claim's own currency.
+  const openLineDialog = () => {
+    lineForm.reset({
+      expenseCategory: 'Meals', expenseDate: '', amountOriginal: 0,
+      currencyOriginal: claim?.currencyCode ?? '', isPerDiem: false,
+    });
+    setShowLine(true);
+  };
 
   const addLine = useMutation({
     mutationFn: (values: z.input<typeof lineSchema>) => {
@@ -218,6 +223,13 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
       </div>
     );
   }
+  if (isError && !claim) {
+    return (
+      <div className="p-6">
+        <TravelQueryError error={error} what="this expense claim" />
+      </div>
+    );
+  }
   if (!claim) {
     return (
       <div className="p-6">
@@ -225,10 +237,6 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
       </div>
     );
   }
-
-  const currencyOptions = (currencies ?? []).map((c) => ({
-    value: c.currencyCode, label: `${c.currencyCode} — ${c.currencyName}`,
-  }));
 
   const isDraft = claim.status === 'Draft' || claim.status === 'Returned';
   const isReviewable = claim.status === 'Submitted' || claim.status === 'UnderReview';
@@ -254,7 +262,7 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
             <StatusBadge status={humanize(claim.statusName)} />
             {isDraft && (
               <>
-                <Button variant="outline" onClick={() => setShowLine(true)}>
+                <Button variant="outline" onClick={openLineDialog}>
                   <Plus className="mr-2 h-4 w-4" /> Add an expense
                 </Button>
                 <Button onClick={() => submit.mutate()} disabled={submit.isPending}>
@@ -362,7 +370,7 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
         <CardHeader className="flex flex-row items-center justify-between gap-4 pb-3">
           <CardTitle className="text-base">Expenses</CardTitle>
           {isDraft && (
-            <Button variant="outline" size="sm" onClick={() => setShowLine(true)}>
+            <Button variant="outline" size="sm" onClick={openLineDialog}>
               <Plus className="mr-2 h-4 w-4" /> Add
             </Button>
           )}
@@ -473,9 +481,8 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
             <TextField form={lineForm} name="merchantName" label="Merchant" />
             <FieldRow>
               <NumberField form={lineForm} name="amountOriginal" label="Amount spent" required />
-              <SelectField
+              <CurrencyField
                 form={lineForm} name="currencyOriginal" label="Currency spent in" required
-                options={currencyOptions}
               />
             </FieldRow>
             <p className="text-xs text-muted-foreground">

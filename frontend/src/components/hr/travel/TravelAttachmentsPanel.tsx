@@ -29,15 +29,15 @@ import { useToast } from '@/hooks/use-toast';
 import { hrDocumentService } from '@/services/hr/hr-document.service';
 import { travelService } from '@/services/hr/travel.service';
 import type { TravelAttachmentType } from '@/types/hr/travel';
+import { TravelQueryError } from './TravelQueryError';
+import { TRAVEL_ATTACHMENT_TYPE_LABELS, enumOptions } from './travel-enums';
 
-const TYPES: { value: TravelAttachmentType; label: string }[] = [
-  { value: 'Invitation', label: 'Invitation' },
-  { value: 'Agenda', label: 'Agenda' },
-  { value: 'Quotation', label: 'Quotation' },
-  { value: 'Approval', label: 'Approval' },
-  { value: 'VisaSupport', label: 'Visa support letter' },
-  { value: 'Other', label: 'Other' },
-];
+/**
+ * ⚠ From the C# enum, through `travel-enums.ts`. The hand-typed list offered Invitation, Agenda,
+ * Quotation, Approval and VisaSupport — none of them a member of `TravelAttachmentType` — so every
+ * upload except "Other" came back 400 (travel final closure, lane 0 — finding A9).
+ */
+const TYPES = enumOptions(TRAVEL_ATTACHMENT_TYPE_LABELS);
 
 const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '—');
 
@@ -50,8 +50,8 @@ const fmtSize = (bytes: number) =>
  * Documents attached to a travel request.
  *
  * Purpose-built rather than reusing `AttachmentsPanel` for one reason: **on travel the attachment
- * type is the point.** A visa support letter and a quotation are different documents with different
- * consequences, so the type is chosen on upload and shown in the list; the shared panel has a
+ * type is the point.** An invitation letter and a visa document are different documents with
+ * different consequences, so the type is chosen on upload and shown in the list; the shared panel has a
  * free-text description and no type.
  *
  * Everything goes through the controlled gate — the file is scanned, registered in the DMS and
@@ -66,7 +66,11 @@ export function TravelAttachmentsPanel({
   requestId: string;
   /** `HR.Travel.Write`. */
   canUpload?: boolean;
-  /** `HR.Travel.Admin` — deleting a scanned passport page is not a desk-clerk action. */
+  /**
+   * `HR.Travel.Admin` — deleting a scanned passport page is not a desk-clerk action. Pass
+   * `useTravelAccess().canAdmin`, never a literal: the button used to render for every HR officer
+   * and answer 403.
+   */
   canDelete?: boolean;
 }) {
   const queryClient = useQueryClient();
@@ -78,7 +82,7 @@ export function TravelAttachmentsPanel({
   const [description, setDescription] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey,
     queryFn: () => travelService.getAttachments(requestId),
   });
@@ -132,8 +136,8 @@ export function TravelAttachmentsPanel({
           <div className="space-y-1.5">
             <CardTitle className="text-base">Attachments</CardTitle>
             <p className="text-sm text-muted-foreground">
-              Invitations, quotations and visa support letters. Files are scanned before they are
-              stored.
+              Invitation letters, visa documents, insurance certificates and receipts. Files are
+              scanned before they are stored.
             </p>
           </div>
           {canUpload && (
@@ -148,6 +152,10 @@ export function TravelAttachmentsPanel({
             <div className="space-y-2 p-4">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
+            </div>
+          ) : isError && !data ? (
+            <div className="p-4">
+              <TravelQueryError error={error} what="the attachments" />
             </div>
           ) : items.length === 0 ? (
             <EmptyState

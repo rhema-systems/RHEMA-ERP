@@ -23,14 +23,13 @@ namespace ErpSystem.Core.Services.HR;
 /// <para><b>⚠ Renamed from travel-specific to HR-wide on 2026-09-01, because this file said to.</b>
 /// Its own note read: <i>"Same division StaffTravelCurrencyBridge settled for travel; when a third
 /// area needs this the two should become one HR-wide bridge."</i> Guarantor sureties (lane 3a) are
-/// that third area, so the implementation moved here and
-/// <see cref="StaffTravelCurrencyBridge"/> is now a thin alias.</para>
+/// that third area, so the implementation moved here. Travel kept a thin alias,
+/// <c>StaffTravelCurrencyBridge</c>, until the travel final closure retired it (2026-10-01, lane 0):
+/// the travel services now take this class directly.</para>
 ///
-/// <para><b>Two callers are owed migration and are deliberately NOT migrated here.</b> Area 12's
-/// travel services keep using the alias, and <c>SeparationService.ResolveCurrencyAsync</c> keeps
-/// its own copy of the settings-then-base fallback. Both are closed areas with their own harnesses;
-/// moving them is a change worth making deliberately with those suites green, not as a side effect
-/// of an employee-master slice.</para>
+/// <para><b>One caller still keeps its own copy.</b> <c>SeparationService.ResolveCurrencyAsync</c>
+/// has its own settings-then-base fallback; moving it is a change worth making with the separation
+/// suites green, not as a side effect of another area's slice.</para>
 /// </remarks>
 public class HrCurrencyBridge
 {
@@ -143,18 +142,4 @@ public class HrCurrencyBridge
 
         return rate;
     }
-}
-
-/// <summary>
-/// Travel's name for <see cref="HrCurrencyBridge"/>, kept so area 12's call sites and its harness
-/// need no change.
-/// </summary>
-/// <remarks>
-/// ⚠ Retire this when area 12 is next opened with its suite runnable — not before. A rename across
-/// a closed area is a cheap edit and an expensive regression.
-/// </remarks>
-public sealed class StaffTravelCurrencyBridge : HrCurrencyBridge
-{
-    public StaffTravelCurrencyBridge(ICurrencyService currencies, IExchangeRateService rates)
-        : base(currencies, rates) { }
 }

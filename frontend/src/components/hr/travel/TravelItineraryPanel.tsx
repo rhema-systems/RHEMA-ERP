@@ -40,6 +40,7 @@ import { countryService } from '@/services/hr/country.service';
 import { travelBookingsService } from '@/services/hr/travel-bookings.service';
 import type { StaffTravelRequest } from '@/types/hr/travel';
 import type { StaffTravelItineraryLeg } from '@/types/hr/travel-bookings';
+import { TravelQueryError } from './TravelQueryError';
 
 const LEG_TYPES = ['Departure', 'Transit', 'Arrival', 'Stay', 'DayTrip', 'Return'] as const;
 const TRANSPORT_MODES = [
@@ -391,7 +392,7 @@ export function TravelItineraryPanel({ request }: { request: StaffTravelRequest 
   const [showLegDialog, setShowLegDialog] = useState(false);
   const [activityLeg, setActivityLeg] = useState<StaffTravelItineraryLeg | null>(null);
 
-  const { data: versions, isLoading } = useQuery({
+  const { data: versions, isLoading, isError, error } = useQuery({
     queryKey: ['travel-itineraries', requestId],
     queryFn: () => travelBookingsService.getItinerariesByRequest(requestId),
   });
@@ -405,7 +406,9 @@ export function TravelItineraryPanel({ request }: { request: StaffTravelRequest 
   const current = ordered.find((v) => v.isCurrentVersion);
   const viewingId = selectedId ?? current?.id ?? ordered[0]?.id ?? null;
 
-  const { data: itinerary } = useQuery({
+  const {
+    data: itinerary, isError: itineraryFailed, error: itineraryError,
+  } = useQuery({
     queryKey: ['travel-itinerary', viewingId],
     queryFn: () => travelBookingsService.getItinerary(viewingId as string),
     enabled: !!viewingId,
@@ -435,6 +438,10 @@ export function TravelItineraryPanel({ request }: { request: StaffTravelRequest 
       </div>
     );
   }
+
+  // A failed read is not "no itinerary yet" — offering to create version 1 over a list that
+  // could not be read invites a duplicate.
+  if (isError && !versions) return <TravelQueryError error={error} what="the itinerary" />;
 
   if (ordered.length === 0) {
     return (
@@ -505,6 +512,8 @@ export function TravelItineraryPanel({ request }: { request: StaffTravelRequest 
           </div>
         </CardContent>
       </Card>
+
+      {itineraryFailed && !itinerary && <TravelQueryError error={itineraryError} what="this itinerary version" />}
 
       {itinerary && (
         <Card>

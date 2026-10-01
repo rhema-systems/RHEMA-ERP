@@ -12,6 +12,8 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
 import { PolicyRulesPanel } from '@/components/hr/travel/PolicyRulesPanel';
 import { TravelPolicyForm } from '@/components/hr/travel/TravelPolicyForm';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import { travelPolicyState } from '@/components/hr/travel/travel-policy-state';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { travelComplianceService } from '@/services/hr/travel-compliance.service';
@@ -54,7 +56,7 @@ export default function TravelPolicyDetailPage({ params }: { params: Promise<{ i
     hasAnyPermission(['HR.Travel.Write', 'HR.Travel.Admin']) || hasAnyRole(HR_ROLES);
   const canAdmin = hasAnyPermission(['HR.Travel.Admin']) || hasAnyRole(HR_ADMIN_ROLES);
 
-  const { data: policy, isLoading } = useQuery({
+  const { data: policy, isLoading, isError, error } = useQuery({
     queryKey: ['travel-policies', id],
     queryFn: () => travelComplianceService.getPolicy(id),
   });
@@ -66,11 +68,11 @@ export default function TravelPolicyDetailPage({ params }: { params: Promise<{ i
       toast({ title: 'Policy deleted' });
       router.push('/administration/hr/travel/policies');
     },
-    onError: (e: any) =>
+    onError: (e: Error) =>
       toast({
         variant: 'destructive',
         title: 'Could not delete the policy',
-        description: e?.response?.data?.message ?? e?.response?.data ?? e?.message,
+        description: e?.message,
       }),
   });
 
@@ -78,6 +80,13 @@ export default function TravelPolicyDetailPage({ params }: { params: Promise<{ i
     return (
       <div className="flex items-center justify-center p-12">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (isError && !policy) {
+    return (
+      <div className="p-6">
+        <TravelQueryError error={error} what="this travel policy" />
       </div>
     );
   }
@@ -93,7 +102,7 @@ export default function TravelPolicyDetailPage({ params }: { params: Promise<{ i
           description="Only a draft can be corrected — an approved policy needs a new version."
           backHref={`/administration/hr/travel/policies/${id}`}
         />
-        <TravelPolicyForm policy={policy} />
+        <TravelPolicyForm policy={policy} onSaved={() => setEditing(false)} />
       </div>
     );
   }
@@ -123,13 +132,7 @@ export default function TravelPolicyDetailPage({ params }: { params: Promise<{ i
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        {isDraft ? (
-          <Badge variant="outline">Draft — not enforcing</Badge>
-        ) : policy.isCurrentVersion ? (
-          <Badge>In force</Badge>
-        ) : (
-          <Badge variant="secondary">Superseded</Badge>
-        )}
+        <Badge variant={travelPolicyState(policy).variant}>{travelPolicyState(policy).label}</Badge>
         <Badge variant="outline">
           {fmtDate(policy.effectiveFrom)}
           {policy.effectiveTo ? ` – ${fmtDate(policy.effectiveTo)}` : ' onwards'}

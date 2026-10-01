@@ -2485,6 +2485,14 @@ the module's argument.
 > code: **T-5** (Finance's conversion was fixed on 2026-09-10), **T-53** (the reminder sweep has been
 > hosted daily since 2026-08-17) and **T-28** (the server does refuse to cancel a Cancelled, Completed
 > or Closed request). This section is the record of the walk, not a to-do list.
+>
+> **Closure lane 0 (2026-10-01, staged)** changed what several steps here show: **T-3, T-12, T-15 and
+> T-27 are fixed** (every dropdown is written from its enum; the composer has an *Internal note*
+> toggle), the request form now sends back the fields the **T-29** replace would erase, the **T-6**
+> copy says recovery happens on payment, and the attachment upload accepts all seven types. It also
+> found that **no travel currency dropdown could be filled by an HR officer or a traveller** — they read
+> a Finance list that answers 403 (closure finding O-19, fixed in the same lane). Where a step below
+> warns about one of these, the warning describes the code before lane 0.
 
 **Fifty-eight findings.** This is the most complete module in HR by some distance — it was built as
 twelve slices with 506 harness assertions and two closure slices on top, and the density of

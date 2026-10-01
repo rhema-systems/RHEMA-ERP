@@ -31,7 +31,7 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     private readonly IStaffTravelHealthRequirementRepository _healthRequirementRepository;
     private readonly IStaffTravelRequestRepository _requestRepository;
     private readonly IEmployeeRepository _employeeRepository;
-    private readonly StaffTravelCurrencyBridge _currency;
+    private readonly HrCurrencyBridge _currency;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAppEventBus _appEventBus;
@@ -48,7 +48,7 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         IStaffTravelHealthRequirementRepository healthRequirementRepository,
         IStaffTravelRequestRepository requestRepository,
         IEmployeeRepository employeeRepository,
-        StaffTravelCurrencyBridge currency,
+        HrCurrencyBridge currency,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         IAppEventBus appEventBus,
@@ -394,6 +394,10 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken, optional: true);
         await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
         await RequireOwnedEmployeeAsync(createDto.EmployeeId);
+        // The status is an input since lane 0 of the travel final closure. A JSON name the enum does
+        // not have is refused at binding; a bare number is not, so it is checked here.
+        if (!Enum.IsDefined(createDto.Status))
+            throw new InvalidOperationException($"{(int)createDto.Status} is not a visa application status.");
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _visaApplicationRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

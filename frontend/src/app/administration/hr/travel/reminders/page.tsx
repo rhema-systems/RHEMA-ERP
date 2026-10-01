@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
 import { useToast } from '@/hooks/use-toast';
 import { travelRemindersService } from '@/services/hr/travel-reminders.service';
 
@@ -18,12 +19,28 @@ const humanize = (v: string) => v.replace(/([a-z])([A-Z])/g, '$1 $2');
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '—');
 
-/** The horizons the engine actually uses. Stated so an admin can see why something is or isn't due. */
+/**
+ * The horizons the engine actually uses. Stated so an admin can see why something is or isn't due.
+ *
+ * ⚠ Worded from `StaffTravelReminderService.TierFor`, not from intent. Each item sends ONE
+ * reminder when it comes inside its horizon, then nothing more until its date passes; after that
+ * it escalates once in each of the windows 1–7, 8–30 and 31–90 days late. "Chased from 90 days
+ * out" read as a repeating chase that does not happen (travel final closure, finding F2).
+ */
 const HORIZONS = [
-  { kind: 'Travel document expiring', detail: 'chased from 90 days out' },
-  { kind: 'Visa expiring', detail: 'chased from 90 days out' },
-  { kind: 'Advance settlement overdue', detail: 'once past its settlement deadline' },
-  { kind: 'Trip departing', detail: 'announced 14 days out' },
+  {
+    kind: 'Travel document expiring',
+    detail: 'once when it comes within 90 days of expiry; then once it has lapsed, after a week and after a month',
+  },
+  {
+    kind: 'Visa expiring',
+    detail: 'once when it comes within 90 days of expiry; then once it has lapsed, after a week and after a month',
+  },
+  {
+    kind: 'Advance settlement overdue',
+    detail: 'once its settlement deadline has passed, then after a week and after a month',
+  },
+  { kind: 'Trip departing', detail: 'once, when an approved trip is 14 days or less away' },
 ];
 
 /**
@@ -43,17 +60,19 @@ export default function TravelRemindersPage() {
   const { toast } = useToast();
   const [asOf, setAsOf] = useState('');
 
-  const { data: preview, isLoading: previewLoading } = useQuery({
+  const {
+    data: preview, isLoading: previewLoading, isError: previewFailed, error: previewError,
+  } = useQuery({
     queryKey: ['travel-reminder-preview', asOf],
     queryFn: () => travelRemindersService.preview(asOf || undefined),
   });
 
-  const { data: runs } = useQuery({
+  const { data: runs, isError: runsFailed, error: runsError } = useQuery({
     queryKey: ['travel-reminder-runs'],
     queryFn: () => travelRemindersService.getRuns(20),
   });
 
-  const { data: log } = useQuery({
+  const { data: log, isError: logFailed, error: logError } = useQuery({
     queryKey: ['travel-reminder-log'],
     queryFn: () => travelRemindersService.getLog(14),
   });
@@ -113,6 +132,12 @@ export default function TravelRemindersPage() {
             notice that still allows a Ghanaian passport renewal. A 30-day warning about a document
             that takes six weeks to replace is not a warning.
           </p>
+          {/* ⚠ Every kind is published to the HR role, in the app only (finding F2) — saying so
+              here stops a reader assuming travellers and approvers are reminded too. */}
+          <p className="text-xs text-muted-foreground md:col-span-2">
+            Every reminder goes to the HR role, in the app only. The traveller and their approver
+            are not reminded of anything by this sweep.
+          </p>
         </CardContent>
       </Card>
 
@@ -149,6 +174,8 @@ export default function TravelRemindersPage() {
             <div className="flex items-center justify-center p-6">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
+          ) : previewFailed && !preview ? (
+            <TravelQueryError error={previewError} what="the reminder preview" />
           ) : items.length === 0 ? (
             <EmptyState
               icon={BellRing}
@@ -208,7 +235,11 @@ export default function TravelRemindersPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {(runs ?? []).length === 0 ? (
+          {runsFailed && !runs ? (
+            <div className="p-4">
+              <TravelQueryError error={runsError} what="the recent sweeps" />
+            </div>
+          ) : (runs ?? []).length === 0 ? (
             <EmptyState title="No sweeps yet" description="Nothing has run for this tenant." />
           ) : (
             <Table>
@@ -240,7 +271,11 @@ export default function TravelRemindersPage() {
           <CardTitle className="text-base">Sent in the last 14 days</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {(log ?? []).length === 0 ? (
+          {logFailed && !log ? (
+            <div className="p-4">
+              <TravelQueryError error={logError} what="the reminder log" />
+            </div>
+          ) : (log ?? []).length === 0 ? (
             <EmptyState title="Nothing sent" description="No reminders in the last fortnight." />
           ) : (
             <Table>

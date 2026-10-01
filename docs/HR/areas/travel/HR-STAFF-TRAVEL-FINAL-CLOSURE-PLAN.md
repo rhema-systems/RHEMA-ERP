@@ -22,14 +22,17 @@ documents:
 
 **Scope decision, 2026-10-01:** close all of it — the user asked for this to be the ultimate and
 final review of the module, with every discovered issue fixed. The user accepted the plan and asked
-for development to be held until they say go.
+for development to be held until they say go. **They said go on 2026-10-01, skipping the old suites'
+baseline (D-13); lane 0 was built the same day.**
 
 **START HERE:**
-1. § 1 is settled — twelve decisions, all taken with the user on 2026-10-01. Decision numbers in this
-   document are **travel-closure-local**; they are not the closure ledger's D-01…D-40.
-2. **Lane 0 first** (§ 4): it makes the travel harness runnable on UAT (it cannot mint actors there as
-   written), records the baseline of the sixteen existing suites, and fixes the frontend fictions that
-   fail in front of a user today. Lane 0 needs no schema.
+1. § 1 is settled — thirteen decisions, all taken with the user on 2026-10-01. Decision numbers in
+   this document are **travel-closure-local**; they are not the closure ledger's D-01…D-40.
+2. **Lane 0** (§ 4) — **COMPLETE 2026-10-01**: `run-final-truth.mjs` passed 112/112 twice on UAT;
+   staged for the user's commit. The old slice suites are not run on UAT at all (D-13). Starting the
+   API on UAT: auto mode refuses `start-api-uat.ps1` unless this project's local settings allow it
+   (the user added that rule on 2026-10-01); before every start, check UAT for pending migrations
+   and ask the user first if one would be applied.
 3. **Then migration batch 1** (§ 5): the user scaffolds it, it is rewritten as guarded SQL, the user
    builds, the data part is dry-run on UAT and applied on the user's go. Lanes 1–9 build on it.
 4. Then lanes **1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane
@@ -64,6 +67,7 @@ lane's slice.
 | **D-10** | "Paid by payroll offset" pays nobody (O-6) | **Hide payroll offset** from the pay dialog and refuse it in the API until payroll can receive travel claims; existing rows keep their value; a hand-off is recorded for the payroll owner. |
 | **D-11** | Which Fleet integrations (FX-1…FX-8) | **All four:** core reservation and sync; fuel on claims; drivers as travellers; incidents and trip signals (with the traveller's assigned official car as the default vehicle). Lane 6. |
 | **D-12** | Who fixes Fleet's own gaps — planned-window conflicts, driver leave, no seeded fleet-trip approval (FX-2, FX-7, FX-9) | **Hand them to the Fleet owner; travel guards its own side meanwhile.** Travel's checks refuse overlapping vehicles and unavailable drivers for travel bookings. This closure does not change Fleet's code. |
+| **D-13** | Run the sixteen slice suites on UAT as lane 0's baseline? (asked at the go, 2026-10-01) | **No — skip the baseline.** The slice suites were written for a throwaway database: they hang their actors off the first position in the tenant (real staff's), mint `HR` and `TenantAdmin` logins they never switch off, approve fixture policies in the tenant and mostly delete nothing. The lane-0 truth suite is the baseline; each lane re-proves, with its own clean-up, what the slice suites covered in its area, and retires them by name in this document. |
 
 **Standing assumptions (not re-asked):** the closure ledger's D-29 holds — the policy rule register
 stays read-only and the policy-exception flow stays withheld until rule enforcement exists; Finance
@@ -76,7 +80,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 
 | Lane | What | Schema | Suite | Status |
 |---|---|---|---|---|
-| **0** | Harness on UAT, baseline, truth and fiction | none | `run-final-truth.mjs` | ☐ not started |
+| **0** | Harness on UAT, truth and fiction | none | `run-final-truth.mjs` | ✅ complete 2026-10-01 — 112/112 twice on UAT; staged |
 | **M1** | Migration batch 1 | the whole batch | — | ☐ not started |
 | **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ☐ |
 | **2** | The approval ladder and the approver's door | batch 1 | `run-final-approvals.mjs` | ☐ |
@@ -123,13 +127,16 @@ Each finding names the lane that owns it.
   → lane 1
 - **A7 M** The desk's *Add comment* sends `commentType: 'General'`, which is not a C# member, so it
   **always 400s** (`hr/travel/[id]/page.tsx:137`); `isVisibleToTraveller` is hard-coded true (T-27).
-  → lane 0
+  → lane 0 — **fixed 2026-10-01** (a Comment / Internal note toggle)
 - **A8 M** The request form offers `Negotiation` and `Extreme` (T-3, both 400) and hides `Emergency`,
   five purposes, `Critical`, `Prohibited` and `System`; its replace payload drops `approvedBudget`,
   `policyId` and `groupTravelId`, so editing a group participant silently removes them from the
   group; a self-service request gets no organisation unit although a comment says it does. → lanes 0, 1
+  — **lane 0's half fixed 2026-10-01** (options from the enums; the edit sends the three back; the
+  comment corrected); the unit and the DTO are lane 1's
 - **A9 M** The attachment upload offers six types, five of them not C# members — 400 unless *Other*
-  (`TravelAttachmentsPanel.tsx:33`); its delete button renders for HR and 403s. → lane 0
+  (`TravelAttachmentsPanel.tsx:33`); its delete button renders for HR and 403s. → lane 0 — **fixed
+  2026-10-01**
 - **A10 L** Comment edit and delete check no author; the desk path takes `CancelledAt` from the body;
   the request has no approver column (only `UpdatedBy`); the request-number generator is not atomic
   (recorded). → lane 1
@@ -187,7 +194,8 @@ Each finding names the lane that owns it.
 - **C1 M** Eight caps are read by nothing — `AdvanceBookingDaysFlight/Hotel`, `RequiresCheapestFare`,
   `PreferredVendorMandatory`, `MaxSingleTripBudget`, `MaxAnnualTravelBudget`, `ReceiptRequiredAbove`,
   `ExpenseSubmissionDays` — while `TravelPolicyForm.tsx:237-282` and `PolicyRulesPanel.tsx:55` present
-  them as rules (D-1). → lanes 1, 3, 4
+  them as rules (D-1). → lanes 1, 3, 4 (lane 0 made the copy true meanwhile: a banner says they are
+  not enforced, and the rules banner no longer counts the budgets among the caps)
 - **C2 M** `[Required]` on the non-nullable cabin-class enums is a no-op: an omitted class is stored as
   0 and, once the policy is approved, **every flight exceeds the cap**. → lane 4
 - **C3 M** The hotel cap has no currency (T-9); `VersionNumber` is caller-declared and not unique
@@ -226,7 +234,8 @@ Each finding names the lane that owns it.
   panel tells users to "record their passport under travel documents first". → lane 7
 - **E3 M** A visa application is frozen at creation: the dialog collects status, number and dates
   that the create DTO drops (`StaffTravelDTOs.cs:2638`); the update has no caller; the list uses the
-  summary DTO, so *Number* and *Fee* always read "—". → lane 7
+  summary DTO, so *Number* and *Fee* always read "—". → lane 7 — **the create DTO and the list
+  brought forward and fixed in lane 0** (2026-10-01); the edit dialog stays in lane 7
 - **E4 M** `RequiresVisa` gates nothing (T-24/T-42); health requirements are never checked (T-25);
   an expiring passport blocks nothing (T-26); `GetRequirementAsync` is not tenant-scoped, so the
   duplicate guard and the read-back can pick another tenant's row. → lanes 5, 7
@@ -254,10 +263,10 @@ Each finding names the lane that owns it.
   duplicate the TS unions (how the drift happened); `'GHS'` is a fallback in twelve places; stale
   comments (no GL posting, advance recovered on approval, pay only Approved); the HR hub card promises
   per diem; *Open in Travel* passes an `employeeId` the register ignores; a withdrawn policy shows
-  *Superseded*; the policy form pushes to its own URL after save. → lane 0
+  *Superseded*; the policy form pushes to its own URL after save. → lane 0 — **fixed 2026-10-01**
 - **F5 L** Five enums with no reference outside their own file (`TravelApproverType`,
   `TravelApprovalDecision`, `TravelApprovalInstanceStatus`, `TravelAllowanceType`, `TravelVendorType`);
-  the `StaffTravelCurrencyBridge` alias is due for retirement. → lane 0
+  the `StaffTravelCurrencyBridge` alias is due for retirement. → lane 0 — **fixed 2026-10-01**
 
 ### 3b. Found by the second review
 
@@ -316,6 +325,13 @@ Each finding names the lane that owns it.
 - **O-18 L** — deleting a group leaves its participants linked to it; no status history for requests,
   claims or advances beyond the workflow tab; lookups by number and the effective per-diem read take
   the first row across tenants (single tenant today). → § 6
+- **O-19 H — the people who use the travel screens could pick no currency on any of them** (found
+  while building lane 0). Every travel currency dropdown — the request form, the four booking dialogs,
+  the visa fee, insurance, the budget, the advance, the claim and its lines, the group's add-traveller
+  dialog — read `GET /api/finance/currencies`, which `FinancePermissionPolicyMap` puts behind a Finance
+  permission: HR officers and travellers get a 403 and an empty list, so none of those could be entered
+  from the screens. `api/hr/currencies` (InternalOnly) exists for exactly this; area 13 met the same wall.
+  → lane 0 — **fixed 2026-10-01**; the truth suite asserts both answers
 
 ### 3c. Corrections the second review made to the first
 
@@ -331,7 +347,7 @@ Each finding names the lane that owns it.
 5. D-3's safety net needed D-8 and the delete guards of O-15; it was incomplete as first written.
 6. Approver notifications (lane 8) are useless until the approver can open the request (lane 2).
 7. The claim-filing page says the advance is recovered "when the claim is approved"
-   (`claims/new/page.tsx:168`); it is recovered on payment.
+   (`claims/new/page.tsx:168`); it is recovered on payment. (The copy was corrected in lane 0.)
 
 ⚠ **For the leave owner, not travel scope:** `LeaveService.EnsureMayDecideAsync` (l.1000) asks only the
 engine, whose stage 1 is the Manager *role*, so any Manager-role user appears able to decide any
@@ -343,7 +359,7 @@ Travel applies the line rule in its service (lane 2) rather than copying leave's
 | Status | Findings |
 |---|---|
 | **Fixed upstream — correct the prose only** | T-5 and T-37's conversion half (Finance FX fixed 2026-09-10, PR #99), T-8's supplier read (2026-09-22), T-43 (alert body), T-53 (the sweep has been hosted daily since 2026-08-17 — the guide was wrong when written), T-58 (claims and advances post since 2026-09-20), T-44's per-trip button (it exists) |
-| **Kept by decision** | T-4 and T-49 (D-29), T-6 (recovery on payment — the copy is fixed in lane 3), T-51 (informational) |
+| **Kept by decision** | T-4 and T-49 (D-29), T-6 (recovery on payment — the copy was fixed in lane 0), T-51 (informational) |
 | **Lane 0** | T-3, T-12, T-15, T-27, T-29 (with lane 1) |
 | **Lane 1** | T-7 (with lane 8), T-16, T-17, T-28 (corrected), T-30, T-31, T-32 |
 | **Lane 2** | T-10 |
@@ -365,7 +381,8 @@ the trip today.
 
 - **FX-1** "This reserves the vehicle in Fleet" (`TravelBookingsPanel.tsx:445, 471`) is false: the
   fleet trip is created **Draft** (`FleetTripService.cs:180`) and never submitted, so the transport
-  office has nothing to approve and nothing is held. → lane 6
+  office has nothing to approve and nothing is held. → lane 6 (lane 0 made the text true: *a draft
+  trip in Fleet; the vehicle is not held*)
 - **FX-2** Fleet's only conflict check looks at **Dispatched** trips (`FleetTripService.cs:885-899`), so
   two legs — or a leg and a fleet booking — can hold one vehicle or driver for the same days. → lane 6
   (travel side), Fleet hand-off
@@ -395,37 +412,102 @@ the trip today.
 
 ## 4. Lanes
 
-### Lane 0 — Harness on UAT, baseline, truth and fiction (no schema)
+### Lane 0 — Harness on UAT, truth and fiction (no schema)
 
-**The harness first.** `dev-harness\hr-travel\setup.mjs` cannot mint actors on UAT as written:
-- [ ] send `employeeNumber: ''` — the staff-number rule auto-generates and refuses a supplied number
-  (copy `hr-performance/setup.mjs:49`);
-- [ ] resolve the tenant from `/api/auth/me`, not the hard-coded `…0001`;
-- [ ] pick the first position that has an `organizationUnitId`;
-- [ ] track minted user ids and switch them off in a `finally` (performance's `mintedUserIds`);
-- [ ] replace the SQL-seeded supplier in `fixtures.json` with an existing active supplier read from
-  the tenant (correction 3);
-- [ ] `workflow-definition.mjs` must not publish a second `StaffTravelRequest` definition beside the
-  seeded one — read the seeded definition and assert on it;
-- [ ] `clamd-stub.mjs` for every upload suite; write the missing `hr-travel/README.md` (environment,
-  suites, counts, teardown rule);
-- [ ] run the sixteen existing suites on UAT and record the baseline — list the stale assertions, do
-  not bend a suite to pass.
+**Status 2026-10-01: COMPLETE.** `run-final-truth.mjs` passed 112/112 twice on UAT (runs 631771
+and 649145) after one harness fix (below); staged for the user's commit. No migration was pending on
+UAT — its history already held every migration in the repo — so starting the API changed no schema.
+
+**The harness.** The slice suites' `setup.mjs` was not repaired: it is retired from UAT with the slice
+suites (D-13), and the closure has its own fixture.
+- [x] `final-api.mjs` (performance style — no throw on a non-2xx; `observe()` records a known-open
+  finding without counting it) and `final-setup.mjs`: the fixture's own unit and position under the live
+  root, employees created with `employeeNumber: ''`, the tenant from `/api/auth/me`, every minted login
+  tracked and switched off.
+- [x] The teardown, in a `finally`: every row the run made is soft-deleted by its request and group ids
+  (claim lines, flight segments, itinerary legs and activities included), then checked — nothing left
+  live. **Claim and advance numbers are renamed `…~E2E<stamp>` before the soft delete**: under B9 a
+  deleted claim makes every later claim on the tenant collide, so the teardown also checks that the next
+  claim and advance numbers are free. (Read-only on 2026-10-01: UAT held one live claim and one live
+  advance, and both next numbers were free.)
+- [x] `hr-travel/README.md`: the environment, `start-api-uat.ps1`, the clamd stub, the suites and their
+  counts, the teardown rule, and why the slice suites must not run on UAT.
+- [—] *A supplier from the tenant* — lane 0 books nothing through a vendor; the first suite that does
+  (lane 4, `PreferredVendorMandatory`) reads an active one through `api/hr/suppliers`.
+- [—] *`workflow-definition.mjs`* — retired with the slice suites; lane 2's suite asserts on the seeded
+  definition.
+- [—] *Run the sixteen existing suites on UAT* — **skipped by D-13.**
+- [x] **Found on the first UAT run (stamp 418116), fixed.** Every feature check passed, but the
+  teardown renamed the two claims the suite leaves on one number into each other: the unique index
+  refused, SQL Server carried on with the rest of the batch, and one deleted claim kept
+  `EXP-2026-00002`, so every new claim on UAT would have collided. The rename now takes the row's id,
+  the teardown runs as one transaction under `XACT_ABORT`, a failure reports SQL Server's own
+  message, and `teardown-run.mjs <stamp> [--apply]` recovers a run whose teardown did not finish —
+  it renamed the stranded claim, and both next numbers were checked free afterwards.
 
 **Frontend truth (A7, A8, A9, F4, F5).**
-- [ ] Every travel union written from its C# enum (`frontend/src/types/hr/travel*.ts`) and the option
-  arrays derived from them — `TravelRequestForm.tsx`, `TravelAttachmentsPanel.tsx`, the register's type
-  filter; one `TravelRiskLevel` export.
-- [ ] Comment type `Comment` / `InternalNote` with an internal-note toggle in the composer; attachment
-  types from the enum; the attachment delete button only for Admin.
-- [ ] The request form sends `policyId`, `groupTravelId` and `approvedBudget` back on edit until lane 1
-  takes them out of the update DTO.
-- [ ] `isError` and one shared error state on every travel query; stale comments and strings (GL, FX,
-  pay statuses, the per-diem card, the nav descriptions, the portal's "compliance tab").
-- [ ] Backend: stale FX comments; retire `StaffTravelCurrencyBridge` onto `HrCurrencyBridge`; delete the
-  five dead enums; `StaffTravelBusinessRulesAttribute` maps `DbUpdateException` to 409 with a sentence.
+- [x] Every travel union written from its C# enum. `travel-enums.ts` holds one label map per request
+  enum (labels from `[Description]`) and every option list is generated from a map;
+  `travel-enums.test.ts` holds the unions to the C# enums (36 compared) and the maps to their members
+  and descriptions. One `TravelRiskLevel` export.
+- [x] The composer: a Comment / Internal note toggle sets the type and the visibility. Attachment types
+  from the enum. The attachment delete button only for `HR.Travel.Admin` (`useTravelAccess`).
+- [x] The request form's payloads are built by `travel-request-payload.ts` (unit-tested): an edit sends
+  `approvedBudget`, `policyId` and `groupTravelId` back as they are; `isInternational` is derived from
+  the two countries; an empty id is sent as `null`.
+- [x] `TravelQueryError` on every travel read (26 screens, panels and forms), so a 403 or a 500 no
+  longer reads as "nothing yet"; `fmtTravelMoney` replaces ten formatters that fell back to `'GHS'` —
+  no currency is invented; error toasts read `e.message`.
+- [x] Backend: the stale FX and GL comments; `StaffTravelCurrencyBridge` retired onto
+  `HrCurrencyBridge`; the five dead enums deleted; `StaffTravelBusinessRulesAttribute` maps
+  `DbUpdateException` to 409 with a fixed sentence (the database's own text is logged, never returned).
 
-Suite `run-final-truth.mjs`: a UI-payload probe per screen; every enum member round-trips.
+**Found while building lane 0, fixed in it.**
+- [x] **O-19** (§ 3b): all seven currency reads moved to `api/hr/currencies` through `CurrencyField` and
+  `CurrencyPicker`. The claim line no longer starts in GHS (its default was read while the claim was
+  still loading); the group's add-traveller dialog no longer defaults to GHS and requires a currency.
+- [x] **E3, brought forward from lane 7.** The visa create DTO accepts the status, the number and the
+  three dates it used to drop (an omitted status is still Not Started; a status number the enum does not
+  have → 422). The visa summary carries the approval date, the fee, its currency and the number masked
+  to its last four — O-7's rule, for visas. The client types the list reads as the summary. Lane 7 keeps
+  the edit dialog, the passport side of O-7 and the tenant-scoped requirement lookup.
+- [x] Strings that promised what the code does not do: the request form's visa and health switches
+  (they record a need; nothing checks it); FX-1's "reserves the vehicle"; "Open the booking to see
+  both" (no screen opens a booking); the alert dialog's "travellers see it on their trip" (a traveller
+  sees only what is sent to them); the policy form's eight unenforced caps (a banner says so, and the two
+  switches say *should*); the rules banner's "and the budgets"; the policy badges (*Not in force* for a
+  withdrawn or superseded version — the record cannot tell which — *Approved — in force from …* for a
+  future one, *Expired* for an ended one); the reminder horizons (one reminder, then escalation only
+  after the date passes) and their audience (the HR role, in the app only); the travel reminders and
+  travel policies nav descriptions; the HR hub's travel card (no per diem); "Raise an amendment instead"
+  (there is none); the dashboard's *High risk* tile (it counts High, Critical and Prohibited); the portal
+  alert panel's "compliance tab" (the portal has none); the claim page's "recovered when the claim is
+  approved" (on payment) and "pay refuses anything not Approved" (it takes Partially approved too).
+- [x] The policy edit form stayed open after a save: it pushed to its own page's URL (F4). It now
+  closes through an `onSaved` callback.
+- [x] The risk-assessment acknowledgement button shows only to the traveller — for everyone else it
+  could only answer 403. A traveller without desk access still has no door (E1, lane 7).
+- [x] The register honours `?employeeId=` from the employee record (with *Show every traveller*), and
+  its type filter offers all eleven types.
+
+Suite `run-final-truth.mjs` — **112 assertions with the clamd stub running; 112/112 twice on UAT,
+2026-10-01**: § 1 the currency doors;
+§ 2 every request-enum member round-trips (31), the old forms' fiction values are refused, the
+traveller's own create and edit; § 3 an edit keeps a group participant in the group; § 4 comment types;
+§ 5 a visa keeps its status, number and dates, and the list masks the number; § 6 all seven attachment
+types, the old ones refused, delete for Admin only; § 7 the money and booking payloads, and the claim
+number collision answering 409; § 8 the register's employee filter; the teardown's five checks. Four
+known-open findings are observed, not counted: A5, A6, O-5 and the link an edit that omits it drops.
+
+Checks run 2026-10-01: `frontend/tsconfig.travel-lane0.json` type-checks clean; `travel-enums.test.ts`
+(9) and `travel-request-payload.test.ts` (6) pass; `hr-setup-nav.test.ts` passes. Four layout tests
+fail outside travel (the HR sidebar keep-open list's leave and company-schedule leaves, procurement's
+sidebar, the header and the dashboard layout) — none touches a file of this lane. The API log of the
+UAT runs holds two kinds of error besides the deliberate claim collision (one a run, answered 409):
+payroll's profile insert failing its payment-method key at every fixture employee create
+(cross-module defect #23 — the employee still saves), and one HR/Identity reconciliation failure for
+a demo user (*Sequence contains more than one element*, `HrIdentityReconciliationService`) — neither
+is travel's; the second is recorded here for the HR identity owner.
 
 ### Lane 1 — Request lifecycle (A1–A6, A10–A12, D-6, D-9, O-5, O-10, O-11, O-13, O-14, T-16, T-17)
 
@@ -825,7 +907,7 @@ fleet trip.
 ## 8. Status at HEAD `bad482a8d` (before any code of this plan)
 
 No lane has started. The travel harness's last green runs predate UAT (August 2026, the dev
-database); lane 0 records the first UAT baseline. The demo database holds the four demo trips of
+database); lane 0's truth suite is the first UAT run (D-13 skipped the old suites' baseline). The demo database holds the four demo trips of
 `080-travel.mjs` and `081-travel-logistics.mjs`, with the 2026 policy unapproved.
 
 ---
@@ -836,3 +918,13 @@ database); lane 0 records the first UAT baseline. The demo database holds the fo
   finding re-read and held, seven corrections, findings O-1…O-18, decisions D-7…D-10. Fleet review:
   findings FX-1…FX-9, decisions D-11 and D-12. Plan accepted by the user; development held until the
   user says go. This document written and staged the same day.
+- **2026-10-01, later** — The user said go, skipping the baseline (D-13). Lane 0 built and staged: the
+  frontend truth (A7, A8, A9, F4, F5); O-19 found and fixed; E3's create and list brought forward from
+  lane 7; the strings that promised more than the code does; the backend tidy-ups and the 409; the new
+  fixture, truth suite and harness README. Scoped type-check and unit tests clean. The suite has not
+  run: it waits for the user's build and the go to start the API on UAT.
+- **2026-10-01, night** — **Lane 0 complete.** The build succeeded; no migration was pending on UAT;
+  the user allowed `start-api-uat.ps1` under auto mode. The first run passed every feature check but
+  its teardown failed (the claim-rename collision in lane 0's checklist) — fixed, and the stranded
+  claim renamed with `teardown-run.mjs`. Then 112/112 twice. Restaged for the user. Next: migration
+  batch 1 (§ 5).

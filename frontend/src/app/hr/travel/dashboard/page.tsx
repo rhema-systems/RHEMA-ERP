@@ -9,17 +9,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import { fmtTravelMoney as fmtMoney } from '@/components/hr/travel/travel-format';
 import { travelService } from '@/services/hr/travel.service';
 import type { StaffTravelRequestSummary } from '@/types/hr/travel';
 
 const humanize = (v: string) => v.replace(/([a-z])([A-Z])/g, '$1 $2');
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
-const fmtMoney = (amount?: number | null, currency?: string) =>
-  amount === null || amount === undefined
-    ? '—'
-    : new Intl.NumberFormat(undefined, {
-        style: 'currency', currency: currency || 'GHS', currencyDisplay: 'code',
-      }).format(amount);
 
 function Tile({
   label, value, hint, icon: Icon,
@@ -85,12 +81,13 @@ function RequestTable({ rows, empty }: { rows: StaffTravelRequestSummary[]; empt
  * ⚠ **The cost figures are shown per currency, not as one total.** The API also returns scalar
  * totals, but those add every request's estimate together regardless of the currency it was costed
  * in — 5,000 GHS plus 5,000 USD is not 10,000 of anything. They are deliberately **not** converted
- * to a base currency here: travel never invents a rate, and Finance's conversion is currently
- * inverted, so a converted headline would be confidently wrong rather than visibly incomplete.
- * A single currency renders as one figure; more than one renders as a breakdown.
+ * to a base currency here: travel never invents a rate, and a headline converted at one day's rate
+ * would hide that the trips were costed in different currencies. (This also said Finance's
+ * conversion was inverted; Finance fixed that on 2026-09-10.) A single currency renders as one
+ * figure; more than one renders as a breakdown.
  */
 export default function TravelDashboardPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['travel-dashboard'],
     queryFn: () => travelService.getDashboard(30),
   });
@@ -99,6 +96,13 @@ export default function TravelDashboardPage() {
     return (
       <div className="flex items-center justify-center p-10">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (isError && !data) {
+    return (
+      <div className="p-6">
+        <TravelQueryError error={error} what="the travel dashboard" />
       </div>
     );
   }
@@ -136,7 +140,7 @@ export default function TravelDashboardPage() {
           icon={CalendarClock}
         />
         <Tile
-          label="High risk"
+          label="High risk or above"
           value={data.highRiskCount}
           hint={`${data.internationalCount} international`}
           icon={ShieldAlert}

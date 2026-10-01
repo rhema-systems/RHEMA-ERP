@@ -21,6 +21,7 @@ import { travelComplianceService } from '@/services/hr/travel-compliance.service
 import { staffLevelService } from '@/services/hr/staff-level.service';
 import type { StaffTravelPolicy } from '@/types/hr/travel-compliance';
 import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
+import { TravelQueryError } from './TravelQueryError';
 
 const CABIN_CLASSES = ['Economy', 'PremiumEconomy', 'Business', 'First'] as const;
 const spaced = (v: string) => v.replace(/([a-z])([A-Z])/g, '$1 $2');
@@ -74,7 +75,14 @@ const toDateInput = (v?: string | null) => (v ? String(v).slice(0, 10) : '');
  * are read in the tenant's own currency and a booking in another one is compared after
  * conversion. Labelled as "per night" rather than with a currency symbol that would be a guess.
  */
-export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
+export function TravelPolicyForm({
+  policy,
+  onSaved,
+}: {
+  policy?: StaffTravelPolicy;
+  /** Called after a save instead of navigating — for a host page that renders the form in place. */
+  onSaved?: () => void;
+}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -87,7 +95,7 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
    * band. A salary-level id passes TypeScript, fails the foreign key and 500s naming nothing —
    * the shape that broke every equipment-tool save in area 17.
    */
-  const { data: levels } = useQuery({
+  const { data: levels, isError: levelsFailed, error: levelsError } = useQuery({
     queryKey: ['staff-levels', 'active'],
     queryFn: () => staffLevelService.getActive(),
     staleTime: 5 * 60 * 1000,
@@ -139,13 +147,17 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
           ? undefined
           : 'It caps nothing until a travel administrator approves it.',
       });
-      router.push(`/administration/hr/travel/policies/${saved.id}`);
+      // ⚠ The edit form is rendered INSIDE the policy's own page, so pushing to that page's URL
+      // changed nothing and the form stayed open after "Policy updated" (finding F4). The host
+      // closes it instead; only a new policy navigates.
+      if (onSaved) onSaved();
+      else router.push(`/administration/hr/travel/policies/${saved.id}`);
     },
-    onError: (e: any) =>
+    onError: (e: Error) =>
       toast({
         variant: 'destructive',
         title: isEdit ? 'Could not save the policy' : 'Could not draft the policy',
-        description: e?.response?.data?.message ?? e?.response?.data ?? e?.message,
+        description: e?.message,
       }),
   });
 
@@ -153,6 +165,8 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
 
   return (
     <form onSubmit={form.handleSubmit((v) => save.mutate(v as Parsed))} className="space-y-6">
+      {/* An empty band picker would otherwise read as "no staff levels exist". */}
+      {levelsFailed && !levels && <TravelQueryError error={levelsError} what="the staff levels" />}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -239,6 +253,13 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
           <CardTitle className="text-base">Budgets and expenses</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* ⚠ None of these eight fields has a reader: they were presented as rules and refused
+              nothing (travel final closure, finding C1). Decision D-1 enforces six of them and
+              drops the cheapest-fare switch and the annual budget; until that lands, say so. */}
+          <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+            Recorded on the policy but not yet enforced: no trip, booking or claim is refused on
+            these figures today. Only the cabin-class and hotel-rate caps above refuse a booking.
+          </p>
           <FieldRow>
             <NumberField form={form} name="maxSingleTripBudget" label="Max per trip" />
             <NumberField form={form} name="maxAnnualTravelBudget" label="Max per year" />
@@ -271,13 +292,13 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
             form={form}
             name="requiresCheapestFare"
             label="Cheapest fare required"
-            description="Travellers must take the lowest available fare that meets the itinerary."
+            description="Records that travellers should take the lowest fare that meets the itinerary. Not checked on any booking."
           />
           <SwitchField
             form={form}
             name="preferredVendorMandatory"
             label="Preferred vendors only"
-            description="Bookings must go through a vendor on the approved list."
+            description="Records that bookings should go through an approved vendor. Not checked on any booking yet."
           />
         </CardContent>
       </Card>

@@ -12,8 +12,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { FieldRow, SelectField } from '@/components/hr/employee/tabs/fields';
+import { CurrencyField } from '@/components/hr/common/CurrencyPicker';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
 import { useToast } from '@/hooks/use-toast';
-import { financeDataService } from '@/services/finance/finance-data.service';
 import { travelService } from '@/services/hr/travel.service';
 import { travelFinanceService } from '@/services/hr/travel-finance.service';
 import type { TravelClaimType } from '@/types/hr/travel-finance';
@@ -45,16 +46,15 @@ function NewTravelClaimForm() {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
 
-  const { data: request, isLoading } = useQuery({
+  const { data: request, isLoading, isError, error } = useQuery({
     queryKey: ['travel-request', requestId],
     queryFn: () => travelService.getById(requestId as string),
     enabled: !!requestId,
   });
 
-  const { data: currencies } = useQuery({
-    queryKey: ['finance', 'currencies', 'active'],
-    queryFn: () => financeDataService.getCurrencies({ isActive: true }),
-  });
+  // ⚠ The currency list is read through `api/hr/currencies` (inside CurrencyField). This page read
+  // `api/finance/currencies`, which answers 403 without a Finance permission, so the dropdown was
+  // empty for the HR desk and no claim could be filed (travel final closure, lane 0 — O-19).
 
   // Only an advance on THIS trip can be settled by this claim.
   const { data: advances } = useQuery({
@@ -87,6 +87,14 @@ function NewTravelClaimForm() {
     );
   }
 
+  if (isError && !request) {
+    return (
+      <div className="p-6">
+        <TravelQueryError error={error} what="the travel request" />
+      </div>
+    );
+  }
+
   if (!request) {
     return (
       <div className="p-6">
@@ -94,10 +102,6 @@ function NewTravelClaimForm() {
       </div>
     );
   }
-
-  const currencyOptions = (currencies ?? []).map((c) => ({
-    value: c.currencyCode, label: `${c.currencyCode} — ${c.currencyName}`,
-  }));
 
   // Only an advance with something still outstanding can be settled against.
   const advanceOptions = (advances ?? [])
@@ -150,10 +154,7 @@ function NewTravelClaimForm() {
               <SelectField
                 form={form} name="claimType" label="Type" required options={options(CLAIM_TYPES)}
               />
-              <SelectField
-                form={form} name="currencyCode" label="Claim currency" required
-                options={currencyOptions}
-              />
+              <CurrencyField form={form} name="currencyCode" label="Claim currency" required />
             </FieldRow>
 
             <SelectField
@@ -165,8 +166,8 @@ function NewTravelClaimForm() {
               emptyLabel={advanceOptions.length ? 'No advance' : 'No outstanding advance on this trip'}
             />
             <p className="text-xs text-muted-foreground">
-              Linking an advance recovers it automatically when the claim is approved — the
-              traveller is paid only the balance. Without the link, an advance already given stays
+              Linking an advance recovers it automatically when the claim is paid — the traveller
+              is paid only the balance. Without the link, an advance already given stays
               outstanding and the claim pays out in full.
             </p>
           </CardContent>

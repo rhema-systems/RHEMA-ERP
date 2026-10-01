@@ -801,7 +801,7 @@ export const hrSetupGroups: HrSetupGroup[] = [
         title: 'Travel Policies',
         href: '/administration/hr/travel/policies',
         icon: Plane,
-        description: 'Entitlements, ceilings and approval rules per travel class.',
+        description: 'Cabin-class and hotel-rate caps by staff level and unit, approved by version.',
       },
       // Destination Alerts used to sit here. An advisory is raised against a destination, expires
       // and is re-issued as conditions change — that is casework on the same cadence as the trips
@@ -839,7 +839,7 @@ export const hrSetupGroups: HrSetupGroup[] = [
         title: 'Travel Reminders',
         href: '/administration/hr/travel/reminders',
         icon: Plane,
-        description: 'Visas, passports and trip approvals falling due.',
+        description: 'Passports and visas expiring, overdue advances and trips departing soon.',
       },
       {
         // The retirement and contract-expiry sweeps RAISE separations. They run nightly on their

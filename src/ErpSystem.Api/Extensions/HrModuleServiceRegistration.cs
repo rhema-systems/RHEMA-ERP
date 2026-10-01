@@ -817,12 +817,10 @@ public static class HrModuleServiceRegistration
         // never scheduled. Slice 11 adds insurance expiry and overdue returns to this one
         // rather than starting a seventh.
         services.AddScoped<IAssetReminderService, AssetReminderService>();
-        // Travel's read-only window onto Finance's currency and exchange-rate masters —
-        // replaces the retired StaffTravelCurrencyExchangeRate table (slice 6).
+        // HR's read-only window onto Finance's currency and exchange-rate masters — replaced travel's
+        // retired StaffTravelCurrencyExchangeRate table (slice 6). Travel's own alias for it was retired
+        // on 2026-10-01 (travel final closure, lane 0); the travel services inject this directly.
         services.AddScoped<HrCurrencyBridge>();
-        // Area 12's alias for the same bridge — registered separately so its existing constructor
-        // injections resolve unchanged. Retire with the alias.
-        services.AddScoped<StaffTravelCurrencyBridge>();
         // HR → Finance posting (HR finish plan lane 8): the HR side of FIN-INT-001. One adapter for
         // every HR money event; the store is split out so its contract tests need no EF provider.
         services.AddScoped<ErpSystem.Core.Services.HR.Finance.IHrFinancePostingStore, ErpSystem.Core.Services.HR.Finance.HrFinancePostingStore>();

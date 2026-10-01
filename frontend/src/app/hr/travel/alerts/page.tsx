@@ -22,8 +22,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
-import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
-import { useAuth } from '@/hooks/use-auth';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import { useTravelAccess } from '@/components/hr/travel/useTravelAccess';
 import { useToast } from '@/hooks/use-toast';
 import { countryService } from '@/services/hr/country.service';
 import { travelComplianceService } from '@/services/hr/travel-compliance.service';
@@ -97,13 +97,9 @@ const BLANK: FormState = {
 export default function TravelAlertsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { hasAnyPermission, hasAnyRole } = useAuth();
+  const { canWrite, canAdmin: canDelete } = useTravelAccess();
 
-  const canWrite =
-    hasAnyPermission(['HR.Travel.Write', 'HR.Travel.Admin']) || hasAnyRole(HR_ROLES);
-  const canDelete = hasAnyPermission(['HR.Travel.Admin']) || hasAnyRole(HR_ADMIN_ROLES);
-
-  const { data: alerts, isLoading } = useQuery({
+  const { data: alerts, isLoading, isError, error } = useQuery({
     queryKey: ['travel-alerts', 'active'],
     queryFn: () => travelComplianceService.getActiveAlerts(),
   });
@@ -122,11 +118,10 @@ export default function TravelAlertsPage() {
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
-  const fail = (title: string) => (e: any) =>
+  const fail = (title: string) => (e: Error) =>
     toast({
       title,
-      description:
-        e?.response?.data?.message ?? e?.response?.data ?? e?.message ?? 'Please try again.',
+      description: e?.message || 'Please try again.',
       variant: 'destructive',
     });
 
@@ -198,7 +193,7 @@ export default function TravelAlertsPage() {
       setEditingId(full.id);
       setOpen(true);
     } catch (e) {
-      fail('Could not open the alert')(e);
+      fail('Could not open the alert')(e as Error);
     }
   };
 
@@ -226,6 +221,10 @@ export default function TravelAlertsPage() {
           {isLoading ? (
             <div className="flex items-center justify-center p-10">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : isError && !alerts ? (
+            <div className="p-4">
+              <TravelQueryError error={error} what="the destination alerts" />
             </div>
           ) : rows.length === 0 ? (
             <EmptyState
@@ -295,9 +294,10 @@ export default function TravelAlertsPage() {
       </Card>
 
       <p className="text-xs text-muted-foreground">
-        An alert appears automatically on any trip to that country while it is in force. Sending it
-        to a named traveller — which notifies them and asks them to confirm they have read it — is
-        done from the trip&apos;s compliance tab.
+        An alert appears automatically on the travel desk&apos;s view of any trip to that country
+        while it is in force. A traveller sees it only once it is sent to them — from the
+        trip&apos;s Compliance tab — which emails them and puts it on their own travel page to
+        confirm they have read it. Raising an alert here sends nothing by itself.
       </p>
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -305,7 +305,8 @@ export default function TravelAlertsPage() {
           <DialogHeader>
             <DialogTitle>{editingId ? 'Edit alert' : 'Raise a destination alert'}</DialogTitle>
             <DialogDescription>
-              Travellers to this destination see it on their trip while it is in force.
+              The travel desk sees it on every trip to this destination while it is in force.
+              Travellers see it once it is sent to them from a trip&apos;s Compliance tab.
             </DialogDescription>
           </DialogHeader>
 

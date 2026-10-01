@@ -24,11 +24,11 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
-import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
-import { useAuth } from '@/hooks/use-auth';
+import { CurrencyPicker } from '@/components/hr/common/CurrencyPicker';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import { useTravelAccess } from '@/components/hr/travel/useTravelAccess';
 import { useToast } from '@/hooks/use-toast';
 import { countryService } from '@/services/hr/country.service';
-import { financeDataService } from '@/services/finance/finance-data.service';
 import { travelService } from '@/services/hr/travel.service';
 import type { GroupTravelStatus, StaffTravelRequestSummary } from '@/types/hr/travel';
 
@@ -65,13 +65,9 @@ export default function TravelGroupDetailPage({ params }: { params: Promise<{ id
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { hasAnyPermission, hasAnyRole } = useAuth();
+  const { canWrite, canAdmin } = useTravelAccess();
 
-  const canWrite =
-    hasAnyPermission(['HR.Travel.Write', 'HR.Travel.Admin']) || hasAnyRole(HR_ROLES);
-  const canAdmin = hasAnyPermission(['HR.Travel.Admin']) || hasAnyRole(HR_ADMIN_ROLES);
-
-  const { data: group, isLoading } = useQuery({
+  const { data: group, isLoading, isError, error } = useQuery({
     queryKey: ['travel-groups', id],
     queryFn: () => travelService.getGroupById(id),
   });
@@ -82,11 +78,8 @@ export default function TravelGroupDetailPage({ params }: { params: Promise<{ id
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: currencies } = useQuery({
-    queryKey: ['finance', 'currencies', 'active'],
-    queryFn: () => financeDataService.getCurrencies({ isActive: true }),
-    staleTime: 5 * 60 * 1000,
-  });
+  // ⚠ The currency list is read through `api/hr/currencies` (inside CurrencyPicker). This page read
+  // `api/finance/currencies`, which answers 403 without a Finance permission (finding O-19).
 
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -106,15 +99,14 @@ export default function TravelGroupDetailPage({ params }: { params: Promise<{ id
   const [pickedLabel, setPickedLabel] = useState<string | null>(null);
   const [originCountryId, setOriginCountryId] = useState('');
   const [originCity, setOriginCity] = useState('');
-  const [currencyCode, setCurrencyCode] = useState('GHS');
+  const [currencyCode, setCurrencyCode] = useState('');
   const [estimatedTotalCost, setEstimatedTotalCost] = useState('0');
   const [purposeDescription, setPurposeDescription] = useState('');
 
-  const fail = (title: string) => (e: any) =>
+  const fail = (title: string) => (e: Error) =>
     toast({
       title,
-      description:
-        e?.response?.data?.message ?? e?.response?.data ?? e?.message ?? 'Please try again.',
+      description: e?.message || 'Please try again.',
       variant: 'destructive',
     });
 
@@ -221,6 +213,13 @@ export default function TravelGroupDetailPage({ params }: { params: Promise<{ id
     return (
       <div className="flex items-center justify-center p-12">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (isError && !group) {
+    return (
+      <div className="p-6">
+        <TravelQueryError error={error} what="this group trip" />
       </div>
     );
   }
@@ -473,7 +472,9 @@ export default function TravelGroupDetailPage({ params }: { params: Promise<{ id
             <DialogTitle>Add a traveller</DialogTitle>
             <DialogDescription>
               This raises a draft travel request for them, carrying the group&apos;s destination and
-              dates. Someone already on the group is skipped rather than added twice.
+              dates. Someone already on the group is skipped rather than added twice. The draft is
+              raised with purpose Conference, risk Low and no visa or health flag — open it from
+              the list to correct those before it is submitted.
             </DialogDescription>
           </DialogHeader>
 
@@ -534,17 +535,10 @@ export default function TravelGroupDetailPage({ params }: { params: Promise<{ id
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="gp-currency">Currency</Label>
-                <Select value={currencyCode} onValueChange={setCurrencyCode}>
-                  <SelectTrigger id="gp-currency"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {(currencies ?? []).map((c) => (
-                      <SelectItem key={c.currencyCode} value={c.currencyCode}>
-                        {c.currencyCode} — {c.currencyName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="gp-currency">
+                  Currency<span className="ml-0.5 text-red-500">*</span>
+                </Label>
+                <CurrencyPicker id="gp-currency" value={currencyCode} onChange={setCurrencyCode} />
               </div>
             </div>
 
@@ -565,7 +559,10 @@ export default function TravelGroupDetailPage({ params }: { params: Promise<{ id
             </Button>
             <Button
               onClick={() => addParticipant.mutate()}
-              disabled={!pickedId || !originCountryId || !originCity.trim() || addParticipant.isPending}
+              disabled={
+                !pickedId || !originCountryId || !originCity.trim() || !currencyCode
+                || addParticipant.isPending
+              }
             >
               {addParticipant.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Add

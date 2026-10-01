@@ -28,25 +28,20 @@ import {
   NumberField,
   SelectField,
 } from '@/components/hr/employee/tabs/fields';
+import { CurrencyField } from '@/components/hr/common/CurrencyPicker';
 import { useToast } from '@/hooks/use-toast';
-import { financeDataService } from '@/services/finance/finance-data.service';
 import { travelFinanceService } from '@/services/hr/travel-finance.service';
 import type { StaffTravelRequest } from '@/types/hr/travel';
 import type { StaffTravelBudget } from '@/types/hr/travel-finance';
+import { TravelQueryError } from './TravelQueryError';
+import { fmtTravelMoney as fmtMoney } from './travel-format';
 
 const ADVANCE_TYPES = ['Cash', 'CorporateCardLoad', 'PettyCash', 'WireTransfer'] as const;
-const CLAIM_TYPES = ['PostTravel', 'AdvanceSettlement', 'PartialClaim', 'Amendment'] as const;
 
 const humanize = (v: string) => v.replace(/([a-z])([A-Z])/g, '$1 $2');
 const options = (values: readonly string[]) => values.map((v) => ({ value: v, label: humanize(v) }));
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
-const fmtMoney = (amount?: number | null, currency?: string) =>
-  amount === null || amount === undefined
-    ? '—'
-    : new Intl.NumberFormat(undefined, {
-        style: 'currency', currency: currency || 'GHS', currencyDisplay: 'code',
-      }).format(amount);
 
 // ── Budget ───────────────────────────────────────────────────────────────────
 
@@ -62,13 +57,12 @@ const budgetSchema = z.object({
 });
 
 function BudgetDialog({
-  requestId, existing, open, onOpenChange, currencyOptions, defaultCurrency,
+  requestId, existing, open, onOpenChange, defaultCurrency,
 }: {
   requestId: string;
   existing?: StaffTravelBudget | null;
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  currencyOptions: { value: string; label: string }[];
   defaultCurrency: string;
 }) {
   const queryClient = useQueryClient();
@@ -105,7 +99,8 @@ function BudgetDialog({
   });
 
   // The allocation lines are guidance, not a constraint the server enforces — say so rather than
-  // silently letting them disagree with the approved total.
+  // silently letting them disagree with the approved total. ⚠ Neither is the approved total: no
+  // booking or claim is refused for exceeding it (finding O-9), so the note must not call it a limit.
   const lines = ['flightBudget', 'accommodationBudget', 'perDiemBudget', 'transportBudget',
     'miscellaneousBudget'] as const;
   const allocated = lines.reduce((sum, k) => sum + (Number(form.watch(k)) || 0), 0);
@@ -124,9 +119,7 @@ function BudgetDialog({
         <form id="budget-form" className="space-y-4" onSubmit={form.handleSubmit((v) => save.mutate(v))}>
           <FieldRow>
             <NumberField form={form} name="approvedTotal" label="Approved total" required />
-            <SelectField
-              form={form} name="currencyCode" label="Currency" required options={currencyOptions}
-            />
+            <CurrencyField form={form} name="currencyCode" label="Currency" required />
           </FieldRow>
           <NumberField form={form} name="budgetYear" label="Budget year" required />
 
@@ -145,8 +138,8 @@ function BudgetDialog({
             <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
               The allocation adds up to {fmtMoney(allocated, form.watch('currencyCode'))} against an
               approved total of {fmtMoney(approved, form.watch('currencyCode'))}. That is allowed —
-              the lines are guidance and the approved total is the limit — but it is worth a second
-              look.
+              both are figures to measure spend against, and neither refuses a booking or a claim —
+              but it is worth a second look.
             </p>
           )}
         </form>
@@ -172,13 +165,12 @@ const advanceSchema = z.object({
 });
 
 function AdvanceDialog({
-  requestId, employeeId, open, onOpenChange, currencyOptions, defaultCurrency,
+  requestId, employeeId, open, onOpenChange, defaultCurrency,
 }: {
   requestId: string;
   employeeId: string;
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  currencyOptions: { value: string; label: string }[];
   defaultCurrency: string;
 }) {
   const queryClient = useQueryClient();
@@ -221,9 +213,7 @@ function AdvanceDialog({
         <form id="advance-form" className="space-y-4" onSubmit={form.handleSubmit((v) => save.mutate(v))}>
           <FieldRow>
             <NumberField form={form} name="requestedAmount" label="Amount requested" required />
-            <SelectField
-              form={form} name="currencyCode" label="Currency" required options={currencyOptions}
-            />
+            <CurrencyField form={form} name="currencyCode" label="Currency" required />
           </FieldRow>
           <FieldRow>
             <SelectField
@@ -335,8 +325,10 @@ function ApproveAdvanceDialog({
  * made; actual is claims paid. A booking paid direct to a vendor is committed and never becomes a
  * claim, so neither figure contains the other. The labels say which is which for that reason.
  *
- * ⚠ **No GL posting exists behind any of this** (decision D-4). An unsettled advance is an employee
- * receivable that appears in no trial balance until the post-module Finance sweep.
+ * Finance posting (since 2026-09-20): a disbursed advance, an approved claim and a paid claim each
+ * post a journal through HR's posting adapter when a posting rule for the event is enabled under
+ * HR Settings → Finance posting; without one the record is kept Unposted. The Finance column on the
+ * advances shows which. (This remark said "no GL posting exists" until the travel final closure.)
  */
 export function TravelFinancePanel({ request }: { request: StaffTravelRequest }) {
   const requestId = request.id;
@@ -347,22 +339,21 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
   const [approving, setApproving] = useState<
     { id: string; requestedAmount: number; currencyCode: string } | null>(null);
 
-  const { data: currencies } = useQuery({
-    queryKey: ['finance', 'currencies', 'active'],
-    queryFn: () => financeDataService.getCurrencies({ isActive: true }),
-  });
+  // ⚠ The currency lists are read through `api/hr/currencies` inside each CurrencyField. This panel
+  // read `api/finance/currencies`, which answers 403 without a Finance permission, so no budget or
+  // advance could be saved by the HR desk (travel final closure, lane 0 — finding O-19).
 
-  const { data: budget, isLoading } = useQuery({
+  const { data: budget, isLoading, isError: budgetFailed, error: budgetError } = useQuery({
     queryKey: ['travel-budget', requestId],
     queryFn: () => travelFinanceService.getBudget(requestId),
   });
 
-  const { data: advances } = useQuery({
+  const { data: advances, isError: advancesFailed, error: advancesError } = useQuery({
     queryKey: ['travel-advances', requestId],
     queryFn: () => travelFinanceService.getAdvancesByRequest(requestId),
   });
 
-  const { data: claims } = useQuery({
+  const { data: claims, isError: claimsFailed, error: claimsError } = useQuery({
     queryKey: ['travel-claims', requestId],
     queryFn: () => travelFinanceService.getClaimsByRequest(requestId),
   });
@@ -376,10 +367,6 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
     onError: (e: Error) =>
       toast({ variant: 'destructive', title: 'Could not disburse', description: e.message }),
   });
-
-  const currencyOptions = (currencies ?? []).map((c) => ({
-    value: c.currencyCode, label: `${c.currencyCode} — ${c.currencyName}`,
-  }));
 
   if (isLoading) {
     return (
@@ -410,7 +397,9 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
           </Button>
         </CardHeader>
         <CardContent>
-          {!budget ? (
+          {budgetFailed && !budget ? (
+            <TravelQueryError error={budgetError} what="the budget" />
+          ) : !budget ? (
             <EmptyState
               title="No budget set"
               description="Set one to track this trip's spend against an approved figure."
@@ -488,7 +477,11 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
           </Button>
         </CardHeader>
         <CardContent className="p-0">
-          {(advances ?? []).length === 0 ? (
+          {advancesFailed && !advances ? (
+            <div className="p-4">
+              <TravelQueryError error={advancesError} what="the advances" />
+            </div>
+          ) : (advances ?? []).length === 0 ? (
             <EmptyState
               icon={Wallet}
               title="No advances"
@@ -577,7 +570,11 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
           </Button>
         </CardHeader>
         <CardContent className="p-0">
-          {(claims ?? []).length === 0 ? (
+          {claimsFailed && !claims ? (
+            <div className="p-4">
+              <TravelQueryError error={claimsError} what="the expense claims" />
+            </div>
+          ) : (claims ?? []).length === 0 ? (
             <EmptyState
               icon={Receipt}
               title="No claims"
@@ -625,7 +622,6 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
         existing={budget}
         open={showBudget}
         onOpenChange={setShowBudget}
-        currencyOptions={currencyOptions}
         defaultCurrency={request.currencyCode}
       />
       <AdvanceDialog
@@ -633,7 +629,6 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
         employeeId={request.employeeId}
         open={showAdvance}
         onOpenChange={setShowAdvance}
-        currencyOptions={currencyOptions}
         defaultCurrency={request.currencyCode}
       />
       <ApproveAdvanceDialog
@@ -646,4 +641,3 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
   );
 }
 
-export { CLAIM_TYPES };

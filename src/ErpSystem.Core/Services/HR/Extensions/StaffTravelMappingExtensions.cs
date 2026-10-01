@@ -1835,9 +1835,24 @@ public static class StaffTravelMappingExtensions
             VisaType = entity.VisaType,
             Status = entity.Status,
             SubmittedDate = entity.SubmittedDate,
+            ApprovedDate = entity.ApprovedDate,
             ExpiryDate = entity.ExpiryDate,
+            VisaNumberMasked = MaskAllButLastFour(entity.VisaNumber),
+            ProcessingFee = entity.ProcessingFee,
+            CurrencyCode = entity.CurrencyCode,
         };
     }
+
+    /// <summary>
+    /// "••••••1234": every character but the last four replaced; a value of four or fewer is masked
+    /// whole. Null or blank stays null. Same shape as the bank-account mask on profile changes.
+    /// </summary>
+    private static string? MaskAllButLastFour(string? value)
+        => string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Length <= 4
+                ? new string('•', value.Length)
+                : $"{new string('•', value.Length - 4)}{value[^4..]}";
 
     public static StaffTravelVisaApplication ToEntity(this CreateStaffTravelVisaApplicationDto dto, Guid tenantId, Guid userId)
     {
@@ -1848,7 +1863,11 @@ public static class StaffTravelMappingExtensions
             EmployeeId = dto.EmployeeId,
             DestinationCountryId = dto.DestinationCountryId,
             VisaType = dto.VisaType,
-            Status = VisaApplicationStatus.NotStarted,
+            Status = dto.Status,
+            SubmittedDate = dto.SubmittedDate,
+            ApprovedDate = dto.ApprovedDate,
+            ExpiryDate = dto.ExpiryDate,
+            VisaNumber = dto.VisaNumber,
             VendorId = dto.VendorId,
             ProcessingFee = dto.ProcessingFee,
             CurrencyCode = dto.CurrencyCode,

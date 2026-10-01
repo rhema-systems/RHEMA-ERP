@@ -42,8 +42,9 @@ public sealed record TravelBudgetSpend(decimal Committed, decimal Actual);
 /// bookings are normally costed in one currency; where they are not, the sum is meaningless and
 /// converting silently would hide that rather than fix it. Slice 6 established that travel never
 /// invents a rate — if mixed-currency budgets become real, the rollup should convert through
-/// <see cref="StaffTravelCurrencyBridge"/> and refuse when Finance holds no rate, exactly as claim
-/// totals do.</para>
+/// <see cref="HrCurrencyBridge"/> and refuse when Finance holds no rate, exactly as claim totals do.
+/// (The travel final closure's lane 3 pins a budget's currency to its request's; a booking costed in
+/// another currency is still summed as recorded.)</para>
 /// </remarks>
 public sealed class StaffTravelBudgetRollup
 {

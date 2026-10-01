@@ -34,7 +34,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     private readonly IAppEventBus _appEventBus;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
-    private readonly StaffTravelCurrencyBridge _currency;
+    private readonly HrCurrencyBridge _currency;
     private readonly ILogger<StaffTravelRequestService> _logger;
 
     public StaffTravelRequestService(
@@ -48,7 +48,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         IAppEventBus appEventBus,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
-        StaffTravelCurrencyBridge currency,
+        HrCurrencyBridge currency,
         ILogger<StaffTravelRequestService> logger)
     {
         _requestRepository = requestRepository;
@@ -434,8 +434,9 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         // ⚠ Split by currency because the two scalar totals above add them together. A tenant that
         // costs one trip in GHS and another in USD gets a headline "total" of neither. Not converted
-        // here: travel does not invent a rate, and Finance's conversion is currently inverted, so a
-        // converted headline would be confidently wrong rather than visibly incomplete.
+        // here: travel does not invent a rate, and a headline converted at one day's rate would hide
+        // that the trips were costed in different currencies. (This also said Finance's conversion
+        // was inverted; Finance fixed that on 2026-09-10.)
         dto.CostByCurrency = rows
             .Where(r => IsActive(r.Status))
             .GroupBy(r => string.IsNullOrWhiteSpace(r.CurrencyCode) ? "—" : r.CurrencyCode)

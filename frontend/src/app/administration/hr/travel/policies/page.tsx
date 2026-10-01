@@ -16,6 +16,8 @@ import {
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import { travelPolicyState } from '@/components/hr/travel/travel-policy-state';
 import { useToast } from '@/hooks/use-toast';
 import { travelComplianceService } from '@/services/hr/travel-compliance.service';
 
@@ -46,7 +48,7 @@ export default function TravelPoliciesPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['travel-policies'],
     queryFn: () => travelComplianceService.getPolicies(),
   });
@@ -121,6 +123,10 @@ export default function TravelPoliciesPage() {
             <div className="flex items-center justify-center p-10">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
+          ) : isError && !data ? (
+            <div className="p-4">
+              <TravelQueryError error={error} what="the travel policies" />
+            </div>
           ) : items.length === 0 ? (
             <EmptyState
               icon={ShieldCheck}
@@ -158,13 +164,9 @@ export default function TravelPoliciesPage() {
                     </TableCell>
                     <TableCell>{p.ruleCount}</TableCell>
                     <TableCell>
-                      {!p.approvedById ? (
-                        <Badge variant="outline">Draft — not enforcing</Badge>
-                      ) : p.isCurrentVersion ? (
-                        <Badge variant="default">In force</Badge>
-                      ) : (
-                        <Badge variant="secondary">Superseded</Badge>
-                      )}
+                      <Badge variant={travelPolicyState(p).variant}>
+                        {travelPolicyState(p).label}
+                      </Badge>
                     </TableCell>
                     <TableCell>{p.approvedByName || '—'}</TableCell>
                     <TableCell>

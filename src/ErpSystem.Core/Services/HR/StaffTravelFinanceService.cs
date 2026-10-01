@@ -22,7 +22,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     private readonly IStaffTravelExpenseClaimLineRepository _lineRepository;
     private readonly IStaffTravelAdvanceRepository _advanceRepository;
     private readonly IStaffTravelRequestRepository _requestRepository;
-    private readonly StaffTravelCurrencyBridge _currency;
+    private readonly HrCurrencyBridge _currency;
     private readonly StaffTravelBudgetRollup _budgetRollup;
     private readonly IStaffTravelPerDiemRateRepository _perDiemRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
@@ -36,7 +36,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         IStaffTravelExpenseClaimLineRepository lineRepository,
         IStaffTravelAdvanceRepository advanceRepository,
         IStaffTravelRequestRepository requestRepository,
-        StaffTravelCurrencyBridge currency,
+        HrCurrencyBridge currency,
         StaffTravelBudgetRollup budgetRollup,
         IStaffTravelPerDiemRateRepository perDiemRepository,
         ICurrentUserProvider currentUserProvider,
@@ -785,10 +785,11 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     /// settles part of it and leaves the rest outstanding, and a claim larger than the advance
     /// settles all of it and pays the difference. It is never negative and never over-recovers.</para>
     ///
-    /// <para>⚠ This is the travel-side arithmetic only. The GL entries that ought to accompany it —
-    /// clearing an employee receivable, posting the net payment — are deliberately out of scope per
-    /// decision D-4 and are registered as items 12.1–12.3 in
-    /// <c>docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md</c>.</para>
+    /// <para>This is the travel-side arithmetic only. The GL side is the <c>TravelClaimPaid</c>
+    /// posting (<c>HrFinancePostingCommandFactory</c>, since 2026-09-20): it clears the payable,
+    /// credits the advance receivable with what this method recovered, and posts the net payment —
+    /// when a posting rule for the event is enabled; without one the claim is recorded Unposted.
+    /// (This remark said the GL entries were out of scope until the travel final closure, lane 0.)</para>
     /// </remarks>
     private async Task SettleLinkedAdvanceAsync(
         StaffTravelExpenseClaim claim, CancellationToken cancellationToken)

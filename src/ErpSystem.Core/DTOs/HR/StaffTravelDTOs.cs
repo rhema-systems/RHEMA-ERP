@@ -2622,6 +2622,14 @@ public class StaffTravelVisaApplicationDto : BaseDto
     public string? Notes { get; set; }
 }
 
+/// <summary>A visa application as every list shows it.</summary>
+/// <remarks>
+/// ⚠ The request's Compliance tab lists visas from this shape under "Number" and "Fee" columns, and
+/// it carried neither, so both always read "—" (travel final closure, lane 0 — finding E3). The fee
+/// and its currency are here now. The number is here MASKED — only its last four characters show —
+/// because a list is read by every travel reader; the full number stays on the single-record read
+/// (finding O-7).
+/// </remarks>
 public class StaffTravelVisaApplicationSummaryDto
 {
     public Guid Id { get; set; }
@@ -2632,9 +2640,20 @@ public class StaffTravelVisaApplicationSummaryDto
     public VisaApplicationStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public DateOnly? SubmittedDate { get; set; }
+    public DateOnly? ApprovedDate { get; set; }
     public DateOnly? ExpiryDate { get; set; }
+    /// <summary>The visa number with all but its last four characters masked; null when none.</summary>
+    public string? VisaNumberMasked { get; set; }
+    public decimal? ProcessingFee { get; set; }
+    public string? CurrencyCode { get; set; }
 }
 
+/// <remarks>
+/// ⚠ The record dialog asks for the status, the number and three dates, and this DTO had none of
+/// them, so all five were dropped without a word and every visa was saved Not Started with no
+/// number (travel final closure, lane 0 — finding E3). They are accepted now, as the update DTO
+/// already accepted them. An omitted status is still Not Started.
+/// </remarks>
 public class CreateStaffTravelVisaApplicationDto : CreateDtoBase
 {
     [Required]
@@ -2648,6 +2667,15 @@ public class CreateStaffTravelVisaApplicationDto : CreateDtoBase
 
     [MaxLength(100)]
     public string? VisaType { get; set; }
+
+    public VisaApplicationStatus Status { get; set; } = VisaApplicationStatus.NotStarted;
+
+    public DateOnly? SubmittedDate { get; set; }
+    public DateOnly? ApprovedDate { get; set; }
+    public DateOnly? ExpiryDate { get; set; }
+
+    [MaxLength(100)]
+    public string? VisaNumber { get; set; }
 
     public Guid? VendorId { get; set; }
 

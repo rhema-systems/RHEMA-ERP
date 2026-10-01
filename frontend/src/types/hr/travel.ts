@@ -15,10 +15,14 @@
 import type { AuditFields } from './common';
 
 /**
- * ⚠ This union had four members and `StaffTravelType` in C# has ten. The six missing ones —
- * every value from `OverseasAssignment` down — are states the API returns and TypeScript said
- * could not exist, so a `switch` over this type looked exhaustive and was not. Written from four
- * examples rather than from the enum; corrected 2026-08-30 by reading it.
+ * ⚠ Every union in this file is written from its C# enum in `src/ErpSystem.Core/Enums/HREnums.cs`,
+ * member for member, and `travel-enums.test.ts` fails the frontend suite if one drifts again.
+ *
+ * Four had drifted (travel final closure, lane 0 — findings A7, A8, A9). This one had four members,
+ * then ten, while C# has eleven (`Emergency` was missing). The purpose union offered `Negotiation`,
+ * which the API refuses, and hid five real purposes. The risk union offered `Extreme` (refused) and
+ * hid `Critical` and `Prohibited`. The comment and attachment unions shared one member with C#
+ * between them, so the desk's every comment and five of six upload types failed.
  */
 export type StaffTravelType =
   | 'Domestic'
@@ -30,16 +34,21 @@ export type StaffTravelType =
   | 'Training'
   | 'Conference'
   | 'ClientVisit'
-  | 'GovernmentDuty';
+  | 'GovernmentDuty'
+  | 'Emergency';
 
 export type StaffTravelPurpose =
   | 'BusinessDevelopment'
   | 'ClientMeeting'
   | 'Conference'
   | 'Training'
-  | 'SiteVisit'
   | 'Audit'
-  | 'Negotiation'
+  | 'Inspection'
+  | 'ProjectWork'
+  | 'SiteVisit'
+  | 'GovernmentEngagement'
+  | 'PersonalCombined'
+  | 'Emergency'
   | 'Other';
 
 export type StaffTravelPriority = 'Routine' | 'Urgent' | 'Emergency';
@@ -60,18 +69,26 @@ export type StaffTravelRequestStatus =
   | 'Completed'
   | 'Closed';
 
-export type TravelInitiatorRole = 'Employee' | 'Manager' | 'HrAdmin' | 'TravelDesk';
+export type TravelInitiatorRole = 'Employee' | 'Manager' | 'HrAdmin' | 'TravelDesk' | 'System';
 
-export type TravelRiskLevel = 'Low' | 'Medium' | 'High' | 'Extreme';
+/** One definition for the whole area — `travel-compliance.ts` re-exports this one. */
+export type TravelRiskLevel = 'Low' | 'Medium' | 'High' | 'Critical' | 'Prohibited';
 
-export type TravelRequestCommentType = 'General' | 'Query' | 'Instruction' | 'Justification';
+export type TravelRequestCommentType =
+  | 'Comment'
+  | 'InternalNote'
+  | 'RejectionReason'
+  | 'Query'
+  | 'Response'
+  | 'SystemNote';
 
 export type TravelAttachmentType =
-  | 'Invitation'
-  | 'Agenda'
-  | 'Quotation'
-  | 'Approval'
-  | 'VisaSupport'
+  | 'InvitationLetter'
+  | 'ConferenceBrochure'
+  | 'Receipt'
+  | 'VisaDocument'
+  | 'InsuranceCertificate'
+  | 'MedicalCertificate'
   | 'Other';
 
 /**
@@ -215,9 +232,10 @@ export interface StaffTravelMonthlyCount {
  *
  * `totalEstimatedCost` and `totalApprovedBudget` on the dashboard add every request's figure
  * together regardless of the currency it was costed in, so they are only meaningful when a tenant
- * travels in one. They are not converted to a base currency: travel does not invent a rate, and
- * Finance's conversion is currently inverted, so a converted headline would be confidently wrong
- * rather than visibly incomplete. Show one figure for one currency and this breakdown otherwise.
+ * travels in one. They are not converted to a base currency: travel does not invent a rate, and a
+ * headline converted at one day's rate would hide that the trips were costed in different
+ * currencies. Show one figure for one currency and this breakdown otherwise. (This comment also said
+ * Finance's conversion was inverted; Finance fixed that on 2026-09-10.)
  */
 export interface StaffTravelCurrencyTotal {
   currencyCode: string;
@@ -257,7 +275,10 @@ export interface StaffTravelDashboard {
 
 /**
  * ⚠ `currencyCode` must be one Finance holds — the server refuses anything else. Bind the picker
- * to `GET /api/finance/currencies`; travel deliberately keeps no currency list of its own.
+ * to `GET /api/hr/currencies` (`useCurrencyOptions`), **not** `/api/finance/currencies`: that one
+ * needs Finance's own read permission, so it answers 403 to the HR desk and to every traveller, and
+ * the picker renders empty (travel final closure, lane 0 — finding O-19). Travel keeps no currency
+ * list of its own.
  *
  * ⚠ There is no `initiatedById`. Who raised the request is the caller's employee id, stamped
  * server-side — the desk raises travel for other people, so it is neither the traveller nor
@@ -289,10 +310,17 @@ export interface CreateStaffTravelRequest {
   amendmentReason?: string | null;
 }
 
+/**
+ * ⚠ A REPLACE, not a patch: the server writes every field it receives, and an omitted one as its
+ * default. `approvedBudget`, `policyId` and `groupTravelId` are on no form, so an edit must send
+ * them back exactly as they were or the save erases them — a group participant edited on the form
+ * left the group (finding A8). `buildTravelRequestUpdate` does this. The travel final closure's
+ * lane 1 takes the three out of the update DTO.
+ */
 export type UpdateStaffTravelRequest = Omit<
   CreateStaffTravelRequest,
   'employeeId' | 'initiatedByRole'
-> & { id: string };
+> & { id: string; approvedBudget?: number | null };
 
 /**
  * ⚠ No `authorId`. Authorship is taken from the caller's token — sending one is ignored, because

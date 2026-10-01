@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/travel.ts",
+    "src/types/hr/travel-*.ts",
+    "src/services/hr/travel.service.ts",
+    "src/services/hr/travel-*.service.ts",
+    "src/services/hr/hr-currency.service.ts",
+    "src/app/hr/travel/**/*.tsx",
+    "src/app/me/travel/**/*.tsx",
+    "src/app/administration/hr/travel/**/*.tsx",
+    "src/app/hr/page.tsx",
+    "src/components/hr/travel/**/*.ts",
+    "src/components/hr/travel/**/*.tsx",
+    "src/components/hr/common/CurrencyPicker.tsx",
+    "src/config/hr-setup-nav.ts"
+  ]
+}

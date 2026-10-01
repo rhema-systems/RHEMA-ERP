@@ -18,7 +18,7 @@
  */
 
 import type { AuditFields } from './common';
-import type { StaffTravelType } from './travel';
+import type { StaffTravelType, TravelRiskLevel } from './travel';
 import type { TravelExpenseCategory } from './travel-finance';
 
 // ── Travel documents ─────────────────────────────────────────────────────────
@@ -95,6 +95,30 @@ export interface StaffTravelVisaApplication extends AuditFields {
   vendorId?: string | null;
   vendorName?: string | null;
   notes?: string | null;
+}
+
+/**
+ * What every visa LIST returns — `StaffTravelVisaApplicationSummaryDto`, not the full record.
+ *
+ * ⚠ The list reads were typed as the full record, so the Compliance tab read `visaNumber` and
+ * `processingFee` off a shape that had neither and showed "—" for both, always (travel final
+ * closure, lane 0 — finding E3). The number is masked here; the full one is on the single read.
+ */
+export interface StaffTravelVisaApplicationSummary {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  destinationCountryName?: string | null;
+  visaType?: string | null;
+  status: VisaApplicationStatus;
+  statusName: string;
+  submittedDate?: string | null;
+  approvedDate?: string | null;
+  expiryDate?: string | null;
+  /** All but the last four characters masked, e.g. `••••••1234`. */
+  visaNumberMasked?: string | null;
+  processingFee?: number | null;
+  currencyCode?: string | null;
 }
 
 export interface CreateStaffTravelVisaApplication {
@@ -198,7 +222,12 @@ export interface UpdateStaffTravelVisaRequirement {
 
 // ── Risk assessments ─────────────────────────────────────────────────────────
 
-export type TravelRiskLevel = 'Low' | 'Medium' | 'High' | 'Critical' | 'Prohibited';
+/**
+ * One definition for the area, in `travel.ts`. There used to be two exports of this name with
+ * different members — this one correct, the request's offering `Extreme` — and which one a file got
+ * depended on its import line (travel final closure, lane 0).
+ */
+export type { TravelRiskLevel };
 
 export type TravelRiskCategory =
   | 'Security'

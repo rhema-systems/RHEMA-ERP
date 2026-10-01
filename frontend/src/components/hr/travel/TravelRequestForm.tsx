@@ -20,57 +20,46 @@ import {
   TextField,
   TextareaField,
 } from '@/components/hr/employee/tabs/fields';
+import { CurrencyField } from '@/components/hr/common/CurrencyPicker';
+import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 import { countryService } from '@/services/hr/country.service';
-import { financeDataService } from '@/services/finance/finance-data.service';
 import { travelService } from '@/services/hr/travel.service';
 import type { StaffTravelRequest } from '@/types/hr/travel';
-import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
+import { TravelQueryError } from './TravelQueryError';
+import {
+  TRAVEL_INITIATOR_ROLES_A_PERSON_CHOOSES,
+  TRAVEL_INITIATOR_ROLE_LABELS,
+  TRAVEL_PRIORITY_LABELS,
+  TRAVEL_PURPOSE_LABELS,
+  TRAVEL_RISK_LEVEL_LABELS,
+  TRAVEL_TYPE_LABELS,
+  enumOptions,
+  enumValues,
+} from './travel-enums';
+import {
+  buildTravelRequestCreate,
+  buildTravelRequestFields,
+  buildTravelRequestUpdate,
+  isInternationalTrip,
+} from './travel-request-payload';
 
 /**
- * ⚠ All ten, not the four this list used to carry. `StaffTravelType` in C# has ten members and
- * the TypeScript union had four, so the form offered four kinds of trip, the zod enum refused the
- * other six, and a request created elsewhere with one of them could not be edited here. The union
- * was written from examples; this is written from the enum.
+ * ⚠ Every member of every enum, from `travel-enums.ts`, which a test holds to the C# enums. These
+ * lists used to be typed by hand: they offered `Negotiation` and `Extreme`, which the API refuses
+ * with a 400, and hid `Emergency` travel, five purposes and the `Critical` and `Prohibited` risk
+ * levels, so a request carrying one of those could not be saved from this form (travel final
+ * closure, lane 0 — finding A8). The schema accepts every member, including the initiator role
+ * `System`; only the *Raised as* picker leaves that one out.
  */
-const TRAVEL_TYPES = [
-  'Domestic',
-  'International',
-  'CrossBorder',
-  'Regional',
-  'OverseasAssignment',
-  'FieldVisit',
-  'Training',
-  'Conference',
-  'ClientVisit',
-  'GovernmentDuty',
-] as const;
-const PURPOSES = [
-  'BusinessDevelopment',
-  'ClientMeeting',
-  'Conference',
-  'Training',
-  'SiteVisit',
-  'Audit',
-  'Negotiation',
-  'Other',
-] as const;
-const PRIORITIES = ['Routine', 'Urgent', 'Emergency'] as const;
-const RISK_LEVELS = ['Low', 'Medium', 'High', 'Extreme'] as const;
-const INITIATOR_ROLES = ['Employee', 'Manager', 'HrAdmin', 'TravelDesk'] as const;
-
-const label = (v: string) => v.replace(/([a-z])([A-Z])/g, '$1 $2');
-const options = (values: readonly string[]) =>
-  values.map((v) => ({ value: v, label: label(v) }));
-
 const schema = z
   .object({
     employeeId: z.string().optional(),
-    initiatedByRole: z.enum(INITIATOR_ROLES).optional(),
-    travelType: z.enum(TRAVEL_TYPES),
-    travelPurpose: z.enum(PURPOSES),
+    initiatedByRole: z.enum(enumValues(TRAVEL_INITIATOR_ROLE_LABELS)).optional(),
+    travelType: z.enum(enumValues(TRAVEL_TYPE_LABELS)),
+    travelPurpose: z.enum(enumValues(TRAVEL_PURPOSE_LABELS)),
     purposeDescription: z.string().max(2000).optional(),
-    priority: z.enum(PRIORITIES),
-    riskLevel: z.enum(RISK_LEVELS),
+    priority: z.enum(enumValues(TRAVEL_PRIORITY_LABELS)),
+    riskLevel: z.enum(enumValues(TRAVEL_RISK_LEVEL_LABELS)),
     originCountryId: z.string().min(1, 'Select a country'),
     originCity: z.string().min(1, 'Required').max(100),
     destinationCountryId: z.string().min(1, 'Select a country'),
@@ -101,13 +90,18 @@ const toDateInput = (v?: string | null) => (v ? v.slice(0, 10) : '');
  * and the initiator are the token — the fields are absent, not disabled, because the self-service
  * endpoint overwrites them server-side and a disabled control would imply the value was sent.
  *
- * ⚠ `currencyCode` is bound to Finance's currency list. Travel keeps no currency table of its own,
- * and the server refuses a code Finance does not hold, so a free-text box here would produce a 422
- * the form could not attribute to a field.
+ * ⚠ `currencyCode` is bound to `api/hr/currencies`, Finance's master read through HR's own door.
+ * The form used to read `api/finance/currencies`, which needs a Finance permission: it answered 403
+ * to HR officers and to travellers alike, so the dropdown was empty and no request could be saved
+ * by the people who raise them (travel final closure, lane 0 — finding O-19). The server refuses a
+ * code Finance does not hold, so this stays a list, never a free-text box.
  *
  * `isInternational` is derived from the two countries rather than asked for. It was a free boolean
  * on the DTO, which let a request claim a domestic trip between two countries; there is no case
- * where the answer is not already on the form.
+ * where the answer is not already on the form. (The server still trusts the payload until lane 1.)
+ *
+ * ⚠ An edit REPLACES the record. `buildTravelRequestUpdate` sends back the three fields this form
+ * does not show — see `travel-request-payload.ts`.
  */
 export function TravelRequestForm({
   surface,
@@ -125,17 +119,14 @@ export function TravelRequestForm({
   const isDesk = surface === 'desk';
   const listHref = isDesk ? '/hr/travel' : '/me/travel';
 
-  const { data: countries } = useQuery({
+  const { data: countries, isError: countriesFailed, error: countriesError } = useQuery({
     queryKey: ['countries', 'active'],
     queryFn: () => countryService.getActive(),
   });
 
-  const { data: currencies } = useQuery({
-    queryKey: ['finance', 'currencies', 'active'],
-    queryFn: () => financeDataService.getCurrencies({ isActive: true }),
-  });
-
-  // Only the desk chooses a unit — an employee's own trip is charged to their own unit server-side.
+  // Only the desk chooses a unit. The traveller's own form sends none, and until lane 1 the server
+  // does not fill it in from the traveller either — so a self-raised trip carries no unit, and a
+  // unit-scoped travel policy never applies to it (findings A8 and O-5).
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -164,8 +155,7 @@ export function TravelRequestForm({
 
   const originCountryId = form.watch('originCountryId');
   const destinationCountryId = form.watch('destinationCountryId');
-  const isInternational = !!originCountryId && !!destinationCountryId
-    && originCountryId !== destinationCountryId;
+  const isInternational = isInternationalTrip(originCountryId, destinationCountryId);
 
   // A trip that crosses a border almost always needs a visa decision made deliberately, so the
   // switch is turned ON once and then left alone — re-forcing it would fight the user.
@@ -178,14 +168,6 @@ export function TravelRequestForm({
   const countryOptions = useMemo(
     () => (countries ?? []).map((c) => ({ value: c.id, label: c.name })),
     [countries],
-  );
-  const currencyOptions = useMemo(
-    () =>
-      (currencies ?? []).map((c) => ({
-        value: c.currencyCode,
-        label: `${c.currencyCode} — ${c.currencyName}`,
-      })),
-    [currencies],
   );
 
   const onSubmit = async (values: FormValues) => {
@@ -200,42 +182,16 @@ export function TravelRequestForm({
 
     setSaving(true);
     try {
-      const shared = {
-        travelType: parsed.travelType,
-        travelPurpose: parsed.travelPurpose,
-        purposeDescription: parsed.purposeDescription || undefined,
-        organizationUnitId: parsed.organizationUnitId || null,
-        priority: parsed.priority,
-        destinationCountryId: parsed.destinationCountryId,
-        destinationCity: parsed.destinationCity,
-        originCountryId: parsed.originCountryId,
-        originCity: parsed.originCity,
-        travelStartDate: parsed.travelStartDate,
-        travelEndDate: parsed.travelEndDate,
-        estimatedTotalCost: parsed.estimatedTotalCost,
-        currencyCode: parsed.currencyCode,
-        isInternational,
-        requiresVisa: parsed.requiresVisa,
-        requiresHealthClearance: parsed.requiresHealthClearance,
-        riskLevel: parsed.riskLevel,
-        amendmentReason: isEdit ? parsed.amendmentReason || null : null,
-      };
-
       let saved: StaffTravelRequest;
       if (isEdit && existing) {
+        const payload = buildTravelRequestUpdate(parsed, existing);
         saved = isDesk
-          ? await travelService.update({ ...shared, id: existing.id })
-          : await travelService.updateMine({ ...shared, id: existing.id });
+          ? await travelService.update(payload)
+          : await travelService.updateMine(payload);
       } else if (isDesk) {
-        saved = await travelService.create({
-          ...shared,
-          employeeId: travellerId ?? '',
-          // No initiator id: the desk raises travel for other people, and who raised it is stamped
-          // from the token. Only the ROLE it was raised under is a real input.
-          initiatedByRole: parsed.initiatedByRole ?? 'TravelDesk',
-        });
+        saved = await travelService.create(buildTravelRequestCreate(parsed, travellerId ?? ''));
       } else {
-        saved = await travelService.createMine(shared);
+        saved = await travelService.createMine(buildTravelRequestFields(parsed, false));
       }
 
       await queryClient.invalidateQueries({ queryKey: ['travel-requests'] });
@@ -256,6 +212,9 @@ export function TravelRequestForm({
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+      {/* Both country pickers are required, so an unread list blocks the save — say why. */}
+      {countriesFailed && !countries && <TravelQueryError error={countriesError} what="the country list" />}
+
       {isDesk && !isEdit && (
         <Card>
           <CardHeader className="pb-2">
@@ -269,7 +228,7 @@ export function TravelRequestForm({
               form={form}
               name="initiatedByRole"
               label="Raised as"
-              options={options(INITIATOR_ROLES)}
+              options={enumOptions(TRAVEL_INITIATOR_ROLE_LABELS, TRAVEL_INITIATOR_ROLES_A_PERSON_CHOOSES)}
             />
           </CardContent>
         </Card>
@@ -286,14 +245,14 @@ export function TravelRequestForm({
               name="travelType"
               label="Travel type"
               required
-              options={options(TRAVEL_TYPES)}
+              options={enumOptions(TRAVEL_TYPE_LABELS)}
             />
             <SelectField
               form={form}
               name="travelPurpose"
               label="Purpose"
               required
-              options={options(PURPOSES)}
+              options={enumOptions(TRAVEL_PURPOSE_LABELS)}
             />
           </FieldRow>
 
@@ -348,14 +307,7 @@ export function TravelRequestForm({
         <CardContent className="space-y-4">
           <FieldRow>
             <NumberField form={form} name="estimatedTotalCost" label="Estimated cost" required />
-            <SelectField
-              form={form}
-              name="currencyCode"
-              label="Currency"
-              required
-              options={currencyOptions}
-              placeholder={currencyOptions.length ? 'Select…' : 'No currencies configured'}
-            />
+            <CurrencyField form={form} name="currencyCode" label="Currency" required />
           </FieldRow>
 
           <FieldRow>
@@ -364,14 +316,14 @@ export function TravelRequestForm({
               name="priority"
               label="Priority"
               required
-              options={options(PRIORITIES)}
+              options={enumOptions(TRAVEL_PRIORITY_LABELS)}
             />
             <SelectField
               form={form}
               name="riskLevel"
               label="Risk level"
               required
-              options={options(RISK_LEVELS)}
+              options={enumOptions(TRAVEL_RISK_LEVEL_LABELS)}
             />
           </FieldRow>
 
@@ -379,17 +331,20 @@ export function TravelRequestForm({
             <OrganizationUnitPickerField form={form} name="organizationUnitId" label="Organisation unit" allowEmpty emptyLabel="Not specified" />
           )}
 
+          {/* ⚠ Both switches RECORD a need; neither enforces one. The visa section on the
+              Compliance tab shows whatever this says, and nothing yet refuses a booking or a
+              departure without a visa or a clearance (findings E4, T-24, T-25 — lanes 5 and 7). */}
           <SwitchField
             form={form}
             name="requiresVisa"
             label="Requires a visa"
-            description="Turns on the visa tracking for this trip."
+            description="Records that this trip needs a visa. The application is tracked on the trip's Compliance tab."
           />
           <SwitchField
             form={form}
             name="requiresHealthClearance"
             label="Requires health clearance"
-            description="Vaccination or fitness-to-travel evidence must be recorded before departure."
+            description="Records that vaccination or fitness-to-travel evidence is needed. The travel desk confirms it; the system does not check it."
           />
 
           {isEdit && (

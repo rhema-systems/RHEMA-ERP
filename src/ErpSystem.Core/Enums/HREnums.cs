@@ -9395,74 +9395,9 @@ public enum TravelInitiatorRole
     System = 5
 }
 
-public enum TravelApproverType
-{
-    [Description("Line Manager")]
-    LineManager = 1,
-
-    [Description("Department Head")]
-    DepartmentHead = 2,
-
-    [Description("HR Manager")]
-    HrManager = 3,
-
-    [Description("Finance Manager")]
-    FinanceManager = 4,
-
-    [Description("Travel Desk")]
-    TravelDesk = 5,
-
-    [Description("Executive")]
-    Executive = 6,
-
-    [Description("Specific Person")]
-    SpecificPerson = 7
-}
-
-public enum TravelApprovalDecision
-{
-    [Description("Approved")]
-    Approved = 1,
-
-    [Description("Rejected")]
-    Rejected = 2,
-
-    [Description("Returned For Revision")]
-    ReturnedForRevision = 3,
-
-    [Description("Escalated")]
-    Escalated = 4,
-
-    [Description("Delegated")]
-    Delegated = 5,
-
-    [Description("Abstained")]
-    Abstained = 6
-}
-
-public enum TravelApprovalInstanceStatus
-{
-    [Description("Pending")]
-    Pending = 1,
-
-    [Description("In Progress")]
-    InProgress = 2,
-
-    [Description("Approved")]
-    Approved = 3,
-
-    [Description("Rejected")]
-    Rejected = 4,
-
-    [Description("Withdrawn")]
-    Withdrawn = 5,
-
-    [Description("Escalated")]
-    Escalated = 6,
-
-    [Description("Expired")]
-    Expired = 7
-}
+// TravelApproverType, TravelApprovalDecision and TravelApprovalInstanceStatus were removed on
+// 2026-10-01 (travel final closure, lane 0). They described travel's own four-table approval chain,
+// which slice 2 retired onto the workflow engine; nothing had referenced them since.
 
 #endregion
 
@@ -9766,26 +9701,8 @@ public enum TravelPaymentMethod
     CorporateCard = 5
 }
 
-public enum TravelAllowanceType
-{
-    [Description("Daily Subsistence")]
-    DailySubsistence = 1,
-
-    [Description("Accommodation")]
-    Accommodation = 2,
-
-    [Description("Transport")]
-    Transport = 3,
-
-    [Description("Incidental")]
-    Incidental = 4,
-
-    [Description("Meals Only")]
-    MealsOnly = 5,
-
-    [Description("Hardship")]
-    Hardship = 6
-}
+// TravelAllowanceType was removed on 2026-10-01 (travel final closure, lane 0): no entity, DTO or
+// service ever used it. Per-diem allowances live on StaffTravelPerDiemRate's own columns.
 
 #endregion
 
@@ -9849,41 +9766,8 @@ public enum TravelPolicyExceptionStatus
 
 #region Vendors
 
-public enum TravelVendorType
-{
-    [Description("Airline")]
-    Airline = 1,
-
-    [Description("Hotel Chain")]
-    HotelChain = 2,
-
-    [Description("Car Rental")]
-    CarRental = 3,
-
-    [Description("Travel Agency")]
-    TravelAgency = 4,
-
-    [Description("GDS")]
-    Gds = 5,
-
-    [Description("Rideshare")]
-    Rideshare = 6,
-
-    [Description("Insurance")]
-    Insurance = 7,
-
-    [Description("Visa Service")]
-    VisaService = 8,
-
-    [Description("Ground Transport")]
-    GroundTransport = 9,
-
-    [Description("Forex")]
-    Forex = 10,
-
-    [Description("Other")]
-    Other = 11
-}
+// TravelVendorType was removed on 2026-10-01 (travel final closure, lane 0). Slice 3 retired travel's
+// own vendor master onto Procurement's Supplier, and nothing referenced the enum after that.
 
 #endregion
 

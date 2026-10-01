@@ -365,7 +365,7 @@ const AREAS = [
   },
   {
     title: 'Staff Travel',
-    description: 'Trip requests, approvals, per diem and travel claims.',
+    description: 'Trip requests, approvals, bookings and expense claims.',
     href: '/hr/travel',
     icon: Plane,
   },

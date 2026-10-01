@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { travelService } from '@/services/hr/travel.service';
 import type { StaffTravelAlertNotification } from '@/types/hr/travel-compliance';
+import { TravelQueryError } from './TravelQueryError';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 
@@ -30,7 +31,7 @@ export function MyTravelAlertsPanel() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const { data: alerts, isLoading } = useQuery({
+  const { data: alerts, isLoading, isError, error } = useQuery({
     queryKey: ['my-travel-alerts'],
     queryFn: () => travelService.getMyAlerts(),
   });
@@ -41,16 +42,20 @@ export function MyTravelAlertsPanel() {
       await queryClient.invalidateQueries({ queryKey: ['my-travel-alerts'] });
       toast({ title: 'Thank you — that is recorded against your trip' });
     },
-    onError: (e: any) =>
+    onError: (e: Error) =>
       toast({
         variant: 'destructive',
         title: 'Could not record that',
-        description: e?.response?.data?.message ?? e?.message,
+        description: e?.message,
       }),
   });
 
   const rows = alerts ?? [];
   const outstanding = rows.filter((a) => !a.isAcknowledged);
+
+  // ⚠ A failed read is NOT "no alerts". This panel used to return nothing on an error, so a
+  // traveller whose alerts could not be loaded saw no sign that a security briefing was waiting.
+  if (isError && !alerts) return <TravelQueryError error={error} what="your travel alerts" />;
 
   // Nothing to say when there is nothing to say — this sits above a trip list that is the point
   // of the page, so an empty "no alerts" card would only push it down.
@@ -127,13 +132,14 @@ export function MyTravelAlertsPanel() {
           ))
         )}
         {/*
-          This used to read "the full alert … is on the trip itself, under its compliance tab" —
-          written because the notification carried no text and the panel had nowhere else to send
-          people. It now carries the text, so the pointer would be misleading rather than helpful.
+          ⚠ This sent travellers to "your trip's compliance tab" — which exists only on the travel
+          desk's page; the self-service trip page has no such tab (travel final closure, finding E7,
+          lane 7). It says where the rest of the picture actually is.
         */}
         <p className="text-xs text-muted-foreground">
-          Your trip’s compliance tab carries the rest of the picture — visas, insurance and every
-          alert for the destination, including ones not sent to you directly.
+          The travel desk keeps the rest of the picture for your trip — visas, insurance and every
+          alert for the destination, including ones not sent to you directly. Ask them if you need
+          any of it.
         </p>
       </CardContent>
     </Card>
