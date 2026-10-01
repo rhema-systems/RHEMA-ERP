@@ -59,21 +59,32 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             var precisionSettings = await _context.FinanceSettings
                 .AsNoTracking()
                 .SingleOrDefaultAsync(s => s.TenantId == TenantId && !s.IsDeleted, cancellationToken);
-            var baseCurrencyCode = precisionSettings?.BaseCurrency?.Trim().ToUpperInvariant() ?? "GHS";
+            if (precisionSettings == null || string.IsNullOrWhiteSpace(precisionSettings.BaseCurrency))
+                throw new InvalidOperationException(
+                    "Finance precision settings and a canonical base currency are required before tax calculation.");
+
+            var baseCurrencyCode = precisionSettings.BaseCurrency.Trim().ToUpperInvariant();
             var currencyDecimalPlaces = await _context.Currencies
                 .AsNoTracking()
                 .Where(currency => currency.TenantId == TenantId
                     && !currency.IsDeleted
                     && currency.CurrencyCode == baseCurrencyCode)
                 .Select(currency => (int?)currency.DecimalPlaces)
-                .FirstOrDefaultAsync(cancellationToken)
-                ?? CurrencyMinorUnitPolicy.ExpectedDecimalPlaces(baseCurrencyCode)
-                ?? 2;
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException(
+                    $"Base currency '{baseCurrencyCode}' is missing from the tenant currency master.");
             CurrencyMinorUnitPolicy.Validate(baseCurrencyCode, currencyDecimalPlaces);
-            if (currencyDecimalPlaces != 2)
+            var hasUnsupportedTransactionCurrency = await _context.Currencies
+                .AsNoTracking()
+                .AnyAsync(currency => currency.TenantId == TenantId
+                    && !currency.IsDeleted
+                    && currency.IsActive
+                    && currency.DecimalPlaces != 2,
+                    cancellationToken);
+            if (currencyDecimalPlaces != 2 || hasUnsupportedTransactionCurrency)
             {
                 throw new InvalidOperationException(
-                    "Tax posting is currently gated to 2-decimal currencies until AR/AP tax evidence and posting storage are widened.");
+                    "Tax posting is currently gated to tenants whose active transaction currencies all use 2 decimals until currency-aware AR/AP tax evidence and posting storage are widened.");
             }
 
             var percentageDecimalPlaces = precisionSettings?.TaxPercentageDecimalPlaces ?? 4;
@@ -81,6 +92,10 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             var roundingScope = precisionSettings?.TaxRoundingScope ?? TaxRoundingScope.Line;
             var roundingIncrement = precisionSettings?.TaxRoundingIncrement
                 ?? CurrencyMinorUnitPolicy.MinorUnit(currencyDecimalPlaces);
+            var currencyMinorUnit = CurrencyMinorUnitPolicy.MinorUnit(currencyDecimalPlaces);
+            if (roundingIncrement < currencyMinorUnit || roundingIncrement % currencyMinorUnit != 0m)
+                throw new InvalidOperationException(
+                    $"Configured tax rounding increment must be a whole multiple of the currency minor unit {currencyMinorUnit}.");
             if (!Enum.IsDefined(roundingMethod) || !Enum.IsDefined(roundingScope))
                 throw new InvalidOperationException("Configured tax rounding method or scope is invalid.");
             if (roundingScope != TaxRoundingScope.Line)
@@ -595,11 +610,12 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 throw new InvalidOperationException("One or more selected taxes were not found for this tenant.");
             }
 
-            return taxes.Select((tax, index) => new TaxGroupComponent
+            var taxesById = taxes.ToDictionary(tax => tax.Id);
+            return requestedIds.Select((taxId, index) => new TaxGroupComponent
             {
                 Id = Guid.NewGuid(),
-                TaxId = tax.Id,
-                Tax = tax,
+                TaxId = taxId,
+                Tax = taxesById[taxId],
                 CalculationOrder = index + 1,
                 CompoundBasis = CompoundBasis.BaseOnly // Default for manual selection
             }).ToList();

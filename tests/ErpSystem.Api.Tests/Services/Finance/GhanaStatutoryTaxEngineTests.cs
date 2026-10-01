@@ -388,6 +388,19 @@ public sealed class GhanaStatutoryTaxEngineTests
         };
 
         var lineResult = await engine.CalculateTaxesAsync(request);
+        var unsupportedCurrency = new Currency
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, CurrencyCode = "JPY", NumericCode = "392",
+            CurrencyName = "Japanese Yen", DecimalPlaces = 0, RoundingPrecision = 1m,
+            IsBaseCurrency = false, IsActive = true
+        };
+        db.Currencies.Add(unsupportedCurrency);
+        await db.SaveChangesAsync();
+        var currencyGateAct = async () => await engine.CalculateTaxesAsync(request);
+        await currencyGateAct.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*active transaction currencies all use 2 decimals*");
+
+        unsupportedCurrency.IsActive = false;
         settings.TaxRoundingScope = TaxRoundingScope.Document;
         await db.SaveChangesAsync();
         var aggregateAct = async () => await engine.CalculateTaxesAsync(request);
@@ -1354,6 +1367,12 @@ public sealed class GhanaStatutoryTaxEngineTests
             Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
             LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
             IsDefault = true, IsActive = true, AllowsPosting = true
+        });
+        db.Currencies.Add(new Currency
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, CurrencyCode = "GHS", NumericCode = "936",
+            CurrencyName = "Ghana Cedi", CurrencySymbol = "GH₵", DecimalPlaces = 2,
+            RoundingPrecision = 0.01m, IsBaseCurrency = true, IsActive = true
         });
     }
 
