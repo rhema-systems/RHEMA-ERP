@@ -173,14 +173,24 @@ async function handleApiRequest(request) {
 async function handleStaticAsset(request) {
   const cache = await caches.open(STATIC_CACHE_NAME)
   const cachedResponse = await cache.match(request)
-  
-  if (cachedResponse) {
+
+  // A deployment can briefly make an old chunk unavailable while the release
+  // is activated. Never keep a failed response in the long-lived static cache:
+  // doing so leaves that browser on a permanent loading screen even after the
+  // server is healthy again.
+  if (cachedResponse?.ok) {
     return cachedResponse
+  }
+
+  if (cachedResponse) {
+    await cache.delete(request)
   }
   
   try {
     const networkResponse = await fetch(request)
-    cache.put(request, networkResponse.clone())
+    if (networkResponse.ok) {
+      await cache.put(request, networkResponse.clone())
+    }
     return networkResponse
   } catch (error) {
     console.log('[SW] Failed to fetch static asset:', request.url)

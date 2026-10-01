@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { apiService } from '@/services/api.service';
@@ -30,6 +30,18 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { getPropertyEnquiryDepositAccess } from '@/lib/sales/property-enquiry-deposit-access';
 import { SalesHandoffActions } from '@/app/crm/components/SalesHandoffActions';
+import { salesReferenceService } from '@/services/salesReferenceService';
+import {
+  buildOpportunityCurrencyOptions,
+  resolveOpportunityCurrency,
+} from '@/lib/crm/opportunity-currency';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 type Envelope<T> = { success: boolean; data: T; totalCount?: number };
 type EstateHandoffState = {
@@ -103,6 +115,19 @@ function PropertyEnquiries() {
     reservationDays: '14',
     notes: '',
   });
+  const activeCurrencies = useQuery({
+    queryKey: ['finance-active-currencies'],
+    queryFn: salesReferenceService.getActiveCurrencies,
+    staleTime: 5 * 60 * 1000,
+  });
+  const opportunityCurrencyOptions = useMemo(
+    () =>
+      buildOpportunityCurrencyOptions(
+        activeCurrencies.data ?? [],
+        opportunityDraft.currency
+      ),
+    [activeCurrencies.data, opportunityDraft.currency]
+  );
   const [depositDraft, setDepositDraft] = useState({
     amount: '',
     currency: 'GHS',
@@ -608,8 +633,10 @@ function PropertyEnquiries() {
       : ticket.propertyListing?.price
         ? String(ticket.propertyListing.price)
         : '';
-    const initialCurrency =
-      ticket.prospect?.currency || ticket.propertyListing?.currency || 'GHS';
+    const initialCurrency = resolveOpportunityCurrency(
+      ticket.prospect?.currency || ticket.propertyListing?.currency,
+      activeCurrencies.data ?? []
+    );
     setAgreedAmount(initialAmount);
     setQualificationCurrency(initialCurrency);
     setOpportunityDraft((value) => ({
@@ -931,18 +958,31 @@ function PropertyEnquiries() {
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label htmlFor="opportunity-currency">Currency</Label>
-                          <Input
-                            id="opportunity-currency"
-                            maxLength={3}
+                          <Label>Currency</Label>
+                          <Select
                             value={opportunityDraft.currency}
-                            onChange={(event) =>
+                            disabled
+                            onValueChange={(currency) =>
                               setOpportunityDraft((value) => ({
                                 ...value,
-                                currency: event.target.value.toUpperCase(),
+                                currency,
                               }))
                             }
-                          />
+                          >
+                            <SelectTrigger aria-label="Opportunity Currency">
+                              <SelectValue placeholder="Select currency" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {opportunityCurrencyOptions.map((currency) => (
+                                <SelectItem key={currency.code} value={currency.code}>
+                                  {currency.code} — {currency.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-slate-600">
+                            Inherited from the qualified prospect or property listing.
+                          </p>
                         </div>
                         <div className="space-y-1">
                           <Label htmlFor="opportunity-close-date">

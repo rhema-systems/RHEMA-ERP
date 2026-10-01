@@ -17,11 +17,20 @@ import {
   crmService,
   type CreateCrmOpportunityDto,
   type CrmLeadListItemDto,
+  type CrmLeadDetailDto,
   type CrmOpportunityDetailDto,
   type CrmOpportunityListItemDto,
   type PagedResult,
 } from '@/services/crmService';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
+import {
+  salesReferenceService,
+  type SalesCurrencyReferenceDto,
+} from '@/services/salesReferenceService';
+import {
+  buildOpportunityCurrencyOptions,
+  resolveOpportunityCurrency,
+} from '@/lib/crm/opportunity-currency';
 import { SalesHandoffActions } from '../components/SalesHandoffActions';
 import {
   BriefcaseBusiness,
@@ -46,7 +55,12 @@ const addDays = (days: number) => {
   return date.toISOString().slice(0, 10);
 };
 
-const createEmptyOpportunityForm = (businessPartnerId?: string, leadId?: string, opportunityType?: string): CreateCrmOpportunityDto => ({
+const createEmptyOpportunityForm = (
+  businessPartnerId?: string,
+  leadId?: string,
+  opportunityType?: string,
+  currency = 'GHS'
+): CreateCrmOpportunityDto => ({
   name: '',
   description: '',
   businessPartnerId: businessPartnerId || '',
@@ -54,7 +68,7 @@ const createEmptyOpportunityForm = (businessPartnerId?: string, leadId?: string,
   stage: 'Prospecting',
   probability: 10,
   amount: 0,
-  currency: 'USD',
+  currency,
   expectedCloseDate: addDays(30),
   actualCloseDate: '',
   leadSource: 'Unknown',
@@ -100,7 +114,7 @@ const buildOpportunityPayload = (form: CreateCrmOpportunityDto): CreateCrmOpport
   stage: form.stage,
   probability: Number(form.probability) || 0,
   amount: Number(form.amount) || 0,
-  currency: form.currency.trim().toUpperCase() || 'USD',
+  currency: form.currency.trim().toUpperCase() || 'GHS',
   expectedCloseDate: form.expectedCloseDate,
   actualCloseDate: form.actualCloseDate || undefined,
   leadSource: form.leadSource,
@@ -138,6 +152,13 @@ function OpportunityDialog({
   saving,
   accounts,
   leads,
+  currencies,
+  currencyLocked = false,
+  inheritedLead,
+  inheritedAccount,
+  sourcePending = false,
+  sourceError,
+  onRetrySource,
   onOpenChange,
   onSubmit,
   onChange,
@@ -149,10 +170,22 @@ function OpportunityDialog({
   saving: boolean;
   accounts: BusinessPartnerDto[];
   leads: CrmLeadListItemDto[];
+  currencies: SalesCurrencyReferenceDto[];
+  currencyLocked?: boolean;
+  inheritedLead?: string;
+  inheritedAccount?: string;
+  sourcePending?: boolean;
+  sourceError?: string;
+  onRetrySource?: () => void;
   onOpenChange: (open: boolean) => void;
   onSubmit: () => void;
   onChange: <K extends keyof CreateCrmOpportunityDto>(field: K, value: CreateCrmOpportunityDto[K]) => void;
 }) {
+  const currencyOptions = buildOpportunityCurrencyOptions(
+    currencies,
+    form.currency
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl">
@@ -174,36 +207,65 @@ function OpportunityDialog({
 
           <div className="space-y-2">
             <Label>CRM Account</Label>
-            <Select value={form.businessPartnerId || 'none'} onValueChange={(value) => onChange('businessPartnerId', value === 'none' ? '' : value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select account" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No account yet</SelectItem>
-                {accounts.map((account) => (
-                  <SelectItem key={account.id} value={account.id}>
-                    {account.partnerName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {inheritedAccount ? (
+              <p className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                {inheritedAccount}
+              </p>
+            ) : sourcePending ? (
+              <p className="text-sm text-muted-foreground">
+                Loading linked account...
+              </p>
+            ) : (
+              <Select
+                value={form.businessPartnerId || 'none'}
+                onValueChange={(value) =>
+                  onChange(
+                    'businessPartnerId',
+                    value === 'none' ? '' : value
+                  )
+                }
+              >
+                <SelectTrigger aria-label="CRM Account">
+                  <SelectValue placeholder="Select account" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No account yet</SelectItem>
+                  {accounts.map((account) => (
+                    <SelectItem key={account.id} value={account.id}>
+                      {account.partnerName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           <div className="space-y-2">
             <Label>Lead</Label>
-            <Select value={form.leadId || 'none'} onValueChange={(value) => onChange('leadId', value === 'none' ? '' : value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select lead" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No linked lead</SelectItem>
-                {leads.map((lead) => (
-                  <SelectItem key={lead.leadId} value={lead.leadId}>
-                    {lead.fullName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {inheritedLead ? (
+              <p className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                {inheritedLead}
+              </p>
+            ) : (
+              <Select
+                value={form.leadId || 'none'}
+                onValueChange={(value) =>
+                  onChange('leadId', value === 'none' ? '' : value)
+                }
+              >
+                <SelectTrigger aria-label="Lead">
+                  <SelectValue placeholder="Select lead" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No linked lead</SelectItem>
+                  {leads.map((lead) => (
+                    <SelectItem key={lead.leadId} value={lead.leadId}>
+                      {lead.fullName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -250,14 +312,28 @@ function OpportunityDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="opportunity-currency">Currency</Label>
-            <Input
-              id="opportunity-currency"
+            <Label>Currency</Label>
+            <Select
               value={form.currency}
-              onChange={(event) => onChange('currency', event.target.value.toUpperCase())}
-              maxLength={3}
-              placeholder="USD"
-            />
+              onValueChange={(value) => onChange('currency', value)}
+              disabled={currencyLocked}
+            >
+              <SelectTrigger aria-label="Opportunity Currency">
+                <SelectValue placeholder="Select currency" />
+              </SelectTrigger>
+              <SelectContent>
+                {currencyOptions.map((currency) => (
+                  <SelectItem key={currency.code} value={currency.code}>
+                    {currency.code} — {currency.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {currencyLocked ? (
+              <p className="text-xs text-muted-foreground">
+                Inherited from the linked property enquiry.
+              </p>
+            ) : null}
           </div>
 
           <div className="space-y-2">
@@ -351,11 +427,12 @@ function OpportunityDialog({
           </div>
         </div>
 
+        {sourceError && <div role="alert" className="text-sm text-destructive">{sourceError}<Button type="button" variant="outline" size="sm" onClick={onRetrySource}>Retry Lead</Button></div>}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={onSubmit} disabled={saving}>
+          <Button onClick={onSubmit} disabled={saving || sourcePending || Boolean(sourceError)}>
             {saving ? 'Saving...' : 'Save Opportunity'}
           </Button>
         </DialogFooter>
@@ -395,6 +472,42 @@ export default function CrmOpportunitiesPage() {
 
   const [accounts, setAccounts] = useState<BusinessPartnerDto[]>([]);
   const [leads, setLeads] = useState<CrmLeadListItemDto[]>([]);
+  const [currencies, setCurrencies] = useState<SalesCurrencyReferenceDto[]>([]);
+  const [scopedLead, setScopedLead] = useState<CrmLeadDetailDto | null>(null);
+  const [scopedLeadError, setScopedLeadError] = useState('');
+  const [scopedLeadRetry, setScopedLeadRetry] = useState(0);
+  const scopedLeadReady = !scopedLeadId || scopedLead?.leadId === scopedLeadId;
+  const linkedLeadAccountId = scopedLeadReady
+    ? scopedLead?.convertedBusinessPartnerId
+    : undefined;
+  const resolvedCreateBusinessPartnerId = linkedLeadAccountId || scopedBusinessPartnerId;
+
+  useEffect(() => {
+    let current = true;
+    setScopedLead(null);
+    setScopedLeadError('');
+    if (scopedLeadId) {
+      void crmService
+        .getLead(scopedLeadId)
+        .then((lead) => {
+          if (current) setScopedLead(lead);
+        })
+        .catch((error) => {
+          if (current) {
+            setScopedLeadError(
+              getMessage(
+                error,
+                'Failed to load the selected Lead. Retry before saving.'
+              )
+            );
+          }
+        });
+    }
+    return () => {
+      current = false;
+    };
+  }, [scopedLeadId, scopedLeadRetry]);
+
 
   const [formOpen, setFormOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -402,6 +515,25 @@ export default function CrmOpportunitiesPage() {
   const [form, setForm] = useState<CreateCrmOpportunityDto>(createEmptyOpportunityForm(scopedBusinessPartnerId, scopedLeadId));
   const [saving, setSaving] = useState(false);
   const [newRequestHandled, setNewRequestHandled] = useState(false);
+
+  useEffect(() => {
+    if (formMode !== 'create' || !scopedLeadId) return;
+    setForm((current) => ({
+      ...current,
+      leadId: scopedLeadId,
+      businessPartnerId: linkedLeadAccountId || scopedBusinessPartnerId,
+      ...(scopedLead?.propertyEnquiryCurrency
+        ? { currency: scopedLead.propertyEnquiryCurrency.trim().toUpperCase() }
+        : {}),
+    }));
+  }, [
+    formMode,
+    scopedLeadId,
+    linkedLeadAccountId,
+    scopedBusinessPartnerId,
+    scopedLead?.propertyEnquiryCurrency,
+  ]);
+
 
   const loadLookups = async () => {
     try {
@@ -419,6 +551,14 @@ export default function CrmOpportunitiesPage() {
       setLeads(leadData.items);
     } catch (error: unknown) {
       toast.error(getMessage(error, 'Failed to load CRM opportunity lookups'));
+    }
+  };
+
+  const loadCurrencies = async () => {
+    try {
+      setCurrencies(await salesReferenceService.getActiveCurrencies());
+    } catch (error: unknown) {
+      toast.error(getMessage(error, 'Failed to load active currencies'));
     }
   };
 
@@ -479,6 +619,7 @@ export default function CrmOpportunitiesPage() {
 
   useEffect(() => {
     void loadLookups();
+    void loadCurrencies();
   }, []);
 
   useEffect(() => {
@@ -506,9 +647,10 @@ export default function CrmOpportunitiesPage() {
 
     setFormMode('create');
     setForm(createEmptyOpportunityForm(
-      scopedBusinessPartnerId,
+      resolvedCreateBusinessPartnerId,
       scopedLeadId,
       resolvedSearchParams.get('opportunityType') || undefined,
+      resolveOpportunityCurrency(scopedLead?.propertyEnquiryCurrency, currencies),
     ));
     setFormOpen(true);
     setNewRequestHandled(true);
@@ -547,14 +689,17 @@ export default function CrmOpportunitiesPage() {
   }, [result]);
 
   const scopedAccountName = accounts.find((account) => account.id === scopedBusinessPartnerId)?.partnerName;
-  const scopedLeadName = leads.find((lead) => lead.leadId === scopedLeadId)?.fullName;
+  const scopedLeadName =
+    (scopedLeadReady ? scopedLead?.fullName : undefined) ||
+    leads.find((lead) => lead.leadId === scopedLeadId)?.fullName;
 
   const openCreateDialog = () => {
     setFormMode('create');
     setForm(createEmptyOpportunityForm(
-      scopedBusinessPartnerId,
+      resolvedCreateBusinessPartnerId,
       scopedLeadId,
       opportunityType !== 'all' ? opportunityType : undefined,
+      resolveOpportunityCurrency(scopedLead?.propertyEnquiryCurrency, currencies),
     ));
     setFormOpen(true);
   };
@@ -581,6 +726,13 @@ export default function CrmOpportunitiesPage() {
   };
 
   const submitOpportunity = async () => {
+    if (
+      formMode === 'create' &&
+      scopedLeadId &&
+      (!scopedLeadReady || scopedLeadError)
+    ) {
+      return;
+    }
     if (!form.name.trim()) {
       toast.error('Opportunity name is required.');
       return;
@@ -588,7 +740,17 @@ export default function CrmOpportunitiesPage() {
 
     try {
       setSaving(true);
-      const payload = buildOpportunityPayload(form);
+      const payload = buildOpportunityPayload(
+        formMode === 'create' && scopedLeadId
+          ? {
+              ...form,
+              leadId: scopedLeadId,
+              ...(linkedLeadAccountId
+                ? { businessPartnerId: linkedLeadAccountId }
+                : {}),
+            }
+          : form
+      );
       const opportunity = formMode === 'create'
         ? await crmService.createOpportunity(payload)
         : await crmService.updateOpportunity(selectedOpportunityId, payload);
@@ -1141,6 +1303,30 @@ export default function CrmOpportunitiesPage() {
         saving={saving}
         accounts={accounts}
         leads={leads}
+        currencies={currencies}
+        currencyLocked={
+          formMode === 'create' &&
+          Boolean(scopedLead?.propertyEnquiryCurrency)
+        }
+        inheritedLead={
+          formMode === 'create' && scopedLeadId
+            ? scopedLeadName || scopedLeadId
+            : undefined
+        }
+        inheritedAccount={
+          formMode === 'create' && scopedLeadId && linkedLeadAccountId
+            ? accounts.find((account) => account.id === linkedLeadAccountId)
+                ?.partnerName || linkedLeadAccountId
+            : undefined
+        }
+        sourcePending={
+          formMode === 'create' &&
+          Boolean(scopedLeadId) &&
+          !scopedLeadReady &&
+          !scopedLeadError
+        }
+        sourceError={formMode === 'create' && scopedLeadId ? scopedLeadError : undefined}
+        onRetrySource={() => setScopedLeadRetry((attempt) => attempt + 1)}
         onOpenChange={setFormOpen}
         onSubmit={() => void submitOpportunity()}
         onChange={(field, value) => setForm((current) => ({ ...current, [field]: value }))}

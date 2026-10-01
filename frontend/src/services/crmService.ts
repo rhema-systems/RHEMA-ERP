@@ -656,6 +656,9 @@ export interface CrmLeadDetailDto extends CrmLeadListItemDto {
   notes?: string;
   convertedBusinessPartnerId?: string;
   convertedDate?: string;
+  propertyEnquiryTicketId?: string;
+  propertyEnquiryTicketNumber?: string;
+  propertyEnquiryCurrency?: string;
   opportunities: CrmOpportunityOverviewDto[];
 }
 

@@ -9,10 +9,19 @@ import type { CrmLeadDetailDto, CrmOpportunityDetailDto, CrmQuoteDetailDto } fro
 const mocks = vi.hoisted(() => ({
   query: '', getLead: vi.fn(), getOpportunity: vi.fn(), getQuote: vi.fn(),
   getLeads: vi.fn(), getOpportunities: vi.fn(), getQuotes: vi.fn(), toast: vi.fn(),
+  getBaseCurrency: vi.fn(),
 }));
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(mocks.query), useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/services/crmService', () => ({ crmService: mocks }));
 vi.mock('@/services/businessPartnerService', () => ({ businessPartnerService: { getAllPartnersForDropdown: async () => [] } }));
+vi.mock('@/services/salesReferenceService', () => ({
+  salesReferenceService: {
+    getActiveCurrencies: async () => [
+      { code: 'GHS', name: 'Ghana Cedi', isBaseCurrency: true },
+      { code: 'USD', name: 'US Dollar', isBaseCurrency: false },
+    ],
+  },
+}));
 vi.mock('./components/SalesHandoffActions', () => ({ SalesHandoffActions: () => null }));
 vi.mock('sonner', () => ({ toast: { error: mocks.toast, success: vi.fn() } }));
 
@@ -43,6 +52,7 @@ const cases = [
 describe.each(cases)('$query global-search navigation', ({ query, Page, detail, list, record }) => {
   beforeEach(() => {
     vi.stubGlobal('React', React); vi.resetAllMocks(); mocks.query = `${query}=first`;
+    mocks.getBaseCurrency.mockResolvedValue({ code: 'GHS' });
     mocks.getLeads.mockResolvedValue(empty); mocks.getOpportunities.mockResolvedValue(empty); mocks.getQuotes.mockResolvedValue(empty);
     detail.mockImplementation(async (id: string) => record(id));
   });

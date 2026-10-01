@@ -7,6 +7,14 @@ import PropertyEnquiriesPage from './page';
 const mocks = vi.hoisted(() => ({ id: 'one', request: vi.fn() }));
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(`id=${mocks.id}`) }));
 vi.mock('@/services/api.service', () => ({ apiService: { request: mocks.request } }));
+vi.mock('@/services/salesReferenceService', () => ({
+  salesReferenceService: {
+    getActiveCurrencies: async () => [
+      { code: 'GHS', name: 'Ghana Cedi', isBaseCurrency: true },
+      { code: 'USD', name: 'US Dollar', isBaseCurrency: false },
+    ],
+  },
+}));
 vi.mock('@/components/estate/PropertyEnquiryDetails', () => ({ PropertyEnquiryDetails: () => null }));
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ hasPermission: () => false }) }));

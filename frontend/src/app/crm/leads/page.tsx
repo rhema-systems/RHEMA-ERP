@@ -19,6 +19,8 @@ import {
   type CrmLeadListItemDto,
   type PagedResult,
 } from '@/services/crmService';
+import { currencyService } from '@/services/financeCommonService';
+import { formatCurrencyAmount } from '@/lib/currency';
 import { SalesHandoffActions } from '../components/SalesHandoffActions';
 import {
   CalendarClock,
@@ -60,8 +62,8 @@ const emptyLeadForm = (): CreateCrmLeadDto => ({
   notes: '',
 });
 
-const formatMoney = (value: number, currency: string = 'USD') =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value);
+const formatMoney = (value: number, currency: string) =>
+  formatCurrencyAmount(value, currency, 0);
 
 const formatDate = (value?: string) => value ? new Date(value).toLocaleDateString() : 'None';
 
@@ -123,6 +125,7 @@ function LeadDialog({
   description,
   form,
   saving,
+  functionalCurrency,
   onOpenChange,
   onSubmit,
   onChange,
@@ -132,6 +135,7 @@ function LeadDialog({
   description: string;
   form: CreateCrmLeadDto;
   saving: boolean;
+  functionalCurrency: string;
   onOpenChange: (open: boolean) => void;
   onSubmit: () => void;
   onChange: <K extends keyof CreateCrmLeadDto>(field: K, value: CreateCrmLeadDto[K]) => void;
@@ -261,7 +265,9 @@ function LeadDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="lead-estimated-value">Estimated Value</Label>
+            <Label htmlFor="lead-estimated-value">
+              Estimated Value ({functionalCurrency})
+            </Label>
             <Input
               id="lead-estimated-value"
               type="number"
@@ -377,6 +383,19 @@ export default function CrmLeadsPage() {
   const [formMode, setFormMode] = useState<'create' | 'edit'>('create');
   const [form, setForm] = useState<CreateCrmLeadDto>(emptyLeadForm());
   const [saving, setSaving] = useState(false);
+  const [functionalCurrency, setFunctionalCurrency] = useState('GHS');
+
+  useEffect(() => {
+    let cancelled = false;
+    void currencyService.getBaseCurrency().then((currency) => {
+      if (!cancelled && currency?.code) {
+        setFunctionalCurrency(currency.code.toUpperCase());
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadLeads = async (requestedPage: number = page) => {
     const requestedIdAtLoad = requestedIdRef.current;
@@ -469,6 +488,7 @@ export default function CrmLeadsPage() {
         label: 'Qualified Value',
         value: formatMoney(
           items.filter((item) => item.leadStatus === 'Qualified').reduce((sum, item) => sum + item.estimatedValue, 0),
+          functionalCurrency,
         ),
         hint: 'Current page only',
         icon: TrendingUp,
@@ -480,7 +500,7 @@ export default function CrmLeadsPage() {
         icon: Target,
       },
     ];
-  }, [result]);
+  }, [functionalCurrency, result]);
 
   const openCreateDialog = () => {
     setFormMode('create');
@@ -694,7 +714,7 @@ export default function CrmLeadsPage() {
                       </TableCell>
                       <TableCell>{formatDate(lead.nextFollowUpDate)}</TableCell>
                       <TableCell className="text-right">
-                        <div>{formatMoney(lead.estimatedValue)}</div>
+                        <div>{formatMoney(lead.estimatedValue, functionalCurrency)}</div>
                         <div className="text-xs text-muted-foreground">{lead.opportunityCount} opportunities</div>
                       </TableCell>
                       <TableCell className="text-right">
@@ -796,7 +816,10 @@ export default function CrmLeadsPage() {
                     <div className="text-xs uppercase tracking-wide text-muted-foreground">Qualification</div>
                     <div className="mt-2 space-y-2">
                       <div>Score: {selectedLead.qualificationScore}/100</div>
-                      <div>Estimated Value: {formatMoney(selectedLead.estimatedValue)}</div>
+                      <div>
+                        Estimated Value:{' '}
+                        {formatMoney(selectedLead.estimatedValue, functionalCurrency)}
+                      </div>
                       <div>Next Follow-Up: {formatDate(selectedLead.nextFollowUpDate)}</div>
                     </div>
                   </div>
@@ -818,8 +841,8 @@ export default function CrmLeadsPage() {
                     </Link>
                   </Button>
                   <Button asChild variant="outline">
-                    <Link href={`/crm/activities?leadId=${selectedLead.leadId}`}>
-                      View Activities
+                    <Link href={`/crm/activities?leadId=${selectedLead.leadId}&new=1`}>
+                      Create Activity
                     </Link>
                   </Button>
                   {selectedLead.convertedBusinessPartnerId ? (
@@ -829,7 +852,7 @@ export default function CrmLeadsPage() {
                         businessPartnerName: selectedLead.companyName || selectedLead.fullName,
                         leadId: selectedLead.leadId,
                         leadName: selectedLead.fullName,
-                        currency: 'GHS',
+                        currency: functionalCurrency,
                         estimatedValue: selectedLead.estimatedValue,
                         contextLabel: 'Converted Lead',
                       }}
@@ -908,6 +931,7 @@ export default function CrmLeadsPage() {
         description="Capture lead details without creating a duplicate customer master record."
         form={form}
         saving={saving}
+        functionalCurrency={functionalCurrency}
         onOpenChange={setFormOpen}
         onSubmit={() => void submitLead()}
         onChange={(field, value) => setForm((current) => ({ ...current, [field]: value }))}

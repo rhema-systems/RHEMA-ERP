@@ -24,6 +24,14 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/services/api.service', () => ({
   apiService: { request: mocks.request },
 }));
+vi.mock('@/services/salesReferenceService', () => ({
+  salesReferenceService: {
+    getActiveCurrencies: async () => [
+      { code: 'GHS', name: 'Ghana Cedi', isBaseCurrency: true },
+      { code: 'USD', name: 'US Dollar', isBaseCurrency: false },
+    ],
+  },
+}));
 vi.mock('@/components/estate/PropertyEnquiryDetails', () => ({
   PropertyEnquiryDetails: () => null,
 }));

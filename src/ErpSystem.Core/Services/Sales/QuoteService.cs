@@ -157,10 +157,11 @@ public class QuoteService : IQuoteService
     {
         var quote = await _quoteRepo.GetByIdAsync(id,
             q => q.Opportunity,
-            q => q.Customer!,
             q => q.LineItems);
 
-        return quote == null ? null : MapToDetailDto(quote);
+        if (quote == null) return null;
+        var customerNames = await SalesBusinessPartnerNames.LoadAsync(_unitOfWork, _currentUserProvider.TenantId, new[] { quote.CustomerId });
+        return MapToDetailDto(quote, customerNames);
     }
 
     public async Task<PagedResult<QuoteSummaryDto>> GetAllAsync(
@@ -186,16 +187,17 @@ public class QuoteService : IQuoteService
         var totalCount = await query.CountAsync();
         var items = await query
             .Include(q => q.Opportunity)
-            .Include(q => q.Customer)
             .Include(q => q.LineItems)
             .OrderByDescending(q => q.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync();
 
+        var customerNames = await SalesBusinessPartnerNames.LoadAsync(_unitOfWork, _currentUserProvider.TenantId, items.Select(item => item.CustomerId));
+
         return new PagedResult<QuoteSummaryDto>
         {
-            Items = items.Select(MapToSummaryDto).ToList(),
+            Items = items.Select(item => MapToSummaryDto(item, customerNames)).ToList(),
             TotalCount = totalCount,
             Page = page,
             PageSize = pageSize
@@ -280,11 +282,11 @@ public class QuoteService : IQuoteService
         var items = await _quoteRepo.GetQueryable()
             .Where(q => q.OpportunityId == opportunityId)
             .Include(q => q.Opportunity)
-            .Include(q => q.Customer)
             .Include(q => q.LineItems)
             .OrderByDescending(q => q.CreatedAt)
             .ToListAsync();
-        return items.Select(MapToSummaryDto).ToList();
+        var customerNames = await SalesBusinessPartnerNames.LoadAsync(_unitOfWork, _currentUserProvider.TenantId, items.Select(item => item.CustomerId));
+        return items.Select(item => MapToSummaryDto(item, customerNames)).ToList();
     }
 
     public async Task<List<QuoteSummaryDto>> GetExpiringQuotesAsync(int daysAhead = 7)
@@ -293,10 +295,10 @@ public class QuoteService : IQuoteService
         var items = await _quoteRepo.GetQueryable()
             .Where(q => q.QuoteStatus == "Sent" && q.ValidUntil <= cutoff && q.ValidUntil >= DateTime.UtcNow)
             .Include(q => q.Opportunity)
-            .Include(q => q.Customer)
             .OrderBy(q => q.ValidUntil)
             .ToListAsync();
-        return items.Select(MapToSummaryDto).ToList();
+        var customerNames = await SalesBusinessPartnerNames.LoadAsync(_unitOfWork, _currentUserProvider.TenantId, items.Select(item => item.CustomerId));
+        return items.Select(item => MapToSummaryDto(item, customerNames)).ToList();
     }
 
     #endregion
@@ -313,7 +315,7 @@ public class QuoteService : IQuoteService
             nameof(Quote));
     }
 
-    private static QuoteSummaryDto MapToSummaryDto(Quote q) => new()
+    private static QuoteSummaryDto MapToSummaryDto(Quote q, IReadOnlyDictionary<Guid, string> customerNames) => new()
     {
         Id = q.Id,
         DocumentNumber = q.DocumentNumber,
@@ -321,7 +323,7 @@ public class QuoteService : IQuoteService
         QuoteStatus = q.QuoteStatus,
         OpportunityId = q.OpportunityId,
         OpportunityName = q.Opportunity?.Name,
-        CustomerName = q.Customer?.CustomerName,
+        CustomerName = customerNames.GetValueOrDefault(q.CustomerId ?? Guid.Empty),
         TotalAmount = q.TotalAmount,
         TaxAmount = q.TaxAmount,
         ValidUntil = q.ValidUntil,
@@ -331,7 +333,7 @@ public class QuoteService : IQuoteService
         CreatedAt = q.CreatedAt
     };
 
-    private static QuoteDetailDto MapToDetailDto(Quote q) => new()
+    private static QuoteDetailDto MapToDetailDto(Quote q, IReadOnlyDictionary<Guid, string> customerNames) => new()
     {
         Id = q.Id,
         DocumentNumber = q.DocumentNumber,
@@ -340,7 +342,7 @@ public class QuoteService : IQuoteService
         OpportunityId = q.OpportunityId,
         OpportunityName = q.Opportunity?.Name,
         CustomerId = q.CustomerId,
-        CustomerName = q.Customer?.CustomerName,
+        CustomerName = customerNames.GetValueOrDefault(q.CustomerId ?? Guid.Empty),
         TotalAmount = q.TotalAmount,
         TaxAmount = q.TaxAmount,
         SubTotal = q.SubTotal,

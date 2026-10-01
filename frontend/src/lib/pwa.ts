@@ -18,6 +18,7 @@ export class PWAManager {
   private updateHandlers: (() => void)[] = []
   private deferredInstallPrompt: BeforeInstallPromptEvent | null = null
   private installPromptListenerReady = false
+  private controllerChangeListenerReady = false
 
   static getInstance(): PWAManager {
     if (!PWAManager.instance) {
@@ -93,9 +94,27 @@ export class PWAManager {
   }
 
   private async registerServiceWorker() {
+    const serviceWorker = navigator.serviceWorker
+    if (!serviceWorker) return
+
     try {
-      const registration = await navigator.serviceWorker.register('/sw.js', {
-        scope: '/'
+      if (!this.controllerChangeListenerReady) {
+        this.controllerChangeListenerReady = true
+        serviceWorker.addEventListener('controllerchange', () => {
+          // skipWaiting + clients.claim can otherwise trigger repeated reloads
+          // when more than one initialization path observes the same update.
+          const reloadKey = 'erp-sw-controller-reload-at'
+          const lastReloadAt = Number(window.sessionStorage.getItem(reloadKey) || 0)
+          if (Date.now() - lastReloadAt < 10_000) return
+
+          window.sessionStorage.setItem(reloadKey, String(Date.now()))
+          window.location.reload()
+        })
+      }
+
+      const registration = await serviceWorker.register('/sw.js', {
+        scope: '/',
+        updateViaCache: 'none'
       })
       
       this.serviceWorkerRegistration = registration
@@ -115,10 +134,9 @@ export class PWAManager {
         }
       })
 
-      // Listen for controlling service worker changes
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        window.location.reload()
-      })
+      // Do not wait for the browser's normal service-worker update interval.
+      // Every ERP bootstrap must discover a newly deployed release promptly.
+      await registration.update()
 
     } catch (error) {
       console.error('Service Worker registration failed:', error)

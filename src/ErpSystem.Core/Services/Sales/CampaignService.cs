@@ -248,10 +248,10 @@ public class CampaignService : ICampaignService
         var members = await _memberRepo.GetQueryable()
             .Where(m => m.CampaignId == campaignId)
             .Include(m => m.Lead)
-            .Include(m => m.Customer)
             .OrderByDescending(m => m.DateAdded)
             .ToListAsync();
 
+        var customerNames = await SalesBusinessPartnerNames.LoadAsync(_unitOfWork, _currentUserProvider.TenantId, members.Select(member => member.CustomerId));
         return members.Select(m => new CampaignMemberDto
         {
             Id = m.Id,
@@ -259,7 +259,7 @@ public class CampaignService : ICampaignService
             LeadId = m.LeadId,
             LeadName = m.Lead != null ? m.Lead.FullName : null,
             CustomerId = m.CustomerId,
-            CustomerName = m.Customer?.CustomerName,
+            CustomerName = customerNames.GetValueOrDefault(m.CustomerId ?? Guid.Empty),
             MemberStatus = m.MemberStatus,
             DateAdded = m.DateAdded,
             ResponseDate = m.ResponseDate,
