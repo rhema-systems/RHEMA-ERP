@@ -77,6 +77,35 @@ function Get-GitHubCliPath {
     return $portablePath
 }
 
+function Test-GitHubCliAuthentication {
+    param(
+        [Parameter(Mandatory)]
+        [string]$GitHubCliPath
+    )
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $GitHubCliPath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.Arguments = 'auth status --hostname github.com'
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        [void]$process.Start()
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        [void]$stdoutTask.GetAwaiter().GetResult()
+        [void]$stderrTask.GetAwaiter().GetResult()
+        return $process.ExitCode -eq 0
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
 function Initialize-WindowsOpenSshServer {
     $principal = [Security.Principal.WindowsPrincipal]::new(
         [Security.Principal.WindowsIdentity]::GetCurrent())
@@ -681,13 +710,13 @@ Initialize-DeploymentSshIdentity
 Ensure-OpenSshServiceRunning
 Write-Output "Windows OpenSSH Server is ready on TCP $SshPort."
 
-& $script:GitHubCliPath auth status --hostname github.com 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
+if (-not (Test-GitHubCliAuthentication -GitHubCliPath $script:GitHubCliPath)) {
     Write-Warning 'GitHub CLI authentication is required once. Complete the browser/device sign-in.'
     & $script:GitHubCliPath auth login --hostname github.com --git-protocol https --web
+    Assert-True ($LASTEXITCODE -eq 0) 'GitHub CLI login did not complete.'
 }
-& $script:GitHubCliPath auth status --hostname github.com | Out-Null
-Assert-True ($LASTEXITCODE -eq 0) 'GitHub CLI is not authenticated.'
+Assert-True (Test-GitHubCliAuthentication -GitHubCliPath $script:GitHubCliPath) `
+    'GitHub CLI is not authenticated.'
 $repositoryAccess = & $script:GitHubCliPath repo view $Repository `
     --json nameWithOwner,viewerPermission | ConvertFrom-Json
 Assert-True ($LASTEXITCODE -eq 0 -and
