@@ -118,7 +118,10 @@ jobs:
         shell: powershell
         env:
           SYNCFUSION_LICENSE: ${{ secrets.SYNCFUSION_LICENSE }}
-          NEXT_BUILD_MAX_OLD_SPACE_SIZE_MB: 6144
+          # The current production route graph exceeds 6 GiB during webpack
+          # optimization. windows-latest provides enough memory for a 10 GiB
+          # build heap while retaining headroom for the runner and native work.
+          NEXT_BUILD_MAX_OLD_SPACE_SIZE_MB: 10240
           NEXT_TELEMETRY_DISABLED: 1
         run: |
           $ErrorActionPreference = 'Stop'
