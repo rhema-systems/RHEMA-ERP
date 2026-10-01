@@ -177,32 +177,7 @@ $blockEnd
         "Windows OpenSSH rejected its managed configuration: $($script:SshdConfigPath)"
 
     Set-Service -Name sshd -StartupType Automatic
-    $sshdService = Get-Service -Name sshd
-    if ($sshdService.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running) {
-        $portUsers = @(Get-NetTCPConnection -State Listen -LocalPort $SshPort `
-                -ErrorAction SilentlyContinue)
-        Assert-True ($portUsers.Count -eq 0) `
-            "TCP $SshPort is already used by process $($portUsers[0].OwningProcess); sshd cannot start."
-    }
-    $startAttempt = Get-Date
-    try {
-        if ($sshdService.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running) {
-            Restart-Service -Name sshd -Force -ErrorAction Stop
-        }
-        else {
-            Start-Service -Name sshd -ErrorAction Stop
-        }
-        $sshdService = Get-Service -Name sshd
-        $sshdService.WaitForStatus(
-            [System.ServiceProcess.ServiceControllerStatus]::Running,
-            [TimeSpan]::FromSeconds(30))
-    }
-    catch {
-        $activationError = $_.Exception.Message
-        Start-Sleep -Seconds 1
-        $startupEvidence = Get-OpenSshStartupEvidence -StartTime $startAttempt
-        throw "OpenSSH service activation failed: $activationError $startupEvidence"
-    }
+    Ensure-OpenSshServiceRunning -Restart
 
     $firewallDisplayName = "RhemaERP GitHub Actions SSH $SshPort"
     $firewallRule = Get-NetFirewallRule -DisplayName $firewallDisplayName `
@@ -222,7 +197,6 @@ $blockEnd
             Set-NetFirewallPortFilter -Protocol TCP -LocalPort $SshPort | Out-Null
     }
 
-    Write-Output "Windows OpenSSH Server is ready on TCP $SshPort."
 }
 
 function Protect-OpenSshFile {
@@ -318,6 +292,51 @@ function Get-OpenSshStartupEvidence {
         $summary = $summary.Substring(0, 1600)
     }
     return $summary.Trim()
+}
+
+function Ensure-OpenSshServiceRunning {
+    param([switch]$Restart)
+
+    $sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
+    Assert-True ($null -ne $sshdService) `
+        'The Windows OpenSSH server service is not installed.'
+    if ($sshdService.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running) {
+        $portUsers = @(Get-NetTCPConnection -State Listen -LocalPort $SshPort `
+                -ErrorAction SilentlyContinue)
+        Assert-True ($portUsers.Count -eq 0) `
+            "TCP $SshPort is already used by process $($portUsers[0].OwningProcess); sshd cannot start."
+    }
+
+    $startAttempt = Get-Date
+    try {
+        if ($sshdService.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running) {
+            if ($Restart) {
+                Restart-Service -Name sshd -Force -ErrorAction Stop
+            }
+        }
+        else {
+            Start-Service -Name sshd -ErrorAction Stop
+        }
+        $sshdService = Get-Service -Name sshd
+        $sshdService.WaitForStatus(
+            [System.ServiceProcess.ServiceControllerStatus]::Running,
+            [TimeSpan]::FromSeconds(30))
+        Start-Sleep -Seconds 3
+        $sshdService.Refresh()
+        Assert-True ($sshdService.Status -eq
+            [System.ServiceProcess.ServiceControllerStatus]::Running) `
+            'The sshd process exited after initially reaching Running state.'
+        $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $SshPort `
+                -ErrorAction SilentlyContinue)
+        Assert-True ($listeners.Count -gt 0) `
+            "sshd is running but TCP $SshPort is not listening."
+    }
+    catch {
+        $activationError = $_.Exception.Message
+        Start-Sleep -Seconds 1
+        $startupEvidence = Get-OpenSshStartupEvidence -StartTime $startAttempt
+        throw "OpenSSH service activation failed: $activationError $startupEvidence"
+    }
 }
 
 function New-DeploymentSshKey {
@@ -554,9 +573,8 @@ Assert-True ($null -ne (Get-Command ssh-keygen.exe -ErrorAction SilentlyContinue
 Assert-True ($null -ne (Get-Command ssh.exe -ErrorAction SilentlyContinue)) `
     'Required command is unavailable after OpenSSH installation: ssh.exe'
 Initialize-DeploymentSshIdentity
-$sshdService = Get-Service -Name sshd -ErrorAction SilentlyContinue
-Assert-True ($null -ne $sshdService -and $sshdService.Status -eq 'Running') `
-    'The Windows OpenSSH server service is not running.'
+Ensure-OpenSshServiceRunning
+Write-Output "Windows OpenSSH Server is ready on TCP $SshPort."
 
 & $script:GitHubCliPath auth status --hostname github.com 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {
