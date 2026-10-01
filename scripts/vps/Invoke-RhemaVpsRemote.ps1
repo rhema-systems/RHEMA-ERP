@@ -78,7 +78,11 @@ function Invoke-RemoteTimedStep {
     $started = [DateTime]::UtcNow
     $resourcesBefore = Get-RemoteResourceSnapshot
     $watch = [Diagnostics.Stopwatch]::StartNew()
-    Write-Output "REMOTE_STEP_START|$Name|$($started.ToString('o'))"
+    # Keep lifecycle markers visible to the deployment log without placing them
+    # on the success stream. Callers capture operation results (for example a
+    # DataRow returned by a verification query); success-stream markers would
+    # otherwise become element zero and silently replace the value being checked.
+    Write-Host "REMOTE_STEP_START|$Name|$($started.ToString('o'))"
     try {
         & $Operation
         $watch.Stop()
@@ -89,7 +93,7 @@ function Invoke-RemoteTimedStep {
             durationSeconds = [Math]::Round($watch.Elapsed.TotalSeconds, 2)
             resourcesBefore = $resourcesBefore; resourcesAfter = Get-RemoteResourceSnapshot
         })
-        Write-Output ("REMOTE_STEP_PASS|{0}|{1:n1}s" -f $Name, $watch.Elapsed.TotalSeconds)
+        Write-Host ("REMOTE_STEP_PASS|{0}|{1:n1}s" -f $Name, $watch.Elapsed.TotalSeconds)
     }
     catch {
         $watch.Stop()
@@ -101,7 +105,7 @@ function Invoke-RemoteTimedStep {
             resourcesBefore = $resourcesBefore; resourcesAfter = Get-RemoteResourceSnapshot
             error = $_.Exception.Message
         })
-        Write-Output ("REMOTE_STEP_FAIL|{0}|{1:n1}s|{2}" -f $Name, $watch.Elapsed.TotalSeconds, $_.Exception.Message)
+        Write-Host ("REMOTE_STEP_FAIL|{0}|{1:n1}s|{2}" -f $Name, $watch.Elapsed.TotalSeconds, $_.Exception.Message)
         throw
     }
 }

@@ -206,6 +206,33 @@ foreach ($contract in @("Join-Path `$RhemaRoot 'releases'", 'VERSIONED_RELEASE|'
 Assert-Test (-not $remote.Contains('Expand-Archive')) `
     'Remote activation still uses slow PowerShell Expand-Archive.'
 
+# Verification queries are intentionally captured from Invoke-RemoteTimedStep.
+# Timing markers must remain visible in the host log without entering that
+# captured success stream and displacing the query result at array index zero.
+$remoteTokens = $null; $remoteErrors = $null
+$remoteAst = [Management.Automation.Language.Parser]::ParseFile(
+    $remotePath, [ref]$remoteTokens, [ref]$remoteErrors)
+$remoteTimedStepAst = $remoteAst.Find({
+        param($candidate)
+        $candidate -is [Management.Automation.Language.FunctionDefinitionAst] -and
+            $candidate.Name -eq 'Invoke-RemoteTimedStep'
+    }, $true)
+Assert-Test ($null -ne $remoteTimedStepAst) `
+    'Remote deployment helper is missing Invoke-RemoteTimedStep.'
+. ([scriptblock]::Create($remoteTimedStepAst.Extent.Text))
+function Get-RemoteResourceSnapshot {
+    [pscustomobject]@{ capturedUtc = [DateTime]::UtcNow.ToString('o') }
+}
+$RemoteTimings = New-Object 'System.Collections.Generic.List[object]'
+$capturedVerification = @(Invoke-RemoteTimedStep 'Verification capture contract' {
+        [pscustomobject]@{ PermissionCount = 1; RoleGrantCount = 2 }
+    })
+Assert-Test ($capturedVerification.Count -eq 1) `
+    'Remote timing markers polluted a captured verification result.'
+Assert-Test ($capturedVerification[0].PermissionCount -eq 1 -and
+    $capturedVerification[0].RoleGrantCount -eq 2) `
+    'Remote timing wrapper displaced the captured verification row.'
+
 $workflow = Get-Content $workflowPath -Raw
 Assert-Test $workflow.Contains('frontend/.next-production/cache') `
     'CI does not persist the real Next.js build cache.'
