@@ -139,12 +139,12 @@ namespace ErpSystem.Data.Migrations
             migrationBuilder.AddCheckConstraint(
                 name: "CK_FinanceSettings_InvoiceRoundingReadiness",
                 table: "FinanceSettings",
-                sql: "[InvoiceRoundingEnabled] = 0 OR ([InvoiceRoundingIncrement] > 0 AND [InvoiceRoundingGainAccountId] IS NOT NULL AND [InvoiceRoundingLossAccountId] IS NOT NULL)");
+                sql: "[InvoiceRoundingEnabled] = 0");
 
             migrationBuilder.AddCheckConstraint(
                 name: "CK_FinanceSettings_PrecisionGovernance",
                 table: "FinanceSettings",
-                sql: "[UnitPriceDecimalPlaces] BETWEEN 0 AND 6 AND [ExchangeRateInputDecimalPlaces] BETWEEN 6 AND 10 AND [ExchangeRateDisplayDecimalPlaces] BETWEEN 6 AND 10 AND [TaxPercentageDecimalPlaces] BETWEEN 0 AND 6 AND [ReportDisplayDecimalPlaces] BETWEEN 0 AND 4");
+                sql: "[UnitPriceDecimalPlaces] BETWEEN 0 AND 6 AND [ExchangeRateInputDecimalPlaces] BETWEEN 6 AND 10 AND [ExchangeRateDisplayDecimalPlaces] BETWEEN 6 AND 10 AND [TaxPercentageDecimalPlaces] BETWEEN 0 AND 4 AND [ReportDisplayDecimalPlaces] BETWEEN 0 AND 4 AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingScope] = 0 AND [InvoiceRoundingMethod] IN (0, 1, 2)");
 
             migrationBuilder.AddCheckConstraint(
                 name: "CK_FinanceSettings_RoundingIncrements",

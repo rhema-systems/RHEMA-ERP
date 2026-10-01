@@ -13444,7 +13444,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     "[WhtStatutoryYearStartMonth] BETWEEN 1 AND 12 AND [WhtStatutoryYearStartDay] BETWEEN 1 AND DAY(EOMONTH(DATEFROMPARTS(2001, [WhtStatutoryYearStartMonth], 1)))");
                 table.HasCheckConstraint(
                     "CK_FinanceSettings_PrecisionGovernance",
-                    "[UnitPriceDecimalPlaces] BETWEEN 0 AND 6 AND [ExchangeRateInputDecimalPlaces] BETWEEN 6 AND 10 AND [ExchangeRateDisplayDecimalPlaces] BETWEEN 6 AND 10 AND [TaxPercentageDecimalPlaces] BETWEEN 0 AND 6 AND [ReportDisplayDecimalPlaces] BETWEEN 0 AND 4");
+                    "[UnitPriceDecimalPlaces] BETWEEN 0 AND 6 AND [ExchangeRateInputDecimalPlaces] BETWEEN 6 AND 10 AND [ExchangeRateDisplayDecimalPlaces] BETWEEN 6 AND 10 AND [TaxPercentageDecimalPlaces] BETWEEN 0 AND 4 AND [ReportDisplayDecimalPlaces] BETWEEN 0 AND 4 AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingScope] = 0 AND [InvoiceRoundingMethod] IN (0, 1, 2)");
                 table.HasCheckConstraint(
                     "CK_FinanceSettings_RoundingIncrements",
                     "([TaxRoundingIncrement] IS NULL OR [TaxRoundingIncrement] > 0) AND ([InvoiceRoundingIncrement] IS NULL OR [InvoiceRoundingIncrement] > 0)");
@@ -13453,7 +13453,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     "[SettlementToleranceAmount] >= 0 AND [SettlementTolerancePercentage] BETWEEN 0 AND 100");
                 table.HasCheckConstraint(
                     "CK_FinanceSettings_InvoiceRoundingReadiness",
-                    "[InvoiceRoundingEnabled] = 0 OR ([InvoiceRoundingIncrement] > 0 AND [InvoiceRoundingGainAccountId] IS NOT NULL AND [InvoiceRoundingLossAccountId] IS NOT NULL)");
+                    "[InvoiceRoundingEnabled] = 0");
                 if (isSqlServer)
                     table.HasCheckConstraint(
                         "CK_FinanceSettings_BaseCurrencyCanonical_C3",

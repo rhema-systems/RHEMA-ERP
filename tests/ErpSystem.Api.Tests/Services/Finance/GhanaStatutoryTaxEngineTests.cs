@@ -354,7 +354,7 @@ public sealed class GhanaStatutoryTaxEngineTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-GhanaTax")]
     [Trait("Category", "Tax")]
-    public async Task TaxCalculation_ShouldApplyConfiguredLineAndDocumentRoundingBoundaries()
+    public async Task TaxCalculation_ShouldReportLineDeltaAndGateAggregateScopeWithoutDocumentOrchestrator()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -390,13 +390,13 @@ public sealed class GhanaStatutoryTaxEngineTests
         var lineResult = await engine.CalculateTaxesAsync(request);
         settings.TaxRoundingScope = TaxRoundingScope.Document;
         await db.SaveChangesAsync();
-        var documentResult = await engine.CalculateTaxesAsync(request);
+        var aggregateAct = async () => await engine.CalculateTaxesAsync(request);
 
         lineResult.TotalTaxAmount.Should().Be(0.04m);
         lineResult.TaxRoundingScope.Should().Be(TaxRoundingScope.Line);
-        documentResult.TotalTaxAmount.Should().Be(0.05m);
-        documentResult.TaxRoundingDelta.Should().Be(0.004m);
-        documentResult.TaxBreakdowns.Sum(item => item.TaxAmount).Should().Be(documentResult.TotalTaxAmount);
+        lineResult.TaxRoundingDelta.Should().Be(-0.006m);
+        await aggregateAct.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*document-wide AR/AP tax orchestrator*");
     }
 
     [Fact]

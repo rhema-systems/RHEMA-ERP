@@ -89,3 +89,14 @@ Shared model snapshot ownership stays with this branch. Any migration remains au
 - Changed-file frontend ESLint passed with no diagnostics. Full TypeScript validation still reports unrelated baseline errors in existing civil-engineering, medical, report-builder and legacy Finance fixture files; none reference this work package's changed files.
 - Canonical AR/AP invoice posting behavior and gain/loss journal-line creation were not changed because that accounting side effect requires explicit user approval. Invoice-rounding configuration is therefore fail-closed: the UI cannot activate it and the API rejects activation until that integration is authorized.
 - Review: coherent local commit and independent read-only accounting review are next.
+
+## Checkpoint — independent review and correction loop
+
+- Independent read-only review completed against commit `2dd80592c`. It confirmed the migration is additive/non-destructive and found no unrelated scope changes.
+- The review identified that document/tax-code-group scope needs a document-wide AR/AP orchestrator, non-two-decimal tax posting needs widened posting/evidence storage, UOM increments need enforcement at every quantity write/post boundary, and invoice rounding needs canonical gain/loss posting. Those accounting behavior changes were not authorized in this work package.
+- Corrective strategy is fail-closed rather than partial activation: aggregate tax scopes, non-two-decimal tax posting, UOM increment activation, and invoice rounding activation now reject explicitly. UI controls communicate/disable the unavailable choices, and database checks force Line tax scope plus disabled invoice rounding.
+- Added service and database enum validation; tax increments must be whole multiples of the currency minor unit; tax percentage precision is capped at the existing four-decimal evidence capacity.
+- Added stable tax component tie-breaking and corrected `TaxRoundingDelta` to compare governed results with raw tax for every supported scope.
+- Precision lifecycle detection now considers posted/reversed journals rather than drafts. Precision policy changes require the Finance audit service and use a relational transaction so settings and audit evidence commit or roll back together.
+- Correction verification: 15 focused core tests passed; corrected focused API tax regression passed; changed-file frontend ESLint passed; API compilation succeeded with existing warnings only.
+- Deferred, approval-dependent adapters: document-wide AR/AP aggregate tax orchestration and allocation evidence; widening tax posting/snapshot storage for 0/3/4-decimal currencies and >4-decimal rates; canonical invoice rounding gain/loss lines; UOM enforcement at journal, budget and posting boundaries; explicit null-clear PATCH semantics; signed tax credit/reversal flow.

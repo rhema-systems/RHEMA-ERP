@@ -430,8 +430,20 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 settings.ApInvoiceQuantityTolerancePercent = dto.ApInvoiceQuantityTolerancePercent.Value;
             }
 
-            ApplyPrecisionSettings(dto, settings);
+            var baseCurrency = await _tenantSettingsService.GetBaseCurrencyReferenceAsync();
+            ApplyPrecisionSettings(dto, settings, baseCurrency.DecimalPlaces);
 
+            var afterPrecisionPolicy = PrecisionPolicyAuditValues(settings);
+            var precisionPolicyChanged = !Equals(beforePrecisionPolicy, afterPrecisionPolicy);
+            if (precisionPolicyChanged && _financeAuditService == null)
+            {
+                throw new InvalidOperationException(
+                    "Finance precision and rounding changes require the Finance audit service.");
+            }
+
+            await using var precisionAuditTransaction = precisionPolicyChanged && _context.Database.IsRelational()
+                ? await _context.Database.BeginTransactionAsync()
+                : null;
             await _context.SaveChangesAsync();
 
             var afterWriteOffMappings = new
@@ -513,8 +525,7 @@ namespace ErpSystem.Api.Services.Finance.Settings
                     afterValues: afterControlPolicy);
             }
 
-            var afterPrecisionPolicy = PrecisionPolicyAuditValues(settings);
-            if (!Equals(beforePrecisionPolicy, afterPrecisionPolicy))
+            if (precisionPolicyChanged)
             {
                 await RecordFinanceSettingsAuditAsync(
                     FinanceAuditEvents.FinanceControlPolicyChanged,
@@ -526,7 +537,9 @@ namespace ErpSystem.Api.Services.Finance.Settings
                     sourceModule: "Finance");
             }
 
-            var baseCurrency = await _tenantSettingsService.GetBaseCurrencyReferenceAsync();
+            if (precisionAuditTransaction != null)
+                await precisionAuditTransaction.CommitAsync();
+
             return MapToDto(settings, baseCurrency, await HasAccountingActivityAsync(tenantId));
         }
 
@@ -620,7 +633,8 @@ namespace ErpSystem.Api.Services.Finance.Settings
         private async Task<bool> HasAccountingActivityAsync(Guid tenantId)
         {
             return await _context.FinancePostingEvents.AnyAsync(e => e.TenantId == tenantId && !e.IsDeleted)
-                || await _context.JournalEntries.AnyAsync(j => j.TenantId == tenantId && !j.IsDeleted)
+                || await _context.JournalEntries.AnyAsync(j => j.TenantId == tenantId && !j.IsDeleted &&
+                    (j.PostingStatus == "Posted" || j.PostingStatus == "Reversed"))
                 || await _context.AccountTransactions.AnyAsync(t => t.TenantId == tenantId && !t.IsDeleted);
         }
 
@@ -774,7 +788,10 @@ namespace ErpSystem.Api.Services.Finance.Settings
             };
         }
 
-        private static void ApplyPrecisionSettings(UpdateFinanceSettingsDto dto, FinanceSettings settings)
+        private static void ApplyPrecisionSettings(
+            UpdateFinanceSettingsDto dto,
+            FinanceSettings settings,
+            int currencyDecimalPlaces)
         {
             var unitPricePlaces = dto.UnitPriceDecimalPlaces ?? settings.UnitPriceDecimalPlaces;
             _ = PrecisionRoundingPolicy.RoundUnitPrice(0m, unitPricePlaces);
@@ -786,6 +803,9 @@ namespace ErpSystem.Api.Services.Finance.Settings
 
             var taxPercentagePlaces = dto.TaxPercentageDecimalPlaces ?? settings.TaxPercentageDecimalPlaces;
             _ = PrecisionRoundingPolicy.RoundPercentage(0m, taxPercentagePlaces);
+            if (taxPercentagePlaces > 4)
+                throw new InvalidOperationException(
+                    "Tax percentage precision above 4 decimals is unavailable until tax evidence storage is widened.");
 
             var reportPlaces = dto.ReportDisplayDecimalPlaces ?? settings.ReportDisplayDecimalPlaces;
             if (reportPlaces is < 0 or > CurrencyMinorUnitPolicy.MaximumDecimalPlaces)
@@ -794,6 +814,22 @@ namespace ErpSystem.Api.Services.Finance.Settings
             var taxIncrement = dto.TaxRoundingIncrement ?? settings.TaxRoundingIncrement;
             if (taxIncrement.HasValue && taxIncrement.Value <= 0m)
                 throw new InvalidOperationException("Tax rounding increment must be greater than zero.");
+            var currencyMinorUnit = CurrencyMinorUnitPolicy.MinorUnit(currencyDecimalPlaces);
+            if (taxIncrement.HasValue &&
+                (taxIncrement.Value < currencyMinorUnit || taxIncrement.Value % currencyMinorUnit != 0m))
+            {
+                throw new InvalidOperationException(
+                    $"Tax rounding increment must be a whole multiple of the currency minor unit {currencyMinorUnit}.");
+            }
+
+            var taxMethod = dto.TaxRoundingMethod ?? settings.TaxRoundingMethod;
+            var taxScope = dto.TaxRoundingScope ?? settings.TaxRoundingScope;
+            var invoiceMethod = dto.InvoiceRoundingMethod ?? settings.InvoiceRoundingMethod;
+            if (!Enum.IsDefined(taxMethod) || !Enum.IsDefined(taxScope) || !Enum.IsDefined(invoiceMethod))
+                throw new InvalidOperationException("Rounding method and scope values must be defined governance options.");
+            if (taxScope != TaxRoundingScope.Line)
+                throw new InvalidOperationException(
+                    "Tax-code-group and document rounding require the document-wide AR/AP tax orchestrator and cannot be activated yet.");
 
             var invoiceEnabled = dto.InvoiceRoundingEnabled ?? settings.InvoiceRoundingEnabled;
             if (invoiceEnabled)

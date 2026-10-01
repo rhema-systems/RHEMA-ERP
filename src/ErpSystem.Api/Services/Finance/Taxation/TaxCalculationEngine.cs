@@ -70,12 +70,22 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 ?? CurrencyMinorUnitPolicy.ExpectedDecimalPlaces(baseCurrencyCode)
                 ?? 2;
             CurrencyMinorUnitPolicy.Validate(baseCurrencyCode, currencyDecimalPlaces);
+            if (currencyDecimalPlaces != 2)
+            {
+                throw new InvalidOperationException(
+                    "Tax posting is currently gated to 2-decimal currencies until AR/AP tax evidence and posting storage are widened.");
+            }
 
             var percentageDecimalPlaces = precisionSettings?.TaxPercentageDecimalPlaces ?? 4;
             var roundingMethod = precisionSettings?.TaxRoundingMethod ?? GovernedRoundingMethod.Nearest;
             var roundingScope = precisionSettings?.TaxRoundingScope ?? TaxRoundingScope.Line;
             var roundingIncrement = precisionSettings?.TaxRoundingIncrement
                 ?? CurrencyMinorUnitPolicy.MinorUnit(currencyDecimalPlaces);
+            if (!Enum.IsDefined(roundingMethod) || !Enum.IsDefined(roundingScope))
+                throw new InvalidOperationException("Configured tax rounding method or scope is invalid.");
+            if (roundingScope != TaxRoundingScope.Line)
+                throw new InvalidOperationException(
+                    "Configured aggregate tax rounding requires the document-wide AR/AP tax orchestrator.");
             result.TaxRoundingScope = roundingScope;
             result.TaxRoundingMethod = roundingMethod;
             result.TaxRoundingIncrement = roundingIncrement;
@@ -141,8 +151,12 @@ namespace ErpSystem.Api.Services.Finance.Taxation
 
             // Calculate taxes in order
             var calculatedTaxes = new Dictionary<string, decimal>(); // TaxCode -> Amount
+            var rawTaxTotal = 0m;
             
-            foreach (var component in components.OrderBy(c => c.CalculationOrder))
+            foreach (var component in components
+                .OrderBy(c => c.CalculationOrder)
+                .ThenBy(c => c.Tax != null ? c.Tax.Code : string.Empty, StringComparer.Ordinal)
+                .ThenBy(c => c.Id))
             {
                 var tax = component.Tax;
                 if (tax == null)
@@ -192,6 +206,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                     effectiveRate.Value,
                     percentageDecimalPlaces);
                 var rawTaxAmount = taxableAmount * governedRate / 100m;
+                rawTaxTotal += rawTaxAmount;
                 var taxAmount = roundingScope == TaxRoundingScope.Line
                     ? PrecisionRoundingPolicy.RoundToIncrement(rawTaxAmount, roundingIncrement, roundingMethod)
                     : rawTaxAmount;
@@ -250,7 +265,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
 
             // Calculate totals
             result.TotalTaxAmount = result.TaxBreakdowns.Sum(t => t.TaxAmount);
-            result.TaxRoundingDelta = result.TotalTaxAmount - calculatedTaxes.Values.Sum();
+            result.TaxRoundingDelta = result.TotalTaxAmount - rawTaxTotal;
             result.GrandTotal = request.BaseAmount + result.TotalTaxAmount;
             result.EffectiveTaxRate = request.BaseAmount > 0 
                 ? PrecisionRoundingPolicy.RoundPercentage(

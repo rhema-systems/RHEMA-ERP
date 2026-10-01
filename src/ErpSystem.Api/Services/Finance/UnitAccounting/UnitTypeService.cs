@@ -75,6 +75,9 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
         public async Task<UnitTypeDto> CreateAsync(CreateUnitTypeDto dto, CancellationToken cancellationToken = default)
         {
+            if (dto.RoundingIncrement.HasValue)
+                throw new InvalidOperationException(
+                    "UOM rounding increments cannot be activated until all quantity write and posting adapters enforce them.");
             PrecisionRoundingPolicy.ValidateQuantity(0m, dto.DecimalPlaces, dto.RoundingIncrement);
             // Check for duplicate code
             var exists = await _unitOfWork.Repository<UnitType>()
@@ -109,6 +112,9 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
         public async Task<UnitTypeDto> UpdateAsync(Guid id, UpdateUnitTypeDto dto, CancellationToken cancellationToken = default)
         {
+            if (dto.RoundingIncrement.HasValue)
+                throw new InvalidOperationException(
+                    "UOM rounding increments cannot be activated until all quantity write and posting adapters enforce them.");
             var unitType = await _unitOfWork.Repository<UnitType>()
                 .FirstOrDefaultAsync(ut => ut.Id == id && ut.TenantId == TenantId && !ut.IsDeleted);
 
