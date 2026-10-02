@@ -50,7 +50,6 @@ const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '
 const budgetSchema = z.object({
   budgetYear: z.coerce.number().min(2000).max(2100),
   approvedTotal: z.coerce.number().min(0),
-  currencyCode: z.string().min(1, 'Select a currency'),
   flightBudget: z.coerce.number().min(0),
   accommodationBudget: z.coerce.number().min(0),
   perDiemBudget: z.coerce.number().min(0),
@@ -58,31 +57,45 @@ const budgetSchema = z.object({
   miscellaneousBudget: z.coerce.number().min(0),
 });
 
+const cents = (v: unknown) => Math.round((Number(v) || 0) * 100);
+
+/** The trip's approved budget — its estimate on a trip approved before lane 2 set one. */
+const tripBudgetOf = (request: StaffTravelRequest) => request.approvedBudget ?? request.estimatedTotalCost;
+
+/**
+ * Lane 3 (B10, O-9, T-22): the budget is in the trip's currency — the server sets it, so there is no currency
+ * field; its total starts at the trip's approved budget and may not exceed it; its parts are all 0 or add up to
+ * the total. Changing an approved budget withdraws its approval.
+ */
 function BudgetDialog({
-  requestId, existing, open, onOpenChange, defaultCurrency,
+  request, existing, open, onOpenChange,
 }: {
-  requestId: string;
+  request: StaffTravelRequest;
   existing?: StaffTravelBudget | null;
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  defaultCurrency: string;
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const requestId = request.id;
+  const currency = request.currencyCode;
+  const tripBudget = tripBudgetOf(request);
 
-  const form = useForm<z.input<typeof budgetSchema>>({
-    resolver: zodResolver(budgetSchema),
-    defaultValues: {
-      budgetYear: existing?.budgetYear ?? new Date().getFullYear(),
-      approvedTotal: existing?.approvedTotal ?? 0,
-      currencyCode: existing?.currencyCode ?? defaultCurrency,
+  const form = useForm<z.input<typeof budgetSchema>>({ resolver: zodResolver(budgetSchema) });
+
+  // Reset each time it opens: the form outlives the budget it was first given (a budget set, then edited).
+  useEffect(() => {
+    if (!open) return;
+    form.reset({
+      budgetYear: existing?.budgetYear ?? new Date(request.travelStartDate).getFullYear(),
+      approvedTotal: existing?.approvedTotal ?? tripBudget,
       flightBudget: existing?.flightBudget ?? 0,
       accommodationBudget: existing?.accommodationBudget ?? 0,
       perDiemBudget: existing?.perDiemBudget ?? 0,
       transportBudget: existing?.transportBudget ?? 0,
       miscellaneousBudget: existing?.miscellaneousBudget ?? 0,
-    },
-  });
+    });
+  }, [open, existing, request.travelStartDate, tripBudget, form]);
 
   const save = useMutation({
     mutationFn: (values: z.input<typeof budgetSchema>) => {
@@ -100,13 +113,14 @@ function BudgetDialog({
       toast({ variant: 'destructive', title: 'Could not save the budget', description: e.message }),
   });
 
-  // The allocation lines are guidance, not a constraint the server enforces — say so rather than
-  // silently letting them disagree with the approved total. ⚠ Neither is the approved total: no
-  // booking or claim is refused for exceeding it (finding O-9), so the note must not call it a limit.
-  const lines = ['flightBudget', 'accommodationBudget', 'perDiemBudget', 'transportBudget',
+  // The same rules the server applies, so the dialog says what is wrong before Save rather than after it.
+  const parts = ['flightBudget', 'accommodationBudget', 'perDiemBudget', 'transportBudget',
     'miscellaneousBudget'] as const;
-  const allocated = lines.reduce((sum, k) => sum + (Number(form.watch(k)) || 0), 0);
-  const approved = Number(form.watch('approvedTotal')) || 0;
+  const allocated = parts.reduce((sum, k) => sum + cents(form.watch(k)), 0);
+  const total = cents(form.watch('approvedTotal')) || cents(tripBudget);
+  const overTrip = total > cents(tripBudget);
+  const partsOff = allocated !== 0 && allocated !== total;
+  const tripBudgetName = request.approvedBudget != null ? 'approved budget' : 'estimate';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -114,18 +128,22 @@ function BudgetDialog({
         <DialogHeader>
           <DialogTitle>{existing ? 'Edit the budget' : 'Set a budget'}</DialogTitle>
           <DialogDescription>
-            Committed and actual spend are worked out from this trip&apos;s bookings and paid
-            claims — there is nothing to enter for them.
+            In {currency}, the trip&apos;s currency, and within its {tripBudgetName} of{' '}
+            {fmtMoney(tripBudget, currency)}. Committed and actual spend are worked out from the trip&apos;s
+            bookings, advances and paid claims — there is nothing to enter for them.
+            {existing?.approvedAt && ' Changing an approved budget withdraws its approval.'}
           </DialogDescription>
         </DialogHeader>
         <form id="budget-form" className="space-y-4" onSubmit={form.handleSubmit((v) => save.mutate(v))}>
           <FieldRow>
-            <NumberField form={form} name="approvedTotal" label="Approved total" required />
-            <CurrencyField form={form} name="currencyCode" label="Currency" required />
+            <NumberField form={form} name="approvedTotal" label={`Approved total (${currency})`} required />
+            <NumberField form={form} name="budgetYear" label="Budget year" required />
           </FieldRow>
-          <NumberField form={form} name="budgetYear" label="Budget year" required />
 
           <p className="text-sm font-medium">Allocation</p>
+          <p className="text-xs text-muted-foreground">
+            Leave every part at 0, or make them add up to the approved total.
+          </p>
           <FieldRow>
             <NumberField form={form} name="flightBudget" label="Flights" />
             <NumberField form={form} name="accommodationBudget" label="Accommodation" />
@@ -136,18 +154,21 @@ function BudgetDialog({
           </FieldRow>
           <NumberField form={form} name="miscellaneousBudget" label="Miscellaneous" />
 
-          {allocated !== approved && (
-            <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-              The allocation adds up to {fmtMoney(allocated, form.watch('currencyCode'))} against an
-              approved total of {fmtMoney(approved, form.watch('currencyCode'))}. That is allowed —
-              both are figures to measure spend against, and neither refuses a booking or a claim —
-              but it is worth a second look.
+          {overTrip && (
+            <p className="rounded-md border border-destructive/50 p-3 text-sm text-destructive">
+              The approved total is above the trip&apos;s {tripBudgetName} of {fmtMoney(tripBudget, currency)}.
+            </p>
+          )}
+          {partsOff && (
+            <p className="rounded-md border border-destructive/50 p-3 text-sm text-destructive">
+              The parts add up to {fmtMoney(allocated / 100, currency)}, not the approved total of{' '}
+              {fmtMoney(total / 100, currency)}.
             </p>
           )}
         </form>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" form="budget-form" disabled={save.isPending}>
+          <Button type="submit" form="budget-form" disabled={save.isPending || overTrip || partsOff}>
             {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Save
           </Button>
@@ -479,7 +500,7 @@ const isCashOut = (a: StaffTravelAdvanceSummary) =>
  * showing whatever someone last typed. Where a number is shown it came off the wire.
  *
  * ⚠ **Committed and actual measure different routes and must not be added.** Committed is bookings
- * made; actual is claims paid. A booking paid direct to a vendor is committed and never becomes a
+ * made; actual is cash paid out — claims paid and, since lane 3, advances. A booking paid direct to a vendor is committed and never becomes a
  * claim, so neither figure contains the other. The labels say which is which for that reason.
  *
  * Finance posting (since 2026-09-20): a disbursed advance, an approved claim and a paid claim each
@@ -503,8 +524,9 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
   const [refunding, setRefunding] = useState<StaffTravelAdvanceSummary | null>(null);
   const [deciding, setDeciding] = useState<
     { advance: StaffTravelAdvanceSummary; verb: 'reject' | 'cancel' | 'write-off' } | null>(null);
-  // D-16: an advance is cash for a trip that is going ahead.
+  // D-16: an advance is cash for a trip that is going ahead; a budget is set once the trip is approved.
   const tripTakesAdvances = request.status === 'Approved' || request.status === 'InProgress';
+  const tripTakesBudget = tripTakesAdvances || request.status === 'Completed';
 
   // ⚠ The currency lists are read through `api/hr/currencies` inside each CurrencyField. This panel
   // read `api/finance/currencies`, which answers 403 without a Finance permission, so no budget or
@@ -539,6 +561,16 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
       toast({ variant: 'destructive', title: 'Could not record that', description: e.message }),
   });
 
+  const approveBudget = useMutation({
+    mutationFn: (id: string) => travelFinanceService.approveBudget(id),
+    onSuccess: async () => {
+      toast({ title: 'Budget approved' });
+      await queryClient.invalidateQueries({ queryKey: ['travel-budget', requestId] });
+    },
+    onError: (e: Error) =>
+      toast({ variant: 'destructive', title: 'Could not approve the budget', description: e.message }),
+  });
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-10">
@@ -563,11 +595,23 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
             <TrendingUp className="h-4 w-4" />
             Budget
           </CardTitle>
-          {access.canWrite && (
-            <Button variant="outline" size="sm" onClick={() => setShowBudget(true)}>
-              {budget ? 'Edit budget' : <><Plus className="mr-2 h-4 w-4" /> Set a budget</>}
-            </Button>
-          )}
+          <div className="flex gap-2">
+            {access.canAdmin && budget && !budget.approvedAt && tripTakesBudget && (
+              <Button
+                size="sm"
+                onClick={() => approveBudget.mutate(budget.id)}
+                disabled={approveBudget.isPending}
+              >
+                {approveBudget.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Approve the budget
+              </Button>
+            )}
+            {access.canWrite && tripTakesBudget && (
+              <Button variant="outline" size="sm" onClick={() => setShowBudget(true)}>
+                {budget ? 'Edit budget' : <><Plus className="mr-2 h-4 w-4" /> Set a budget</>}
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {budgetFailed && !budget ? (
@@ -575,10 +619,19 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
           ) : !budget ? (
             <EmptyState
               title="No budget set"
-              description="Set one to track this trip's spend against an approved figure."
+              description={tripTakesBudget
+                ? "Set one to track this trip's spend against an approved figure."
+                : 'A budget is set once the trip is approved.'}
             />
           ) : (
             <div className="space-y-4">
+              <p className="text-xs text-muted-foreground">
+                {budget.approvedAt
+                  ? `Approved by ${budget.approvedByName ?? 'a travel administrator'} on ${fmtDate(budget.approvedAt)}.`
+                  : 'Not approved yet — a travel administrator other than the traveller approves it.'}
+                {budget.tripApprovedBudget != null &&
+                  ` The trip's approved budget is ${fmtMoney(budget.tripApprovedBudget, request.currencyCode)}.`}
+              </p>
               <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
                 <div>
                   <p className="text-xs text-muted-foreground">Approved</p>
@@ -588,17 +641,20 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Committed</p>
-                  <p className="text-lg font-semibold">
+                  <p className={`text-lg font-semibold ${budget.committedOverrun ? 'text-destructive' : ''}`}>
                     {fmtMoney(budget.totalCommitted, budget.currencyCode)}
                   </p>
                   <p className="text-xs text-muted-foreground">bookings made</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Actual</p>
-                  <p className="text-lg font-semibold">
+                  <p className={`text-lg font-semibold ${budget.actualOverrun ? 'text-destructive' : ''}`}>
                     {fmtMoney(budget.totalActual, budget.currencyCode)}
                   </p>
-                  <p className="text-xs text-muted-foreground">claims paid</p>
+                  <p className="text-xs text-muted-foreground">
+                    claims paid {fmtMoney(budget.actualClaimsPaid, budget.currencyCode)} · advances{' '}
+                    {fmtMoney(budget.actualAdvancesPaidOut, budget.currencyCode)}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Variance</p>
@@ -628,10 +684,20 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
                 Said plainly because the two bars invite being read as parts of one whole, and they
                 are not: a vendor-paid booking is committed and never becomes a claim.
               */}
+              {(budget.committedOverrun || budget.actualOverrun) && (
+                <p className="rounded-md border border-destructive/50 p-3 text-sm text-destructive">
+                  {budget.committedOverrun && budget.actualOverrun
+                    ? 'Committed and actual spend are both'
+                    : budget.committedOverrun ? 'Committed spend is' : 'Actual spend is'}{' '}
+                  above the approved total. This is flagged, not refused — bookings, advances and claims
+                  still go ahead.
+                </p>
+              )}
               <p className="text-xs text-muted-foreground">
-                Committed counts bookings made; actual counts claims paid. They measure different
-                routes and do not add up to total spend — a booking paid direct to a vendor is
-                committed but never becomes a claim.
+                Committed counts bookings made (not a no-show; a cancelled booking&apos;s fee); actual
+                counts cash paid out — claims paid, and advances paid out less cash handed back. They
+                measure different routes and do not add up to total spend — a booking paid direct to a
+                vendor is committed but never becomes a claim.
               </p>
             </div>
           )}
@@ -830,11 +896,10 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
       </Card>
 
       <BudgetDialog
-        requestId={requestId}
+        request={request}
         existing={budget}
         open={showBudget}
         onOpenChange={setShowBudget}
-        defaultCurrency={request.currencyCode}
       />
       <AdvanceDialog
         requestId={requestId}

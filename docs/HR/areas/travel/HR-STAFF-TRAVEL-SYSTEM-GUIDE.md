@@ -113,6 +113,7 @@ This is finding **T-1**.
 | **Approve a travel policy** — which is what makes its caps bind at all | **Admin** |
 | **Withdraw a travel policy** | **Admin** |
 | **Authorise a booking above the policy cap** | **Admin** |
+| **Write off an advance; approve a trip's budget; void a claim's payment** *(closure lane 3, 2026-10-02 — each by a travel administrator who is not the traveller, and a void not by the payer)* | **Admin** |
 | **The entire Reminders screen, reads included** | **Admin** |
 
 > That third and fourth row are the point. **`HR.Travel.Admin` is a financial authority here, not a
@@ -2505,7 +2506,30 @@ the module's argument.
 > they read a Finance list that answers 403 (closure finding O-19, fixed in the same lane). Where a step
 > below warns about one of these, the warning describes the code before lane 0.
 >
-> **Closure lane 2, slice 2b (2026-10-02, staged) — lane 2 complete.** The screens: a **Travel
+> **Closure lane 3, the money chain (2026-10-02) — lane 3 complete** (3a committed `e2785ce7b`, 3b
+> `f49e5eb9c`, 3c staged). **Advances (3a):** raised only on an approved trip or one under way, for the
+> trip's traveller; approved above zero, no more than asked and within the trip's approved budget; nobody
+> approves, pays out or writes off their own, and the approver does not pay it out; **Reject, Cancel, Cash
+> back and Write off** (Admin) buttons; nothing is owed until the cash goes out; the sweep marks an advance
+> **Overdue** and a write-off marks it **Written off** (**T-21 fixed**); **Staff Travel → Advances** lists
+> overdue settlements; a deleted claim's or advance's number is never issued again. **Claims (3b):** filed
+> for the trip's traveller, in the base currency, only on a trip approved, under way or completed; each
+> expense valued at Finance's rate on its own date (**T-37 fixed**); under an approved policy, receipts
+> above its threshold (**T-35 fixed**, a per diem excepted) and its claim window (**T-36 fixed**) — both
+> bind only once a policy is approved, which Rule 1 still blocks on the demo; an expense approved in whole
+> or part with a reason for any cut; a claim **returned** to the claimant with a reason (**T-38 fixed**);
+> nobody reviews or pays their own claim and no reviewer pays it; no payroll offset; paying in full past
+> advance cash the claim does not name needs a recorded reason (**T-57** — naming the advance is still what
+> recovers it, Rule 6). **The budget and the void (3c):** a budget is set once the trip is approved, in the
+> trip's currency (**T-22 fixed**), within the trip's approved budget, its parts empty or adding up to the
+> total; a travel administrator approves it, and a change withdraws the approval; *Actual* now counts
+> advance cash paid out as well as claims paid, and an overrun is **flagged, not refused** (**T-20** stays
+> open — whether it should refuse is TDC's question); a travel administrator who neither claimed nor paid
+> it can **Void payment** on a paid claim with a reason — the journal is reversed, the advance's recovery
+> undone and the claim goes back to approved (**T-39 fixed**). The three Admin acts are in Rule 2's table;
+> no demo persona holds Admin, so on the demo the budgets stay unapproved.
+>
+> **Closure lane 2, slice 2b (2026-10-02, committed `519418f00`) — lane 2 complete.** The screens: a **Travel
 > Approvals** queue under Staff Travel; the request page's own **Approve, Reject and Return** buttons,
 > drawn only for whoever may decide at the stage, with a banner saying whose decision it is; the approve
 > dialog asks for the **approved budget** at the last stage, prefilled with the estimate (**T-10

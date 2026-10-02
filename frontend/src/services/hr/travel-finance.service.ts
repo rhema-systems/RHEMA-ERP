@@ -12,6 +12,7 @@ import type {
   ReviewStaffTravelExpenseClaim,
   ReviewStaffTravelExpenseClaimLine,
   PayStaffTravelExpenseClaim,
+  VoidStaffTravelClaimPayment,
   TravelClaimStatus,
   StaffTravelAdvance,
   StaffTravelAdvanceSummary,
@@ -59,6 +60,11 @@ class TravelFinanceService {
 
   updateBudget(payload: UpdateStaffTravelBudget) {
     return apiService.put<StaffTravelBudget>(`${this.baseUrl}/budgets/${payload.id}`, payload);
+  }
+
+  /** A travel administrator approves the budget; the approver is the token's employee record, never the traveller. */
+  approveBudget(id: string) {
+    return apiService.post<StaffTravelBudget>(`${this.baseUrl}/budgets/${id}/approve`, {});
   }
 
   // ── Expense claims ─────────────────────────────────────────────────────────
@@ -129,6 +135,14 @@ class TravelFinanceService {
   payClaim(id: string, payload: Omit<PayStaffTravelExpenseClaim, 'claimId'>) {
     return apiService.post<{ message: string }>(
       `${this.baseUrl}/claims/${id}/pay`, { claimId: id, ...payload });
+  }
+
+  /**
+   * Voids a paid claim's payment (lane 3, T-39): its journal reversed, its advance settlement undone, the claim back
+   * to approved — to be paid again, or not. A travel administrator other than the claimant and the payer.
+   */
+  voidClaimPayment(id: string, payload: VoidStaffTravelClaimPayment) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/claims/${id}/void-payment`, payload);
   }
 
   // ── Claim lines ────────────────────────────────────────────────────────────

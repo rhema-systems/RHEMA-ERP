@@ -1,5 +1,6 @@
 ﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -29,6 +30,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IHrFinancePostingAdapter _financePosting;
+    private readonly IHrFinancePostingAdminService _postingRegister;
     private readonly ILogger<StaffTravelFinanceService> _logger;
 
     public StaffTravelFinanceService(
@@ -43,8 +45,10 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         IHrFinancePostingAdapter financePosting,
+        IHrFinancePostingAdminService postingRegister,
         ILogger<StaffTravelFinanceService> logger)
     {
+        _postingRegister = postingRegister;
         _budgetRepository = budgetRepository;
         _claimRepository = claimRepository;
         _lineRepository = lineRepository;
@@ -149,34 +153,140 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         if (entity == null || entity.TenantId != GetTenantId())
             return null;
 
+        return await ToBudgetDtoAsync(entity, await RequireOwnedRequestAsync(entity.StaffTravelRequestId), cancellationToken);
+    }
+
+    /// <summary>
+    /// The budget as read: its spend recomputed, its parts, the trip's approved budget beside it and whether either
+    /// spend figure is past the approved total (lane 3, B10, O-9).
+    /// </summary>
+    private async Task<StaffTravelBudgetDto> ToBudgetDtoAsync(
+        StaffTravelBudget entity, StaffTravelRequest request, CancellationToken cancellationToken)
+    {
         var dto = entity.ToDto();
         var spend = await _budgetRollup.ComputeAsync(
-            entity.TenantId, entity.StaffTravelRequestId, cancellationToken);
+            entity.TenantId, entity.StaffTravelRequestId, entity.CurrencyCode, cancellationToken);
 
         // ⚠ Onto the DTO, NOT onto the entity. The entity here is tracked, so assigning to it would
         // queue an UPDATE for whatever else in the request calls SaveChangesAsync — a read that
         // silently writes. The write paths do the persisting, deliberately and visibly.
         dto.TotalCommitted = spend.Committed;
         dto.TotalActual = spend.Actual;
+        dto.ActualClaimsPaid = spend.ClaimsPaid;
+        dto.ActualAdvancesPaidOut = spend.AdvancesPaidOut;
         dto.Variance = dto.ApprovedTotal - spend.Actual;
+        dto.TripApprovedBudget = TripBudget(request);
+        // Whether an overrun refuses anything is TDC's question (§ 6); the card says so either way.
+        dto.CommittedOverrun = spend.Committed > dto.ApprovedTotal;
+        dto.ActualOverrun = spend.Actual > dto.ApprovedTotal;
         return dto;
     }
 
+    /// <summary>
+    /// Sets a trip's budget (lane 3, B10, O-9, T-22, D-16): only once the trip is approved; in the trip's currency;
+    /// its total, when none is given, the trip's approved budget, and never above it; its allocation left empty or
+    /// adding up to the total. The currency and the total were the caller's — a budget in any currency, of any size,
+    /// beside an approved budget it had no link to.
+    /// </summary>
     public async Task<StaffTravelBudgetDto> CreateBudgetAsync(CreateStaffTravelBudgetDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
-        StaffTravelRequestGuards.RequireOpen(await RequireOwnedRequestAsync(createDto.StaffTravelRequestId), "a budget");
+        var request = await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
+        RequireTripTakesBudget(request, "A budget is set");
 
         var existing = await _budgetRepository.GetByRequestIdAsync(createDto.StaffTravelRequestId);
         if (existing != null && existing.TenantId == tenantId)
-            throw new InvalidOperationException("A budget already exists for this request.");
+            throw new InvalidOperationException($"Travel request {request.RequestNumber} already has a budget; change that one.");
 
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var total = RequireBudgetTotal(request, createDto.ApprovedTotal,
+            createDto.FlightBudget, createDto.AccommodationBudget, createDto.PerDiemBudget,
+            createDto.TransportBudget, createDto.MiscellaneousBudget);
+
+        var entity = createDto.ToEntity(tenantId, createdByUserId, request.CurrencyCode, total);
         await ApplyRollupAsync(entity, cancellationToken);
         await _budgetRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await ToBudgetDtoAsync(entity, request, cancellationToken);
+    }
+
+    /// <summary>
+    /// Approves a trip's budget (lane 3, B10, T-22): a travel administrator who is not the traveller, once. The
+    /// budget's <c>ApprovedById</c> and <c>ApprovedAt</c> had no writer, so every budget read as unapproved.
+    /// </summary>
+    public async Task<StaffTravelBudgetDto> ApproveBudgetAsync(Guid budgetId, Guid approverEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedBudgetAsync(budgetId);
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        RequireTripTakesBudget(request, "A budget is approved");
+        if (entity.ApprovedAt is DateTime approvedAt)
+            throw new InvalidOperationException(
+                $"The budget of travel request {request.RequestNumber} was approved on {approvedAt:d MMM yyyy}.");
+        if (request.EmployeeId == approverEmployeeId)
+            throw new UnauthorizedAccessException(
+                $"You cannot approve the budget of your own trip ({request.RequestNumber}). Another officer must.");
+        // The trip's approved budget is fixed once the trip is approved, but a budget set before lane 3 was never
+        // held to it — nor to the trip's currency, nor to a total at all: approval is where it is.
+        if (entity.CurrencyCode != request.CurrencyCode)
+            throw new InvalidOperationException(
+                $"The budget is in {entity.CurrencyCode} and its trip in {request.CurrencyCode}. Change the budget to state it " +
+                $"in {request.CurrencyCode}, then approve it.");
+        if (entity.ApprovedTotal <= 0m)
+            throw new InvalidOperationException("The budget has no total. Change it to give one, then approve it.");
+        RequireBudgetTotal(request, entity.ApprovedTotal,
+            entity.FlightBudget, entity.AccommodationBudget, entity.PerDiemBudget,
+            entity.TransportBudget, entity.MiscellaneousBudget);
+
+        entity.ApprovedById = approverEmployeeId;   // the caller, not a payload value
+        entity.ApprovedAt = DateTime.UtcNow;
+        entity.UpdatedBy = _currentUserProvider.UserId.ToString();
+        entity.UpdatedAt = DateTime.UtcNow;
+        await ApplyRollupAsync(entity, cancellationToken);
+        // Tracked, so the save writes it; `UpdateAsync` would mark the approver loaded beside it modified too.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Travel budget approved for {RequestNumber}: {Currency} {Total}",
+            request.RequestNumber, entity.CurrencyCode, entity.ApprovedTotal);
+        var reloaded = await _budgetRepository.GetByRequestIdAsync(entity.StaffTravelRequestId);
+        return await ToBudgetDtoAsync(reloaded ?? entity, request, cancellationToken);
+    }
+
+    /// <summary>The trip's approved budget, or its estimate on a trip approved before lane 2 set one.</summary>
+    private static decimal TripBudget(StaffTravelRequest request) => request.ApprovedBudget ?? request.EstimatedTotalCost;
+
+    /// <summary>D-16: a budget is for a trip that is approved, under way or completed.</summary>
+    private static void RequireTripTakesBudget(StaffTravelRequest request, string what)
+    {
+        if (request.Status is StaffTravelRequestStatus.Approved or StaffTravelRequestStatus.InProgress or StaffTravelRequestStatus.Completed)
+            return;
+        throw new InvalidOperationException(
+            $"{what} only once its trip is approved; travel request {request.RequestNumber} is " +
+            $"{Humanise(request.Status.ToString()).ToLowerInvariant()}.");
+    }
+
+    /// <summary>
+    /// O-9: the budget's total — the trip's approved budget when 0 is given — above zero and within the trip's approved
+    /// budget; its allocation left at zero or adding up to the total exactly.
+    /// </summary>
+    private static decimal RequireBudgetTotal(
+        StaffTravelRequest request, decimal given, decimal flight, decimal accommodation, decimal perDiem, decimal transport, decimal miscellaneous)
+    {
+        var tripBudget = TripBudget(request);
+        var tripBudgetName = request.ApprovedBudget.HasValue ? "approved budget" : "estimate";
+        var total = given == 0m ? tripBudget : given;
+        if (total <= 0m)
+            throw new InvalidOperationException(
+                $"Travel request {request.RequestNumber} has no {tripBudgetName} to take the total from; give the budget's total.");
+        if (total > tripBudget)
+            throw new InvalidOperationException(
+                $"The budget's total ({request.CurrencyCode} {total:N2}) is above the trip's {tripBudgetName} " +
+                $"({request.CurrencyCode} {tripBudget:N2}).");
+
+        var allocated = flight + accommodation + perDiem + transport + miscellaneous;
+        if (allocated != 0m && allocated != total)
+            throw new InvalidOperationException(
+                $"The budget's parts add up to {request.CurrencyCode} {allocated:N2}, not its total of " +
+                $"{request.CurrencyCode} {total:N2}. Make them add up to the total, or leave them all at zero.");
+        return total;
     }
 
     /// <summary>
@@ -202,22 +312,46 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     private async Task ApplyRollupAsync(StaffTravelBudget entity, CancellationToken cancellationToken)
     {
         var spend = await _budgetRollup.ComputeAsync(
-            entity.TenantId, entity.StaffTravelRequestId, cancellationToken);
+            entity.TenantId, entity.StaffTravelRequestId, entity.CurrencyCode, cancellationToken);
 
         entity.TotalCommitted = spend.Committed;
         entity.TotalActual = spend.Actual;
         entity.Variance = entity.ApprovedTotal - spend.Actual;
     }
 
+    /// <summary>
+    /// Changes a trip's budget under the rules of <see cref="CreateBudgetAsync"/>. A change to an approved budget
+    /// withdraws its approval: what was approved is not what it now says. A budget kept in another currency before
+    /// lane 3 moves to the trip's — the form states the figures in the trip's currency.
+    /// </summary>
     public async Task<StaffTravelBudgetDto> UpdateBudgetAsync(UpdateStaffTravelBudgetDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedBudgetAsync(updateDto.Id);
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        RequireTripTakesBudget(request, "A budget is changed");
 
-        entity.UpdateEntity(updateDto, updatedByUserId);
+        var total = RequireBudgetTotal(request, updateDto.ApprovedTotal,
+            updateDto.FlightBudget, updateDto.AccommodationBudget, updateDto.PerDiemBudget,
+            updateDto.TransportBudget, updateDto.MiscellaneousBudget);
+
+        var changed = entity.ApprovedTotal != total || entity.BudgetYear != updateDto.BudgetYear
+            || entity.FlightBudget != updateDto.FlightBudget || entity.AccommodationBudget != updateDto.AccommodationBudget
+            || entity.PerDiemBudget != updateDto.PerDiemBudget || entity.TransportBudget != updateDto.TransportBudget
+            || entity.MiscellaneousBudget != updateDto.MiscellaneousBudget || entity.CurrencyCode != request.CurrencyCode;
+
+        entity.UpdateEntity(updateDto, updatedByUserId, total);
+        entity.CurrencyCode = request.CurrencyCode;
+        if (changed)
+        {
+            entity.ApprovedById = null;
+            entity.ApprovedAt = null;
+        }
         await ApplyRollupAsync(entity, cancellationToken);
-        await _budgetRepository.UpdateAsync(entity);
+        // Tracked, so the save writes it; `UpdateAsync` would mark the approver loaded beside it modified too.
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        var reloaded = await _budgetRepository.GetByRequestIdAsync(entity.StaffTravelRequestId);
+        return await ToBudgetDtoAsync(reloaded ?? entity, request, cancellationToken);
     }
 
     // ---- Expense claims ----------------------------------------------------
@@ -572,6 +706,149 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         _logger.LogInformation(
             "Expense claim paid: {ClaimNumber}, net {NetPayable}, advance deducted {AdvanceDeducted}",
             entity.ClaimNumber, entity.NetPayable, entity.AdvanceDeducted);
+        return true;
+    }
+
+    /// <summary>
+    /// Voids a claim's payment (lane 3, T-39): a travel administrator who is neither the claimant nor the payer, with
+    /// the reason. The payment's journal is reversed, the advance settlement it made is undone, and the claim goes back
+    /// to approved — to be paid again, or not. A claim paid in error needed SQL.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The journal first.</b> A posted <c>TRAVEL_CLAIM_PAID</c> row is reversed through the posting register —
+    /// Finance's exact reversal, in the register's own transaction — before the claim changes. Should the claim's save
+    /// then fail, the claim still reads Paid beside a reversed row, which the register's retry posts again; the void
+    /// can be repeated. A row that never posted (no rule, or Finance refused) is marked Skipped with the reason, so the
+    /// register does not hold out a payment that no longer exists. Paying again posts afresh either way: a Reversed
+    /// row as its next generation, a Skipped one as a new attempt.</para>
+    ///
+    /// <para><b>The advance.</b> The payment recovered <c>AdvanceDeducted</c> (in the claim's currency) from the
+    /// advance it names; an advance in another currency was settled at Finance's rate on the payment date, so that
+    /// rate takes the same amount back (D-15). What comes back is capped at what claims settled on the advance — never
+    /// cash the traveller handed back — and a written-off advance is refused: its write-off already accounted for the
+    /// rest. The approval's journal stands: the claim is still approved.</para>
+    /// </remarks>
+    public async Task<bool> VoidClaimPaymentAsync(Guid claimId, VoidStaffTravelClaimPaymentDto voidDto, Guid voiderEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedClaimAsync(claimId);
+        if (entity.Status != TravelClaimStatus.Paid)
+            throw new InvalidOperationException(
+                $"Claim {entity.ClaimNumber} is {Describe(entity.Status)}; only a paid claim's payment can be voided.");
+        var reason = voidDto.Reason?.Trim() ?? string.Empty;
+        if (reason.Length < 5)
+            throw new InvalidOperationException("Give the reason the payment is voided, in at least five characters.");
+        RefuseOwnClaim(entity, voiderEmployeeId, "void the payment of");
+        if (entity.PaidById == voiderEmployeeId)
+            throw new UnauthorizedAccessException(
+                $"You paid claim {entity.ClaimNumber}, so another officer must void the payment — the person who paid it out " +
+                "does not also undo it.");
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        if (request.Status == StaffTravelRequestStatus.Closed)
+            throw new InvalidOperationException(
+                $"Travel request {request.RequestNumber} is closed, so the payment of claim {entity.ClaimNumber} stands.");
+
+        var paidOn = DateOnly.FromDateTime(entity.PaidAt ?? DateTime.UtcNow);
+        StaffTravelAdvance? advance = null;
+        var settledBack = 0m;
+        if (entity.AdvanceDeducted > 0m && entity.TravelAdvanceId is Guid advanceId)
+        {
+            advance = await _advanceRepository.GetByIdAsync(advanceId);
+            if (advance != null && advance.TenantId == entity.TenantId)
+            {
+                if (advance.Status == TravelAdvanceStatus.WrittenOff)
+                    throw new InvalidOperationException(
+                        $"Advance {advance.AdvanceNumber}, which this payment settled in part, has since been written off, so " +
+                        "the settlement cannot be undone. Reverse the write-off in Finance's register first.");
+                settledBack = advance.CurrencyCode == entity.CurrencyCode
+                    ? entity.AdvanceDeducted
+                    : decimal.Round(
+                        entity.AdvanceDeducted / await _currency.GetRateToBaseAsync(advance.CurrencyCode, paidOn, cancellationToken),
+                        2, MidpointRounding.AwayFromZero);
+                settledBack = Math.Min(settledBack, advance.SettledAmount - advance.RefundedAmount);
+            }
+            else advance = null;
+        }
+
+        var paidRow = await _unitOfWork.Repository<HrFinancePostingRecord>()
+            .GetQueryable(r => r.TenantId == entity.TenantId && !r.IsDeleted && r.SourceDocumentId == entity.Id
+                            && r.EventCode == HrFinancePostingEventCatalog.TravelClaimPaid)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(cancellationToken);
+        if (paidRow is { Status: HrFinancePostingStatus.Posted })
+            await _postingRegister.ReverseAsync(paidRow.Id,
+                new ReverseHrFinancePostingDto { Reason = $"Payment of claim {entity.ClaimNumber} voided: {reason}" },
+                cancellationToken);
+
+        var now = DateTime.UtcNow;
+        var userId = _currentUserProvider.UserId.ToString();
+        var lines = await ClaimLinesAsync(entity, cancellationToken);
+        var note =
+            $"Payment of claim {entity.ClaimNumber} voided. It was paid on {entity.PaidAt:d MMM yyyy}" +
+            (entity.PaymentMethod is TravelPaymentMethod method ? $" by {Humanise(method.ToString()).ToLowerInvariant()}" : string.Empty) +
+            (string.IsNullOrWhiteSpace(entity.PaymentReference) ? string.Empty : $" (reference {entity.PaymentReference.Trim()})") +
+            $": {entity.CurrencyCode} {entity.NetPayable:N2}" +
+            (advance is null ? "." : $", after {entity.CurrencyCode} {entity.AdvanceDeducted:N2} recovered from advance {advance.AdvanceNumber}, " +
+                                     $"whose {advance.CurrencyCode} {settledBack:N2} is outstanding again.") +
+            (paidRow is { Status: HrFinancePostingStatus.Posted } ? $" Its journal {paidRow.JournalEntryNumber} is reversed." : string.Empty) +
+            $" Reason: {reason}";
+
+        entity.Status = lines.Sum(l => l.AmountApproved ?? 0m) == lines.Sum(l => l.AmountBaseCurrency)
+            ? TravelClaimStatus.Approved
+            : TravelClaimStatus.PartiallyApproved;
+        entity.PaidAt = null;
+        entity.PaidById = null;
+        entity.PaymentMethod = null;
+        entity.PaymentReference = null;
+        entity.AdvanceWaiverReason = null;
+        entity.AdvanceDeducted = 0m;
+        entity.NetPayable = ComputeNetPayable(entity.TotalApproved, 0m);
+        entity.PaymentVoidedAt = now;
+        entity.PaymentVoidedById = voiderEmployeeId;   // the caller, not a payload value
+        entity.PaymentVoidReason = reason;
+        entity.UpdatedBy = userId;
+        entity.UpdatedAt = now;
+
+        if (advance is not null && settledBack > 0m)
+        {
+            advance.SettledAmount -= settledBack;
+            advance.UnsettledAmount = (advance.ApprovedAmount ?? 0m) - advance.SettledAmount;
+            advance.Status = StaffTravelAdvanceRules.SettlementStatus(advance, DateOnly.FromDateTime(now));
+            advance.UpdatedBy = userId;
+            advance.UpdatedAt = now;
+        }
+
+        if (paidRow is { Status: HrFinancePostingStatus.Unposted or HrFinancePostingStatus.Failed })
+        {
+            var rowId = paidRow.Id;
+            var row = await _unitOfWork.Repository<HrFinancePostingRecord>()
+                .GetQueryable(r => r.Id == rowId)
+                .FirstAsync(cancellationToken);
+            row.Status = HrFinancePostingStatus.Skipped;
+            var why = $"The payment was voided on {now:d MMM yyyy}: {reason}";
+            row.StatusReason = why.Length > 2000 ? why[..2000] : why;
+            row.LastActedByUserId = _currentUserProvider.UserId;
+            row.UpdatedBy = userId;
+            row.UpdatedAt = now;
+        }
+
+        await _unitOfWork.Repository<StaffTravelRequestComment>().AddAsync(new StaffTravelRequestComment
+        {
+            TenantId = entity.TenantId,
+            StaffTravelRequestId = request.Id,
+            AuthorId = voiderEmployeeId,
+            CommentType = TravelRequestCommentType.InternalNote,
+            Body = note.Length > 2000 ? note[..2000] : note,
+            IsVisibleToTraveller = false,
+            CreatedBy = userId,
+        });
+
+        // One save: the claim, the advance, the register row and the note together. All tracked — the claim and the
+        // advance were read alone — so nothing beside them is marked modified.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Expense claim payment voided: {ClaimNumber}, advance settlement undone {SettledBack}, journal {Journal}",
+            entity.ClaimNumber, settledBack, paidRow?.JournalEntryNumber ?? "none");
         return true;
     }
 

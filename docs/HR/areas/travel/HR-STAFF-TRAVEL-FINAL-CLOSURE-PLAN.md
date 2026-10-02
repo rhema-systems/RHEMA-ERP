@@ -46,14 +46,13 @@ baseline (D-13); lane 0 was built the same day.**
    the workflow designer fix (cross-module defect #34) — built and proven (`run-final-approvals.mjs`
    123/123 twice, lifecycle 255/255 twice, truth 117/117 twice), committed `519418f00`.
    ⚠ Stage 1 is addressed **by name**, not by role — read lane 2's *As built* before touching the route.
-6. **Lane 3** (the money chain, B9 included) — **IN PROGRESS.** Source-checked against `519418f00` on
-   2026-10-02: every finding still reproduces, and the check found ten more (N1–N10, lane 3's *Source
-   check*). Decisions D-14…D-17 taken (D-17: the posted path is proven on a scratch copy of UAT). **Slice
-   3a committed `e2785ce7b`** (the migration `20261002132850_TravelClosureMoneyChain` applied to UAT,
-   restore point `ErpSystemDB_UAT_before_travell3.bak`); **slice 3b built and proven** (money 202/202
-   twice) and staged. Three slices: **3a** advances,
-   numbers and the lane's migration `TravelClosureMoneyChain`; **3b** the claim chain; **3c** the budget
-   and void payment.
+6. **Lane 3** (the money chain, B9 included) — **COMPLETE 2026-10-02**, in three slices: **3a** advances,
+   numbers and the lane's migration (committed `e2785ce7b`; `20261002132850_TravelClosureMoneyChain` applied
+   to UAT, restore point `ErpSystemDB_UAT_before_travell3.bak`); **3b** the claim chain (committed
+   `f49e5eb9c`); **3c** the budget and the payment void, with D-17's posted-path proof on a scratch copy of
+   UAT (built and proven — money 286/286 twice, the posting proof 70/70 twice — and staged). Decisions
+   D-14…D-17. ⚠ The posting proof found that **no HR posting can land on a database seeded with Finance's v2
+   books** (cross-module defect #35): it passed only once the scratch copy's primary book was renamed.
 7. **Then** lanes **4 → 5 → 6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane against this
    document before building it — line numbers are as of HEAD `bad482a8d`.
 
@@ -90,7 +89,7 @@ lane's slice.
 | **D-14** | Lane 3 needs columns batch 1 did not add (asked at lane 3's source check, 2026-10-02) | **A small lane-3 migration** (`TravelClosureMoneyChain`, guarded SQL, proven on a scratch copy of UAT first): `StaffTravelAdvances.CancelledAt`, `CancelledById`, `CancellationReason`; `StaffTravelExpenseClaims.ReviewNotes`. Its data part, applied with slice 3a's code: `UnsettledAmount` 0 on advances not yet disbursed (moved here from batch 1, § 5), and a settlement deadline — the trip's end plus its approved policy's claim window, or 30 days — on advances with cash out and none. Rejected: reusing the rejection columns for a cancellation and keeping review reasons as trip comments. |
 | **D-15** | A claim is valued in the base currency; how much of it does an advance in another currency cover? (B11) | **Finance's rate on the day the claim is paid.** The deduction is worked in the advance's own currency; whatever a rate movement leaves on the advance is refunded or written off. Rejected: the rate on the day the advance went out, which pays the traveller a windfall or a shortfall whenever the cedi moves between disbursement and spending. |
 | **D-16** | Three refinements of lane 3's own checklist | **All three:** the payer may not be anyone who reviewed a line of the claim, as well as the claim's reviewer; advances only on Approved or InProgress trips (money after the trip is a claim); a budget only once the trip is approved, its total defaulting to the approved budget. |
-| **D-17** | How is the posted path proven — a payment journal reversed by a void and posted again? UAT has no travel posting rule, so every travel row in the posting register is Unposted (lane 3's source check) | **On a scratch copy of UAT (2026-10-02).** UAT here is the developer's local database, so no Finance owner can open its periods or add a travel account. The posted path is proven by one run of the API against a COPY_ONLY restore of UAT on which Finance's authority is prepared (`dev-harness/hr-finance/prep-uat-finance-authority.sql`), a travel expense account added and travel's rules switched on; the copy is dropped afterwards. UAT keeps no travel rule and an empty ledger, and its suites prove the Unposted path. |
+| **D-17** | How is the posted path proven — a payment journal reversed by a void and posted again? UAT has no travel posting rule, so every travel row in the posting register is Unposted (lane 3's source check) | **On a scratch copy of UAT (2026-10-02).** UAT here is the developer's local database, so no Finance owner can open its periods or add a travel account. The posted path is proven by one run of the API against a COPY_ONLY restore of UAT on which Finance's authority is prepared (`dev-harness/hr-finance/prep-uat-finance-authority.sql`), a travel expense account added and travel's rules switched on; the copy is dropped afterwards. UAT keeps no travel rule and an empty ledger, and its suites prove the Unposted path. **Done 2026-10-02**: `run-final-posting.mjs` 70/70 twice; its first run found cross-module defect #35 — on a database seeded with Finance's v2 books no HR posting lands (lane 3, *D-17*). |
 
 **Standing assumptions (not re-asked):** the closure ledger's D-29 holds — the policy rule register
 stays read-only and the policy-exception flow stays withheld until rule enforcement exists; Finance
@@ -107,7 +106,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **M1** | Migration batch 1 | the whole batch | `m1/test-cycle.sh` (session scratchpad) | ✅ applied to UAT 2026-10-02 — 33/33 on a scratch copy first, verified on UAT, truth suite 112/112 twice after; committed `d426f4ed3` |
 | **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ✅ complete 2026-10-02 — 1a `e1d050da2`, 1b `8fadfd31e`, 1c `895996b6f` |
 | **2** | The approval ladder and the approver's door | data-only retrofit `20261002042909_TravelClosureApprovalLadder` | `run-final-approvals.mjs` | ✅ complete 2026-10-02 — 2a `4e4d85b2f` (retrofit applied to UAT); 2b `519418f00` (approvals 123/123 twice, lifecycle 255/255 twice, truth 117/117 twice) |
-| **3** | The money chain | batch 1 + `TravelClosureMoneyChain` (D-14, applied to UAT) | `run-final-money.mjs` | ◐ 3a `e2785ce7b`; 3b built 2026-10-02 — money 202/202 twice, lifecycle 256/256, truth 115/115, approvals 123/123 twice; staged. Next 3c (budget, void, D-17's scratch-copy posting proof) |
+| **3** | The money chain | batch 1 + `TravelClosureMoneyChain` (D-14, applied to UAT) | `run-final-money.mjs`, `run-final-posting.mjs` (D-17, a scratch copy only) | ✅ complete 2026-10-02 — 3a `e2785ce7b`, 3b `f49e5eb9c`; 3c built and staged (money 286/286 twice, posting proof 70/70 twice on a scratch copy, lifecycle 256/256, truth 116/116, approvals 123/123 twice) |
 | **4** | Policy and authority | batch 1 | `run-final-policy.mjs` | ☐ |
 | **5** | Bookings and itinerary | batch 1 | `run-final-bookings.mjs` | ☐ |
 | **6** | Fleet | batch 1 | `run-final-fleet.mjs` | ☐ |
@@ -961,14 +960,14 @@ browser.
   money did go out)*
 - [x] **Numbers (B9):** max-based, tenant-scoped generators for claims and advances (the shape of
   `GenerateRequestNumberAsync`), with filtered unique indexes (§ 5).
-- [ ] **Budget (B10, O-9, T-22):** Actual = paid claims' `NetPayable` + disbursed advances; Committed
+- [x] **Budget (B10, O-9, T-22):** Actual = paid claims' `NetPayable` + disbursed advances; Committed
   excludes NoShow and adds cancellation fees; the budget's lines sum to `ApprovedTotal`, which defaults
   to and may not exceed the request's approved budget; the budget's currency is the request's;
   `budgets/{id}/approve` on `TravelAdminPolicy` stamps `ApprovedById/At` (approver ≠ traveller),
   shown on the card; the Finance tab shows committed and actual against the approved budget and flags
   an overrun (whether an overrun refuses is a TDC question, § 6).
 - [x] **D-10:** payroll offset leaves the pay dialog and is refused by the API for new payments.
-- [ ] **T-39:** an Admin *void payment* (a second person, a reason) reverses the payment and the advance
+- [x] **T-39:** an Admin *void payment* (a second person, a reason) reverses the payment and the advance
   settlement it made, and asks the posting register to reverse `TravelClaimPaid`. No code in
   `Services/HR/Finance` calls back into a claim after a Finance reversal, so a reversed posting row
   stays retryable as it is.
@@ -1184,6 +1183,95 @@ second GHS → USD rate planted in Finance's table for the run (stamped, removed
 836539), truth **115/115 twice** (912862, 923384 — its claim checks moved to the money suite and a claim on its
 draft trip is now a 422), approvals **123/123 twice** (931619, 966528). The posting catalogue tests 37/37 with the
 build's binaries. The API log held only the known noise; every run tore down clean.
+
+**As built — slice 3c (2026-10-02).** No migration (the void's three columns came with migration batch 1).
+
+- *The budget (B10, O-9, T-22, D-16).* Set only once the trip is approved, under way or completed; one per
+  trip. **In the trip's currency**, set by the server — the create and update DTOs lost `CurrencyCode` (T-22), and
+  the update DTO the `TotalCommitted`/`TotalActual` it ignored (B14). Its total, when 0 is sent, is the trip's
+  approved budget (its estimate on a trip approved before lane 2), and it may not exceed it; its five parts are all
+  0 or add up to the total exactly (the dialog had called a mismatch "allowed"). A budget kept in another currency
+  before lane 3 moves to the trip's on its next edit, and cannot be approved until it does.
+- *Approval.* `POST budgets/{id}/approve` (`TravelAdminPolicy`, the caller's employee link): never the
+  traveller's own trip (403), once (422 naming the date), and re-checked against the trip's approved budget —
+  `ApprovedById`/`ApprovedAt` had no writer. **Changing an approved budget withdraws its approval**; saving it
+  unchanged keeps it.
+- *The rollup (B10).* `StaffTravelBudgetRollup` works in the budget's currency, each figure converted at
+  Finance's rate on its own date (a booking when made, a claim when paid, an advance when paid out). *Committed*
+  leaves out a no-show and keeps a cancelled or refunded flight's or hotel's cancellation fee. *Actual* =
+  claims paid (their net) + advances paid out less cash handed back (Disbursed, PartiallySettled, FullySettled,
+  Overdue and WrittenOff) — a claim against an advance pays only the balance, so nothing is counted twice. The
+  read adds both parts of *Actual*, the trip's approved budget, and an overrun flag for each figure: **flagged,
+  not refused** — whether an overrun refuses is TDC's question (§ 6), and T-20 (the parts do not bind a
+  booking) stays open with it. Variance is approved less actual.
+- *Voiding a payment (T-39).* `POST claims/{id}/void-payment` (`TravelAdminPolicy`, employee link, a reason of
+  five characters or more): only a Paid claim; never the claimant or the payer (403 with the sentence); not on a
+  closed trip; refused when the advance it recovered from has since been written off. A posted
+  `TRAVEL_CLAIM_PAID` row is reversed **through the register first** (`IHrFinancePostingAdminService.ReverseAsync`,
+  Finance's exact reversal, its own transaction); a row that never posted is marked **Skipped** with the reason.
+  Then, in one save: the claim back to Approved or Partially approved (from its lines), its payment, payer, method,
+  reference and waiver cleared, nothing deducted, the approved total payable; `PaymentVoidedAt/ById/Reason` set;
+  the advance's recovery undone (the deduction in the claim's currency, or at Finance's rate on the payment date
+  for a foreign advance, capped at what claims settled — cash handed back is never undone) and its status worked
+  out again; an internal note on the trip naming the payment, the advance, the journal reversed and the reason.
+  The approval's journal stands. Paying again posts afresh — a Reversed row as its next generation, a Skipped one
+  as a new attempt. Should the save fail after the reversal, the claim reads Paid beside a reversed row, which the
+  register's retry posts again; the void can be repeated.
+- *Screens.* The budget dialog: no currency field (the trip's is named), the total prefilled with the trip's
+  approved budget, the year from the trip, the cap and the parts' sum checked before Save, reset each time it
+  opens. The budget card: who approved it and when, the trip's approved budget, committed and actual in red when
+  over, actual split into claims and advances, an overrun note, **Approve the budget** for a travel administrator,
+  Set/Edit only on a trip that takes a budget. The claim page: **Void payment** for a travel administrator on a
+  Paid claim (a reason dialog that wants five characters — `TravelReasonDialog` gained `minLength`), and the
+  void's date, officer and reason shown. Scoped type-check and lint clean. Not walked in a browser.
+- *Demo pack.* `080-travel.mjs` sets budgets only on the trips it approves (Kumasi and Sebrepor), without a
+  currency; Lagos and London, left submitted, take none — a database seeded before 3c keeps the ones it has.
+  Neither is approved: approving a budget and voiding a payment are `HR.Travel.Admin`'s, and no demo persona
+  holds it (the guide's Rule 2, where both acts and the write-off are now listed).
+
+**Suite** `run-final-money.mjs` gains §15–§16 (286 assertions): §15 the budget — none on a draft trip; above the
+trip's approved budget refused; parts adding to 900 of 1,000 refused, naming the 900; set with no total and no parts →
+1,000 in the trip's currency though the payload said USD; a second refused; HR cannot approve (403), the travel
+administrator can, once, recorded by name; a re-split withdraws the approval, an unchanged save keeps it; the
+administrator's own trip refused; committed 370 from a 320 booking, a no-show of 200 and a 150 fare cancelled with a
+fee of 50; actual 400 from an advance paid out, 300 once 100 is handed back, and 500 (claims 200 + advances 300) once a
+claim of 500 recovering the 300 is paid; cut to 400, actual flagged as an overrun, variance −100. §16 the void — a
+four-character reason refused, HR refused, the administrator voids: the claim Approved, payment and payer cleared,
+500 payable, the void recorded by name with its reason; the advance back from Fully settled to Partially settled with
+300 owed; the payment's register row Skipped and the approval's untouched; the budget's claims paid back to 0; the
+internal note (not the traveller's) naming the advance, the 300 and the reason; no second void; paid again, the 300
+recovered again, the row Unposted again; the payer cannot void their own payment; the claimant cannot void theirs; a
+payment whose advance was later written off cannot be voided. **286/286 twice on UAT, 2026-10-02** (stamps 992779,
+077210; §15 49 checks, §16 35 — none skipped). Regression: lifecycle **256/256 twice** (124715, 193277 — §11's budget
+on a closed trip sends no currency), truth **116/116 twice** (255937, 265254 — §7's budget on its draft trip is now a 422
+naming the rule), approvals **123/123 twice** (273481, 308759). The posting catalogue tests 37/37 with the build's
+binaries. The API log held only the known noise (payroll's profile FK, defect #23; the truth suite's deliberate
+duplicate policy version; e-mail with no SMTP; one identity-reconciliation job error that predates travel).
+
+**D-17 — the posted path, on a scratch copy of UAT.** `run-final-posting.mjs` (70 assertions) against a COPY_ONLY
+restore of UAT (`ErpSystemDB_TravelPostProof`; kit in the session scratchpad `l3c/d17`), on which Finance's authority
+was prepared (`prep-uat-finance-authority.sql`), a travel expense account **6150** and a write-off account **6650**
+were added (copies of 6000's row — UAT's 6600 is a control account), every role mapped and travel's five rules
+switched on; the API started against it by `dev-harness/hr-travel/tools/start-api-scratch.ps1`, which refuses UAT,
+and the suite refuses any other SQL target and stops before switching a rule on unless the API is on the copy too.
+Every journal is read back from Finance: disbursement Dr 1120 400 / Cr 1010 400; cash back Dr 1010 100 / Cr 1120 100;
+claim approval Dr 6150 500 / Cr 2120 500; payment Dr 2120 500 / Cr 1120 300 / Cr 1010 200; **the register's reversal
+of the payment** — a reversal journal, the claim still Paid (nothing in Finance calls back into travel, T-39's note) —
+and its **retry**, the same amounts as the row's second generation in a new journal; **the void**, reversing that
+posted payment through the register (the reversal's reason naming the void, the trip's note naming the journal), the
+claim approved again with its approval's journal standing, 300 of the advance owed again; **paid again**, posted as
+the third generation for the same amounts; a write-off Dr 6650 300 / Cr 1120 300. **70/70 twice, 2026-10-02**
+(stamps 677609, 702006). The copy was dropped; UAT still has no travel rule, no mapping, its own three books and no
+6150 or 6650.
+
+⚠ **The first run failed at the first posting, and that is a finding: cross-module defect #35.** HR's posting store
+takes the book from Finance's V1 resolver, which answers `IFRS` from UAT's `SubledgerPostingMode`; a database seeded
+on Finance's book model v2 (2026-09-21) has `BASE`, `IFRS_ADJUSTMENTS` and `USD_PARALLEL` and no `IFRS`, so Finance
+refused — *"Accounting book is unavailable for this tenant"* — and the strict adapter refused the disbursement and the
+claim approval with it. **No HR posting rule can be switched on on such a database** until Finance's V2 cut-over
+gives producers a book that exists. The proof renamed the copy's primary book `BASE` to `IFRS`
+(`l3c/d17/scratch-book.sql`) to get past it; `HR-FINANCE-POSTING-DESIGN.md` § 5.1 now says its prep table is out of
+date.
 
 ### Lane 4 — Policy and authority (C1–C6, D-1, D-3, D-8, O-3, O-4, O-5, T-1, T-2, T-9, T-46, T-50, T-52)
 
@@ -1571,3 +1659,11 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   no migration; `run-final-money.mjs` 202/202 twice, lifecycle 256/256 twice, truth 115/115 twice, approvals
   123/123 twice. Staged. Next: slice 3c, the budget and void payment, with D-17's posting proof on a scratch
   copy of UAT.
+- **2026-10-02, later** — The user committed slice 3b (`f49e5eb9c`). **Slice 3c built — LANE 3 COMPLETE**: the
+  trip budget (in the trip's currency, within its approved budget, approved by a travel administrator, *Actual*
+  counting advances, an overrun flagged) and the payment void (T-39). The build succeeded, the posting catalogue
+  tests 37/37, no migration; `run-final-money.mjs` 286/286 twice, lifecycle 256/256 twice, truth 116/116 twice,
+  approvals 123/123 twice. **D-17 done**: `run-final-posting.mjs` 70/70 twice on a scratch copy of UAT, every
+  journal read back from Finance, the copy dropped — after its first run found **cross-module defect #35** (no HR
+  posting can land on a database seeded with Finance's v2 books). The demo pack's budgets follow the new rules.
+  Staged. Next: lane 4, policy and authority.

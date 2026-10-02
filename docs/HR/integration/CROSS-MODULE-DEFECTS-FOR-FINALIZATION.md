@@ -2077,6 +2077,52 @@ in the designer (task steps already offer *Dynamic User From Context*), and #3 b
   stage assigned to "the requestor's manager" has no approver. HR built its own line-manager lookup for
   travel for this reason (`HrLineAuthority`).
 
+## 35. Finance — on a database seeded with the v2 accounting books, the V1 book resolver names a book that does not exist, so no HR (or Procurement) posting can land (2026-10-02)
+
+**Owner:** Finance (`ErpSystem.Core/Finance/Integration/FinanceAccountingBookCodeResolver.cs`, the V1 compatibility
+boundary of `docs/Finance/ACCOUNTING_BOOK_V2_PRODUCER_MIGRATION.md`), with the HR, Payroll and Procurement owners for
+the V2 cut-over that document schedules. **Severity:** high the day any producer's posting rule is switched on — with
+HR's strict adapter the HR action itself is refused, not merely left unposted. **Found:** HR's travel closure, lane 3
+(D-17), proving travel's posted path on a scratch copy of UAT. **Evidence:** reproduced against the running API on that
+copy, 2026-10-02.
+
+### What is broken
+
+`HrFinancePostingStore.GetTenantContextAsync` takes the book from Finance's own resolver,
+`FinanceAccountingBookCodeResolver.ResolveLegacySingleBook(FinanceSettings.SubledgerPostingMode, …)`, which answers only
+`IFRS`, `LOCAL_STATUTORY` or `MANAGEMENT` (and `IFRS` when there are no settings). UAT's `FinanceSettings` say
+`SubledgerPostingMode = IFRS`. But UAT — seeded on Finance's book model v2 (`a5baaf88f`, `0e3b1580b`, 2026-09-21) —
+has the books **`BASE`** (default, primary, active, posting), **`IFRS_ADJUSTMENTS`** and **`USD_PARALLEL`**, and no
+`IFRS`. `FinancePostingEngine` (`FinancePostingEngine.cs:1330`) looks the book up by tenant and code, finds none,
+records a `BOOK_UNAVAILABLE` denial and throws *"Accounting book is unavailable for this tenant."*
+
+Reproduced: with travel's five rules switched on and every role mapped, disbursing an advance answered **422 —
+"Finance did not accept 'Travel advance disbursed' for ADV-2026-00002: Accounting book is unavailable for this
+tenant."**; the register row is `Failed`, and — the adapter being strict — the advance stayed Approved. A claim's
+approval was refused the same way. Every HR event goes through the same store, so medical, benefits, awards, leave
+encashment, separation and receivables are affected alike. Procurement's supplier-onboarding fee and tender fee
+(`ProcurementSupplierOnboardingTokenService.cs:1535`, `TenderBidService.cs:2136`) call the same resolver.
+
+HR's posting design (`HR-FINANCE-POSTING-DESIGN.md` § 5.1) and `dev-harness/hr-finance/prep-uat-finance-authority.sql`
+were written when UAT had an `IFRS` book; the prep's `UPDATE … WHERE Code = 'IFRS'` now matches nothing. (UAT's three
+books are already active and postable — that step of the prep is obsolete.)
+
+### What it blocks
+
+Switching on any HR posting rule on a database built today. UAT keeps no HR rule, so nothing fails there now — every
+HR money event is recorded `Unposted`, as designed.
+
+### What a fix needs
+
+The V2 cut-over the migration note describes: producers submit a concrete `AccountingBookCode` that exists — for a v2
+tenant, presumably its default primary book — rather than the V1 setting. Until then, either the resolver (or
+`FinanceSettings`) must be able to name `BASE`, or a v2 seed must keep a book the resolver names. Not HR's to choose:
+the book a subledger posts to is Finance's decision.
+
+**How HR proved its own path meanwhile:** on the scratch copy only, the primary book `BASE` was renamed `IFRS`
+(`l3c/d17/scratch-book.sql`); travel's posted path then ran 70/70 twice (`dev-harness/hr-travel/run-final-posting.mjs`)
+and the copy was dropped.
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

@@ -313,6 +313,13 @@ These are Finance's governed operations (C3 book lifecycle, C4 book periods, per
 The SQL shortcut is acceptable only on a rebuilt demo database; on anything that becomes go-live
 they go through Finance's endpoints and workflow. Raised in the hand-off so the seed can do it.
 
+> ⚠ **Since Finance's book model v2 (2026-09-21) this table is out of date** (found by the travel closure, lane 3,
+> 2026-10-02). A database seeded today has the books `BASE`, `IFRS_ADJUSTMENTS` and `USD_PARALLEL` — already active and
+> postable — and **no `IFRS` book**, while HR's book still comes from Finance's V1 resolver, which answers `IFRS`. So
+> every HR posting is refused, *"Accounting book is unavailable for this tenant"*, and the strict adapter refuses the
+> HR action with it — cross-module defect **#35**. The prep's IFRS row now matches nothing; travel's posted-path proof
+> renamed `BASE` to `IFRS` on a scratch copy to get past it.
+
 **Verified live 2026-09-20 on `ErpSystemDB_UAT`:** `dev-harness/hr-finance/run-slice1.mjs`,
 51 assertions, green twice — medical approve/pay, advance disburse, claim approve/pay with advance
 recovery, each journal read back from Finance with the expected lines; reversal produces a real

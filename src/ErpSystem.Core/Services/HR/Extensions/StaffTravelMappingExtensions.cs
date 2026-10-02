@@ -1121,15 +1121,17 @@ public static class StaffTravelMappingExtensions
         };
     }
 
-    public static StaffTravelBudget ToEntity(this CreateStaffTravelBudgetDto dto, Guid tenantId, Guid userId)
+    /// <summary>The currency and the total are the service's (lane 3): the trip's currency, and the total it settled.</summary>
+    public static StaffTravelBudget ToEntity(
+        this CreateStaffTravelBudgetDto dto, Guid tenantId, Guid userId, string currencyCode, decimal approvedTotal)
     {
         return new StaffTravelBudget
         {
             TenantId = tenantId,
             StaffTravelRequestId = dto.StaffTravelRequestId,
             BudgetYear = dto.BudgetYear,
-            ApprovedTotal = dto.ApprovedTotal,
-            CurrencyCode = dto.CurrencyCode,
+            ApprovedTotal = approvedTotal,
+            CurrencyCode = currencyCode,
             FlightBudget = dto.FlightBudget,
             AccommodationBudget = dto.AccommodationBudget,
             PerDiemBudget = dto.PerDiemBudget,
@@ -1139,11 +1141,11 @@ public static class StaffTravelMappingExtensions
         };
     }
 
-    public static void UpdateEntity(this StaffTravelBudget entity, UpdateStaffTravelBudgetDto dto, Guid userId)
+    /// <summary>The total is the service's, as on create; the currency stays the trip's.</summary>
+    public static void UpdateEntity(this StaffTravelBudget entity, UpdateStaffTravelBudgetDto dto, Guid userId, decimal approvedTotal)
     {
         entity.BudgetYear = dto.BudgetYear;
-        entity.ApprovedTotal = dto.ApprovedTotal;
-        entity.CurrencyCode = dto.CurrencyCode;
+        entity.ApprovedTotal = approvedTotal;
         entity.FlightBudget = dto.FlightBudget;
         entity.AccommodationBudget = dto.AccommodationBudget;
         entity.PerDiemBudget = dto.PerDiemBudget;
@@ -1196,6 +1198,9 @@ public static class StaffTravelMappingExtensions
             PaidById = entity.PaidById,
             PaidByName = entity.PaidBy?.FullName,
             AdvanceWaiverReason = entity.AdvanceWaiverReason,
+            PaymentVoidedAt = entity.PaymentVoidedAt,
+            PaymentVoidedByName = entity.PaymentVoidedBy?.FullName,
+            PaymentVoidReason = entity.PaymentVoidReason,
             Lines = entity.Lines.Where(l => !l.IsDeleted).Select(l => l.ToDto()).ToList(),
         };
     }

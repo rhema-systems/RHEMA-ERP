@@ -1788,13 +1788,30 @@ public class StaffTravelBudgetDto : BaseDto
     public decimal TransportBudget { get; set; }
     public decimal MiscellaneousBudget { get; set; }
     public decimal TotalCommitted { get; set; }
+    /// <summary>Claims paid plus advance cash paid out (less what came back) — lane 3, B10.</summary>
     public decimal TotalActual { get; set; }
+    /// <summary>The part of <see cref="TotalActual"/> paid on claims.</summary>
+    public decimal ActualClaimsPaid { get; set; }
+    /// <summary>The part of <see cref="TotalActual"/> paid out as advances, less cash handed back.</summary>
+    public decimal ActualAdvancesPaidOut { get; set; }
     public decimal Variance { get; set; }
+    /// <summary>The trip's approved budget (its estimate on a trip approved before lane 2), which this budget's
+    /// total may not exceed — the two figures were unlinked (O-9).</summary>
+    public decimal? TripApprovedBudget { get; set; }
+    /// <summary>Committed spend above the approved total. An overrun warns; whether it refuses is TDC's question.</summary>
+    public bool CommittedOverrun { get; set; }
+    /// <summary>Actual spend above the approved total.</summary>
+    public bool ActualOverrun { get; set; }
     public Guid? ApprovedById { get; set; }
     public string? ApprovedByName { get; set; }
     public DateTime? ApprovedAt { get; set; }
 }
 
+/// <summary>
+/// A trip's budget (lane 3, B10, O-9, D-16): only once the trip is approved; in the trip's currency, set by the
+/// server; its total defaults to the trip's approved budget and may not exceed it; its allocation is left empty
+/// or adds up to the total exactly.
+/// </summary>
 public class CreateStaffTravelBudgetDto : CreateDtoBase
 {
     [Required]
@@ -1803,12 +1820,11 @@ public class CreateStaffTravelBudgetDto : CreateDtoBase
     [Range(2000, 2100)]
     public short BudgetYear { get; set; }
 
+    /// <summary>0 takes the trip's approved budget.</summary>
     [Range(0, double.MaxValue)]
     public decimal ApprovedTotal { get; set; }
 
-    [Required]
-    [MaxLength(3)]
-    public string CurrencyCode { get; set; } = string.Empty;
+    // CurrencyCode removed (lane 3): a budget is in its trip's currency, set by the server.
 
     [Range(0, double.MaxValue)]
     public decimal FlightBudget { get; set; }
@@ -1826,17 +1842,17 @@ public class CreateStaffTravelBudgetDto : CreateDtoBase
     public decimal MiscellaneousBudget { get; set; }
 }
 
+/// <summary>As <see cref="CreateStaffTravelBudgetDto"/>. Changing an approved budget withdraws its approval.</summary>
 public class UpdateStaffTravelBudgetDto : UpdateDtoBase
 {
     [Range(2000, 2100)]
     public short BudgetYear { get; set; }
 
+    /// <summary>0 takes the trip's approved budget.</summary>
     [Range(0, double.MaxValue)]
     public decimal ApprovedTotal { get; set; }
 
-    [Required]
-    [MaxLength(3)]
-    public string CurrencyCode { get; set; } = string.Empty;
+    // CurrencyCode removed (lane 3): the trip's, set by the server.
 
     [Range(0, double.MaxValue)]
     public decimal FlightBudget { get; set; }
@@ -1853,17 +1869,17 @@ public class UpdateStaffTravelBudgetDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal MiscellaneousBudget { get; set; }
 
-    /// <summary>
-    /// <b>Server-derived; anything sent here is overwritten.</b> Committed is the value of
-    /// non-cancelled bookings on the request, actual is the value of paid expense claims, and
-    /// <c>Variance</c> is <c>ApprovedTotal - TotalActual</c>. All three were caller-declared, so a
-    /// budget-versus-actual screen showed whatever was last typed while the records that constitute
-    /// the spend sat unread on the same request. See <c>StaffTravelBudgetRollup</c>.
-    /// </summary>
-    public decimal TotalCommitted { get; set; }
+    // TotalCommitted and TotalActual removed (lane 3, B14): they were ignored — the rollup derives both from the
+    // trip's bookings, claims and advances (StaffTravelBudgetRollup).
+}
 
-    /// <summary><b>Server-derived</b> — see <see cref="TotalCommitted"/>.</summary>
-    public decimal TotalActual { get; set; }
+/// <summary>Voiding a paid claim's payment (lane 3, T-39): a travel administrator other than the payer, with the reason.</summary>
+public class VoidStaffTravelClaimPaymentDto
+{
+    [Required]
+    [MinLength(5)]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
 }
 
 #endregion
@@ -1905,6 +1921,11 @@ public class StaffTravelExpenseClaimDto : BaseDto
     public string? PaidByName { get; set; }
     /// <summary>Why the claim was paid in full although the traveller held advance cash the claim does not name (O-2).</summary>
     public string? AdvanceWaiverReason { get; set; }
+    /// <summary>The last payment voided, by whom and why (lane 3, T-39); the voided payment's details are an
+    /// internal note on the trip.</summary>
+    public DateTime? PaymentVoidedAt { get; set; }
+    public string? PaymentVoidedByName { get; set; }
+    public string? PaymentVoidReason { get; set; }
     public List<StaffTravelExpenseClaimLineDto> Lines { get; set; } = new();
 }
 

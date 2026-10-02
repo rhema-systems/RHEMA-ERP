@@ -28,6 +28,7 @@ export function TravelReasonDialog({
   placeholder,
   confirmLabel,
   optional = false,
+  minLength = 1,
   pending = false,
   destructive = false,
   onConfirm,
@@ -41,6 +42,8 @@ export function TravelReasonDialog({
   confirmLabel: string;
   /** True where the server takes the action without a reason (recall). */
   optional?: boolean;
+  /** The fewest characters the server takes for a required reason (a payment void: 5). */
+  minLength?: number;
   pending?: boolean;
   destructive?: boolean;
   /** Resolves when the action succeeded; the dialog then closes and clears itself. */
@@ -79,7 +82,7 @@ export function TravelReasonDialog({
           </Button>
           <Button
             variant={destructive ? 'destructive' : 'default'}
-            disabled={pending || (!optional && !reason.trim())}
+            disabled={pending || (!optional && reason.trim().length < Math.max(1, minLength))}
             onClick={async () => {
               try {
                 await onConfirm(reason.trim());

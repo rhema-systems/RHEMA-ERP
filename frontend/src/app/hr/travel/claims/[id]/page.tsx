@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Send, Gavel, Banknote, Pencil, Scale, Paperclip } from 'lucide-react';
+import { Loader2, Plus, Send, Gavel, Banknote, Pencil, Scale, Paperclip, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -33,6 +33,8 @@ import {
 } from '@/components/hr/employee/tabs/fields';
 import { CurrencyField } from '@/components/hr/common/CurrencyPicker';
 import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import { TravelReasonDialog } from '@/components/hr/travel/TravelReasonDialog';
+import { financePostingSourceKey } from '@/components/hr/common/FinancePostingCard';
 import { fmtTravelMoney as fmtMoney } from '@/components/hr/travel/travel-format';
 import { useTravelAccess } from '@/components/hr/travel/useTravelAccess';
 import { useToast } from '@/hooks/use-toast';
@@ -114,6 +116,7 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
   const [lineDialog, setLineDialog] = useState<{ line: StaffTravelExpenseClaimLine | null } | null>(null);
   const [showReview, setShowReview] = useState(false);
   const [showPay, setShowPay] = useState(false);
+  const [showVoid, setShowVoid] = useState(false);
   const [outcome, setOutcome] = useState<TravelClaimStatus>('Approved');
   const [notes, setNotes] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<TravelPaymentMethod>('BankTransfer');
@@ -268,6 +271,20 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
       toast({ variant: 'destructive', title: 'Could not record payment', description: e.message }),
   });
 
+  // Lane 3, T-39: the journal reversed, the advance settlement undone, the claim back to approved.
+  const voidPayment = useMutation({
+    mutationFn: (reason: string) => travelFinanceService.voidClaimPayment(id, { reason }),
+    onSuccess: async () => {
+      toast({ title: 'Payment voided', description: 'The claim is back to approved, to be paid again or not.' });
+      await refresh();
+      await queryClient.invalidateQueries({ queryKey: financePostingSourceKey(id) });
+      await queryClient.invalidateQueries({ queryKey: ['travel-claims-register'] });
+      await queryClient.invalidateQueries({ queryKey: ['travel-advances', claim?.staffTravelRequestId] });
+    },
+    onError: (e: Error) =>
+      toast({ variant: 'destructive', title: 'Could not void the payment', description: e.message }),
+  });
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-10">
@@ -349,6 +366,11 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
             {canWrite && isPayable && (
               <Button onClick={() => setShowPay(true)}>
                 <Banknote className="mr-2 h-4 w-4" /> Record payment
+              </Button>
+            )}
+            {access.canAdmin && claim.status === 'Paid' && (
+              <Button variant="outline" onClick={() => setShowVoid(true)}>
+                <Undo2 className="mr-2 h-4 w-4" /> Void payment
               </Button>
             )}
           </div>
@@ -443,6 +465,18 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
         <p className="text-xs text-muted-foreground">
           Paid in full past advance cash the traveller held on this trip: {claim.advanceWaiverReason}
         </p>
+      )}
+      {claim.paymentVoidedAt && (
+        <Card className="border-amber-500/60">
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground">
+              {claim.status === 'Paid' ? 'An earlier payment was voided' : 'Payment voided'} on{' '}
+              {fmtDateTime(claim.paymentVoidedAt)}
+              {claim.paymentVoidedByName ? ` by ${claim.paymentVoidedByName}` : ''}
+            </p>
+            <p className="mt-1 whitespace-pre-wrap text-sm">{claim.paymentVoidReason}</p>
+          </CardContent>
+        </Card>
       )}
 
       {/* What Finance holds for this claim: recognition on approval, settlement on payment (lane 8). */}
@@ -862,6 +896,27 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <TravelReasonDialog
+        open={showVoid}
+        onOpenChange={setShowVoid}
+        title={`Void the payment of ${claim.claimNumber}`}
+        description={
+          `The payment of ${fmtMoney(claim.netPayable, claim.currencyCode)} is undone: its Finance journal, if one was ` +
+          'posted, is reversed' +
+          (claim.advanceDeducted > 0
+            ? `, the ${fmtMoney(claim.advanceDeducted, claim.currencyCode)} it recovered goes back onto ${claim.travelAdvanceNumber ?? 'the advance'}`
+            : '') +
+          ', and the claim returns to approved, to be paid again or not. Neither the claimant nor the person who paid it ' +
+          'can void it. The reason is kept on the claim and the trip.'
+        }
+        minLength={5}
+        placeholder="At least five characters"
+        confirmLabel="Void payment"
+        destructive
+        pending={voidPayment.isPending}
+        onConfirm={(reason) => voidPayment.mutateAsync(reason)}
+      />
     </div>
   );
 }

@@ -16,7 +16,8 @@
  * | advance `settledAmount` / `unsettledAmount` | claims settled against it |
  * | advance `approvedAmount` | the approve endpoint, never a plain update |
  * | advance `disbursedAt`, claim `paidAt` | the clock, on the action that caused them |
- * | budget `totalCommitted` / `totalActual` / `variance` | the request's bookings and paid claims |
+ * | budget `totalCommitted` / `totalActual` / `variance` | the request's bookings, paid claims and advances paid out |
+ * | budget `currencyCode`, `approvedById` / `approvedAt` | the trip's currency; the approve endpoint |
  *
  * Finance posting (since 2026-09-20, the HR finance posting sweep): `TravelAdvanceDisbursed`,
  * `TravelClaimApproved` and `TravelClaimPaid` post journals through HR's one posting adapter when a
@@ -95,31 +96,45 @@ export interface StaffTravelBudget extends AuditFields {
   transportBudget: number;
   miscellaneousBudget: number;
   /**
-   * Server-derived: the value of non-cancelled bookings on this request. Money the organisation is
-   * on the hook for, whether or not it has left yet.
+   * Server-derived: the value of bookings on this request that are not cancelled, refunded or a no-show,
+   * plus the cancellation fees of those cancelled or refunded. Money the organisation is on the hook for,
+   * whether or not it has left yet.
    */
   totalCommitted: number;
   /**
-   * Server-derived: expense claims that have been **paid**. Cash actually gone out through the
-   * claim route.
+   * Server-derived: cash actually gone out — `actualClaimsPaid` + `actualAdvancesPaidOut` (lane 3).
    *
    * ⚠ Committed and actual measure **different routes** and neither contains the other — a booking
    * paid direct to a vendor is committed but never becomes a claim. They must not be added
    * together, and a screen showing both should say what each one counts.
    */
   totalActual: number;
+  /** Claims paid, net of the advance each recovered. */
+  actualClaimsPaid: number;
+  /** Advance cash paid out, less cash handed back. */
+  actualAdvancesPaidOut: number;
   /** Server-derived: `approvedTotal − totalActual`. */
   variance: number;
+  /** The trip's approved budget (its estimate on a trip approved before lane 2) — the cap on `approvedTotal`. */
+  tripApprovedBudget?: number | null;
+  /** Committed spend is above `approvedTotal`. It warns; whether it refuses is a TDC question. */
+  committedOverrun: boolean;
+  /** Actual spend is above `approvedTotal`. */
+  actualOverrun: boolean;
   approvedById?: string | null;
   approvedByName?: string | null;
   approvedAt?: string | null;
 }
 
+/**
+ * Lane 3: only once the trip is approved; in the trip's currency (set by the server — there is no currency
+ * field); `approvedTotal` 0 takes the trip's approved budget, and may not exceed it; the five parts are all 0 or
+ * add up to the total exactly. Changing an approved budget withdraws its approval.
+ */
 export interface CreateStaffTravelBudget {
   staffTravelRequestId: string;
   budgetYear: number;
   approvedTotal: number;
-  currencyCode: string;
   flightBudget: number;
   accommodationBudget: number;
   perDiemBudget: number;
@@ -212,6 +227,10 @@ export interface StaffTravelExpenseClaim extends AuditFields {
   paidByName?: string | null;
   /** Why the claim was paid in full past advance cash the traveller held that it did not name. */
   advanceWaiverReason?: string | null;
+  // Lane 3 (slice 3c, T-39): the last payment voided, if one was. The claim went back to approved.
+  paymentVoidedAt?: string | null;
+  paymentVoidedByName?: string | null;
+  paymentVoidReason?: string | null;
   lines: StaffTravelExpenseClaimLine[];
 }
 
@@ -281,6 +300,14 @@ export interface PayStaffTravelExpenseClaim {
   paymentMethod: TravelPaymentMethod;
   paymentReference?: string | null;
   advanceWaiverReason?: string | null;
+}
+
+/**
+ * Lane 3, T-39: a travel administrator who is neither the claimant nor the payer, with a reason of at least five
+ * characters. The payment's journal is reversed, its advance settlement undone, and the claim goes back to approved.
+ */
+export interface VoidStaffTravelClaimPayment {
+  reason: string;
 }
 
 // ── Advances ─────────────────────────────────────────────────────────────────

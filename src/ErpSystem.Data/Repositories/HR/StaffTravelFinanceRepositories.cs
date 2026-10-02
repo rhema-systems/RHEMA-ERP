@@ -48,6 +48,7 @@ public class StaffTravelExpenseClaimRepository : GenericRepository<StaffTravelEx
             .Include(c => c.StaffTravelRequest)
             .Include(c => c.FinanceReviewedBy)
             .Include(c => c.PaidBy)
+            .Include(c => c.PaymentVoidedBy)
             .Include(c => c.TravelAdvance)
             .Include(c => c.Lines).ThenInclude(l => l.PerDiemRate)
             .Include(c => c.Lines).ThenInclude(l => l.ReviewedBy)

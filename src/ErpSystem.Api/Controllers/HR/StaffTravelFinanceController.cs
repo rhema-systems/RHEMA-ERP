@@ -61,6 +61,17 @@ public class StaffTravelFinanceController : HrControllerBase
         return Ok(await _service.UpdateBudgetAsync(dto, ctx.Value.userId));
     }
 
+    /// <summary>A travel administrator's verb (lane 3, B10): the budget's approver is an Employee FK, and is never the traveller.</summary>
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
+    [HttpPost("budgets/{id:guid}/approve")]
+    public async Task<ActionResult<StaffTravelBudgetDto>> ApproveBudget(Guid id)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Approving a travel budget") is { } contextError) return contextError;
+
+        return Ok(await _service.ApproveBudgetAsync(id, employeeId));
+    }
+
     // =========================================================================
     // EXPENSE CLAIMS
     // =========================================================================
@@ -163,6 +174,22 @@ public class StaffTravelFinanceController : HrControllerBase
         dto.ClaimId = id;
         await _service.PayClaimAsync(dto, employeeId);
         return Ok(new { message = "Expense claim paid." });
+    }
+
+    /// <summary>
+    /// A travel administrator's verb (lane 3, T-39): the payment's journal reversed, its advance settlement undone, the
+    /// claim back to approved. Never the claimant's or the payer's own — so it needs the caller's employee link.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
+    [HttpPost("claims/{id:guid}/void-payment")]
+    public async Task<IActionResult> VoidClaimPayment(Guid id, [FromBody] VoidStaffTravelClaimPaymentDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Voiding a claim's payment") is { } contextError) return contextError;
+
+        await _service.VoidClaimPaymentAsync(id, dto, employeeId);
+        return Ok(new { message = "Payment voided." });
     }
 
     // ---- Expense claim lines -----------------------------------------------

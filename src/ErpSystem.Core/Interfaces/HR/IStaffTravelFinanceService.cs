@@ -15,6 +15,9 @@ public interface IStaffTravelFinanceService
     Task<StaffTravelBudgetDto?> GetBudgetByRequestAsync(Guid requestId, CancellationToken cancellationToken = default);
     Task<StaffTravelBudgetDto> CreateBudgetAsync(CreateStaffTravelBudgetDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<StaffTravelBudgetDto> UpdateBudgetAsync(UpdateStaffTravelBudgetDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>ApproveBudget. <paramref name="approverEmployeeId"/> is the caller's employee record, recorded as the
+    /// approver; never the traveller (lane 3, B10).</summary>
+    Task<StaffTravelBudgetDto> ApproveBudgetAsync(Guid budgetId, Guid approverEmployeeId, CancellationToken cancellationToken = default);
 
     // Expense claims
     Task<StaffTravelExpenseClaimDto> GetClaimByIdAsync(Guid id, CancellationToken cancellationToken = default);
@@ -34,6 +37,9 @@ public interface IStaffTravelFinanceService
     /// <summary>PayClaim. <paramref name="payerEmployeeId"/> is the caller's employee record: the payer is recorded
     /// and is never the claimant or a reviewer of the claim (lane 3, D-2).</summary>
     Task<bool> PayClaimAsync(PayStaffTravelExpenseClaimDto payDto, Guid payerEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>VoidClaimPayment. <paramref name="voiderEmployeeId"/> is the caller's employee record: never the
+    /// claimant or the payer (lane 3, T-39).</summary>
+    Task<bool> VoidClaimPaymentAsync(Guid claimId, VoidStaffTravelClaimPaymentDto voidDto, Guid voiderEmployeeId, CancellationToken cancellationToken = default);
 
     // Expense claim lines
     Task<StaffTravelExpenseClaimLineDto> AddClaimLineAsync(CreateStaffTravelExpenseClaimLineDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
