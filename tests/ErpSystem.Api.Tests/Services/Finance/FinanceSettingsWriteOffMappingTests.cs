@@ -156,7 +156,7 @@ public sealed class FinanceSettingsWriteOffMappingTests
         cleared.InvoiceRoundingLossAccountId.Should().BeNull();
 
         var audit = fixture.Audits.Should().ContainSingle().Which;
-        audit.EventType.Should().Be(FinanceAuditEvents.FinancePrecisionPolicyChanged);
+        audit.EventType.Should().Be(FinanceAuditEvents.FinanceControlPolicyChanged);
         JsonSerializer.Serialize(audit.BeforeValues).Should().Contain("0.05").And.Contain("0.10");
         JsonSerializer.Serialize(audit.AfterValues).Should().Contain("null");
     }
