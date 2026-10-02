@@ -11,11 +11,14 @@ import {
   ArrowRight,
   Banknote,
   Boxes,
+  CircleCheckBig,
   Clock3,
   FileText,
   FolderKanban,
   Gauge,
   MapPin,
+  ListTodo,
+  Server,
   ShieldAlert,
   type LucideIcon,
   RefreshCw,
@@ -46,6 +49,8 @@ import { formatCurrencyAmount } from '../../lib/currency';
 import { authService } from '../../services/auth';
 import { dashboardService, getUnavailableDashboardModules, resolveDashboardReportingCurrency } from '../../services/dashboard';
 import { inventoryWarehouseService } from '../../services/inventoryWarehouseService';
+import { useInterfaceStyle } from '../../contexts/InterfaceStyleContext';
+import { systemHealthService } from '../../services/systemHealthService';
 
 interface SummaryCardDefinition {
   title: string;
@@ -56,6 +61,35 @@ interface SummaryCardDefinition {
   iconClassName: string;
   icon: LucideIcon;
 }
+
+const buildQueryHref = (path: string, parameters: Record<string, string | undefined>) => {
+  const query = new URLSearchParams();
+  Object.entries(parameters).forEach(([key, value]) => {
+    if (value) query.set(key, value);
+  });
+  const suffix = query.toString();
+  return suffix ? `${path}?${suffix}` : path;
+};
+
+const getCrmFunnelHref = (stage: string) => {
+  const normalized = stage.trim().toLowerCase();
+  if (normalized === 'enquiry' || normalized === 'lead' || normalized === 'leads') {
+    return '/crm/leads?status=New';
+  }
+  if (normalized === 'qualified') {
+    return '/crm/leads?status=Qualified';
+  }
+  return buildQueryHref('/crm/opportunities', { stage });
+};
+
+const operationalModuleHref: Record<string, string> = {
+  CRM: '/crm/leads?followUpOnly=true',
+  Projects: '/development/projects',
+  Procurement: '/procurement/purchase-orders',
+  Inventory: '/inventory/requisitions',
+  Maintenance: '/maintenance/work-orders',
+  Tenders: '/procurement/tenders',
+};
 
 const formatNumber = (value: number) =>
   new Intl.NumberFormat('en-US', {
@@ -130,6 +164,7 @@ const toDashboardDate = (value: Date) => format(value, 'yyyy-MM-dd');
 
 export default function Dashboard() {
   const router = useRouter();
+  const { interfaceStyle } = useInterfaceStyle();
   const { user } = useAuth();
   const storedUser = authService.getStoredUser();
   const effectiveUser = user ?? storedUser;
@@ -201,6 +236,15 @@ export default function Dashboard() {
     enabled: !shouldRouteToExternalPortal && rangeQuery !== null,
     staleTime: 60_000,
     placeholderData: (previousData) => previousData,
+  });
+
+  const { data: systemHealth, error: systemHealthError } = useQuery({
+    queryKey: ['enterprise-dashboard', 'system-health'],
+    queryFn: () => systemHealthService.getReadiness(),
+    enabled: !shouldRouteToExternalPortal,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    retry: 1,
   });
 
   const handleRangeChange = (range: DateRange | undefined) => {
@@ -397,16 +441,35 @@ export default function Dashboard() {
 
   const tenderStatusData = queues.openTendersByStatus.map((status) => ({ name: status.label, value: status.count }));
 
+  const procurementQueuesAvailable = data.moduleStatus.some(
+    (status) => status.module === 'Procurement Queues' && status.available,
+  );
+  const inventoryQueuesAvailable = data.moduleStatus.some(
+    (status) => status.module === 'Inventory Queues' && status.available,
+  );
+
   const queueLoadData = [
-    { module: 'CRM', items: (data.crm?.leadsNeedingFollowUpCount ?? 0) + (data.crm?.atRiskAccountCount ?? 0) },
-    {
-      module: 'Projects',
-      items: (data.projectDashboard?.overdueTasks ?? 0) + (data.projectDashboard?.overdueMilestones ?? 0) + (data.projectDashboard?.openRisks ?? 0),
-    },
-    { module: 'Procurement', items: queues.pendingPurchaseRequisitionCount + queues.openPurchaseOrderCount },
-    { module: 'Inventory', items: queues.pendingInventoryApprovalCount + queues.pendingInventoryIssueCount },
-    { module: 'Maintenance', items: maintenanceActiveWorkOrders + maintenanceOverdueWorkOrders },
-    { module: 'Tenders', items: queues.openTenderCount + queues.tendersClosingWithin14DaysCount },
+    ...(data.crm
+      ? [{ module: 'CRM', items: data.crm.leadsNeedingFollowUpCount + data.crm.atRiskAccountCount }]
+      : []),
+    ...(data.projectDashboard
+      ? [{
+        module: 'Projects',
+        items: data.projectDashboard.overdueTasks + data.projectDashboard.overdueMilestones + data.projectDashboard.openRisks,
+      }]
+      : []),
+    ...(procurementQueuesAvailable
+      ? [
+        { module: 'Procurement', items: queues.pendingPurchaseRequisitionCount + queues.openPurchaseOrderCount },
+        { module: 'Tenders', items: queues.openTenderCount + queues.tendersClosingWithin14DaysCount },
+      ]
+      : []),
+    ...(inventoryQueuesAvailable
+      ? [{ module: 'Inventory', items: queues.pendingInventoryApprovalCount + queues.pendingInventoryIssueCount }]
+      : []),
+    ...(data.maintenanceOverview || data.maintenanceMetrics
+      ? [{ module: 'Maintenance', items: maintenanceActiveWorkOrders + maintenanceOverdueWorkOrders }]
+      : []),
   ];
 
   const criticalAlertCount =
@@ -414,6 +477,30 @@ export default function Dashboard() {
     (data.projectDashboard?.overdueMilestones ?? 0) +
     maintenanceOverdueWorkOrders +
     queues.tendersClosingWithin14DaysCount;
+
+  const operationalAlerts = [
+    { label: 'Leads needing follow-up', count: data.crm?.leadsNeedingFollowUpCount ?? 0, href: '/crm/leads?followUpOnly=true' },
+    { label: 'Overdue project milestones', count: data.projectDashboard?.overdueMilestones ?? 0, href: '/development/projects' },
+    { label: 'Overdue maintenance work orders', count: maintenanceOverdueWorkOrders, href: '/maintenance/work-orders' },
+    ...(procurementQueuesAvailable
+      ? [{ label: 'Tenders closing within 14 days', count: queues.tendersClosingWithin14DaysCount, href: '/procurement/tenders' }]
+      : []),
+  ].filter((item) => item.count > 0);
+
+  const operationalWorkQueues = [
+    ...(procurementQueuesAvailable
+      ? [
+        { label: 'Purchase requisitions', count: queues.pendingPurchaseRequisitionCount, href: '/procurement/purchase-requisitions' },
+        { label: 'Open purchase orders', count: queues.openPurchaseOrderCount, href: '/procurement/purchase-orders' },
+      ]
+      : []),
+    ...(inventoryQueuesAvailable
+      ? [
+        { label: 'Inventory approvals', count: queues.pendingInventoryApprovalCount, href: '/inventory/requisitions' },
+        { label: 'Inventory issues', count: queues.pendingInventoryIssueCount, href: '/inventory/requisitions' },
+      ]
+      : []),
+  ];
 
   const management = data.procurementInventoryManagement;
   const managementSpendByCategory = (management?.spendByCategory ?? []).slice(0, 10).map((item) => ({
@@ -432,11 +519,20 @@ export default function Dashboard() {
     name: item.label,
     value: item.count,
   }));
+  const detailedLedgerHref = buildQueryHref('/finance/reports/detailed-ledger', {
+    startDate: rangeQuery?.startDate,
+    endDate: rangeQuery?.endDate,
+  });
 
   return (
     <DashboardLayout>
-      <div className="space-y-5">
-        <section className="rounded-[28px] border border-slate-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.12),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(16,185,129,0.12),_transparent_24%),linear-gradient(135deg,rgba(255,255,255,0.96),rgba(248,250,252,0.98))] p-5 shadow-[0_24px_60px_-24px_rgba(15,23,42,0.25)] dark:border-slate-800/80 dark:bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.18),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(16,185,129,0.14),_transparent_24%),linear-gradient(135deg,rgba(2,6,23,0.96),rgba(15,23,42,0.98))]">
+      <div className={cn('space-y-5', interfaceStyle === 'immersive' && 'dashboard-immersive')} data-dashboard-style={interfaceStyle}>
+        <section className={cn(
+          'border border-slate-200/80 p-5 dark:border-slate-800/80',
+          interfaceStyle === 'immersive'
+            ? 'rounded-[28px] bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.16),_transparent_30%),radial-gradient(circle_at_top_right,_rgba(16,185,129,0.14),_transparent_26%),linear-gradient(135deg,rgba(255,255,255,0.97),rgba(239,246,255,0.96))] shadow-[0_24px_60px_-24px_rgba(15,23,42,0.25)] dark:bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.2),_transparent_30%),radial-gradient(circle_at_top_right,_rgba(16,185,129,0.16),_transparent_26%),linear-gradient(135deg,rgba(2,6,23,0.96),rgba(15,23,42,0.98))]'
+            : 'rounded-xl bg-white shadow-sm dark:bg-[#181818]',
+        )}>
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
@@ -451,9 +547,10 @@ export default function Dashboard() {
                 </Badge>
               </div>
               <div>
-                <h1 className="text-[1.75rem] font-bold tracking-tight text-slate-950 dark:text-slate-50">Dashboard</h1>
+                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'},</p>
+                <h1 className={cn('font-bold tracking-tight text-slate-950 dark:text-slate-50', interfaceStyle === 'immersive' ? 'text-[2rem]' : 'text-[1.75rem]')}>Welcome back, {displayName}!</h1>
                 <p className="mt-1 max-w-3xl text-sm leading-5 text-slate-600 dark:text-slate-300">
-                  Welcome back, {displayName}. Select a reporting period to refresh period-sensitive activity while retaining the current operational context.
+                  Here&apos;s what&apos;s happening across your organization for the selected reporting period.
                 </p>
               </div>
             </div>
@@ -528,12 +625,18 @@ export default function Dashboard() {
           </Alert>
         )}
 
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+        <div className={cn('grid gap-3 md:grid-cols-2', interfaceStyle === 'immersive' ? 'xl:grid-cols-4 2xl:grid-cols-6' : 'xl:grid-cols-4')}>
           {summaryCards.map((card) => {
             const Icon = card.icon;
 
             return (
-              <Card key={card.title} className={cn('overflow-hidden border shadow-[0_16px_40px_-28px_rgba(15,23,42,0.4)] dark:shadow-none', card.accentClassName)}>
+              <Link
+                key={card.title}
+                href={card.href}
+                aria-label={`Open ${card.title} details`}
+                className="group block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+              <Card className={cn('h-full overflow-hidden border shadow-[0_16px_40px_-28px_rgba(15,23,42,0.4)] transition-transform group-hover:-translate-y-0.5 group-hover:shadow-lg dark:shadow-none', card.accentClassName)}>
                 <CardContent className="px-4 py-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -545,19 +648,100 @@ export default function Dashboard() {
                       <Icon className="h-4.5 w-4.5" />
                     </div>
                   </div>
-                  <div className="mt-3">
-                    <Link href={card.href}>
-                      <Button variant="ghost" size="sm" className="h-7 px-0">
-                        Open
-                        <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
-                      </Button>
-                    </Link>
+                  <div className="mt-3 inline-flex items-center text-xs font-medium text-primary">
+                    View details
+                    <ArrowRight className="ml-1.5 h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
                   </div>
                 </CardContent>
               </Card>
+              </Link>
             );
           })}
         </div>
+
+        <section className="grid gap-4 lg:grid-cols-3" aria-label="Dashboard attention and system status">
+          <Card className="border-slate-200/80 shadow-sm dark:border-slate-800/80">
+            <CardHeader className="px-4 pb-2 pt-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-sm">System health</CardTitle>
+                  <CardDescription className="text-xs">Live API readiness checks</CardDescription>
+                </div>
+                <Server className="h-4 w-4 text-blue-600 dark:text-blue-300" />
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2 px-4 pb-4">
+              {systemHealth?.checks.map((check) => {
+                const healthy = check.status.toLowerCase() === 'healthy';
+                return (
+                  <div key={check.name} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs">
+                    <span className="truncate font-medium capitalize">{check.name.replaceAll('-', ' ')}</span>
+                    <Badge variant="outline" className={cn('shrink-0', healthy ? 'border-emerald-200 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300' : 'border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-300')}>
+                      {check.status}
+                    </Badge>
+                  </div>
+                );
+              })}
+              {!systemHealth && !systemHealthError && <p className="py-3 text-center text-xs text-slate-500">Checking service readiness…</p>}
+              {systemHealthError && <p className="py-3 text-center text-xs text-rose-600">Readiness checks are currently unavailable.</p>}
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-200/80 shadow-sm dark:border-slate-800/80">
+            <CardHeader className="px-4 pb-2 pt-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-sm">Alerts and attention</CardTitle>
+                  <CardDescription className="text-xs">Operational records requiring review</CardDescription>
+                </div>
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2 px-4 pb-4">
+              {operationalAlerts.length === 0 ? (
+                <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-3 text-xs text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-300">
+                  <CircleCheckBig className="h-4 w-4" />
+                  No active operational alerts
+                </div>
+              ) : operationalAlerts.map((alert) => (
+                <Link key={alert.label} href={alert.href} className="group flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs transition-colors hover:bg-slate-50 dark:hover:bg-slate-900">
+                  <span className="font-medium">{alert.label}</span>
+                  <span className="flex items-center gap-1.5 font-semibold text-amber-700 dark:text-amber-300">
+                    {formatNumber(alert.count)}
+                    <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                  </span>
+                </Link>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-200/80 shadow-sm dark:border-slate-800/80">
+            <CardHeader className="px-4 pb-2 pt-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-sm">Operational work queues</CardTitle>
+                  <CardDescription className="text-xs">Live workload across permitted modules</CardDescription>
+                </div>
+                <ListTodo className="h-4 w-4 text-violet-600 dark:text-violet-300" />
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2 px-4 pb-4">
+              {operationalWorkQueues.length === 0 ? (
+                <p className="rounded-lg border px-3 py-3 text-xs text-slate-500 dark:text-slate-400">
+                  No permitted operational queues
+                </p>
+              ) : operationalWorkQueues.map((queue) => (
+                <Link key={queue.label} href={queue.href} className="group flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs transition-colors hover:bg-slate-50 dark:hover:bg-slate-900">
+                  <span className="font-medium">{queue.label}</span>
+                  <span className="flex items-center gap-1.5 font-semibold text-violet-700 dark:text-violet-300">
+                    {formatNumber(queue.count)}
+                    <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                  </span>
+                </Link>
+              ))}
+            </CardContent>
+          </Card>
+        </section>
 
         {data.financeOverview && (
           <section className="space-y-3" aria-labelledby="finance-performance-title">
@@ -580,7 +764,8 @@ export default function Dashboard() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <Card className="border-emerald-200/80 dark:border-emerald-900/70">
+              <Link href={detailedLedgerHref} aria-label="Drill down to revenue ledger detail" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <Card className="h-full border-emerald-200/80 transition-colors hover:bg-emerald-50/60 dark:border-emerald-900/70 dark:hover:bg-emerald-950/20">
                 <CardContent className="flex items-start justify-between gap-3 p-4">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Revenue</p>
@@ -590,8 +775,10 @@ export default function Dashboard() {
                   <TrendingUp className="h-5 w-5 text-emerald-600" />
                 </CardContent>
               </Card>
+              </Link>
 
-              <Card className="border-amber-200/80 dark:border-amber-900/70">
+              <Link href={detailedLedgerHref} aria-label="Drill down to expense ledger detail" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <Card className="h-full border-amber-200/80 transition-colors hover:bg-amber-50/60 dark:border-amber-900/70 dark:hover:bg-amber-950/20">
                 <CardContent className="flex items-start justify-between gap-3 p-4">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Expenses</p>
@@ -601,8 +788,10 @@ export default function Dashboard() {
                   <Banknote className="h-5 w-5 text-amber-600" />
                 </CardContent>
               </Card>
+              </Link>
 
-              <Card className="border-blue-200/80 dark:border-blue-900/70">
+              <Link href={detailedLedgerHref} aria-label="Drill down to net-position ledger detail" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <Card className="h-full border-blue-200/80 transition-colors hover:bg-blue-50/60 dark:border-blue-900/70 dark:hover:bg-blue-950/20">
                 <CardContent className="flex items-start justify-between gap-3 p-4">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Net position</p>
@@ -612,8 +801,10 @@ export default function Dashboard() {
                   <Gauge className="h-5 w-5 text-blue-600" />
                 </CardContent>
               </Card>
+              </Link>
 
-              <Card className="border-violet-200/80 dark:border-violet-900/70">
+              <Link href={detailedLedgerHref} aria-label="Drill down to cash ledger detail" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <Card className="h-full border-violet-200/80 transition-colors hover:bg-violet-50/60 dark:border-violet-900/70 dark:hover:bg-violet-950/20">
                 <CardContent className="flex items-start justify-between gap-3 p-4">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Cash on hand</p>
@@ -623,6 +814,7 @@ export default function Dashboard() {
                   <WalletCards className="h-5 w-5 text-violet-600" />
                 </CardContent>
               </Card>
+              </Link>
             </div>
 
             <div className="grid gap-4 lg:grid-cols-2">
@@ -638,6 +830,8 @@ export default function Dashboard() {
                 height={300}
                 compact
                 formatValue={(value) => formatReportingMoney(Number(value))}
+                detailsHref={detailedLedgerHref}
+                detailsLabel="Open ledger"
                 className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
               />
               <BaseBarChart
@@ -650,6 +844,8 @@ export default function Dashboard() {
                 compact
                 orientation="horizontal"
                 formatValue={(value) => formatReportingMoney(Number(value))}
+                detailsHref={detailedLedgerHref}
+                detailsLabel="Open ledger"
                 className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
               />
             </div>
@@ -775,6 +971,8 @@ export default function Dashboard() {
                 height={280}
                 compact
                 formatValue={(value) => formatNumber(Number(value))}
+                detailsHref="/procurement/purchase-orders"
+                detailsLabel="View orders"
               />
               <BaseBarChart
                 data={managementSpendByDepartment}
@@ -785,6 +983,8 @@ export default function Dashboard() {
                 height={280}
                 compact
                 formatValue={(value) => formatNumber(Number(value))}
+                detailsHref="/procurement/purchase-orders"
+                detailsLabel="View orders"
               />
               <BaseBarChart
                 data={managementInventoryByCategory}
@@ -795,6 +995,8 @@ export default function Dashboard() {
                 height={280}
                 compact
                 formatValue={(value) => formatNumber(Number(value))}
+                detailsHref="/inventory/valuation"
+                detailsLabel="View valuation"
               />
               <BasePieChart
                 data={managementSupplierRisk}
@@ -806,6 +1008,9 @@ export default function Dashboard() {
                 compact
                 innerRadius={64}
                 showLabels={false}
+                detailsHref="/administration/procurement/supplier-risk"
+                detailsLabel="View suppliers"
+                getDatumHref={() => '/administration/procurement/supplier-risk'}
                 colors={[CHART_COLORS.danger[0], CHART_COLORS.warning[0], CHART_COLORS.info[0], CHART_COLORS.success[0]]}
               />
             </div>
@@ -837,7 +1042,7 @@ export default function Dashboard() {
           </section>
         )}
 
-        <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+        <div className={cn('grid gap-4 lg:grid-cols-2', interfaceStyle === 'immersive' && '2xl:grid-cols-3')}>
           <BaseBarChart
             data={pipelineStageData}
             xAxisKey="stage"
@@ -850,6 +1055,11 @@ export default function Dashboard() {
             height={300}
             compact
             formatValue={(value) => formatNumber(Number(value))}
+            detailsHref="/crm/opportunities"
+            detailsLabel="View pipeline"
+            getDatumHref={(datum) => buildQueryHref('/crm/opportunities', {
+              stage: String(datum.stage ?? ''),
+            })}
             error={unavailableModules.find((module) => module.module === 'CRM')?.error}
             className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
           />
@@ -864,6 +1074,9 @@ export default function Dashboard() {
             compact
             showLabels={false}
             formatValue={(value) => formatNumber(Number(value))}
+            detailsHref="/crm/leads"
+            detailsLabel="View funnel"
+            getDatumHref={(datum) => getCrmFunnelHref(String(datum.stage ?? ''))}
             error={unavailableModules.find((module) => module.module === 'CRM')?.error}
             className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
           />
@@ -878,6 +1091,11 @@ export default function Dashboard() {
             compact
             innerRadius={68}
             showLabels={false}
+            detailsHref="/crm/accounts"
+            detailsLabel="View accounts"
+            getDatumHref={(datum) => buildQueryHref('/crm/accounts', {
+              healthCategory: String(datum.name ?? ''),
+            })}
             colors={[CHART_COLORS.success[0], CHART_COLORS.warning[0], CHART_COLORS.danger[0], CHART_COLORS.info[0]]}
             error={unavailableModules.find((module) => module.module === 'CRM')?.error}
             className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
@@ -893,6 +1111,9 @@ export default function Dashboard() {
             compact
             orientation="horizontal"
             formatValue={(value) => formatNumber(Number(value))}
+            detailsHref="/development/projects"
+            detailsLabel="View projects"
+            getDatumHref={() => '/development/projects'}
             error={unavailableModules.find((module) => module.module === 'Projects')?.error}
             className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
           />
@@ -907,6 +1128,9 @@ export default function Dashboard() {
             compact
             orientation="horizontal"
             formatValue={(value) => formatNumber(Number(value))}
+            detailsHref="/inventory/requisitions"
+            detailsLabel="View queue"
+            getDatumHref={() => '/inventory/requisitions'}
             error={unavailableModules.find((module) => module.module === 'Inventory Queues')?.error}
             className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
           />
@@ -923,6 +1147,8 @@ export default function Dashboard() {
             height={300}
             compact
             formatValue={(value) => formatNumber(Number(value))}
+            detailsHref="/maintenance/work-orders"
+            detailsLabel="View work orders"
             error={unavailableModules.find((module) => module.module === 'Maintenance Trends')?.error}
             className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
           />
@@ -937,6 +1163,9 @@ export default function Dashboard() {
             compact
             innerRadius={68}
             showLabels={false}
+            detailsHref="/maintenance/work-orders"
+            detailsLabel="View work orders"
+            getDatumHref={() => '/maintenance/work-orders'}
             colors={[CHART_COLORS.danger[0], CHART_COLORS.warning[0], CHART_COLORS.success[0]]}
             error={unavailableModules.find((module) => ['Maintenance Overview', 'Maintenance Metrics'].includes(module.module))?.error}
             className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
@@ -952,6 +1181,9 @@ export default function Dashboard() {
             compact
             innerRadius={68}
             showLabels={false}
+            detailsHref="/procurement/tenders"
+            detailsLabel="View tenders"
+            getDatumHref={() => '/procurement/tenders'}
             colors={[CHART_COLORS.info[0], CHART_COLORS.warning[0], CHART_COLORS.success[0], CHART_COLORS.primary[0], CHART_COLORS.danger[0]]}
             error={unavailableModules.find((module) => module.module === 'Procurement Queues')?.error}
             className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
@@ -967,6 +1199,9 @@ export default function Dashboard() {
             compact
             orientation="horizontal"
             formatValue={(value) => formatNumber(Number(value))}
+            detailsHref="/workflow/inbox"
+            detailsLabel="View work"
+            getDatumHref={(datum) => operationalModuleHref[String(datum.module ?? '')]}
             className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
           />
         </div>

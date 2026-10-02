@@ -1,6 +1,9 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { ArrowUpRight } from 'lucide-react';
 import {
   AreaChart,
   Area,
@@ -53,6 +56,9 @@ interface BaseChartProps {
   loading?: boolean;
   error?: string;
   compact?: boolean;
+  detailsHref?: string;
+  detailsLabel?: string;
+  getDatumHref?: (datum: Record<string, unknown>) => string | undefined;
 }
 
 interface ChartContainerProps extends BaseChartProps {
@@ -73,16 +79,34 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
   loading = false,
   error,
   compact = false,
+  detailsHref,
+  detailsLabel = 'View details',
 }) => {
+  const heading = title || description ? (
+    <CardHeader className={cn(compact && 'px-5 pb-2 pt-4 space-y-1')}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          {title && <CardTitle className={cn(compact && 'text-base leading-tight')}>{title}</CardTitle>}
+          {description && <CardDescription className={cn(compact && 'text-sm leading-5')}>{description}</CardDescription>}
+        </div>
+        {detailsHref ? (
+          <Link
+            href={detailsHref}
+            className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={`${detailsLabel}${title ? ` for ${title}` : ''}`}
+          >
+            {detailsLabel}
+            <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+          </Link>
+        ) : null}
+      </div>
+    </CardHeader>
+  ) : null;
+
   if (loading) {
     return (
       <Card className={cn('w-full', className)}>
-        {(title || description) && (
-          <CardHeader className={cn(compact && 'px-5 pb-2 pt-4 space-y-1')}>
-            {title && <CardTitle className={cn(compact && 'text-base leading-tight')}>{title}</CardTitle>}
-            {description && <CardDescription className={cn(compact && 'text-sm leading-5')}>{description}</CardDescription>}
-          </CardHeader>
-        )}
+        {heading}
         <CardContent className={cn(compact && 'px-5 pb-5 pt-0')}>
           <div className="flex items-center justify-center" style={{ height }}>
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -95,12 +119,7 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
   if (error) {
     return (
       <Card className={cn('w-full', className)}>
-        {(title || description) && (
-          <CardHeader className={cn(compact && 'px-5 pb-2 pt-4 space-y-1')}>
-            {title && <CardTitle className={cn(compact && 'text-base leading-tight')}>{title}</CardTitle>}
-            {description && <CardDescription className={cn(compact && 'text-sm leading-5')}>{description}</CardDescription>}
-          </CardHeader>
-        )}
+        {heading}
         <CardContent className={cn(compact && 'px-5 pb-5 pt-0')}>
           <div className="flex items-center justify-center" style={{ height }}>
             <div className="text-center">
@@ -116,14 +135,9 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
   if (!data || data.length === 0) {
     return (
       <Card className={cn('w-full', className)}>
-        {(title || description) && (
-          <CardHeader className={cn(compact && 'px-5 pb-2 pt-4 space-y-1')}>
-            {title && <CardTitle className={cn(compact && 'text-base leading-tight')}>{title}</CardTitle>}
-            {description && <CardDescription className={cn(compact && 'text-sm leading-5')}>{description}</CardDescription>}
-          </CardHeader>
-        )}
+        {heading}
         <CardContent className={cn(compact && 'px-5 pb-5 pt-0')}>
-          <div className="flex items-center justify-center" style={{ height }}>
+          <div className="flex items-center justify-center" style={{ height: Math.min(height, compact ? 156 : height) }}>
             <div className="text-center">
               <p className="text-sm font-medium text-foreground">No live data yet</p>
               <p className="mt-1 text-sm text-muted-foreground">This widget will populate as records flow into the module.</p>
@@ -136,12 +150,7 @@ const ChartContainer: React.FC<ChartContainerProps> = ({
 
   return (
     <Card className={cn('w-full', className)}>
-      {(title || description) && (
-        <CardHeader className={cn(compact && 'px-5 pb-2 pt-4 space-y-1')}>
-          {title && <CardTitle className={cn(compact && 'text-base leading-tight')}>{title}</CardTitle>}
-          {description && <CardDescription className={cn(compact && 'text-sm leading-5')}>{description}</CardDescription>}
-        </CardHeader>
-      )}
+      {heading}
       <CardContent className={cn(compact && 'px-5 pb-5 pt-0')}>
         <ResponsiveContainer width="100%" height={height}>
           {children}
@@ -227,6 +236,8 @@ export const BaseLineChart: React.FC<LineChartProps> = ({
   loading,
   error,
   compact,
+  detailsHref,
+  detailsLabel,
 }) => {
   return (
     <ChartContainer
@@ -238,6 +249,8 @@ export const BaseLineChart: React.FC<LineChartProps> = ({
       error={error}
       data={data}
       compact={compact}
+      detailsHref={detailsHref}
+      detailsLabel={detailsLabel}
     >
       <LineChart data={data}>
         {showGrid && <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />}
@@ -302,6 +315,8 @@ export const BaseAreaChart: React.FC<AreaChartProps> = ({
   loading,
   error,
   compact,
+  detailsHref,
+  detailsLabel,
 }) => {
   return (
     <ChartContainer
@@ -313,6 +328,8 @@ export const BaseAreaChart: React.FC<AreaChartProps> = ({
       error={error}
       data={data}
       compact={compact}
+      detailsHref={detailsHref}
+      detailsLabel={detailsLabel}
     >
       <AreaChart data={data}>
         {showGrid && <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />}
@@ -378,8 +395,19 @@ export const BaseBarChart: React.FC<BarChartProps> = ({
   loading,
   error,
   compact,
+  detailsHref,
+  detailsLabel,
+  getDatumHref,
 }) => {
   const isHorizontal = orientation === 'horizontal';
+  const router = useRouter();
+  const handleDatumClick = getDatumHref
+    ? (datum: any) => {
+      const record = (datum?.payload ?? datum) as Record<string, unknown>;
+      const href = getDatumHref(record);
+      if (href) router.push(href);
+    }
+    : undefined;
 
   return (
     <ChartContainer
@@ -391,6 +419,8 @@ export const BaseBarChart: React.FC<BarChartProps> = ({
       error={error}
       data={data}
       compact={compact}
+      detailsHref={detailsHref}
+      detailsLabel={detailsLabel}
     >
       <BarChart data={data} layout={isHorizontal ? 'vertical' : 'horizontal'}>
         {showGrid && <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />}
@@ -417,6 +447,8 @@ export const BaseBarChart: React.FC<BarChartProps> = ({
             name={bar.name}
             fill={bar.color || CHART_COLORS.primary[index % CHART_COLORS.primary.length]}
             radius={4}
+            onClick={handleDatumClick}
+            className={cn(getDatumHref && 'cursor-pointer')}
           />
         ))}
       </BarChart>
@@ -450,7 +482,19 @@ export const BasePieChart: React.FC<PieChartProps> = ({
   loading,
   error,
   compact,
+  detailsHref,
+  detailsLabel,
+  getDatumHref,
 }) => {
+  const router = useRouter();
+  const handleDatumClick = getDatumHref
+    ? (datum: any) => {
+      const record = (datum?.payload ?? datum) as Record<string, unknown>;
+      const href = getDatumHref(record);
+      if (href) router.push(href);
+    }
+    : undefined;
+
   return (
     <ChartContainer
       className={className}
@@ -461,6 +505,8 @@ export const BasePieChart: React.FC<PieChartProps> = ({
       error={error}
       data={data}
       compact={compact}
+      detailsHref={detailsHref}
+      detailsLabel={detailsLabel}
     >
       <PieChart>
         <Pie
@@ -473,6 +519,8 @@ export const BasePieChart: React.FC<PieChartProps> = ({
           dataKey={dataKey}
           nameKey={nameKey}
           label={showLabels ? ({ name, value }) => `${name}: ${value}` : false}
+          onClick={handleDatumClick}
+          className={cn(getDatumHref && 'cursor-pointer')}
         >
           {data.map((entry, index) => (
             <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
@@ -511,6 +559,8 @@ export const BaseRadialBarChart: React.FC<RadialBarChartProps> = ({
   loading,
   error,
   compact,
+  detailsHref,
+  detailsLabel,
 }) => {
   return (
     <ChartContainer
@@ -522,6 +572,8 @@ export const BaseRadialBarChart: React.FC<RadialBarChartProps> = ({
       error={error}
       data={data}
       compact={compact}
+      detailsHref={detailsHref}
+      detailsLabel={detailsLabel}
     >
       <RadialBarChart cx="50%" cy="50%" innerRadius={innerRadius} outerRadius={outerRadius} data={data}>
         <RadialBar
@@ -562,7 +614,19 @@ export const BaseFunnelChart: React.FC<FunnelChartProps> = ({
   loading,
   error,
   compact,
+  detailsHref,
+  detailsLabel,
+  getDatumHref,
 }) => {
+  const router = useRouter();
+  const handleDatumClick = getDatumHref
+    ? (datum: any) => {
+      const record = (datum?.payload ?? datum) as Record<string, unknown>;
+      const href = getDatumHref(record);
+      if (href) router.push(href);
+    }
+    : undefined;
+
   return (
     <ChartContainer
       className={className}
@@ -573,10 +637,19 @@ export const BaseFunnelChart: React.FC<FunnelChartProps> = ({
       error={error}
       data={data}
       compact={compact}
+      detailsHref={detailsHref}
+      detailsLabel={detailsLabel}
     >
       <FunnelChart>
         <Tooltip content={<CustomTooltip formatValue={formatValue} />} />
-        <Funnel data={data} dataKey={dataKey} nameKey={nameKey} isAnimationActive>
+        <Funnel
+          data={data}
+          dataKey={dataKey}
+          nameKey={nameKey}
+          isAnimationActive
+          onClick={handleDatumClick}
+          className={cn(getDatumHref && 'cursor-pointer')}
+        >
           {data.map((_, index) => (
             <Cell key={`funnel-cell-${index}`} fill={colors[index % colors.length]} />
           ))}
