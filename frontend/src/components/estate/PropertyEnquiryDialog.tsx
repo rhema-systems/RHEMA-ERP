@@ -24,6 +24,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { settingsService } from '@/services/settings';
+import { isValidPhoneNumberForCountry } from '@/lib/phone-number';
 import {
   externalEstateListingsService,
   type ExternalEstateListing,
@@ -35,8 +36,6 @@ import {
 } from '@/services/external-estate-listings.service';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PHONE_PATTERN = /^\+[1-9]\d{6,14}$/;
-
 function normalizePhone(value: string) {
   return value.replace(/[^\d+]/g, '');
 }
@@ -144,7 +143,7 @@ export function PropertyEnquiryDialog({
   const selectedContactIsValid =
     preferredContactMethod === 'Email'
       ? EMAIL_PATTERN.test(selectedContact)
-      : PHONE_PATTERN.test(selectedContact);
+      : isValidPhoneNumberForCountry(selectedContact);
 
   const resetContactVerification = () => {
     setContactChallenge(null);
@@ -382,14 +381,17 @@ export function PropertyEnquiryDialog({
                   error={
                     preferredContactMethod === 'Phone' &&
                     Boolean(contactPhone) &&
-                    !PHONE_PATTERN.test(normalizePhone(contactPhone))
+                    !isValidPhoneNumberForCountry(normalizePhone(contactPhone))
                   }
                   countrySelectLabel="Phone country calling code"
                   placeholder="National phone number"
+                  showCountryLengthHint
                 />
                 {preferredContactMethod === 'Phone' &&
                   contactPhone &&
-                  !PHONE_PATTERN.test(normalizePhone(contactPhone)) && (
+                  !isValidPhoneNumberForCountry(
+                    normalizePhone(contactPhone)
+                  ) && (
                     <p className="text-xs text-destructive">
                       Enter a valid phone number after the country code.
                     </p>

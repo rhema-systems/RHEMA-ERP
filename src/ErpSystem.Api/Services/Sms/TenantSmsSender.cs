@@ -106,6 +106,7 @@ public sealed class TenantSmsSender : ITenantSmsSender
             providers.Add("Twilio");
 
         Exception? last = null;
+        var failures = new List<(string Provider, Exception Error)>();
         foreach (var provider in providers.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             try
@@ -125,14 +126,19 @@ public sealed class TenantSmsSender : ITenantSmsSender
 
                 throw new InvalidOperationException($"Unknown SMS provider '{provider}'.");
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 last = ex;
+                failures.Add((provider, ex));
                 _logger.LogWarning(ex, "Tenant SMS provider {Provider} failed; trying next if available", provider);
             }
         }
 
-        throw new InvalidOperationException("All tenant SMS providers failed.", last);
+        throw new InvalidOperationException(BuildProviderFailureMessage(failures), last);
     }
 
     private async Task SendWithFallbackOptionsAsync(
@@ -151,6 +157,7 @@ public sealed class TenantSmsSender : ITenantSmsSender
             throw new InvalidOperationException("No SMS providers are configured.");
 
         Exception? last = null;
+        var failures = new List<(string Provider, Exception Error)>();
         foreach (var provider in providers.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             try
@@ -170,14 +177,58 @@ public sealed class TenantSmsSender : ITenantSmsSender
 
                 throw new InvalidOperationException($"Unknown SMS provider '{provider}'.");
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 last = ex;
+                failures.Add((provider, ex));
                 _logger.LogWarning(ex, "Fallback SMS provider {Provider} failed; trying next if available", provider);
             }
         }
 
-        throw new InvalidOperationException("All fallback SMS providers failed.", last);
+        throw new InvalidOperationException(BuildProviderFailureMessage(failures), last);
+    }
+
+    internal static string BuildProviderFailureMessage(
+        IReadOnlyCollection<(string Provider, Exception Error)> failures)
+    {
+        if (failures.Count == 0)
+            return "SMS delivery failed because no configured provider accepted the request.";
+
+        var details = failures.Select(failure =>
+            $"{DisplayProviderName(failure.Provider)}: {DescribeProviderFailure(failure.Error)}");
+        return $"SMS delivery failed. {string.Join("; ", details)}";
+    }
+
+    private static string DisplayProviderName(string provider)
+    {
+        var normalized = provider.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "mnotify" or "ghanagateway" or "ghana" => "mNotify",
+            "twilio" => "Twilio",
+            _ => string.IsNullOrWhiteSpace(provider) ? "Unknown provider" : provider.Trim()
+        };
+    }
+
+    private static string DescribeProviderFailure(Exception error)
+    {
+        var description = error switch
+        {
+            TaskCanceledException => "The provider request timed out.",
+            HttpRequestException { StatusCode: not null } requestError =>
+                $"The provider could not be reached (HTTP {(int)requestError.StatusCode.Value}).",
+            HttpRequestException => "The provider could not be reached.",
+            InvalidOperationException or ArgumentException => error.Message,
+            _ => "The provider rejected the request. Review the server log for its response."
+        };
+
+        var singleLine = string.Join(" ", description
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return singleLine.Length <= 320 ? singleLine : $"{singleLine[..317]}...";
     }
 
     private async Task SendViaTwilioAsync(SmsSettings settings, string toPhoneNumber, string message, CancellationToken cancellationToken)

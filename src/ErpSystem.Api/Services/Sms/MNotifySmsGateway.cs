@@ -73,7 +73,7 @@ internal static class MNotifySmsGateway
 
         if (result is null ||
             !string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(result.Code, "2000", StringComparison.OrdinalIgnoreCase))
+            !string.Equals(ReadScalarText(result.Code), "2000", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("mNotify SMS was not accepted." + FormatProviderFailure(result));
         }
@@ -167,9 +167,26 @@ internal static class MNotifySmsGateway
         if (result is null)
             return " The provider returned an unreadable response.";
 
-        var code = string.IsNullOrWhiteSpace(result.Code) ? "unknown" : result.Code;
-        var message = string.IsNullOrWhiteSpace(result.Message) ? "No provider message was supplied." : result.Message;
+        var providerCode = ReadScalarText(result.Code);
+        var code = string.IsNullOrWhiteSpace(providerCode) ? "unknown" : providerCode;
+        var message = string.IsNullOrWhiteSpace(result.Message)
+            ? "No provider message was supplied."
+            : SanitizeProviderText(result.Message);
         return $" Provider code: {code}. {message}";
+    }
+
+    private static string? ReadScalarText(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString(),
+        JsonValueKind.Number => value.GetRawText(),
+        _ => null
+    };
+
+    private static string SanitizeProviderText(string value)
+    {
+        var singleLine = string.Join(" ", value
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return singleLine.Length <= 240 ? singleLine : $"{singleLine[..237]}...";
     }
 
     private static string FormatBalanceFailure(MNotifyBalanceResponse? result)
@@ -206,7 +223,7 @@ internal static class MNotifySmsGateway
         public string? Status { get; init; }
 
         [JsonPropertyName("code")]
-        public string? Code { get; init; }
+        public JsonElement Code { get; init; }
 
         [JsonPropertyName("message")]
         public string? Message { get; init; }

@@ -74,6 +74,54 @@ public sealed class MNotifySmsGatewayTests
     }
 
     [Fact]
+    public async Task SendAsync_AcceptsNumericSuccessCodeFromProvider()
+    {
+        var handler = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"status":"success","code":2000,"message":"messages sent successfully"}""")
+        });
+        using var client = new HttpClient(handler);
+
+        await MNotifySmsGateway.SendAsync(
+            client,
+            Options(),
+            "0241234567",
+            "Message",
+            isOtp: false,
+            CancellationToken.None);
+    }
+
+    [Fact]
+    public void BuildProviderFailureMessage_PreservesSafeReasonsForEveryAttempt()
+    {
+        var failures = new (string Provider, Exception Error)[]
+        {
+            ("GhanaGateway", new InvalidOperationException(
+                "mNotify SMS was not accepted. Provider code: 4001. invalid sender")),
+            ("Twilio", new InvalidOperationException("Twilio SMS is not enabled for this tenant."))
+        };
+
+        var message = TenantSmsSender.BuildProviderFailureMessage(failures);
+
+        message.Should().Contain("mNotify: mNotify SMS was not accepted. Provider code: 4001. invalid sender");
+        message.Should().Contain("Twilio: Twilio SMS is not enabled for this tenant.");
+    }
+
+    [Fact]
+    public void BuildProviderFailureMessage_DoesNotExposeUnexpectedExceptionDetails()
+    {
+        var failures = new (string Provider, Exception Error)[]
+        {
+            ("GhanaGateway", new Exception("request URL contained ?key=secret-api-key"))
+        };
+
+        var message = TenantSmsSender.BuildProviderFailureMessage(failures);
+
+        message.Should().Contain("Review the server log");
+        message.Should().NotContain("secret-api-key");
+    }
+
+    [Fact]
     public async Task GetBalanceAsync_UsesOfficialEndpointAndReturnsBalanceAndBonus()
     {
         var handler = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK)

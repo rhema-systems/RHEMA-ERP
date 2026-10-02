@@ -2535,22 +2535,51 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 maxAttempts: 5,
                 cancellationToken);
 
-            if (otpChannel == OtpChannel.Email)
+            try
             {
-                await _notificationService.SendEmailAsync(
-                    normalizedContact,
-                    "Property enquiry verification code",
-                    $"<p>Your property enquiry verification code is <strong>{code}</strong>. It expires in 10 minutes.</p>",
-                    isHtml: true,
-                    persistBody: false);
+                if (otpChannel == OtpChannel.Email)
+                {
+                    await _notificationService.SendEmailAsync(
+                        normalizedContact,
+                        "Property enquiry verification code",
+                        $"<p>Your property enquiry verification code is <strong>{code}</strong>. It expires in 10 minutes.</p>",
+                        isHtml: true,
+                        persistBody: false);
+                }
+                else
+                {
+                    await _tenantSmsSender.SendOtpAsync(
+                        tenantId,
+                        normalizedContact,
+                        $"Your property enquiry verification code is {code}. It expires in 10 minutes.",
+                        cancellationToken);
+                }
             }
-            else
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                await _tenantSmsSender.SendOtpAsync(
+                throw;
+            }
+            catch (Exception ex)
+            {
+                verification.IsDeleted = true;
+                verification.UpdatedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync(cancellationToken);
+                _logger.LogError(ex,
+                    "Public property enquiry {Channel} verification delivery failed for tenant {TenantId}; listing {ListingId}; trace {TraceId}",
+                    channel,
                     tenantId,
-                    normalizedContact,
-                    $"Your property enquiry verification code is {code}. It expires in 10 minutes.",
-                    cancellationToken);
+                    request.ListingId,
+                    HttpContext.TraceIdentifier);
+
+                var deliveryLabel = otpChannel == OtpChannel.Email ? "email" : "SMS";
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                {
+                    success = false,
+                    code = otpChannel == OtpChannel.Email
+                        ? "PUBLIC_ENQUIRY_EMAIL_DELIVERY_FAILED"
+                        : "PUBLIC_ENQUIRY_SMS_DELIVERY_FAILED",
+                    message = $"The {deliveryLabel} verification code could not be sent. Ask an administrator to check the tenant {deliveryLabel} settings, then try again."
+                });
             }
 
             return Accepted(new
