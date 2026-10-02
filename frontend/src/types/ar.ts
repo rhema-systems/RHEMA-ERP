@@ -12,6 +12,7 @@ export interface Customer {
     country?: string;
     creditLimit: number;
     outstandingBalance: number;
+    customerCreditBalance: number;
     paymentTermsDays: number;
     paymentTermId?: string | null;
     priceGroup?: string;

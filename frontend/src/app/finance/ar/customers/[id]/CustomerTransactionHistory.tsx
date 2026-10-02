@@ -24,9 +24,10 @@ interface CustomerTransactionHistoryProps {
 interface Transaction {
     id: string;
     date: Date;
-    type: 'Invoice' | 'Payment';
+    type: 'Invoice' | 'Receipt' | 'Customer advance';
     reference: string;
     amount: number;
+    customerCreditAmount: number;
     status: string;
     currencyCode: string;
 }
@@ -60,17 +61,21 @@ export function CustomerTransactionHistory({ customerId }: CustomerTransactionHi
             type: 'Invoice' as const,
             reference: inv.invoiceNumber,
             amount: inv.totalAmount,
+            customerCreditAmount: 0,
             status: inv.status,
             currencyCode: inv.currencyCode
         })),
         ...(payments?.items || []).map(pay => ({
             id: pay.id,
             date: new Date(pay.paymentDate),
-            type: 'Payment' as const,
+            type: pay.unallocatedAmount > 0 && pay.allocatedAmount === 0
+                ? 'Customer advance' as const
+                : 'Receipt' as const,
             // paymentNumber is the canonical AR receipt reference. The optional legacy aliases
             // remain fallbacks for older API projections while the application is still in dev.
             reference: pay.paymentNumber || pay.paymentReference || pay.referenceNumber || pay.id,
             amount: pay.totalAmount ?? pay.amount,
+            customerCreditAmount: pay.unallocatedAmount,
             status: pay.status,
             currencyCode: pay.currencyCode
         }))
@@ -93,6 +98,7 @@ export function CustomerTransactionHistory({ customerId }: CustomerTransactionHi
                         <TableHead>Type</TableHead>
                         <TableHead>Reference</TableHead>
                         <TableHead className="text-right">Amount</TableHead>
+                        <TableHead className="text-right">Customer Credit</TableHead>
                         <TableHead>Status</TableHead>
                     </TableRow>
                 </TableHeader>
@@ -115,6 +121,11 @@ export function CustomerTransactionHistory({ customerId }: CustomerTransactionHi
                             <TableCell>{tx.reference}</TableCell>
                             <TableCell className="text-right font-medium">
                                 {formatCurrency(tx.amount, tx.currencyCode)}
+                            </TableCell>
+                            <TableCell className="text-right font-medium">
+                                {tx.customerCreditAmount > 0
+                                    ? <span className="text-blue-600">{formatCurrency(tx.customerCreditAmount, tx.currencyCode)}</span>
+                                    : <span className="text-muted-foreground">-</span>}
                             </TableCell>
                             <TableCell>
                                 <Badge variant={
