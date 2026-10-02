@@ -175,6 +175,7 @@ export function PropertyUnitRegister() {
     totalItems,
   } = useManagedAssetsPage({
     search: search || undefined,
+    includeLandDemarcations: true,
     assetType:
       typeFilter === 'all'
         ? undefined
@@ -204,18 +205,45 @@ export function PropertyUnitRegister() {
         return;
       }
 
-      const listingType = asset.isAvailableForSale ? 'Sale' : 'Rent';
-      await estateLandManagementService.updateExternalListing(asset.id, {
-        isPublishedToExternalPortal: false,
-        externalListingType: listingType,
-        externalListingStatus: 'Draft',
-        externalListingPrice: null,
-        externalSalePrice: null,
-        externalMonthlyRent: null,
-        externalLeaseTermMonths: null,
-        externalListingCurrency: asset.currency || 'GHS',
-        externalListingNotes: null,
-      });
+      if (asset.listingScope === 'demarcation') {
+        if (!asset.parentAssetId) {
+          throw new Error('Parent land reference is missing for this demarcation.');
+        }
+
+        await estateLandManagementService.updateLandDemarcationDisposition(
+          asset.parentAssetId,
+          asset.id,
+          {
+            isReadyForProjectManagement: false,
+            isPublishedToExternalPortal: true,
+            externalListingType: 'Sale',
+            externalListingStatus: 'Draft',
+            externalListingPrice: null,
+            externalSalePrice:
+              asset.externalSalePrice ??
+              asset.externalListingPrice ??
+              asset.targetSalePrice ??
+              null,
+            externalMonthlyRent: null,
+            externalLeaseTermMonths: null,
+            externalListingCurrency: asset.currency || 'GHS',
+            externalListingNotes: null,
+          }
+        );
+      } else {
+        const listingType = asset.isAvailableForSale ? 'Sale' : 'Rent';
+        await estateLandManagementService.updateExternalListing(asset.id, {
+          isPublishedToExternalPortal: false,
+          externalListingType: listingType,
+          externalListingStatus: 'Draft',
+          externalListingPrice: null,
+          externalSalePrice: null,
+          externalMonthlyRent: null,
+          externalLeaseTermMonths: null,
+          externalListingCurrency: asset.currency || 'GHS',
+          externalListingNotes: null,
+        });
+      }
       toast.success(
         'Property sent to Portal Listings for commercial setup.'
       );
@@ -234,17 +262,40 @@ export function PropertyUnitRegister() {
   const recallFromPortalListings = async (asset: EstateManagedAsset) => {
     try {
       setSendingListingId(asset.id);
-      await estateLandManagementService.updateExternalListing(asset.id, {
-        isPublishedToExternalPortal: false,
-        externalListingType: 'None',
-        externalListingStatus: 'Draft',
-        externalListingPrice: null,
-        externalSalePrice: null,
-        externalMonthlyRent: null,
-        externalLeaseTermMonths: null,
-        externalListingCurrency: asset.currency || 'GHS',
-        externalListingNotes: null,
-      });
+      if (asset.listingScope === 'demarcation') {
+        if (!asset.parentAssetId) {
+          throw new Error('Parent land reference is missing for this demarcation.');
+        }
+
+        await estateLandManagementService.updateLandDemarcationDisposition(
+          asset.parentAssetId,
+          asset.id,
+          {
+            isReadyForProjectManagement: false,
+            isPublishedToExternalPortal: false,
+            externalListingType: 'None',
+            externalListingStatus: 'Draft',
+            externalListingPrice: null,
+            externalSalePrice: null,
+            externalMonthlyRent: null,
+            externalLeaseTermMonths: null,
+            externalListingCurrency: asset.currency || 'GHS',
+            externalListingNotes: null,
+          }
+        );
+      } else {
+        await estateLandManagementService.updateExternalListing(asset.id, {
+          isPublishedToExternalPortal: false,
+          externalListingType: 'None',
+          externalListingStatus: 'Draft',
+          externalListingPrice: null,
+          externalSalePrice: null,
+          externalMonthlyRent: null,
+          externalLeaseTermMonths: null,
+          externalListingCurrency: asset.currency || 'GHS',
+          externalListingNotes: null,
+        });
+      }
       toast.success('Property recalled from Portal Listings.');
       await loadAssets();
     } catch (error: unknown) {
@@ -407,9 +458,15 @@ export function PropertyUnitRegister() {
                   {assets.map((asset) => {
                     const isPortalListing =
                       asset.externalListingType !== 'None';
+                    const isDemarcationRow =
+                      asset.listingScope === 'demarcation';
                     const portalSendUnavailableReason =
-                      asset.assetType === EstateManagedAssetType.Land
+                      asset.assetType === EstateManagedAssetType.Land && !isDemarcationRow
                         ? 'List land through a demarcation.'
+                        : isDemarcationRow && !asset.boundaryVerified
+                          ? 'Verify this demarcation first.'
+                          : isDemarcationRow && asset.isReadyForProjectManagement
+                            ? 'Move this demarcation back to internal before sending it to Portal Listings.'
                         : asset.status !== EstateManagedAssetStatus.Available
                           ? 'Set the property status to Available first.'
                           : asset.sourceType !== EstateManagedAssetSourceType.Manual &&
@@ -420,7 +477,7 @@ export function PropertyUnitRegister() {
                             : null;
 
                     return (
-                      <TableRow key={asset.id}>
+                      <TableRow key={`${asset.listingScope || 'asset'}:${asset.id}`}>
                         <TableCell className="min-w-0">
                           <div className="truncate font-medium" title={getPropertyName(asset)}>
                             {getPropertyName(asset)}
@@ -458,11 +515,19 @@ export function PropertyUnitRegister() {
                               <DropdownMenuItem onSelect={() => setViewAsset(asset)}>
                                 <Eye className="mr-2 h-4 w-4" /> View details
                               </DropdownMenuItem>
-                              <DropdownMenuItem asChild>
-                                <Link href={`/estate/property-management/EstatePropertyManagementOccupancyAvailability?assetId=${encodeURIComponent(asset.id)}`}>
-                                  <Settings2 className="mr-2 h-4 w-4" /> Manage status
-                                </Link>
-                              </DropdownMenuItem>
+                              {isDemarcationRow ? (
+                                <DropdownMenuItem asChild>
+                                  <Link href="/estate/land-management">
+                                    <Settings2 className="mr-2 h-4 w-4" /> Open land management
+                                  </Link>
+                                </DropdownMenuItem>
+                              ) : (
+                                <DropdownMenuItem asChild>
+                                  <Link href={`/estate/property-management/EstatePropertyManagementOccupancyAvailability?assetId=${encodeURIComponent(asset.id)}`}>
+                                    <Settings2 className="mr-2 h-4 w-4" /> Manage status
+                                  </Link>
+                                </DropdownMenuItem>
+                              )}
                               {isPortalListing && asset.status === EstateManagedAssetStatus.Available ? (
                                 <DropdownMenuItem asChild>
                                   <Link href={`/estate/property-management/listings?assetId=${encodeURIComponent(asset.id)}`}>

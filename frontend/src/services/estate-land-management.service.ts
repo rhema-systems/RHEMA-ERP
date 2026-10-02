@@ -359,6 +359,7 @@ export interface EstateManagedAssetQuery {
   portalListingCandidates?: boolean;
   externalListingStatus?: string;
   publishedToExternalPortal?: boolean;
+  includeLandDemarcations?: boolean;
   skip?: number;
   take?: number;
 }
@@ -475,6 +476,7 @@ const buildManagedAssetQueryParams = (query: EstateManagedAssetQuery) => ({
   portalListingCandidates: query.portalListingCandidates,
   externalListingStatus: query.externalListingStatus,
   publishedToExternalPortal: query.publishedToExternalPortal,
+  includeLandDemarcations: query.includeLandDemarcations,
   skip: query.skip,
   take: query.take || 250,
 });
