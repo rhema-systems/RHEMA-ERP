@@ -712,6 +712,10 @@ public sealed class AccountingBookPeriodInitializationC4Tests
         state.Book.LifecycleStatus.Should().Be(AccountingBookLifecycleStatus.Active);
         state.Book.IsActive.Should().BeTrue();
         state.Book.AllowsPosting.Should().BeTrue();
+        db.AccountingBookPeriods.Should().Contain(period =>
+            period.AccountingBookId == state.Book.Id
+            && period.FiscalPeriodId == state.Period.Id
+            && period.PeriodStatus == AccountingBookPeriodStatus.Closed);
         db.AccountAccountingBooks.Where(item => item.AccountingBookId == state.Book.Id)
             .Should().OnlyContain(mapping => mapping.IsEnabled);
         (await db.JournalEntries.CountAsync()).Should().Be(journalCount);

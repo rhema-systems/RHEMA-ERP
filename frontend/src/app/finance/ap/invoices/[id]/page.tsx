@@ -117,6 +117,29 @@ export default function VendorInvoiceDetailsPage() {
         },
     });
 
+    const postOpeningBalanceMutation = useMutation({
+        mutationFn: (invoiceId: string) => accountsPayableService.postInvoice(invoiceId),
+        onSuccess: (postedInvoice) => {
+            queryClient.invalidateQueries({ queryKey: ['vendor-invoice', id] });
+            queryClient.invalidateQueries({ queryKey: ['vendor-invoices'] });
+            queryClient.invalidateQueries({ queryKey: ['subledger-opening-balance-readiness'] });
+            toast({
+                title: 'Opening balance posted',
+                description: postedInvoice.journalEntryId
+                    ? 'The AP opening balance is linked to its governed journal.'
+                    : 'Posting completed, but no journal reference was returned. Check Subledger Readiness before continuing.',
+            });
+        },
+        onError: (error: unknown) => {
+            const postingError = getFinancePostingErrorPresentation(
+                error,
+                'Failed to post the AP opening balance.',
+                'Opening balance posting failed',
+            );
+            toast({ ...postingError, variant: 'destructive' });
+        },
+    });
+
     const submitInvoiceMutation = useMutation({
         mutationFn: (invoiceId: string) => accountsPayableService.submitInvoiceForApproval(invoiceId),
         onSuccess: (savedInvoice) => {
@@ -267,7 +290,13 @@ export default function VendorInvoiceDetailsPage() {
                             Approve
                         </Button>
                     )}
-                    {(invoice.status === 'Approved' || invoice.status === 'PartiallyPaid') && invoice.balanceAmount > 0 && (
+                    {invoice.isOpeningBalance && invoice.status === 'Approved' && !invoice.journalEntryId && hasPermission('Finance.AP.Invoices.Post') && (
+                        <Button size="sm" onClick={() => postOpeningBalanceMutation.mutate(invoice.id)} disabled={postOpeningBalanceMutation.isPending}>
+                            {postOpeningBalanceMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
+                            Post opening balance
+                        </Button>
+                    )}
+                    {(invoice.status === 'Approved' || invoice.status === 'PartiallyPaid') && invoice.balanceAmount > 0 && (!invoice.isOpeningBalance || Boolean(invoice.journalEntryId)) && (
                         <Button size="sm" onClick={() => router.push(`/finance/ap/payments/create?supplierId=${invoice.businessPartnerId}&invoiceId=${invoice.id}`)}>
                             <CreditCard className="mr-2 h-4 w-4" /> Schedule Payment
                         </Button>
@@ -304,6 +333,11 @@ export default function VendorInvoiceDetailsPage() {
                         Tax review pending. Open Edit invoice and select the tax treatment for each landed-cost line before continuing. The displayed total is before any unreviewed tax.
                     </div>}
                 {withholdingDecisionPending && <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Withholding choice pending. Open Edit invoice and select Yes or No before continuing.</div>}
+                {invoice.isOpeningBalance && invoice.status === 'Approved' && !invoice.journalEntryId && (
+                    <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                        Approval is complete, but the AP opening balance is not yet posted. Use <strong>Post opening balance</strong>; do not recreate it in a GL batch.
+                    </div>
+                )}
                 {!invoice.isOpeningBalance && <ActualLandedCostSummary invoiceId={invoice.id} purchaseOrderId={invoice.purchaseOrderId} />}
                 <SourceDocumentDimensionEvidence evidence={invoice.financeDimensions} />
             </div>

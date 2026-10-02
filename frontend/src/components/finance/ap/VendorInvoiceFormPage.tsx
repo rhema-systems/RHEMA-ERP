@@ -992,7 +992,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 businessPartnerId: supplierId,
                 businessPartnerRoleId: selectedSupplier?.businessPartnerRoleId,
                 currencyOverrideReason: currencyOverridesSupplier ? data.currencyOverrideReason?.trim() : undefined,
-                expenseAccountId: data.expenseAccountId || undefined,
+                expenseAccountId: isOpeningBalance ? undefined : (data.expenseAccountId || undefined),
                 paymentTermsDays: !isOpeningBalance && applySupplierDefaults && supplierDefaults?.paymentTermId === data.paymentTermId && !manualSupplierDefaults.current.has('paymentTermId') && !manualSupplierDefaults.current.has('dueDate')
                     ? supplierDefaults?.paymentTermsDays ?? undefined : undefined,
                 applyBusinessPartnerDefaults: !isEditMode && !isOpeningBalance && applySupplierDefaults && defaultsPlan?.allowServerDefaults === true,
@@ -1022,8 +1022,8 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                     return {
                         id: item.sourceLineId,
                         lineItemType: item.lineItemType,
-                        glAccountId: item.glAccountId || null,
-                        budgetEntryId: item.budgetEntryId || null,
+                        glAccountId: isOpeningBalance ? undefined : (item.glAccountId || undefined),
+                        budgetEntryId: isOpeningBalance ? undefined : (item.budgetEntryId || undefined),
                         purchaseOrderItemId: item.purchaseOrderItemId || null,
                         description: item.description,
                         quantity: Number(item.quantity),
@@ -1067,7 +1067,9 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                     withholdingCertificateNumber: editInvoice.withholdingCertificateNumber,
                     withholdingCertificateDate: editInvoice.withholdingCertificateDate,
                     matchingType: editInvoice.matchingType,
-                    expenseAccountId: data.expenseAccountId || editInvoice.expenseAccountId,
+                    expenseAccountId: isOpeningBalance
+                        ? undefined
+                        : (data.expenseAccountId || editInvoice.expenseAccountId),
                 });
             } else {
                 await accountsPayableService.createInvoice(request);
@@ -1600,7 +1602,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                 </div>
                                 {supplierDefaultsError && <p role="status" className="text-sm text-amber-700">Supplier defaults unavailable. You can enter the invoice details manually.</p>}
                                 {applySupplierDefaults && supplierDefaults?.postingDefaults.defaultTaxGroupId && taxGroupsData && !taxGroupsData.some(group => group.id === supplierDefaults.postingDefaults.defaultTaxGroupId) && <p role="status" className="text-sm text-amber-700">The saved supplier tax schedule is unavailable. Select tax manually.</p>}
-                                {(applySupplierDefaults || watchExpenseAccountId) && <div className="max-w-2xl space-y-1.5">
+                                {!watchIsOpeningBalance && (applySupplierDefaults || watchExpenseAccountId) && <div className="max-w-2xl space-y-1.5">
                                         <Label htmlFor="expenseAccountId">Default line posting account</Label>
                                         <Controller control={form.control} name="expenseAccountId" render={({ field }) => <PostingAccountPicker id="expenseAccountId" value={field.value} accounts={(glAccountsData?.items || []).filter(account => !account.isControlAccount && account.allowDirectPosting && ['Asset', 'Expense'].includes(account.accountType))} onChange={value => { manualSupplierDefaults.current.add('expenseAccountId'); field.onChange(value || ''); }} />} />
                                         <p className="text-xs text-muted-foreground">Fallback for a manual GL line. A line-level GL account takes precedence.</p>
@@ -1698,6 +1700,11 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                         </Button>}
                     </CardHeader>
                     <CardContent>
+                        {watchIsOpeningBalance && (
+                            <div role="status" className="mb-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                                Migration Clearing is derived from Finance Settings. No manual line posting account is required for an AP opening balance.
+                            </div>
+                        )}
                         <div className="space-y-4">
                             {fields.map((field, index) => {
                                 const lineItemType = form.watch(`lineItems.${index}.lineItemType`);
@@ -1711,7 +1718,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                     <div className="grid grid-cols-12 items-end gap-4">
                                         {lineItemType === 'Expense' || lineItemType === 'Service' ? (
                                             <>
-                                                <div className="col-span-12 min-w-0 space-y-2 md:col-span-3">
+                                                {!watchIsOpeningBalance && <div className="col-span-12 min-w-0 space-y-2 md:col-span-3">
                                                     <Label className={index !== 0 ? 'sr-only' : ''}>GL Account</Label>
                                                     <Controller
                                                         control={form.control}
@@ -1771,8 +1778,8 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                             </Popover>
                                                         )}
                                                     />
-                                                </div>
-                                                <div className="col-span-12 space-y-2 md:col-span-3">
+                                                </div>}
+                                                <div className={cn("col-span-12 space-y-2", watchIsOpeningBalance ? "md:col-span-6" : "md:col-span-3")}>
                                                     <Label className={index !== 0 ? 'sr-only' : ''}>Description</Label>
                                                     <Input {...form.register(`lineItems.${index}.description` as const)} placeholder="Notes" />
                                                 </div>

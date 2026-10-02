@@ -14,6 +14,19 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { formatCurrency, cn } from '@/lib/utils';
 import { ReportPdfActions } from '@/components/finance/reports/ReportPdfActions';
 
+export function formatLedgerDateTime(value: string): string {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+    });
+}
+
 export interface LedgerPartnerOption {
     id: string;
     code: string;
@@ -447,7 +460,7 @@ export function PartnerDetailedLedgerReport({
                                         <Table>
                                             <TableHeader>
                                                 <TableRow>
-                                                    <TableHead className="min-w-[110px]">Date</TableHead>
+                                                    <TableHead className="min-w-[155px]">Date / time</TableHead>
                                                     <TableHead className="min-w-[150px]">Type</TableHead>
                                                     <TableHead className="min-w-[140px]">Document</TableHead>
                                                     <TableHead className="min-w-[140px]">Reference</TableHead>
@@ -474,7 +487,7 @@ export function PartnerDetailedLedgerReport({
                                                 </TableRow>
                                                 {account.lines.map((line, index) => (
                                                     <TableRow key={`${line.sourceDocumentId}-${line.transactionType}-${index}`}>
-                                                        <TableCell>{line.transactionDate.slice(0, 10)}</TableCell>
+                                                        <TableCell className="whitespace-nowrap">{formatLedgerDateTime(line.transactionDate)}</TableCell>
                                                         <TableCell>{line.transactionType}</TableCell>
                                                         <TableCell className="font-medium">{line.documentNumber}</TableCell>
                                                         <TableCell>{line.reference || '-'}</TableCell>
