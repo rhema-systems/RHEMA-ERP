@@ -2846,11 +2846,58 @@ public sealed class BankingSettlementService : IBankingSettlementService
                 item.AllocatedAmount
             })
             .ToListAsync(cancellationToken);
+
+        var primaryBook = await _context.AccountingBooks
+            .AsNoTracking()
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted && item.IsDefault &&
+                           item.BookType == AccountingBookType.PrimaryFull)
+            .Select(item => new { item.Id, item.FunctionalCurrencyCode })
+            .SingleOrDefaultAsync(cancellationToken);
+        var glAccountIds = accounts.Select(item => item.GLAccountId).Distinct().ToArray();
+        var functionalCurrency = primaryBook?.FunctionalCurrencyCode?.Trim().ToUpperInvariant();
+        if (primaryBook != null && string.IsNullOrWhiteSpace(functionalCurrency))
+        {
+            functionalCurrency = await _context.FinanceSettings.AsNoTracking()
+                .Where(item => item.TenantId == TenantId)
+                .Select(item => item.BaseCurrency)
+                .FirstOrDefaultAsync(cancellationToken) ?? "GHS";
+            functionalCurrency = functionalCurrency.Trim().ToUpperInvariant();
+        }
+        var postedLines = primaryBook == null
+            ? []
+            : await _context.AccountTransactions
+                .AsNoTracking()
+                .Where(item => item.TenantId == TenantId && !item.IsDeleted &&
+                               glAccountIds.Contains(item.AccountId) &&
+                               item.AccountingBookId == primaryBook.Id &&
+                               (item.PostingStatus == "Posted" || item.PostingStatus == "Reversed") &&
+                               !item.JournalEntry.IsDeleted &&
+                               (item.JournalEntry.PostingStatus == "Posted" || item.JournalEntry.PostingStatus == "Reversed"))
+                .Select(item => new
+                {
+                    item.AccountId,
+                    item.DebitAmount,
+                    item.CreditAmount,
+                    item.TransactionCurrency,
+                    item.TransactionDebitAmount,
+                    item.TransactionCreditAmount
+                })
+                .ToListAsync(cancellationToken);
         return accounts.Select(account =>
         {
             var accountEntries = entries.Where(item => item.LiquidityAccountId == account.Id).ToArray();
-            var balance = accountEntries.Sum(item =>
+            var settlementBalance = accountEntries.Sum(item =>
                 item.Direction == LiquidityEntryDirection.Increase ? item.Amount : -item.Amount);
+            var accountCurrency = account.Currency.Trim().ToUpperInvariant();
+            var accountLines = postedLines.Where(item => item.AccountId == account.GLAccountId).ToArray();
+            var glBalance = primaryBook == null
+                ? settlementBalance
+                : string.Equals(accountCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase)
+                    ? accountLines.Sum(item => item.DebitAmount - item.CreditAmount)
+                    : accountLines
+                        .Where(item => string.Equals(item.TransactionCurrency, accountCurrency, StringComparison.OrdinalIgnoreCase))
+                        .Sum(item => (item.TransactionDebitAmount ?? 0m) - (item.TransactionCreditAmount ?? 0m));
+            var difference = glBalance - settlementBalance;
             var available = accountEntries.Sum(item =>
             {
                 var remaining = Math.Max(item.Amount - item.AllocatedAmount, 0m);
@@ -2875,7 +2922,11 @@ public sealed class BankingSettlementService : IBankingSettlementService
                 IsActive = account.IsActive,
                 IsSystemAccount = account.IsSystemAccount,
                 Notes = account.Notes,
-                CurrentBalance = balance,
+                CurrentBalance = glBalance,
+                SettlementBalance = settlementBalance,
+                BalanceDifference = difference,
+                IsReconciled = primaryBook != null && difference == 0m,
+                BalanceAuthority = primaryBook == null ? "LiquiditySubledgerFallback" : "PrimaryBookGL",
                 AvailableToSettle = available,
                 OpenEntryCount = accountEntries.Count(item => item.Amount > item.AllocatedAmount),
                 CreatedAt = account.CreatedAt,

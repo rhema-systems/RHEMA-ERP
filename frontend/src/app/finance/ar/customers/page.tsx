@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import {
     Plus,
     Search,
-    Filter,
     MoreHorizontal,
     Building2,
     Phone,
@@ -39,6 +38,7 @@ import { arService } from '@/services/ar-service';
 import { formatCurrency } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useDebounce } from '@/hooks/use-debounce';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export default function CustomersPage() {
     const router = useRouter();
@@ -46,14 +46,16 @@ export default function CustomersPage() {
     const debouncedSearchTerm = useDebounce(searchTerm, 500);
     const [page, setPage] = useState(1);
     const [pageSize] = useState(10);
+    const [readiness, setReadiness] = useState<'All' | 'Ready' | 'NotReady'>('All');
 
     const { data: customersData, isLoading } = useQuery({
-        queryKey: ['customers', page, pageSize, debouncedSearchTerm],
+        queryKey: ['customers', page, pageSize, debouncedSearchTerm, readiness],
         queryFn: () => arService.getCustomers({
             page,
             pageSize,
             searchTerm: debouncedSearchTerm,
-            includeBalances: true
+            includeBalances: true,
+            transactionReadiness: readiness === 'All' ? undefined : readiness
         }),
     });
 
@@ -90,9 +92,16 @@ export default function CustomersPage() {
                                     onChange={handleSearch}
                                 />
                             </div>
-                            <Button variant="outline" size="icon">
-                                <Filter className="h-4 w-4" />
-                            </Button>
+                            <Select value={readiness} onValueChange={(value: 'All' | 'Ready' | 'NotReady') => { setReadiness(value); setPage(1); }}>
+                                <SelectTrigger className="w-44" aria-label="Filter by AR readiness">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="All">All customers</SelectItem>
+                                    <SelectItem value="Ready">Transaction ready</SelectItem>
+                                    <SelectItem value="NotReady">Setup incomplete</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
                     </div>
                 </CardHeader>
@@ -152,21 +161,23 @@ export default function CustomersPage() {
                                             </TableCell>
                                             <TableCell className="text-right font-medium">
                                                 <span className={customer.outstandingBalance > 0 ? "text-red-600" : "text-green-600"}>
-                                                    {formatCurrency(customer.outstandingBalance, 'GHS')}
+                                                    {formatCurrency(customer.outstandingBalance, customer.currencyCode)}
                                                 </span>
                                             </TableCell>
                                             <TableCell className="text-right text-muted-foreground">
-                                                {formatCurrency(customer.creditLimit, 'GHS')}
+                                                {formatCurrency(customer.creditLimit, customer.currencyCode)}
                                             </TableCell>
                                             <TableCell>
                                                 <Badge
                                                     variant={
-                                                        customer.status === 'Active' ? 'default' :
-                                                            customer.status === 'OnHold' ? 'destructive' : 'secondary'
+                                                        customer.isTransactionReady ? 'default' : 'secondary'
                                                     }
+                                                    title={customer.readinessMessage}
                                                 >
-                                                    {customer.status}
+                                                    {customer.isTransactionReady ? 'Transaction ready' : 'Setup incomplete'}
                                                 </Badge>
+                                                {!customer.isActive && <div className="mt-1 text-xs text-destructive">Partner inactive</div>}
+                                                {customer.isBlacklisted && <div className="mt-1 text-xs text-destructive">Blacklisted</div>}
                                             </TableCell>
                                             <TableCell>
                                                 <DropdownMenu>
@@ -185,10 +196,10 @@ export default function CustomersPage() {
                                                             Edit Business Partner
                                                         </DropdownMenuItem>
                                                         <DropdownMenuSeparator />
-                                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); router.push(`/finance/ar/invoices/new?businessPartnerId=${customer.id}`); }}>
+                                                        <DropdownMenuItem disabled={!customer.isTransactionReady} title={customer.isTransactionReady ? undefined : customer.readinessMessage} onClick={(e) => { e.stopPropagation(); router.push(`/finance/ar/invoices/new?businessPartnerId=${customer.id}`); }}>
                                                             <FileText className="mr-2 h-4 w-4" /> New Invoice
                                                         </DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); router.push(`/finance/ar/receipts/new?businessPartnerId=${customer.id}`); }}>
+                                                        <DropdownMenuItem disabled={!customer.isTransactionReady} title={customer.isTransactionReady ? undefined : customer.readinessMessage} onClick={(e) => { e.stopPropagation(); router.push(`/finance/ar/receipts/new?businessPartnerId=${customer.id}`); }}>
                                                             <DollarSign className="mr-2 h-4 w-4" /> Record Receipt
                                                         </DropdownMenuItem>
                                                     </DropdownMenuContent>

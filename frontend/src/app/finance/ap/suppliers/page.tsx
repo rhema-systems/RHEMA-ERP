@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -23,6 +24,7 @@ import { accountsPayableService } from '@/services/accountsPayableService';
 export default function ApSuppliersPage() {
   const router = useRouter();
   const [search, setSearch] = useState('');
+  const [readiness, setReadiness] = useState<'All' | 'Ready' | 'NotReady'>('All');
   const { data: suppliers = [], isLoading, isError, error, refetch } = useQuery({
     queryKey: ['finance', 'ap', 'entry-suppliers', 'register'],
     queryFn: () => accountsPayableService.getInvoiceSupplierEntryOptions(),
@@ -30,11 +32,12 @@ export default function ApSuppliersPage() {
 
   const visibleSuppliers = useMemo(() => {
     const term = search.trim().toLocaleLowerCase();
-    if (!term) return suppliers;
-    return suppliers.filter((supplier) =>
-      `${supplier.name} ${supplier.code}`.toLocaleLowerCase().includes(term)
-    );
-  }, [search, suppliers]);
+    return suppliers.filter((supplier) => {
+      const matchesSearch = !term || `${supplier.name} ${supplier.code}`.toLocaleLowerCase().includes(term);
+      const matchesReadiness = readiness === 'All' || supplier.isTransactionReady === (readiness === 'Ready');
+      return matchesSearch && matchesReadiness;
+    });
+  }, [readiness, search, suppliers]);
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-8 p-8">
@@ -49,14 +52,19 @@ export default function ApSuppliersPage() {
       <Card>
         <CardHeader className="gap-4 md:flex-row md:items-center md:justify-between">
           <CardTitle>Supplier register</CardTitle>
-          <div className="relative w-full md:w-80">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              placeholder="Search name or code…"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
+          <div className="flex w-full gap-2 md:w-auto">
+            <div className="relative flex-1 md:w-80">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input className="pl-9" placeholder="Search name or code…" value={search} onChange={(event) => setSearch(event.target.value)} />
+            </div>
+            <Select value={readiness} onValueChange={(value: 'All' | 'Ready' | 'NotReady') => setReadiness(value)}>
+              <SelectTrigger className="w-44" aria-label="Filter by AP readiness"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All suppliers</SelectItem>
+                <SelectItem value="Ready">Transaction ready</SelectItem>
+                <SelectItem value="NotReady">Setup incomplete</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </CardHeader>
         <CardContent>

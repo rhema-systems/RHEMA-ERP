@@ -18,9 +18,12 @@ export interface Customer {
     currencyCode: string;
     lastPaymentDate?: string;
     overdueAmount?: number;
-    isActive?: boolean;
+    isActive: boolean;
+    isBlacklisted: boolean;
+    isTransactionReady: boolean;
+    readinessCode: string;
+    readinessMessage: string;
     notes?: string;
-    status: 'Active' | 'Inactive' | 'OnHold';
     tenantId: string;
     createdAt: string;
     updatedAt?: string;

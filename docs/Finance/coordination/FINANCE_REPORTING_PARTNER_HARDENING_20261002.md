@@ -5,7 +5,7 @@
 - Objective: investigate and remediate liquidity-card totals, detailed-ledger presentation, and AR/AP Business Partner eligibility/display gaps as a separate follow-up to PR #323.
 - Exact base: `4ad3a54f4a03f2fd56da733c6a63081a947c4505` (`origin/master`).
 - Branch: `codex/finance-reporting-partner-hardening`.
-- Worktree: `C:/Users/Akwas/Documents/DEV_WORK/RHEMA-ERP-finance-reporting-partner-hardening`.
+- Worktree: `C:/Users/Akwas/Documents/DEV WORK/RHEMA ERP/RHEMA-ERP/.codex-worktrees/finance-reporting-partner-hardening`.
 - The primary dirty UAT checkout is untouched.
 
 ## Confirmed baseline
@@ -31,5 +31,21 @@
 
 ## Status
 
-- Phase: implementation and focused regression coverage.
-- Review: independent accounting/read-model review required before remote integration.
+- Implemented:
+  - liquidity headline balances now derive from posted/reversed rows in the exact default `PrimaryFull` book, using functional amounts for the book currency and transaction amounts for a matching foreign liquidity currency;
+  - the response and UI expose settlement balance, GL/subledger variance, reconciliation state, and an explicit fallback when no primary-book authority exists;
+  - detailed-ledger UI displays the report's selected-book currency before the tenant base-currency fallback;
+  - AR exposes partner activity/blacklist separately from transaction readiness, supports `Ready`/`NotReady` filtering, and honours `IncludeBalances` through the settlement read model;
+  - AR and AP registers provide working readiness filters without weakening canonical partner/profile policy.
+- Focused regressions added for liquidity GL/subledger variance and AR readiness/read-model balances.
+- Verification:
+  - API build: passed (`0` errors; existing warnings remain).
+  - changed-file ESLint: passed.
+  - repository-wide lint: blocked by 146 pre-existing errors outside this scope.
+  - focused backend tests: passed (`7/7`) for canonical AR profile/readiness/balance behavior and liquidity GL/subledger reconciliation.
+- Accounting/read-model review:
+  - posted exact-book `AccountTransaction` rows remain the monetary authority for the liquidity headline;
+  - settlement entries remain the authority for availability and open-item workflow;
+  - historical partner visibility is retained, while readiness is explicit and new-transaction actions remain fail-closed;
+  - no schema, migration, posted evidence, or Business Partner master data is mutated.
+- Phase: final diff review and local commit; no remote integration has been performed.
