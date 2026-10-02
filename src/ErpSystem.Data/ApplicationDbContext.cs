@@ -11049,11 +11049,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                      .Where(entityType => typeof(ICommercialQuantityEvidenceLine).IsAssignableFrom(entityType.ClrType)))
         {
             builder.Entity(entityType.ClrType)
+                .Property(nameof(ICommercialQuantityEvidenceLine.UnitOfMeasureRoundingIncrementSnapshot))
+                .HasColumnType("decimal(18,6)");
+            builder.Entity(entityType.ClrType)
                 .HasOne(typeof(UnitOfMeasure), navigationName: null)
                 .WithMany()
                 .HasForeignKey(nameof(ICommercialQuantityEvidenceLine.UnitOfMeasureId))
                 .OnDelete(DeleteBehavior.Restrict);
         }
+
+        builder.Entity<AccountTransaction>()
+            .Property(item => item.CommercialQuantityRoundingIncrement)
+            .HasColumnType("decimal(18,6)");
     }
 
     private static void ConfigureProcedureCaseEntities(ModelBuilder builder)

@@ -53,7 +53,7 @@ namespace ErpSystem.Data.Migrations
                     type: "uniqueidentifier", nullable: true);
                 migrationBuilder.AddColumn<decimal>(
                     name: "UnitOfMeasureRoundingIncrementSnapshot", table: table,
-                    type: "decimal(18,4)", nullable: true);
+                    type: "decimal(18,6)", nullable: true);
                 migrationBuilder.CreateIndex(
                     name: $"IX_{table}_UnitOfMeasureId", table: table,
                     column: "UnitOfMeasureId");
@@ -79,7 +79,7 @@ namespace ErpSystem.Data.Migrations
                 type: "int", nullable: true);
             migrationBuilder.AddColumn<decimal>(
                 name: "CommercialQuantityRoundingIncrement", table: "AccountTransactions",
-                type: "decimal(18,4)", nullable: true);
+                type: "decimal(18,6)", nullable: true);
             migrationBuilder.AddColumn<string>(
                 name: "CommercialUnitOfMeasureCode", table: "AccountTransactions",
                 type: "nvarchar(20)", maxLength: 20, nullable: true);

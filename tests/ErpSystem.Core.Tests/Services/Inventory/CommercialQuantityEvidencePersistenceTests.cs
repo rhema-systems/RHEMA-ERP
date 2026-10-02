@@ -62,6 +62,34 @@ public sealed class CommercialQuantityEvidencePersistenceTests
     }
 
     [Fact]
+    public async Task Save_PreservesSixDecimalMicroIncrementEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options;
+        await using var db = new ApplicationDbContext(options, tenantId);
+        var uom = new UnitOfMeasure
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "MICRO", Name = "Micro unit",
+            DecimalPlaces = 6, RoundingIncrement = 0.000001m
+        };
+        db.UnitsOfMeasure.Add(uom);
+        await db.SaveChangesAsync();
+        var movement = new StockMovement
+        {
+            TenantId = tenantId, InventoryItemId = Guid.NewGuid(), WarehouseId = Guid.NewGuid(),
+            MovementType = "Receipt", Quantity = 0.000001m, ReferenceType = ReferenceType.Manual,
+            UnitOfMeasureId = uom.Id
+        };
+        db.StockMovements.Add(movement);
+
+        await db.SaveChangesAsync();
+
+        movement.UnitOfMeasureDecimalPlacesSnapshot.Should().Be(6);
+        movement.UnitOfMeasureRoundingIncrementSnapshot.Should().Be(0.000001m);
+    }
+
+    [Fact]
     public async Task PostedFinanceEvidence_RemainsFrozenAfterUomConfigurationChanges()
     {
         var tenantId = Guid.NewGuid();
