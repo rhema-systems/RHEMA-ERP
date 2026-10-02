@@ -216,6 +216,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         tenantId = RequireCurrentTenant(tenantId);
         await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         var request = await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
+        StaffTravelRequestGuards.RequireOpen(request, "a booking");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await ApplyFlightPolicyAsync(
@@ -385,6 +386,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         tenantId = RequireCurrentTenant(tenantId);
         await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         var request = await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
+        StaffTravelRequestGuards.RequireOpen(request, "a booking");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await ApplyHotelDerivationsAsync(
@@ -454,7 +456,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
-        await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
+        StaffTravelRequestGuards.RequireOpen(await RequireOwnedRequestAsync(createDto.StaffTravelRequestId), "a booking");
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         // A company vehicle is a real, finite resource — reserve it in Fleet rather than writing a
@@ -540,7 +542,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
-        await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
+        StaffTravelRequestGuards.RequireOpen(await RequireOwnedRequestAsync(createDto.StaffTravelRequestId), "a booking");
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         ApplyCarRentalDerivations(entity);
         await _carRentalRepository.AddAsync(entity);

@@ -36,11 +36,11 @@ baseline (D-13); lane 0 was built the same day.**
 3. **Migration batch 1** (§ 5) — **APPLIED to UAT 2026-10-02**, committed `d426f4ed3`
    (`20261002000637_TravelClosureBatch1`, guarded SQL; 33/33 on a scratch copy of UAT first; verified on
    UAT; truth suite 112/112 twice after). Lanes 1–9 build on it.
-4. **Lane 1** (§ 4) is built in three slices. **Slice 1a — the request's write rules — built and proven
-   2026-10-02** (`run-final-lifecycle.mjs` 103/103 twice, then a third time after a harness fix; the
-   truth suite 114/114 twice); staged for the user's commit. **Next: slice 1b** (cancel, return for
-   revision, close, request change, recall, the approver's stamp), then **1c** (comments, the
-   traveller's privacy, groups).
+4. **Lane 1** (§ 4) is built in three slices. **Slice 1a — the request's write rules — committed
+   `e1d050da2`** (2026-10-02). **Slice 1b — the lifecycle verbs (cancel, return for revision, request
+   change, recall, complete, close, the approver's stamp) — built and proven 2026-10-02**
+   (`run-final-lifecycle.mjs` 193/193 twice; the truth suite 114/114 twice); staged for the user's
+   commit. **Next: slice 1c** (comment edit and delete by their author, the traveller's privacy, groups).
 5. Then lanes **2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane
    against this document before building it — line numbers are as of HEAD `bad482a8d`.
 
@@ -88,7 +88,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 |---|---|---|---|---|
 | **0** | Harness on UAT, truth and fiction | none | `run-final-truth.mjs` | ✅ complete 2026-10-01 — 112/112 twice on UAT; committed `0b8cdf124` |
 | **M1** | Migration batch 1 | the whole batch | `m1/test-cycle.sh` (session scratchpad) | ✅ applied to UAT 2026-10-02 — 33/33 on a scratch copy first, verified on UAT, truth suite 112/112 twice after; committed `d426f4ed3` |
-| **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ◐ slice 1a (write rules) 2026-10-02 — 103/103 twice, truth 114/114 twice; staged. 1b (verbs) and 1c (comments, privacy, groups) to come |
+| **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ◐ 1a (write rules) committed `e1d050da2`; 1b (verbs) 2026-10-02 — 193/193 twice, truth 114/114 twice; staged. 1c (comments, privacy, groups) to come |
 | **2** | The approval ladder and the approver's door | batch 1 | `run-final-approvals.mjs` | ☐ |
 | **3** | The money chain | batch 1 | `run-final-money.mjs` | ☐ |
 | **4** | Policy and authority | batch 1 | `run-final-policy.mjs` | ☐ |
@@ -118,8 +118,12 @@ Each finding names the lane that owns it.
 - **A2 H** `CancelAsync` (l.713) never cancels the engine instance (leave and movements call
   `CancelWorkflowAsync`), so a cancelled Submitted trip leaves a live approval task; cancelling an
   Approved trip leaves confirmed bookings counted as committed, a disbursed advance outstanding and a
-  Fleet trip live. → lanes 1, 6
-- **A3 M** `ReturnedForRevision`, `InProgress` and `Closed` have no writer (D-6). → lanes 1, 8
+  Fleet trip live. → lanes 1, 6 — **lane 1's half fixed in slice 1b, 2026-10-02** (the approval task is
+  cancelled with the trip; an approved trip with advance cash out cannot be cancelled); the bookings and
+  the Fleet trip are lanes 5 and 6
+- **A3 M** `ReturnedForRevision`, `InProgress` and `Closed` have no writer (D-6). → lanes 1, 8 —
+  **ReturnedForRevision and Closed have writers since slice 1b, 2026-10-02**; InProgress is the sweep's
+  (lane 8)
 - **A4 M** `SubmitAsync` checks nothing but status: cost 0, return before departure (the mapper
   clamps the duration to 0), past dates, no itinerary, the policy; `SubmittedAt` comes from the DTO's
   default. → lane 1 — **fixed in slice 1a, 2026-10-02** (an itinerary is not required: a trip is often
@@ -147,13 +151,14 @@ Each finding names the lane that owns it.
   2026-10-01**
 - **A10 L** Comment edit and delete check no author; the desk path takes `CancelledAt` from the body;
   the request has no approver column (only `UpdatedBy`); the request-number generator is not atomic
-  (recorded). → lane 1
+  (recorded). → lane 1 — **`CancelledAt` and the approver fixed in slice 1b, 2026-10-02**; the comment
+  author check is slice 1c's
 - **A11 M** Group travel: `MaxParticipants` is not enforced, the group's status is whatever the PUT
   says, dates and destination are not pushed to participants, an existing request cannot be linked,
   and the add-traveller dialog hard-codes purpose, risk, `requiresVisa: false` and `GHS`. → lane 1
 - **A12 M** No recall verb in the service or controller although `HrWorkflowFallbackAuthority` says
   *use all four or none*; the generic recall button works only while a definition is published.
-  → lane 1
+  → lane 1 — **fixed in slice 1b, 2026-10-02**
 
 **B. The money chain** (`StaffTravelFinanceService.cs`, its controller and repositories)
 - **B1 H** `ReviewClaimAsync` (l.361) has **no from-status guard and no to-status validation**: Draft →
@@ -313,9 +318,12 @@ Each finding names the lane that owns it.
   `budget.ApprovedTotal` are two unlinked "approved" figures, and neither caps bookings or claims.
   → lanes 2, 3
 - **O-10 M — no change path after approval.** The edit page says "Raise an amendment instead"
-  (`[id]/edit/page.tsx:51`); no amendment exists. → lane 1 (D-9)
+  (`[id]/edit/page.tsx:51`); no amendment exists. → lane 1 (D-9) — **fixed in slice 1b, 2026-10-02**
+  (Request change)
 - **O-11 M — lifecycle edges:** cancel is allowed while InProgress; Complete before the trip starts; a
-  Submitted trip whose departure passes is never escalated. → lanes 1, 8
+  Submitted trip whose departure passes is never escalated. → lanes 1, 8 — **lane 1's half fixed in
+  slice 1b, 2026-10-02** (no cancel or change under way; no completion before the start); the
+  escalation is lane 8's
 - **O-12 M — travel is invisible to attendance.** `StaffAttendanceStatus.OnDuty` exists and the
   attendance dashboard counts it as present, but nothing writes it; leave posts its days through
   `LeaveAttendancePostingService` and travel posts nothing. → lane 9
@@ -591,28 +599,75 @@ as "Sept"). Regression: `run-final-truth.mjs` **114/114 twice** (stamps 207913, 
 asserted, three findings still observed (the group link on an edit and A6 for slice 1c, B9 for lane 3).
 Four runs wrote 44 requests and 466 notifications to UAT and left none live, no open workflow instance,
 no fixture leave, policy or active login.
-- [ ] **Cancel:** cancels the engine instance while Submitted; refused once InProgress; from Approved
+- [x] **Cancel:** cancels the engine instance while Submitted; refused once InProgress; from Approved
   it requires no disbursed advance with money outstanding (the 422 names it) and cancels pending and
-  confirmed bookings and undispatched fleet trips (lanes 5, 6).
-- [ ] **D-6 writers.** `ReturnForRevisionAsync` (the approve gate) on leave's suggest-changes shape
+  confirmed bookings and undispatched fleet trips (lanes 5, 6). *Slice 1b; the bookings and the Fleet
+  trip remain lanes 5 and 6.*
+- [x] **D-6 writers.** `ReturnForRevisionAsync` (the approve gate) on leave's suggest-changes shape
   (`LeaveService.cs:1163-1177`): `HasActiveApprovalWorkflowAsync` → `CancelWorkflowAsync` → check
   `.Success` → set the status directly (the engine has no *returned* outcome), stamping
   `ReturnedAt/ById/Reason`. `CloseAsync` (HR), `ClosedAt/ById`; the sweep closes too (lane 8) when every
   claim is Paid or Rejected and every advance FullySettled, refunded or written off, or when no claim
   was filed by `TravelEndDate + ExpenseSubmissionDays`. Nothing is booked, advanced or claimed on a
-  Closed trip. Complete only on or after `TravelStartDate`.
-- [ ] **D-9 Request change** (traveller, desk or approver; Approved only): returns the trip to
+  Closed trip. Complete only on or after `TravelStartDate`. *Slice 1b; the sweep's close is lane 8's.*
+- [x] **D-9 Request change** (traveller, desk or approver; Approved only): returns the trip to
   ReturnedForRevision with a reason (`ChangeRequestedAt/ById`, `ChangeReason`); bookings, advances and
   claims stay linked; resubmission re-enters the two-stage ladder. The edit page's "raise an amendment"
-  text becomes this button.
-- [ ] **Recall** — service, `/recall` and `/me/recall`: the requester-only check in the service first
+  text becomes this button. *Slice 1b — the traveller and the desk; the approver gets their door in
+  lane 2.*
+- [x] **Recall** — service, `/recall` and `/me/recall`: the requester-only check in the service first
   (the helper does not enforce it), then `HrWorkflowFallbackAuthority.RecallAsync`, then
-  `ApplyRecallOutcome` whatever the helper returns. This completes "all four or none".
-- [ ] **`ApprovedById`** (new column) is the final approver's employee id, stamped in `ApproveAsync`; an
+  `ApplyRecallOutcome` whatever the helper returns. This completes "all four or none". *Slice 1b.*
+- [x] **`ApprovedById`** (new column) is the final approver's employee id, stamped in `ApproveAsync`; an
   instance completed through the generic inbox never passes the service, so it stays null there
-  (recorded under #15).
+  (recorded under #15). *Slice 1b.*
 - [ ] Comment edit and delete by their author (or Admin); `CancelledAt` from the clock; the `/me`
   detail filters comments by `IsVisibleToTraveller` on the server and drops policy exceptions.
+  *`CancelledAt` done in slice 1b; the rest is slice 1c.*
+
+**Slice 1b as built (2026-10-02)** — `StaffTravelRequestService` (`CancelAsync`, `MarkCompletedAsync`,
+`ApproveAsync`'s stamp, and the new `ReturnForRevisionAsync`, `RequestChangeAsync`, `RecallAsync`,
+`CloseAsync`), a new `StaffTravelRequestGuards` (a closed trip takes nothing more — used by the four
+booking creates and the budget, claim and advance creates), the read DTO's lifecycle fields and the
+repository's includes for them, four desk routes (`return`, `request-change`, `recall`, `close`) and two
+portal routes (`recall`, `request-change`); on the frontend a shared `TravelReasonDialog`, a
+`TravelLifecycleNotes` card, the desk page's Return for revision, Request change, Close and its recall
+wired into the shared workflow actions (the generic recall never told the request), the portal's Recall
+and Request change, and both edit pages' Request change button.
+- *Cancel* asks the engine whether the record has a live instance (not whether a definition is
+  published: a request submitted before one was has no instance) and cancels it first; a refusal stops
+  the cancel. A rejected request is refused too — its rejection reason lives in `CancellationReason`,
+  which a cancel would overwrite.
+- *Return for revision* runs the approve gate (the engine's assignee, or the approve tier with no
+  definition), never the traveller, before it cancels the approval. *Recall* allows the traveller or
+  whoever raised the request; with an instance the engine also insists on the login that submitted it, so
+  a trip the desk submitted is the desk's to recall — the traveller is told to ask them.
+- *Request change* keeps the approval's stamps as the record of what is being changed until the next
+  approval replaces them; return, request change and recall all clear `SubmittedAt` and the recorded
+  policy, which the next submission sets again.
+- *Close* needs a completed trip, every claim paid or rejected, and every advance settled, written off,
+  rejected or cancelled — until lane 3 gives advances reject and cancel verbs, an unpaid requested advance
+  is deleted (Admin) before closing.
+- *Not yet:* none of the new verbs notifies anyone — who hears of each is lane 8's (D-4).
+
+**Suite** `run-final-lifecycle.mjs` gains §7–§11 (193 assertions in all): §7 cancel — the approval task
+withdrawn on the desk and the portal, the clock's time, refused for a rejected request, for an approved
+trip with a paid-out advance (named, with its amount), and under way; §8 return for revision — refused
+for a draft, without a reason and for a plain employee, the task withdrawn, edited and resubmitted into
+a new approval, an officer refused on their own trip; §9 request change — the approver recorded, the
+advance kept, edited, resubmitted and approved again, from the portal too and nobody else's; §10 recall
+— the traveller's own, the desk's submission refused to the traveller, an outsider refused, the
+raiser's recall; §11 complete and close — not before the start, not while a claim or an advance is open
+(each named), closed, and then no advance, claim, budget or booking. "Under way" is set on the run's own
+trip in SQL (lane 8 writes InProgress). The suite pays out one advance, which writes an unposted row to
+HR's Finance posting register (UAT has no posting rules, so no journal); the teardown retires the run's
+register rows with its notifications. **193/193 twice on UAT, 2026-10-02** (stamps 651140, 780011).
+Regression: `run-final-truth.mjs` **114/114 twice** (stamps 849263, 860396), the same three observed.
+Four runs wrote 70 requests, 8 advances, 2 register rows and 1,474 notifications, and left none live —
+no open workflow instance, fixture leave, policy or active login. The API log's only errors were the
+known payroll defect #23, the truth suite's deliberate duplicate policy, the known demo-user identity
+reconciliation, and one failure of the platform's notification clean-up job under the suite's load
+(it deleted nothing and recovered).
 - [ ] **Groups:** `MaxParticipants` enforced; a change of the group's dates or destination propagates
   to Draft participants; `POST groups/{id}/requests/{requestId}` links an existing Draft request; the
   group's status moves by verb (open, close, cancel), not by PUT; deleting a group detaches its
@@ -1035,3 +1090,6 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   lock, the server's facts, what create and submission refuse, the policy preview). The build
   succeeded; no migration pending on UAT; `run-final-lifecycle.mjs` 103/103 twice (and once more after
   a harness date fix), the truth suite 114/114 twice. Staged. Next: slice 1b.
+- **2026-10-02, later** — The user committed slice 1a (`e1d050da2`). **Slice 1b built and proven** (the
+  lifecycle verbs): the build succeeded; no migration pending on UAT; `run-final-lifecycle.mjs` 193/193
+  twice, the truth suite 114/114 twice. Staged. Next: slice 1c.

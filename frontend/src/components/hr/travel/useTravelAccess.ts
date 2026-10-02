@@ -7,8 +7,10 @@ import { useAuth } from '@/hooks/use-auth';
  * What the signed-in user may do on the travel desk, in one place.
  *
  * `canWrite` is `HR.Travel.Write`; `canAdmin` is `HR.Travel.Admin` — deletes, approving a policy,
- * authorising a booking above a cap. Each also passes on the roles the API's role fallback grants
- * while a tenant's permission seed has not run, as the other HR screens do.
+ * authorising a booking above a cap; `canApprove` is `HR.Travel.Approve`, which decides a request only
+ * while no approval workflow is published (with one, the workflow names the approver). Each also
+ * passes on the roles the API's role fallback grants while a tenant's permission seed has not run, as
+ * the other HR screens do.
  *
  * ⚠ A button an endpoint will refuse should not render (travel final closure, lane 0 — the
  * attachment delete showed for HR and answered 403). Screens read this rather than hard-coding.
@@ -18,5 +20,6 @@ export function useTravelAccess() {
   return {
     canWrite: hasAnyPermission(['HR.Travel.Write', 'HR.Travel.Admin']) || hasAnyRole(HR_ROLES),
     canAdmin: hasAnyPermission(['HR.Travel.Admin']) || hasAnyRole(HR_ADMIN_ROLES),
+    canApprove: hasAnyPermission(['HR.Travel.Approve', 'HR.Travel.Admin']) || hasAnyRole(HR_ROLES),
   };
 }

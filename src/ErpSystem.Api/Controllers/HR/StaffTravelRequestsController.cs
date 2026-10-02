@@ -243,6 +243,63 @@ public class StaffTravelRequestsController : HrControllerBase
         return Ok(new { message = "Travel request marked as completed." });
     }
 
+    /// <summary>Send a submitted request back to its requester, saying what to change (D-6, lane 1).</summary>
+    /// <remarks>
+    /// The approve gate: the engine's assignee when a definition is published, the travel approve tier
+    /// when none is, and never the traveller. Lane 2 moves this, with approve and reject, off the Write
+    /// policy and onto the traveller's line authority.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("{id:guid}/return")]
+    public async Task<IActionResult> ReturnForRevision(Guid id, [FromBody] ReturnStaffTravelRequestDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetWriteContext(out _, out _) is { } contextError) return contextError;
+
+        await _service.ReturnForRevisionAsync(id, dto.Reason);
+        return Ok(new { message = "Travel request returned for revision." });
+    }
+
+    /// <summary>Ask for a change to an approved trip — it goes back for re-approval (D-9, lane 1).</summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("{id:guid}/request-change")]
+    public async Task<IActionResult> RequestChange(Guid id, [FromBody] RequestStaffTravelChangeDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetWriteContext(out _, out _) is { } contextError) return contextError;
+
+        await _service.RequestChangeAsync(id, dto.Reason);
+        return Ok(new { message = "The trip is back for revision and will be approved again." });
+    }
+
+    /// <summary>Withdraw a submitted request from approval, back to Draft (lane 1).</summary>
+    /// <remarks>
+    /// The traveller's or whoever raised it — the service checks; with a workflow instance the engine
+    /// also insists on the login that submitted it. The reason is optional.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("{id:guid}/recall")]
+    public async Task<IActionResult> Recall(
+        Guid id, [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] RecallStaffTravelRequestDto? dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetWriteContext(out _, out _) is { } contextError) return contextError;
+
+        await _service.RecallAsync(id, dto?.Reason);
+        return Ok(new { message = "Travel request recalled to draft." });
+    }
+
+    /// <summary>Close a completed trip once every claim and advance on it is finished (D-6, lane 1).</summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("{id:guid}/close")]
+    public async Task<IActionResult> Close(Guid id)
+    {
+        if (TryGetWriteContext(out _, out _) is { } contextError) return contextError;
+
+        await _service.CloseAsync(id);
+        return Ok(new { message = "Travel request closed." });
+    }
+
     // =========================================================================
     // COMMENTS
     // =========================================================================

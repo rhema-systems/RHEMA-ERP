@@ -35,6 +35,11 @@ public class StaffTravelRequestRepository : GenericRepository<StaffTravelRequest
             .Include(r => r.Employee)
             .Include(r => r.InitiatedBy)
             .Include(r => r.CancelledBy)
+            // Lane 1's lifecycle actors — without these the names map blank on every read.
+            .Include(r => r.ApprovedBy)
+            .Include(r => r.ReturnedBy)
+            .Include(r => r.ClosedBy)
+            .Include(r => r.ChangeRequestedBy)
             .Include(r => r.OrganizationUnit)
             .Include(r => r.DestinationCountry)
             .Include(r => r.OriginCountry)

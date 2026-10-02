@@ -3,7 +3,7 @@
 import { use, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Loader2, Ban, CheckCheck, Globe, ShieldAlert, Pencil, Send } from 'lucide-react';
+import { Loader2, Ban, CheckCheck, Globe, ShieldAlert, Pencil, Send, RotateCcw, FilePenLine, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -26,7 +26,9 @@ import { TravelBookingsPanel } from '@/components/hr/travel/TravelBookingsPanel'
 import { TravelCompliancePanel } from '@/components/hr/travel/TravelCompliancePanel';
 import { TravelFinancePanel } from '@/components/hr/travel/TravelFinancePanel';
 import { TravelItineraryPanel } from '@/components/hr/travel/TravelItineraryPanel';
+import { TravelLifecycleNotes } from '@/components/hr/travel/TravelLifecycleNotes';
 import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import { TravelReasonDialog } from '@/components/hr/travel/TravelReasonDialog';
 import {
   ELEVATED_TRAVEL_RISK_LEVELS,
   TRAVEL_COMMENT_TYPE_LABELS,
@@ -79,8 +81,8 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
   const [internalNote, setInternalNote] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
-  const [lateOpen, setLateOpen] = useState(false);
-  const [lateReason, setLateReason] = useState('');
+  /** Which reason-asking action is open: submit after departure, return for revision, request change. */
+  const [reasonFor, setReasonFor] = useState<null | 'late' | 'return' | 'change'>(null);
 
   const { data: r, isLoading, isError, error } = useQuery({
     queryKey: ['travel-request', id],
@@ -132,23 +134,49 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
       // anywhere in the workflow; lane 2 gives the approve dialog one (findings O-9, T-10).
       approve: (ctx) => travelService.approve(id, undefined, ctx.comments || undefined),
       reject: (ctx) => travelService.reject(id, ctx.comments || 'Rejected'),
+      // Travel's own recall (lane 1): the generic recall the actions fell back to never told the
+      // request, which stayed Submitted with no workflow behind it (cross-module defect #15's shape).
+      recall: (reason) => travelService.recall(id, reason || undefined),
       afterAction: refresh,
     },
     onOpenWorkflows: () => router.push('/administration/workflow'),
   });
 
+  const afterLifecycle = async (title: string, description?: string) => {
+    toast({ title, description });
+    await refresh();
+    await workflow.refresh();
+  };
+  const failed = (title: string) => (e: Error) =>
+    toast({ variant: 'destructive', title, description: e.message });
+
   const submitLate = useMutation({
-    mutationFn: () => travelService.submit(id, lateReason.trim()),
+    mutationFn: (reason: string) => travelService.submit(id, reason),
     onSuccess: async (result) => {
-      setLateOpen(false);
-      setLateReason('');
-      toast({ title: 'Travel request submitted', description: result.message });
+      await afterLifecycle('Travel request submitted', result.message);
       announceWarnings(result);
-      await refresh();
-      await workflow.refresh();
     },
-    onError: (e: Error) =>
-      toast({ variant: 'destructive', title: 'Could not submit', description: e.message }),
+    onError: failed('Could not submit'),
+  });
+
+  // Lane 1 (D-6): the approver's third answer beside approve and reject.
+  const returnForRevision = useMutation({
+    mutationFn: (reason: string) => travelService.returnForRevision(id, reason),
+    onSuccess: () => afterLifecycle('Returned for revision', 'The request is back with its requester to change.'),
+    onError: failed('Could not return the request'),
+  });
+
+  // Lane 1 (D-9): the only way to change a trip once it is approved.
+  const requestChange = useMutation({
+    mutationFn: (reason: string) => travelService.requestChange(id, reason),
+    onSuccess: () => afterLifecycle('Back for revision', 'Edit the trip and submit it again for approval.'),
+    onError: failed('Could not send the trip back'),
+  });
+
+  const close = useMutation({
+    mutationFn: () => travelService.close(id),
+    onSuccess: () => afterLifecycle('Trip closed'),
+    onError: failed('Could not close the trip'),
   });
 
   const complete = useMutation({
@@ -216,7 +244,14 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
 
   const isEditable = r.status === 'Draft' || r.status === 'ReturnedForRevision';
   const canComplete = r.status === 'Approved' || r.status === 'InProgress';
-  const isLive = !['Cancelled', 'Rejected', 'Completed', 'Closed'].includes(r.status);
+  // Lane 1: completion records that the trip happened, so not before it starts.
+  const notStarted = r.travelStartDate.slice(0, 10) > todayUtc();
+  // Lane 1 (O-11): a trip under way is completed, not cancelled.
+  const isLive = !['Cancelled', 'Rejected', 'Completed', 'Closed', 'InProgress'].includes(r.status);
+  // Returning is the approver's — whoever the workflow names, or the approve tier when none is published.
+  const mayDecide = workflow.summary?.hasActiveInstance
+    ? !!workflow.summary.canCurrentUserApprove
+    : access.canApprove;
 
   return (
     <div className="space-y-6 p-6">
@@ -234,13 +269,33 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
             )}
             <WorkflowApprovalActions {...workflow.actionProps} />
             {isEditable && departed && (
-              <Button onClick={() => setLateOpen(true)}>
+              <Button onClick={() => setReasonFor('late')}>
                 <Send className="mr-2 h-4 w-4" /> Submit after departure
               </Button>
             )}
+            {r.status === 'Submitted' && mayDecide && (
+              <Button variant="outline" onClick={() => setReasonFor('return')}>
+                <RotateCcw className="mr-2 h-4 w-4" /> Return for revision
+              </Button>
+            )}
+            {r.status === 'Approved' && access.canWrite && (
+              <Button variant="outline" onClick={() => setReasonFor('change')}>
+                <FilePenLine className="mr-2 h-4 w-4" /> Request change
+              </Button>
+            )}
             {canComplete && (
-              <Button variant="outline" onClick={() => complete.mutate()} disabled={complete.isPending}>
+              <Button
+                variant="outline"
+                onClick={() => complete.mutate()}
+                disabled={complete.isPending || notStarted}
+                title={notStarted ? 'A trip can be marked completed once it has started.' : undefined}
+              >
                 <CheckCheck className="mr-2 h-4 w-4" /> Mark completed
+              </Button>
+            )}
+            {r.status === 'Completed' && access.canWrite && (
+              <Button variant="outline" onClick={() => close.mutate()} disabled={close.isPending}>
+                <Lock className="mr-2 h-4 w-4" /> Close trip
               </Button>
             )}
             {isLive && (
@@ -322,10 +377,18 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
               <InfoRow label="Visa required" value={r.requiresVisa ? 'Yes' : 'No'} />
               <InfoRow label="Health clearance" value={r.requiresHealthClearance ? 'Yes' : 'No'} />
               <InfoRow label="Submitted" value={fmtDateTime(r.submittedAt)} />
-              <InfoRow label="Approved" value={fmtDateTime(r.approvedAt)} />
+              <InfoRow
+                label="Approved"
+                value={r.approvedAt ? [fmtDateTime(r.approvedAt), r.approvedByName].filter(Boolean).join(' · ') : '—'}
+              />
               <InfoRow label="Completed" value={fmtDateTime(r.completedAt)} />
+              {r.closedAt && (
+                <InfoRow label="Closed" value={[fmtDateTime(r.closedAt), r.closedByName].filter(Boolean).join(' · ')} />
+              )}
             </CardContent>
           </Card>
+
+          <TravelLifecycleNotes request={r} />
 
           {r.purposeDescription && (
             <Card>
@@ -467,37 +530,40 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
         />
       </Tabs>
 
-      <Dialog open={lateOpen} onOpenChange={setLateOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Submit a trip after its departure date</DialogTitle>
-            <DialogDescription>
-              This trip was due to leave on {fmtDate(r.travelStartDate)}. Say why it is being submitted
-              late — usually travel at short notice, with the paperwork following. The reason is kept on
-              the request as an internal note in your name, for the approver.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="late-reason">Reason</Label>
-            <Textarea
-              id="late-reason"
-              value={lateReason}
-              onChange={(e) => setLateReason(e.target.value)}
-              rows={3}
-              maxLength={1000}
-              placeholder="Why is this trip being submitted after it began?"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setLateOpen(false)}>
-              Not now
-            </Button>
-            <Button disabled={!lateReason.trim() || submitLate.isPending} onClick={() => submitLate.mutate()}>
-              Submit for approval
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <TravelReasonDialog
+        open={reasonFor === 'late'}
+        onOpenChange={(open) => setReasonFor(open ? 'late' : null)}
+        title="Submit a trip after its departure date"
+        description={`This trip was due to leave on ${fmtDate(r.travelStartDate)}. Say why it is being submitted late — usually travel at short notice, with the paperwork following. The reason is kept on the request as an internal note in your name, for the approver.`}
+        placeholder="Why is this trip being submitted after it began?"
+        confirmLabel="Submit for approval"
+        pending={submitLate.isPending}
+        onConfirm={(reason) => submitLate.mutateAsync(reason)}
+      />
+
+      <TravelReasonDialog
+        open={reasonFor === 'return'}
+        onOpenChange={(open) => setReasonFor(open ? 'return' : null)}
+        title="Return this request for revision"
+        description="It goes back to whoever submitted it to change and send again. The approval in progress is withdrawn, and a new one starts when it is resubmitted."
+        label="What needs to change"
+        placeholder="The dates, the cost, the purpose — say what, so it comes back right."
+        confirmLabel="Return for revision"
+        pending={returnForRevision.isPending}
+        onConfirm={(reason) => returnForRevision.mutateAsync(reason)}
+      />
+
+      <TravelReasonDialog
+        open={reasonFor === 'change'}
+        onOpenChange={(open) => setReasonFor(open ? 'change' : null)}
+        title="Request a change to this approved trip"
+        description="The trip goes back for revision: edit it, then submit it for approval again. Its bookings, advances and claims stay with it."
+        label="What has changed"
+        placeholder="New dates, a different destination, a higher cost…"
+        confirmLabel="Send back for revision"
+        pending={requestChange.isPending}
+        onConfirm={(reason) => requestChange.mutateAsync(reason)}
+      />
 
       <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
         <DialogContent>

@@ -149,9 +149,38 @@ class TravelService {
     });
   }
 
-  /** Only from Approved or InProgress — completion records that the trip happened. */
+  /**
+   * Only from Approved or InProgress, and not before the trip starts — completion records that the
+   * trip happened.
+   */
   complete(id: string) {
     return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/complete`, {});
+  }
+
+  /**
+   * An approver sends a submitted request back with what to change; it returns to the requester to
+   * edit and resubmit (lane 1, D-6). The approve gate applies, and never the traveller.
+   */
+  returnForRevision(id: string, reason: string) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/return`, { reason });
+  }
+
+  /** An approved trip goes back for revision and is approved again; its bookings stay (lane 1, D-9). */
+  requestChange(id: string, reason: string) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/request-change`, { reason });
+  }
+
+  /**
+   * Back to Draft from approval — the traveller's or whoever raised it. With a workflow instance only
+   * the login that submitted it can recall it; the server says so otherwise.
+   */
+  recall(id: string, reason?: string) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/recall`, reason ? { reason } : {});
+  }
+
+  /** A completed trip, once every claim is paid or rejected and every advance settled (lane 1, D-6). */
+  close(id: string) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/close`, {});
   }
 
   // ── Comments ───────────────────────────────────────────────────────────────
@@ -285,6 +314,16 @@ class TravelService {
 
   cancelMine(id: string, payload: CancelMyStaffTravelRequest) {
     return apiService.post<void>(`${this.meUrl}/requests/${id}/cancel`, payload);
+  }
+
+  /** Take your own request back from approval to change it. */
+  recallMine(id: string, reason?: string) {
+    return apiService.post<void>(`${this.meUrl}/requests/${id}/recall`, reason ? { reason } : {});
+  }
+
+  /** Ask for a change to your own approved trip — it comes back to you and is approved again. */
+  requestChangeMine(id: string, reason: string) {
+    return apiService.post<void>(`${this.meUrl}/requests/${id}/request-change`, { reason });
   }
 
   // ── My destination alerts ──────────────────────────────────────────────────

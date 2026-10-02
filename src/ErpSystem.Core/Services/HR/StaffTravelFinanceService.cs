@@ -165,7 +165,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
-        await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
+        StaffTravelRequestGuards.RequireOpen(await RequireOwnedRequestAsync(createDto.StaffTravelRequestId), "a budget");
 
         var existing = await _budgetRepository.GetByRequestIdAsync(createDto.StaffTravelRequestId);
         if (existing != null && existing.TenantId == tenantId)
@@ -287,7 +287,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
-        await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
+        StaffTravelRequestGuards.RequireOpen(await RequireOwnedRequestAsync(createDto.StaffTravelRequestId), "an expense claim");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.ClaimNumber = await GenerateClaimNumberAsync(cancellationToken);
@@ -582,7 +582,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
-        await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
+        StaffTravelRequestGuards.RequireOpen(await RequireOwnedRequestAsync(createDto.StaffTravelRequestId), "an advance");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.AdvanceNumber = await GenerateAdvanceNumberAsync(cancellationToken);
@@ -828,11 +828,12 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     /// Confirms the travel request exists in the caller's tenant before money is hung off it.
     /// Budgets, claims and advances all took StaffTravelRequestId straight from the payload.
     /// </summary>
-    private async Task RequireOwnedRequestAsync(Guid requestId)
+    private async Task<StaffTravelRequest> RequireOwnedRequestAsync(Guid requestId)
     {
         var request = await _requestRepository.GetByIdAsync(requestId);
         if (request == null || request.TenantId != GetTenantId())
             throw new ArgumentException($"Staff travel request with ID '{requestId}' not found.");
+        return request;
     }
 
     /// <summary>What the employee is actually owed: the payable total less any advance held.</summary>

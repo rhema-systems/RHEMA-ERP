@@ -1009,7 +1009,12 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         // The approved budget is the domain's own decision, not the engine's, so it is applied only
         // once the engine says the request is actually approved.
         if (entity.Status == StaffTravelRequestStatus.Approved)
+        {
             entity.ApprovedBudget = approveDto.ApprovedBudget ?? entity.EstimatedTotalCost;
+            // Lane 1: the approver as a person. The engine records a platform user; nothing on the
+            // trip said who approved it (finding A10). Null for an approver with no employee link.
+            entity.ApprovedById = _currentUserService.EmployeeId;
+        }
 
         entity.UpdatedBy = userId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
@@ -1059,20 +1064,39 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         return true;
     }
 
+    /// <remarks>
+    /// <para><b>Lane 1 (findings A2, O-11).</b> Cancelling a Submitted trip left its approval task live —
+    /// the approver could still decide a cancelled request — so the engine's instance is cancelled first,
+    /// and a refusal from the engine stops the cancel. A trip under way cannot be cancelled: it ended
+    /// early or it did not, and Complete records that. An Approved trip with an advance whose cash is
+    /// still out cannot be cancelled until the advance is settled — cancelling would leave money with
+    /// the traveller against a trip that no longer exists. (Cancelling the trip's bookings and Fleet
+    /// trip is lanes 5 and 6.) A rejected request is refused too: its rejection reason lives in
+    /// <c>CancellationReason</c>, which a cancel would overwrite.</para>
+    /// </remarks>
     public async Task<bool> CancelAsync(CancelStaffTravelRequestDto cancelDto, Guid cancelledByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedRequestAsync(cancelDto.RequestId);
 
-        if (entity.Status is StaffTravelRequestStatus.Cancelled or StaffTravelRequestStatus.Completed or StaffTravelRequestStatus.Closed)
-            throw new InvalidOperationException($"A request in status '{entity.Status}' cannot be cancelled.");
+        if (entity.Status is StaffTravelRequestStatus.Cancelled or StaffTravelRequestStatus.Completed
+            or StaffTravelRequestStatus.Closed or StaffTravelRequestStatus.Rejected)
+            throw new InvalidOperationException($"A request that is {entity.Status} cannot be cancelled.");
+        if (entity.Status == StaffTravelRequestStatus.InProgress)
+            throw new InvalidOperationException(
+                "A trip that is under way cannot be cancelled. If it ended early, mark it completed.");
+        if (entity.Status == StaffTravelRequestStatus.Approved)
+            await RequireNoAdvanceCashOutAsync(entity, "cancelling the trip", cancellationToken);
+
+        var reason = cancelDto.CancellationReason.Trim();
+        await CancelLiveApprovalAsync(entity, $"Travel request cancelled: {reason}");
 
         entity.Status = StaffTravelRequestStatus.Cancelled;
-        entity.CancellationReason = cancelDto.CancellationReason;
+        entity.CancellationReason = reason;
         // CancelledById is an Employee FK; UpdatedBy is a platform-user audit field. The one DTO
         // field was feeding BOTH, so whichever id the caller supplied was wrong for one of them.
         // They are separate now: the employee who cancelled, and the user account that acted.
         entity.CancelledById = cancelDto.CancelledById;
-        entity.CancelledAt = cancelDto.CancelledAt;
+        entity.CancelledAt = DateTime.UtcNow;
         entity.UpdatedBy = cancelledByUserId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
 
@@ -1092,6 +1116,10 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         if (entity.Status is not (StaffTravelRequestStatus.Approved or StaffTravelRequestStatus.InProgress))
             throw new InvalidOperationException("Only approved or in-progress requests can be marked completed.");
+        // Lane 1, finding O-11: a trip cannot have happened before it began.
+        if (DateOnly.FromDateTime(DateTime.UtcNow) < entity.TravelStartDate)
+            throw new InvalidOperationException(
+                $"A trip cannot be marked completed before it starts ({entity.TravelStartDate:dd MMM yyyy}).");
 
         entity.Status = StaffTravelRequestStatus.Completed;
         entity.CompletedAt = DateTime.UtcNow;
@@ -1105,6 +1133,250 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         await PublishLifecycleAsync(entity, "Completed", cancellationToken);
 
+        return true;
+    }
+
+    // ---- The lifecycle's other writers -------------------------------------
+    //
+    // Travel final closure, lane 1 (decisions D-6 and D-9, finding A12). ReturnedForRevision and
+    // Closed were statuses nothing wrote, a trip could not be changed after approval, and the request
+    // had no recall of its own — "use all four or none" (HrWorkflowFallbackAuthority) had three. Who
+    // hears about each is lane 8's (D-4); none of these publishes yet.
+
+    /// <summary>
+    /// Refuses a caller who cannot decide this request at its current step: the engine's assignee when
+    /// a definition is published, the travel approve tier when none is — the two arms approve and
+    /// reject already run. Leave's <c>EnsureMayDecideAsync</c>, for the third decision verb.
+    /// </summary>
+    private async Task EnsureMayDecideAsync(Guid requestId, Guid userId, string actionDescription)
+    {
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, requestId, userId))
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+        }
+        else
+        {
+            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserProvider, actionDescription, HrPermissions.ApproveTravel);
+        }
+    }
+
+    /// <summary>Cancels the request's live approval instance, if it has one; a refusal stops the caller.</summary>
+    /// <remarks>
+    /// Asked of the record, not of the definition: a request submitted while no definition was published
+    /// has no instance even after one is, and the engine answers "No active workflow found" for it.
+    /// </remarks>
+    private async Task CancelLiveApprovalAsync(StaffTravelRequest entity, string reason)
+    {
+        if (!await _workflowIntegrationService.HasActiveApprovalInstanceAsync(EntityType, entity.Id)) return;
+
+        var result = await _workflowIntegrationService.CancelWorkflowAsync(EntityType, entity.Id, reason);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Message ?? "The approval workflow could not be cancelled.");
+    }
+
+    /// <summary>An advance whose cash is still with the traveller — paid out and not settled — blocks the caller.</summary>
+    /// <remarks>Lane 3 adds the way to record cash handed back; until then a claim settles an advance.</remarks>
+    private async Task RequireNoAdvanceCashOutAsync(
+        StaffTravelRequest entity, string action, CancellationToken cancellationToken)
+    {
+        var outstanding = await _unitOfWork.Repository<StaffTravelAdvance>().GetQueryable()
+            .Where(a => a.TenantId == entity.TenantId
+                     && a.StaffTravelRequestId == entity.Id
+                     && (a.Status == TravelAdvanceStatus.Disbursed
+                         || a.Status == TravelAdvanceStatus.PartiallySettled
+                         || a.Status == TravelAdvanceStatus.Overdue)
+                     && a.UnsettledAmount > 0m)
+            .OrderBy(a => a.AdvanceNumber)
+            .Select(a => new { a.AdvanceNumber, a.CurrencyCode, a.UnsettledAmount })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (outstanding is not null)
+            throw new InvalidOperationException(
+                $"Advance {outstanding.AdvanceNumber} still has {outstanding.CurrencyCode} {outstanding.UnsettledAmount:N2} " +
+                $"with the traveller. Settle it first — through an expense claim — before {action}.");
+    }
+
+    /// <summary>An approver sends a submitted request back to its requester to change (D-6).</summary>
+    /// <remarks>
+    /// Leave's suggest-changes shape (<c>LeaveService.SuggestChangesAsync</c>): the decider is checked
+    /// first, then the live approval is cancelled — a fresh one starts when the request is submitted
+    /// again — and the status is set here, because the engine has no "returned" outcome for the adapter
+    /// to apply. Lane 2 adds the traveller's line authority to who may do it.
+    /// </remarks>
+    public async Task<bool> ReturnForRevisionAsync(Guid requestId, string reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedRequestAsync(requestId);
+
+        if (entity.Status != StaffTravelRequestStatus.Submitted)
+            throw new InvalidOperationException("Only a request out for approval can be returned for revision.");
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new InvalidOperationException("Say what needs to change — the reason goes back with the request.");
+
+        var userId = RequireUserId();
+        RequireNotTheTraveller(entity, "return");
+        await EnsureMayDecideAsync(entity.Id, userId, "return a travel request for revision");
+
+        var trimmed = reason.Trim();
+        await CancelLiveApprovalAsync(entity, $"Returned for revision: {trimmed}");
+
+        entity.Status = StaffTravelRequestStatus.ReturnedForRevision;
+        entity.ReturnedAt = DateTime.UtcNow;
+        entity.ReturnedById = _currentUserService.EmployeeId;
+        entity.ReturnReason = trimmed;
+        // Back with the requester: no longer submitted, and the policy is checked again when it is.
+        entity.SubmittedAt = null;
+        entity.PolicyId = null;
+        entity.UpdatedBy = userId.ToString();
+        entity.UpdatedAt = DateTime.UtcNow;
+
+        await _requestRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Staff travel request returned for revision: {RequestNumber}", entity.RequestNumber);
+        return true;
+    }
+
+    /// <summary>
+    /// Asks for a change to an approved trip: it goes back to the requester and is approved again (D-9).
+    /// </summary>
+    /// <remarks>
+    /// Bookings, advances and claims stay linked. The approval's stamps stay as the record of what is
+    /// being changed until the next approval replaces them. Not once the trip is under way. The engine's
+    /// instance is already complete, so there is nothing to cancel; resubmission starts a new one.
+    /// Lane 2 lets the approver ask too.
+    /// </remarks>
+    public async Task<bool> RequestChangeAsync(Guid requestId, string reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedRequestAsync(requestId);
+
+        if (entity.Status == StaffTravelRequestStatus.InProgress)
+            throw new InvalidOperationException(
+                "A trip that is under way cannot be sent back for a change. If it ended early, mark it completed.");
+        if (entity.Status != StaffTravelRequestStatus.Approved)
+            throw new InvalidOperationException(
+                "Only an approved trip can be sent back for a change. A draft or a returned request can be edited as it is.");
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new InvalidOperationException("Say what has changed — the trip is approved again on it.");
+
+        var userId = RequireUserId();
+        entity.Status = StaffTravelRequestStatus.ReturnedForRevision;
+        entity.ChangeRequestedAt = DateTime.UtcNow;
+        entity.ChangeRequestedById = _currentUserService.EmployeeId;
+        entity.ChangeReason = reason.Trim();
+        entity.SubmittedAt = null;
+        entity.PolicyId = null;
+        entity.UpdatedBy = userId.ToString();
+        entity.UpdatedAt = DateTime.UtcNow;
+
+        await _requestRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Change requested on approved staff travel request: {RequestNumber}", entity.RequestNumber);
+        return true;
+    }
+
+    /// <summary>Withdraws a request from approval, back to Draft — the requester's own correction (A12).</summary>
+    /// <remarks>
+    /// <para><b>Who:</b> the traveller, or whoever raised the request. The rule is here because the
+    /// helper does not enforce one without a workflow instance; with an instance the engine also insists
+    /// on the login that submitted it, so a trip the desk submitted is the desk's to recall and the
+    /// traveller is told to ask them.</para>
+    ///
+    /// <para>The adapter returns the request to Draft whatever the helper reports: with no definition
+    /// published there is nothing for the engine to do, and the record still has to come back.</para>
+    /// </remarks>
+    public async Task<bool> RecallAsync(Guid requestId, string? reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedRequestAsync(requestId);
+
+        if (entity.Status != StaffTravelRequestStatus.Submitted)
+            throw new InvalidOperationException("Only a request out for approval can be recalled.");
+
+        var me = _currentUserService.EmployeeId;
+        if (me is null || (me != entity.EmployeeId && me != entity.InitiatedById))
+            throw new UnauthorizedAccessException("Only the traveller, or whoever raised the request, can recall it.");
+
+        var userId = RequireUserId();
+        var trimmed = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+        try
+        {
+            await HrWorkflowFallbackAuthority.RecallAsync(_workflowIntegrationService, EntityType, entity.Id, userId, trimmed);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("Only the requester", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Only whoever submitted the request can recall it from approval. Ask them, or ask the approver " +
+                "to return it for revision.");
+        }
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType).ApplyRecallOutcome(entity, userId, trimmed);
+        entity.PolicyId = null;
+        entity.UpdatedBy = userId.ToString();
+        entity.UpdatedAt = DateTime.UtcNow;
+
+        await _requestRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Staff travel request recalled: {RequestNumber}", entity.RequestNumber);
+        return true;
+    }
+
+    /// <summary>Closes a completed trip once nothing is left to settle (D-6) — HR's verb; lane 8's sweep closes too.</summary>
+    /// <remarks>
+    /// Every claim paid or rejected and every advance settled, written off, rejected or cancelled — the
+    /// rule the sweep will apply. A trip closed with a claim in flight would leave that claim to be paid
+    /// against a trip everything else treats as finished; once closed, nothing more can be booked,
+    /// budgeted, advanced or claimed on it (<see cref="StaffTravelRequestGuards"/>).
+    /// </remarks>
+    public async Task<bool> CloseAsync(Guid requestId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedRequestAsync(requestId);
+
+        if (entity.Status != StaffTravelRequestStatus.Completed)
+            throw new InvalidOperationException(entity.Status == StaffTravelRequestStatus.Closed
+                ? "This trip is already closed."
+                : "Only a completed trip can be closed. Mark it completed first.");
+
+        var openClaim = await _unitOfWork.Repository<StaffTravelExpenseClaim>().GetQueryable()
+            .Where(c => c.TenantId == entity.TenantId
+                     && c.StaffTravelRequestId == entity.Id
+                     && c.Status != TravelClaimStatus.Paid
+                     && c.Status != TravelClaimStatus.Rejected)
+            .OrderBy(c => c.ClaimNumber)
+            .Select(c => new { c.ClaimNumber, c.Status })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (openClaim is not null)
+            throw new InvalidOperationException(
+                $"Expense claim {openClaim.ClaimNumber} is {openClaim.Status}. A trip closes once every claim on it is paid or rejected.");
+
+        var openAdvance = await _unitOfWork.Repository<StaffTravelAdvance>().GetQueryable()
+            .Where(a => a.TenantId == entity.TenantId
+                     && a.StaffTravelRequestId == entity.Id
+                     && a.Status != TravelAdvanceStatus.FullySettled
+                     && a.Status != TravelAdvanceStatus.WrittenOff
+                     && a.Status != TravelAdvanceStatus.Rejected
+                     && a.Status != TravelAdvanceStatus.Cancelled)
+            .OrderBy(a => a.AdvanceNumber)
+            .Select(a => new { a.AdvanceNumber, a.Status })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (openAdvance is not null)
+            throw new InvalidOperationException(
+                $"Advance {openAdvance.AdvanceNumber} is {openAdvance.Status}. A trip closes once every advance on it is " +
+                "settled, written off, rejected or cancelled.");
+
+        var userId = RequireUserId();
+        entity.Status = StaffTravelRequestStatus.Closed;
+        entity.ClosedAt = DateTime.UtcNow;
+        entity.ClosedById = _currentUserService.EmployeeId;
+        entity.UpdatedBy = userId.ToString();
+        entity.UpdatedAt = DateTime.UtcNow;
+
+        await _requestRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Staff travel request closed: {RequestNumber}", entity.RequestNumber);
         return true;
     }
 

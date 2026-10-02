@@ -3,7 +3,7 @@
 import { use, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Loader2, Send, Ban, Globe, Pencil } from 'lucide-react';
+import { Loader2, Send, Ban, Globe, Pencil, Undo2, FilePenLine } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -19,7 +19,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { TravelLifecycleNotes } from '@/components/hr/travel/TravelLifecycleNotes';
 import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import { TravelReasonDialog } from '@/components/hr/travel/TravelReasonDialog';
 import {
   TRAVEL_PRIORITY_LABELS,
   TRAVEL_PURPOSE_LABELS,
@@ -50,7 +52,8 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
  * One of your own travel requests.
  *
  * <b>Deliberately narrower than the desk's page.</b> The self-service surface exposes read, amend,
- * submit and withdraw and nothing else — there is no comment, attachment or approval endpoint under
+ * submit, recall, withdraw and — once approved — request a change (lane 1), and nothing else — there
+ * is no comment, attachment or approval endpoint under
  * `api/staff-travel/me`, and pointing this page at the desk's routes to get them would 403 for the
  * employee it exists to serve. Comments the desk marked visible arrive embedded on the record, so
  * they are read here without a second call.
@@ -65,6 +68,7 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
   const { toast } = useToast();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [reasonFor, setReasonFor] = useState<null | 'recall' | 'change'>(null);
 
   const { data: r, isLoading, isError, error } = useQuery({
     queryKey: ['my-travel-request', id],
@@ -88,6 +92,29 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
     },
     onError: (e: Error) =>
       toast({ variant: 'destructive', title: 'Could not submit', description: e.message }),
+  });
+
+  // Lane 1: take a submission back to change it. If the desk submitted it, only they can recall it —
+  // the server says so.
+  const recall = useMutation({
+    mutationFn: (reason: string) => travelService.recallMine(id, reason || undefined),
+    onSuccess: async () => {
+      toast({ title: 'Recalled', description: 'It is a draft again — change it and send it when ready.' });
+      await refresh();
+    },
+    onError: (e: Error) =>
+      toast({ variant: 'destructive', title: 'Could not recall', description: e.message }),
+  });
+
+  // Lane 1 (D-9): the way to change a trip once it is approved.
+  const requestChange = useMutation({
+    mutationFn: (reason: string) => travelService.requestChangeMine(id, reason),
+    onSuccess: async () => {
+      toast({ title: 'Back with you to change', description: 'Edit the trip, then send it for approval again.' });
+      await refresh();
+    },
+    onError: (e: Error) =>
+      toast({ variant: 'destructive', title: 'Could not ask for the change', description: e.message }),
   });
 
   const cancel = useMutation({
@@ -126,7 +153,8 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
   }
 
   const isEditable = r.status === 'Draft' || r.status === 'ReturnedForRevision';
-  const isLive = !['Cancelled', 'Rejected', 'Completed', 'Closed'].includes(r.status);
+  // A trip under way is completed by the travel desk, not withdrawn (lane 1, O-11).
+  const isLive = !['Cancelled', 'Rejected', 'Completed', 'Closed', 'InProgress'].includes(r.status);
   // The server refuses a past departure from this surface: the travel desk submits it, with the
   // reason it is late (lane 1). Say so instead of offering a button that can only fail.
   const departed = r.travelStartDate.slice(0, 10) < todayUtc();
@@ -160,6 +188,16 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
                   <Send className="mr-2 h-4 w-4" /> Send for approval
                 </Button>
               </>
+            )}
+            {r.status === 'Submitted' && (
+              <Button variant="outline" onClick={() => setReasonFor('recall')}>
+                <Undo2 className="mr-2 h-4 w-4" /> Recall
+              </Button>
+            )}
+            {r.status === 'Approved' && (
+              <Button variant="outline" onClick={() => setReasonFor('change')}>
+                <FilePenLine className="mr-2 h-4 w-4" /> Request change
+              </Button>
             )}
             {isLive && (
               <Button variant="outline" onClick={() => setCancelOpen(true)}>
@@ -201,11 +239,17 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
           <InfoRow label="Estimated" value={fmtMoney(r.estimatedTotalCost, r.currencyCode)} />
           <InfoRow label="Approved budget" value={fmtMoney(r.approvedBudget, r.currencyCode)} />
           <InfoRow label="Submitted" value={fmtDateTime(r.submittedAt)} />
+          <InfoRow
+            label="Approved"
+            value={r.approvedAt ? [fmtDateTime(r.approvedAt), r.approvedByName].filter(Boolean).join(' · ') : '—'}
+          />
           <InfoRow label="Visa required" value={r.requiresVisa ? 'Yes' : 'No'} />
           <InfoRow label="Health clearance" value={r.requiresHealthClearance ? 'Yes' : 'No'} />
           <InfoRow label="Risk level" value={enumLabel(TRAVEL_RISK_LEVEL_LABELS, r.riskLevel)} />
         </CardContent>
       </Card>
+
+      <TravelLifecycleNotes request={r} />
 
       {r.purposeDescription && (
         <Card>
@@ -255,6 +299,30 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
           </CardContent>
         </Card>
       )}
+
+      <TravelReasonDialog
+        open={reasonFor === 'recall'}
+        onOpenChange={(open) => setReasonFor(open ? 'recall' : null)}
+        title="Recall this request"
+        description="It comes back to you as a draft, to change and send again. The approval in progress is withdrawn."
+        optional
+        placeholder="What you want to change, if you'd like the approver to know."
+        confirmLabel="Recall"
+        pending={recall.isPending}
+        onConfirm={(reason) => recall.mutateAsync(reason)}
+      />
+
+      <TravelReasonDialog
+        open={reasonFor === 'change'}
+        onOpenChange={(open) => setReasonFor(open ? 'change' : null)}
+        title="Ask for a change to this approved trip"
+        description="It comes back to you to edit, then goes for approval again. Bookings and any advance stay with the trip."
+        label="What has changed"
+        placeholder="New dates, a different destination, a higher cost…"
+        confirmLabel="Ask for the change"
+        pending={requestChange.isPending}
+        onConfirm={(reason) => requestChange.mutateAsync(reason)}
+      />
 
       <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
         <DialogContent>

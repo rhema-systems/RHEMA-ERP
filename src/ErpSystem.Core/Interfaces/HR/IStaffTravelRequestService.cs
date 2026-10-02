@@ -55,6 +55,18 @@ public interface IStaffTravelRequestService
     Task<bool> CancelAsync(CancelStaffTravelRequestDto cancelDto, Guid cancelledByUserId, CancellationToken cancellationToken = default);
     Task<bool> MarkCompletedAsync(Guid requestId, Guid updatedByUserId, CancellationToken cancellationToken = default);
 
+    /// <summary>An approver sends a submitted request back to its requester, with what to change (D-6).</summary>
+    Task<bool> ReturnForRevisionAsync(Guid requestId, string reason, CancellationToken cancellationToken = default);
+
+    /// <summary>A change to an approved trip: back to the requester, then approved again (D-9).</summary>
+    Task<bool> RequestChangeAsync(Guid requestId, string reason, CancellationToken cancellationToken = default);
+
+    /// <summary>The traveller or whoever raised it withdraws a submitted request, back to Draft.</summary>
+    Task<bool> RecallAsync(Guid requestId, string? reason, CancellationToken cancellationToken = default);
+
+    /// <summary>Closes a completed trip once every claim and advance on it is finished (D-6).</summary>
+    Task<bool> CloseAsync(Guid requestId, CancellationToken cancellationToken = default);
+
     // Comment operations
     /// <summary>
     /// Adds a comment. <paramref name="authorEmployeeId"/> is the caller's employee record and

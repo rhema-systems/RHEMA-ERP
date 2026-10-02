@@ -366,15 +366,15 @@ Nine enum families. Three matter; the rest are look-ups.
 
 | Value | Means | Set by |
 |---|---|---|
-| `Draft` | being written | create |
+| `Draft` | being written | create; **Recall** returns a submitted request here |
 | `Submitted` | out for approval | **Submit**, via the workflow engine |
-| `ReturnedForRevision` | sent back to the requester | the engine |
+| `ReturnedForRevision` | sent back to the requester | **Return for revision** (the approver) or **Request change** (an approved trip) — since closure lane 1, 2026-10-02; nothing wrote it before |
 | `Approved` | authorised to travel | the engine |
 | `Rejected` | refused | the engine |
-| `InProgress` | the trip is happening | *(nothing sets it — T-7)* |
-| `Completed` | the trip has happened | **Mark completed** |
-| `Closed` | finalised | *(nothing sets it — T-7)* |
-| `Cancelled` | called off, with a reason | **Cancel** |
+| `InProgress` | the trip is happening | *(nothing sets it yet — T-7; the closure's lane 8 sweep will)* |
+| `Completed` | the trip has happened | **Mark completed** (not before the trip starts, since lane 1) |
+| `Closed` | finalised | **Close trip** — once every claim is paid or rejected and every advance settled (since lane 1; the lane 8 sweep will close too) |
+| `Cancelled` | called off, with a reason | **Cancel** (not once under way, since lane 1) |
 
 **Claim status** — eight: Draft · Submitted · UnderReview · Approved · **PartiallyApproved** ·
 Rejected · **Paid** · Returned. *PartiallyApproved* is the one people ask about: it means some lines
@@ -2494,7 +2494,16 @@ the module's argument.
 > they read a Finance list that answers 403 (closure finding O-19, fixed in the same lane). Where a step
 > below warns about one of these, the warning describes the code before lane 0.
 >
-> **Closure lane 1, slice 1a (2026-10-02, staged)** changed the request form and submission: the form no
+> **Closure lane 1, slice 1b (2026-10-02, staged)** gave the request its other verbs: an approver can
+> **return a request for revision** with a reason, an approved trip can be sent back with **Request
+> change** and approved again (its bookings, advances and claims stay), the requester can **recall** a
+> submission, and the desk can **close** a completed trip once nothing is left to settle — after which
+> nothing more can be booked, advanced or claimed on it. **Cancel** now withdraws the approval in
+> progress, and is refused for a trip under way and for an approved trip whose advance cash is still out;
+> **Mark completed** waits for the trip to start; the request records **who approved** it. **T-7** is half
+> fixed (Closed has a writer; InProgress waits for lane 8) and **T-28** stays corrected.
+>
+> **Closure lane 1, slice 1a (2026-10-02, committed `e1d050da2`)** changed the request form and submission: the form no
 > longer offers an organisation unit — a request carries the **traveller's own unit**, and whether it is
 > international follows from its two countries; a **Policy and limits** card shows the approved policy
 > that will apply and its limits before saving (**T-16 fixed**); submission refuses a trip estimated above

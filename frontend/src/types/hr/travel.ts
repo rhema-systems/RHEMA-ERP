@@ -190,6 +190,23 @@ export interface StaffTravelRequest extends StaffTravelRequestSummary {
   submittedAt?: string | null;
   approvedAt?: string | null;
   completedAt?: string | null;
+  /**
+   * Who decided and what happened after (travel final closure, lane 1). The approval stamps stay when
+   * a change is requested — they record the approval being changed until the next one replaces them.
+   */
+  approvedById?: string | null;
+  approvedByName?: string | null;
+  returnedAt?: string | null;
+  returnedById?: string | null;
+  returnedByName?: string | null;
+  returnReason?: string | null;
+  changeRequestedAt?: string | null;
+  changeRequestedById?: string | null;
+  changeRequestedByName?: string | null;
+  changeReason?: string | null;
+  closedAt?: string | null;
+  closedById?: string | null;
+  closedByName?: string | null;
   comments?: StaffTravelRequestComment[];
   attachments?: StaffTravelRequestAttachment[];
 }

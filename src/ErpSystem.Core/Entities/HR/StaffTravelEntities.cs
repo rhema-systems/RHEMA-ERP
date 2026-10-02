@@ -95,8 +95,10 @@ public class StaffTravelRequest : TenantEntity
 
     // ---- Travel final closure, migration batch 1 (2026-10-01) — written by lanes 1 and 2 ----
 
-    /// <summary>The final approver, an Employee, stamped by the approve action (lane 2). The engine's
-    /// own record holds a platform user; this is the person, for the record and the D-2 checks.</summary>
+    /// <summary>The final approver, an Employee, stamped by the approve action (lane 1). The engine's
+    /// own record holds a platform user; this is the person, for the record and the D-2 checks. Null
+    /// when the approver's login has no employee link, and when an instance is completed through the
+    /// generic inbox, which never passes the travel service (cross-module defect #15).</summary>
     public Guid? ApprovedById { get; set; }               // FK -> Employee
 
     /// <summary>An approver sent the request back for revision (D-6, lane 1).</summary>

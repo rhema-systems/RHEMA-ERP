@@ -5,11 +5,13 @@ using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 /// <summary>
-/// An employee's own travel: raising a request, tracking it, and withdrawing it.
+/// An employee's own travel: raising a request, tracking it, recalling or withdrawing it, and asking
+/// for a change once it is approved.
 /// </summary>
 /// <remarks>
 /// <para><b>Why this exists.</b> Slice 0 put every staff-travel controller behind
@@ -192,6 +194,44 @@ public class StaffTravelMeController : HrControllerBase
             CancelledById = employeeId,
             CancellationReason = dto.CancellationReason
         }, userId, ct);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Take your own request back from approval to change it (lane 1). If the travel desk submitted it,
+    /// the workflow lets only them recall it, and the answer says so.
+    /// </summary>
+    [HttpPost("requests/{id:guid}/recall")]
+    public async Task<IActionResult> RecallMyRequest(
+        Guid id,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] RecallStaffTravelRequestDto? dto,
+        CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Recalling a travel request") is { } error) return error;
+
+        if (await GetOwnActiveRequestAsync(id, employeeId, ct) is null) return NotFound();
+
+        await _service.RecallAsync(id, dto?.Reason, ct);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Ask for a change to your own approved trip: it comes back to you to edit and goes for approval
+    /// again (D-9, lane 1). Bookings, advances and claims stay with the trip.
+    /// </summary>
+    [HttpPost("requests/{id:guid}/request-change")]
+    public async Task<IActionResult> RequestChangeToMyRequest(
+        Guid id, [FromBody] RequestStaffTravelChangeDto dto, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Asking for a change to a travel request") is { } error) return error;
+
+        if (await GetOwnActiveRequestAsync(id, employeeId, ct) is null) return NotFound();
+
+        await _service.RequestChangeAsync(id, dto.Reason, ct);
         return NoContent();
     }
 

@@ -91,6 +91,23 @@ public class StaffTravelRequestDto : BaseDto
     public DateTime? ApprovedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
 
+    // Who decided, and what happened after (travel final closure, lane 1). The approval stamps stay
+    // when a change is requested: they record the approval being changed until the next one replaces
+    // them.
+    public Guid? ApprovedById { get; set; }
+    public string? ApprovedByName { get; set; }
+    public DateTime? ReturnedAt { get; set; }
+    public Guid? ReturnedById { get; set; }
+    public string? ReturnedByName { get; set; }
+    public string? ReturnReason { get; set; }
+    public DateTime? ChangeRequestedAt { get; set; }
+    public Guid? ChangeRequestedById { get; set; }
+    public string? ChangeRequestedByName { get; set; }
+    public string? ChangeReason { get; set; }
+    public DateTime? ClosedAt { get; set; }
+    public Guid? ClosedById { get; set; }
+    public string? ClosedByName { get; set; }
+
     // Child collections
     public StaffTravelBudgetDto? Budget { get; set; }
     public List<StaffTravelRequestCommentDto> Comments { get; set; } = new();
@@ -374,6 +391,10 @@ public class ApproveStaffTravelRequestDto
     public string? Notes { get; set; }
 }
 
+/// <remarks>
+/// <c>CancelledById</c> is set by the controller from the token; the time is the server's clock — this
+/// DTO carried a <c>CancelledAt</c> the desk path wrote as sent (finding A10, lane 1).
+/// </remarks>
 public class CancelStaffTravelRequestDto
 {
     [Required]
@@ -382,11 +403,33 @@ public class CancelStaffTravelRequestDto
     [Required]
     public Guid CancelledById { get; set; }
 
-    public DateTime CancelledAt { get; set; } = DateTime.UtcNow;
-
     [Required]
     [MaxLength(1000)]
     public string CancellationReason { get; set; } = string.Empty;
+}
+
+/// <summary>An approver sending a submitted request back to its requester (D-6, lane 1).</summary>
+public class ReturnStaffTravelRequestDto
+{
+    /// <summary>What needs to change — it goes back to the traveller.</summary>
+    [Required]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>Asking for a change to an approved trip, which sends it back for re-approval (D-9, lane 1).</summary>
+public class RequestStaffTravelChangeDto
+{
+    [Required]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>Withdrawing a request from approval, back to Draft (lane 1). The reason is optional.</summary>
+public class RecallStaffTravelRequestDto
+{
+    [MaxLength(1000)]
+    public string? Reason { get; set; }
 }
 
 /// <summary>
