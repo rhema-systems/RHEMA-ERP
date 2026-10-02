@@ -3956,9 +3956,37 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (_taxEngine != null)
             {
-                foreach (var line in invoice.LineItems.Where(l => !l.IsDeleted).OrderBy(l => l.CreatedAt).ThenBy(l => l.Id))
+                var orderedSourceLines = invoice.LineItems
+                    .Where(line => !line.IsDeleted)
+                    .OrderBy(line => line.CreatedAt)
+                    .ThenBy(line => line.Id)
+                    .ToList();
+                var lineBases = orderedSourceLines.ToDictionary(
+                    line => line.Id,
+                    line => RoundMoney((line.Quantity * line.UnitPrice) - line.DiscountAmount));
+                var taxableLines = orderedSourceLines
+                    .Where(line => lineBases[line.Id] > 0m && !IsNoTaxTreatment(line.TaxTreatment))
+                    .Select(line => new TaxDocumentLineRequestDto
+                    {
+                        DocumentLineId = line.Id,
+                        BaseAmount = lineBases[line.Id],
+                        TaxGroupId = line.TaxGroupId,
+                        TransactionType = ResolveApTaxTransactionType(line)
+                    }).ToList();
+                var documentTaxResult = taxableLines.Count == 0
+                    ? new TaxCalculationResultDto { CurrencyCode = invoiceCurrency }
+                    : await _taxEngine.CalculateDocumentTaxesAsync(new TaxDocumentCalculationRequestDto
+                    {
+                        CurrencyCode = invoiceCurrency,
+                        TransactionDate = invoice.InvoiceDate,
+                        BusinessPartnerId = invoice.BusinessPartnerId,
+                        BusinessPartnerRole = BusinessPartnerRoleType.Supplier,
+                        Lines = taxableLines
+                    }, cancellationToken);
+
+                foreach (var line in orderedSourceLines)
                 {
-                    var lineBase = RoundMoney((line.Quantity * line.UnitPrice) - line.DiscountAmount);
+                    var lineBase = lineBases[line.Id];
                     if (lineBase <= 0m)
                     {
                         continue;
@@ -3974,17 +4002,21 @@ namespace ErpSystem.Api.Services.Finance.AP
                         continue;
                     }
 
-                    var taxResult = await _taxEngine.CalculateTaxesAsync(new TaxCalculationRequestDto
+                    var taxResult = new TaxCalculationResultDto
                     {
                         BaseAmount = lineBase,
-                        TaxGroupId = line.TaxGroupId,
-                        TransactionDate = invoice.InvoiceDate,
-                        TransactionType = ResolveApTaxTransactionType(line),
-                        BusinessPartnerId = invoice.BusinessPartnerId,
-                        BusinessPartnerRole = BusinessPartnerRoleType.Supplier
-                    }, cancellationToken);
+                        CurrencyCode = documentTaxResult.CurrencyCode,
+                        CurrencyDecimalPlaces = documentTaxResult.CurrencyDecimalPlaces,
+                        TaxRoundingScope = documentTaxResult.TaxRoundingScope,
+                        TaxRoundingMethod = documentTaxResult.TaxRoundingMethod,
+                        TaxRoundingIncrement = documentTaxResult.TaxRoundingIncrement,
+                        TaxBreakdowns = documentTaxResult.TaxBreakdowns
+                            .Where(item => item.DocumentLineId == line.Id)
+                            .ToList()
+                    };
+                    taxResult.TotalTaxAmount = taxResult.TaxBreakdowns.Sum(item => item.TaxAmount);
 
-                    foreach (var breakdown in taxResult.TaxBreakdowns.Where(t => t.TaxAmount > 0m))
+                    foreach (var breakdown in taxResult.TaxBreakdowns.Where(t => t.TaxAmount != 0m))
                     {
                         Guid? accountId;
                         if (breakdown.IsInputTaxDeductible)
@@ -4038,8 +4070,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                             $"AP-Tax-{breakdown.TaxCode}");
                         postingLine.SourceDocumentLineId = line.Id;
                         postingLine.Notes = IsFixedAssetLine(line)
-                            ? $"{BuildFixedAssetLineNotes(line)};TaxId={breakdown.TaxId};TaxGroupId={taxResult.TaxGroupId};TaxRate={breakdown.TaxRate};TaxableAmount={breakdown.TaxableAmount};Recoverable={breakdown.IsInputTaxDeductible}"
-                            : $"TaxId={breakdown.TaxId};TaxGroupId={taxResult.TaxGroupId};TaxRate={breakdown.TaxRate};TaxableAmount={breakdown.TaxableAmount}";
+                            ? $"{BuildFixedAssetLineNotes(line)};TaxId={breakdown.TaxId};TaxGroupId={breakdown.TaxGroupId};TaxRate={breakdown.TaxRate};TaxableAmount={breakdown.TaxableAmount};Recoverable={breakdown.IsInputTaxDeductible};RawTax={breakdown.RawTaxAmount};RoundingAdjustment={breakdown.RoundingAdjustment};AllocationSequence={breakdown.AllocationSequence}"
+                            : $"TaxId={breakdown.TaxId};TaxGroupId={breakdown.TaxGroupId};TaxRate={breakdown.TaxRate};TaxableAmount={breakdown.TaxableAmount};RawTax={breakdown.RawTaxAmount};RoundingAdjustment={breakdown.RoundingAdjustment};AllocationSequence={breakdown.AllocationSequence}";
                         calculatedLines.Add(postingLine);
 
                         snapshots.Add(ToTaxSnapshot(
@@ -4047,10 +4079,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                             invoice.Id,
                             line.Id,
                             accountId.Value,
-                            taxResult.TaxGroupId,
+                            breakdown.TaxGroupId,
                             lineBase,
                             breakdown,
-                            invoice.InvoiceDate));
+                            invoice.InvoiceDate,
+                            documentTaxResult.CurrencyCode,
+                            documentTaxResult.CurrencyDecimalPlaces));
                     }
                 }
 
@@ -4115,7 +4149,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             Guid? taxGroupId,
             decimal baseAmount,
             TaxBreakdownDto breakdown,
-            DateTime calculationDate)
+            DateTime calculationDate,
+            string currencyCode,
+            int currencyDecimalPlaces)
         {
             return new FinanceTaxCalculationSnapshotDto
             {
@@ -4125,10 +4161,15 @@ namespace ErpSystem.Api.Services.Finance.AP
                 PostingAccountId = postingAccountId,
                 TaxId = breakdown.TaxId,
                 TaxGroupId = taxGroupId,
+                CurrencyCode = currencyCode,
+                CurrencyDecimalPlaces = currencyDecimalPlaces,
                 BaseAmount = baseAmount,
                 TaxableAmount = breakdown.TaxableAmount,
                 TaxRate = breakdown.TaxRate,
                 TaxAmount = breakdown.TaxAmount,
+                RawTaxAmount = breakdown.RawTaxAmount,
+                RoundingAdjustment = breakdown.RoundingAdjustment,
+                AllocationSequence = breakdown.AllocationSequence,
                 CompoundBasis = breakdown.CompoundBasis,
                 CalculationOrder = breakdown.CalculationOrder,
                 CalculationDate = calculationDate,
@@ -4343,10 +4384,15 @@ namespace ErpSystem.Api.Services.Finance.AP
                     PostingAccountId = snapshot.PostingAccountId,
                     TaxId = snapshot.TaxId,
                     TaxGroupId = snapshot.TaxGroupId,
+                    CurrencyCode = snapshot.CurrencyCode,
+                    CurrencyDecimalPlaces = snapshot.CurrencyDecimalPlaces,
                     BaseAmount = snapshot.BaseAmount,
                     TaxableAmount = snapshot.TaxableAmount,
                     TaxRate = snapshot.TaxRate,
                     TaxAmount = snapshot.TaxAmount,
+                    RawTaxAmount = snapshot.RawTaxAmount,
+                    RoundingAdjustment = snapshot.RoundingAdjustment,
+                    AllocationSequence = snapshot.AllocationSequence,
                     CompoundBasis = snapshot.CompoundBasis,
                     CalculationOrder = snapshot.CalculationOrder,
                     CalculationDate = snapshot.CalculationDate,

@@ -18512,7 +18512,7 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasCheckConstraint("CK_FinanceSettings_InvoiceRoundingReadiness", "[InvoiceRoundingEnabled] = 0 OR ([InvoiceRoundingIncrement] IS NOT NULL AND [InvoiceRoundingIncrement] > 0 AND [InvoiceRoundingGainAccountId] IS NOT NULL AND [InvoiceRoundingLossAccountId] IS NOT NULL)");
 
-                            t.HasCheckConstraint("CK_FinanceSettings_PrecisionGovernance", "[UnitPriceDecimalPlaces] BETWEEN 0 AND 6 AND [ExchangeRateInputDecimalPlaces] BETWEEN 6 AND 10 AND [ExchangeRateDisplayDecimalPlaces] BETWEEN 6 AND 10 AND [TaxPercentageDecimalPlaces] BETWEEN 0 AND 4 AND [ReportDisplayDecimalPlaces] BETWEEN 0 AND 4 AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingScope] = 0 AND [InvoiceRoundingMethod] IN (0, 1, 2)");
+                            t.HasCheckConstraint("CK_FinanceSettings_PrecisionGovernance", "[UnitPriceDecimalPlaces] BETWEEN 0 AND 6 AND [ExchangeRateInputDecimalPlaces] BETWEEN 6 AND 10 AND [ExchangeRateDisplayDecimalPlaces] BETWEEN 6 AND 10 AND [TaxPercentageDecimalPlaces] BETWEEN 0 AND 6 AND [ReportDisplayDecimalPlaces] BETWEEN 0 AND 4 AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingScope] IN (0, 1, 2) AND [InvoiceRoundingMethod] IN (0, 1, 2)");
 
                             t.HasCheckConstraint("CK_FinanceSettings_RoundingIncrements", "([TaxRoundingIncrement] IS NULL OR [TaxRoundingIncrement] > 0) AND ([InvoiceRoundingIncrement] IS NULL OR [InvoiceRoundingIncrement] > 0)");
 
@@ -24432,7 +24432,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("TaxAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid?>("TaxGroupId")
                         .HasColumnType("uniqueidentifier");
@@ -24554,7 +24554,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(100)");
 
                     b.Property<decimal>("TaxAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<string>("TaxCode")
                         .HasMaxLength(50)
@@ -24564,7 +24564,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("TaxRate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<int>("TaxTreatment")
                         .ValueGeneratedOnAdd()
@@ -29851,7 +29851,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(200)");
 
                     b.Property<decimal>("Rate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<Guid?>("TaxPayableAccountId")
                         .HasColumnType("uniqueidentifier");
@@ -29885,7 +29885,10 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("BaseAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
+
+                    b.Property<int>("AllocationSequence")
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("CalculationDate")
                         .HasColumnType("datetime2");
@@ -29894,6 +29897,14 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("int");
 
                     b.Property<int>("CompoundBasis")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<int>("CurrencyDecimalPlaces")
                         .HasColumnType("int");
 
                     b.Property<DateTime>("CreatedAt")
@@ -29938,8 +29949,14 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("PostingAccountId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal>("RawTaxAmount")
+                        .HasColumnType("decimal(20,10)");
+
+                    b.Property<decimal>("RoundingAdjustment")
+                        .HasColumnType("decimal(20,10)");
+
                     b.Property<decimal>("TaxAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid?>("TaxGroupId")
                         .HasColumnType("uniqueidentifier");
@@ -29948,10 +29965,10 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("TaxRate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<decimal>("TaxableAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,10)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -29973,7 +29990,10 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "DocumentType", "DocumentId", "DocumentLineId", "TaxId", "TaxGroupId")
                         .HasDatabaseName("IX_TaxCalculations_Document_Line_Tax");
 
-                    b.ToTable("TaxCalculations");
+                    b.ToTable("TaxCalculations", t =>
+                        {
+                            t.HasCheckConstraint("CK_TaxCalculations_CurrencyPrecision", "[CurrencyDecimalPlaces] BETWEEN 0 AND 4 AND LEN([CurrencyCode]) = 3");
+                        });
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.TaxConfigurationVersion", b =>
@@ -30037,7 +30057,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(200)");
 
                     b.Property<decimal>("Rate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<Guid>("TaxId")
                         .HasColumnType("uniqueidentifier");
@@ -30247,7 +30267,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(500)");
 
                     b.Property<decimal>("Rate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<Guid>("TaxId")
                         .HasColumnType("uniqueidentifier");
@@ -31229,7 +31249,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("TaxAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -31470,7 +31490,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(100)");
 
                     b.Property<decimal>("TaxAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<string>("TaxCode")
                         .HasMaxLength(50)
@@ -31480,7 +31500,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("TaxRate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<int>("TaxTreatment")
                         .ValueGeneratedOnAdd()

@@ -43,11 +43,6 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             TaxCalculationRequestDto request,
             CancellationToken cancellationToken = default)
         {
-            if (request.BaseAmount < 0)
-            {
-                throw new InvalidOperationException("Tax calculation base amount cannot be negative.");
-            }
-
             _logger.LogInformation("Calculating taxes for {TransactionType}, Base: {Amount}", 
                 request.TransactionType, request.BaseAmount);
 
@@ -64,28 +59,21 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                     "Finance precision settings and a canonical base currency are required before tax calculation.");
 
             var baseCurrencyCode = precisionSettings.BaseCurrency.Trim().ToUpperInvariant();
+            var transactionCurrencyCode = string.IsNullOrWhiteSpace(request.CurrencyCode)
+                ? baseCurrencyCode
+                : request.CurrencyCode.Trim().ToUpperInvariant();
             var currencyDecimalPlaces = await _context.Currencies
                 .AsNoTracking()
                 .Where(currency => currency.TenantId == TenantId
                     && !currency.IsDeleted
-                    && currency.CurrencyCode == baseCurrencyCode)
+                    && currency.CurrencyCode == transactionCurrencyCode)
                 .Select(currency => (int?)currency.DecimalPlaces)
                 .SingleOrDefaultAsync(cancellationToken)
                 ?? throw new InvalidOperationException(
-                    $"Base currency '{baseCurrencyCode}' is missing from the tenant currency master.");
-            CurrencyMinorUnitPolicy.Validate(baseCurrencyCode, currencyDecimalPlaces);
-            var hasUnsupportedTransactionCurrency = await _context.Currencies
-                .AsNoTracking()
-                .AnyAsync(currency => currency.TenantId == TenantId
-                    && !currency.IsDeleted
-                    && currency.IsActive
-                    && currency.DecimalPlaces != 2,
-                    cancellationToken);
-            if (currencyDecimalPlaces != 2 || hasUnsupportedTransactionCurrency)
-            {
-                throw new InvalidOperationException(
-                    "Tax posting is currently gated to tenants whose active transaction currencies all use 2 decimals until currency-aware AR/AP tax evidence and posting storage are widened.");
-            }
+                    $"Transaction currency '{transactionCurrencyCode}' is missing from the tenant currency master.");
+            CurrencyMinorUnitPolicy.Validate(transactionCurrencyCode, currencyDecimalPlaces);
+            result.CurrencyCode = transactionCurrencyCode;
+            result.CurrencyDecimalPlaces = currencyDecimalPlaces;
 
             var percentageDecimalPlaces = precisionSettings?.TaxPercentageDecimalPlaces ?? 4;
             var roundingMethod = precisionSettings?.TaxRoundingMethod ?? GovernedRoundingMethod.Nearest;
@@ -98,9 +86,6 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                     $"Configured tax rounding increment must be a whole multiple of the currency minor unit {currencyMinorUnit}.");
             if (!Enum.IsDefined(roundingMethod) || !Enum.IsDefined(roundingScope))
                 throw new InvalidOperationException("Configured tax rounding method or scope is invalid.");
-            if (roundingScope != TaxRoundingScope.Line)
-                throw new InvalidOperationException(
-                    "Configured aggregate tax rounding requires the document-wide AR/AP tax orchestrator.");
             result.TaxRoundingScope = roundingScope;
             result.TaxRoundingMethod = roundingMethod;
             result.TaxRoundingIncrement = roundingIncrement;
@@ -232,7 +217,9 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 // Add to breakdown
                 result.TaxBreakdowns.Add(new TaxBreakdownDto
                 {
+                    DocumentLineId = request.DocumentLineId,
                     TaxId = tax.Id,
+                    TaxGroupId = taxGroup?.Id,
                     TaxCode = tax.Code,
                     TaxName = tax.Name,
                     TaxCategory = tax.Category,
@@ -243,6 +230,9 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                     TaxableAmount = taxableAmount,
                     TaxRate = governedRate,
                     TaxAmount = taxAmount,
+                    RawTaxAmount = rawTaxAmount,
+                    RoundingAdjustment = taxAmount - rawTaxAmount,
+                    AllocationSequence = result.TaxBreakdowns.Count + 1,
                     CompoundBasis = component.CompoundBasis,
                     CalculationOrder = component.CalculationOrder,
                     AppliedOnTaxCodes = ParseTaxCodes(component.AppliesOnTaxCodes),
@@ -258,14 +248,17 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             // assign the deterministic residual to the last contributing breakdown.
             if (roundingScope == TaxRoundingScope.TaxCodeGroup)
             {
-                foreach (var group in result.TaxBreakdowns.GroupBy(tax => tax.TaxCode))
+                foreach (var group in result.TaxBreakdowns.GroupBy(tax => tax.TaxId))
                 {
                     var rawGroupAmount = group.Sum(tax => tax.TaxAmount);
                     var roundedGroupAmount = PrecisionRoundingPolicy.RoundToIncrement(
                         rawGroupAmount,
                         roundingIncrement,
                         roundingMethod);
-                    group.Last().TaxAmount += roundedGroupAmount - rawGroupAmount;
+                    var target = group.Last();
+                    var residual = roundedGroupAmount - rawGroupAmount;
+                    target.TaxAmount += residual;
+                    target.RoundingAdjustment += residual;
                 }
             }
             else if (roundingScope == TaxRoundingScope.Document && result.TaxBreakdowns.Count > 0)
@@ -275,7 +268,9 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                     rawDocumentTax,
                     roundingIncrement,
                     roundingMethod);
-                result.TaxBreakdowns[^1].TaxAmount += roundedDocumentTax - rawDocumentTax;
+                var residual = roundedDocumentTax - rawDocumentTax;
+                result.TaxBreakdowns[^1].TaxAmount += residual;
+                result.TaxBreakdowns[^1].RoundingAdjustment += residual;
             }
 
             // Calculate totals
@@ -291,6 +286,99 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             _logger.LogInformation("Tax calculation complete: Base {Base}, Tax {Tax}, Total {Total}, Effective Rate {Rate}%",
                 result.BaseAmount, result.TotalTaxAmount, result.GrandTotal, result.EffectiveTaxRate);
 
+            return result;
+        }
+
+        public async Task<TaxCalculationResultDto> CalculateDocumentTaxesAsync(
+            TaxDocumentCalculationRequestDto request,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(request.CurrencyCode))
+                throw new InvalidOperationException("Document tax calculation requires an ISO transaction currency.");
+            if (request.Lines.Count == 0)
+                throw new InvalidOperationException("Document tax calculation requires at least one source line.");
+            if (request.Lines.Any(line => line.DocumentLineId == Guid.Empty)
+                || request.Lines.GroupBy(line => line.DocumentLineId).Any(group => group.Count() > 1))
+                throw new InvalidOperationException("Document tax source-line identities must be non-empty and unique.");
+
+            var lineResults = new List<TaxCalculationResultDto>(request.Lines.Count);
+            foreach (var line in request.Lines)
+            {
+                lineResults.Add(await CalculateTaxesAsync(new TaxCalculationRequestDto
+                {
+                    CurrencyCode = request.CurrencyCode,
+                    DocumentLineId = line.DocumentLineId,
+                    BaseAmount = line.BaseAmount,
+                    TaxGroupId = line.TaxGroupId,
+                    ManualTaxIds = line.ManualTaxIds,
+                    TransactionDate = request.TransactionDate,
+                    TransactionType = line.TransactionType,
+                    BusinessPartnerId = request.BusinessPartnerId,
+                    BusinessPartnerRole = request.BusinessPartnerRole
+                }, cancellationToken));
+            }
+
+            var first = lineResults[0];
+            var result = new TaxCalculationResultDto
+            {
+                CurrencyCode = first.CurrencyCode,
+                CurrencyDecimalPlaces = first.CurrencyDecimalPlaces,
+                BaseAmount = request.Lines.Sum(line => line.BaseAmount),
+                TaxRoundingScope = first.TaxRoundingScope,
+                TaxRoundingMethod = first.TaxRoundingMethod,
+                TaxRoundingIncrement = first.TaxRoundingIncrement,
+                HasManualOverrides = lineResults.Any(line => line.HasManualOverrides)
+            };
+
+            result.TaxBreakdowns = lineResults
+                .SelectMany(line => line.TaxBreakdowns)
+                .OrderBy(item => request.Lines.FindIndex(line => line.DocumentLineId == item.DocumentLineId))
+                .ThenBy(item => item.CalculationOrder)
+                .ThenBy(item => item.TaxCode, StringComparer.Ordinal)
+                .ThenBy(item => item.TaxId)
+                .ToList();
+            for (var index = 0; index < result.TaxBreakdowns.Count; index++)
+                result.TaxBreakdowns[index].AllocationSequence = index + 1;
+
+            if (result.TaxRoundingScope != TaxRoundingScope.Line)
+            {
+                foreach (var item in result.TaxBreakdowns)
+                {
+                    item.TaxAmount = item.RawTaxAmount;
+                    item.RoundingAdjustment = 0m;
+                }
+
+                if (result.TaxRoundingScope == TaxRoundingScope.TaxCodeGroup)
+                {
+                    foreach (var group in result.TaxBreakdowns.GroupBy(item => item.TaxId))
+                    {
+                        var raw = group.Sum(item => item.RawTaxAmount);
+                        var rounded = PrecisionRoundingPolicy.RoundToIncrement(
+                            raw, result.TaxRoundingIncrement, result.TaxRoundingMethod);
+                        var target = group.Last();
+                        target.RoundingAdjustment = rounded - raw;
+                        target.TaxAmount += target.RoundingAdjustment;
+                    }
+                }
+                else if (result.TaxBreakdowns.Count > 0)
+                {
+                    var raw = result.TaxBreakdowns.Sum(item => item.RawTaxAmount);
+                    var rounded = PrecisionRoundingPolicy.RoundToIncrement(
+                        raw, result.TaxRoundingIncrement, result.TaxRoundingMethod);
+                    var target = result.TaxBreakdowns[^1];
+                    target.RoundingAdjustment = rounded - raw;
+                    target.TaxAmount += target.RoundingAdjustment;
+                }
+            }
+
+            result.TotalTaxAmount = result.TaxBreakdowns.Sum(item => item.TaxAmount);
+            result.TaxRoundingDelta = result.TaxBreakdowns.Sum(item => item.RoundingAdjustment);
+            result.GrandTotal = result.BaseAmount + result.TotalTaxAmount;
+            result.EffectiveTaxRate = result.BaseAmount == 0m
+                ? 0m
+                : PrecisionRoundingPolicy.RoundPercentage(
+                    result.TotalTaxAmount / result.BaseAmount * 100m,
+                    PrecisionRoundingPolicy.MaximumPercentageDecimalPlaces);
             return result;
         }
 

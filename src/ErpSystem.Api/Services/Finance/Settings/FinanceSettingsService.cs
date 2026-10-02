@@ -818,9 +818,6 @@ namespace ErpSystem.Api.Services.Finance.Settings
 
             var taxPercentagePlaces = dto.TaxPercentageDecimalPlaces ?? settings.TaxPercentageDecimalPlaces;
             _ = PrecisionRoundingPolicy.RoundPercentage(0m, taxPercentagePlaces);
-            if (taxPercentagePlaces > 4)
-                throw new InvalidOperationException(
-                    "Tax percentage precision above 4 decimals is unavailable until tax evidence storage is widened.");
 
             var reportPlaces = dto.ReportDisplayDecimalPlaces ?? settings.ReportDisplayDecimalPlaces;
             if (reportPlaces is < 0 or > CurrencyMinorUnitPolicy.MaximumDecimalPlaces)
@@ -844,10 +841,6 @@ namespace ErpSystem.Api.Services.Finance.Settings
             var invoiceMethod = dto.InvoiceRoundingMethod ?? settings.InvoiceRoundingMethod;
             if (!Enum.IsDefined(taxMethod) || !Enum.IsDefined(taxScope) || !Enum.IsDefined(invoiceMethod))
                 throw new InvalidOperationException("Rounding method and scope values must be defined governance options.");
-            if (taxScope != TaxRoundingScope.Line)
-                throw new InvalidOperationException(
-                    "Tax-code-group and document rounding require the document-wide AR/AP tax orchestrator and cannot be activated yet.");
-
             var invoiceEnabled = dto.InvoiceRoundingEnabled ?? settings.InvoiceRoundingEnabled;
             if (invoiceEnabled)
             {

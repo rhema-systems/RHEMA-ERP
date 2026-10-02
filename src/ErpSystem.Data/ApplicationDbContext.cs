@@ -4395,6 +4395,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<TaxCalculation>(entity =>
         {
+            entity.ToTable("TaxCalculations", table =>
+                table.HasCheckConstraint(
+                    "CK_TaxCalculations_CurrencyPrecision",
+                    "[CurrencyDecimalPlaces] BETWEEN 0 AND 4 AND LEN([CurrencyCode]) = 3"));
             entity.HasIndex(e => new
             {
                 e.TenantId,

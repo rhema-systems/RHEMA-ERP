@@ -192,7 +192,7 @@ public class VendorInvoice : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal SubTotal { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal TaxAmount { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
@@ -501,10 +501,10 @@ public class VendorInvoiceLineItem : TenantEntity
 
     public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
 
-    [Column(TypeName = "decimal(5,2)")]
+    [Column(TypeName = "decimal(18,6)")]
     public decimal TaxRate { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal TaxAmount { get; set; }
 
     [MaxLength(50)]

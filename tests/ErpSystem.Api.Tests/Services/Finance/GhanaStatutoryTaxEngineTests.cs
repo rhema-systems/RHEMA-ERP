@@ -357,7 +357,7 @@ public sealed class GhanaStatutoryTaxEngineTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-GhanaTax")]
     [Trait("Category", "Tax")]
-    public async Task TaxCalculation_ShouldReportLineDeltaAndGateAggregateScopeWithoutDocumentOrchestrator()
+    public async Task TaxCalculation_ShouldAggregateAcrossDocumentAndAllocateSignedResidualDeterministically()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -382,37 +382,88 @@ public sealed class GhanaStatutoryTaxEngineTests
         await db.SaveChangesAsync();
 
         var engine = new TaxCalculationEngine(db, CreateCurrentUser(tenantId).Object, Mock.Of<ILogger<TaxCalculationEngine>>());
-        var request = new TaxCalculationRequestDto
+        settings.TaxRoundingScope = TaxRoundingScope.Document;
+        await db.SaveChangesAsync();
+        var firstLineId = Guid.NewGuid();
+        var secondLineId = Guid.NewGuid();
+        TaxDocumentCalculationRequestDto Document(decimal sign) => new()
         {
-            BaseAmount = 0.23m,
+            CurrencyCode = "GHS",
+            TransactionDate = new DateTime(2026, 7, 6),
+            Lines =
+            [
+                new() { DocumentLineId = firstLineId, BaseAmount = sign * 0.23m, TaxGroupId = group.Id, TransactionType = TaxTransactionType.SaleOfGoods },
+                new() { DocumentLineId = secondLineId, BaseAmount = sign * 0.23m, TaxGroupId = group.Id, TransactionType = TaxTransactionType.SaleOfGoods }
+            ]
+        };
+
+        var result = await engine.CalculateDocumentTaxesAsync(Document(1m));
+        var replay = await engine.CalculateDocumentTaxesAsync(Document(1m));
+        var reversal = await engine.CalculateDocumentTaxesAsync(Document(-1m));
+
+        result.TotalTaxAmount.Should().Be(0.09m);
+        result.TaxRoundingDelta.Should().Be(-0.002m);
+        result.TaxBreakdowns.Last().DocumentLineId.Should().Be(secondLineId);
+        result.TaxBreakdowns.Last().RoundingAdjustment.Should().Be(-0.002m);
+        replay.TaxBreakdowns.Select(item => new { item.DocumentLineId, item.TaxId, item.TaxAmount, item.RoundingAdjustment, item.AllocationSequence })
+            .Should().BeEquivalentTo(result.TaxBreakdowns.Select(item => new { item.DocumentLineId, item.TaxId, item.TaxAmount, item.RoundingAdjustment, item.AllocationSequence }), options => options.WithStrictOrdering());
+        reversal.TotalTaxAmount.Should().Be(-0.09m);
+        reversal.TaxRoundingDelta.Should().Be(0.002m);
+        reversal.TaxBreakdowns.Last().RoundingAdjustment.Should().Be(0.002m);
+    }
+
+    [Theory]
+    [InlineData("JPY", 0, 1.234567, 0.0)]
+    [InlineData("GHS", 2, 1.234567, 0.12)]
+    [InlineData("BHD", 3, 1.234567, 0.123)]
+    [InlineData("CLF", 4, 1.234567, 0.1235)]
+    [Trait("Batch", "FinanceGoLive-GhanaTax")]
+    [Trait("Category", "Tax")]
+    public async Task TaxCalculation_ShouldHonorTransactionCurrencyMinorUnits(
+        string currencyCode,
+        int decimalPlaces,
+        decimal baseAmount,
+        decimal expectedTax)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        if (currencyCode != "GHS")
+        {
+            db.Currencies.Add(new Currency
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, CurrencyCode = currencyCode,
+                NumericCode = decimalPlaces.ToString(), CurrencyName = currencyCode,
+                DecimalPlaces = decimalPlaces,
+                RoundingPrecision = CurrencyMinorUnitPolicy.MinorUnit(decimalPlaces),
+                IsActive = true
+            });
+        }
+        var payable = SeedAccount(db, tenantId, "2212", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
+        var receivable = SeedAccount(db, tenantId, "1412", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
+        var tax = SeedTax(db, tenantId, "CURR-TAX", "Currency tax", 10m, TaxCategory.Standard, receivable.Id, payable.Id, new DateTime(2026, 1, 1));
+        var group = SeedTaxGroup(db, tenantId, "CURR-GRP", TaxApplicability.Sales);
+        AddComponent(db, tenantId, group.Id, tax.Id, 1);
+        db.FinanceSettings.Add(new FinanceSettings
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BaseCurrency = "GHS",
+            TaxPercentageDecimalPlaces = 6, TaxRoundingScope = TaxRoundingScope.Line,
+            TaxRoundingMethod = GovernedRoundingMethod.Nearest, TaxRoundingIncrement = null
+        });
+        await db.SaveChangesAsync();
+
+        var engine = new TaxCalculationEngine(db, CreateCurrentUser(tenantId).Object, Mock.Of<ILogger<TaxCalculationEngine>>());
+        var result = await engine.CalculateTaxesAsync(new TaxCalculationRequestDto
+        {
+            CurrencyCode = currencyCode,
+            BaseAmount = baseAmount,
             TaxGroupId = group.Id,
             TransactionDate = new DateTime(2026, 7, 6),
             TransactionType = TaxTransactionType.SaleOfGoods
-        };
+        });
 
-        var lineResult = await engine.CalculateTaxesAsync(request);
-        var unsupportedCurrency = new Currency
-        {
-            Id = Guid.NewGuid(), TenantId = tenantId, CurrencyCode = "JPY", NumericCode = "392",
-            CurrencyName = "Japanese Yen", DecimalPlaces = 0, RoundingPrecision = 1m,
-            IsBaseCurrency = false, IsActive = true
-        };
-        db.Currencies.Add(unsupportedCurrency);
-        await db.SaveChangesAsync();
-        var currencyGateAct = async () => await engine.CalculateTaxesAsync(request);
-        await currencyGateAct.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*active transaction currencies all use 2 decimals*");
-
-        unsupportedCurrency.IsActive = false;
-        settings.TaxRoundingScope = TaxRoundingScope.Document;
-        await db.SaveChangesAsync();
-        var aggregateAct = async () => await engine.CalculateTaxesAsync(request);
-
-        lineResult.TotalTaxAmount.Should().Be(0.04m);
-        lineResult.TaxRoundingScope.Should().Be(TaxRoundingScope.Line);
-        lineResult.TaxRoundingDelta.Should().Be(-0.006m);
-        await aggregateAct.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*document-wide AR/AP tax orchestrator*");
+        result.CurrencyDecimalPlaces.Should().Be(decimalPlaces);
+        result.TotalTaxAmount.Should().Be(expectedTax);
     }
 
     [Fact]

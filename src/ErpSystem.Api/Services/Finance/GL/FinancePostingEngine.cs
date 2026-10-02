@@ -3362,10 +3362,15 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
             AddGuid($"{prefix}.taxId", item.TaxId);
             AddGuid($"{prefix}.taxGroupId", item.TaxGroupId);
             AddGuid($"{prefix}.postingAccountId", item.PostingAccountId);
+            Add($"{prefix}.currencyCode", item.CurrencyCode?.Trim().ToUpperInvariant());
+            AddInt($"{prefix}.currencyDecimalPlaces", item.CurrencyDecimalPlaces);
             AddDecimal($"{prefix}.baseAmount", item.BaseAmount);
             AddDecimal($"{prefix}.taxableAmount", item.TaxableAmount);
             AddDecimal($"{prefix}.taxRate", item.TaxRate);
             AddDecimal($"{prefix}.taxAmount", item.TaxAmount);
+            AddDecimal($"{prefix}.rawTaxAmount", item.RawTaxAmount);
+            AddDecimal($"{prefix}.roundingAdjustment", item.RoundingAdjustment);
+            AddInt($"{prefix}.allocationSequence", item.AllocationSequence);
             AddInt($"{prefix}.compoundBasis", (int)item.CompoundBasis);
             AddInt($"{prefix}.calculationOrder", item.CalculationOrder);
             AddDate($"{prefix}.calculationDate", item.CalculationDate);
