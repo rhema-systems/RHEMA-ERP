@@ -261,6 +261,7 @@ public sealed class FinanceSettingsWriteOffMappingTests
         fixture.Context.JournalEntries.Add(new JournalEntry
         {
             TenantId = fixture.TenantId,
+            AccountingBookId = fixture.Book.Id,
             JournalEntryNumber = "LOCK-1",
             Description = "Precision lifecycle lock",
             PostingStatus = "Posted"
@@ -285,6 +286,7 @@ public sealed class FinanceSettingsWriteOffMappingTests
         public ApplicationDbContext Context { get; } = new(new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options);
         public FinanceSettings Settings { get; private set; } = null!;
+        public AccountingBook Book { get; private set; } = null!;
         public Account Expense { get; private set; } = null!;
         public Account Recovery { get; private set; } = null!;
         public FinanceSettingsService Service { get; private set; } = null!;
@@ -298,9 +300,21 @@ public sealed class FinanceSettingsWriteOffMappingTests
                 TenantId = fixture.TenantId, BaseCurrency = "GHS", CoaType = "Segmented", AccountSeparator = "-",
                 ControlAccountInventoryId = Guid.NewGuid(), ApInvoicePriceTolerancePercent = 3m
             };
+            fixture.Book = new AccountingBook
+            {
+                TenantId = fixture.TenantId,
+                Code = "IFRS",
+                Name = "IFRS Primary",
+                BookType = AccountingBookType.PrimaryFull,
+                LifecycleStatus = AccountingBookLifecycleStatus.Active,
+                FunctionalCurrencyCode = "GHS",
+                IsDefault = true,
+                IsActive = true,
+                AllowsPosting = true
+            };
             fixture.Expense = fixture.Account("LOSS", AccountType.Expense);
             fixture.Recovery = fixture.Account("RECOVERY", AccountType.Revenue);
-            fixture.Context.AddRange(fixture.Settings, fixture.Expense, fixture.Recovery);
+            fixture.Context.AddRange(fixture.Settings, fixture.Book, fixture.Expense, fixture.Recovery);
             await fixture.Context.SaveChangesAsync();
             var currentUser = new Mock<ICurrentUserService>();
             currentUser.SetupGet(user => user.TenantId).Returns(fixture.TenantId);
