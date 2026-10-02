@@ -202,7 +202,6 @@ export default function NewUnitTypePage() {
                                 <Input
                                     id="roundingIncrement"
                                     type="number"
-                                    disabled
                                     min={10 ** -Number(formData.decimalPlaces)}
                                     step={10 ** -Number(formData.decimalPlaces)}
                                     placeholder="Optional, e.g. 0.125"
@@ -211,7 +210,7 @@ export default function NewUnitTypePage() {
                                     className={errors.roundingIncrement ? 'border-destructive' : ''}
                                 />
                                 {errors.roundingIncrement && <p className="text-sm text-destructive">{errors.roundingIncrement}</p>}
-                                <p className="text-xs text-muted-foreground">Reserved until every quantity write and posting adapter enforces the increment.</p>
+                                <p className="text-xs text-muted-foreground">Optional governed increment; entered quantities must be exact multiples.</p>
                             </div>
                         </div>
 

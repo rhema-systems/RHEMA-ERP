@@ -813,7 +813,9 @@ namespace ErpSystem.Api.Services.Finance.Settings
             if (reportPlaces is < 0 or > CurrencyMinorUnitPolicy.MaximumDecimalPlaces)
                 throw new InvalidOperationException("Report display precision must be between 0 and 4 decimal places.");
 
-            var taxIncrement = dto.TaxRoundingIncrement ?? settings.TaxRoundingIncrement;
+            var taxIncrement = dto.TaxRoundingIncrementSpecified
+                ? dto.TaxRoundingIncrement
+                : settings.TaxRoundingIncrement;
             if (taxIncrement.HasValue && taxIncrement.Value <= 0m)
                 throw new InvalidOperationException("Tax rounding increment must be greater than zero.");
             var currencyMinorUnit = CurrencyMinorUnitPolicy.MinorUnit(currencyDecimalPlaces);
@@ -850,12 +852,12 @@ namespace ErpSystem.Api.Services.Finance.Settings
             settings.TaxPercentageDecimalPlaces = taxPercentagePlaces;
             if (dto.TaxRoundingMethod.HasValue) settings.TaxRoundingMethod = dto.TaxRoundingMethod.Value;
             if (dto.TaxRoundingScope.HasValue) settings.TaxRoundingScope = dto.TaxRoundingScope.Value;
-            if (dto.TaxRoundingIncrement.HasValue) settings.TaxRoundingIncrement = dto.TaxRoundingIncrement;
+            if (dto.TaxRoundingIncrementSpecified) settings.TaxRoundingIncrement = dto.TaxRoundingIncrement;
             settings.InvoiceRoundingEnabled = invoiceEnabled;
-            if (dto.InvoiceRoundingIncrement.HasValue) settings.InvoiceRoundingIncrement = dto.InvoiceRoundingIncrement;
+            if (dto.InvoiceRoundingIncrementSpecified) settings.InvoiceRoundingIncrement = dto.InvoiceRoundingIncrement;
             if (dto.InvoiceRoundingMethod.HasValue) settings.InvoiceRoundingMethod = dto.InvoiceRoundingMethod.Value;
-            if (dto.InvoiceRoundingGainAccountId.HasValue) settings.InvoiceRoundingGainAccountId = dto.InvoiceRoundingGainAccountId;
-            if (dto.InvoiceRoundingLossAccountId.HasValue) settings.InvoiceRoundingLossAccountId = dto.InvoiceRoundingLossAccountId;
+            if (dto.InvoiceRoundingGainAccountIdSpecified) settings.InvoiceRoundingGainAccountId = dto.InvoiceRoundingGainAccountId;
+            if (dto.InvoiceRoundingLossAccountIdSpecified) settings.InvoiceRoundingLossAccountId = dto.InvoiceRoundingLossAccountId;
             settings.SettlementToleranceAmount = settlementAmount;
             settings.SettlementTolerancePercentage = settlementPercentage;
             settings.ReportDisplayDecimalPlaces = reportPlaces;
@@ -867,12 +869,12 @@ namespace ErpSystem.Api.Services.Finance.Settings
             dto.TaxPercentageDecimalPlaces.HasValue && dto.TaxPercentageDecimalPlaces.Value != settings.TaxPercentageDecimalPlaces ||
             dto.TaxRoundingMethod.HasValue && dto.TaxRoundingMethod.Value != settings.TaxRoundingMethod ||
             dto.TaxRoundingScope.HasValue && dto.TaxRoundingScope.Value != settings.TaxRoundingScope ||
-            dto.TaxRoundingIncrement.HasValue && dto.TaxRoundingIncrement.Value != settings.TaxRoundingIncrement ||
+            dto.TaxRoundingIncrementSpecified && dto.TaxRoundingIncrement != settings.TaxRoundingIncrement ||
             dto.InvoiceRoundingEnabled.HasValue && dto.InvoiceRoundingEnabled.Value != settings.InvoiceRoundingEnabled ||
-            dto.InvoiceRoundingIncrement.HasValue && dto.InvoiceRoundingIncrement.Value != settings.InvoiceRoundingIncrement ||
+            dto.InvoiceRoundingIncrementSpecified && dto.InvoiceRoundingIncrement != settings.InvoiceRoundingIncrement ||
             dto.InvoiceRoundingMethod.HasValue && dto.InvoiceRoundingMethod.Value != settings.InvoiceRoundingMethod ||
-            dto.InvoiceRoundingGainAccountId.HasValue && dto.InvoiceRoundingGainAccountId.Value != settings.InvoiceRoundingGainAccountId ||
-            dto.InvoiceRoundingLossAccountId.HasValue && dto.InvoiceRoundingLossAccountId.Value != settings.InvoiceRoundingLossAccountId ||
+            dto.InvoiceRoundingGainAccountIdSpecified && dto.InvoiceRoundingGainAccountId != settings.InvoiceRoundingGainAccountId ||
+            dto.InvoiceRoundingLossAccountIdSpecified && dto.InvoiceRoundingLossAccountId != settings.InvoiceRoundingLossAccountId ||
             dto.SettlementToleranceAmount.HasValue && dto.SettlementToleranceAmount.Value != settings.SettlementToleranceAmount ||
             dto.SettlementTolerancePercentage.HasValue && dto.SettlementTolerancePercentage.Value != settings.SettlementTolerancePercentage;
 

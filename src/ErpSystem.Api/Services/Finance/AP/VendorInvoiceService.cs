@@ -480,6 +480,8 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var lineDto in dto.LineItems)
             {
+                await UnitAccounting.FinanceQuantityPrecisionAdapter.ValidateAsync(
+                    _unitOfWork, TenantId, lineDto.Unit, lineDto.Quantity, "AP invoice line", cancellationToken);
                 var lineGross = RoundMoney(lineDto.Quantity * lineDto.UnitPrice);
                 var lineDiscount = InvoiceTradeDiscountPolicy.CalculateLineDiscount(
                     lineGross,
@@ -731,6 +733,8 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var lineDto in dto.LineItems)
             {
+                await UnitAccounting.FinanceQuantityPrecisionAdapter.ValidateAsync(
+                    _unitOfWork, TenantId, lineDto.Unit, lineDto.Quantity, "AP invoice line", cancellationToken);
                 var lineGross = RoundMoney(lineDto.Quantity * lineDto.UnitPrice);
                 var lineDiscount = InvoiceTradeDiscountPolicy.CalculateLineDiscount(
                     lineGross,
@@ -1298,6 +1302,11 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (_unitOfWork.HasActiveTransaction)
                 await _unitOfWork.AcquireTransactionLockAsync($"ap-invoice-post:{TenantId:N}:{id:N}", cancellationToken);
             var invoice = await LoadInvoiceForPostingAsync(id, cancellationToken);
+            foreach (var line in invoice.LineItems.Where(line => !line.IsDeleted))
+            {
+                await UnitAccounting.FinanceQuantityPrecisionAdapter.ValidateAsync(
+                    _unitOfWork, TenantId, line.Unit, line.Quantity, "AP invoice posting", cancellationToken);
+            }
             if ((RequiresProcurementMatch(invoice) || IsLandedCostInvoice(invoice)) && !_unitOfWork.HasActiveTransaction)
                 throw new InvalidOperationException("The invoice source changed. Refresh before posting.");
             try

@@ -331,6 +331,8 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             foreach (var lineDto in dto.LineItems)
             {
+                await UnitAccounting.FinanceQuantityPrecisionAdapter.ValidateAsync(
+                    _unitOfWork, TenantId, lineDto.Unit, lineDto.Quantity, "AR invoice line", cancellationToken);
                 var lineItemType = Enum.TryParse<LineItemType>(lineDto.LineItemType, out var parsedType)
                     ? parsedType
                     : LineItemType.Product;
@@ -681,6 +683,8 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             foreach (var lineDto in dto.LineItems)
             {
+                await UnitAccounting.FinanceQuantityPrecisionAdapter.ValidateAsync(
+                    _unitOfWork, TenantId, lineDto.Unit, lineDto.Quantity, "AR invoice line", cancellationToken);
                 var lineItemType = Enum.TryParse<LineItemType>(lineDto.LineItemType, out var parsedType)
                     ? parsedType
                     : LineItemType.Product;
@@ -833,6 +837,11 @@ namespace ErpSystem.Api.Services.Finance.AR
             var lines = invoice.LineItems.Where(line => !line.IsDeleted).ToArray();
             if (lines.Length == 0 || lines.Any(line => line.InvoiceId != invoice.Id || line.TenantId != TenantId || line.Quantity <= 0))
                 throw new InvalidOperationException("Invoice requires valid lines belonging to this invoice and tenant.");
+            foreach (var line in lines)
+            {
+                await UnitAccounting.FinanceQuantityPrecisionAdapter.ValidateAsync(
+                    _unitOfWork, TenantId, line.Unit, line.Quantity, "AR invoice submission", cancellationToken);
+            }
 
             var approvalRequired = await workflow.HasActiveApprovalInstanceAsync("Invoice", id) ||
                 await workflow.HasActiveApprovalWorkflowAsync("Invoice");
@@ -1130,6 +1139,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                 throw new InvalidOperationException("Central finance posting engine is not configured for AR invoice posting.");
 
             var invoice = await LoadInvoiceForPostingAsync(id, cancellationToken);
+            foreach (var line in invoice.LineItems.Where(line => !line.IsDeleted))
+            {
+                await UnitAccounting.FinanceQuantityPrecisionAdapter.ValidateAsync(
+                    _unitOfWork, TenantId, line.Unit, line.Quantity, "AR invoice posting", cancellationToken);
+            }
             if (invoice.Status is InvoiceStatus.ReadyToPost or InvoiceStatus.Approved)
                 return await SendInvoiceCoreAsync(id, producer, cancellationToken);
             await InventoryDisposalAuctionInvoiceGuard.ValidateAsync(_unitOfWork, TenantId, invoice, producer, cancellationToken);

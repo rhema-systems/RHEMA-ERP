@@ -146,7 +146,7 @@ export interface UpdateUnitTypeDto {
     name?: string;
     description?: string;
     decimalPlaces?: number;
-    roundingIncrement?: number;
+    roundingIncrement?: number | null;
     isActive?: boolean;
 }
 
