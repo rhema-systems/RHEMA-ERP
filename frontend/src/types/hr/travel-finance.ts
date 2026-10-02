@@ -69,6 +69,8 @@ export type TravelPaymentMethod =
 
 export type TravelAdvanceType = 'Cash' | 'CorporateCardLoad' | 'PettyCash' | 'WireTransfer';
 
+// Rejected and Cancelled: travel final closure, migration batch 1 — written from lane 3. (A comment INSIDE the
+// union hid it from travel-enums.test.ts's regex, so it was never compared with the C# enum — lane 3, N9.)
 export type TravelAdvanceStatus =
   | 'Requested'
   | 'Approved'
@@ -77,7 +79,6 @@ export type TravelAdvanceStatus =
   | 'FullySettled'
   | 'Overdue'
   | 'WrittenOff'
-  // Travel final closure, migration batch 1 — written from lane 3.
   | 'Rejected'
   | 'Cancelled';
 
@@ -270,6 +271,8 @@ export interface PayStaffTravelExpenseClaim {
 export interface StaffTravelAdvanceSummary {
   id: string;
   advanceNumber: string;
+  staffTravelRequestId: string;
+  requestNumber?: string | null;
   employeeId: string;
   employeeName: string;
   requestedAmount: number;
@@ -279,8 +282,17 @@ export interface StaffTravelAdvanceSummary {
   advanceTypeName: string;
   status: TravelAdvanceStatus;
   statusName: string;
+  /** Recovered by claims plus cash handed back. */
+  settledAmount: number;
+  /** What the traveller still holds: 0 until the advance is disbursed (lane 3). */
   unsettledAmount: number;
+  refundedAmount: number;
   settlementDeadline?: string | null;
+  disbursedAt?: string | null;
+  /** Cash out past its deadline — true before the nightly sweep writes Overdue. */
+  isOverdue: boolean;
+  /** Why a rejected, cancelled or written-off advance ended as it did. */
+  outcomeReason?: string | null;
 }
 
 export interface StaffTravelAdvance extends AuditFields {
@@ -307,19 +319,47 @@ export interface StaffTravelAdvance extends AuditFields {
   approvedByName?: string | null;
   disbursedById?: string | null;
   disbursedByName?: string | null;
+  // Lane 3 — the verbs' records.
+  rejectedAt?: string | null;
+  rejectedByName?: string | null;
+  rejectionReason?: string | null;
+  cancelledAt?: string | null;
+  cancelledByName?: string | null;
+  cancellationReason?: string | null;
+  writtenOffAt?: string | null;
+  writtenOffByName?: string | null;
+  writeOffReason?: string | null;
+  writtenOffAmount?: number | null;
+  refundedAmount: number;
+  refundedAt?: string | null;
+  refundedByName?: string | null;
+  refundReference?: string | null;
+  isOverdue: boolean;
 }
 
+/** The traveller is the trip's — the server sets it (lane 3, B3). */
 export interface CreateStaffTravelAdvance {
   staffTravelRequestId: string;
-  employeeId: string;
   requestedAmount: number;
   currencyCode: string;
   advanceType: TravelAdvanceType;
   settlementDeadline?: string | null;
 }
 
+/** A requested advance only. */
 export type UpdateStaffTravelAdvance =
-  Omit<CreateStaffTravelAdvance, 'staffTravelRequestId' | 'employeeId'> & { id: string };
+  Omit<CreateStaffTravelAdvance, 'staffTravelRequestId'> & { id: string };
+
+/** Reject, cancel or write off: the verb is the route; the reason is required. */
+export interface DecideStaffTravelAdvance {
+  reason: string;
+}
+
+/** Unused cash handed back — one refund per advance. */
+export interface RefundStaffTravelAdvance {
+  amount: number;
+  reference: string;
+}
 
 /** The approver is the token's. */
 export interface ApproveStaffTravelAdvance {

@@ -44,11 +44,17 @@ baseline (D-13); lane 0 was built the same day.**
    retrofit `20261002042909_TravelClosureApprovalLadder` is applied to UAT, restore point
    `ErpSystemDB_UAT_before_travell2.bak`); **2b** the screens, the last stage read from the route, and
    the workflow designer fix (cross-module defect #34) — built and proven (`run-final-approvals.mjs`
-   123/123 twice, lifecycle 255/255 twice, truth 117/117 twice) and staged for the user's commit.
+   123/123 twice, lifecycle 255/255 twice, truth 117/117 twice), committed `519418f00`.
    ⚠ Stage 1 is addressed **by name**, not by role — read lane 2's *As built* before touching the route.
-6. **Next: lane 3** (the money chain, B9 included), then lanes **4 → 5 → 6 → 7 → 8 → 9 → 10** in that
-   order (§ 2). Source-check each lane against this document before building it — line numbers are as
-   of HEAD `bad482a8d`.
+6. **Lane 3** (the money chain, B9 included) — **IN PROGRESS.** Source-checked against `519418f00` on
+   2026-10-02: every finding still reproduces, and the check found ten more (N1–N10, lane 3's *Source
+   check*). Decisions D-14…D-17 taken (D-17: the posted path is proven on a scratch copy of UAT). **Slice
+   3a built and proven** (money 121/121 twice; the migration `20261002132850_TravelClosureMoneyChain`
+   applied to UAT, restore point `ErpSystemDB_UAT_before_travell3.bak`) and staged. Three slices: **3a** advances,
+   numbers and the lane's migration `TravelClosureMoneyChain`; **3b** the claim chain; **3c** the budget
+   and void payment.
+7. **Then** lanes **4 → 5 → 6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane against this
+   document before building it — line numbers are as of HEAD `bad482a8d`.
 
 **House rules** (from the HR programme, not repeated in each lane): the user runs builds — never
 `dotnet build`; stop `ErpSystem.Api` by command line before the user builds; migrations are scaffolded
@@ -80,6 +86,10 @@ lane's slice.
 | **D-11** | Which Fleet integrations (FX-1…FX-8) | **All four:** core reservation and sync; fuel on claims; drivers as travellers; incidents and trip signals (with the traveller's assigned official car as the default vehicle). Lane 6. |
 | **D-12** | Who fixes Fleet's own gaps — planned-window conflicts, driver leave, no seeded fleet-trip approval (FX-2, FX-7, FX-9) | **Hand them to the Fleet owner; travel guards its own side meanwhile.** Travel's checks refuse overlapping vehicles and unavailable drivers for travel bookings. This closure does not change Fleet's code. |
 | **D-13** | Run the sixteen slice suites on UAT as lane 0's baseline? (asked at the go, 2026-10-01) | **No — skip the baseline.** The slice suites were written for a throwaway database: they hang their actors off the first position in the tenant (real staff's), mint `HR` and `TenantAdmin` logins they never switch off, approve fixture policies in the tenant and mostly delete nothing. The lane-0 truth suite is the baseline; each lane re-proves, with its own clean-up, what the slice suites covered in its area, and retires them by name in this document. |
+| **D-14** | Lane 3 needs columns batch 1 did not add (asked at lane 3's source check, 2026-10-02) | **A small lane-3 migration** (`TravelClosureMoneyChain`, guarded SQL, proven on a scratch copy of UAT first): `StaffTravelAdvances.CancelledAt`, `CancelledById`, `CancellationReason`; `StaffTravelExpenseClaims.ReviewNotes`. Its data part, applied with slice 3a's code: `UnsettledAmount` 0 on advances not yet disbursed (moved here from batch 1, § 5), and a settlement deadline — the trip's end plus its approved policy's claim window, or 30 days — on advances with cash out and none. Rejected: reusing the rejection columns for a cancellation and keeping review reasons as trip comments. |
+| **D-15** | A claim is valued in the base currency; how much of it does an advance in another currency cover? (B11) | **Finance's rate on the day the claim is paid.** The deduction is worked in the advance's own currency; whatever a rate movement leaves on the advance is refunded or written off. Rejected: the rate on the day the advance went out, which pays the traveller a windfall or a shortfall whenever the cedi moves between disbursement and spending. |
+| **D-16** | Three refinements of lane 3's own checklist | **All three:** the payer may not be anyone who reviewed a line of the claim, as well as the claim's reviewer; advances only on Approved or InProgress trips (money after the trip is a claim); a budget only once the trip is approved, its total defaulting to the approved budget. |
+| **D-17** | How is the posted path proven — a payment journal reversed by a void and posted again? UAT has no travel posting rule, so every travel row in the posting register is Unposted (lane 3's source check) | **On a scratch copy of UAT (2026-10-02).** UAT here is the developer's local database, so no Finance owner can open its periods or add a travel account. The posted path is proven by one run of the API against a COPY_ONLY restore of UAT on which Finance's authority is prepared (`dev-harness/hr-finance/prep-uat-finance-authority.sql`), a travel expense account added and travel's rules switched on; the copy is dropped afterwards. UAT keeps no travel rule and an empty ledger, and its suites prove the Unposted path. |
 
 **Standing assumptions (not re-asked):** the closure ledger's D-29 holds — the policy rule register
 stays read-only and the policy-exception flow stays withheld until rule enforcement exists; Finance
@@ -95,8 +105,8 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **0** | Harness on UAT, truth and fiction | none | `run-final-truth.mjs` | ✅ complete 2026-10-01 — 112/112 twice on UAT; committed `0b8cdf124` |
 | **M1** | Migration batch 1 | the whole batch | `m1/test-cycle.sh` (session scratchpad) | ✅ applied to UAT 2026-10-02 — 33/33 on a scratch copy first, verified on UAT, truth suite 112/112 twice after; committed `d426f4ed3` |
 | **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ✅ complete 2026-10-02 — 1a `e1d050da2`, 1b `8fadfd31e`, 1c `895996b6f` |
-| **2** | The approval ladder and the approver's door | data-only retrofit `20261002042909_TravelClosureApprovalLadder` | `run-final-approvals.mjs` | ✅ complete 2026-10-02 — 2a `4e4d85b2f` (retrofit applied to UAT); 2b approvals 123/123 twice, lifecycle 255/255 twice, truth 117/117 twice, staged |
-| **3** | The money chain | batch 1 | `run-final-money.mjs` | ☐ |
+| **2** | The approval ladder and the approver's door | data-only retrofit `20261002042909_TravelClosureApprovalLadder` | `run-final-approvals.mjs` | ✅ complete 2026-10-02 — 2a `4e4d85b2f` (retrofit applied to UAT); 2b `519418f00` (approvals 123/123 twice, lifecycle 255/255 twice, truth 117/117 twice) |
+| **3** | The money chain | batch 1 + `TravelClosureMoneyChain` (D-14, applied to UAT) | `run-final-money.mjs` | ◐ 3a built 2026-10-02 — money 121/121 twice, lifecycle 256/256, truth 118/118, approvals 123/123 twice; staged. Next 3b, then 3c |
 | **4** | Policy and authority | batch 1 | `run-final-policy.mjs` | ☐ |
 | **5** | Bookings and itinerary | batch 1 | `run-final-bookings.mjs` | ☐ |
 | **6** | Fleet | batch 1 | `run-final-fleet.mjs` | ☐ |
@@ -934,7 +944,7 @@ browser.
   `GetRateToBaseAsync` returns the dated row's rate (direction per PR #99's contract, asserted against
   `GET /api/finance/exchange-rates/current/USD`); an advance in another currency converted before it
   is deducted.
-- [ ] **Advances:** `0 < ApprovedAmount ≤ RequestedAmount`; the total approved on a request ≤ its
+- [x] **Advances:** `0 < ApprovedAmount ≤ RequestedAmount`; the total approved on a request ≤ its
   approved budget; no new advance while the traveller has an Overdue one; reject and cancel verbs
   (`TravelAdvanceStatus.Rejected = 8`, `Cancelled = 9`); `UnsettledAmount` 0 until disbursed — and the
   data step moved here from batch 1: zero it on existing Requested and Approved advances in the same
@@ -943,10 +953,12 @@ browser.
   ExpenseSubmissionDays` (or 30 days); `Overdue` set by the sweep; `WrittenOff` by an Admin verb with a
   reason; **`RecordRefundAsync`** (amount ≤ unsettled, reference, actor ≠ traveller) settles unused
   cash handed back and posts through the same adapter as a new posting event (the Finance owner told).
-- [ ] ⚠ Flip the posting retry guard at `HrFinancePostingAdminService.cs:655` from the negative list
+  *(3a; the Finance owner's note is lane 10's)*
+- [x] ⚠ Flip the posting retry guard at `HrFinancePostingAdminService.cs:655` from the negative list
   to `is not (Disbursed or PartiallySettled or FullySettled or Overdue)`, or a rejected advance could
-  be re-posted; regenerate the `TravelAdvanceStatus` TS union.
-- [ ] **Numbers (B9):** max-based, tenant-scoped generators for claims and advances (the shape of
+  be re-posted; regenerate the `TravelAdvanceStatus` TS union. *(3a — WrittenOff joins the list: its
+  money did go out)*
+- [x] **Numbers (B9):** max-based, tenant-scoped generators for claims and advances (the shape of
   `GenerateRequestNumberAsync`), with filtered unique indexes (§ 5).
 - [ ] **Budget (B10, O-9, T-22):** Actual = paid claims' `NetPayable` + disbursed advances; Committed
   excludes NoShow and adds cancellation fees; the budget's lines sum to `ApprovedTotal`, which defaults
@@ -968,6 +980,140 @@ Suite `run-final-money.mjs`: every H above as a two-actor assertion; pay twice �
 claim → 422; a claim naming another employee's advance → 404; a zero-line approval → 422; inline lines
 valued; a back-dated line valued at its date's rate; a deleted claim does not collide; a reversed
 `TravelClaimPaid` leaves the claim Paid and a retry re-posts the same amount.
+
+**Source check (2026-10-02, HEAD `519418f00`).** The finance service, controller, repositories, budget
+rollup, currency bridge, posting factory and register, mapper, DTOs, entities and the frontend money
+screens were re-read. Lanes 0 and 1 touched these files only lightly: every finding above still holds,
+at the cited lines (B4's l.809 is l.810). Ten more:
+
+- **N1 — `Overdue` has three readers that would drop it.** Claim recovery (`SettleLinkedAdvanceAsync`),
+  the separation clearance (`SeparationService.cs:2314`) and the sweep's own advance query
+  (`StaffTravelReminderService.cs:301`) accept only Disbursed and PartiallySettled. Given a writer, an
+  overdue advance would stop being recovered by a claim (O-2's leak again), vanish from a leaver's
+  clearance and stop being chased the day it became overdue. The clearance also computes the amount
+  owed itself and would ignore refunds. "Cash out" is defined once and read by all of them, in the
+  slice that gives `Overdue` its writer.
+- **N2 — a cancelled trip keeps its undisbursed advances.** Lane 1b's cancel refuses only cash out; a
+  Requested or Approved advance stays live on the Cancelled trip and can still be approved and
+  disbursed — disbursement checks nothing about the trip.
+- **N3 — an advance is editable after settlement.** `UpdateAdvanceAsync` refuses only Disbursed, so a
+  PartiallySettled, FullySettled, Overdue or WrittenOff advance can be re-currencied and re-dated; the
+  currency is not validated on update.
+- **N4 — the review's notes are accepted and dropped.** `ReviewStaffTravelExpenseClaimDto.Notes` is read
+  by nothing; a rejected or returned claim carries no reason anywhere (D-14 adds the column).
+- **N5 — a cancelled advance has nowhere to record who and why** (D-14).
+- **N6 — the receipt rule has no screen to satisfy it.** The add-line dialog never sends
+  `receiptAttachmentId`; once a policy with `ReceiptRequiredAbove` is approved, every desk claim with a
+  line above it would be refused at submission. 3b adds a receipt picker.
+- **N7 — the rate's direction.** UAT holds GHS→USD as `Rate 0.08`, `InverseRate 12.5` — Finance's
+  documented contract, *1 base = Rate target* — not the 12.5 the bridge's remarks quote. `ConvertAsync`
+  reaches 12.5 through its inverse path, at today's date. B12's dated rate repeats Finance's own lookup
+  (direct quote, then inverse) on the expense date rather than reading `Rate`. (`ConvertAsync` also
+  rounds the rate to the target's two places, because it converts one unit; the dated rate keeps six.)
+- **N8 — no money control is permission-gated.** `TravelFinancePanel` and the claim pages do not use
+  `useTravelAccess`; every button renders for any reader.
+- **N9 — the advance-status union escapes its enum test.** The comment inside the
+  `TravelAdvanceStatus` union defeats the test's regex, so it is not compared with C#.
+- **N10 — copy that contradicts the server:** the advance "recovered at approval"
+  (`travel-finance.service.ts:125`, `travel-finance.ts:192`) and pay "refuses anything not Approved"
+  (`travel-finance.service.ts:117`, `travel-finance.ts:244`).
+
+Also observed: the approve-advance dialog's prefill sits in the Dialog's own `onOpenChange`, which a
+controlled `open` never calls, so it probably never fires (not run); the line review is two icons with
+no amount or reason; disbursement has no confirmation; UAT's only live money rows are the Kumasi
+advance (GHS 2,500, disbursed, deadline 2026-11-03 — so D-14's data part touches no live row on UAT) and
+the Sebrepor claim (submitted). **The posting seam on UAT (D-17):** no travel rule or account mapping exists, `JournalEntries`
+is empty, only August 2026's fiscal period is open (September onward *Future*), no
+`AccountingBookPeriods` row exists, and the chart has no travel expense account — so with a rule
+switched on today Finance would refuse every travel posting, and the strict adapter would refuse the
+travel action with it.
+
+**Slices.**
+- **3a — advances, numbers and the migration.** D-14's migration; B9 for claims and advances;
+  `0 < approved ≤ requested`, the trip's approved advances within its approved budget, no new advance
+  over an overdue one, edits only while Requested (N3), approve and disburse only on Approved or
+  InProgress trips (D-16); D-2 on advances; reject, cancel (a trip's cancel cancels its undisbursed
+  advances, N2), write-off, refund with its posting event; `UnsettledAmount` from disbursement and the
+  default deadline; `Overdue` by the sweep with N1's readers; the retry guard flipped; D-15's recovery
+  arithmetic. Screens: the advance dialogs, the overdue-settlements queue, gated money controls (N8),
+  the union under its test (N9).
+- **3b — the claim chain.** The state machine, B3 parents, B4, B5/B11/B12 (N7), B6, B7, D-2 on claims
+  (D-16's line reviewers), O-2 with the waiver, D-10, B14, the review notes (N4). Screens: line review
+  with an amount and a reason, the receipt picker (N6), the filing page's advance and currency, the pay
+  dialog, the copy (N10).
+- **3c — the budget and void payment.** B10, O-9, T-22; T-39.
+
+**As built — slice 3a (2026-10-02).**
+
+- *The migration* `20261002132850_TravelClosureMoneyChain` (D-14): scaffolded by the user, rewritten as
+  guarded SQL, proven **38/38** on a COPY_ONLY copy of UAT (kit: session scratchpad `m2/` — the migration's
+  exact SQL rendered with csc, then Up, Up again with no row changed, Down to UAT's exact schema, Up again;
+  six planted advances, one per case the data part handles; a self-test that the checking helper fails a
+  wrong value). **Applied to UAT 2026-10-02** after a restore point (`ErpSystemDB_UAT_before_travell3.bak`,
+  COPY_ONLY, verified with `RESTORE VERIFYONLY`); history 110 rows; verified in SQL. On UAT the data part
+  touched no live row. ⚠ *The kits' `expect` helper had been vacuous* since migration batch 1: the value in
+  the message was read after the test, so `$?` was always 0. Fixed (`tools/migration-kit-lane2` too);
+  batch 1's and lane 2's saved results were re-checked against their expectations and all hold.
+- *One definition of cash out* — `StaffTravelAdvanceRules` (Core): Disbursed, PartiallySettled or Overdue
+  with something unsettled; the settlement status from the figures (an overdue advance partly settled
+  stays overdue); the default deadline; the cancellation. Read by claim recovery, the separation
+  clearance (which now reads the unsettled amount, so cash handed back counts), the sweep's reminder query,
+  the trip's cash-out refusals and the two repository reads (N1). Requested advances no longer read as
+  owed anywhere.
+- *Advances.* Raised only on an Approved or InProgress trip (D-16), for the trip's traveller (the create
+  DTO lost `EmployeeId`, B3), for more than nothing, with a deadline not before the trip ends, and never
+  for a traveller who holds an overdue advance (O-8). Edited only while Requested (N3). Approved above zero,
+  no more than asked, and within the trip's approved budget — its estimate on a trip approved before lane 2 —
+  with every other approved advance, each converted at Finance's rate (O-8). **D-2:** nobody approves, pays
+  out, records cash back on or writes off their own advance; the approver cannot pay it out (403 with the
+  sentence). Paying out starts the debt and sets the deadline when none was given (trip end + the approved
+  policy's claim window, else 30 days). **Reject** (Requested; reason), **cancel** (Requested or Approved;
+  reason; the trip's cancel does it for each undisbursed advance, N2), **cash handed back** (once; at most
+  what is outstanding; reference), **write off** (Admin; reason; nothing owed afterwards).
+- *Overdue* is written by the reminder sweep before it collects candidates (`AdvancesMarkedOverdue` on the
+  run's result); reads treat cash out past its deadline as overdue before the sweep runs (`IsOverdue`).
+- *D-15* — a claim recovers a foreign advance at Finance's rate on the payment date, in the advance's own
+  currency, the whole advance when the claim covers it (no rounding remainder).
+- *B9* — claim and advance numbers: the highest ever issued in the tenant and year, deleted rows included,
+  plus one (`CountByYearAsync` removed).
+- *Posting* — two events: `TRAVEL_ADVANCE_REFUNDED` (Dr staff payments clearing / Cr staff advances
+  receivable) and **`TRAVEL_ADVANCE_WRITTEN_OFF`** (Dr staff receivable write-off / Cr staff advances
+  receivable) — the write-off event is an addition to this plan: without it Finance's receivable outlives an
+  advance travel has written off. The register rebuilds both; the retry guard is a positive list. The
+  catalogue gate test has both samples (37/37 with the build's binaries).
+- *Screens.* The Finance tab's money controls render only for who may use them (N8): Approve (prefilled — the
+  prefill sat in an `onOpenChange` Radix never calls — and capped), Reject, Pay out (confirmed), Cancel, Cash
+  back and Write off (Admin); a requested advance waits for an approved trip; reasons and refunds show under the
+  status. **Staff Travel → Advances** (`/hr/travel/advances`, `HR.Travel.Read`): overdue settlements (D-5),
+  cash out, all. The advance-status union is under its enum test (N9). Scoped type-check, lint and the
+  travel unit tests clean; the sidebar test fails only on the two non-travel leaves recorded in lane 2. Not
+  walked in a browser.
+- *A second HR persona* — at the user's request, in the seeder rather than left to lane 10:
+  `TdcDemoPersonaSeeder` gains **`hr.officer`** (HR + Employee, on the Human Resource Officer post, fallback
+  HR Assistant), so every seed — `seed-hr-demo` or the Developer Test Data screen's Logins tier — has the
+  second officer the two-person rules need (D-2 here, D-8 in lane 4). `080-travel.mjs` pays the Kumasi
+  advance out as `hr.officer`; the pack's `personas.mjs` checks the login; `UAT-DEMO-DATABASE.md` lists it.
+  A database seeded before 2026-10-02 gains it when the persona seeder next runs. UAT's own Kumasi advance
+  (disbursed, deadline 2026-11-03) is untouched. **UAT gained it the same day**, on the user's go:
+  `seed-hr-demo` after a restore point (`ErpSystemDB_UAT_before_hrofficer.bak`) and a read-only dry run of
+  every orchestrator probe and of the persona resolution (UAT holds `TDC/` employees the demo seeder did not
+  create, which is why the Test Data screen refuses its Logins tier there) — 2 steps ran (both write nothing
+  on UAT), 21 skipped, 0 failed; one login created, `hr.officer` → TDC/00082 Esi Vanderpuye; the other 17
+  personas kept their employees; `personas.mjs` signs in as all ten it checks.
+
+**Suite** `run-final-money.mjs` (121 assertions; fixture `buildLifecycleFixture`): §1 numbers; §2 raising;
+§3 approving; §4 paying out, with the disbursement's register row; §5 reject, cancel and the trip's
+cancel; §6 cash back, once, posted; §7 write-off, posted, never one's own; §8 overdue before the sweep, the
+sweep's mark and reminder, no new advance, a request change paying nothing out, and a claim recovering the
+overdue advance; §9 a USD advance recovered at 12.5. **121/121 twice on UAT** (stamps 124762, 160270). The
+first run (988288) passed every feature check and failed the two next-number checks: the harness's rewritten
+check printed SQL Server's *Null value is eliminated by an aggregate* warning ahead of its answer and parsed
+the warning — fixed, the answer was 0 and 0. All three runs tore down cleanly (`teardown-run.mjs`).
+Regression: lifecycle **256/256 twice** (201951, 269738 — §7 pays out with the second officer, §8 raises its
+advance while the trip is approved), truth **118/118 twice** (333841, 342014 — the draft trip's advance is now
+a 422 naming the rule), approvals **123/123 twice** (349180, 383684). The API log held only the known noise:
+payroll's profile FK on every employee create (defect #23), the truth suite's deliberate duplicate policy
+version, and notification e-mails failing for want of SMTP.
 
 ### Lane 4 — Policy and authority (C1–C6, D-1, D-3, D-8, O-3, O-4, O-5, T-1, T-2, T-9, T-46, T-50, T-52)
 
@@ -1337,3 +1483,15 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   stage read from the route, and the designer fix with its round-trip tests. The build succeeded; no
   migration pending on UAT; approvals 123/123 twice, lifecycle 255/255 twice, truth 117/117 twice.
   Staged. Next: lane 3.
+- **2026-10-02, later** — The user committed slice 2b (`519418f00`). **Lane 3 source-checked**: every
+  finding holds; ten more found (N1–N10); split into 3a, 3b, 3c; the user took the recommendations as
+  D-14, D-15 and D-16, and asked whether travel posting can be switched on in UAT (D-17, open). Slice 3a
+  began with D-14's model change (three cancellation columns on the advance, the claim's review notes),
+  handed to the user to scaffold.
+- **2026-10-02, later** — The user scaffolded `TravelClosureMoneyChain`; rewritten as guarded SQL, proven
+  38/38 on a scratch copy of UAT (the proof found the kits' vacuous `expect` helper — fixed; earlier
+  migrations re-checked and hold). D-17 settled: UAT is the developer's local database, so the posted path is
+  proven on a scratch copy. **Slice 3a built**: the build succeeded, the posting catalogue tests 37/37, a
+  restore point taken, the API started on UAT applied the migration (verified in SQL);
+  `run-final-money.mjs` 121/121 twice, lifecycle 256/256 twice, truth 118/118 twice, approvals 123/123
+  twice. Staged. Next: slice 3b, the claim chain.

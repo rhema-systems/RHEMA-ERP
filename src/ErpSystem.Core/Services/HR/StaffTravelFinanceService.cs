@@ -5,6 +5,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Services.HR.Finance;
 using ErpSystem.Application.HR.Extensions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
@@ -290,7 +291,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         StaffTravelRequestGuards.RequireOpen(await RequireOwnedRequestAsync(createDto.StaffTravelRequestId), "an expense claim");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
-        entity.ClaimNumber = await GenerateClaimNumberAsync(cancellationToken);
+        entity.ClaimNumber = await GenerateClaimNumberAsync(tenantId, cancellationToken);
         entity.Status = TravelClaimStatus.Draft;
         entity.TotalClaimed = entity.Lines.Sum(l => l.AmountBaseCurrency);
 
@@ -578,14 +579,25 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
             .ToList();
     }
 
+    /// <summary>
+    /// Raises an advance for the trip's traveller (lane 3). Only on an approved trip or one under way — money after the
+    /// trip is a claim (D-16); never for someone who has not settled an overdue advance; nothing is owed until the
+    /// advance is disbursed.
+    /// </summary>
     public async Task<StaffTravelAdvanceDto> CreateAdvanceAsync(CreateStaffTravelAdvanceDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
-        StaffTravelRequestGuards.RequireOpen(await RequireOwnedRequestAsync(createDto.StaffTravelRequestId), "an advance");
+        var request = await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
+        StaffTravelRequestGuards.RequireOpen(request, "an advance");
+        RequireTripTakesAdvances(request, "An advance can be requested");
+        if (createDto.RequestedAmount <= 0m)
+            throw new InvalidOperationException("An advance must be for more than nothing.");
+        RequireDeadlineAfterTrip(createDto.SettlementDeadline, request);
+        await RefuseWhileOverdueAsync(tenantId, request.EmployeeId, cancellationToken);
 
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
-        entity.AdvanceNumber = await GenerateAdvanceNumberAsync(cancellationToken);
+        var entity = createDto.ToEntity(tenantId, createdByUserId, request.EmployeeId);
+        entity.AdvanceNumber = await GenerateAdvanceNumberAsync(tenantId, cancellationToken);
         entity.Status = TravelAdvanceStatus.Requested;
 
         await _advanceRepository.AddAsync(entity);
@@ -596,16 +608,25 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         return (reloaded ?? entity).ToDto();
     }
 
+    /// <summary>
+    /// A requested advance only (N3): it refused nothing but Disbursed, so a partly settled, settled, overdue or
+    /// written-off advance could be re-currencied and re-dated.
+    /// </summary>
     public async Task<StaffTravelAdvanceDto> UpdateAdvanceAsync(UpdateStaffTravelAdvanceDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAdvanceAsync(updateDto.Id);
 
-        if (entity.Status is TravelAdvanceStatus.Disbursed)
-            throw new InvalidOperationException("A disbursed advance cannot be edited.");
+        if (entity.Status != TravelAdvanceStatus.Requested)
+            throw new InvalidOperationException(
+                $"Advance {entity.AdvanceNumber} is {Describe(entity.Status)}; only a requested advance can be changed.");
         await GuardAdvanceNotPostedAsync(entity.Id, "Editing this advance", cancellationToken);
+        await _currency.RequireKnownCurrencyAsync(updateDto.CurrencyCode, cancellationToken);
+        if (updateDto.RequestedAmount <= 0m)
+            throw new InvalidOperationException("An advance must be for more than nothing.");
+        RequireDeadlineAfterTrip(updateDto.SettlementDeadline, await RequireOwnedRequestAsync(entity.StaffTravelRequestId));
 
         entity.UpdateEntity(updateDto, updatedByUserId);
-        entity.UnsettledAmount = (entity.ApprovedAmount ?? entity.RequestedAmount) - entity.SettledAmount;
+        entity.UnsettledAmount = 0m;   // nothing is owed before disbursement (B8)
         await _advanceRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         var reloaded = await _advanceRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
@@ -624,18 +645,34 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         return true;
     }
 
+    /// <summary>
+    /// Approves a requested advance (lane 3): never the traveller's own (D-2); more than nothing and no more than was
+    /// asked (B8, O-8 — a typed 0 approved GHS 0, and the dialog's "or less" bound nothing); and with every other
+    /// approved advance on the trip, within the trip's approved budget.
+    /// </summary>
     public async Task<bool> ApproveAdvanceAsync(ApproveStaffTravelAdvanceDto approveDto, Guid approverEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAdvanceAsync(approveDto.AdvanceId);
 
         if (entity.Status != TravelAdvanceStatus.Requested)
-            throw new InvalidOperationException("Only requested advances can be approved.");
+            throw new InvalidOperationException(
+                $"Advance {entity.AdvanceNumber} is {Describe(entity.Status)}; only a requested advance can be approved.");
+        RefuseOwnAdvance(entity, approverEmployeeId, "approve");
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        RequireTripTakesAdvances(request, "An advance can be approved");
+        if (approveDto.ApprovedAmount <= 0m)
+            throw new InvalidOperationException("Approve an amount above zero, or reject the advance.");
+        if (approveDto.ApprovedAmount > entity.RequestedAmount)
+            throw new InvalidOperationException(
+                $"{entity.CurrencyCode} {approveDto.ApprovedAmount:N2} is more than the {entity.CurrencyCode} {entity.RequestedAmount:N2} " +
+                "requested. Approve the amount requested or less.");
+        await RequireWithinTripBudgetAsync(request, entity, approveDto.ApprovedAmount, cancellationToken);
 
         entity.Status = TravelAdvanceStatus.Approved;
         entity.ApprovedById = approverEmployeeId;   // the caller, not a payload value
         entity.ApprovedAmount = approveDto.ApprovedAmount;
-        entity.UnsettledAmount = approveDto.ApprovedAmount - entity.SettledAmount;
-        entity.UpdatedBy = approverEmployeeId.ToString();
+        entity.UnsettledAmount = 0m;                // nothing is owed until it is disbursed (B8)
+        entity.UpdatedBy = _currentUserProvider.UserId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _advanceRepository.UpdateAsync(entity);
@@ -645,24 +682,91 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         return true;
     }
 
+    /// <summary>The desk refuses a requested advance, with a reason (lane 3, B8). Never the traveller's own.</summary>
+    public async Task<bool> RejectAdvanceAsync(Guid advanceId, string reason, Guid rejecterEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAdvanceAsync(advanceId);
+
+        if (entity.Status != TravelAdvanceStatus.Requested)
+            throw new InvalidOperationException(entity.Status == TravelAdvanceStatus.Approved
+                ? $"Advance {entity.AdvanceNumber} is already approved. Cancel it instead, with the reason."
+                : $"Advance {entity.AdvanceNumber} is {Describe(entity.Status)}; only a requested advance can be rejected.");
+        RefuseOwnAdvance(entity, rejecterEmployeeId, "reject");
+        var why = RequireReason(reason, "rejecting an advance");
+
+        var now = DateTime.UtcNow;
+        entity.Status = TravelAdvanceStatus.Rejected;
+        entity.RejectedAt = now;
+        entity.RejectedById = rejecterEmployeeId;
+        entity.RejectionReason = why;
+        entity.UnsettledAmount = 0m;
+        entity.UpdatedBy = _currentUserProvider.UserId.ToString();
+        entity.UpdatedAt = now;
+
+        await _advanceRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Travel advance rejected: {AdvanceNumber}", entity.AdvanceNumber);
+        return true;
+    }
+
+    /// <summary>
+    /// Withdraws an advance before any money goes out, with a reason (lane 3, B8). A trip's own cancel does the same
+    /// for each of its undisbursed advances (<see cref="StaffTravelAdvanceRules.ApplyCancellation"/>). Once money has
+    /// gone out, the way back is a claim, cash handed back or a write-off.
+    /// </summary>
+    public async Task<bool> CancelAdvanceAsync(Guid advanceId, string reason, Guid cancellerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAdvanceAsync(advanceId);
+
+        if (!StaffTravelAdvanceRules.IsUndisbursed(entity.Status))
+            throw new InvalidOperationException(StaffTravelAdvanceRules.IsCashOutStatus(entity.Status)
+                ? $"Advance {entity.AdvanceNumber} has been paid out. Settle it through an expense claim, record the cash " +
+                  "handed back, or write it off."
+                : $"Advance {entity.AdvanceNumber} is {Describe(entity.Status)}; there is nothing to cancel.");
+        var why = RequireReason(reason, "cancelling an advance");
+
+        StaffTravelAdvanceRules.ApplyCancellation(entity, why, cancellerEmployeeId, _currentUserProvider.UserId, DateTime.UtcNow);
+        await _advanceRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Travel advance cancelled: {AdvanceNumber}", entity.AdvanceNumber);
+        return true;
+    }
+
+    /// <summary>
+    /// Pays the advance out (lane 3): never to oneself, and never by the officer who approved it (D-2 — the person who
+    /// decides an amount does not also release it); only while the trip is approved or under way. What the traveller
+    /// owes starts here, and a settlement deadline is given when none was set (O-8 — without one the overdue sweep
+    /// never sees the advance).
+    /// </summary>
     public async Task<bool> DisburseAdvanceAsync(DisburseStaffTravelAdvanceDto disburseDto, Guid disburserEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAdvanceAsync(disburseDto.AdvanceId);
 
         if (entity.Status != TravelAdvanceStatus.Approved)
-            throw new InvalidOperationException("Only approved advances can be disbursed.");
+            throw new InvalidOperationException(
+                $"Advance {entity.AdvanceNumber} is {Describe(entity.Status)}; only an approved advance can be disbursed.");
+        RefuseOwnAdvance(entity, disburserEmployeeId, "disburse");
+        if (entity.ApprovedById == disburserEmployeeId)
+            throw new UnauthorizedAccessException(
+                $"You approved advance {entity.AdvanceNumber}, so another officer must disburse it — the person who approves " +
+                "money does not also pay it out.");
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        RequireTripTakesAdvances(request, "An advance can be disbursed");
+        var deadline = entity.SettlementDeadline
+            ?? StaffTravelAdvanceRules.DefaultDeadline(request.TravelEndDate, await ClaimWindowDaysAsync(request, cancellationToken));
 
         // Disbursement and its Finance receivable commit together (lane 8).
         await _financePosting.RunAsync(async ct =>
         {
+            var now = DateTime.UtcNow;
             entity.Status = TravelAdvanceStatus.Disbursed;
             entity.DisbursedById = disburserEmployeeId;   // the caller, not a payload value
-            // ...and the clock, not a payload value either. `DisburseStaffTravelAdvanceDto.DisbursedAt`
-            // let a caller state when the money went out — the F-09 fiction shape — which matters here
-            // because the settlement deadline and the overdue-settlement sweep are both driven by dates.
-            entity.DisbursedAt = DateTime.UtcNow;
-            entity.UpdatedBy = disburserEmployeeId.ToString();
-            entity.UpdatedAt = DateTime.UtcNow;
+            // ...and the clock, not a payload value either: the settlement deadline and the overdue sweep run off dates.
+            entity.DisbursedAt = now;
+            entity.SettlementDeadline = deadline;
+            entity.UnsettledAmount = (entity.ApprovedAmount ?? 0m) - entity.SettledAmount;
+            entity.UpdatedBy = _currentUserProvider.UserId.ToString();
+            entity.UpdatedAt = now;
 
             await _advanceRepository.UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync(ct);
@@ -672,6 +776,195 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
         _logger.LogInformation("Travel advance disbursed: {AdvanceNumber}", entity.AdvanceNumber);
         return true;
+    }
+
+    /// <summary>
+    /// Records unused cash the traveller handed back (lane 3, O-8): it settles the advance as a claim's recovery does
+    /// and posts through the same adapter (<c>TRAVEL_ADVANCE_REFUNDED</c>). One refund per advance — the posting
+    /// register keeps one row per event and advance, so a second would be answered as a duplicate and never reach
+    /// Finance. Never recorded by the traveller.
+    /// </summary>
+    public async Task<bool> RecordAdvanceRefundAsync(Guid advanceId, RefundStaffTravelAdvanceDto refundDto, Guid recorderEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAdvanceAsync(advanceId);
+
+        if (!StaffTravelAdvanceRules.IsCashOutStatus(entity.Status) || entity.UnsettledAmount <= 0m)
+            throw new InvalidOperationException(
+                $"Advance {entity.AdvanceNumber} is {Describe(entity.Status)} with nothing outstanding; there is no cash to hand back.");
+        if (entity.RefundedAt is not null)
+            throw new InvalidOperationException(
+                $"Advance {entity.AdvanceNumber} already records a refund of {entity.CurrencyCode} {entity.RefundedAmount:N2} " +
+                $"(ref {entity.RefundReference}). Settle what is left through a claim or write it off.");
+        RefuseOwnAdvance(entity, recorderEmployeeId, "record a refund on");
+        if (refundDto.Amount <= 0m)
+            throw new InvalidOperationException("Enter the amount handed back.");
+        if (refundDto.Amount > entity.UnsettledAmount)
+            throw new InvalidOperationException(
+                $"{entity.CurrencyCode} {refundDto.Amount:N2} is more than the {entity.CurrencyCode} {entity.UnsettledAmount:N2} " +
+                $"still outstanding on advance {entity.AdvanceNumber}.");
+        var reference = RequireReason(refundDto.Reference, "a refund's receipt reference");
+
+        await _financePosting.RunAsync(async ct =>
+        {
+            var now = DateTime.UtcNow;
+            entity.RefundedAmount = refundDto.Amount;
+            entity.RefundedAt = now;
+            entity.RefundedById = recorderEmployeeId;
+            entity.RefundReference = reference;
+            entity.SettledAmount += refundDto.Amount;
+            entity.UnsettledAmount = (entity.ApprovedAmount ?? 0m) - entity.SettledAmount;
+            entity.Status = StaffTravelAdvanceRules.SettlementStatus(entity, DateOnly.FromDateTime(now));
+            entity.UpdatedBy = _currentUserProvider.UserId.ToString();
+            entity.UpdatedAt = now;
+
+            await _advanceRepository.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            return HrFinancePostingCommandFactory.TravelAdvanceRefunded(entity);
+        }, _currentUserProvider.UserId, cancellationToken);
+
+        _logger.LogInformation("Travel advance refund recorded: {AdvanceNumber}", entity.AdvanceNumber);
+        return true;
+    }
+
+    /// <summary>
+    /// Writes off what is left on an advance with cash out — a travel administrator's verb, with a reason, never on
+    /// their own advance (lane 3, B8). The balance written off posts (<c>TRAVEL_ADVANCE_WRITTEN_OFF</c>), so Finance's
+    /// receivable falls with travel's; without it the ledger would keep an advance travel says is gone.
+    /// </summary>
+    public async Task<bool> WriteOffAdvanceAsync(Guid advanceId, string reason, Guid writerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAdvanceAsync(advanceId);
+
+        if (!StaffTravelAdvanceRules.IsCashOutStatus(entity.Status) || entity.UnsettledAmount <= 0m)
+            throw new InvalidOperationException(
+                $"Advance {entity.AdvanceNumber} is {Describe(entity.Status)} with nothing outstanding; there is nothing to write off.");
+        RefuseOwnAdvance(entity, writerEmployeeId, "write off");
+        var why = RequireReason(reason, "writing off an advance");
+
+        await _financePosting.RunAsync(async ct =>
+        {
+            var now = DateTime.UtcNow;
+            entity.Status = TravelAdvanceStatus.WrittenOff;
+            entity.WrittenOffAt = now;
+            entity.WrittenOffById = writerEmployeeId;
+            entity.WriteOffReason = why;
+            // What was written off stays readable as the approved amount less what was settled; nothing is owed now.
+            entity.UnsettledAmount = 0m;
+            entity.UpdatedBy = _currentUserProvider.UserId.ToString();
+            entity.UpdatedAt = now;
+
+            await _advanceRepository.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            return HrFinancePostingCommandFactory.TravelAdvanceWrittenOff(entity);
+        }, _currentUserProvider.UserId, cancellationToken);
+
+        _logger.LogInformation("Travel advance written off: {AdvanceNumber}", entity.AdvanceNumber);
+        return true;
+    }
+
+    // ---- Advance rules (lane 3) ----------------------------------------------
+
+    private static string Describe(TravelAdvanceStatus status) => status switch
+    {
+        TravelAdvanceStatus.PartiallySettled => "partly settled",
+        TravelAdvanceStatus.FullySettled => "fully settled",
+        TravelAdvanceStatus.WrittenOff => "written off",
+        _ => status.ToString().ToLowerInvariant(),
+    };
+
+    private static string RequireReason(string? text, string what)
+    {
+        var trimmed = text?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+            throw new InvalidOperationException($"Give the reason for {what}.");
+        return trimmed;
+    }
+
+    /// <summary>D-2: nobody decides, pays out, settles or writes off their own advance.</summary>
+    private static void RefuseOwnAdvance(StaffTravelAdvance advance, Guid callerEmployeeId, string verb)
+    {
+        if (advance.EmployeeId == callerEmployeeId)
+            throw new UnauthorizedAccessException(
+                $"You cannot {verb} your own travel advance ({advance.AdvanceNumber}). Another officer must do it.");
+    }
+
+    /// <summary>D-16: an advance is cash for a trip that is going ahead — approved, or under way.</summary>
+    private static void RequireTripTakesAdvances(StaffTravelRequest request, string what)
+    {
+        if (request.Status is StaffTravelRequestStatus.Approved or StaffTravelRequestStatus.InProgress)
+            return;
+
+        var finished = request.Status is StaffTravelRequestStatus.Completed or StaffTravelRequestStatus.Closed;
+        var status = System.Text.RegularExpressions.Regex.Replace(request.Status.ToString(), "(?<!^)([A-Z])", " $1").ToLowerInvariant();
+        throw new InvalidOperationException(
+            $"{what} only while its trip is approved or under way; travel request {request.RequestNumber} is {status}." +
+            (finished ? " Money spent on a finished trip is claimed, not advanced." : string.Empty));
+    }
+
+    private static void RequireDeadlineAfterTrip(DateOnly? deadline, StaffTravelRequest request)
+    {
+        if (deadline is DateOnly d && d < request.TravelEndDate)
+            throw new InvalidOperationException(
+                $"The settlement deadline ({d:d MMM yyyy}) falls before the trip ends ({request.TravelEndDate:d MMM yyyy}).");
+    }
+
+    /// <summary>O-8: no new advance for a traveller who still holds one past its deadline.</summary>
+    private async Task RefuseWhileOverdueAsync(Guid tenantId, Guid employeeId, CancellationToken cancellationToken)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var overdue = await _unitOfWork.Repository<StaffTravelAdvance>()
+            .GetQueryable(a => a.TenantId == tenantId && !a.IsDeleted && a.EmployeeId == employeeId
+                            && a.SettlementDeadline != null && a.SettlementDeadline < today)
+            .Where(StaffTravelAdvanceRules.CashOut)
+            .OrderBy(a => a.SettlementDeadline)
+            .Select(a => new { a.AdvanceNumber, a.CurrencyCode, a.UnsettledAmount, a.SettlementDeadline })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (overdue is not null)
+            throw new InvalidOperationException(
+                $"The traveller still holds advance {overdue.AdvanceNumber} ({overdue.CurrencyCode} {overdue.UnsettledAmount:N2}), " +
+                $"overdue since {overdue.SettlementDeadline:d MMM yyyy}. It must be settled — by a claim, cash handed back or a " +
+                "write-off — before another advance is raised.");
+    }
+
+    /// <summary>
+    /// O-8: the advances approved on a trip stay within its approved budget (the estimate, on a trip approved before
+    /// the budget was recorded). Each is converted into the trip's currency at Finance's rate.
+    /// </summary>
+    private async Task RequireWithinTripBudgetAsync(
+        StaffTravelRequest request, StaffTravelAdvance approving, decimal amount, CancellationToken cancellationToken)
+    {
+        var budget = request.ApprovedBudget ?? request.EstimatedTotalCost;
+        var budgetName = request.ApprovedBudget.HasValue ? "approved budget" : "estimate";
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var others = await _unitOfWork.Repository<StaffTravelAdvance>()
+            .GetQueryable(a => a.TenantId == request.TenantId && !a.IsDeleted
+                            && a.StaffTravelRequestId == request.Id && a.Id != approving.Id)
+            .Select(a => new { a.Status, a.ApprovedAmount, a.CurrencyCode })
+            .ToListAsync(cancellationToken);
+
+        var total = await _currency.ConvertBetweenAsync(amount, approving.CurrencyCode, request.CurrencyCode, today, cancellationToken);
+        foreach (var other in others.Where(o => StaffTravelAdvanceRules.CountsAgainstBudget(o.Status) && o.ApprovedAmount > 0m))
+            total += await _currency.ConvertBetweenAsync(other.ApprovedAmount!.Value, other.CurrencyCode, request.CurrencyCode, today, cancellationToken);
+        total = decimal.Round(total, 2, MidpointRounding.AwayFromZero);
+
+        if (total > budget)
+            throw new InvalidOperationException(
+                $"Approving this would bring the advances approved on {request.RequestNumber} to {request.CurrencyCode} {total:N2}, " +
+                $"above its {budgetName} of {request.CurrencyCode} {budget:N2}.");
+    }
+
+    /// <summary>The claim window of the approved policy the trip was checked against at submission, if any.</summary>
+    private async Task<int?> ClaimWindowDaysAsync(StaffTravelRequest request, CancellationToken cancellationToken)
+    {
+        if (request.PolicyId is not Guid policyId) return null;
+        return await _unitOfWork.Repository<StaffTravelPolicy>()
+            .GetQueryable(p => p.Id == policyId && p.TenantId == request.TenantId && !p.IsDeleted && p.ApprovedById != null)
+            .Select(p => (int?)p.ExpenseSubmissionDays)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     // ---- Per-diem rates ----------------------------------------------------
@@ -790,6 +1083,15 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     /// credits the advance receivable with what this method recovered, and posts the net payment —
     /// when a posting rule for the event is enabled; without one the claim is recorded Unposted.
     /// (This remark said the GL entries were out of scope until the travel final closure, lane 0.)</para>
+    ///
+    /// <para><b>An overdue advance is recovered too</b> (lane 3, N1): only Disbursed and PartiallySettled were, so
+    /// the day the sweep marked an advance overdue, a claim against it would have paid out in full.</para>
+    ///
+    /// <para><b>An advance in another currency</b> (lane 3, D-15) is recovered in its own currency at Finance's rate
+    /// on the day the claim is paid: the claim's figures are in the base currency, so the advance's outstanding
+    /// balance is valued at that rate, the smaller of the two is deducted, and the advance is settled by the same
+    /// amount in its own currency. Whatever a rate movement leaves on the advance is refunded or written off. It was
+    /// deducted unconverted — USD 1,000 outstanding took GHS 1,000 off a claim (B11).</para>
     /// </remarks>
     private async Task SettleLinkedAdvanceAsync(
         StaffTravelExpenseClaim claim, CancellationToken cancellationToken)
@@ -799,26 +1101,32 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         var advance = await _advanceRepository.GetByIdAsync(advanceId);
         if (advance == null || advance.TenantId != claim.TenantId) return;
 
-        // Only money that actually left the company can be recovered from a claim.
-        if (advance.Status is not (TravelAdvanceStatus.Disbursed or TravelAdvanceStatus.PartiallySettled))
-            return;
+        // Only money that actually left the company — and has not come back — can be recovered from a claim.
+        if (!StaffTravelAdvanceRules.IsCashOutStatus(advance.Status)) return;
 
         var outstanding = advance.UnsettledAmount;
         if (outstanding <= 0m) return;
 
         // Recover against what the claim is worth before any deduction, not after.
         var recoverable = claim.TotalApproved > 0m ? claim.TotalApproved : claim.TotalClaimed;
-        var deduction = Math.Min(outstanding, recoverable);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var rate = await _currency.GetRateToBaseAsync(advance.CurrencyCode, today, cancellationToken);
+        var outstandingInBase = decimal.Round(outstanding * rate, 2, MidpointRounding.AwayFromZero);
+
+        var deduction = Math.Min(outstandingInBase, recoverable);
         if (deduction <= 0m) return;
+        // The advance is settled in its own currency; all of it when the claim covers all of it, so no rounding
+        // remainder is left behind on an advance the claim fully recovered.
+        var settledInAdvanceCurrency = deduction == outstandingInBase
+            ? outstanding
+            : decimal.Round(deduction / rate, 2, MidpointRounding.AwayFromZero);
 
         claim.AdvanceDeducted = deduction;
         claim.NetPayable = ComputeNetPayable(recoverable, deduction);
 
-        advance.SettledAmount += deduction;
+        advance.SettledAmount += settledInAdvanceCurrency;
         advance.UnsettledAmount = (advance.ApprovedAmount ?? 0m) - advance.SettledAmount;
-        advance.Status = advance.UnsettledAmount <= 0m
-            ? TravelAdvanceStatus.FullySettled
-            : TravelAdvanceStatus.PartiallySettled;
+        advance.Status = StaffTravelAdvanceRules.SettlementStatus(advance, today);
         advance.UpdatedAt = DateTime.UtcNow;
 
         await _advanceRepository.UpdateAsync(advance);
@@ -861,19 +1169,42 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
-    private async Task<string> GenerateClaimNumberAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// The next claim number: the highest this tenant ever issued in the year, deleted claims included, plus one.
+    /// </summary>
+    /// <remarks>
+    /// B9 (lane 3): it counted LIVE claims across every tenant, so deleting a draft claim made the next create reissue
+    /// a number — a 500 against the unfiltered index until batch 1 filtered it, and since then a number used twice.
+    /// The shape of <c>StaffTravelRequestService.GenerateRequestNumberAsync</c>; not atomic under concurrent creates,
+    /// as that one records.
+    /// </remarks>
+    private async Task<string> GenerateClaimNumberAsync(Guid tenantId, CancellationToken cancellationToken)
     {
-        var year = DateTime.UtcNow.Year;
-        var count = await _claimRepository.CountByYearAsync(year);
-        return $"EXP-{year}-{(count + 1):D5}";
+        var prefix = $"EXP-{DateTime.UtcNow.Year}-";
+        var issued = await _claimRepository
+            .GetQueryableIncludingDeleted(c => c.TenantId == tenantId && c.ClaimNumber.StartsWith(prefix))
+            .Select(c => c.ClaimNumber)
+            .ToListAsync(cancellationToken);
+        return $"{prefix}{(HighestIssued(issued, prefix) + 1):D5}";
     }
 
-    private async Task<string> GenerateAdvanceNumberAsync(CancellationToken cancellationToken)
+    /// <summary>The next advance number — as <see cref="GenerateClaimNumberAsync"/>.</summary>
+    private async Task<string> GenerateAdvanceNumberAsync(Guid tenantId, CancellationToken cancellationToken)
     {
-        var year = DateTime.UtcNow.Year;
-        var count = await _advanceRepository.CountByYearAsync(year);
-        return $"ADV-{year}-{(count + 1):D5}";
+        var prefix = $"ADV-{DateTime.UtcNow.Year}-";
+        var issued = await _advanceRepository
+            .GetQueryableIncludingDeleted(a => a.TenantId == tenantId && a.AdvanceNumber.StartsWith(prefix))
+            .Select(a => a.AdvanceNumber)
+            .ToListAsync(cancellationToken);
+        return $"{prefix}{(HighestIssued(issued, prefix) + 1):D5}";
     }
+
+    /// <summary>A number that does not parse (a renamed test row, say) counts as 0, never as the highest.</summary>
+    private static int HighestIssued(IEnumerable<string> numbers, string prefix)
+        => numbers
+            .Select(number => int.TryParse(number[prefix.Length..], out var value) ? value : 0)
+            .DefaultIfEmpty(0)
+            .Max();
 }
 
 #endregion

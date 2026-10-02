@@ -18,6 +18,7 @@ import type {
   CreateStaffTravelAdvance,
   UpdateStaffTravelAdvance,
   ApproveStaffTravelAdvance,
+  RefundStaffTravelAdvance,
   TravelAdvanceStatus,
   StaffTravelPerDiemRate,
   CreateStaffTravelPerDiemRate,
@@ -186,7 +187,7 @@ class TravelFinanceService {
       `${this.baseUrl}/advances/employee/${employeeId}/outstanding`);
   }
 
-  /** Disbursed advances past their settlement deadline — the desk's chase list. */
+  /** Advances with cash still out past their settlement deadline — the desk's chase list. */
   getOverdueSettlements() {
     return apiService.get<StaffTravelAdvanceSummary[]>(
       `${this.baseUrl}/advances/overdue-settlements`);
@@ -211,10 +212,30 @@ class TravelFinanceService {
       `${this.baseUrl}/advances/${id}/approve`, { advanceId: id, approvedAmount });
   }
 
-  /** The disburser and the moment are both the server's; there is nothing else to send. */
+  /** The disburser and the moment are both the server's; there is nothing else to send. Never the approver (D-2). */
   disburseAdvance(id: string) {
     return apiService.post<{ message: string }>(
       `${this.baseUrl}/advances/${id}/disburse`, { advanceId: id });
+  }
+
+  /** A requested advance, refused with a reason. */
+  rejectAdvance(id: string, reason: string) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/advances/${id}/reject`, { reason });
+  }
+
+  /** A requested or approved advance withdrawn before any money goes out. */
+  cancelAdvance(id: string, reason: string) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/advances/${id}/cancel`, { reason });
+  }
+
+  /** Unused cash handed back — at most what is outstanding, once per advance. */
+  refundAdvance(id: string, payload: RefundStaffTravelAdvance) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/advances/${id}/refund`, payload);
+  }
+
+  /** Admin-gated: writes off what is left on an advance with cash out. */
+  writeOffAdvance(id: string, reason: string) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/advances/${id}/write-off`, { reason });
   }
 
   // ── Per-diem rates ─────────────────────────────────────────────────────────

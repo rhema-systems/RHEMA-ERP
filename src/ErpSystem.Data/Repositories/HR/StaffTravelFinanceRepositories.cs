@@ -101,11 +101,6 @@ public class StaffTravelExpenseClaimRepository : GenericRepository<StaffTravelEx
             .OrderBy(c => c.SubmittedAt)
             .ToListAsync();
     }
-
-    public async Task<int> CountByYearAsync(int year)
-    {
-        return await _dbSet.CountAsync(c => c.CreatedAt.Year == year);
-    }
 }
 
 #endregion
@@ -150,6 +145,10 @@ public class StaffTravelAdvanceRepository : GenericRepository<StaffTravelAdvance
             .Include(a => a.StaffTravelRequest)
             .Include(a => a.ApprovedBy)
             .Include(a => a.DisbursedBy)
+            .Include(a => a.RejectedBy)
+            .Include(a => a.CancelledBy)
+            .Include(a => a.WrittenOffBy)
+            .Include(a => a.RefundedBy)
             .FirstOrDefaultAsync(a => a.Id == id && a.TenantId == tenantId && !a.IsDeleted);
     }
 
@@ -161,10 +160,13 @@ public class StaffTravelAdvanceRepository : GenericRepository<StaffTravelAdvance
             .FirstOrDefaultAsync(a => a.AdvanceNumber == advanceNumber && !a.IsDeleted);
     }
 
+    // The summary carries the trip's number (lane 3), so every list read includes the request.
+
     public async Task<IEnumerable<StaffTravelAdvance>> GetAllWithDetailsAsync()
     {
         return await _dbSet
             .Include(a => a.Employee)
+            .Include(a => a.StaffTravelRequest)
             .Where(a => !a.IsDeleted)
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync();
@@ -174,6 +176,7 @@ public class StaffTravelAdvanceRepository : GenericRepository<StaffTravelAdvance
     {
         return await _dbSet
             .Include(a => a.Employee)
+            .Include(a => a.StaffTravelRequest)
             .Where(a => a.StaffTravelRequestId == requestId && !a.IsDeleted)
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync();
@@ -182,6 +185,8 @@ public class StaffTravelAdvanceRepository : GenericRepository<StaffTravelAdvance
     public async Task<IEnumerable<StaffTravelAdvance>> GetByEmployeeIdAsync(Guid employeeId)
     {
         return await _dbSet
+            .Include(a => a.Employee)
+            .Include(a => a.StaffTravelRequest)
             .Where(a => a.EmployeeId == employeeId && !a.IsDeleted)
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync();
@@ -191,33 +196,37 @@ public class StaffTravelAdvanceRepository : GenericRepository<StaffTravelAdvance
     {
         return await _dbSet
             .Include(a => a.Employee)
+            .Include(a => a.StaffTravelRequest)
             .Where(a => a.Status == status && !a.IsDeleted)
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync();
     }
 
+    /// <summary>Money the employee still holds (<see cref="ErpSystem.Core.Services.HR.StaffTravelAdvanceRules.CashOut"/>).
+    /// It read every row with something unsettled, so a requested advance — unsettled from creation until lane 3 —
+    /// counted as money owed.</summary>
     public async Task<IEnumerable<StaffTravelAdvance>> GetOutstandingByEmployeeAsync(Guid employeeId)
     {
         return await _dbSet
-            .Where(a => a.EmployeeId == employeeId && a.UnsettledAmount > 0 && !a.IsDeleted)
+            .Include(a => a.Employee)
+            .Include(a => a.StaffTravelRequest)
+            .Where(a => a.EmployeeId == employeeId && !a.IsDeleted)
+            .Where(ErpSystem.Core.Services.HR.StaffTravelAdvanceRules.CashOut)
             .OrderBy(a => a.SettlementDeadline)
             .ToListAsync();
     }
 
+    /// <summary>Cash out past its deadline, whether or not the sweep has written Overdue yet.</summary>
     public async Task<IEnumerable<StaffTravelAdvance>> GetOverdueSettlementsAsync()
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         return await _dbSet
             .Include(a => a.Employee)
-            .Where(a => !a.IsDeleted && a.UnsettledAmount > 0
-                     && a.SettlementDeadline != null && a.SettlementDeadline < today)
+            .Include(a => a.StaffTravelRequest)
+            .Where(a => !a.IsDeleted && a.SettlementDeadline != null && a.SettlementDeadline < today)
+            .Where(ErpSystem.Core.Services.HR.StaffTravelAdvanceRules.CashOut)
             .OrderBy(a => a.SettlementDeadline)
             .ToListAsync();
-    }
-
-    public async Task<int> CountByYearAsync(int year)
-    {
-        return await _dbSet.CountAsync(a => a.CreatedAt.Year == year);
     }
 }
 

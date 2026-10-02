@@ -896,6 +896,13 @@ public class StaffTravelExpenseClaim : TenantEntity
     [MaxLength(1000)]
     public string? PaymentVoidReason { get; set; }
 
+    // ---- Travel final closure, lane 3 migration ----
+
+    /// <summary>The reviewer's words on the outcome — required when a claim is returned, rejected or
+    /// partly approved, so the claimant is told why. The review's notes were accepted and dropped.</summary>
+    [MaxLength(2000)]
+    public string? ReviewNotes { get; set; }
+
     [ForeignKey(nameof(StaffTravelRequestId))]
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
 
@@ -1060,6 +1067,18 @@ public class StaffTravelAdvance : TenantEntity
     [MaxLength(100)]
     public string? RefundReference { get; set; }
 
+    // ---- Travel final closure, lane 3 migration ----
+
+    /// <summary>Withdrawn before any money went out (<see cref="TravelAdvanceStatus.Cancelled"/>): by the
+    /// desk, or with its trip when the trip is cancelled. Rejected is the desk refusing the request;
+    /// Cancelled is the advance no longer being wanted.</summary>
+    public DateTime? CancelledAt { get; set; }
+
+    public Guid? CancelledById { get; set; }                        // FK -> Employee
+
+    [MaxLength(1000)]
+    public string? CancellationReason { get; set; }
+
     [ForeignKey(nameof(StaffTravelRequestId))]
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
 
@@ -1077,6 +1096,9 @@ public class StaffTravelAdvance : TenantEntity
 
     [ForeignKey(nameof(WrittenOffById))]
     public virtual Employee? WrittenOffBy { get; set; }
+
+    [ForeignKey(nameof(CancelledById))]
+    public virtual Employee? CancelledBy { get; set; }
 
     [ForeignKey(nameof(RefundedById))]
     public virtual Employee? RefundedBy { get; set; }

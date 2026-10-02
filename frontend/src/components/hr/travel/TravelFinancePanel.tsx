@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -32,8 +32,10 @@ import { CurrencyField } from '@/components/hr/common/CurrencyPicker';
 import { useToast } from '@/hooks/use-toast';
 import { travelFinanceService } from '@/services/hr/travel-finance.service';
 import type { StaffTravelRequest } from '@/types/hr/travel';
-import type { StaffTravelBudget } from '@/types/hr/travel-finance';
+import type { StaffTravelAdvanceSummary, StaffTravelBudget } from '@/types/hr/travel-finance';
 import { TravelQueryError } from './TravelQueryError';
+import { TravelReasonDialog } from './TravelReasonDialog';
+import { useTravelAccess } from './useTravelAccess';
 import { fmtTravelMoney as fmtMoney } from './travel-format';
 
 const ADVANCE_TYPES = ['Cash', 'CorporateCardLoad', 'PettyCash', 'WireTransfer'] as const;
@@ -158,17 +160,17 @@ function BudgetDialog({
 // ── Advances ─────────────────────────────────────────────────────────────────
 
 const advanceSchema = z.object({
-  requestedAmount: z.coerce.number().min(0),
+  requestedAmount: z.coerce.number().positive('Enter the amount asked for'),
   currencyCode: z.string().min(1, 'Select a currency'),
   advanceType: z.enum(ADVANCE_TYPES),
   settlementDeadline: z.string().optional(),
 });
 
+/** The traveller is the trip's — the server sets it (lane 3, B3), so the dialog sends none. */
 function AdvanceDialog({
-  requestId, employeeId, open, onOpenChange, defaultCurrency,
+  requestId, open, onOpenChange, defaultCurrency,
 }: {
   requestId: string;
-  employeeId: string;
   open: boolean;
   onOpenChange: (v: boolean) => void;
   defaultCurrency: string;
@@ -187,7 +189,6 @@ function AdvanceDialog({
       return travelFinanceService.createAdvance({
         ...v,
         staffTravelRequestId: requestId,
-        employeeId,
         settlementDeadline: v.settlementDeadline || null,
       });
     },
@@ -207,7 +208,9 @@ function AdvanceDialog({
         <DialogHeader>
           <DialogTitle>Request a travel advance</DialogTitle>
           <DialogDescription>
-            Approving and disbursing are separate steps, each recorded against whoever did it.
+            Approving and paying out are separate steps by different officers — whoever approves an
+            advance cannot also pay it out, and nobody decides their own. Nothing is owed until it is
+            paid out.
           </DialogDescription>
         </DialogHeader>
         <form id="advance-form" className="space-y-4" onSubmit={form.handleSubmit((v) => save.mutate(v))}>
@@ -222,8 +225,10 @@ function AdvanceDialog({
             <DateField form={form} name="settlementDeadline" label="Settle by" />
           </FieldRow>
           <p className="text-xs text-muted-foreground">
-            The settlement deadline drives the chase list. An advance not settled by then appears on
-            overdue settlements and in the reminder sweep.
+            The settlement deadline drives the chase list: an advance not settled by then is marked
+            overdue, appears on overdue settlements and in the reminder sweep, and the traveller can
+            take no new advance until it is settled. Left empty, it is set when the advance is paid
+            out — the trip&apos;s end plus the policy&apos;s claim window, or 30 days.
           </p>
         </form>
         <DialogFooter>
@@ -250,15 +255,25 @@ function ApproveAdvanceDialog({
   const { toast } = useToast();
   const [amount, setAmount] = useState('');
 
+  // Prefilled with what was asked for whenever an advance is chosen. This sat in the Dialog's own
+  // onOpenChange, which Radix does not call when the parent opens it through `open` — so the box
+  // opened empty (lane 3).
+  useEffect(() => {
+    setAmount(advance ? String(advance.requestedAmount) : '');
+  }, [advance]);
+
+  const value = Number(amount);
+  const tooMuch = !!advance && value > advance.requestedAmount;
+  const valid = amount !== '' && value > 0 && !tooMuch;
+
   const approve = useMutation({
     mutationFn: () => {
       if (!advance) throw new Error('No advance selected');
-      return travelFinanceService.approveAdvance(advance.id, Number(amount));
+      return travelFinanceService.approveAdvance(advance.id, value);
     },
     onSuccess: async () => {
       toast({ title: 'Advance approved' });
       onOpenChange(false);
-      setAmount('');
       await queryClient.invalidateQueries({ queryKey: ['travel-advances', requestId] });
     },
     onError: (e: Error) =>
@@ -266,18 +281,14 @@ function ApproveAdvanceDialog({
   });
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        if (v && advance) setAmount(String(advance.requestedAmount));
-        onOpenChange(v);
-      }}
-    >
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Approve this advance</DialogTitle>
           <DialogDescription>
-            Approve the full amount requested, or less. You are recorded as the approver.
+            Approve the amount requested or less — never more, and never your own advance. You are
+            recorded as the approver, so another officer pays it out. With the trip&apos;s other approved
+            advances it must stay within the trip&apos;s approved budget.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
@@ -288,19 +299,23 @@ function ApproveAdvanceDialog({
             id="approved-amount"
             type="number"
             step="0.01"
+            min="0.01"
+            max={advance?.requestedAmount}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
           />
           {advance && (
-            <p className="text-xs text-muted-foreground">
-              {fmtMoney(advance.requestedAmount, advance.currencyCode)} was requested.
+            <p className={`text-xs ${tooMuch ? 'text-destructive' : 'text-muted-foreground'}`}>
+              {tooMuch
+                ? `More than the ${fmtMoney(advance.requestedAmount, advance.currencyCode)} requested.`
+                : `${fmtMoney(advance.requestedAmount, advance.currencyCode)} was requested.`}
             </p>
           )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button disabled={!amount || approve.isPending} onClick={() => approve.mutate()}>
+          <Button disabled={!valid || approve.isPending} onClick={() => approve.mutate()}>
             {approve.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Approve
           </Button>
@@ -309,6 +324,148 @@ function ApproveAdvanceDialog({
     </Dialog>
   );
 }
+
+/** Unused cash handed back (lane 3, O-8): at most what is outstanding, once per advance. */
+function RefundAdvanceDialog({
+  advance, requestId, onClose,
+}: {
+  advance: StaffTravelAdvanceSummary | null;
+  requestId: string;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [amount, setAmount] = useState('');
+  const [reference, setReference] = useState('');
+
+  useEffect(() => {
+    setAmount(advance ? String(advance.unsettledAmount) : '');
+    setReference('');
+  }, [advance]);
+
+  const value = Number(amount);
+  const tooMuch = !!advance && value > advance.unsettledAmount;
+  const valid = amount !== '' && value > 0 && !tooMuch && reference.trim().length > 0;
+
+  const refund = useMutation({
+    mutationFn: () => {
+      if (!advance) throw new Error('No advance selected');
+      return travelFinanceService.refundAdvance(advance.id, { amount: value, reference: reference.trim() });
+    },
+    onSuccess: async () => {
+      toast({ title: 'Refund recorded' });
+      onClose();
+      await queryClient.invalidateQueries({ queryKey: ['travel-advances', requestId] });
+      await queryClient.invalidateQueries({ queryKey: ['travel-overdue-settlements'] });
+    },
+    onError: (e: Error) =>
+      toast({ variant: 'destructive', title: 'Could not record the refund', description: e.message }),
+  });
+
+  return (
+    <Dialog open={!!advance} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Record cash handed back</DialogTitle>
+          <DialogDescription>
+            Unused advance cash the traveller returned. It settles the advance as a claim would, and
+            posts to Finance when travel posting is switched on. One refund per advance — settle
+            anything left through a claim, or write it off.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <label className="text-sm font-medium" htmlFor="refund-amount">Amount handed back</label>
+            <input
+              id="refund-amount"
+              type="number"
+              step="0.01"
+              min="0.01"
+              max={advance?.unsettledAmount}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+            {advance && (
+              <p className={`text-xs ${tooMuch ? 'text-destructive' : 'text-muted-foreground'}`}>
+                {tooMuch ? 'More than is outstanding. ' : ''}
+                {fmtMoney(advance.unsettledAmount, advance.currencyCode)} is outstanding.
+              </p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium" htmlFor="refund-reference">Receipt or bank reference</label>
+            <input
+              id="refund-reference"
+              maxLength={100}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={!valid || refund.isPending} onClick={() => refund.mutate()}>
+            {refund.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Record refund
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Paying an advance out is money leaving: confirmed, and never by the officer who approved it (D-2). */
+function DisburseAdvanceDialog({
+  advance, requestId, onClose,
+}: {
+  advance: StaffTravelAdvanceSummary | null;
+  requestId: string;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const disburse = useMutation({
+    mutationFn: () => {
+      if (!advance) throw new Error('No advance selected');
+      return travelFinanceService.disburseAdvance(advance.id);
+    },
+    onSuccess: async () => {
+      toast({ title: 'Advance disbursed' });
+      onClose();
+      await queryClient.invalidateQueries({ queryKey: ['travel-advances', requestId] });
+    },
+    onError: (e: Error) =>
+      toast({ variant: 'destructive', title: 'Could not disburse', description: e.message }),
+  });
+
+  return (
+    <Dialog open={!!advance} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Pay out advance {advance?.advanceNumber}</DialogTitle>
+          <DialogDescription>
+            {advance && <>{fmtMoney(advance.approvedAmount, advance.currencyCode)} goes to {advance.employeeName}. </>}
+            From now the traveller owes it until a claim, cash handed back or a write-off settles it.
+            You are recorded as the officer who paid it out — it cannot be the officer who approved it.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={disburse.isPending} onClick={() => disburse.mutate()}>
+            {disburse.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Pay out
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const isCashOut = (a: StaffTravelAdvanceSummary) =>
+  ['Disbursed', 'PartiallySettled', 'Overdue'].includes(a.status) && a.unsettledAmount > 0;
 
 // ── The panel ────────────────────────────────────────────────────────────────
 
@@ -327,17 +484,27 @@ function ApproveAdvanceDialog({
  *
  * Finance posting (since 2026-09-20): a disbursed advance, an approved claim and a paid claim each
  * post a journal through HR's posting adapter when a posting rule for the event is enabled under
- * HR Settings → Finance posting; without one the record is kept Unposted. The Finance column on the
- * advances shows which. (This remark said "no GL posting exists" until the travel final closure.)
+ * HR Settings → Finance posting; without one the record is kept Unposted. Since lane 3 so do cash
+ * handed back and a write-off. The Finance column on the advances shows which. (This remark said
+ * "no GL posting exists" until the travel final closure.)
  */
 export function TravelFinancePanel({ request }: { request: StaffTravelRequest }) {
   const requestId = request.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  // Lane 3, N8: every money button rendered for any reader and answered 403. Write for the desk's
+  // verbs; Admin for a write-off.
+  const access = useTravelAccess();
   const [showBudget, setShowBudget] = useState(false);
   const [showAdvance, setShowAdvance] = useState(false);
   const [approving, setApproving] = useState<
     { id: string; requestedAmount: number; currencyCode: string } | null>(null);
+  const [disbursing, setDisbursing] = useState<StaffTravelAdvanceSummary | null>(null);
+  const [refunding, setRefunding] = useState<StaffTravelAdvanceSummary | null>(null);
+  const [deciding, setDeciding] = useState<
+    { advance: StaffTravelAdvanceSummary; verb: 'reject' | 'cancel' | 'write-off' } | null>(null);
+  // D-16: an advance is cash for a trip that is going ahead.
+  const tripTakesAdvances = request.status === 'Approved' || request.status === 'InProgress';
 
   // ⚠ The currency lists are read through `api/hr/currencies` inside each CurrencyField. This panel
   // read `api/finance/currencies`, which answers 403 without a Finance permission, so no budget or
@@ -358,14 +525,18 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
     queryFn: () => travelFinanceService.getClaimsByRequest(requestId),
   });
 
-  const disburse = useMutation({
-    mutationFn: (id: string) => travelFinanceService.disburseAdvance(id),
-    onSuccess: async () => {
-      toast({ title: 'Advance disbursed' });
+  const decide = useMutation({
+    mutationFn: ({ id, verb, reason }: { id: string; verb: 'reject' | 'cancel' | 'write-off'; reason: string }) =>
+      verb === 'reject' ? travelFinanceService.rejectAdvance(id, reason)
+        : verb === 'cancel' ? travelFinanceService.cancelAdvance(id, reason)
+          : travelFinanceService.writeOffAdvance(id, reason),
+    onSuccess: async (_, { verb }) => {
+      toast({ title: verb === 'reject' ? 'Advance rejected' : verb === 'cancel' ? 'Advance cancelled' : 'Advance written off' });
       await queryClient.invalidateQueries({ queryKey: ['travel-advances', requestId] });
+      await queryClient.invalidateQueries({ queryKey: ['travel-overdue-settlements'] });
     },
     onError: (e: Error) =>
-      toast({ variant: 'destructive', title: 'Could not disburse', description: e.message }),
+      toast({ variant: 'destructive', title: 'Could not record that', description: e.message }),
   });
 
   if (isLoading) {
@@ -392,9 +563,11 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
             <TrendingUp className="h-4 w-4" />
             Budget
           </CardTitle>
-          <Button variant="outline" size="sm" onClick={() => setShowBudget(true)}>
-            {budget ? 'Edit budget' : <><Plus className="mr-2 h-4 w-4" /> Set a budget</>}
-          </Button>
+          {access.canWrite && (
+            <Button variant="outline" size="sm" onClick={() => setShowBudget(true)}>
+              {budget ? 'Edit budget' : <><Plus className="mr-2 h-4 w-4" /> Set a budget</>}
+            </Button>
+          )}
         </CardHeader>
         <CardContent>
           {budgetFailed && !budget ? (
@@ -472,9 +645,17 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
             <HandCoins className="h-4 w-4" />
             Advances
           </CardTitle>
-          <Button variant="outline" size="sm" onClick={() => setShowAdvance(true)}>
-            <Plus className="mr-2 h-4 w-4" /> Request an advance
-          </Button>
+          {access.canWrite && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!tripTakesAdvances}
+              title={tripTakesAdvances ? undefined : 'An advance is for an approved trip or one under way'}
+              onClick={() => setShowAdvance(true)}
+            >
+              <Plus className="mr-2 h-4 w-4" /> Request an advance
+            </Button>
+          )}
         </CardHeader>
         <CardContent className="p-0">
           {advancesFailed && !advances ? (
@@ -519,31 +700,60 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
                     <TableCell className="whitespace-nowrap">
                       {fmtDate(a.settlementDeadline)}
                     </TableCell>
-                    <TableCell><StatusBadge status={humanize(a.statusName)} /></TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <StatusBadge status={humanize(a.statusName)} />
+                        {/* Past its deadline before the nightly sweep has written Overdue. */}
+                        {a.isOverdue && a.status !== 'Overdue' && <StatusBadge status="Overdue" />}
+                      </div>
+                      {a.outcomeReason && (
+                        <p className="mt-1 max-w-[16rem] text-xs text-muted-foreground">{a.outcomeReason}</p>
+                      )}
+                      {a.refundedAmount > 0 && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {fmtMoney(a.refundedAmount, a.currencyCode)} handed back
+                        </p>
+                      )}
+                    </TableCell>
                     <TableCell><FinancePostingInlineStatus sourceDocumentId={a.id} /></TableCell>
                     <TableCell>
-                      <div className="flex gap-1">
-                        {a.status === 'Requested' && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setApproving({
-                              id: a.id,
-                              requestedAmount: a.requestedAmount,
-                              currencyCode: a.currencyCode,
-                            })}
-                          >
-                            Approve
+                      <div className="flex flex-wrap gap-1">
+                        {access.canWrite && a.status === 'Requested' && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setApproving({
+                                id: a.id,
+                                requestedAmount: a.requestedAmount,
+                                currencyCode: a.currencyCode,
+                              })}
+                            >
+                              Approve
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => setDeciding({ advance: a, verb: 'reject' })}>
+                              Reject
+                            </Button>
+                          </>
+                        )}
+                        {access.canWrite && a.status === 'Approved' && (
+                          <Button variant="ghost" size="sm" onClick={() => setDisbursing(a)}>
+                            Pay out
                           </Button>
                         )}
-                        {a.status === 'Approved' && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={disburse.isPending}
-                            onClick={() => disburse.mutate(a.id)}
-                          >
-                            Disburse
+                        {access.canWrite && (a.status === 'Requested' || a.status === 'Approved') && (
+                          <Button variant="ghost" size="sm" onClick={() => setDeciding({ advance: a, verb: 'cancel' })}>
+                            Cancel
+                          </Button>
+                        )}
+                        {access.canWrite && isCashOut(a) && a.refundedAmount === 0 && (
+                          <Button variant="ghost" size="sm" onClick={() => setRefunding(a)}>
+                            Cash back
+                          </Button>
+                        )}
+                        {access.canAdmin && isCashOut(a) && (
+                          <Button variant="ghost" size="sm" onClick={() => setDeciding({ advance: a, verb: 'write-off' })}>
+                            Write off
                           </Button>
                         )}
                       </div>
@@ -563,11 +773,13 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
             <Receipt className="h-4 w-4" />
             Expense claims
           </CardTitle>
-          <Button variant="outline" size="sm" asChild>
-            <Link href={`/hr/travel/claims/new?requestId=${requestId}`}>
-              <Plus className="mr-2 h-4 w-4" /> File a claim
-            </Link>
-          </Button>
+          {access.canWrite && (
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/hr/travel/claims/new?requestId=${requestId}`}>
+                <Plus className="mr-2 h-4 w-4" /> File a claim
+              </Link>
+            </Button>
+          )}
         </CardHeader>
         <CardContent className="p-0">
           {claimsFailed && !claims ? (
@@ -626,7 +838,6 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
       />
       <AdvanceDialog
         requestId={requestId}
-        employeeId={request.employeeId}
         open={showAdvance}
         onOpenChange={setShowAdvance}
         defaultCurrency={request.currencyCode}
@@ -636,6 +847,33 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
         requestId={requestId}
         open={!!approving}
         onOpenChange={(v) => !v && setApproving(null)}
+      />
+      <DisburseAdvanceDialog advance={disbursing} requestId={requestId} onClose={() => setDisbursing(null)} />
+      <RefundAdvanceDialog advance={refunding} requestId={requestId} onClose={() => setRefunding(null)} />
+      <TravelReasonDialog
+        open={!!deciding}
+        onOpenChange={(v) => !v && setDeciding(null)}
+        title={
+          deciding?.verb === 'reject' ? `Reject advance ${deciding.advance.advanceNumber}`
+            : deciding?.verb === 'cancel' ? `Cancel advance ${deciding?.advance.advanceNumber}`
+              : `Write off advance ${deciding?.advance.advanceNumber ?? ''}`
+        }
+        description={
+          deciding?.verb === 'reject'
+            ? 'The request for cash is refused. The traveller owes nothing; the reason is kept on the advance.'
+            : deciding?.verb === 'cancel'
+              ? 'Withdrawn before any money goes out — the advance is no longer wanted. The reason is kept on the advance.'
+              : deciding
+                ? `${fmtMoney(deciding.advance.unsettledAmount, deciding.advance.currencyCode)} the traveller still holds is given up. It posts to Finance as a write-off when travel posting is switched on. You cannot write off your own advance.`
+                : ''
+        }
+        confirmLabel={deciding?.verb === 'reject' ? 'Reject' : deciding?.verb === 'cancel' ? 'Cancel the advance' : 'Write off'}
+        destructive
+        pending={decide.isPending}
+        onConfirm={(reason) => {
+          if (!deciding) return Promise.resolve();
+          return decide.mutateAsync({ id: deciding.advance.id, verb: deciding.verb, reason });
+        }}
       />
     </div>
   );

@@ -1483,6 +1483,17 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         entity.UpdatedBy = cancelledByUserId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
 
+        // Lane 3, N2: the trip's advances no money has left for are withdrawn with it. They stayed live on the
+        // cancelled trip and could still be approved and paid out. (Cash out was refused above.)
+        var undisbursed = await _unitOfWork.Repository<StaffTravelAdvance>()
+            .GetQueryable(a => a.TenantId == entity.TenantId && a.StaffTravelRequestId == entity.Id
+                            && (a.Status == TravelAdvanceStatus.Requested || a.Status == TravelAdvanceStatus.Approved))
+            .ToListAsync(cancellationToken);
+        var advanceReason = $"The trip was cancelled: {reason}";
+        if (advanceReason.Length > 1000) advanceReason = advanceReason[..1000];
+        foreach (var advance in undisbursed)
+            StaffTravelAdvanceRules.ApplyCancellation(advance, advanceReason, cancelDto.CancelledById, cancelledByUserId, DateTime.UtcNow);
+
         await _requestRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -1541,17 +1552,14 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     }
 
     /// <summary>An advance whose cash is still with the traveller — paid out and not settled — blocks the caller.</summary>
-    /// <remarks>Lane 3 adds the way to record cash handed back; until then a claim settles an advance.</remarks>
+    /// <remarks>"Cash out" is <see cref="StaffTravelAdvanceRules.CashOut"/> (lane 3), shared with claim recovery, the
+    /// separation clearance and the sweep.</remarks>
     private async Task RequireNoAdvanceCashOutAsync(
         StaffTravelRequest entity, string action, CancellationToken cancellationToken)
     {
         var outstanding = await _unitOfWork.Repository<StaffTravelAdvance>().GetQueryable()
-            .Where(a => a.TenantId == entity.TenantId
-                     && a.StaffTravelRequestId == entity.Id
-                     && (a.Status == TravelAdvanceStatus.Disbursed
-                         || a.Status == TravelAdvanceStatus.PartiallySettled
-                         || a.Status == TravelAdvanceStatus.Overdue)
-                     && a.UnsettledAmount > 0m)
+            .Where(a => a.TenantId == entity.TenantId && a.StaffTravelRequestId == entity.Id)
+            .Where(StaffTravelAdvanceRules.CashOut)
             .OrderBy(a => a.AdvanceNumber)
             .Select(a => new { a.AdvanceNumber, a.CurrencyCode, a.UnsettledAmount })
             .FirstOrDefaultAsync(cancellationToken);
@@ -1559,7 +1567,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         if (outstanding is not null)
             throw new InvalidOperationException(
                 $"Advance {outstanding.AdvanceNumber} still has {outstanding.CurrencyCode} {outstanding.UnsettledAmount:N2} " +
-                $"with the traveller. Settle it first — through an expense claim — before {action}.");
+                $"with the traveller. Settle it first — through an expense claim, by recording the cash handed back, or by " +
+                $"writing it off — before {action}.");
     }
 
     /// <summary>An approver sends a submitted request back to its requester to change (D-6).</summary>

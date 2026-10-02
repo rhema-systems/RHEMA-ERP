@@ -60,6 +60,11 @@ public interface IStaffTravelFinanceService
     /// <summary>DisburseAdvance. <paramref name="disburserEmployeeId"/> is the caller's employee record and
     /// overrides any <c>DisbursedById</c> on the payload — who acted is identity, not an input.</summary>
     Task<bool> DisburseAdvanceAsync(DisburseStaffTravelAdvanceDto disburseDto, Guid disburserEmployeeId, CancellationToken cancellationToken = default);
+    // Lane 3: the verbs an advance lacked. Each actor is the caller's employee record.
+    Task<bool> RejectAdvanceAsync(Guid advanceId, string reason, Guid rejecterEmployeeId, CancellationToken cancellationToken = default);
+    Task<bool> CancelAdvanceAsync(Guid advanceId, string reason, Guid cancellerEmployeeId, CancellationToken cancellationToken = default);
+    Task<bool> RecordAdvanceRefundAsync(Guid advanceId, RefundStaffTravelAdvanceDto refundDto, Guid recorderEmployeeId, CancellationToken cancellationToken = default);
+    Task<bool> WriteOffAdvanceAsync(Guid advanceId, string reason, Guid writerEmployeeId, CancellationToken cancellationToken = default);
 
     // Per-diem rates
     Task<StaffTravelPerDiemRateDto> GetPerDiemRateByIdAsync(Guid id, CancellationToken cancellationToken = default);

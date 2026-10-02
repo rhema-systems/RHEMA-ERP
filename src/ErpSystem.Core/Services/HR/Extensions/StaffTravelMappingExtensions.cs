@@ -1351,8 +1351,33 @@ public static class StaffTravelMappingExtensions
             ApprovedByName = entity.ApprovedBy?.FullName,
             DisbursedById = entity.DisbursedById,
             DisbursedByName = entity.DisbursedBy?.FullName,
+            RejectedAt = entity.RejectedAt,
+            RejectedByName = entity.RejectedBy?.FullName,
+            RejectionReason = entity.RejectionReason,
+            CancelledAt = entity.CancelledAt,
+            CancelledByName = entity.CancelledBy?.FullName,
+            CancellationReason = entity.CancellationReason,
+            WrittenOffAt = entity.WrittenOffAt,
+            WrittenOffByName = entity.WrittenOffBy?.FullName,
+            WriteOffReason = entity.WriteOffReason,
+            WrittenOffAmount = entity.Status == TravelAdvanceStatus.WrittenOff
+                ? (entity.ApprovedAmount ?? 0m) - entity.SettledAmount
+                : null,
+            RefundedAmount = entity.RefundedAmount,
+            RefundedAt = entity.RefundedAt,
+            RefundedByName = entity.RefundedBy?.FullName,
+            RefundReference = entity.RefundReference,
+            IsOverdue = IsAdvanceOverdue(entity),
         };
     }
+
+    /// <summary>Cash out past its deadline, read from the figures rather than the stored status, which the
+    /// nightly sweep writes (<see cref="ErpSystem.Core.Services.HR.StaffTravelAdvanceRules"/>).</summary>
+    private static bool IsAdvanceOverdue(StaffTravelAdvance entity)
+        => ErpSystem.Core.Services.HR.StaffTravelAdvanceRules.IsCashOutStatus(entity.Status)
+           && entity.UnsettledAmount > 0m
+           && entity.SettlementDeadline is DateOnly deadline
+           && deadline < DateOnly.FromDateTime(DateTime.UtcNow);
 
     public static StaffTravelAdvanceSummaryDto ToSummaryDto(this StaffTravelAdvance entity)
     {
@@ -1360,6 +1385,8 @@ public static class StaffTravelMappingExtensions
         {
             Id = entity.Id,
             AdvanceNumber = entity.AdvanceNumber,
+            StaffTravelRequestId = entity.StaffTravelRequestId,
+            RequestNumber = entity.StaffTravelRequest?.RequestNumber,
             EmployeeId = entity.EmployeeId,
             EmployeeName = entity.Employee?.FullName ?? string.Empty,
             RequestedAmount = entity.RequestedAmount,
@@ -1367,24 +1394,37 @@ public static class StaffTravelMappingExtensions
             CurrencyCode = entity.CurrencyCode,
             AdvanceType = entity.AdvanceType,
             Status = entity.Status,
+            SettledAmount = entity.SettledAmount,
             UnsettledAmount = entity.UnsettledAmount,
+            RefundedAmount = entity.RefundedAmount,
             SettlementDeadline = entity.SettlementDeadline,
+            DisbursedAt = entity.DisbursedAt,
+            IsOverdue = IsAdvanceOverdue(entity),
+            OutcomeReason = entity.Status switch
+            {
+                TravelAdvanceStatus.Rejected => entity.RejectionReason,
+                TravelAdvanceStatus.Cancelled => entity.CancellationReason,
+                TravelAdvanceStatus.WrittenOff => entity.WriteOffReason,
+                _ => null,
+            },
         };
     }
 
-    public static StaffTravelAdvance ToEntity(this CreateStaffTravelAdvanceDto dto, Guid tenantId, Guid userId)
+    /// <summary>The traveller (<paramref name="employeeId"/>) is the trip's, passed in by the service; nothing is
+    /// owed until the advance is disbursed (lane 3, B3 and B8).</summary>
+    public static StaffTravelAdvance ToEntity(this CreateStaffTravelAdvanceDto dto, Guid tenantId, Guid userId, Guid employeeId)
     {
         return new StaffTravelAdvance
         {
             TenantId = tenantId,
             StaffTravelRequestId = dto.StaffTravelRequestId,
-            EmployeeId = dto.EmployeeId,
+            EmployeeId = employeeId,
             RequestedAmount = dto.RequestedAmount,
             CurrencyCode = dto.CurrencyCode,
             AdvanceType = dto.AdvanceType,
             Status = TravelAdvanceStatus.Requested,
             SettlementDeadline = dto.SettlementDeadline,
-            UnsettledAmount = dto.RequestedAmount,
+            UnsettledAmount = 0m,
             CreatedBy = userId.ToString(),
         };
     }
@@ -1392,11 +1432,9 @@ public static class StaffTravelMappingExtensions
     public static void UpdateEntity(this StaffTravelAdvance entity, UpdateStaffTravelAdvanceDto dto, Guid userId)
     {
         entity.RequestedAmount = dto.RequestedAmount;
-        // ⚠ ApprovedAmount is deliberately NOT mapped. Approving an advance is `ApproveAdvanceAsync`,
-        // which stamps ApprovedById from the token and checks the status; a plain PUT that could set
-        // the approved amount was a way round both, leaving an advance with money approved and no
-        // approver on record — and UnsettledAmount is computed off it. The area-5 "DTO owns too
-        // much" shape; slice 4 closed the actor half and this is the amount half.
+        // ⚠ No approved amount: approving an advance is `ApproveAdvanceAsync`, which stamps the approver
+        // from the token and checks the status (the DTO lost the ignored field in lane 3). An edit is a
+        // Requested advance's only, so nothing it changes has been approved, paid or settled.
         entity.CurrencyCode = dto.CurrencyCode;
         entity.AdvanceType = dto.AdvanceType;
         entity.SettlementDeadline = dto.SettlementDeadline;

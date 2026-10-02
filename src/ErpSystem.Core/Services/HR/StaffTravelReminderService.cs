@@ -88,6 +88,8 @@ public class StaffTravelReminderService : IStaffTravelReminderService
         await _unitOfWork.Repository<StaffTravelReminderRun>().AddAsync(run);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        var markedOverdue = await MarkOverdueAdvancesAsync(tenantId, DateOnly.FromDateTime(now), cancellationToken);
+
         var candidates = (await FindCandidatesAsync(tenantId, now, cancellationToken)).ToList();
 
         var keys = candidates.Select(c => c.DedupeKey).ToList();
@@ -168,7 +170,37 @@ public class StaffTravelReminderService : IStaffTravelReminderService
             Trigger = run.Trigger,
             RemindersQueued = fresh.Count,
             AlreadySent = candidates.Count - fresh.Count,
+            AdvancesMarkedOverdue = markedOverdue,
         };
+    }
+
+    /// <summary>
+    /// Gives <see cref="TravelAdvanceStatus.Overdue"/> its writer (travel final closure, lane 3; D-6): an advance with
+    /// cash out whose settlement deadline has passed. Every reader of cash out accepts Overdue
+    /// (<see cref="StaffTravelAdvanceRules.CashOut"/>), so marking one changes no money — it is what the register and
+    /// the desk's overdue queue show, and it bars the traveller from a new advance until it is settled.
+    /// </summary>
+    private async Task<int> MarkOverdueAdvancesAsync(Guid tenantId, DateOnly today, CancellationToken cancellationToken)
+    {
+        var due = await _unitOfWork.Repository<StaffTravelAdvance>()
+            .GetQueryable(a => a.TenantId == tenantId && !a.IsDeleted
+                            && a.Status != TravelAdvanceStatus.Overdue
+                            && a.SettlementDeadline != null && a.SettlementDeadline < today)
+            .Where(StaffTravelAdvanceRules.CashOut)
+            .ToListAsync(cancellationToken);
+        if (due.Count == 0) return 0;
+
+        var at = DateTime.UtcNow;
+        foreach (var advance in due)
+        {
+            advance.Status = TravelAdvanceStatus.Overdue;
+            advance.UpdatedAt = at;
+            advance.UpdatedBy = "staff-travel-sweep";
+        }
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Travel reminder sweep marked {Count} advance(s) overdue for tenant {TenantId}", due.Count, tenantId);
+        return due.Count;
     }
 
     public async Task<IEnumerable<StaffTravelReminderPreviewItemDto>> PreviewSweepAsync(
@@ -297,15 +329,15 @@ public class StaffTravelReminderService : IStaffTravelReminderService
 
         // 3. Advances past their settlement deadline with money still outstanding.
         //    Slice 4 made UnsettledAmount mean something; before that every disbursed advance
-        //    would have appeared here for ever.
+        //    would have appeared here for ever. Cash out includes Overdue (lane 3, N1): this named
+        //    only Disbursed and PartiallySettled, so the reminder would have stopped the day the
+        //    sweep above marked the advance overdue.
         var advances = await _unitOfWork.Repository<StaffTravelAdvance>()
             .GetQueryable(a => a.TenantId == tenantId && !a.IsDeleted
-                            && a.UnsettledAmount > 0m
                             && a.SettlementDeadline != null
                             && a.SettlementDeadline < today
-                            && a.SettlementDeadline >= backlogFloor
-                            && (a.Status == TravelAdvanceStatus.Disbursed
-                                || a.Status == TravelAdvanceStatus.PartiallySettled))
+                            && a.SettlementDeadline >= backlogFloor)
+            .Where(StaffTravelAdvanceRules.CashOut)
             .Select(a => new { a.Id, a.AdvanceNumber, a.SettlementDeadline, a.StaffTravelRequestId })
             .ToListAsync(cancellationToken);
         foreach (var a in advances)

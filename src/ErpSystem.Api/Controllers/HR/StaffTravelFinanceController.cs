@@ -311,6 +311,58 @@ public class StaffTravelFinanceController : HrControllerBase
         return Ok(new { message = "Advance disbursed." });
     }
 
+    // Lane 3: an advance's other verbs. Each records an Employee actor, so each needs the caller's employee link;
+    // the service refuses the traveller on their own advance (D-2).
+
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("advances/{id:guid}/reject")]
+    public async Task<IActionResult> RejectAdvance(Guid id, [FromBody] DecideStaffTravelAdvanceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Rejecting a travel advance") is { } contextError) return contextError;
+
+        await _service.RejectAdvanceAsync(id, dto.Reason, employeeId);
+        return Ok(new { message = "Advance rejected." });
+    }
+
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("advances/{id:guid}/cancel")]
+    public async Task<IActionResult> CancelAdvance(Guid id, [FromBody] DecideStaffTravelAdvanceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Cancelling a travel advance") is { } contextError) return contextError;
+
+        await _service.CancelAdvanceAsync(id, dto.Reason, employeeId);
+        return Ok(new { message = "Advance cancelled." });
+    }
+
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("advances/{id:guid}/refund")]
+    public async Task<IActionResult> RecordAdvanceRefund(Guid id, [FromBody] RefundStaffTravelAdvanceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Recording cash handed back on a travel advance") is { } contextError) return contextError;
+
+        await _service.RecordAdvanceRefundAsync(id, dto, employeeId);
+        return Ok(new { message = "Refund recorded." });
+    }
+
+    /// <summary>A travel administrator's verb: what is written off is money the organisation gives up.</summary>
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
+    [HttpPost("advances/{id:guid}/write-off")]
+    public async Task<IActionResult> WriteOffAdvance(Guid id, [FromBody] DecideStaffTravelAdvanceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Writing off a travel advance") is { } contextError) return contextError;
+
+        await _service.WriteOffAdvanceAsync(id, dto.Reason, employeeId);
+        return Ok(new { message = "Advance written off." });
+    }
+
     // =========================================================================
     // PER-DIEM RATES
     // =========================================================================

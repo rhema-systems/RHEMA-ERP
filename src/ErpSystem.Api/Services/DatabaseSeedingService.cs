@@ -640,8 +640,9 @@ namespace ErpSystem.Web.Services
         /// here, for the reason recorded as trap 7 in <c>HR-WORKFLOW-ENGINE-INTEGRATION.md</c>. That
         /// flag guards the <i>initiator</i>, but a leave request's conflicted party is its
         /// <i>subject</i> — and HR raises requests on other people's behalf from the desk. On a
-        /// tenant with one HR user (the demo tenant is exactly that: <c>hr.head</c> is the only
-        /// holder of the HR role) the flag would strand every desk-raised request at stage 2 with
+        /// tenant with one HR user (the demo tenant was exactly that until 2026-10-02, when the
+        /// persona seeder gained <c>hr.officer</c> for travel's two-person rules; a real tenant may
+        /// still be) the flag would strand every desk-raised request at stage 2 with
         /// nobody able to clear it, which is the area-9b mistake repeated. So the engine does not
         /// block the initiator, and each leave service refuses an approval where the actor IS the
         /// employee the record is about. That targets the real conflict and cannot strand a third

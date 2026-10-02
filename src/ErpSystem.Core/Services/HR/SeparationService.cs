@@ -2311,16 +2311,18 @@ public class SeparationService : ISeparationService
 
         // Travel advances the employee still holds. HR's own data, and until now nothing connected
         // it to somebody leaving — an employee could walk out owing one with nothing to notice.
+        // Cash out by travel's own definition (travel final closure, lane 3, N1): this named only Disbursed and
+        // PartiallySettled, so an advance the travel sweep had marked Overdue — the one most likely to be owed —
+        // would have dropped off a leaver's clearance; and it recomputed the amount owed, ignoring cash handed back.
         var advances = await _unitOfWork.Repository<StaffTravelAdvance>().GetQueryable()
             .AsNoTracking()
-            .Where(a => a.TenantId == tenantId && !a.IsDeleted && a.EmployeeId == separation.EmployeeId
-                        && (a.Status == TravelAdvanceStatus.Disbursed
-                            || a.Status == TravelAdvanceStatus.PartiallySettled))
+            .Where(a => a.TenantId == tenantId && !a.IsDeleted && a.EmployeeId == separation.EmployeeId)
+            .Where(StaffTravelAdvanceRules.CashOut)
             .ToListAsync(cancellationToken);
 
         foreach (var advance in advances)
         {
-            var outstanding = (advance.ApprovedAmount ?? advance.RequestedAmount) - advance.SettledAmount;
+            var outstanding = advance.UnsettledAmount;
             if (outstanding <= 0) continue;
 
             // ⚠ A currency the settlement is not stated in cannot simply be added to it. Recorded

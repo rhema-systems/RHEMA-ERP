@@ -2124,12 +2124,34 @@ public class StaffTravelAdvanceDto : BaseDto
     public string? ApprovedByName { get; set; }
     public Guid? DisbursedById { get; set; }
     public string? DisbursedByName { get; set; }
+
+    // Travel final closure, lane 3 — the verbs' records.
+    public DateTime? RejectedAt { get; set; }
+    public string? RejectedByName { get; set; }
+    public string? RejectionReason { get; set; }
+    public DateTime? CancelledAt { get; set; }
+    public string? CancelledByName { get; set; }
+    public string? CancellationReason { get; set; }
+    public DateTime? WrittenOffAt { get; set; }
+    public string? WrittenOffByName { get; set; }
+    public string? WriteOffReason { get; set; }
+    /// <summary>What was written off: the approved amount less what claims recovered and cash came back.</summary>
+    public decimal? WrittenOffAmount { get; set; }
+    public decimal RefundedAmount { get; set; }
+    public DateTime? RefundedAt { get; set; }
+    public string? RefundedByName { get; set; }
+    public string? RefundReference { get; set; }
+    /// <summary>Cash out past its settlement deadline — true from the day after the deadline, whether or not the
+    /// nightly sweep has written <see cref="TravelAdvanceStatus.Overdue"/> yet.</summary>
+    public bool IsOverdue { get; set; }
 }
 
 public class StaffTravelAdvanceSummaryDto
 {
     public Guid Id { get; set; }
     public string AdvanceNumber { get; set; } = string.Empty;
+    public Guid StaffTravelRequestId { get; set; }
+    public string? RequestNumber { get; set; }
     public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
     public decimal RequestedAmount { get; set; }
@@ -2139,8 +2161,15 @@ public class StaffTravelAdvanceSummaryDto
     public string AdvanceTypeName => AdvanceType.ToString();
     public TravelAdvanceStatus Status { get; set; }
     public string StatusName => Status.ToString();
+    public decimal SettledAmount { get; set; }
     public decimal UnsettledAmount { get; set; }
+    public decimal RefundedAmount { get; set; }
     public DateOnly? SettlementDeadline { get; set; }
+    public DateTime? DisbursedAt { get; set; }
+    /// <summary>As on <see cref="StaffTravelAdvanceDto.IsOverdue"/>.</summary>
+    public bool IsOverdue { get; set; }
+    /// <summary>Why a rejected, cancelled or written-off advance ended as it did; otherwise null.</summary>
+    public string? OutcomeReason { get; set; }
 }
 
 public class CreateStaffTravelAdvanceDto : CreateDtoBase
@@ -2148,8 +2177,8 @@ public class CreateStaffTravelAdvanceDto : CreateDtoBase
     [Required]
     public Guid StaffTravelRequestId { get; set; }
 
-    [Required]
-    public Guid EmployeeId { get; set; }
+    // EmployeeId removed (lane 3, B3): an advance is the trip's traveller's, set by the server. A payload could name
+    // anyone, and a claim recovers only an advance of its own traveller.
 
     [Range(0, double.MaxValue)]
     public decimal RequestedAmount { get; set; }
@@ -2169,12 +2198,7 @@ public class UpdateStaffTravelAdvanceDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal RequestedAmount { get; set; }
 
-    /// <summary>
-    /// <b>Ignored.</b> Approving an advance is <c>POST advances/{id}/approve</c>, which stamps the
-    /// approver from the token and checks the status. Accepting it here left an advance with money
-    /// approved and nobody on record as having approved it.
-    /// </summary>
-    public decimal? ApprovedAmount { get; set; }
+    // ApprovedAmount removed (lane 3, B14): it was ignored — approving is POST advances/{id}/approve.
 
     [Required]
     [MaxLength(3)]
@@ -2201,13 +2225,27 @@ public class DisburseStaffTravelAdvanceDto
     [Required]
     public Guid AdvanceId { get; set; }
     // DisbursedById removed: stamped from the caller's token, never accepted from the body.
+    // DisbursedAt removed (lane 3, B14): it was ignored — when the money went out is the clock's answer.
+}
 
-    /// <summary>
-    /// <b>Ignored — stamped from the clock.</b> It let a caller state when the money went out, which
-    /// matters because the settlement deadline and the overdue-settlement sweep both run off dates.
-    /// Kept on the DTO so existing callers do not break; the value is not read.
-    /// </summary>
-    public DateTime DisbursedAt { get; set; } = DateTime.UtcNow;
+/// <summary>Reject, cancel or write off an advance: the verb is the route; the reason is required.</summary>
+public class DecideStaffTravelAdvanceDto
+{
+    [Required]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>Unused advance cash handed back by the traveller (lane 3, O-8). One refund per advance.</summary>
+public class RefundStaffTravelAdvanceDto
+{
+    [Range(0, double.MaxValue)]
+    public decimal Amount { get; set; }
+
+    /// <summary>The receipt or bank reference for the cash received.</summary>
+    [Required]
+    [MaxLength(100)]
+    public string Reference { get; set; } = string.Empty;
 }
 
 #endregion
@@ -3346,6 +3384,9 @@ public class StaffTravelReminderRunResultDto
 
     /// <summary>How many candidates were found but already claimed by an earlier sweep.</summary>
     public int AlreadySent { get; set; }
+
+    /// <summary>Advances this sweep marked Overdue — cash out past its settlement deadline (lane 3).</summary>
+    public int AdvancesMarkedOverdue { get; set; }
 }
 
 /// <summary>

@@ -59,6 +59,9 @@ public static class HrFinancePostingEventCatalog
     public const string TravelClaimApproved = "TRAVEL_CLAIM_APPROVED";
     public const string TravelClaimPaid = "TRAVEL_CLAIM_PAID";
     public const string TravelAdvanceDisbursed = "TRAVEL_ADVANCE_DISBURSED";
+    // Travel final closure, lane 3: the two other ways an advance's receivable is cleared besides a claim.
+    public const string TravelAdvanceRefunded = "TRAVEL_ADVANCE_REFUNDED";
+    public const string TravelAdvanceWrittenOff = "TRAVEL_ADVANCE_WRITTEN_OFF";
     // slice 2 — employee payables
     public const string LeaveEncashmentProcessed = "LEAVE_ENCASHMENT_PROCESSED";
     public const string AwardConferred = "AWARD_CONFERRED";
@@ -137,6 +140,18 @@ public static class HrFinancePostingEventCatalog
             "Dr Staff advances receivable / Cr Staff payments clearing, for the approved amount. A foreign-currency advance is valued through Finance's rate.",
             [HrFinanceAccountRole.StaffAdvancesReceivable],
             [HrFinanceAccountRole.StaffPaymentsClearing]),
+
+        new(TravelAdvanceRefunded, "Travel advance refunded", "Staff Travel", SourceStaffTravelAdvance, "Refund",
+            "Unused advance cash handed back by the traveller is recorded (POST staff-travel/finance/advances/{id}/refund). One refund per advance.",
+            "Dr Staff payments clearing / Cr Staff advances receivable, for the cash handed back. A foreign-currency advance is valued through Finance's rate.",
+            [HrFinanceAccountRole.StaffPaymentsClearing],
+            [HrFinanceAccountRole.StaffAdvancesReceivable]),
+
+        new(TravelAdvanceWrittenOff, "Travel advance written off", "Staff Travel", SourceStaffTravelAdvance, "WriteOff",
+            "An advance's unsettled balance is written off by a travel administrator, with a reason (POST staff-travel/finance/advances/{id}/write-off).",
+            "Dr Staff receivable write-off / Cr Staff advances receivable, for the balance written off. A foreign-currency advance is valued through Finance's rate.",
+            [HrFinanceAccountRole.StaffReceivableWriteOff],
+            [HrFinanceAccountRole.StaffAdvancesReceivable]),
 
         // ── slice 2 — employee payables ──────────────────────────────────────────────────────
         new(LeaveEncashmentProcessed, "Leave encashment processed", "Leave", SourceLeaveEncashment, "Process",

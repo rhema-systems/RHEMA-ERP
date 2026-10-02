@@ -1355,6 +1355,9 @@ export const navigationItems: NavItem[] = [
               // "approved and unpaid" — which no single travel request can show.
               { title: 'Group Travel', href: '/hr/travel/groups', icon: Users2, permissions: ['HR.Travel.Read'] },
               { title: 'Expense Claims', href: '/hr/travel/claims', icon: Receipt, permissions: ['HR.Travel.Read'] },
+              // The desk's chase list across trips (travel final closure, lane 3, D-5): advances with cash
+              // still out past their deadline, and every advance on one screen.
+              { title: 'Advances', href: '/hr/travel/advances', icon: HandCoins, permissions: ['HR.Travel.Read'] },
               // The visa register had a client and no screen, so eleven fields on its DTOs
               // were unreachable. Reference data rather than day-to-day work, so it sits last.
               { title: 'Visa Requirements', href: '/hr/travel/visa-requirements', icon: Globe2, permissions: ['HR.Travel.Read'] },
