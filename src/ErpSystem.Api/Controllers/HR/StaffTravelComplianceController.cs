@@ -16,12 +16,22 @@ namespace ErpSystem.Api.Controllers.HR;
 public class StaffTravelComplianceController : HrControllerBase
 {
     private readonly IStaffTravelComplianceService _service;
+    private readonly IStaffTravelFleetService _fleet;
 
-    public StaffTravelComplianceController(IStaffTravelComplianceService service, ICurrentUserService currentUser)
+    public StaffTravelComplianceController(IStaffTravelComplianceService service, IStaffTravelFleetService fleet, ICurrentUserService currentUser)
         : base(currentUser)
     {
         _service = service;
+        _fleet = fleet;
     }
+
+    /// <summary>
+    /// Lane 6 (D-29, FX-8's read half): the incidents Fleet records on a trip's company vehicles while on its fleet trips —
+    /// read-only, through travel's door (HR holds no Maintenance permission). Telling anyone of them is lane 8's.
+    /// </summary>
+    [HttpGet("requests/{requestId:guid}/fleet-incidents")]
+    public async Task<ActionResult<IReadOnlyList<StaffTravelFleetIncidentDto>>> GetFleetIncidents(Guid requestId)
+        => Ok(await _fleet.GetIncidentsAsync(requestId));
 
     /// <summary>
     /// Tenant + platform user id for audit fields. Deliberately does not require an employee

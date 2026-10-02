@@ -27,6 +27,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     private readonly IStaffTravelCarRentalBookingRepository _carRentalRepository;
     private readonly IStaffTravelRequestRepository _requestRepository;
     private readonly IStaffTravelFleetService _fleet;
+    private readonly IStaffTravelRequestService _requests;
     private readonly HrCurrencyBridge _currency;
     private readonly StaffTravelPolicyGuard _policyGuard;
     private readonly ICurrentUserProvider _currentUserProvider;
@@ -41,6 +42,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         IStaffTravelCarRentalBookingRepository carRentalRepository,
         IStaffTravelRequestRepository requestRepository,
         IStaffTravelFleetService fleet,
+        IStaffTravelRequestService requests,
         HrCurrencyBridge currency,
         StaffTravelPolicyGuard policyGuard,
         ICurrentUserProvider currentUserProvider,
@@ -48,6 +50,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         ILogger<StaffTravelBookingService> logger)
     {
         _policyGuard = policyGuard;
+        _requests = requests;
         _flightRepository = flightRepository;
         _segmentRepository = segmentRepository;
         _hotelRepository = hotelRepository;
@@ -870,7 +873,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         return await GroundDtoAsync(reloaded ?? entity, cancellationToken);
     }
 
-    public async Task<StaffTravelGroundTransportDto> UpdateGroundTransportAsync(UpdateStaffTravelGroundTransportDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
+    public async Task<StaffTravelGroundTransportDto> UpdateGroundTransportAsync(UpdateStaffTravelGroundTransportDto updateDto, Guid updatedByUserId, Guid? actorEmployeeId = null, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedGroundTransportAsync(updateDto.Id);
         var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
@@ -892,11 +895,28 @@ public class StaffTravelBookingService : IStaffTravelBookingService
             if (updateDto.PickupDatetime is not DateTime pickup || updateDto.DropoffDatetime is not DateTime dropoff)
                 throw new InvalidOperationException(
                     "A company vehicle is reserved from a pick-up time to a drop-off time — give both.");
+            // D-35: another driver ends the old driver's own request — checked before Fleet's trip changes (G3), cancelled after.
+            var driverChanges = entity.DriverTravelRequestId is not null && updateDto.DriverEmployeeId is Guid newDriver
+                                && newDriver != (await GroundDtoAsync(entity, cancellationToken)).DriverEmployeeId;
+            if (driverChanges)
+            {
+                if (actorEmployeeId is null)
+                    throw new UnauthorizedAccessException(
+                        "Changing the driver cancels their own travel request, which needs a login linked to an employee record.");
+                await _requests.RequireDriverRequestCancellableAsync(entity.DriverTravelRequestId, request.RequestNumber, cancellationToken);
+            }
             // Fleet's trip changes first, while Fleet allows (a draft or rejected trip; an approved one only its driver).
             await _fleet.UpdateReservationAsync(request, fleetTripId, new StaffTravelFleetReservation(
                 updateDto.VehicleAssetId, updateDto.DriverEmployeeId, pickup, dropoff,
                 updateDto.PickupLocation, updateDto.DropoffLocation, updateDto.FleetTripDestinationId,
                 $"Staff travel {request.RequestNumber}", updateDto.Notes), cancellationToken);
+            if (driverChanges)
+            {
+                await _requests.CancelDriverRequestAsync(entity.DriverTravelRequestId,
+                    $"The company vehicle on {request.RequestNumber} has another driver now.", actorEmployeeId!.Value, updatedByUserId,
+                    cancellationToken);
+                entity.DriverTravelRequestId = null;
+            }
         }
         var previousVendor = entity.VendorId;
         entity.UpdateEntity(updateDto, updatedByUserId);
@@ -909,11 +929,11 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         return await GroundDtoAsync(reloaded ?? entity, cancellationToken);
     }
 
-    public async Task<bool> DeleteGroundTransportAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<bool> DeleteGroundTransportAsync(Guid id, Guid? actorEmployeeId = null, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedGroundTransportAsync(id);
-        StaffTravelBookingRules.RequireDeletable(
-            entity.Status, await RequireOwnedRequestAsync(entity.StaffTravelRequestId), GroundLabel(entity));
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        StaffTravelBookingRules.RequireDeletable(entity.Status, request, GroundLabel(entity));
         if (entity.FleetTripId is Guid fleetTripId)
         {
             // Lane 6: only a reservation the transport office has not taken up — a draft, or one it rejected — goes with
@@ -922,11 +942,84 @@ public class StaffTravelBookingService : IStaffTravelBookingService
             if (fleetStatus is not (FleetStatus.Draft or FleetStatus.Rejected or FleetStatus.Cancelled or null))
                 throw new InvalidOperationException(
                     $"The vehicle's trip is {fleetStatus.ToLowerInvariant()} in Fleet, so the leg is not deleted — cancel it instead.");
+            // D-35: the driver's own request goes with the leg — checked before Fleet's cancel saves (G3).
+            if (entity.DriverTravelRequestId is not null)
+            {
+                if (actorEmployeeId is null)
+                    throw new UnauthorizedAccessException(
+                        "Deleting the leg cancels its driver's own travel request, which needs a login linked to an employee record.");
+                await _requests.RequireDriverRequestCancellableAsync(entity.DriverTravelRequestId, request.RequestNumber, cancellationToken);
+            }
             await _fleet.CancelReservationAsync(fleetTripId, $"Travel leg deleted ({GroundLabel(entity)})", cancellationToken);
+            if (entity.DriverTravelRequestId is not null)
+                await _requests.CancelDriverRequestAsync(entity.DriverTravelRequestId,
+                    $"Its company-vehicle leg on {request.RequestNumber} was deleted.", actorEmployeeId!.Value,
+                    _currentUserProvider.UserId, cancellationToken);
         }
         await _groundRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    /// <summary>
+    /// Lane 6 (D-33, D-34): raises the driver's own travel request for a company-vehicle leg — a Draft for the driver with
+    /// the trip's dates, destination and purpose, for the desk to cost and submit through the usual two-stage approval, so
+    /// the driver's allowance, attendance and duty of care are covered. The leg keeps it; it goes with the leg (D-35).
+    /// </summary>
+    public async Task<StaffTravelGroundTransportDto> RaiseDriverRequestAsync(
+        Guid legId, Guid tenantId, Guid createdByUserId, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        tenantId = RequireCurrentTenant(tenantId);
+        var entity = await GetOwnedGroundTransportAsync(legId);
+        if (entity.FleetTripId is null)
+            throw new InvalidOperationException("Only a company vehicle's leg has a driver to raise a travel request for.");
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        StaffTravelBookingRules.RequireBookable(request, "a driver's request");
+        var leg = await GroundDtoAsync(entity, cancellationToken);
+        if (leg.Status == TravelBookingStatus.Cancelled)
+            throw new InvalidOperationException("The leg is cancelled, so its driver travels nowhere on it.");
+        if (leg.DriverEmployeeId is not Guid driverId)
+            throw new InvalidOperationException("The leg names no driver yet — choose the driver first.");
+        if (driverId == request.EmployeeId)
+            throw new InvalidOperationException(
+                "The traveller drives this vehicle, so their own trip covers them — there is no driver's request to raise.");
+        if (leg.DriverTravelRequestStatus is { } raised and not (nameof(StaffTravelRequestStatus.Cancelled) or nameof(StaffTravelRequestStatus.Rejected)))
+            throw new InvalidOperationException(
+                $"The driver's request {leg.DriverTravelRequestNumber} is already raised ({raised}).");
+        if (actorEmployeeId is not Guid initiator)
+            throw new UnauthorizedAccessException("Raising a driver's request needs a login linked to an employee record.");
+
+        var created = await _requests.CreateAsync(new CreateStaffTravelRequestDto
+        {
+            EmployeeId = driverId,
+            InitiatedById = initiator,
+            InitiatedByRole = TravelInitiatorRole.TravelDesk,
+            TravelType = request.TravelType,
+            TravelPurpose = request.TravelPurpose,
+            PurposeDescription = $"Driver — company vehicle {leg.VehicleName}" +
+                                 (string.IsNullOrWhiteSpace(leg.VehiclePlate) ? string.Empty : $" ({leg.VehiclePlate})") +
+                                 $" for {request.RequestNumber}",
+            Priority = request.Priority,
+            DestinationCountryId = request.DestinationCountryId,
+            DestinationCity = request.DestinationCity,
+            OriginCountryId = request.OriginCountryId,
+            OriginCity = request.OriginCity,
+            TravelStartDate = request.TravelStartDate,
+            TravelEndDate = request.TravelEndDate,
+            // The desk costs the driver's own trip — per diem, lodging — before submitting it; a draft takes none.
+            EstimatedTotalCost = 0m,
+            CurrencyCode = request.CurrencyCode,
+            RequiresVisa = request.RequiresVisa,
+            RequiresHealthClearance = request.RequiresHealthClearance,
+            RiskLevel = request.RiskLevel,
+        }, tenantId, createdByUserId, cancellationToken);
+
+        entity.DriverTravelRequestId = created.Id;
+        Touch((at, by) => { entity.UpdatedAt = at; entity.UpdatedBy = by; });
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Driver's request {Driver} raised for the company-vehicle leg {Leg} of {Request}",
+            created.RequestNumber, entity.Id, request.RequestNumber);
+        return await GroundDtoAsync(entity, cancellationToken);
     }
 
     // ---- Car rental bookings -----------------------------------------------
@@ -1200,7 +1293,12 @@ public class StaffTravelBookingService : IStaffTravelBookingService
                 throw new InvalidOperationException("Say why the booking is cancelled, in at least five characters.");
             if (actorEmployeeId is null)
                 throw new UnauthorizedAccessException("Cancelling a booking needs a login linked to an employee record.");
+            // D-35: the driver's own request goes with the leg — checked before Fleet's cancel saves (G3).
+            await _requests.RequireDriverRequestCancellableAsync(entity.DriverTravelRequestId, request.RequestNumber, cancellationToken);
             await _fleet.CancelReservationAsync(fleetTripId, why, cancellationToken);
+            await _requests.CancelDriverRequestAsync(entity.DriverTravelRequestId,
+                $"Its company-vehicle leg on {request.RequestNumber} was cancelled: {why}", actorEmployeeId.Value,
+                _currentUserProvider.UserId, cancellationToken);
         }
         var next = StaffTravelBookingRules.Next(entity.Status, verb, request, label);
         if (verb == TravelBookingVerb.Cancel)

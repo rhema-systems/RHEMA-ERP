@@ -49,8 +49,10 @@ public interface IStaffTravelBookingService
     Task<StaffTravelGroundTransportDto> GetGroundTransportByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelGroundTransportDto>> GetGroundTransportsByRequestAsync(Guid requestId, CancellationToken cancellationToken = default);
     Task<StaffTravelGroundTransportDto> CreateGroundTransportAsync(CreateStaffTravelGroundTransportDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
-    Task<StaffTravelGroundTransportDto> UpdateGroundTransportAsync(UpdateStaffTravelGroundTransportDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> DeleteGroundTransportAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<StaffTravelGroundTransportDto> UpdateGroundTransportAsync(UpdateStaffTravelGroundTransportDto updateDto, Guid updatedByUserId, Guid? actorEmployeeId = null, CancellationToken cancellationToken = default);
+    Task<bool> DeleteGroundTransportAsync(Guid id, Guid? actorEmployeeId = null, CancellationToken cancellationToken = default);
+    /// <summary>Lane 6 (D-33, D-34): raises the driver's own travel request for a company-vehicle leg — a Draft the leg keeps.</summary>
+    Task<StaffTravelGroundTransportDto> RaiseDriverRequestAsync(Guid legId, Guid tenantId, Guid createdByUserId, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 
     // Car rental bookings
     Task<StaffTravelCarRentalBookingDto> GetCarRentalByIdAsync(Guid id, CancellationToken cancellationToken = default);

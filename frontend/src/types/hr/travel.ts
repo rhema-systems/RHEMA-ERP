@@ -184,6 +184,9 @@ export interface StaffTravelRequest extends StaffTravelRequestSummary {
   groupTravelId?: string | null;
   parentRequestId?: string | null;
   amendmentReason?: string | null;
+  /** Lane 6 (D-33): a driver's own request names the trip whose company vehicle they drive. */
+  driverForRequestId?: string | null;
+  driverForRequestNumber?: string | null;
   cancellationReason?: string | null;
   cancelledById?: string | null;
   cancelledByName?: string | null;

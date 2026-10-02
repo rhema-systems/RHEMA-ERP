@@ -34,6 +34,7 @@ import { CurrencyField } from '@/components/hr/common/CurrencyPicker';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { travelComplianceService } from '@/services/hr/travel-compliance.service';
+import { travelBookingsService } from '@/services/hr/travel-bookings.service';
 import { TravelQueryError } from './TravelQueryError';
 import { fmtTravelMoney as fmtMoney } from './travel-format';
 import { VISA_REQUIREMENT_TYPE_LABELS } from '@/types/hr/travel-compliance';
@@ -143,6 +144,12 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
   const { data: alerts, isError: alertsFailed, error: alertsError } = useQuery({
     queryKey: ['travel-alerts-country', request.destinationCountryId],
     queryFn: () => travelComplianceService.getCurrentAlertsForCountry(request.destinationCountryId),
+  });
+
+  // Lane 6 (D-29, FX-8's read half): what Fleet records against the trip's company vehicles on its fleet trips.
+  const { data: incidents, isError: incidentsFailed, error: incidentsError } = useQuery({
+    queryKey: ['travel-fleet-incidents', requestId],
+    queryFn: () => travelBookingsService.getFleetIncidents(requestId),
   });
 
   // Who has already been told what, so the desk does not send the same alert twice.
@@ -321,6 +328,36 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
     <div className="space-y-4">
       {/* A failed alert read must not look like "no alerts": this is a duty-of-care card. */}
       {alertsFailed && !alerts && <TravelQueryError error={alertsError} what="the destination alerts" />}
+      {incidentsFailed && !incidents && <TravelQueryError error={incidentsError} what="the company vehicles' incidents" />}
+
+      {/* Lane 6 (D-29): read-only — Fleet records and closes them; telling anyone of a new one is lane 8's. */}
+      {(incidents ?? []).length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ShieldAlert className="h-4 w-4 text-destructive" />
+              Company vehicle incidents (from Fleet)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {(incidents ?? []).map((i) => (
+              <div key={i.id} className="rounded-md border p-3">
+                <p className="text-sm font-medium">
+                  {i.title}
+                  <span className="text-muted-foreground">
+                    {' '}· {i.incidentType} · {i.severity} · {i.status}
+                  </span>
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {new Date(i.occurredAtUtc).toLocaleString()} · {i.vehicleName}{i.vehiclePlate ? ` (${i.vehiclePlate})` : ''}
+                  {i.driverName ? ` · driver ${i.driverName}` : ''}{i.location ? ` · ${i.location}` : ''}
+                </p>
+                {i.description && <p className="mt-1 text-sm text-muted-foreground">{i.description}</p>}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {(alerts ?? []).length > 0 && (
         <Card>

@@ -1,6 +1,7 @@
 'use client';
 
 import { use, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Loader2, Ban, CheckCheck, Globe, ShieldAlert, Pencil, Send, RotateCcw, FilePenLine, Lock, ThumbsUp, ThumbsDown, UserCheck } from 'lucide-react';
@@ -380,6 +381,17 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
       {/* Lane 5, T-45: an alert in force at the destination during the trip — a warning, for the approver and the desk. */}
       {(r.status === 'Submitted' || r.status === 'Approved' || r.status === 'InProgress') && (
         <TravelDestinationAlerts requestId={r.id} context={r.status === 'Submitted' ? 'approve' : 'book'} />
+      )}
+
+      {/* Lane 6 (D-33): a driver's own request names the trip whose company vehicle they drive; it goes with that leg. */}
+      {r.driverForRequestId && (
+        <p className="rounded-md border bg-muted/40 px-4 py-2 text-sm">
+          The driver&apos;s own trip, for the company vehicle on{' '}
+          {deskView
+            ? <Link className="font-medium underline" href={`/hr/travel/${r.driverForRequestId}`}>{r.driverForRequestNumber}</Link>
+            : <span className="font-medium">{r.driverForRequestNumber}</span>}
+          . It is cancelled with that leg, or with that trip.
+        </p>
       )}
 
       <Tabs defaultValue="overview">

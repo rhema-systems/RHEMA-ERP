@@ -1356,6 +1356,16 @@ export function TravelBookingsPanel({ request }: { request: StaffTravelRequest }
     onError: (e: Error) => notify.refused(e),
   });
 
+  // Lane 6 (D-33, D-34): the driver's own request for a leg that keeps its driver away — a Draft the desk costs and submits.
+  const raiseDriver = useMutation({
+    mutationFn: (legId: string) => travelBookingsService.raiseDriverRequest(legId),
+    onSuccess: async (leg) => {
+      notify.saved(`Driver's request ${leg.driverTravelRequestNumber ?? ''} raised as a draft — cost it and submit it`);
+      await invalidate('Ground');
+    },
+    onError: (e: Error) => notify.refused(e),
+  });
+
   const countryOptions = (countries ?? []).map((c) => ({ value: c.id, label: c.name }));
 
   const actions = (kind: TravelBookingKind, id: string, status: TravelBookingStatus | undefined, label: string,
@@ -1518,6 +1528,29 @@ export function TravelBookingsPanel({ request }: { request: StaffTravelRequest }
                       </span>
                     )}
                     {g.fleetNote && <span className="block text-xs font-normal text-muted-foreground">{g.fleetNote}</span>}
+                    {/* Lane 6 (D-33…D-35): the driver's own request, which goes with the leg. */}
+                    {g.driverTravelRequestId && g.driverTravelRequestNumber && (
+                      <span className="block text-xs font-normal">
+                        Driver&apos;s request{' '}
+                        <Link className="underline" href={`/hr/travel/${g.driverTravelRequestId}`}>{g.driverTravelRequestNumber}</Link>
+                        {g.driverTravelRequestStatus ? ` · ${humanize(g.driverTravelRequestStatus)}` : ''}
+                      </span>
+                    )}
+                    {g.driverAwayOvernight
+                      && !(g.driverTravelRequestStatus && !['Cancelled', 'Rejected'].includes(g.driverTravelRequestStatus)) && (
+                      <span className="mt-1 block text-xs font-normal text-amber-700 dark:text-amber-400">
+                        This leg keeps its driver away overnight — the driver travels on a request of their own.
+                        {canWrite && bookable && (
+                          <Button
+                            variant="link" size="sm" className="h-auto px-1 py-0 text-xs"
+                            disabled={raiseDriver.isPending}
+                            onClick={() => raiseDriver.mutate(g.id)}
+                          >
+                            Raise the driver&apos;s request
+                          </Button>
+                        )}
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell>
                     {g.pickupLocation || '—'} → {g.dropoffLocation || '—'}

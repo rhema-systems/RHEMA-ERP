@@ -500,6 +500,27 @@ export interface StaffTravelGroundTransport extends AuditFields {
   dispatchedAt?: string | null;
   returnedAt?: string | null;
   distance?: number | null;
+  /** Lane 6 (D-33, D-34): the driver's own request the leg keeps, and whether the leg keeps its driver away overnight. */
+  driverTravelRequestId?: string | null;
+  driverTravelRequestNumber?: string | null;
+  driverTravelRequestStatus?: string | null;
+  driverAwayOvernight?: boolean;
+}
+
+/** Lane 6 (D-29): an incident Fleet records on one of the trip's company vehicles — read-only. */
+export interface StaffTravelFleetIncident {
+  id: string;
+  fleetTripId?: string | null;
+  vehicleName: string;
+  vehiclePlate?: string | null;
+  driverName?: string | null;
+  occurredAtUtc: string;
+  incidentType: string;
+  title: string;
+  description?: string | null;
+  location?: string | null;
+  severity: string;
+  status: string;
 }
 
 /** What a company-vehicle leg chooses from, through travel's own door (lane 6). */

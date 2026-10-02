@@ -1085,6 +1085,12 @@ Tables: `StaffTravelItineraries`, `StaffTravelItineraryLegs`, `StaffTravelItiner
 >   offers only *Cancel booking…* (which cancels the fleet trip) — the transport office approves, dispatches and
 >   completes it in Fleet. **While Fleet publishes no approval route (UAT today, D-27) the reservation stays a
 >   draft and the leg says the vehicle is not held.** UAT has no fleet at all, so the demo cannot show this.
+> - **The driver travels on a request of their own (lane 6, slice 6c).** A leg that keeps a driver other than the
+>   traveller away overnight says so and offers **Raise the driver's request**: a Draft for the driver with the trip's
+>   dates, destination and purpose, which the desk costs and submits like any trip. The leg shows it, and the driver's
+>   request says whose vehicle it drives. It goes with the leg — cancelling or deleting the leg, changing the driver,
+>   cancelling the trip or *Request change* cancel it — and a driver's request that cannot be cancelled (under way, cash
+>   out) holds the leg's or the trip's cancel back, naming it.
 > - **Bookings live on an approved trip (lane 5, D-23).** The Add buttons show only while the trip is
 >   Approved or under way; on any other trip a note says why. On a database built by the demo pack since
 >   lane 5, **London is approved and Lagos carries no flight or hotel** (D-26). UAT built before that still
@@ -1296,6 +1302,11 @@ Tables: `StaffTravelBudgets`, `StaffTravelAdvances`, `StaffTravelExpenseClaims`.
 ---
 
 ### 5.5 👁 Compliance tab
+
+> ⚠ **Added by closure lane 6, slice 6c (2026-10-02):** when Fleet records an incident against one of the trip's company
+> vehicles on its fleet trip, a read-only **Company vehicle incidents (from Fleet)** card shows it — when, the vehicle
+> and driver, type, severity, status, where and what happened. Fleet records and closes incidents; telling the desk or
+> the traveller's line authority of a new one is lane 8's. UAT has no fleet, so the demo shows no such card.
 
 **The richest tab in HR, and the one that justifies the module.** Six sections:
 
@@ -2485,7 +2496,7 @@ Six places. Two are worth a minute of the demo; the rest are for the questions.
 |---|---|---|
 | **Finance — currencies and conversion** | Every currency picker in this module reads Finance's active-currency list, and every conversion delegates to Finance's `ConvertAsync`. Travel keeps no currency table and invents no rate | **Say it**, in chapter 4 and again on the dashboard. It is the discipline behind Rule 5 |
 | **Procurement — Suppliers** | `VendorId` on every booking points at a Procurement `Supplier`. `api/Suppliers` answers **400**, so there are no selectable vendors and no booking form offers the field (**T-8**) | Only if asked why *"preferred vendor mandatory"* checks nothing |
-| **Fleet — vehicles** | `GroundTransportType.CompanyVehicle` reserves a **Fleet** vehicle asset, which is a different register from HR's own `CompanyAssets`. The demo's Sebrepor trip uses *PrivateCarHire* for exactly that reason. *Since closure lane 6 (slice 6a) the leg makes a real fleet trip — clashes and expiring compliance refused, its status, vehicle, driver and costs read from Fleet, cancelled with the leg or the trip; since slice 6b a paid fuel expense goes into Fleet's fuel log (chapter 9). UAT has no fleet, so it is not demonstrable there* | Mention it in chapter 5.3 if somebody asks about the pool vehicle |
+| **Fleet — vehicles** | `GroundTransportType.CompanyVehicle` reserves a **Fleet** vehicle asset, which is a different register from HR's own `CompanyAssets`. The demo's Sebrepor trip uses *PrivateCarHire* for exactly that reason. *Since closure lane 6 (slice 6a) the leg makes a real fleet trip — clashes and expiring compliance refused, its status, vehicle, driver and costs read from Fleet, cancelled with the leg or the trip; since slice 6b a paid fuel expense goes into Fleet's fuel log (chapter 9), and since 6c a driver kept away overnight travels on a request of their own and Fleet's incidents show on the Compliance tab. UAT has no fleet, so it is not demonstrable there* | Mention it in chapter 5.3 if somebody asks about the pool vehicle |
 | **The employee's position → staff level** | The policy guard resolves the applicable policy from the traveller's **staff level, which lives on their position**, not on the employee. A traveller with no position falls back to the organisation-wide policy | Worth one sentence in chapter 13 |
 | **Workflow inbox** (`/workflow/inbox`) | A submitted travel request appears in the assignee's inbox alongside every other approval in the ERP | **Yes** — 30 seconds, and it is the same point as every other module: a manager lives in one inbox |
 | **General Ledger** | ⚠ **Nothing.** No travel transaction posts to GL. Advances, claims and payments are recorded in travel's own tables and the Finance hand-off is an open backlog item (D-4) | Say it plainly if a finance director asks — see **T-58** |

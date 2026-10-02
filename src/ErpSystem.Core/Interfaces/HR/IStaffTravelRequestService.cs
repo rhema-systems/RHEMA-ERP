@@ -61,6 +61,16 @@ public interface IStaffTravelRequestService
     /// the audit trail. Different identifiers — the DTO field used to serve both.
     /// </summary>
     Task<bool> CancelAsync(CancelStaffTravelRequestDto cancelDto, Guid cancelledByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lane 6 (D-35): refuses — naming why — when a leg's driver's own request is live and could not be cancelled (under
+    /// way, advance cash out, a committed booking). Nothing when there is none. Called before Fleet's cancel saves (G3).
+    /// </summary>
+    Task RequireDriverRequestCancellableAsync(Guid? driverRequestId, string tripNumber, CancellationToken cancellationToken = default);
+
+    /// <summary>Lane 6 (D-35): cancels a leg's driver's own request, if it is live — with the leg.</summary>
+    Task CancelDriverRequestAsync(
+        Guid? driverRequestId, string reason, Guid cancelledById, Guid cancelledByUserId, CancellationToken cancellationToken = default);
     Task<bool> MarkCompletedAsync(Guid requestId, Guid updatedByUserId, CancellationToken cancellationToken = default);
 
     /// <summary>An approver sends a submitted request back to its requester, with what to change (D-6).</summary>

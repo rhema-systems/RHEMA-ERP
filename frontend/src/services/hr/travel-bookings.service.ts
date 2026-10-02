@@ -31,6 +31,7 @@ import type {
   TravelBookingExceptionState,
   StaffTravelBookingException,
   StaffTravelFleetOptions,
+  StaffTravelFleetIncident,
 } from '@/types/hr/travel-bookings';
 
 /**
@@ -292,6 +293,19 @@ class TravelBookingsService {
     if (to) params.to = to;
     if (excludeFleetTripId) params.excludeFleetTripId = excludeFleetTripId;
     return apiService.get<StaffTravelFleetOptions>(`${this.bookings}/fleet/options`, params);
+  }
+
+  /**
+   * Lane 6 (D-33, D-34): raises the driver's own travel request for a company-vehicle leg — a Draft (the trip's dates,
+   * destination and purpose) for the desk to cost and submit. The leg keeps it; it goes with the leg (D-35).
+   */
+  raiseDriverRequest(legId: string) {
+    return apiService.post<StaffTravelGroundTransport>(`${this.bookings}/ground-transport/${legId}/driver-request`, {});
+  }
+
+  /** Lane 6 (D-29): the incidents Fleet records on the trip's company vehicles — read-only, for the Compliance tab. */
+  getFleetIncidents(requestId: string) {
+    return apiService.get<StaffTravelFleetIncident[]>(`/staff-travel/compliance/requests/${requestId}/fleet-incidents`);
   }
 
   // ── Status verbs (lane 5, D1) ──────────────────────────────────────────────

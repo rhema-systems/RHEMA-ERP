@@ -326,15 +326,28 @@ public class StaffTravelBookingsController : HrControllerBase
         var ctx = ResolveContext();
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
-        return Ok(await _service.UpdateGroundTransportAsync(dto, ctx.Value.userId));
+        return Ok(await _service.UpdateGroundTransportAsync(dto, ctx.Value.userId, CurrentUser.EmployeeId));
     }
 
     [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("ground-transport/{id:guid}")]
     public async Task<IActionResult> DeleteGroundTransport(Guid id)
     {
-        await _service.DeleteGroundTransportAsync(id);
+        await _service.DeleteGroundTransportAsync(id, CurrentUser.EmployeeId);
         return NoContent();
+    }
+
+    /// <summary>
+    /// Lane 6 (D-33, D-34): raises the driver's own travel request for a company-vehicle leg that keeps its driver away —
+    /// a Draft for the desk to cost and submit. The leg keeps it, and it goes with the leg (D-35).
+    /// </summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("ground-transport/{id:guid}/driver-request")]
+    public async Task<ActionResult<StaffTravelGroundTransportDto>> RaiseDriverRequest(Guid id)
+    {
+        var ctx = ResolveContext();
+        if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
+        return Ok(await _service.RaiseDriverRequestAsync(id, ctx.Value.tenantId, ctx.Value.userId, CurrentUser.EmployeeId));
     }
 
     // =========================================================================

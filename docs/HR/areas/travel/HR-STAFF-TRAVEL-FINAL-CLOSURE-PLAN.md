@@ -63,12 +63,14 @@ baseline (D-13); lane 0 was built the same day.**
    *Source check*: Q1–Q7; D-23…D-26). **5a** bookings (the trip-status gate, dates, status verbs, the visa gate, D-24's
    cascade, the booking doors, the demo pack) committed `4b7d12302`; **5b** itinerary and destination alerts (D-25,
    O-15, Q3, Q5, T-19, T-45) — bookings 148/148 three times — committed `f8e9a9e31`. No migration.
-9. **Lane 6** (Fleet) — **IN PROGRESS.** Source-checked against `f8e9a9e31` (lane 6's *Source check*: R1–R4;
+9. **Lane 6** (Fleet) — **COMPLETE 2026-10-02.** Source-checked against `f8e9a9e31` (lane 6's *Source check*: R1–R4;
    D-27…D-29). **6a** the reservation (pickers through travel's door, the clash and compliance refusals, the D-27
    submit, the leg following its fleet trip, Fleet's costs in the budget) — committed `3723e3e23`. **6b** fuel on claims
    (S1–S5; D-30…D-32: a fuel expense names its vehicle trip, the paid fuel goes into Fleet's log, a void removes it) —
-   fleet 124/124 twice — staged. No migration; Fleet's code unchanged. ⚠ **UAT has no Fleet data** — the suite makes and
-   removes its own (D-28). Next: **6c** drivers as travellers and incidents shown.
+   committed `c9e4cd9ee`. **6c** drivers as travellers and incidents shown (G1–G4; D-33…D-35: the leg links the
+   driver's own request, raised on the desk's click and going with the leg; Fleet's incidents read-only on the
+   Compliance tab) — fleet 165/165 twice — staged. No migration; Fleet's code unchanged. ⚠ **UAT has no Fleet data** —
+   the suite makes and removes its own (D-28). The sweep's fleet signals are lane 8's (D-29).
 10. **Then** lanes **7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane against this
    document before building it — line numbers are as of HEAD `bad482a8d`.
 
@@ -121,6 +123,9 @@ lane's slice.
 | **D-30** | When must a fuel expense name a fleet trip (6b)? | **On a trip with a live company-vehicle leg, a Fuel line names one of its fleet trips — unless the trip also has a car rental,** when it may name none (fuel for the rental). Fuel on a trip with no company vehicle names nothing. Lane 6, slice 6b. |
 | **D-31** | What does a paid claim put in Fleet's fuel log (6b)? | **Only a fuel line approved above zero: the litres claimed and the amount paid** (unit cost = paid ÷ litres). A rejected line writes nothing; a voided payment removes what the payment wrote. Lane 6, slice 6b. |
 | **D-32** | A fuel line for a fleet trip on a day Fleet already logs fuel for it (S5) | **Refused unless the desk gives the reason it is claimed too;** the reason is kept as an internal note on the trip, and the dialog shows Fleet's fuel for the trip first. Lane 6, slice 6b. |
+| **D-33** | The plan ties a driver's request to the trip through a group, but only a draft joins a group and joining rewrites its dates, while a company vehicle is booked only on an approved trip (G1) | **The leg links them:** the company-vehicle leg keeps the driver's request (`DriverTravelRequestId`); the leg shows it, and the driver's request shows whom it drives for, with a link back. No group is made. Lane 6, slice 6c. |
+| **D-34** | How is a driver's request raised? | **On the desk's click, prompted:** a leg that keeps its driver away overnight says so and offers *Raise the driver's request*, which makes a Draft for the driver — the trip's dates, destination and purpose — for the desk to cost and submit through the usual two-stage approval. Lane 6, slice 6c. |
+| **D-35** | What happens to a driver's request when its leg goes or changes driver? | **It goes with the leg:** cancelling or deleting the leg, changing its driver, the trip's cancel and *Request change* cancel the driver's live request — refused, naming why, when that request cannot be cancelled (under way, advance cash out, a committed booking). Lane 6, slice 6c. |
 
 **Standing assumptions (not re-asked):** the closure ledger's D-29 holds — the policy rule register
 stays read-only and the policy-exception flow stays withheld until rule enforcement exists; Finance
@@ -140,7 +145,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **3** | The money chain | batch 1 + `TravelClosureMoneyChain` (D-14, applied to UAT) | `run-final-money.mjs`, `run-final-posting.mjs` (D-17, a scratch copy only) | ✅ complete 2026-10-02 — 3a `e2785ce7b`, 3b `f49e5eb9c`, 3c `b08bd498d` (money 286/286 twice, posting proof 70/70 twice on a scratch copy, lifecycle 256/256, truth 116/116, approvals 123/123 twice) |
 | **4** | Policy and authority | batch 1 (no lane migration) | `run-final-policy.mjs` | ✅ complete 2026-10-02 — 4a `19f20f2f2`, 4b `3a6792a30`, 4c staged (policy 129/129 twice, money 287, lifecycle 256, truth 117, approvals 123 twice each); D-18…D-22 |
 | **5** | Bookings and itinerary | batch 1 (no lane migration) | `run-final-bookings.mjs` | ✅ complete 2026-10-02 — 5a `4b7d12302`, 5b `f8e9a9e31` (bookings 148/148 ×3, policy 131, money 288, lifecycle 256, truth 118, approvals 123 twice each); D-23…D-26 |
-| **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ◐ 6a `3723e3e23`; 6b staged 2026-10-02 (fleet 124/124 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-32; next 6c |
+| **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ✅ complete 2026-10-02 — 6a `3723e3e23`, 6b `c9e4cd9ee`, 6c staged (fleet 165/165 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-35; the signals are lane 8's (D-29) |
 | **7** | Compliance and the portal | batch 1 | `run-final-compliance.mjs`, `run-final-portal.mjs` | ☐ |
 | **8** | Notifications and the sweep | batch 1 | `run-final-reminders.mjs` | ☐ |
 | **9** | Cross-module touchpoints | none | `run-final-touchpoints.mjs` | ☐ |
@@ -1744,13 +1749,15 @@ held only the known noise.
   travel records it through `IFleetFuelService.CreateAsync` (vehicle, trip, quantity, cost, merchant,
   receipt) and keeps the id; a voided payment deletes it; a Fuel line on a date Fleet already holds fuel
   for that trip asks for a reason; the rollup counts a claim-created fuel cost once, as the paid claim.
-- [ ] **Drivers as travellers:** when a leg keeps the driver away overnight (drop-off on a later date,
+- [x] **Drivers as travellers** (6c — **linked by the leg, not a group: D-33**; raised on the desk's click, D-34; going
+  with the leg, D-35): when a leg keeps the driver away overnight (drop-off on a later date,
   or a destination outside the origin city), the desk is asked to raise the driver's own request — a
   Draft linked to the trip through its group record (created if none exists, the traveller as lead),
   same dates and destination, purpose "driver — company vehicle for TR-…" — which goes through the same
   two-stage approval, so allowances, attendance and duty-of-care alerts cover the driver. The leg keeps
   `DriverTravelRequestId`; cancelling the leg or the trip cancels the driver's request.
-- [ ] **Incidents and signals:** the sweep reads fleet incidents carrying a fleet trip of an open
+- [~] **Incidents and signals** (6c built the read half — the Compliance tab's incidents card; the sweep's signals and
+  notices moved to **lane 8**, D-29): the sweep reads fleet incidents carrying a fleet trip of an open
   travel request (read-only), shows them on the request's Compliance tab and tells the travel desk and
   the traveller's line authority once per incident; Fleet's dispatch of the outbound leg moves an
   Approved trip to InProgress ahead of the date rule; Fleet's completion of the return leg tells the
@@ -1942,6 +1949,73 @@ row after). Regression: bookings **148/148 twice** (603503, 620027), money **288
 808211), approvals **123/123 twice** (813497, 834332). The slowest travel call 168 ms (only the cold start's first login
 took longer, 1.6 s); the API log held only the known noise and the suites' expected refusals.
 
+**Slice 6c source check (2026-10-02, HEAD after 6b).** The ground leg, the group model and its service (lane 1c), the
+request's create and cancel, Fleet's incident entity and the Compliance tab were re-read. The leg already carries
+`DriverTravelRequestId` — an FK to the request with no navigation (batch 1) — **no migration**. Four facts:
+- **G1 — the group route collides with lanes 1c and 5.** The plan links the driver's request "through its group record
+  (created if none exists, the traveller as lead)". A request joins a group only as a draft or returned for revision, and
+  joining rewrites its destination and dates to the group's (lane 1c, T-30, T-32); a company-vehicle leg exists only on an
+  approved trip (D-23). So the traveller's trip can never join, and a group around it would need its own exception — and
+  would then carry lane 1c's propagation, seat limit and group cancel onto an approved trip.
+- **G2 — no purpose fits a driver.** `StaffTravelPurpose` has no driving value; the driver's request takes the trip's own
+  purpose, its description "Driver — company vehicle {vehicle} for TR-…".
+- **G3 — order of a cascading cancel.** Fleet's cancel saves at once, so a trip's cancel that also cancels a driver's
+  request must check that request can go (not under way, no advance cash out, no committed booking) before any fleet trip
+  is touched.
+- **G4 — incidents.** `FleetIncident` carries the vehicle, an optional fleet trip and driver, when, type (Accident or
+  Incident), title, description, location, severity (Low…Critical), status (Open, InProgress, Closed) and the repair and
+  insurance figures. A trip's incidents are those on its legs' fleet trips; read-only here (D-29).
+
+**Decisions (the user, 2026-10-02):** D-33 (the leg links the driver's request — no group), D-34 (raised on the desk's
+click, prompted), D-35 (it goes with the leg) — § 1.
+
+**As built — slice 6c (2026-10-02).** No migration; Fleet's code unchanged.
+
+- *The prompt (D-34).* Every company-vehicle leg read carries `DriverTravelRequestId`, its number and status, and
+  `DriverAwayOvernight` — a driver other than the traveller, on a live leg, with a drop-off on a later day than the
+  pick-up or a trip whose destination city is not its origin city (filled beside Fleet's facts in `DescribeAsync`). The
+  row says so and offers **Raise the driver's request** while the trip takes bookings.
+- *Raising (D-33).* `POST bookings/ground-transport/{id}/driver-request` (Write): a company-vehicle leg, not cancelled,
+  with a driver who is not the traveller and no live driver's request already. It goes through the request service's own
+  create — every create rule — as a **Draft** for the driver, initiated by the desk, with the trip's type, purpose,
+  priority, origin, destination, dates, currency, visa and health flags and risk level; its description "Driver —
+  company vehicle {vehicle} ({plate}) for TR-…"; no estimate (the desk costs it — submission refuses a zero estimate as
+  for any trip). The leg keeps its id. The driver's request reads `DriverForRequestId`/`Number` from the leg that keeps
+  it, and its page says whose vehicle it drives, with a link.
+- *It goes with the leg (D-35, G3).* The leg's cancel and delete, a change of driver (which also clears the link), the
+  trip's cancel and *Request change* cancel the driver's live request through the request service's own cancel — the
+  approval withdrawn, its holds and itinerary with it. Whatever would refuse that cancel (under way, advance cash out, a
+  committed booking) refuses the leg's or the trip's, naming the driver's request, and is checked **before** Fleet's
+  cancel saves. The cancel guard is now one helper (`RequireCancellableAsync`) shared by the trip and its drivers. The
+  leg's update and delete take the caller's employee id (the cancel's `CancelledById`); *Request change* uses the
+  caller's.
+- *Incidents (D-29).* `GET compliance/requests/{id}/fleet-incidents` (Read): the incidents Fleet records on the trip's
+  legs' fleet trips, newest first — type, title, description, where, severity, status, vehicle and plate, driver. The
+  Compliance tab shows them in a read-only card when there are any. Telling anyone of one stays lane 8's.
+- *Demo pack.* No change (no company vehicle on UAT).
+
+**Suite** `run-final-fleet.mjs` 124 → **165**: §12 a trip in 90 days takes the Hilux for three days with the second
+fixture employee driving — the leg says it keeps the driver away overnight; a leg the traveller drives does not, and its
+raise is refused; the desk raises the driver's request — a Draft for the driver with the trip's dates, destination and
+purpose, described as the Hilux's driver for the trip, naming the trip it drives for; a second raise refused. §13 the
+traveller takes the wheel — the request cancelled and the link cleared; driving again, a new request; that request
+under way (planted) refuses the leg's cancel, naming it, with Fleet's trip still a draft (G3); back to a draft, the leg's
+cancel takes it and the fleet trip; a deleted leg takes its request; *Request change* takes another's; a third trip's
+cancel is refused while its driver's request is under way (Fleet's trip untouched), then takes it and the fleet trip.
+§14 an accident Fleet records on the Hilux's trip shows on the trip's incidents, read through travel's door, with
+severity, vehicle, driver and place; another trip shows none. The teardown also soft-deletes incidents on the run's
+vehicles. **165/165 twice** (599122, 704630; every section ran; no live Fleet row or fixture trip left). Regression:
+bookings **148/148 twice** (750614, 766890), money **288/288 twice** (782153, 812051), policy **131/131 twice** (839192,
+852405), lifecycle **256/256 twice** (864522, 909885), truth **118/118 twice** (954953, 961284), approvals **123/123
+twice** (969542, 015375). Approvals run 966528 failed in its fixture before any travel call: its six-digit stamp repeated
+lane 3b's, whose unit code `E2ETVD966528` still exists — the stamp wraps every 1,000 s; a rerun is the remedy. Two
+requests took ten seconds — run 599122's leg delete (its driver's request cancelled within the same second, then the
+saves of the cancel's notices spread over the gap) and run 969542's self-service submit, a path this slice did not touch
+(four to five seconds per approval notice sent). Both are the platform sending notices inside the request while UAT
+has no `EmailSettings` row; neither recurred on the other run. The API log otherwise held only the known noise.
+
+**Lane 6 complete:** 6a `3723e3e23`, 6b `c9e4cd9ee`, 6c staged. D-29's signals and notices are lane 8's.
+
 ### Lane 7 — Compliance and the portal (E1–E7, D-5, O-7, O-15, O-16, O-17, T-23–T-26, T-40, T-44, T-54–T-56)
 
 - [ ] **E1:** `/me/risk-assessments/{id}/acknowledge` and a portal screen; the desk button becomes a
@@ -2006,6 +2080,11 @@ clamd stub.
   swallows handler errors, so delivery is proved by counting the notification rows written per
   audience, never by reading the log.
 - [ ] The reminders page reads for HR (D-3); the nav description says what the sweep chases.
+- [ ] **From lane 6 (D-29):** the sweep's fleet signals — Fleet's dispatch of a trip's outbound leg moves an Approved
+  trip to InProgress ahead of the date rule; Fleet's completion of the return leg tells the desk to mark the trip
+  completed; a fleet incident on an open trip's fleet trip tells the travel desk and the traveller's line authority
+  once per incident (the incidents are already read by `IStaffTravelFleetService.GetIncidentsAsync`, slice 6c). A
+  driver's own request (D-33) is a trip like any other here.
 
 Suite `run-final-reminders.mjs` (the SMTP-sink pattern; assert the rows written per audience) and
 re-run `run-slice5a.mjs`.

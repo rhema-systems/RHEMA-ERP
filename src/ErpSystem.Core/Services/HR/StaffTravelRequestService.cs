@@ -529,7 +529,18 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         var entity = await _requestRepository.GetWithFullDetailsAsync(tenantId, id);
         if (entity == null)
             throw new ArgumentException($"Staff travel request with ID '{id}' not found.");
-        return entity.ToDto();
+        var dto = entity.ToDto();
+        // Lane 6 (D-33): a driver's own request says whose company vehicle it drives — read from the leg that keeps it.
+        var driverFor = await _unitOfWork.Repository<StaffTravelGroundTransport>()
+            .GetQueryable(g => g.TenantId == tenantId && !g.IsDeleted && g.DriverTravelRequestId == id)
+            .Select(g => new { g.StaffTravelRequestId, g.StaffTravelRequest.RequestNumber })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (driverFor is not null)
+        {
+            dto.DriverForRequestId = driverFor.StaffTravelRequestId;
+            dto.DriverForRequestNumber = driverFor.RequestNumber;
+        }
+        return dto;
     }
 
     public async Task<StaffTravelRequestDto?> GetByRequestNumberAsync(string requestNumber, CancellationToken cancellationToken = default)
@@ -1524,29 +1535,24 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     public async Task<bool> CancelAsync(CancelStaffTravelRequestDto cancelDto, Guid cancelledByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedRequestAsync(cancelDto.RequestId);
-
-        if (entity.Status is StaffTravelRequestStatus.Cancelled or StaffTravelRequestStatus.Completed
-            or StaffTravelRequestStatus.Closed or StaffTravelRequestStatus.Rejected)
-            throw new InvalidOperationException($"A request that is {entity.Status} cannot be cancelled.");
-        if (entity.Status == StaffTravelRequestStatus.InProgress)
-            throw new InvalidOperationException(
-                "A trip that is under way cannot be cancelled. If it ended early, mark it completed.");
-        if (entity.Status == StaffTravelRequestStatus.Approved)
-            await RequireNoAdvanceCashOutAsync(entity, "cancelling the trip", cancellationToken);
-        // Lane 5, D-24: a booking a supplier has confirmed or ticketed is the organisation's commitment, cancelled on its
-        // own with the fee the supplier charges — refused here BEFORE the approval is withdrawn below.
-        var committed = await StaffTravelBookingRules.CommittedBookingsAsync(
-            _unitOfWork, entity.TenantId, entity.Id, cancellationToken);
-        if (committed.Count > 0)
-            throw new InvalidOperationException(
-                $"Travel request {entity.RequestNumber} has bookings its suppliers have committed to — " +
-                $"{string.Join("; ", committed)}. Cancel each on the Bookings tab first, recording what the supplier " +
-                "charges, then cancel the trip.");
+        await RequireCancellableAsync(entity, cancellationToken);
 
         var reason = cancelDto.CancellationReason.Trim();
+        // Lane 6 (D-35): the drivers' own requests go with the trip — each checked BEFORE anything moves, since Fleet's
+        // cancel below saves at once (G3).
+        var drivers = await LiveDriverRequestsAsync(entity, cancellationToken);
+        foreach (var driver in drivers)
+            await RequireDriverCancellableAsync(driver, entity.RequestNumber, cancellationToken);
         // Lane 6 (D2): the company vehicles' undispatched fleet trips go with the trip — first, so a refusal from Fleet
         // stops the cancel before anything of travel's has moved. (Approved ones were refused above, as committed.)
         await _fleet.CancelForRequestAsync(entity.TenantId, entity.Id, $"Travel request {entity.RequestNumber} cancelled: {reason}", cancellationToken);
+        foreach (var driver in drivers)
+            await CancelAsync(new CancelStaffTravelRequestDto
+            {
+                RequestId = driver.Id,
+                CancellationReason = Clip($"The trip {entity.RequestNumber} this driver's company vehicle served was cancelled: {reason}", 1000),
+                CancelledById = cancelDto.CancelledById,
+            }, cancelledByUserId, cancellationToken);
         await CancelLiveApprovalAsync(entity, $"Travel request cancelled: {reason}");
 
         entity.Status = StaffTravelRequestStatus.Cancelled;
@@ -1587,6 +1593,93 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         return true;
     }
+
+    /// <summary>What refuses a cancel (lanes 1 and 5) — checked before anything moves.</summary>
+    private async Task RequireCancellableAsync(StaffTravelRequest entity, CancellationToken cancellationToken)
+    {
+        if (entity.Status is StaffTravelRequestStatus.Cancelled or StaffTravelRequestStatus.Completed
+            or StaffTravelRequestStatus.Closed or StaffTravelRequestStatus.Rejected)
+            throw new InvalidOperationException($"A request that is {entity.Status} cannot be cancelled.");
+        if (entity.Status == StaffTravelRequestStatus.InProgress)
+            throw new InvalidOperationException(
+                "A trip that is under way cannot be cancelled. If it ended early, mark it completed.");
+        if (entity.Status == StaffTravelRequestStatus.Approved)
+            await RequireNoAdvanceCashOutAsync(entity, "cancelling the trip", cancellationToken);
+        // Lane 5, D-24: a booking a supplier has confirmed or ticketed is the organisation's commitment, cancelled on its
+        // own with the fee the supplier charges — refused here BEFORE the approval is withdrawn.
+        var committed = await StaffTravelBookingRules.CommittedBookingsAsync(
+            _unitOfWork, entity.TenantId, entity.Id, cancellationToken);
+        if (committed.Count > 0)
+            throw new InvalidOperationException(
+                $"Travel request {entity.RequestNumber} has bookings its suppliers have committed to — " +
+                $"{string.Join("; ", committed)}. Cancel each on the Bookings tab first, recording what the supplier " +
+                "charges, then cancel the trip.");
+    }
+
+    // ---- Lane 6, slice 6c: a company vehicle's driver travels on their own request (D-33…D-35) ----
+
+    /// <summary>The live driver's requests a trip's company-vehicle legs keep — tracked, for the cascade (D-35).</summary>
+    private async Task<List<StaffTravelRequest>> LiveDriverRequestsAsync(StaffTravelRequest trip, CancellationToken cancellationToken)
+    {
+        var ids = await _unitOfWork.Repository<StaffTravelGroundTransport>()
+            .GetQueryable(g => g.TenantId == trip.TenantId && g.StaffTravelRequestId == trip.Id && !g.IsDeleted
+                            && g.DriverTravelRequestId != null)
+            .Select(g => g.DriverTravelRequestId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        if (ids.Count == 0) return new List<StaffTravelRequest>();
+        return await _unitOfWork.Repository<StaffTravelRequest>()
+            .GetQueryable(r => r.TenantId == trip.TenantId && !r.IsDeleted && ids.Contains(r.Id)
+                            && r.Status != StaffTravelRequestStatus.Cancelled && r.Status != StaffTravelRequestStatus.Rejected
+                            && r.Status != StaffTravelRequestStatus.Completed && r.Status != StaffTravelRequestStatus.Closed)
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <summary>A driver's request goes with its leg (D-35) — so whatever would refuse its cancel refuses the leg's.</summary>
+    private async Task RequireDriverCancellableAsync(StaffTravelRequest driver, string tripNumber, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RequireCancellableAsync(driver, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new InvalidOperationException(
+                $"The driver's own request {driver.RequestNumber}, raised for {tripNumber}'s company vehicle, goes with it but " +
+                $"cannot be cancelled: {ex.Message}");
+        }
+    }
+
+    private async Task<StaffTravelRequest?> LiveDriverRequestAsync(Guid? driverRequestId, CancellationToken cancellationToken)
+    {
+        if (driverRequestId is not Guid id) return null;
+        var tenantId = GetTenantId();
+        return await _unitOfWork.Repository<StaffTravelRequest>()
+            .GetQueryable(r => r.Id == id && r.TenantId == tenantId && !r.IsDeleted
+                            && r.Status != StaffTravelRequestStatus.Cancelled && r.Status != StaffTravelRequestStatus.Rejected
+                            && r.Status != StaffTravelRequestStatus.Completed && r.Status != StaffTravelRequestStatus.Closed)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task RequireDriverRequestCancellableAsync(Guid? driverRequestId, string tripNumber, CancellationToken cancellationToken = default)
+    {
+        if (await LiveDriverRequestAsync(driverRequestId, cancellationToken) is { } driver)
+            await RequireDriverCancellableAsync(driver, tripNumber, cancellationToken);
+    }
+
+    public async Task CancelDriverRequestAsync(
+        Guid? driverRequestId, string reason, Guid cancelledById, Guid cancelledByUserId, CancellationToken cancellationToken = default)
+    {
+        if (await LiveDriverRequestAsync(driverRequestId, cancellationToken) is not { } driver) return;
+        await CancelAsync(new CancelStaffTravelRequestDto
+        {
+            RequestId = driver.Id,
+            CancellationReason = Clip(reason, 1000),
+            CancelledById = cancelledById,
+        }, cancelledByUserId, cancellationToken);
+    }
+
+    private static string Clip(string text, int max) => text.Length > max ? text[..max] : text;
 
     public async Task<bool> MarkCompletedAsync(Guid requestId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
@@ -1720,10 +1813,24 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             throw new InvalidOperationException("Say what has changed — the trip is approved again on it.");
 
         var userId = RequireUserId();
+        // Lane 6 (D-35): the drivers' own requests go with the vehicles — checked before Fleet's cancel saves (G3).
+        var drivers = await LiveDriverRequestsAsync(entity, cancellationToken);
+        foreach (var driver in drivers)
+            await RequireDriverCancellableAsync(driver, entity.RequestNumber, cancellationToken);
+        if (drivers.Count > 0 && _currentUserService.EmployeeId is null)
+            throw new UnauthorizedAccessException(
+                "Sending back a trip whose drivers' requests go with it needs a login linked to an employee record.");
         // Lane 6 (FX-3): the trip goes back for re-approval, so its vehicles are not held meanwhile — the undispatched
         // fleet trips are cancelled (the legs stay, cancelled, as the record), and are booked again once approved.
         await _fleet.CancelForRequestAsync(entity.TenantId, entity.Id,
             $"Travel request {entity.RequestNumber} sent back for a change: {reason.Trim()}", cancellationToken);
+        foreach (var driver in drivers)
+            await CancelAsync(new CancelStaffTravelRequestDto
+            {
+                RequestId = driver.Id,
+                CancellationReason = Clip($"The trip {entity.RequestNumber} this driver's company vehicle served was sent back for a change: {reason.Trim()}", 1000),
+                CancelledById = _currentUserService.EmployeeId!.Value,
+            }, userId, cancellationToken);
         entity.Status = StaffTravelRequestStatus.ReturnedForRevision;
         entity.ChangeRequestedAt = DateTime.UtcNow;
         entity.ChangeRequestedById = _currentUserService.EmployeeId;

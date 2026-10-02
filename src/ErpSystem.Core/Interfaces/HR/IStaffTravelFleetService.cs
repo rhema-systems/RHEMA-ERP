@@ -66,4 +66,9 @@ public interface IStaffTravelFleetService
 
     /// <summary>Removes a fuel record a payment wrote, with its cost entry — a voided payment (D-31).</summary>
     Task RemoveClaimFuelAsync(Guid fleetFuelTransactionId, CancellationToken cancellationToken = default);
+
+    // ---- Slice 6c ----
+
+    /// <summary>The incidents Fleet records on a trip's fleet trips, newest first — read-only (D-29, FX-8's read half).</summary>
+    Task<IReadOnlyList<StaffTravelFleetIncidentDto>> GetIncidentsAsync(Guid requestId, CancellationToken cancellationToken = default);
 }

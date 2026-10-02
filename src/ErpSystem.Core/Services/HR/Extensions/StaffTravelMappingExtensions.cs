@@ -958,6 +958,8 @@ public static class StaffTravelMappingExtensions
             CurrencyCode = entity.CurrencyCode,
             Status = entity.Status,
             Notes = entity.Notes,
+            // Lane 6 (D-33): the number and status are read beside it (StaffTravelFleetService.DescribeAsync).
+            DriverTravelRequestId = entity.DriverTravelRequestId,
         };
     }
 

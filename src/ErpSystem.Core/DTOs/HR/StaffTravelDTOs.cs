@@ -80,6 +80,13 @@ public class StaffTravelRequestDto : BaseDto
     public string? ParentRequestNumber { get; set; }
     public string? AmendmentReason { get; set; }
 
+    /// <summary>
+    /// Lane 6 (D-33): when this is a driver's own request, the trip whose company vehicle they drive — read from the leg
+    /// that keeps it, not stored here.
+    /// </summary>
+    public Guid? DriverForRequestId { get; set; }
+    public string? DriverForRequestNumber { get; set; }
+
     // Cancellation
     public string? CancellationReason { get; set; }
     public Guid? CancelledById { get; set; }
@@ -1588,6 +1595,36 @@ public class StaffTravelGroundTransportDto : BaseDto
     public DateTime? ReturnedAt { get; set; }
     /// <summary>End mileage less start mileage, once Fleet has both.</summary>
     public double? Distance { get; set; }
+
+    /// <summary>
+    /// Lane 6 (D-33, D-34): the driver's own travel request, when one was raised for the leg, and whether the leg keeps
+    /// a driver other than the traveller away overnight — drop-off on a later day, or a destination outside the trip's
+    /// origin city — which is when the desk is asked to raise one.
+    /// </summary>
+    public Guid? DriverTravelRequestId { get; set; }
+    public string? DriverTravelRequestNumber { get; set; }
+    public string? DriverTravelRequestStatus { get; set; }
+    public bool DriverAwayOvernight { get; set; }
+}
+
+/// <summary>
+/// Lane 6 (D-29, FX-8's read half): an incident Fleet records against one of a trip's company vehicles on its fleet
+/// trip — shown on the trip's Compliance tab, read-only. Fleet owns it.
+/// </summary>
+public class StaffTravelFleetIncidentDto
+{
+    public Guid Id { get; set; }
+    public Guid? FleetTripId { get; set; }
+    public string VehicleName { get; set; } = string.Empty;
+    public string? VehiclePlate { get; set; }
+    public string? DriverName { get; set; }
+    public DateTime OccurredAtUtc { get; set; }
+    public string IncidentType { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string? Location { get; set; }
+    public string Severity { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
 }
 
 /// <summary>

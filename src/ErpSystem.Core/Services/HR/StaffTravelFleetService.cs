@@ -452,6 +452,63 @@ public class StaffTravelFleetService : IStaffTravelFleetService
                 _ => null,
             };
         }
+
+        await DescribeDriversAsync(tenantId, legs.Where(l => l.FleetTripId is not null).ToList(), cancellationToken);
+    }
+
+    /// <summary>
+    /// D-33, D-34: the driver's own request the leg keeps, and whether the leg keeps a driver other than the traveller away
+    /// overnight — a drop-off on a later day than the pick-up, or a trip whose destination is outside its origin city.
+    /// </summary>
+    private async Task DescribeDriversAsync(Guid tenantId, List<StaffTravelGroundTransportDto> legs, CancellationToken cancellationToken)
+    {
+        if (legs.Count == 0) return;
+        var requestIds = legs.Select(l => l.StaffTravelRequestId)
+            .Concat(legs.Where(l => l.DriverTravelRequestId is not null).Select(l => l.DriverTravelRequestId!.Value))
+            .Distinct().ToList();
+        var requests = await _unitOfWork.Repository<StaffTravelRequest>()
+            .GetQueryable(r => r.TenantId == tenantId && requestIds.Contains(r.Id))
+            .Select(r => new { r.Id, r.RequestNumber, r.Status, r.EmployeeId, r.OriginCity, r.DestinationCity, r.IsDeleted })
+            .ToListAsync(cancellationToken);
+        foreach (var leg in legs)
+        {
+            if (leg.DriverTravelRequestId is Guid driverRequestId
+                && requests.FirstOrDefault(r => r.Id == driverRequestId && !r.IsDeleted) is { } own)
+            {
+                leg.DriverTravelRequestNumber = own.RequestNumber;
+                leg.DriverTravelRequestStatus = own.Status.ToString();
+            }
+            var trip = requests.FirstOrDefault(r => r.Id == leg.StaffTravelRequestId);
+            leg.DriverAwayOvernight = trip is not null
+                && leg.Status != TravelBookingStatus.Cancelled
+                && leg.DriverEmployeeId is Guid driver && driver != trip.EmployeeId
+                && ((leg.PickupDatetime is DateTime from && leg.DropoffDatetime is DateTime to && to.Date > from.Date)
+                    || !string.Equals(trip.OriginCity?.Trim(), trip.DestinationCity?.Trim(), StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    // ---- Slice 6c: incidents (D-29, FX-8's read half) ------------------------------------------------------------
+
+    public async Task<IReadOnlyList<StaffTravelFleetIncidentDto>> GetIncidentsAsync(Guid requestId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var tripIds = await _unitOfWork.Repository<StaffTravelGroundTransport>()
+            .GetQueryable(g => g.TenantId == tenantId && g.StaffTravelRequestId == requestId && !g.IsDeleted && g.FleetTripId != null)
+            .Select(g => g.FleetTripId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        if (tripIds.Count == 0) return Array.Empty<StaffTravelFleetIncidentDto>();
+        return await _unitOfWork.Repository<FleetIncident>()
+            .GetQueryable(i => i.TenantId == tenantId && !i.IsDeleted && i.FleetTripId != null && tripIds.Contains(i.FleetTripId.Value))
+            .OrderByDescending(i => i.OccurredAtUtc)
+            .Select(i => new StaffTravelFleetIncidentDto
+            {
+                Id = i.Id, FleetTripId = i.FleetTripId, VehicleName = i.VehicleAsset.Name, VehiclePlate = i.VehicleAsset.LicensePlate,
+                DriverName = i.DriverEmployee == null ? null : (i.DriverEmployee.FirstName + " " + i.DriverEmployee.LastName).Trim(),
+                OccurredAtUtc = i.OccurredAtUtc, IncidentType = i.IncidentType, Title = i.Title, Description = i.Description,
+                Location = i.Location, Severity = i.Severity, Status = i.Status,
+            })
+            .ToListAsync(cancellationToken);
     }
 
     // ---- Slice 6b: fuel on claims (FX-6, D-30, D-31, D-32) ----------------------------------------------------------
