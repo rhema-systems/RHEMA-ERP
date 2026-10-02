@@ -1279,6 +1279,9 @@ public static class StaffTravelMappingExtensions
             ReviewedById = entity.ReviewedById,
             ReviewedByName = entity.ReviewedBy?.FullName,
             ReviewedAt = entity.ReviewedAt,
+            FleetTripId = entity.FleetTripId,
+            FuelQuantity = entity.FuelQuantity,
+            FleetFuelTransactionId = entity.FleetFuelTransactionId,
         };
     }
 
@@ -1301,6 +1304,9 @@ public static class StaffTravelMappingExtensions
             ReceiptAttachmentId = dto.ReceiptAttachmentId,
             IsPerDiem = dto.IsPerDiem,
             PerDiemRateId = dto.PerDiemRateId,
+            // Lane 6 (D-30): checked by the service first. FleetFuelTransactionId is the payment's to write (D-31).
+            FleetTripId = dto.FleetTripId,
+            FuelQuantity = dto.FuelQuantity,
             Status = TravelExpenseLineStatus.Pending,
             CreatedBy = userId.ToString(),
         };
@@ -1321,6 +1327,8 @@ public static class StaffTravelMappingExtensions
         entity.ReceiptAttachmentId = dto.ReceiptAttachmentId;
         entity.IsPerDiem = dto.IsPerDiem;
         entity.PerDiemRateId = dto.PerDiemRateId;
+        entity.FleetTripId = dto.FleetTripId;
+        entity.FuelQuantity = dto.FuelQuantity;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }

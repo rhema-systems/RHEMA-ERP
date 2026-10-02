@@ -96,6 +96,14 @@ const lineSchema = z.object({
   currencyOriginal: z.string().min(1, 'Select a currency'),
   receiptAttachmentId: z.string().optional(),
   isPerDiem: z.boolean(),
+  // Lane 6 (D-30, D-32): a fuel expense's company-vehicle trip, the litres, and why a fill Fleet already logs is claimed.
+  fleetTripId: z.string().optional(),
+  fuelQuantity: z.coerce.number().min(0, 'Litres cannot be negative').optional(),
+  fuelDuplicateReason: z.string().max(1000).optional(),
+}).superRefine((v, ctx) => {
+  if (v.expenseCategory === 'Fuel' && v.fleetTripId && !(Number(v.fuelQuantity) > 0)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['fuelQuantity'], message: 'Enter the litres bought' });
+  }
 });
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -157,6 +165,19 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
     enabled: !!claim?.staffTravelRequestId,
   });
 
+  // Lane 6 (D-30, D-32): the trip's company-vehicle trips and the fuel Fleet already logs on each. Keyed under the
+  // claim, so every refresh of the claim — a save, a payment, a void — reads it again.
+  const { data: fleetFuel, isSuccess: fleetFuelLoaded } = useQuery({
+    queryKey: ['travel-claim', id, 'fleet-fuel'],
+    queryFn: () => travelFinanceService.getClaimFleetFuel(id),
+    enabled: !!claim,
+  });
+  const fleetTrip = (tripId?: string | null) => fleetFuel?.trips.find((t) => t.fleetTripId === tripId);
+  const vehicleLabel = (tripId?: string | null) => {
+    const t = fleetTrip(tripId);
+    return t ? (t.vehiclePlate ? `${t.vehicleName} (${t.vehiclePlate})` : t.vehicleName) : 'Company vehicle';
+  };
+
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['travel-claim', id] });
 
   const lineForm = useForm<z.input<typeof lineSchema>>({
@@ -164,6 +185,7 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
     defaultValues: {
       expenseCategory: 'Meals', expenseDate: '', amountOriginal: 0,
       currencyOriginal: '', receiptAttachmentId: '', isPerDiem: false,
+      fleetTripId: '', fuelQuantity: undefined, fuelDuplicateReason: '',
     },
   });
 
@@ -179,18 +201,42 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
         description: line.description ?? '', merchantName: line.merchantName ?? '',
         amountOriginal: line.amountOriginal, currencyOriginal: line.currencyOriginal,
         receiptAttachmentId: line.receiptAttachmentId ?? '', isPerDiem: line.isPerDiem,
+        fleetTripId: line.fleetTripId ?? '', fuelQuantity: line.fuelQuantity ?? undefined, fuelDuplicateReason: '',
       }
       : {
         expenseCategory: 'Meals', expenseDate: '', amountOriginal: 0,
         currencyOriginal: claim?.currencyCode ?? '', receiptAttachmentId: '', isPerDiem: false,
+        fleetTripId: '', fuelQuantity: undefined, fuelDuplicateReason: '',
       });
     setLineDialog({ line });
   };
+
+  // The fuel half of the dialog (D-30, D-32): what the form currently says, and what Fleet already logs that day.
+  const watchedCategory = lineForm.watch('expenseCategory');
+  const watchedTrip = lineForm.watch('fleetTripId');
+  const watchedDate = lineForm.watch('expenseDate');
+  const editingLine = lineDialog?.line ?? null;
+  const fuelTripOptions = (fleetFuel?.trips ?? [])
+    .filter((t) => t.live || t.fleetTripId === editingLine?.fleetTripId)
+    .map((t) => ({
+      value: t.fleetTripId,
+      label: `${t.vehiclePlate ? `${t.vehicleName} (${t.vehiclePlate})` : t.vehicleName} · ${fmtDate(t.plannedStartAt)} to ${fmtDate(t.plannedEndAt)}`
+        + (t.live ? '' : ` — ${t.status.toLowerCase()} in Fleet`),
+    }));
+  const showFuel = watchedCategory === 'Fuel' && fuelTripOptions.length > 0;
+  // The server asks again only when the fill moves — a new line, or another trip, day or category.
+  const fillMoved = !editingLine || (editingLine.fleetTripId ?? null) !== (watchedTrip || null)
+    || String(editingLine.expenseDate).slice(0, 10) !== watchedDate || editingLine.expenseCategory !== watchedCategory;
+  const sameDayFuel = showFuel && watchedTrip && watchedDate && fillMoved
+    ? (fleetTrip(watchedTrip)?.fuel ?? []).filter((f) => String(f.fuelledAt).slice(0, 10) === watchedDate)
+    : [];
 
   const saveLine = useMutation({
     mutationFn: (values: z.input<typeof lineSchema>) => {
       const v = lineSchema.parse(values);
       const editing = lineDialog?.line;
+      // A trip and litres belong to a fuel expense only — a line switched to another category sends neither.
+      const fuel = v.expenseCategory === 'Fuel' && !!v.fleetTripId;
       const payload = {
         expenseCategory: v.expenseCategory as TravelExpenseCategory,
         expenseDate: v.expenseDate,
@@ -202,6 +248,9 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
         isPerDiem: v.isPerDiem,
         perDiemRateId: editing?.perDiemRateId ?? null,
         policyLimit: editing?.policyLimit ?? null,
+        fleetTripId: fuel ? v.fleetTripId : null,
+        fuelQuantity: fuel ? Number(v.fuelQuantity) : null,
+        fuelDuplicateReason: fuel && v.fuelDuplicateReason?.trim() ? v.fuelDuplicateReason.trim() : null,
       };
       return editing
         ? travelFinanceService.updateClaimLine({ ...payload, id: editing.id })
@@ -350,7 +399,7 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
             <StatusBadge status={humanize(claim.statusName)} />
             {canWrite && isDraft && (
               <>
-                <Button variant="outline" onClick={() => openLineDialog(null)} disabled={!attachmentsLoaded}>
+                <Button variant="outline" onClick={() => openLineDialog(null)} disabled={!attachmentsLoaded || !fleetFuelLoaded}>
                   <Plus className="mr-2 h-4 w-4" /> Add an expense
                 </Button>
                 <Button onClick={() => submit.mutate()} disabled={submit.isPending}>
@@ -486,7 +535,7 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
         <CardHeader className="flex flex-row items-center justify-between gap-4 pb-3">
           <CardTitle className="text-base">Expenses</CardTitle>
           {canWrite && isDraft && (
-            <Button variant="outline" size="sm" onClick={() => openLineDialog(null)} disabled={!attachmentsLoaded}>
+            <Button variant="outline" size="sm" onClick={() => openLineDialog(null)} disabled={!attachmentsLoaded || !fleetFuelLoaded}>
               <Plus className="mr-2 h-4 w-4" /> Add
             </Button>
           )}
@@ -520,6 +569,12 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
                         <span className="text-muted-foreground"> · {l.merchantName}</span>
                       )}
                       {l.isPerDiem && <span className="text-muted-foreground"> · per diem</span>}
+                      {l.fleetTripId && (
+                        <span className="block text-xs text-muted-foreground">
+                          {vehicleLabel(l.fleetTripId)}{l.fuelQuantity != null ? ` · ${l.fuelQuantity} L` : ''}
+                          {l.fleetFuelTransactionId ? ' · in Fleet\'s fuel log' : ''}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right whitespace-nowrap">
                       {fmtMoney(l.amountOriginal, l.currencyOriginal)}
@@ -554,7 +609,7 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
                             variant="ghost"
                             size="icon"
                             aria-label="Change this expense"
-                            disabled={!attachmentsLoaded}
+                            disabled={!attachmentsLoaded || !fleetFuelLoaded}
                             onClick={() => openLineDialog(l)}
                           >
                             <Pencil className="h-4 w-4" />
@@ -606,6 +661,42 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
               />
               <DateField form={lineForm} name="expenseDate" label="Date" required />
             </FieldRow>
+            {showFuel && (
+              <div className="space-y-3 rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">
+                  {fleetFuel?.fuelNamesTrip
+                    ? 'This trip travels by company vehicle and hires no car, so its fuel was the company vehicle\'s — name the vehicle\'s trip and the litres.'
+                    : 'Fuel for the company vehicle names its trip and the litres; fuel for the hired car names neither.'}
+                  {' '}When the claim is paid, Fleet&apos;s fuel log takes the litres and the amount paid.
+                </p>
+                <FieldRow>
+                  <SelectField
+                    form={lineForm}
+                    name="fleetTripId"
+                    label="Company vehicle trip"
+                    required={!!fleetFuel?.fuelNamesTrip}
+                    options={fuelTripOptions}
+                    allowEmpty={!fleetFuel?.fuelNamesTrip}
+                    emptyLabel="Not the company vehicle"
+                  />
+                  {watchedTrip && (
+                    <NumberField form={lineForm} name="fuelQuantity" label="Litres" required />
+                  )}
+                </FieldRow>
+                {sameDayFuel.length > 0 && (
+                  <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-700 dark:bg-amber-950">
+                    <p>
+                      Fleet already logs fuel for {vehicleLabel(watchedTrip)} on that day:{' '}
+                      {sameDayFuel.map((f) =>
+                        `${f.quantity} ${f.unit}${f.totalCost != null ? ` for ${fmtMoney(f.totalCost, claim.currencyCode)}` : ''}`
+                        + (f.claimNumber ? ` (travel claim ${f.claimNumber})` : ' (logged in Fleet)')).join('; ')}.
+                      If this is another fill, say why it is claimed too — the reason is kept as an internal note on the trip.
+                    </p>
+                    <TextField form={lineForm} name="fuelDuplicateReason" label="Why it is claimed too" required />
+                  </div>
+                )}
+              </div>
+            )}
             <TextField form={lineForm} name="description" label="Description" />
             <TextField form={lineForm} name="merchantName" label="Merchant" />
             <FieldRow>
@@ -792,6 +883,8 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
               To {claim.employeeName}. The payment date is taken from the clock, and you are recorded
               as the officer who paid — it cannot be the claimant or anyone who reviewed the claim or
               its expenses.
+              {claim.lines.some((l) => l.fleetTripId && (l.amountApproved ?? 0) > 0)
+                && ' Its approved fuel for the company vehicle goes into Fleet\'s fuel log, at the amount paid.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -907,6 +1000,7 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
           (claim.advanceDeducted > 0
             ? `, the ${fmtMoney(claim.advanceDeducted, claim.currencyCode)} it recovered goes back onto ${claim.travelAdvanceNumber ?? 'the advance'}`
             : '') +
+          (claim.lines.some((l) => l.fleetFuelTransactionId) ? ', the fuel it put in Fleet\'s log is removed' : '') +
           ', and the claim returns to approved, to be paid again or not. Neither the claimant nor the person who paid it ' +
           'can void it. The reason is kept on the claim and the trip.'
         }

@@ -173,6 +173,42 @@ export interface StaffTravelExpenseClaimLine extends AuditFields {
   reviewedById?: string | null;
   reviewedByName?: string | null;
   reviewedAt?: string | null;
+  /** Lane 6 (D-30): a fuel expense's company-vehicle trip and the litres bought. */
+  fleetTripId?: string | null;
+  fuelQuantity?: number | null;
+  /** Fleet's fuel record the payment wrote (D-31); cleared by a voided payment. */
+  fleetFuelTransactionId?: string | null;
+}
+
+/** Lane 6 (D-30, D-32): `GET claims/{id}/fleet-fuel` — the trip's company-vehicle trips and Fleet's fuel on each. */
+export interface StaffTravelFleetFuelOptions {
+  /** A fuel expense must name one of the live trips: a company vehicle travels and no car is hired. */
+  fuelNamesTrip: boolean;
+  hasCarRental: boolean;
+  trips: StaffTravelFleetFuelTrip[];
+}
+
+export interface StaffTravelFleetFuelTrip {
+  fleetTripId: string;
+  vehicleName: string;
+  vehiclePlate?: string | null;
+  plannedStartAt?: string | null;
+  plannedEndAt?: string | null;
+  status: string;
+  live: boolean;
+  fuel: StaffTravelFleetFuelEntry[];
+}
+
+export interface StaffTravelFleetFuelEntry {
+  id: string;
+  fuelledAt: string;
+  quantity: number;
+  unit: string;
+  /** In Finance's base currency, as Fleet keeps it. */
+  totalCost?: number | null;
+  vendorName?: string | null;
+  /** The paid travel claim that logged it; otherwise Fleet's own entry. */
+  claimNumber?: string | null;
 }
 
 export interface StaffTravelExpenseClaimSummary {
@@ -246,6 +282,11 @@ export interface CreateStaffTravelExpenseClaimLine {
   receiptAttachmentId?: string | null;
   isPerDiem: boolean;
   perDiemRateId?: string | null;
+  /** Lane 6 (D-30): a fuel expense's company-vehicle trip — on a trip with one and no hired car, required. */
+  fleetTripId?: string | null;
+  fuelQuantity?: number | null;
+  /** D-32: why the fill is claimed though Fleet already logs fuel for that trip that day — kept as an internal note. */
+  fuelDuplicateReason?: string | null;
 }
 
 /**

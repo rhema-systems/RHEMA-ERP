@@ -65,9 +65,10 @@ baseline (D-13); lane 0 was built the same day.**
    O-15, Q3, Q5, T-19, T-45) — bookings 148/148 three times — committed `f8e9a9e31`. No migration.
 9. **Lane 6** (Fleet) — **IN PROGRESS.** Source-checked against `f8e9a9e31` (lane 6's *Source check*: R1–R4;
    D-27…D-29). **6a** the reservation (pickers through travel's door, the clash and compliance refusals, the D-27
-   submit, the leg following its fleet trip, Fleet's costs in the budget) — fleet 75/75 twice — staged. No migration;
-   Fleet's code unchanged. ⚠ **UAT has no Fleet data** — the suite makes and removes its own (D-28). Next: **6b** fuel
-   on claims, **6c** drivers as travellers and incidents shown.
+   submit, the leg following its fleet trip, Fleet's costs in the budget) — committed `3723e3e23`. **6b** fuel on claims
+   (S1–S5; D-30…D-32: a fuel expense names its vehicle trip, the paid fuel goes into Fleet's log, a void removes it) —
+   fleet 124/124 twice — staged. No migration; Fleet's code unchanged. ⚠ **UAT has no Fleet data** — the suite makes and
+   removes its own (D-28). Next: **6c** drivers as travellers and incidents shown.
 10. **Then** lanes **7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane against this
    document before building it — line numbers are as of HEAD `bad482a8d`.
 
@@ -114,6 +115,12 @@ lane's slice.
 | **D-24** | What happens to a trip's bookings when the trip is cancelled (Q2)? | **Cascade the holds, refuse the live:** cancelling a trip cancels its Pending and OnHold bookings with it, and is refused while any booking is Confirmed or Ticketed — the desk cancels those first, recording the supplier's fee. The itinerary's current version is marked Cancelled (5b). Lane 5. |
 | **D-25** | Who moves an itinerary's status (D5)? | **The server, with a Finalise step:** Draft on create; Finalise on the current version stamps `FinalizedAt` and marks it Approved; Superseded when a newer version becomes current; Cancelled with the trip. An edit no longer writes the status. PendingReview, Active and Completed stay readable with no writer. Lane 5, slice 5b. |
 | **D-26** | D-23 leaves the demo's two Submitted trips unable to hold bookings | **The demo pack approves London** (hr.head's trip — md.tdc at stage 1, `hr.officer` at HR's): its BA flight is held at Confirmed and refused a ticket until the visa is approved (T-24 live), with the Hilton and the Avis car. **Lagos stays Submitted** for the approvals walk, keeping its group, itinerary, insurance and risk assessment, without its flight and hotel. Lane 5, slice 5a. |
+| **D-27** | Fleet submits a trip through the workflow engine, and with no published `FLEET_TRIP` route the engine approves it with nobody asked (R2, FX-9) | **Travel submits a leg's fleet trip only under a published, active `FLEET_TRIP` route;** otherwise the trip stays a Draft and the leg says the vehicle is not held. FX-9 itself stays Fleet's hand-off. Lane 6, slice 6a. |
+| **D-28** | UAT holds no Fleet data at all (R1) | **Proofs use per-run suite fixtures only** — a vehicle category, vehicles, compliance items and verified licences made through the APIs as the platform admin and removed in teardown. A demo fleet is Fleet's owner's to seed (hand-off). Lane 6. |
+| **D-29** | The sweep's fleet signals (dispatch → InProgress, the completion notice, an incident notice) belong with the other notices | **They move to lane 8;** lane 6 shows a trip's fleet incidents read-only on its Compliance tab (6c). |
+| **D-30** | When must a fuel expense name a fleet trip (6b)? | **On a trip with a live company-vehicle leg, a Fuel line names one of its fleet trips — unless the trip also has a car rental,** when it may name none (fuel for the rental). Fuel on a trip with no company vehicle names nothing. Lane 6, slice 6b. |
+| **D-31** | What does a paid claim put in Fleet's fuel log (6b)? | **Only a fuel line approved above zero: the litres claimed and the amount paid** (unit cost = paid ÷ litres). A rejected line writes nothing; a voided payment removes what the payment wrote. Lane 6, slice 6b. |
+| **D-32** | A fuel line for a fleet trip on a day Fleet already logs fuel for it (S5) | **Refused unless the desk gives the reason it is claimed too;** the reason is kept as an internal note on the trip, and the dialog shows Fleet's fuel for the trip first. Lane 6, slice 6b. |
 
 **Standing assumptions (not re-asked):** the closure ledger's D-29 holds — the policy rule register
 stays read-only and the policy-exception flow stays withheld until rule enforcement exists; Finance
@@ -133,7 +140,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **3** | The money chain | batch 1 + `TravelClosureMoneyChain` (D-14, applied to UAT) | `run-final-money.mjs`, `run-final-posting.mjs` (D-17, a scratch copy only) | ✅ complete 2026-10-02 — 3a `e2785ce7b`, 3b `f49e5eb9c`, 3c `b08bd498d` (money 286/286 twice, posting proof 70/70 twice on a scratch copy, lifecycle 256/256, truth 116/116, approvals 123/123 twice) |
 | **4** | Policy and authority | batch 1 (no lane migration) | `run-final-policy.mjs` | ✅ complete 2026-10-02 — 4a `19f20f2f2`, 4b `3a6792a30`, 4c staged (policy 129/129 twice, money 287, lifecycle 256, truth 117, approvals 123 twice each); D-18…D-22 |
 | **5** | Bookings and itinerary | batch 1 (no lane migration) | `run-final-bookings.mjs` | ✅ complete 2026-10-02 — 5a `4b7d12302`, 5b `f8e9a9e31` (bookings 148/148 ×3, policy 131, money 288, lifecycle 256, truth 118, approvals 123 twice each); D-23…D-26 |
-| **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ◐ 6a staged 2026-10-02 (fleet 75/75 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-29; next 6b, 6c |
+| **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ◐ 6a `3723e3e23`; 6b staged 2026-10-02 (fleet 124/124 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-32; next 6c |
 | **7** | Compliance and the portal | batch 1 | `run-final-compliance.mjs`, `run-final-portal.mjs` | ☐ |
 | **8** | Notifications and the sweep | batch 1 | `run-final-reminders.mjs` | ☐ |
 | **9** | Cross-module touchpoints | none | `run-final-touchpoints.mjs` | ☐ |
@@ -1732,7 +1739,7 @@ held only the known noise.
   trips. **No copies of Fleet's facts** — vehicle, driver and status are read from the fleet trip.
 - [x] **Shown on the leg:** vehicle, plate, driver, fleet status, dispatch and return times, distance
   from the start and end mileage. Fleet's costs for the trip feed the budget rollup for that leg.
-- [ ] **Fuel on claims:** claim lines gain `FleetTripId`, `FuelQuantity` and `FleetFuelTransactionId`;
+- [x] **Fuel on claims** (6b; D-30 required unless a car is hired, D-31 the paid amount, D-32 a reason): claim lines gain `FleetTripId`, `FuelQuantity` and `FleetFuelTransactionId`;
   a Fuel line on a request with a company-vehicle leg names one of its fleet trips; on **payment**
   travel records it through `IFleetFuelService.CreateAsync` (vehicle, trip, quantity, cost, merchant,
   receipt) and keeps the id; a voided payment deletes it; a Fuel line on a date Fleet already holds fuel
@@ -1861,6 +1868,79 @@ twice** (841338, 853035), lifecycle **256/256 twice** (863936, 904154), truth **
 approvals **123/123 twice** (953639, 973646). No request over 404 ms (the fleet calls under 100 ms). The API log held
 only the known noise (defect #23, the identity reconciliation, the email queue — UAT has no `EmailSettings` row) and the
 suites' own expected refusals.
+
+**Slice 6b source check (2026-10-02, HEAD `3723e3e23`).** Fleet's fuel service, the claim line (entity, DTOs, mapper),
+the claim's create, line, payment and void paths, HR's posting runner and the claim screen were re-read. The line already
+carries `FleetTripId`, `FuelQuantity` and `FleetFuelTransactionId` (batch 1) — **no migration**. Five facts:
+- **S1 — Fleet's fuel record.** `IFleetFuelService.CreateAsync` needs the vehicle, a fleet trip of that vehicle and litres
+  above zero; it keeps the unit cost to 4 places and works the total out as litres × unit cost, and writes a matching
+  `Fuel` cost entry (source `FuelTransaction`) in Finance's base currency — the claim's own currency since lane 3. It
+  checks no trip status. `DeleteAsync` removes the transaction and its cost entry together. Paying the approved amount
+  through a unit cost can leave Fleet's total a pesewa off on a large fill; the budget does not read it (R4).
+- **S2 — atomicity.** The payment runs inside HR's posting runner, a transaction that allows saves — Fleet's fuel
+  record lands with the payment or not at all. The void has no transaction around its last save, so its Fleet half is
+  wrapped in one (`ExecuteInTransactionAsync`, after the journal's reversal, which keeps its own).
+- **S3 — one filer, two doors.** Only the desk files claims; the new-claim page sends no lines, but the API takes inline
+  lines on create — the same rules on both, and on a line's add and change.
+- **S4 — no date rule on a line today.** A fuel line naming a fleet trip falls within that trip's planned days, a day
+  either side, as bookings do.
+- **S5 — Fleet's own fuel.** A driver can log the same fill in Fleet. Paid, the claim would log it a second time, so
+  Fleet's fuel log and costs would hold one fill twice (and the budget's committed keeps Fleet's own copy, which no
+  claim made).
+
+**Decisions (the user, 2026-10-02):** D-30 (a Fuel line names a fleet trip on a trip with a live company vehicle,
+unless a car rental is on it too), D-31 (the paid amount and the claimed litres, only for a line approved above zero),
+D-32 (a same-day fill Fleet already logs is refused without a reason, kept as an internal note) — § 1.
+
+**As built — slice 6b (2026-10-02).** No migration; Fleet's code unchanged.
+
+- *The seam grows.* `IStaffTravelFleetService` gains `GetFuelOptionsAsync`, `CheckFuelLineAsync`, `RecordClaimFuelAsync`
+  and `RemoveClaimFuelAsync` (over `IFleetFuelService`); the finance service reaches Fleet only through it.
+- *The line (D-30, S4).* Create and update line DTOs carry `FleetTripId`, `FuelQuantity` and a write-only
+  `FuelDuplicateReason`; the read DTO the first two and `FleetFuelTransactionId`. Only a fuel expense names a vehicle trip
+  and litres. On a trip with a live company-vehicle leg and no live car rental, a fuel expense must name one of the
+  trip's fleet trips (D-30); a named trip is the request's own (404 otherwise) and not cancelled or rejected in Fleet;
+  litres from 0.01; the fill inside the vehicle's trip, a day either side (S4). The same check runs on a claim's inline
+  lines at create, an added line and a changed one.
+- *A fill Fleet already logs (D-32).* A fuel line on a day Fleet logs fuel for that trip is refused without a reason of
+  five characters; with one it is saved and the reason is kept as an internal note on the trip, authored by the caller
+  (`CurrentUser.EmployeeId` from the controller — a reason needs a linked login). An edit asks again only when the fill
+  moves — another trip, day or category.
+- *Payment (D-31, S2).* Inside the payment's posting transaction, each fuel line approved above zero and not yet logged
+  is written to Fleet through `IFleetFuelService.CreateAsync`: the vehicle trip, the expense day at noon UTC, the litres,
+  the amount paid as a unit cost (in Finance's base currency — converted if the claim's ever differs), the merchant as
+  vendor, the claim number as reference. Fleet writes its own `Fuel` cost entry; the line keeps the record's id. A
+  rejected line and fuel naming no vehicle trip write nothing. The budget leaves those cost entries out (R4, built in 6a).
+- *Void (D-31, S2).* The records the payment wrote are removed through `IFleetFuelService.DeleteAsync` (with their cost
+  entries) and the lines cleared, in one transaction with the void's save (`ExecuteInTransactionAsync`, after the
+  journal's reversal); the void's internal note says so. Paid again, the fuel is logged afresh.
+- *Read.* `GET finance/claims/{claimId}/fleet-fuel` (Read): the trip's fleet trips — vehicle, plate, planned days,
+  Fleet's status, live — each with Fleet's fuel on it (litres, cost, vendor, and the travel claim that logged it, if one
+  did), plus `FuelNamesTrip` and `HasCarRental`.
+- *Screen.* The claim's expense dialog: for a fuel expense on a trip with a company vehicle, a **Company vehicle trip**
+  picker (required when D-30 binds; "Not the company vehicle" otherwise), **Litres**, and — when Fleet already logs fuel
+  for that trip on that day and the fill moved — Fleet's fills listed with a **Why it is claimed too** field. The
+  expense row shows the vehicle, the litres and "in Fleet's fuel log" once paid; the pay dialog says approved fuel goes
+  to Fleet's log, the void dialog that it is removed. Scoped type-check and lint clean; not walked in a browser.
+- *Demo pack.* No change: its claims carry no company-vehicle trip.
+
+**Suite** `run-final-fleet.mjs` 75 → **124**: §8 a trip in 80 days takes the Hilux; its claim offers the Hilux's trip with
+fuel bound to name it; fuel naming none refused (D-30), a meal naming one refused, no litres refused, another trip's
+vehicle 404, a fill three days after the return refused (S4); 40 L for GHS 600 on day 80 taken, nothing in Fleet yet;
+the driver logs 35 L in Fleet on day 81, so a claimed day-81 fill is refused naming it and taken with a reason, kept as
+an internal note (D-32), and its description then changed with no reason; a car hired, fuel for it names none. §9 the
+claim submitted, the 40 L approved at 500 of 600, the day-81 fill rejected, the hired car's fuel approved, paid by
+another officer: Fleet holds 40 L at GHS 500 on the Hilux's trip on day 80 from the merchant, with its Fuel cost entry;
+the rejected and the hired car's lines wrote nothing (D-31); the claim's fuel options list the claim's fill and the
+driver's own; the budget's committed unchanged by the paid fuel while its actual rose by 600 (R4 — §7 shows a Fleet cost
+on the trip does move committed). §10 the void removes Fleet's record and its cost entry, the options drop it, the note
+says so; paid again, a fresh record. §11 with the first trip's Land Cruiser cancelled, its claim offers only dead trips,
+fuel naming it is refused and fuel naming none is taken. The teardown now also soft-deletes the fuel records on the
+run's vehicles and counts fuel and costs. **124/124 twice** (553588, 590116; every section ran; UAT holds no live Fleet
+row after). Regression: bookings **148/148 twice** (603503, 620027), money **288/288 twice** (634186, 662308), policy
+**131/131 twice** (688589, 700745), lifecycle **256/256 twice** (715573, 756790), truth **118/118 twice** (802904,
+808211), approvals **123/123 twice** (813497, 834332). The slowest travel call 168 ms (only the cold start's first login
+took longer, 1.6 s); the API log held only the known noise and the suites' expected refusals.
 
 ### Lane 7 — Compliance and the portal (E1–E7, D-5, O-7, O-15, O-16, O-17, T-23–T-26, T-40, T-44, T-54–T-56)
 

@@ -1724,6 +1724,15 @@ as **hr.head** · **8 minutes** — the second-best chapter in the module
 
 ### 🚫 **READ RULE 6 BEFORE THIS CHAPTER.**
 
+> ⚠ **Changed by closure lane 6, slice 6b (2026-10-02) — fuel for a company vehicle.** On a trip that travels by
+> company vehicle, a **Fuel** expense names the vehicle's trip and the **litres** — required when no car was hired on the
+> trip (D-30). The fill must fall within the vehicle's trip, a day either side. When Fleet already logs fuel for that
+> trip on that day (the driver may have logged the same fill), the dialog lists Fleet's fills and the expense is refused
+> without a **reason it is claimed too**, which is kept as an internal note on the trip (D-32). When the claim is
+> **paid**, each fuel expense approved above zero goes into Fleet's fuel log — the litres claimed, the amount paid — and
+> its row reads "in Fleet's fuel log"; a rejected one writes nothing, and **voiding the payment removes it** (D-31).
+> The trip's budget counts that fuel once, as the paid claim. UAT has no fleet, so the demo cannot show this.
+
 ### 👁 On the page
 
 **Header:** the claim number, the traveller and the trip, a status badge, and up to four actions:
@@ -2476,7 +2485,7 @@ Six places. Two are worth a minute of the demo; the rest are for the questions.
 |---|---|---|
 | **Finance — currencies and conversion** | Every currency picker in this module reads Finance's active-currency list, and every conversion delegates to Finance's `ConvertAsync`. Travel keeps no currency table and invents no rate | **Say it**, in chapter 4 and again on the dashboard. It is the discipline behind Rule 5 |
 | **Procurement — Suppliers** | `VendorId` on every booking points at a Procurement `Supplier`. `api/Suppliers` answers **400**, so there are no selectable vendors and no booking form offers the field (**T-8**) | Only if asked why *"preferred vendor mandatory"* checks nothing |
-| **Fleet — vehicles** | `GroundTransportType.CompanyVehicle` reserves a **Fleet** vehicle asset, which is a different register from HR's own `CompanyAssets`. The demo's Sebrepor trip uses *PrivateCarHire* for exactly that reason. *Since closure lane 6 (slice 6a) the leg makes a real fleet trip — clashes and expiring compliance refused, its status, vehicle, driver and costs read from Fleet, cancelled with the leg or the trip; UAT has no fleet, so it is not demonstrable there* | Mention it in chapter 5.3 if somebody asks about the pool vehicle |
+| **Fleet — vehicles** | `GroundTransportType.CompanyVehicle` reserves a **Fleet** vehicle asset, which is a different register from HR's own `CompanyAssets`. The demo's Sebrepor trip uses *PrivateCarHire* for exactly that reason. *Since closure lane 6 (slice 6a) the leg makes a real fleet trip — clashes and expiring compliance refused, its status, vehicle, driver and costs read from Fleet, cancelled with the leg or the trip; since slice 6b a paid fuel expense goes into Fleet's fuel log (chapter 9). UAT has no fleet, so it is not demonstrable there* | Mention it in chapter 5.3 if somebody asks about the pool vehicle |
 | **The employee's position → staff level** | The policy guard resolves the applicable policy from the traveller's **staff level, which lives on their position**, not on the employee. A traveller with no position falls back to the organisation-wide policy | Worth one sentence in chapter 13 |
 | **Workflow inbox** (`/workflow/inbox`) | A submitted travel request appears in the assignee's inbox alongside every other approval in the ERP | **Yes** — 30 seconds, and it is the same point as every other module: a manager lives in one inbox |
 | **General Ledger** | ⚠ **Nothing.** No travel transaction posts to GL. Advances, claims and payments are recorded in travel's own tables and the Finance hand-off is an open backlog item (D-4) | Say it plainly if a finance director asks — see **T-58** |

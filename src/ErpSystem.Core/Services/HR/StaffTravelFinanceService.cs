@@ -31,6 +31,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     private readonly IUnitOfWork _unitOfWork;
     private readonly IHrFinancePostingAdapter _financePosting;
     private readonly IHrFinancePostingAdminService _postingRegister;
+    private readonly IStaffTravelFleetService _fleet;
     private readonly ILogger<StaffTravelFinanceService> _logger;
 
     public StaffTravelFinanceService(
@@ -46,9 +47,11 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         IUnitOfWork unitOfWork,
         IHrFinancePostingAdapter financePosting,
         IHrFinancePostingAdminService postingRegister,
+        IStaffTravelFleetService fleet,
         ILogger<StaffTravelFinanceService> logger)
     {
         _postingRegister = postingRegister;
+        _fleet = fleet;
         _budgetRepository = budgetRepository;
         _claimRepository = claimRepository;
         _lineRepository = lineRepository;
@@ -431,7 +434,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     /// is approved, under way or completed; an advance it names is this trip's and this traveller's; lines sent with
     /// it are checked and valued exactly as lines added later (B5 — they were stored at rate 0, worth nothing).
     /// </summary>
-    public async Task<StaffTravelExpenseClaimDto> CreateClaimAsync(CreateStaffTravelExpenseClaimDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    public async Task<StaffTravelExpenseClaimDto> CreateClaimAsync(CreateStaffTravelExpenseClaimDto createDto, Guid tenantId, Guid createdByUserId, Guid? actorEmployeeId = null, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         var request = await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
@@ -439,6 +442,12 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         RequireTripTakesClaims(request, "An expense claim can be filed");
         await RequireClaimableAdvanceAsync(request, createDto.TravelAdvanceId, cancellationToken);
         var baseCurrency = await RequireBaseCurrencyAsync(cancellationToken);
+        // Lane 6 (D-30, D-32): inline lines name their company vehicle's trip under the same rule as an added line.
+        var fuelNotes = new List<string>();
+        foreach (var line in createDto.Lines)
+            if (await _fleet.CheckFuelLineAsync(request, line.ExpenseCategory, line.ExpenseDate, line.FleetTripId, line.FuelQuantity,
+                    line.FuelDuplicateReason, askAboutDuplicates: true, cancellationToken) is { } note)
+                fuelNotes.Add(note);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId, request.EmployeeId, baseCurrency);
         entity.ClaimNumber = await GenerateClaimNumberAsync(tenantId, cancellationToken);
@@ -457,6 +466,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         entity.NetPayable = ComputeNetPayable(entity.TotalClaimed, entity.AdvanceDeducted);
 
         await _claimRepository.AddAsync(entity);
+        await KeepFuelNotesAsync(request, fuelNotes, actorEmployeeId);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Expense claim created: {ClaimNumber}", entity.ClaimNumber);
@@ -705,6 +715,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
             entity.UpdatedAt = DateTime.UtcNow;
 
             await SettleLinkedAdvanceAsync(entity, ct);
+            await LogPaidFuelAsync(entity, request, lines, ct);
 
             await _unitOfWork.SaveChangesAsync(ct);
 
@@ -790,6 +801,10 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         var now = DateTime.UtcNow;
         var userId = _currentUserProvider.UserId.ToString();
         var lines = await ClaimLinesAsync(entity, cancellationToken);
+        // D-31: the fuel records the payment put in Fleet's log go with it. Their ids are taken now: a retried transaction
+        // removes them again rather than finding the lines already cleared.
+        var fuelLines = lines.Where(l => l.FleetFuelTransactionId is not null).ToList();
+        var fuelIds = fuelLines.Select(l => l.FleetFuelTransactionId!.Value).ToList();
         var note =
             $"Payment of claim {entity.ClaimNumber} voided. It was paid on {entity.PaidAt:d MMM yyyy}" +
             (entity.PaymentMethod is TravelPaymentMethod method ? $" by {Humanise(method.ToString()).ToLowerInvariant()}" : string.Empty) +
@@ -798,6 +813,9 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
             (advance is null ? "." : $", after {entity.CurrencyCode} {entity.AdvanceDeducted:N2} recovered from advance {advance.AdvanceNumber}, " +
                                      $"whose {advance.CurrencyCode} {settledBack:N2} is outstanding again.") +
             (paidRow is { Status: HrFinancePostingStatus.Posted } ? $" Its journal {paidRow.JournalEntryNumber} is reversed." : string.Empty) +
+            (fuelIds.Count == 0 ? string.Empty
+                : fuelIds.Count == 1 ? " The fuel record it put in Fleet's log is removed."
+                : $" The {fuelIds.Count} fuel records it put in Fleet's log are removed.") +
             $" Reason: {reason}";
 
         entity.Status = lines.Sum(l => l.AmountApproved ?? 0m) == lines.Sum(l => l.AmountBaseCurrency)
@@ -851,8 +869,19 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         });
 
         // One save: the claim, the advance, the register row and the note together. All tracked — the claim and the
-        // advance were read alone — so nothing beside them is marked modified.
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // advance were read alone — so nothing beside them is marked modified. Since lane 6 it is a transaction with
+        // Fleet's fuel records (D-31), which Fleet's own service removes — saving as it goes — with their cost entries.
+        await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+        {
+            foreach (var fuelId in fuelIds)
+                await _fleet.RemoveClaimFuelAsync(fuelId, ct);
+            foreach (var line in fuelLines)
+            {
+                line.FleetFuelTransactionId = null;
+                line.UpdatedAt = now;
+                line.UpdatedBy = userId;
+            }
+        }, cancellationToken);
 
         _logger.LogInformation(
             "Expense claim payment voided: {ClaimNumber}, advance settlement undone {SettledBack}, journal {Journal}",
@@ -863,7 +892,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     // ---- Expense claim lines -----------------------------------------------
 
     /// <summary>Adds an expense to a draft or returned claim (lane 3, B6), its receipt and per-diem rate checked (B3).</summary>
-    public async Task<StaffTravelExpenseClaimLineDto> AddClaimLineAsync(CreateStaffTravelExpenseClaimLineDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    public async Task<StaffTravelExpenseClaimLineDto> AddClaimLineAsync(CreateStaffTravelExpenseClaimLineDto createDto, Guid tenantId, Guid createdByUserId, Guid? actorEmployeeId = null, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         var claim = await GetOwnedClaimAsync(createDto.StaffTravelExpenseClaimId);
@@ -871,10 +900,13 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         await GuardClaimNotPostedAsync(createDto.StaffTravelExpenseClaimId, "Adding a line to this claim", cancellationToken);
         var request = await RequireOwnedRequestAsync(claim.StaffTravelRequestId);
         await RequireLineReferencesAsync(request, createDto.ReceiptAttachmentId, createDto.PerDiemRateId, cancellationToken);
+        var fuelNote = await _fleet.CheckFuelLineAsync(request, createDto.ExpenseCategory, createDto.ExpenseDate,
+            createDto.FleetTripId, createDto.FuelQuantity, createDto.FuelDuplicateReason, askAboutDuplicates: true, cancellationToken);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await ApplyBaseCurrencyAmountAsync(entity, cancellationToken);
         await _lineRepository.AddAsync(entity);
+        await KeepFuelNotesAsync(request, fuelNote is null ? Array.Empty<string>() : new[] { fuelNote }, actorEmployeeId);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         await RecomputeClaimTotalsAsync(entity.StaffTravelExpenseClaimId, cancellationToken);
@@ -895,7 +927,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     /// Changes an expense on a draft or returned claim (lane 3, B6). An expense already reviewed — on a claim
     /// returned to the claimant — goes back to be reviewed again: the review was of what it said before.
     /// </summary>
-    public async Task<StaffTravelExpenseClaimLineDto> UpdateClaimLineAsync(UpdateStaffTravelExpenseClaimLineDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
+    public async Task<StaffTravelExpenseClaimLineDto> UpdateClaimLineAsync(UpdateStaffTravelExpenseClaimLineDto updateDto, Guid updatedByUserId, Guid? actorEmployeeId = null, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedClaimLineAsync(updateDto.Id);
         var claim = await GetOwnedClaimAsync(entity.StaffTravelExpenseClaimId);
@@ -903,6 +935,12 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         await GuardClaimNotPostedAsync(entity.StaffTravelExpenseClaimId, "Editing a line of this claim", cancellationToken);
         var request = await RequireOwnedRequestAsync(claim.StaffTravelRequestId);
         await RequireLineReferencesAsync(request, updateDto.ReceiptAttachmentId, updateDto.PerDiemRateId, cancellationToken);
+        // D-32 asks again only when the fill moves — to another fleet trip, day or category; the reason given when it was
+        // first saved stands for an edit of its description or amount.
+        var fillMoved = updateDto.FleetTripId != entity.FleetTripId || updateDto.ExpenseDate != entity.ExpenseDate
+                        || updateDto.ExpenseCategory != entity.ExpenseCategory;
+        var fuelNote = await _fleet.CheckFuelLineAsync(request, updateDto.ExpenseCategory, updateDto.ExpenseDate,
+            updateDto.FleetTripId, updateDto.FuelQuantity, updateDto.FuelDuplicateReason, askAboutDuplicates: fillMoved, cancellationToken);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         entity.Status = TravelExpenseLineStatus.Pending;
@@ -919,6 +957,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         // summing whatever the payload said. The half-fix shape: when a derived field is taken back
         // from the caller, take it back on every path that writes it.
         await ApplyBaseCurrencyAmountAsync(entity, cancellationToken);
+        await KeepFuelNotesAsync(request, fuelNote is null ? Array.Empty<string>() : new[] { fuelNote }, actorEmployeeId);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -1066,6 +1105,64 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         }
         if (perDiemRateId is Guid rate)
             await GetOwnedPerDiemRateAsync(rate);
+    }
+
+    /// <summary>
+    /// D-32's reasons — a fill claimed though Fleet already logs fuel for that trip that day — kept as internal notes on the
+    /// trip, by the caller; so a reason needs a login linked to an employee record. Added for the caller's save.
+    /// </summary>
+    private async Task KeepFuelNotesAsync(StaffTravelRequest request, IReadOnlyCollection<string> notes, Guid? actorEmployeeId)
+    {
+        if (notes.Count == 0) return;
+        if (actorEmployeeId is not Guid author)
+            throw new UnauthorizedAccessException(
+                "Recording why a fill Fleet already logs is claimed too needs a login linked to an employee record.");
+        foreach (var note in notes)
+            await _unitOfWork.Repository<StaffTravelRequestComment>().AddAsync(new StaffTravelRequestComment
+            {
+                TenantId = request.TenantId,
+                StaffTravelRequestId = request.Id,
+                AuthorId = author,
+                CommentType = TravelRequestCommentType.InternalNote,
+                Body = note.Length > 2000 ? note[..2000] : note,
+                IsVisibleToTraveller = false,
+                CreatedBy = _currentUserProvider.UserId.ToString(),
+            });
+    }
+
+    /// <summary>
+    /// D-31: each fuel expense approved above zero goes into Fleet's fuel log — the litres claimed, the amount paid in
+    /// Finance's base currency (Fleet's) — inside the payment's transaction, so the payment and Fleet's record stand or
+    /// fall together. Fleet writes the matching cost entry, which the budget leaves out (R4): the paid claim counts it.
+    /// </summary>
+    private async Task LogPaidFuelAsync(
+        StaffTravelExpenseClaim claim, StaffTravelRequest request, IEnumerable<StaffTravelExpenseClaimLine> lines, CancellationToken cancellationToken)
+    {
+        var fuel = lines.Where(l => l.FleetTripId is not null && l.FuelQuantity is > 0m && (l.AmountApproved ?? 0m) > 0m
+                                    && l.FleetFuelTransactionId is null)
+                        .ToList();
+        if (fuel.Count == 0) return;
+        var paidOn = DateOnly.FromDateTime(claim.PaidAt ?? DateTime.UtcNow);
+        var fleetCurrency = await RequireBaseCurrencyAsync(cancellationToken);
+        foreach (var line in fuel)
+        {
+            var paid = await _currency.ConvertBetweenAsync(line.AmountApproved!.Value, claim.CurrencyCode, fleetCurrency, paidOn, cancellationToken);
+            line.FleetFuelTransactionId = await _fleet.RecordClaimFuelAsync(
+                line.FleetTripId!.Value, line.ExpenseDate, line.FuelQuantity!.Value, paid, line.MerchantName,
+                $"Travel claim {claim.ClaimNumber}",
+                $"Fuel paid on travel claim {claim.ClaimNumber} for {request.RequestNumber}" +
+                (string.IsNullOrWhiteSpace(line.Description) ? "." : $": {line.Description.Trim()}"),
+                cancellationToken);
+            line.UpdatedAt = DateTime.UtcNow;
+            line.UpdatedBy = _currentUserProvider.UserId.ToString();
+        }
+    }
+
+    /// <summary>Lane 6 (D-30, D-32): the claim's trip's company-vehicle trips and the fuel Fleet logs on them.</summary>
+    public async Task<StaffTravelFleetFuelOptionsDto> GetClaimFleetFuelAsync(Guid claimId, CancellationToken cancellationToken = default)
+    {
+        var claim = await GetOwnedClaimAsync(claimId);
+        return await _fleet.GetFuelOptionsAsync(claim.StaffTravelRequestId, cancellationToken);
     }
 
     private async Task<string> RequireBaseCurrencyAsync(CancellationToken cancellationToken)

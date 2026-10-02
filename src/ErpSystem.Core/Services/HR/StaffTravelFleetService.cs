@@ -15,7 +15,8 @@ using Microsoft.Extensions.Logging;
 namespace ErpSystem.Core.Services.HR;
 
 /// <summary>
-/// Travel's side of the seam with Fleet (travel final closure, lane 6, slice 6a — FX-1…FX-5, D2, D4, D-27).
+/// Travel's side of the seam with Fleet (travel final closure, lane 6: slice 6a — FX-1…FX-5, D2, D4, D-27; slice 6b —
+/// fuel on claims, FX-6, D-30…D-32).
 /// </summary>
 /// <remarks>
 /// <para><b>Fleet's facts stay Fleet's.</b> A company-vehicle leg keeps only its fleet trip's id; the vehicle, plate,
@@ -31,6 +32,10 @@ namespace ErpSystem.Core.Services.HR;
 /// approve it with nobody asked, so the trip stays a draft and the leg says the vehicle is not held.</para>
 ///
 /// <para><b>Through travel's door.</b> HR holds no Maintenance permission, so the pickers are read here (FX-4).</para>
+///
+/// <para><b>Fuel on claims (6b).</b> A fuel expense names its company vehicle's trip and the litres; when the claim is paid
+/// the fill goes into Fleet's fuel log at the amount paid, through Fleet's own service, which writes the cost entry — and
+/// a voided payment takes it out again. The budget leaves those cost entries out: the paid claim counts them (R4).</para>
 /// </remarks>
 public class StaffTravelFleetService : IStaffTravelFleetService
 {
@@ -42,6 +47,7 @@ public class StaffTravelFleetService : IStaffTravelFleetService
     private readonly IFleetTripService _fleetTrips;
     private readonly IFleetComplianceService _compliance;
     private readonly IFleetTripDestinationService _destinations;
+    private readonly IFleetFuelService _fuel;
     private readonly ILogger<StaffTravelFleetService> _logger;
 
     public StaffTravelFleetService(
@@ -50,12 +56,14 @@ public class StaffTravelFleetService : IStaffTravelFleetService
         IFleetTripService fleetTrips,
         IFleetComplianceService compliance,
         IFleetTripDestinationService destinations,
+        IFleetFuelService fuel,
         ILogger<StaffTravelFleetService> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _fleetTrips = fleetTrips;
         _compliance = compliance;
+        _fuel = fuel;
         _destinations = destinations;
         _logger = logger;
     }
@@ -445,4 +453,188 @@ public class StaffTravelFleetService : IStaffTravelFleetService
             };
         }
     }
+
+    // ---- Slice 6b: fuel on claims (FX-6, D-30, D-31, D-32) ----------------------------------------------------------
+
+    private sealed record FuelTrip(
+        Guid Id, Guid VehicleAssetId, string VehicleName, string? Plate, string Status, DateTime? PlannedStartAt, DateTime? PlannedEndAt)
+    {
+        /// <summary>Fuel is claimed only for a trip the vehicle can have made.</summary>
+        public bool Live => Status is not (FleetTripStatuses.Cancelled or FleetTripStatuses.Rejected);
+        public string Label => string.IsNullOrWhiteSpace(Plate) ? VehicleName : $"{VehicleName} ({Plate})";
+    }
+
+    /// <summary>The fleet trips the request's company-vehicle legs reserved, whatever their state.</summary>
+    private async Task<List<FuelTrip>> RequestFleetTripsAsync(Guid tenantId, Guid requestId, CancellationToken cancellationToken)
+    {
+        var ids = await _unitOfWork.Repository<StaffTravelGroundTransport>()
+            .GetQueryable(g => g.TenantId == tenantId && g.StaffTravelRequestId == requestId && !g.IsDeleted && g.FleetTripId != null)
+            .Select(g => g.FleetTripId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        if (ids.Count == 0) return new List<FuelTrip>();
+        return await _unitOfWork.Repository<FleetTrip>()
+            .GetQueryable(t => t.TenantId == tenantId && !t.IsDeleted && ids.Contains(t.Id))
+            .OrderBy(t => t.PlannedStartAt)
+            .Select(t => new FuelTrip(t.Id, t.VehicleAssetId, t.VehicleAsset!.Name, t.VehicleAsset!.LicensePlate, t.Status,
+                t.PlannedStartAt, t.PlannedEndAt))
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <summary>A hired car the traveller had — fuel may have been for it rather than the company vehicle (D-30).</summary>
+    private Task<bool> HasCarRentalAsync(Guid tenantId, Guid requestId, CancellationToken cancellationToken)
+        => _unitOfWork.Repository<StaffTravelCarRentalBooking>()
+            .GetQueryable(c => c.TenantId == tenantId && c.StaffTravelRequestId == requestId && !c.IsDeleted
+                            && c.Status != TravelBookingStatus.Cancelled && c.Status != TravelBookingStatus.Refunded
+                            && c.Status != TravelBookingStatus.NoShow)
+            .AnyAsync(cancellationToken);
+
+    public async Task<StaffTravelFleetFuelOptionsDto> GetFuelOptionsAsync(Guid requestId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var trips = await RequestFleetTripsAsync(tenantId, requestId, cancellationToken);
+        var dto = new StaffTravelFleetFuelOptionsDto { HasCarRental = await HasCarRentalAsync(tenantId, requestId, cancellationToken) };
+        dto.FuelNamesTrip = trips.Any(t => t.Live) && !dto.HasCarRental;
+        if (trips.Count == 0) return dto;
+
+        var ids = trips.Select(t => t.Id).ToList();
+        var fuel = await _unitOfWork.Repository<FleetFuelTransaction>()
+            .GetQueryable(f => f.TenantId == tenantId && !f.IsDeleted && f.FleetTripId != null && ids.Contains(f.FleetTripId.Value))
+            .OrderBy(f => f.FuelledAt)
+            .Select(f => new { f.Id, TripId = f.FleetTripId!.Value, f.FuelledAt, f.Quantity, f.Unit, f.TotalCost, f.VendorName })
+            .ToListAsync(cancellationToken);
+        var fuelIds = fuel.Select(f => f.Id).ToList();
+        var fromClaims = fuelIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : (await _unitOfWork.Repository<StaffTravelExpenseClaimLine>()
+                    .GetQueryable(l => l.TenantId == tenantId && !l.IsDeleted && l.FleetFuelTransactionId != null
+                                    && fuelIds.Contains(l.FleetFuelTransactionId.Value))
+                    .Select(l => new { Id = l.FleetFuelTransactionId!.Value, l.ExpenseClaim.ClaimNumber })
+                    .ToListAsync(cancellationToken))
+                .GroupBy(x => x.Id)
+                .ToDictionary(g => g.Key, g => g.First().ClaimNumber);
+
+        foreach (var t in trips)
+            dto.Trips.Add(new StaffTravelFleetFuelTripDto
+            {
+                FleetTripId = t.Id, VehicleName = t.VehicleName, VehiclePlate = t.Plate, PlannedStartAt = t.PlannedStartAt,
+                PlannedEndAt = t.PlannedEndAt, Status = t.Status, Live = t.Live,
+                Fuel = fuel.Where(f => f.TripId == t.Id)
+                    .Select(f => new StaffTravelFleetFuelEntryDto
+                    {
+                        Id = f.Id, FuelledAt = f.FuelledAt, Quantity = f.Quantity, Unit = f.Unit, TotalCost = f.TotalCost,
+                        VendorName = f.VendorName, ClaimNumber = fromClaims.GetValueOrDefault(f.Id),
+                    })
+                    .ToList(),
+            });
+        return dto;
+    }
+
+    public async Task<string?> CheckFuelLineAsync(
+        StaffTravelRequest request, TravelExpenseCategory category, DateOnly expenseDate, Guid? fleetTripId, decimal? litres,
+        string? duplicateReason, bool askAboutDuplicates, CancellationToken cancellationToken = default)
+    {
+        if (category != TravelExpenseCategory.Fuel)
+        {
+            if (fleetTripId is not null || litres is not null)
+                throw new InvalidOperationException("Only a fuel expense names a company vehicle's trip and the litres bought.");
+            return null;
+        }
+
+        var tenantId = TenantId;
+        var trips = await RequestFleetTripsAsync(tenantId, request.Id, cancellationToken);
+        if (fleetTripId is not Guid tripId)
+        {
+            if (litres is not null)
+                throw new InvalidOperationException(
+                    "Litres are kept for fuel bought for a company vehicle — name the vehicle's trip, or leave the litres out.");
+            // D-30: with a company vehicle on the trip and no car hired, the fuel was the company vehicle's.
+            var live = trips.Where(t => t.Live).ToList();
+            if (live.Count > 0 && !await HasCarRentalAsync(tenantId, request.Id, cancellationToken))
+                throw new InvalidOperationException(
+                    $"Travel request {request.RequestNumber} travels by company vehicle ({string.Join(", ", live.Select(t => t.Label))}) " +
+                    "and hires no car, so its fuel was the company vehicle's — name the vehicle's trip and the litres; Fleet's fuel " +
+                    "log takes them when the claim is paid.");
+            return null;
+        }
+
+        var trip = trips.FirstOrDefault(t => t.Id == tripId)
+                   ?? throw new ArgumentException(
+                       $"Fleet trip '{tripId}' is not one of travel request {request.RequestNumber}'s company vehicles.");
+        if (!trip.Live)
+            throw new InvalidOperationException(
+                $"The {trip.Label} trip is {trip.Status.ToLowerInvariant()} in Fleet — fuel is claimed for a trip the vehicle made.");
+        if (litres is not decimal quantity || quantity < 0.01m)
+            throw new InvalidOperationException("Give the litres bought — Fleet's fuel log keeps them with the cost.");
+
+        // S4: the fill falls within the vehicle's trip, a day either side — as a booking falls within the travel.
+        if (trip.PlannedStartAt is DateTime from && trip.PlannedEndAt is DateTime to
+            && (expenseDate < DateOnly.FromDateTime(from).AddDays(-1) || expenseDate > DateOnly.FromDateTime(to).AddDays(1)))
+            throw new InvalidOperationException(
+                $"Fuel on {expenseDate:d MMM yyyy} falls outside the {trip.Label} trip ({Window(from, to)}), allowing the day " +
+                "before and the day after.");
+
+        if (!askAboutDuplicates) return null;
+        // D-32: the driver may have logged this fill in Fleet already — paid, the claim would log it a second time.
+        var dayStart = DateTime.SpecifyKind(expenseDate.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
+        var dayEnd = dayStart.AddDays(1);
+        var sameDay = await _unitOfWork.Repository<FleetFuelTransaction>()
+            .GetQueryable(f => f.TenantId == tenantId && !f.IsDeleted && f.FleetTripId == tripId
+                            && f.FuelledAt >= dayStart && f.FuelledAt < dayEnd)
+            .Select(f => new { f.Quantity, f.Unit, f.TotalCost })
+            .ToListAsync(cancellationToken);
+        if (sameDay.Count == 0) return null;
+        var logged = string.Join("; ", sameDay.Select(f =>
+            $"{f.Quantity:0.##} {f.Unit}" + (f.TotalCost is decimal cost ? $" for {cost:N2}" : string.Empty)));
+        var why = duplicateReason?.Trim();
+        if (string.IsNullOrEmpty(why) || why.Length < 5)
+            throw new InvalidOperationException(
+                $"Fleet already logs fuel for the {trip.Label} on {expenseDate:d MMM yyyy} ({logged}). If this is another fill, " +
+                "say why it is claimed too — paid, it is logged in Fleet a second time.");
+        return $"Fuel for the {trip.Label} on {expenseDate:d MMM yyyy} claimed although Fleet already logs fuel for that trip " +
+               $"that day ({logged}): {why}";
+    }
+
+    public async Task<Guid> RecordClaimFuelAsync(
+        Guid fleetTripId, DateOnly fuelledOn, decimal litres, decimal amountPaid, string? merchant, string reference, string notes,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var vehicleAssetId = await _unitOfWork.Repository<FleetTrip>()
+            .GetQueryable(t => t.TenantId == tenantId && t.Id == fleetTripId && !t.IsDeleted)
+            .Select(t => (Guid?)t.VehicleAssetId)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException(
+                "A fuel expense's fleet trip is no longer in Fleet, so the fill cannot be logged there — return the claim and " +
+                "correct the expense.");
+        try
+        {
+            var fuel = await _fuel.CreateAsync(new CreateFleetFuelTransactionDto
+            {
+                VehicleAssetId = vehicleAssetId,
+                FleetTripId = fleetTripId,
+                // Noon, in UTC: Fleet converts the time to UTC, and a local midnight could land on the day before.
+                FuelledAt = DateTime.SpecifyKind(fuelledOn.ToDateTime(new TimeOnly(12, 0)), DateTimeKind.Utc),
+                Quantity = litres,
+                Unit = "L",
+                // D-31: Fleet works its total out as litres × unit cost, so the paid amount goes in as a unit cost.
+                UnitCost = decimal.Round(amountPaid / litres, 4, MidpointRounding.AwayFromZero),
+                VendorName = Clip(merchant, 200),
+                ReceiptReference = Clip(reference, 500),
+                Notes = Clip(notes, 2000),
+            });
+            return fuel.Id;
+        }
+        catch (ArgumentException ex)
+        {
+            // Fleet's validation speaks ArgumentException, which travel's contract reads as "not found" (404).
+            throw new InvalidOperationException($"Fleet could not log the fuel: {ex.Message}");
+        }
+    }
+
+    public async Task RemoveClaimFuelAsync(Guid fleetFuelTransactionId, CancellationToken cancellationToken = default)
+        => await _fuel.DeleteAsync(fleetFuelTransactionId);   // with its cost entry; already gone is nothing to do
+
+    private static string? Clip(string? text, int max)
+        => string.IsNullOrWhiteSpace(text) ? null : text.Trim().Length > max ? text.Trim()[..max] : text.Trim();
 }

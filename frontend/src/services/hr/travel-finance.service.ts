@@ -22,6 +22,7 @@ import type {
   RefundStaffTravelAdvance,
   TravelAdvanceStatus,
   StaffTravelPerDiemRate,
+  StaffTravelFleetFuelOptions,
   CreateStaffTravelPerDiemRate,
   UpdateStaffTravelPerDiemRate,
 } from '@/types/hr/travel-finance';
@@ -178,6 +179,14 @@ class TravelFinanceService {
   /** Admin-gated. */
   deleteClaimLine(lineId: string) {
     return apiService.delete<void>(`${this.baseUrl}/lines/${lineId}`);
+  }
+
+  /**
+   * Lane 6 (D-30, D-32): the claim's trip's company-vehicle trips, with the fuel Fleet already logs on each — what a fuel
+   * expense names, read through travel's door (HR holds no Maintenance permission).
+   */
+  getClaimFleetFuel(claimId: string) {
+    return apiService.get<StaffTravelFleetFuelOptions>(`${this.baseUrl}/claims/${claimId}/fleet-fuel`);
   }
 
   // ── Advances ───────────────────────────────────────────────────────────────

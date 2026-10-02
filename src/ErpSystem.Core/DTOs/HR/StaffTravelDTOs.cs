@@ -1641,6 +1641,44 @@ public class StaffTravelFleetDestinationOptionDto
     public string Name { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Lane 6, slice 6b: what a fuel expense on a claim chooses from — the trip's company-vehicle trips, with the fuel Fleet
+/// already logs on each (D-30, D-32). Read through travel's door; HR holds no Maintenance permission.
+/// </summary>
+public class StaffTravelFleetFuelOptionsDto
+{
+    /// <summary>D-30: a fuel expense must name one of the live trips — a company vehicle travels and no car is hired.</summary>
+    public bool FuelNamesTrip { get; set; }
+    public bool HasCarRental { get; set; }
+    public List<StaffTravelFleetFuelTripDto> Trips { get; set; } = new();
+}
+
+public class StaffTravelFleetFuelTripDto
+{
+    public Guid FleetTripId { get; set; }
+    public string VehicleName { get; set; } = string.Empty;
+    public string? VehiclePlate { get; set; }
+    public DateTime? PlannedStartAt { get; set; }
+    public DateTime? PlannedEndAt { get; set; }
+    public string Status { get; set; } = string.Empty;
+    /// <summary>Not cancelled or rejected in Fleet — fuel is claimed only for a live trip.</summary>
+    public bool Live { get; set; }
+    public List<StaffTravelFleetFuelEntryDto> Fuel { get; set; } = new();
+}
+
+public class StaffTravelFleetFuelEntryDto
+{
+    public Guid Id { get; set; }
+    public DateTime FuelledAt { get; set; }
+    public decimal Quantity { get; set; }
+    public string Unit { get; set; } = "L";
+    /// <summary>In Finance's base currency, as Fleet keeps it.</summary>
+    public decimal? TotalCost { get; set; }
+    public string? VendorName { get; set; }
+    /// <summary>The paid travel claim that logged it, if one did; otherwise Fleet's own entry.</summary>
+    public string? ClaimNumber { get; set; }
+}
+
 public class CreateStaffTravelGroundTransportDto : CreateDtoBase
 {
     /// <summary>
@@ -2122,6 +2160,13 @@ public class StaffTravelExpenseClaimLineDto : BaseDto
     public Guid? ReviewedById { get; set; }
     public string? ReviewedByName { get; set; }
     public DateTime? ReviewedAt { get; set; }
+
+    /// <summary>Lane 6 (D-30): a fuel expense's company-vehicle trip, and the litres bought.</summary>
+    public Guid? FleetTripId { get; set; }
+    public decimal? FuelQuantity { get; set; }
+
+    /// <summary>Fleet's fuel record the payment wrote (D-31); cleared when the payment is voided.</summary>
+    public Guid? FleetFuelTransactionId { get; set; }
 }
 
 public class CreateStaffTravelExpenseClaimLineDto : CreateDtoBase
@@ -2158,6 +2203,22 @@ public class CreateStaffTravelExpenseClaimLineDto : CreateDtoBase
     public Guid? ReceiptAttachmentId { get; set; }
     public bool IsPerDiem { get; set; }
     public Guid? PerDiemRateId { get; set; }
+
+    /// <summary>
+    /// Lane 6 (D-30): the company-vehicle trip a fuel expense was for — one of the claim's own trip's fleet trips — with
+    /// the litres bought. Fleet's fuel log takes both when the claim is paid (D-31).
+    /// </summary>
+    public Guid? FleetTripId { get; set; }
+
+    [Range(0, 100000)]
+    public decimal? FuelQuantity { get; set; }
+
+    /// <summary>
+    /// D-32: why the fill is claimed when Fleet already logs fuel for that trip that day. Kept as an internal note on the
+    /// trip, not on the line.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? FuelDuplicateReason { get; set; }
 }
 
 public class UpdateStaffTravelExpenseClaimLineDto : UpdateDtoBase
@@ -2192,6 +2253,16 @@ public class UpdateStaffTravelExpenseClaimLineDto : UpdateDtoBase
     public Guid? ReceiptAttachmentId { get; set; }
     public bool IsPerDiem { get; set; }
     public Guid? PerDiemRateId { get; set; }
+
+    /// <summary>Lane 6 (D-30): as on the create — the fuel expense's fleet trip and litres.</summary>
+    public Guid? FleetTripId { get; set; }
+
+    [Range(0, 100000)]
+    public decimal? FuelQuantity { get; set; }
+
+    /// <summary>D-32: asked again only when the line moves to another fleet trip or date.</summary>
+    [MaxLength(1000)]
+    public string? FuelDuplicateReason { get; set; }
 }
 
 public class ReviewStaffTravelExpenseClaimLineDto

@@ -112,7 +112,7 @@ public class StaffTravelFinanceController : HrControllerBase
         var ctx = ResolveContext();
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
-        var created = await _service.CreateClaimAsync(dto, ctx.Value.tenantId, ctx.Value.userId);
+        var created = await _service.CreateClaimAsync(dto, ctx.Value.tenantId, ctx.Value.userId, CurrentUser.EmployeeId);
         return CreatedAtAction(nameof(GetClaimById), new { id = created.Id }, created);
     }
 
@@ -207,7 +207,7 @@ public class StaffTravelFinanceController : HrControllerBase
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
         dto.StaffTravelExpenseClaimId = claimId;
-        return Ok(await _service.AddClaimLineAsync(dto, ctx.Value.tenantId, ctx.Value.userId));
+        return Ok(await _service.AddClaimLineAsync(dto, ctx.Value.tenantId, ctx.Value.userId, CurrentUser.EmployeeId));
     }
 
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
@@ -219,8 +219,16 @@ public class StaffTravelFinanceController : HrControllerBase
         var ctx = ResolveContext();
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
-        return Ok(await _service.UpdateClaimLineAsync(dto, ctx.Value.userId));
+        return Ok(await _service.UpdateClaimLineAsync(dto, ctx.Value.userId, CurrentUser.EmployeeId));
     }
+
+    /// <summary>
+    /// Lane 6 (D-30, D-32): the claim's trip's company-vehicle trips, with the fuel Fleet already logs on each — what a
+    /// fuel expense names. Through travel's door: HR holds no Maintenance permission.
+    /// </summary>
+    [HttpGet("claims/{claimId:guid}/fleet-fuel")]
+    public async Task<ActionResult<StaffTravelFleetFuelOptionsDto>> GetClaimFleetFuel(Guid claimId)
+        => Ok(await _service.GetClaimFleetFuelAsync(claimId));
 
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("lines/{lineId:guid}/review")]
