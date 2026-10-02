@@ -118,6 +118,8 @@ foreach ($contract in @('DeployOnly', 'ArtifactDirectory',
         'slowestSteps', 'completedUtc', 'Publish self-contained API',
         'Restore locked frontend dependencies', 'Build Next.js production application',
         'Stage frontend runtime and production dependencies',
+        'Prune obsolete VPS deployment artifacts',
+        "Invoke-RemoteHelper `$remoteHelperPath 'Prune'",
         'Package API artifact', 'Package frontend artifact')) {
     Assert-Test $deploy.Contains($contract) "Deploy-only contract is missing: $contract"
 }
@@ -135,6 +137,12 @@ Assert-Test (-not $deploy.Contains('Compress-Archive')) `
     'The legacy deployer still uses the slow PowerShell Compress-Archive implementation.'
 Assert-Test $deploy.Contains("if (`$PrepareOperationalUat -and -not `$FreshDatabaseName)") `
     'Normal application deployment still runs operational UAT seeds unconditionally.'
+$pruneCallIndex = $deploy.IndexOf("Invoke-RemoteHelper `$remoteHelperPath 'Prune'", `
+    [StringComparison]::Ordinal)
+$preflightCallIndex = $deploy.IndexOf("Invoke-RemoteHelper `$remoteHelperPath 'Preflight'", `
+    [StringComparison]::Ordinal)
+Assert-Test ($pruneCallIndex -ge 0 -and $preflightCallIndex -gt $pruneCallIndex) `
+    'Safe VPS retention must run before the free-space preflight.'
 
 $deployTokens = $null; $deployErrors = $null
 $deployAst = [Management.Automation.Language.Parser]::ParseFile(
@@ -193,6 +201,8 @@ foreach ($contract in @('tar.exe', 'ZipFile]::CreateFromDirectory', 'NoCompressi
 $remote = Get-Content $remotePath -Raw
 foreach ($contract in @("Join-Path `$RhemaRoot 'releases'", 'VERSIONED_RELEASE|',
         'RollbackRelease', 'APPLICATION_ROLLBACK|PASS|DATABASE_UNCHANGED',
+        "'Prune' { Invoke-DeploymentRetentionPrune }", 'PRUNE|PASS',
+        'Assert-SafeDeploymentChildPath', 'PRUNE_PROTECTED_RELEASES',
         "['status'] = 'Successful'", 'Get-RemoteResourceSnapshot',
         'Create compressed SQL COPY_ONLY backup',
         'Verify SQL backup checksum and restore metadata',
@@ -212,6 +222,28 @@ Assert-Test (-not $remote.Contains('Expand-Archive')) `
 $remoteTokens = $null; $remoteErrors = $null
 $remoteAst = [Management.Automation.Language.Parser]::ParseFile(
     $remotePath, [ref]$remoteTokens, [ref]$remoteErrors)
+foreach ($functionName in @('Assert-True', 'Assert-SafeDeploymentChildPath')) {
+    $functionAst = $remoteAst.Find({
+            param($candidate)
+            $candidate -is [Management.Automation.Language.FunctionDefinitionAst] -and
+                $candidate.Name -eq $functionName
+        }, $true)
+    Assert-Test ($null -ne $functionAst) `
+        "The remote deployer is missing retention safety function: $functionName"
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+$retentionTestRoot = Join-Path ([IO.Path]::GetTempPath()) `
+    ('rhema-retention-safety-' + [Guid]::NewGuid().ToString('N'))
+$retentionChild = Join-Path $retentionTestRoot 'child\release'
+$retentionSibling = "$retentionTestRoot-sibling\release"
+Assert-SafeDeploymentChildPath -Candidate $retentionChild -Parent $retentionTestRoot
+$escapedRetentionPathRejected = $false
+try {
+    Assert-SafeDeploymentChildPath -Candidate $retentionSibling -Parent $retentionTestRoot
+}
+catch { $escapedRetentionPathRejected = $true }
+Assert-Test $escapedRetentionPathRejected `
+    'The VPS retention path guard permits recursive removal outside its intended root.'
 $remoteTimedStepAst = $remoteAst.Find({
         param($candidate)
         $candidate -is [Management.Automation.Language.FunctionDefinitionAst] -and

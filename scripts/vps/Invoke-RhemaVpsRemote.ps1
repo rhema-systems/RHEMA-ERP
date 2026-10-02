@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Preflight', 'Backup', 'Apply', 'SeedOperational', 'ResumeFrontend', 'Verify', 'RollbackRelease', 'RollbackFresh', 'CompleteFresh')]
+    [ValidateSet('Prune', 'Preflight', 'Backup', 'Apply', 'SeedOperational', 'ResumeFrontend', 'Verify', 'RollbackRelease', 'RollbackFresh', 'CompleteFresh')]
     [string]$Action,
 
     [string]$DeploymentId,
@@ -37,6 +37,31 @@ $RemoteTimings = [System.Collections.Generic.List[object]]::new()
 function Assert-True {
     param([bool]$Condition, [string]$Message)
     if (-not $Condition) { throw $Message }
+}
+
+function Assert-SafeDeploymentChildPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Candidate,
+        [Parameter(Mandatory = $true)][string]$Parent
+    )
+
+    $candidatePath = [IO.Path]::GetFullPath($Candidate)
+    $parentPath = [IO.Path]::GetFullPath($Parent).TrimEnd('\') + '\'
+    Assert-True ($candidatePath.StartsWith(
+            $parentPath, [StringComparison]::OrdinalIgnoreCase)) `
+        "Refusing to remove a deployment path outside $parentPath"
+}
+
+function Remove-SafeDeploymentItem {
+    param(
+        [Parameter(Mandatory = $true)]$Item,
+        [Parameter(Mandatory = $true)][string]$Parent,
+        [Parameter(Mandatory = $true)][string]$Category
+    )
+
+    Assert-SafeDeploymentChildPath -Candidate $Item.FullName -Parent $Parent
+    Write-Output "PRUNE_REMOVE|$Category|$($Item.Name)|$($Item.LastWriteTimeUtc.ToString('o'))"
+    Remove-Item -LiteralPath $Item.FullName -Recurse -Force
 }
 
 function Get-RemoteResourceSnapshot {
@@ -875,6 +900,162 @@ function Get-ManagedServices {
         throw 'Required HTTPS gateway service RhemaERPCaddy is missing.'
     }
     return @(Get-Service RhemaERPAPI,RhemaERPFrontend) + @($caddy)
+}
+
+function Invoke-DeploymentRetentionPrune {
+    foreach ($path in @($PackagesRoot, $ReleasesRoot, $BackupsRoot, $LogsRoot)) {
+        Assert-True (Test-Path -LiteralPath $path) "Required VPS path is missing: $path"
+    }
+
+    $driveName = [IO.Path]::GetPathRoot($RhemaRoot).TrimEnd(':\')
+    $before = (Get-PSDrive -Name $driveName).Free
+    $now = [DateTime]::UtcNow
+    $protectedReleaseIds = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    $protectedDeploymentIds = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    $currentReleasePath = Join-Path $LogsRoot 'current-release.json'
+
+    if (Test-Path -LiteralPath $currentReleasePath) {
+        try {
+            $current = Get-Content -LiteralPath $currentReleasePath -Raw | ConvertFrom-Json
+            foreach ($releaseId in @($current.releaseId, $current.previousReleaseId)) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$releaseId)) {
+                    [void]$protectedReleaseIds.Add([string]$releaseId)
+                }
+            }
+            if (-not [string]::IsNullOrWhiteSpace([string]$current.deploymentId)) {
+                [void]$protectedDeploymentIds.Add([string]$current.deploymentId)
+            }
+        }
+        catch {
+            throw "Current release retention metadata is invalid: $($_.Exception.Message)"
+        }
+    }
+
+    foreach ($releaseId in @($protectedReleaseIds)) {
+        $metadataPath = Join-Path (Join-Path $ReleasesRoot $releaseId) 'release.json'
+        if (-not (Test-Path -LiteralPath $metadataPath)) { continue }
+        try {
+            $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+            if (-not [string]::IsNullOrWhiteSpace([string]$metadata.deploymentId)) {
+                [void]$protectedDeploymentIds.Add([string]$metadata.deploymentId)
+            }
+        }
+        catch {
+            throw "Protected release metadata is invalid for ${releaseId}: $($_.Exception.Message)"
+        }
+    }
+
+    $releaseDirectories = @(Get-ChildItem -LiteralPath $ReleasesRoot -Directory -Force `
+        -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending)
+    $successfulReleases = @($releaseDirectories | Where-Object {
+            $metadataPath = Join-Path $_.FullName 'release.json'
+            if (-not (Test-Path -LiteralPath $metadataPath)) { return $false }
+            try {
+                (Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json).status -eq 'Successful'
+            }
+            catch { $false }
+        })
+    foreach ($release in @($successfulReleases | Select-Object -First 3)) {
+        [void]$protectedReleaseIds.Add($release.Name)
+        $metadataPath = Join-Path $release.FullName 'release.json'
+        try {
+            $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+            if (-not [string]::IsNullOrWhiteSpace([string]$metadata.deploymentId)) {
+                [void]$protectedDeploymentIds.Add([string]$metadata.deploymentId)
+            }
+        }
+        catch {
+            throw "Retained release metadata is invalid for $($release.Name): $($_.Exception.Message)"
+        }
+    }
+
+    foreach ($release in $releaseDirectories) {
+        if ($protectedReleaseIds.Contains($release.Name)) { continue }
+        $metadataPath = Join-Path $release.FullName 'release.json'
+        $isSuccessful = $false
+        if (Test-Path -LiteralPath $metadataPath) {
+            try {
+                $isSuccessful = (Get-Content -LiteralPath $metadataPath -Raw |
+                    ConvertFrom-Json).status -eq 'Successful'
+            }
+            catch { $isSuccessful = $false }
+        }
+        if ($isSuccessful -or $release.LastWriteTimeUtc -lt $now.AddHours(-24)) {
+            Remove-SafeDeploymentItem -Item $release -Parent $ReleasesRoot -Category 'release'
+        }
+    }
+
+    $retiredDirectories = @(Get-ChildItem -LiteralPath $PackagesRoot -Directory -Force `
+        -Filter 'retired-*' -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTimeUtc -Descending)
+    $protectedRetiredNames = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($deploymentId in @($protectedDeploymentIds)) {
+        [void]$protectedRetiredNames.Add("retired-$deploymentId")
+    }
+    foreach ($item in @($retiredDirectories | Select-Object -First 2)) {
+        [void]$protectedRetiredNames.Add($item.Name)
+    }
+    foreach ($item in $retiredDirectories) {
+        if (-not $protectedRetiredNames.Contains($item.Name)) {
+            Remove-SafeDeploymentItem -Item $item -Parent $PackagesRoot -Category 'retired'
+        }
+    }
+
+    foreach ($pattern in @('stage-*', 'operational-*')) {
+        foreach ($item in @(Get-ChildItem -LiteralPath $PackagesRoot -Directory -Force `
+                -Filter $pattern -ErrorAction SilentlyContinue)) {
+            if ($item.LastWriteTimeUtc -lt $now.AddMinutes(-30)) {
+                Remove-SafeDeploymentItem -Item $item -Parent $PackagesRoot -Category 'temporary'
+            }
+        }
+    }
+    foreach ($pattern in @('failed-*', 'failed-rollback-*')) {
+        foreach ($item in @(Get-ChildItem -LiteralPath $PackagesRoot -Directory -Force `
+                -Filter $pattern -ErrorAction SilentlyContinue)) {
+            if ($item.LastWriteTimeUtc -lt $now.AddDays(-7)) {
+                Remove-SafeDeploymentItem -Item $item -Parent $PackagesRoot -Category 'failed'
+            }
+        }
+    }
+    foreach ($item in @(Get-ChildItem -LiteralPath $PackagesRoot -File -Force `
+            -Filter '*.zip' -ErrorAction SilentlyContinue)) {
+        if ($item.LastWriteTimeUtc -lt $now.AddMinutes(-30)) {
+            Remove-SafeDeploymentItem -Item $item -Parent $PackagesRoot -Category 'package'
+        }
+    }
+    $helpers = @(Get-ChildItem -LiteralPath $PackagesRoot -File -Force `
+        -Filter 'Invoke-RhemaVpsRemote-*.ps1' -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTimeUtc -Descending)
+    foreach ($item in @($helpers | Select-Object -Skip 5)) {
+        Remove-SafeDeploymentItem -Item $item -Parent $PackagesRoot -Category 'helper'
+    }
+
+    $backupDirectories = @(Get-ChildItem -LiteralPath $BackupsRoot -Directory -Force `
+        -Filter 'deploy-*' -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTimeUtc -Descending)
+    $protectedBackupNames = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($deploymentId in @($protectedDeploymentIds)) {
+        [void]$protectedBackupNames.Add("deploy-$deploymentId")
+    }
+    foreach ($item in @($backupDirectories | Select-Object -First 2)) {
+        [void]$protectedBackupNames.Add($item.Name)
+    }
+    foreach ($item in $backupDirectories) {
+        if (-not $protectedBackupNames.Contains($item.Name)) {
+            Remove-SafeDeploymentItem -Item $item -Parent $BackupsRoot -Category 'backup'
+        }
+    }
+
+    $after = (Get-PSDrive -Name $driveName).Free
+    Write-Output "PRUNE_PROTECTED_RELEASES|$($protectedReleaseIds.Count)"
+    Write-Output "PRUNE_PROTECTED_DEPLOYMENTS|$($protectedDeploymentIds.Count)"
+    Write-Output "PRUNE_RECLAIMED_GB|$([Math]::Round(($after - $before) / 1GB, 2))"
+    Write-Output "DISK_FREE_GB|$([Math]::Round($after / 1GB, 2))"
+    Write-Output 'PRUNE|PASS'
 }
 
 function Invoke-Preflight {
@@ -2021,6 +2202,7 @@ function Invoke-Verify {
 try {
     Invoke-RemoteTimedStep "Remote action $Action" {
         switch ($Action) {
+            'Prune' { Invoke-DeploymentRetentionPrune }
             'Preflight' { Invoke-Preflight }
             'Backup' { Invoke-Backup }
             'Apply' { Invoke-Apply }
