@@ -553,7 +553,7 @@ export default function NewInvoicePage() {
                     id: item.sourceLineId,
                     lineItemType: item.lineItemType,
                     productId: item.productId,
-                    glAccountId: item.glAccountId,
+                    glAccountId: isOpeningBalance ? undefined : (item.glAccountId || undefined),
                     description: item.description,
                     quantity: Number(item.quantity),
                     unitPrice: Number(item.unitPrice),

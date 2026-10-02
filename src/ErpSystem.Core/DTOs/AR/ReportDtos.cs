@@ -149,6 +149,7 @@ public class CustomerDetailedLedgerLineDto
 {
     public Guid SourceDocumentId { get; set; }
     public DateTime TransactionDate { get; set; }
+    public DateTime? PostedAt { get; set; }
     public string TransactionType { get; set; } = string.Empty;
     public string DocumentNumber { get; set; } = string.Empty;
     public string? Reference { get; set; }
