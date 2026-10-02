@@ -85,25 +85,9 @@ public sealed class TenantSmsSender : ITenantSmsSender
             return;
         }
 
-        var providers = new List<string>();
-        if (!string.IsNullOrWhiteSpace(settings.DefaultProvider))
-            providers.Add(settings.DefaultProvider);
-
-        if (!string.IsNullOrWhiteSpace(settings.FallbackProvidersJson))
-        {
-            try
-            {
-                var fallbacks = JsonSerializer.Deserialize<string[]>(settings.FallbackProvidersJson) ?? Array.Empty<string>();
-                providers.AddRange(fallbacks.Where(x => !string.IsNullOrWhiteSpace(x)));
-            }
-            catch
-            {
-                // ignore invalid JSON
-            }
-        }
-
+        var providers = BuildTenantProviderOrder(settings);
         if (providers.Count == 0)
-            providers.Add("Twilio");
+            throw new InvalidOperationException("No SMS providers are enabled for this tenant.");
 
         Exception? last = null;
         var failures = new List<(string Provider, Exception Error)>();
@@ -139,6 +123,49 @@ public sealed class TenantSmsSender : ITenantSmsSender
         }
 
         throw new InvalidOperationException(BuildProviderFailureMessage(failures), last);
+    }
+
+    internal static IReadOnlyList<string> BuildTenantProviderOrder(SmsSettings settings)
+    {
+        var configuredProviders = new List<string>();
+        if (!string.IsNullOrWhiteSpace(settings.DefaultProvider))
+            configuredProviders.Add(settings.DefaultProvider);
+
+        if (!string.IsNullOrWhiteSpace(settings.FallbackProvidersJson))
+        {
+            try
+            {
+                var fallbacks = JsonSerializer.Deserialize<string[]>(settings.FallbackProvidersJson) ?? Array.Empty<string>();
+                configuredProviders.AddRange(fallbacks.Where(provider => !string.IsNullOrWhiteSpace(provider)));
+            }
+            catch (JsonException)
+            {
+                // A malformed legacy fallback list must not prevent an enabled provider from being used.
+            }
+        }
+
+        var providers = new List<string>();
+        foreach (var configuredProvider in configuredProviders)
+        {
+            var normalized = configuredProvider.Trim().ToLowerInvariant();
+            if (normalized == "twilio" && settings.TwilioEnabled)
+                providers.Add("Twilio");
+            else if (normalized is "mnotify" or "ghanagateway" or "ghana" && settings.GhanaGatewayEnabled)
+                providers.Add("GhanaGateway");
+        }
+
+        if (providers.Count == 0)
+        {
+            // Recover safely from legacy rows whose default still names a disabled provider.
+            // mNotify is the product default, so prefer it when both providers are enabled but
+            // neither appears in the persisted routing configuration.
+            if (settings.GhanaGatewayEnabled)
+                providers.Add("GhanaGateway");
+            if (settings.TwilioEnabled)
+                providers.Add("Twilio");
+        }
+
+        return providers.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
     private async Task SendWithFallbackOptionsAsync(

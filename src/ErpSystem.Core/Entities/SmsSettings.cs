@@ -10,7 +10,7 @@ public class SmsSettings : BaseEntity
     public virtual Tenant Tenant { get; set; } = null!;
 
     [StringLength(50)]
-    public string DefaultProvider { get; set; } = "Twilio";
+    public string DefaultProvider { get; set; } = "GhanaGateway";
 
     /// <summary>
     /// Optional JSON array of fallback providers (e.g. ["GhanaGateway"]).
