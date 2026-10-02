@@ -472,7 +472,17 @@ namespace ErpSystem.Api.Controllers.Finance
                  CanFreeze = source.CanFreeze,
                  IsSystemDefined = source.IsSystemDefined,
                  Description = source.Description,
-                 LookupValueCount = source.LookupValuesCount
+                 LookupValueCount = source.LookupValuesCount,
+                 LookupValues = source.LookupValues.Select(value => new SegmentLookupValueDto
+                 {
+                     Id = value.Id,
+                     TenantId = source.TenantId,
+                     SegmentStructureId = source.Id,
+                     SegmentValue = value.SegmentValue,
+                     Description = value.Description,
+                     IsActive = value.IsActive,
+                     DisplayOrder = value.DisplayOrder
+                 }).ToList()
              };
         }
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
@@ -104,6 +105,30 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
         public async Task<FiscalYearDto> CreateFiscalYearAsync(CreateFiscalYearDto dto, CancellationToken cancellationToken = default)
         {
+            var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsTransaction)
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    $"finance-fiscal-calendar:{TenantId:N}",
+                    cancellationToken);
+                var result = await CreateFiscalYearCoreAsync(dto, cancellationToken);
+                if (ownsTransaction)
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch
+            {
+                if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+
+        private async Task<FiscalYearDto> CreateFiscalYearCoreAsync(CreateFiscalYearDto dto, CancellationToken cancellationToken)
+        {
             var startDate = dto.StartDate.Date;
             var endDate = dto.EndDate.Date;
             if (endDate < startDate)
@@ -118,6 +143,51 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
             if (overlapping)
                 throw new InvalidOperationException("Fiscal year dates overlap with an existing fiscal year.");
+
+            var latestFiscalYear = await _unitOfWork.Repository<FiscalYear>()
+                .GetQueryable(fy => fy.TenantId == TenantId && !fy.IsDeleted)
+                .OrderByDescending(fy => fy.EndDate)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (latestFiscalYear != null)
+            {
+                var expectedYear = latestFiscalYear.Year + 1;
+                var expectedStartDate = latestFiscalYear.EndDate.Date.AddDays(1);
+                if (dto.Year != expectedYear || startDate != expectedStartDate)
+                {
+                    throw new InvalidOperationException(
+                        $"The next fiscal year must be FY{expectedYear} and start on {expectedStartDate:yyyy-MM-dd}; fiscal years must be created contiguously.");
+                }
+
+                var establishedPeriodTypes = await _unitOfWork.Repository<FiscalPeriod>()
+                    .GetQueryable(period =>
+                        period.TenantId == TenantId &&
+                        period.FiscalYearId == latestFiscalYear.Id &&
+                        !period.IsDeleted)
+                    .Select(period => period.PeriodType)
+                    .Distinct()
+                    .Take(2)
+                    .ToListAsync(cancellationToken);
+
+                if (establishedPeriodTypes.Count == 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Fiscal year '{latestFiscalYear.FiscalYearCode}' has no period structure. Repair the fiscal calendar before adding another year.");
+                }
+
+                if (establishedPeriodTypes.Count != 1)
+                {
+                    throw new InvalidOperationException(
+                        $"Fiscal year '{latestFiscalYear.FiscalYearCode}' contains mixed period types. Repair the fiscal calendar before adding another year.");
+                }
+
+                var establishedPeriodType = establishedPeriodTypes[0];
+                if (dto.PeriodType != establishedPeriodType)
+                {
+                    throw new InvalidOperationException(
+                        $"The fiscal calendar uses {establishedPeriodType} periods. All subsequent fiscal years must use the same period type.");
+                }
+            }
 
             var now = DateTime.UtcNow;
             var fiscalYear = new FiscalYear

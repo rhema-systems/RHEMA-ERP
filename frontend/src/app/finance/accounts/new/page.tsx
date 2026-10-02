@@ -151,6 +151,10 @@ export default function NewAccountPage() {
         const value = rawValue.trim();
         const isRequired = seg.isRequired;
 
+        if (seg.lookupTableRequired && !(seg.lookupValues || []).some(lv => lv.isActive)) {
+            return `${seg.segmentName} has no active lookup values. Configure the segment before creating an account.`;
+        }
+
         if (isRequired && !value) {
             return `${seg.segmentName} is required.`;
         }
@@ -259,30 +263,39 @@ export default function NewAccountPage() {
     const renderSegmentInput = (segment: SegmentStructure) => {
         const value = segmentValues[segment.id] || '';
         const lookupValues = segment.lookupValues || [];
+        const activeLookupValues = lookupValues
+            .filter(lv => lv.isActive)
+            .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
 
-        if (segment.lookupTableRequired && lookupValues.length > 0) {
-            // Dropdown only - segment requires lookup values
+        if (segment.lookupTableRequired) {
+            // Governed lookup segments must never silently degrade into free text.
             return (
-                <Select
-                    value={value}
-                    onValueChange={(v) => updateSegmentValue(segment.id, v)}
-                >
-                    <SelectTrigger onBlur={() => validateSegmentOnBlur(segment)}>
-                        <SelectValue placeholder={`Select ${segment.segmentName}...`} />
-                    </SelectTrigger>
-                    <SelectContent>
-                        {lookupValues
-                            .filter(lv => lv.isActive)
-                            .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
-                            .map((lv) => (
+                <div className="space-y-2">
+                    <Select
+                        value={value}
+                        onValueChange={(v) => updateSegmentValue(segment.id, v)}
+                        disabled={activeLookupValues.length === 0}
+                    >
+                        <SelectTrigger onBlur={() => validateSegmentOnBlur(segment)}>
+                            <SelectValue placeholder={activeLookupValues.length === 0
+                                ? `No active ${segment.segmentName} values configured`
+                                : `Select ${segment.segmentName}...`} />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {activeLookupValues.map((lv) => (
                                 <SelectItem key={lv.id} value={lv.segmentValue}>
                                     <span className="font-mono">{lv.segmentValue}</span>
                                     <span className="ml-2 text-muted-foreground">- {lv.description}</span>
                                 </SelectItem>
-                            ))
-                        }
-                    </SelectContent>
-                </Select>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    {activeLookupValues.length === 0 && (
+                        <p className="text-sm text-destructive">
+                            This governed segment has no active values. Add or activate values in Account Segments before creating the account.
+                        </p>
+                    )}
+                </div>
             );
         } else if (!segment.lookupTableRequired && lookupValues.length > 0) {
             // Combo - can select from dropdown OR type custom value

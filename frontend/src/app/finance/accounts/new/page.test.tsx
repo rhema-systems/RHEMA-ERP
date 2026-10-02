@@ -25,7 +25,7 @@ const segment = (id: string, segmentName: string, segmentPosition: number, segme
     isActive = true): SegmentStructure => ({
     id, segmentName, segmentCode: id, segmentPosition, segmentLength,
     isActive, lifecycleStatus: 'Active', isRequired: true, rowVersion: '',
-    accountUsageCount: 0, canActivate: false, canFreeze: false, isSystemDefined: false,
+    accountUsageCount: 0, totalAccountCount: 0, canActivate: false, canFreeze: false, isSystemDefined: false,
     dataType: 'Numeric', separatorCharacter: '-',
     lookupTableRequired: false, isReportingDimension: false, isNaturalAccount: id === 'natural',
     lookupValues: [], lookupValueCount: 0, createdAt: '', updatedAt: '',
@@ -33,6 +33,7 @@ const segment = (id: string, segmentName: string, segmentPosition: number, segme
 
 beforeAll(() => {
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+    window.HTMLElement.prototype.scrollIntoView = vi.fn();
 });
 afterAll(() => vi.unstubAllGlobals());
 beforeEach(() => {
@@ -60,6 +61,62 @@ async function fillAccount() {
 }
 
 describe('New account active segment structure', () => {
+    it('renders seeded active Legal Entity values as a governed dropdown', async () => {
+        const legalEntity = segment('legal-entity', 'Legal Entity / Company', 1, 7);
+        legalEntity.lookupTableRequired = true;
+        legalEntity.lookupValues = [{
+            id: 'tenant-value',
+            segmentStructureId: legalEntity.id,
+            segmentValue: 'DEFAULT',
+            description: 'Default Tenant',
+            effectiveDate: '',
+            isActive: true,
+            displayOrder: 1,
+            createdAt: '',
+            updatedAt: '',
+        }];
+        vi.mocked(financeDataService.getSegmentStructures).mockResolvedValue([
+            legalEntity,
+            segment('natural', 'Natural Account', 2, 4),
+        ]);
+
+        render(<NewAccountPage />);
+        await screen.findByRole('heading', { name: 'New Segmented Account' });
+
+        const dropdown = screen.getAllByRole('combobox').find(
+            element => element.textContent?.includes('Select Legal Entity / Company')
+        );
+        if (!dropdown) throw new Error('Legal Entity dropdown was not rendered.');
+        expect(dropdown).toBeEnabled();
+        fireEvent.click(dropdown);
+        expect(await screen.findByText('DEFAULT')).toBeInTheDocument();
+        expect(screen.getByText('- Default Tenant')).toBeInTheDocument();
+    });
+
+    it('does not degrade a governed lookup segment into free text when no active values exist', async () => {
+        const legalEntity = segment('legal-entity', 'Legal Entity / Company', 1, 7);
+        legalEntity.lookupTableRequired = true;
+        vi.mocked(financeDataService.getSegmentStructures).mockResolvedValue([
+            legalEntity,
+            segment('natural', 'Natural Account', 2, 4),
+        ]);
+
+        render(<NewAccountPage />);
+        await screen.findByRole('heading', { name: 'New Segmented Account' });
+
+        expect(screen.queryByPlaceholderText('Enter Legal Entity / Company value...')).not.toBeInTheDocument();
+        expect(screen.getByText('This governed segment has no active values. Add or activate values in Account Segments before creating the account.')).toBeInTheDocument();
+
+        fireEvent.change(screen.getByPlaceholderText('Enter Natural Account value...'), { target: { value: '1210' } });
+        fireEvent.change(screen.getByRole('textbox', { name: 'Account Name *' }), { target: { value: 'Cash' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
+
+        await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.objectContaining({
+            description: 'Legal Entity / Company has no active lookup values. Configure the segment before creating an account.',
+        })));
+        expect(financeDataService.createAccount).not.toHaveBeenCalled();
+    });
+
     it('excludes inactive mandatory segments from the form and generated account number', async () => {
         await fillAccount();
         expect(screen.queryByText('Fund')).not.toBeInTheDocument();

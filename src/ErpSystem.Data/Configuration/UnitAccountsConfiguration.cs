@@ -27,6 +27,9 @@ public class UnitTypeConfiguration : IEntityTypeConfiguration<UnitType>
         builder.Property(ut => ut.Description)
             .HasMaxLength(500);
 
+        builder.Property(ut => ut.RoundingIncrement)
+            .HasColumnType("decimal(18,6)");
+
         // Relationship to UnitAccounts
         builder.HasMany(ut => ut.UnitAccounts)
             .WithOne(ua => ua.UnitType)

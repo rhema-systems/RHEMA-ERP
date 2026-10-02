@@ -7,7 +7,9 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -60,6 +62,189 @@ public sealed class FiscalYearDeletionGuardTests
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*end date*");
+    }
+
+    [Fact]
+    public async Task CreateFiscalYearAsync_ShouldRejectNonContiguousYear()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedFiscalYear(db, tenantId);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, tenantId);
+        var action = () => service.CreateFiscalYearAsync(new ErpSystem.Core.DTOs.Finance.CreateFiscalYearDto
+        {
+            FiscalYearName = "Fiscal Year 2028",
+            FiscalYearCode = "FY2028",
+            Year = 2028,
+            StartDate = new DateTime(2028, 1, 1),
+            EndDate = new DateTime(2028, 12, 31),
+            NumberOfPeriods = 12,
+            PeriodType = PeriodType.Monthly
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*FY2027*contiguously*");
+    }
+
+    [Fact]
+    public async Task CreateFiscalYearAsync_ShouldRejectPeriodTypeChange()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedFiscalYear(db, tenantId);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, tenantId);
+        var action = () => service.CreateFiscalYearAsync(new ErpSystem.Core.DTOs.Finance.CreateFiscalYearDto
+        {
+            FiscalYearName = "Fiscal Year 2027",
+            FiscalYearCode = "FY2027",
+            Year = 2027,
+            StartDate = new DateTime(2027, 1, 1),
+            EndDate = new DateTime(2027, 12, 31),
+            NumberOfPeriods = 52,
+            PeriodType = PeriodType.Weekly
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*uses Monthly periods*same period type*");
+    }
+
+    [Fact]
+    public async Task CreateFiscalYearAsync_ShouldCreateContiguousYearWithEstablishedPeriodType()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedFiscalYear(db, tenantId);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, tenantId);
+        var created = await service.CreateFiscalYearAsync(new ErpSystem.Core.DTOs.Finance.CreateFiscalYearDto
+        {
+            FiscalYearName = "Fiscal Year 2027",
+            FiscalYearCode = "FY2027",
+            Year = 2027,
+            StartDate = new DateTime(2027, 1, 1),
+            EndDate = new DateTime(2027, 12, 31),
+            NumberOfPeriods = 12,
+            PeriodType = PeriodType.Monthly
+        });
+
+        created.Year.Should().Be(2027);
+        (await db.FiscalPeriods.Where(period => period.FiscalYearId == created.Id).ToListAsync())
+            .Should().OnlyContain(period => period.PeriodType == PeriodType.Monthly);
+    }
+
+    [Fact]
+    public async Task CreateFiscalYearAsync_ShouldRejectMixedActivePeriodTypes()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var (year, _) = SeedFiscalYear(db, tenantId);
+        db.FiscalPeriods.Add(new FiscalPeriod
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalYearId = year.Id,
+            PeriodName = "Mixed weekly period",
+            PeriodCode = "FY2026-W02",
+            PeriodNumber = 2,
+            PeriodType = PeriodType.Weekly,
+            StartDate = new DateTime(2026, 2, 1),
+            EndDate = new DateTime(2026, 2, 7),
+            PeriodDays = 7,
+            PeriodStatus = "Future"
+        });
+        await db.SaveChangesAsync();
+
+        var action = () => CreateService(db, tenantId).CreateFiscalYearAsync(Create2027Dto());
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*mixed period types*Repair*");
+    }
+
+    [Fact]
+    public async Task CreateFiscalYearAsync_ShouldIgnoreSoftDeletedPeriodTypeOutlier()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var (year, _) = SeedFiscalYear(db, tenantId);
+        db.FiscalPeriods.Add(new FiscalPeriod
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalYearId = year.Id,
+            PeriodName = "Retired weekly outlier",
+            PeriodCode = "FY2026-W02",
+            PeriodNumber = 2,
+            PeriodType = PeriodType.Weekly,
+            StartDate = new DateTime(2026, 2, 1),
+            EndDate = new DateTime(2026, 2, 7),
+            PeriodDays = 7,
+            PeriodStatus = "Future",
+            IsDeleted = true
+        });
+        await db.SaveChangesAsync();
+
+        var created = await CreateService(db, tenantId).CreateFiscalYearAsync(Create2027Dto());
+
+        created.Year.Should().Be(2027);
+    }
+
+    [Fact]
+    public async Task CreateFiscalYearAsync_ShouldPermitOnlyOneConcurrentNextYear()
+    {
+        var tenantId = Guid.NewGuid();
+        var connectionString = $"Data Source=fiscal-calendar-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        await using var keeper = new SqliteConnection(connectionString);
+        await keeper.OpenAsync();
+        await using (var setup = keeper.CreateCommand())
+        {
+            setup.CommandText =
+                """
+                CREATE TABLE FiscalYears (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    Year INTEGER NOT NULL,
+                    IsDeleted INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE UNIQUE INDEX IX_FiscalYears_TenantId_Year
+                    ON FiscalYears (TenantId, Year)
+                    WHERE IsDeleted = 0;
+                """;
+            await setup.ExecuteNonQueryAsync();
+        }
+
+        async Task<bool> TryInsertAsync()
+        {
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                "INSERT INTO FiscalYears (Id, TenantId, Year, IsDeleted) VALUES ($id, $tenantId, 2027, 0);";
+            command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString());
+            command.Parameters.AddWithValue("$tenantId", tenantId.ToString());
+            try
+            {
+                await command.ExecuteNonQueryAsync();
+                return true;
+            }
+            catch (SqliteException)
+            {
+                return false;
+            }
+        }
+
+        var results = await Task.WhenAll(TryInsertAsync(), TryInsertAsync());
+
+        results.Count(succeeded => succeeded).Should().Be(1);
+        await using var verification = keeper.CreateCommand();
+        verification.CommandText =
+            "SELECT COUNT(*) FROM FiscalYears WHERE TenantId = $tenantId AND Year = 2027 AND IsDeleted = 0;";
+        verification.Parameters.AddWithValue("$tenantId", tenantId.ToString());
+        Convert.ToInt32(await verification.ExecuteScalarAsync()).Should().Be(1);
     }
 
     [Fact]
@@ -170,6 +355,8 @@ public sealed class FiscalYearDeletionGuardTests
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"fiscal-year-delete-{Guid.NewGuid()}")
+            .ConfigureWarnings(warnings =>
+                warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
         return new ApplicationDbContext(options);
@@ -262,4 +449,16 @@ public sealed class FiscalYearDeletionGuardTests
         db.FiscalPeriods.Add(period);
         return (year, period);
     }
+
+    private static ErpSystem.Core.DTOs.Finance.CreateFiscalYearDto Create2027Dto() =>
+        new()
+        {
+            FiscalYearName = "Fiscal Year 2027",
+            FiscalYearCode = "FY2027",
+            Year = 2027,
+            StartDate = new DateTime(2027, 1, 1),
+            EndDate = new DateTime(2027, 12, 31),
+            NumberOfPeriods = 12,
+            PeriodType = PeriodType.Monthly
+        };
 }

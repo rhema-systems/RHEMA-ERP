@@ -54,6 +54,7 @@ export default function JournalEntryDetailPage() {
     // Reversal State
     const [showReverseForm, setShowReverseForm] = useState(false);
     const [reverseReason, setReverseReason] = useState('');
+    const [reversalDatePolicy, setReversalDatePolicy] = useState<'CurrentOpenPeriod' | 'OriginalDocumentPeriodIfOpen'>('CurrentOpenPeriod');
     const [reverseDate, setReverseDate] = useState(() => {
         const today = new Date();
         return today.toISOString().split('T')[0];
@@ -328,7 +329,12 @@ export default function JournalEntryDetailPage() {
         if (!entry || !reverseReason.trim()) return;
         try {
             setActionLoading('reverse');
-            await financeDataService.reverseJournalEntry(entry.id, reverseReason, reverseDate);
+            await financeDataService.reverseJournalEntry(
+                entry.id,
+                reverseReason,
+                reversalDatePolicy,
+                reversalDatePolicy === 'CurrentOpenPeriod' ? reverseDate : undefined
+            );
             toast({ title: 'Reversed', description: 'Journal entry has been successfully reversed.' });
             setShowReverseForm(false);
             setReverseReason('');
@@ -1129,12 +1135,27 @@ export default function JournalEntryDetailPage() {
                                 ) : (
                                     <div className="space-y-3">
                                         <div>
+                                            <label className="text-xs font-medium text-muted-foreground">Reversal Timing</label>
+                                            <select
+                                                className="w-full rounded-md border p-2 text-sm mt-1 bg-background"
+                                                value={reversalDatePolicy}
+                                                onChange={(event) => setReversalDatePolicy(event.target.value as typeof reversalDatePolicy)}
+                                            >
+                                                <option value="CurrentOpenPeriod">Use a date in the current open period</option>
+                                                <option value="OriginalDocumentPeriodIfOpen">Use original journal date if its period is open</option>
+                                            </select>
+                                            <p className="mt-1 text-xs text-muted-foreground">
+                                                If the original period is closed, the reversal falls forward to the current open period.
+                                            </p>
+                                        </div>
+                                        <div>
                                             <label className="text-xs font-medium text-muted-foreground">Reversal Date</label>
                                             <input
                                                 type="date"
                                                 className="w-full rounded-md border p-2 text-sm mt-1 bg-background"
                                                 value={reverseDate}
                                                 onChange={(e) => setReverseDate(e.target.value)}
+                                                disabled={reversalDatePolicy === 'OriginalDocumentPeriodIfOpen'}
                                             />
                                         </div>
                                         <div>

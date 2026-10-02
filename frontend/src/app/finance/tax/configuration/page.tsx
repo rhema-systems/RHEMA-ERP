@@ -91,8 +91,12 @@ export default function TaxConfigurationPage() {
                 </div>
             </div>
 
-            {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <section aria-labelledby="tax-overview-heading" className="space-y-3">
+                <div>
+                    <h2 id="tax-overview-heading" className="text-xl font-semibold">Tax overview</h2>
+                    <p className="text-sm text-muted-foreground">Current status of the tenant&apos;s tax configuration.</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Active Taxes</CardTitle>
@@ -144,10 +148,15 @@ export default function TaxConfigurationPage() {
                         </p>
                     </CardContent>
                 </Card>
-            </div>
+                </div>
+            </section>
 
-            {/* Quick Links */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <section aria-labelledby="tax-configuration-heading" className="space-y-4 rounded-xl border bg-muted/20 p-5">
+                <div className="border-b pb-4">
+                    <h2 id="tax-configuration-heading" className="text-xl font-semibold">Configuration</h2>
+                    <p className="text-sm text-muted-foreground">Maintain tax definitions, groups, and automatic selection rules.</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Link href={`${configurationBasePath}/taxes`}>
                     <Card className="hover:bg-accent cursor-pointer transition-colors">
                         <CardHeader>
@@ -204,7 +213,8 @@ export default function TaxConfigurationPage() {
                         </CardContent>
                     </Card>
                 </Link>
-            </div>
+                </div>
+            </section>
 
             {/* Active Taxes */}
             <Card>

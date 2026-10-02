@@ -4,6 +4,7 @@ using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ErpSystem.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261001213911_FinancePrecisionRoundingGovernance")]
+    partial class FinancePrecisionRoundingGovernance
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -3582,169 +3585,6 @@ namespace ErpSystem.Data.Migrations
                         });
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcPublicPropertyEnquiryContact", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("BusinessPartnerId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Channel")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
-                    b.Property<string>("ContactName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime?>("LastEnquiryAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("LastVerifiedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("NormalizedContact")
-                        .IsRequired()
-                        .HasMaxLength(320)
-                        .HasColumnType("nvarchar(320)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BusinessPartnerId");
-
-                    b.HasIndex("TenantId", "BusinessPartnerId");
-
-                    b.HasIndex("TenantId", "Channel", "NormalizedContact")
-                        .IsUnique()
-                        .HasFilter("[IsDeleted] = 0");
-
-                    b.ToTable("EhcPublicPropertyEnquiryContacts");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcPublicPropertyEnquiryVerification", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Channel")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
-                    b.Property<DateTime?>("ConsumedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("ConsumedSubmissionId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ContactHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<Guid?>("ContactId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("ExpiresAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime?>("LastAttemptAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("ListingId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("RequestedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("VerificationTokenHash")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<int>("VerificationAttemptCount")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("VerifiedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ContactId");
-
-                    b.HasIndex("VerificationTokenHash")
-                        .IsUnique()
-                        .HasFilter("[VerificationTokenHash] IS NOT NULL AND [IsDeleted] = 0");
-
-                    b.HasIndex("TenantId", "ListingId", "Channel", "ContactHash", "RequestedAtUtc");
-
-                    b.ToTable("EhcPublicPropertyEnquiryVerifications");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcRetentionCategoryException", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4332,9 +4172,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("PropertyListingContextJson")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<Guid?>("PublicPropertyEnquiryContactId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<string>("RelatedEntityReference")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -4410,8 +4247,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("CrmOpportunityId");
 
-                    b.HasIndex("PublicPropertyEnquiryContactId");
-
                     b.HasIndex("RequesterUserId");
 
                     b.HasIndex("RootCauseId");
@@ -4431,8 +4266,6 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "ExternalSubmissionId")
                         .IsUnique()
                         .HasFilter("[ExternalSubmissionId] IS NOT NULL AND [RequesterUserId] IS NULL");
-
-                    b.HasIndex("TenantId", "PublicPropertyEnquiryContactId");
 
                     b.HasIndex("TenantId", "RequesterUserId");
 
@@ -20213,10 +20046,6 @@ namespace ErpSystem.Data.Migrations
                         .HasFilter("[NextFiscalYearId] IS NOT NULL");
 
                     b.HasIndex("OpeningBalanceJournalEntryId");
-
-                    b.HasIndex("TenantId", "Year")
-                        .IsUnique()
-                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("FiscalYears", (string)null);
                 });
@@ -188025,42 +187854,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcPublicPropertyEnquiryContact", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Procurement.BusinessPartner", "BusinessPartner")
-                        .WithMany()
-                        .HasForeignKey("BusinessPartnerId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("BusinessPartner");
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcPublicPropertyEnquiryVerification", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Ehc.EhcPublicPropertyEnquiryContact", "Contact")
-                        .WithMany()
-                        .HasForeignKey("ContactId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Contact");
-
-                    b.Navigation("Tenant");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcRetentionCategoryException", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Ehc.EhcTicketCategory", "Category")
@@ -188221,11 +188014,6 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("CrmOpportunityId")
                         .OnDelete(DeleteBehavior.NoAction);
 
-                    b.HasOne("ErpSystem.Core.Entities.Ehc.EhcPublicPropertyEnquiryContact", "PublicPropertyEnquiryContact")
-                        .WithMany("Enquiries")
-                        .HasForeignKey("PublicPropertyEnquiryContactId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
                     b.HasOne("ErpSystem.Core.Entities.ApplicationUser", "RequesterUser")
                         .WithMany()
                         .HasForeignKey("RequesterUserId")
@@ -188258,8 +188046,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("CrmLead");
 
                     b.Navigation("CrmOpportunity");
-
-                    b.Navigation("PublicPropertyEnquiryContact");
 
                     b.Navigation("RequesterUser");
 
@@ -240514,11 +240300,6 @@ namespace ErpSystem.Data.Migrations
             modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcPropertyEnquiryProspect", b =>
                 {
                     b.Navigation("DepositReceipts");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcPublicPropertyEnquiryContact", b =>
-                {
-                    b.Navigation("Enquiries");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Ehc.EhcServiceRequest", b =>

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 
 namespace ErpSystem.Core.DTOs.Finance
 {
@@ -239,6 +240,18 @@ namespace ErpSystem.Core.DTOs.Finance
         /// Effective tax rate (total tax / base * 100)
         /// </summary>
         public decimal EffectiveTaxRate { get; set; }
+
+        /// <summary>Accounting boundary used to round this result.</summary>
+        public TaxRoundingScope TaxRoundingScope { get; set; }
+
+        /// <summary>Direction used at the configured accounting boundary.</summary>
+        public GovernedRoundingMethod TaxRoundingMethod { get; set; }
+
+        /// <summary>Monetary increment used for tax rounding.</summary>
+        public decimal TaxRoundingIncrement { get; set; }
+
+        /// <summary>Difference between aggregate raw tax and the governed result.</summary>
+        public decimal TaxRoundingDelta { get; set; }
 
         /// <summary>
         /// Tax group used (if any)
