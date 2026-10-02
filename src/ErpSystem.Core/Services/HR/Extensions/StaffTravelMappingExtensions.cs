@@ -703,8 +703,7 @@ public static class StaffTravelMappingExtensions
             AirlineCode = dto.AirlineCode,
             AirlineName = dto.AirlineName,
             BookingClass = dto.BookingClass,
-            PolicyAllowedClass = dto.PolicyAllowedClass,
-            ClassExceptionApproved = dto.ClassExceptionApproved,
+            // Lane 5 (D5): the cap, the exception's grant, the status and the stamps are the service's.
             ClassExceptionReason = dto.ClassExceptionReason,
             BookedBy = dto.BookedBy,
             VendorId = dto.VendorId,
@@ -712,19 +711,19 @@ public static class StaffTravelMappingExtensions
             TaxesAndFees = dto.TaxesAndFees,
             CurrencyCode = dto.CurrencyCode,
             TicketNumber = dto.TicketNumber,
-            Status = dto.Status,
+            Status = TravelBookingStatus.Pending,
             CreatedBy = userId.ToString(),
         };
     }
 
+    /// <summary>The fields the desk edits — never the status (the verbs), the stamps, the fee or the policy's cap
+    /// (lane 5, D1, D5).</summary>
     public static void UpdateEntity(this StaffTravelFlightBooking entity, UpdateStaffTravelFlightBookingDto dto, Guid userId)
     {
         entity.BookingReference = dto.BookingReference;
         entity.AirlineCode = dto.AirlineCode;
         entity.AirlineName = dto.AirlineName;
         entity.BookingClass = dto.BookingClass;
-        entity.PolicyAllowedClass = dto.PolicyAllowedClass;
-        entity.ClassExceptionApproved = dto.ClassExceptionApproved;
         entity.ClassExceptionReason = dto.ClassExceptionReason;
         entity.BookedBy = dto.BookedBy;
         entity.VendorId = dto.VendorId;
@@ -732,10 +731,6 @@ public static class StaffTravelMappingExtensions
         entity.TaxesAndFees = dto.TaxesAndFees;
         entity.CurrencyCode = dto.CurrencyCode;
         entity.TicketNumber = dto.TicketNumber;
-        entity.Status = dto.Status;
-        entity.BookedAt = dto.BookedAt;
-        entity.CancelledAt = dto.CancelledAt;
-        entity.CancellationFee = dto.CancellationFee;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -904,22 +899,21 @@ public static class StaffTravelMappingExtensions
             StarRating = dto.StarRating,
             CheckInDate = dto.CheckInDate,
             CheckOutDate = dto.CheckOutDate,
-            NumberOfNights = dto.NumberOfNights,
             RoomType = dto.RoomType,
             RatePerNight = dto.RatePerNight,
-            TotalCost = dto.TotalCost,
             CurrencyCode = dto.CurrencyCode,
-            PolicyMaxRatePerNight = dto.PolicyMaxRatePerNight,
-            RateExceptionApproved = dto.RateExceptionApproved,
+            // Lane 5 (D5): nights, total, the cap, the exception's grant, the status and the stamps are the service's.
             RateExceptionReason = dto.RateExceptionReason,
             VendorId = dto.VendorId,
             BookedBy = dto.BookedBy,
-            Status = dto.Status,
+            Status = TravelBookingStatus.Pending,
             CancellationPolicy = dto.CancellationPolicy,
             CreatedBy = userId.ToString(),
         };
     }
 
+    /// <summary>The fields the desk edits — never the status (the verbs), what is derived, the stamps, the fee or the
+    /// policy's cap (lane 5, D1, D5).</summary>
     public static void UpdateEntity(this StaffTravelHotelBooking entity, UpdateStaffTravelHotelBookingDto dto, Guid userId)
     {
         entity.BookingReference = dto.BookingReference;
@@ -931,21 +925,13 @@ public static class StaffTravelMappingExtensions
         entity.StarRating = dto.StarRating;
         entity.CheckInDate = dto.CheckInDate;
         entity.CheckOutDate = dto.CheckOutDate;
-        entity.NumberOfNights = dto.NumberOfNights;
         entity.RoomType = dto.RoomType;
         entity.RatePerNight = dto.RatePerNight;
-        entity.TotalCost = dto.TotalCost;
         entity.CurrencyCode = dto.CurrencyCode;
-        entity.PolicyMaxRatePerNight = dto.PolicyMaxRatePerNight;
-        entity.RateExceptionApproved = dto.RateExceptionApproved;
         entity.RateExceptionReason = dto.RateExceptionReason;
         entity.VendorId = dto.VendorId;
         entity.BookedBy = dto.BookedBy;
-        entity.Status = dto.Status;
         entity.CancellationPolicy = dto.CancellationPolicy;
-        entity.BookedAt = dto.BookedAt;
-        entity.CancelledAt = dto.CancelledAt;
-        entity.CancellationFee = dto.CancellationFee;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -1000,12 +986,13 @@ public static class StaffTravelMappingExtensions
             EstimatedCost = dto.EstimatedCost,
             ActualCost = dto.ActualCost,
             CurrencyCode = dto.CurrencyCode,
-            Status = dto.Status,
+            Status = TravelBookingStatus.Pending,   // lane 5 (D1): moved by its verbs
             Notes = dto.Notes,
             CreatedBy = userId.ToString(),
         };
     }
 
+    /// <summary>The fields the desk edits — never the status, which the verbs move (lane 5, D1).</summary>
     public static void UpdateEntity(this StaffTravelGroundTransport entity, UpdateStaffTravelGroundTransportDto dto, Guid userId)
     {
         entity.TransportType = dto.TransportType;
@@ -1018,7 +1005,6 @@ public static class StaffTravelMappingExtensions
         entity.EstimatedCost = dto.EstimatedCost;
         entity.ActualCost = dto.ActualCost;
         entity.CurrencyCode = dto.CurrencyCode;
-        entity.Status = dto.Status;
         entity.Notes = dto.Notes;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
@@ -1073,16 +1059,16 @@ public static class StaffTravelMappingExtensions
             VehicleCategory = dto.VehicleCategory,
             VehicleModel = dto.VehicleModel,
             DailyRate = dto.DailyRate,
-            TotalCost = dto.TotalCost,
             CurrencyCode = dto.CurrencyCode,
             InsuranceIncluded = dto.InsuranceIncluded,
             FuelPolicy = dto.FuelPolicy,
             DriverLicenseRequired = dto.DriverLicenseRequired,
-            Status = dto.Status,
+            Status = TravelBookingStatus.Pending,   // lane 5 (D1, D5): moved by its verbs; the total is the service's
             CreatedBy = userId.ToString(),
         };
     }
 
+    /// <summary>The fields the desk edits — never the status (the verbs), the total or <c>BookedAt</c> (lane 5, D1, D5).</summary>
     public static void UpdateEntity(this StaffTravelCarRentalBooking entity, UpdateStaffTravelCarRentalBookingDto dto, Guid userId)
     {
         entity.VendorId = dto.VendorId;
@@ -1094,13 +1080,10 @@ public static class StaffTravelMappingExtensions
         entity.VehicleCategory = dto.VehicleCategory;
         entity.VehicleModel = dto.VehicleModel;
         entity.DailyRate = dto.DailyRate;
-        entity.TotalCost = dto.TotalCost;
         entity.CurrencyCode = dto.CurrencyCode;
         entity.InsuranceIncluded = dto.InsuranceIncluded;
         entity.FuelPolicy = dto.FuelPolicy;
         entity.DriverLicenseRequired = dto.DriverLicenseRequired;
-        entity.Status = dto.Status;
-        entity.BookedAt = dto.BookedAt;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }

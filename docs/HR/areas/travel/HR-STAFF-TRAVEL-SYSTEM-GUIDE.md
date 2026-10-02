@@ -539,8 +539,8 @@ may mint a fifth:
 | # | Trip | Who | State | What it is for |
 |---|---|---|---|---|
 | 1 | **Kumasi** — Ghana Institution of Engineers conference, presenting the Community 25 drainage design | `head.dev` | **Approved** | the **advance** story: GHS 2,500 requested → approved → **disbursed** |
-| 2 | **Lagos** — Free Zone housing scheme study tour | `gm.ops` | **Submitted** *(pending)* | the **depth** story: group travel, a 3-leg itinerary with activities, a flight with 2 segments, a hotel, insurance, a medium-risk assessment, a live alert |
-| 3 | **London** — CIPD Africa HR Summit | `hr.head` | **Submitted** *(pending)* | the **compliance** story: a visa application, a policy exception, an over-cap hotel, a car rental, priority Emergency |
+| 2 | **Lagos** — Free Zone housing scheme study tour | `gm.ops` | **Submitted** *(pending)* | the **depth** story: group travel, a 3-leg itinerary with activities, insurance, a medium-risk assessment, a live alert. *(Its flight and hotel left the pack in closure lane 5 — a submitted trip takes no booking, D-23)* |
+| 3 | **London** — CIPD Africa HR Summit | `hr.head` | **Approved** *(since closure lane 5, D-26; `hr.officer` gives HR's approval — hr.head travels)* | the **compliance** story: a visa application, a policy exception, an over-cap hotel, a car rental, a flight **refused its ticket until the visa is approved** (T-24), priority Emergency |
 | 4 | **Sebrepor** — site handover with the contractor | `staff` | **Approved** | the **claim** story: an expense claim with 3 lines and a real receipt, submitted and awaiting review |
 
 **And around them:**
@@ -564,8 +564,8 @@ may mint a fifth:
 | `StaffTravelInsurancePolicies` | **2** — Lagos GHS 250,000 cover, London GHS 500,000 |
 | `StaffTravelRiskAssessments` | **2** — Lagos **Medium** with real mitigation notes, London **Low**. Only the London one is acknowledged |
 | `StaffTravelAlerts` | **3** — Lagos road disruption (**Warning**), London Piccadilly line works (Info), Ashanti heavy rains (Info) |
-| `StaffTravelFlightBookings` | **2** — Air Peace ACC↔LOS (Economy, **Confirmed**), British Airways ACC↔LHR (**Premium economy, Ticketed**) with 2 segments each, terminals, seats and baggage |
-| `StaffTravelHotelBookings` | **2** — Radisson Blu Anchorage Lagos at GHS 2,200/night, Hilton London Metropole at **GHS 3,200/night with the rate exception** |
+| `StaffTravelFlightBookings` | **1** since closure lane 5 — British Airways ACC↔LHR (**Premium economy, Confirmed** — its ticket is refused until the visa is approved, T-24) with 2 segments, terminals, seats and baggage. *(Before lane 5 also Air Peace ACC↔LOS for Lagos, and the BA flight Ticketed — what a UAT seeded earlier still shows)* |
+| `StaffTravelHotelBookings` | **1** since closure lane 5 — Hilton London Metropole at **GHS 3,200/night**, Confirmed. *(Before lane 5 also the Radisson Blu Anchorage, Lagos, at GHS 2,200/night)* |
 | `StaffTravelGroundTransports` | **3** — the VIP coach to Kumasi, a Kumasi taxi, private car hire to Sebrepor |
 | `StaffTravelCarRentalBookings` | **1** — Avis at Heathrow T5, VW Golf automatic |
 | `StaffTravelItineraries` | **1** — the Lagos programme, version 1, 3 legs, **3 activities** with named contacts at LFZDC |
@@ -573,7 +573,8 @@ may mint a fifth:
 
 > **The Lagos trip is the one to open.** It is the only request that has every tab populated —
 > itinerary, bookings, finance, compliance, comments, group. Chapter 5 spends most of its time
-> there.
+> there. *(Since closure lane 5 the pack books only approved trips, so on a freshly built database
+> Lagos has no bookings and the **London** trip carries them — open London for the Bookings tab.)*
 
 ### 2.2 Check the register reads four
 
@@ -1062,6 +1063,24 @@ Tables: `StaffTravelItineraries`, `StaffTravelItineraryLegs`, `StaffTravelItiner
 
 ### 5.3 👁 Bookings tab
 
+> ⚠ **Changed by closure lanes 4 and 5 (2026-10-02) — read this before the walk below, which lane 10
+> rewrites.**
+> - **Bookings live on an approved trip (lane 5, D-23).** The Add buttons show only while the trip is
+>   Approved or under way; on any other trip a note says why. On a database built by the demo pack since
+>   lane 5, **London is approved and Lagos carries no flight or hotel** (D-26). UAT built before that still
+>   shows the older shape until the pack runs again.
+> - **The status is no longer on the dialogs.** A booking is saved **Pending**, and the row's **⋯ menu** moves
+>   it: *Put on hold*, *Confirm*, *Ticket…* (flights, with the ticket number), *Mark completed* and *Record a
+>   no-show* (once the trip has started), *Cancel booking…* (a reason, kept as an internal note, and on a
+>   flight or hotel the supplier's fee), *Delete* (a pending booking only; administrators), and *Edit*.
+> - **A flight on a trip that needs a visa is not ticketed** until a visa application on it is approved or
+>   recorded as not required (T-24). On the demo, London's BA flight is Confirmed and *Ticket…* is refused,
+>   naming the visa: say it out loud.
+> - **The exception switches ask, they do not grant** (lane 4, D-8): a breaching booking waits on *Staff
+>   Travel → Policy Breaches* for another travel administrator and cannot be confirmed until then.
+> - A flight's **Segments** dialog lists, adds and removes its segments; a hotel has a star rating and ground
+>   transport an actual cost. Every booking falls inside the trip's dates, a day either side.
+
 **What it is:** what has actually been reserved. **Four sections, each with its own Add button:**
 **Flights** · **Hotels** · **Ground transport** · **Car rentals**.
 
@@ -1362,7 +1381,7 @@ Tables: `StaffTravelDocuments`, `StaffTravelVisaRequirements`, `StaffTravelVisaA
 | Gap | |
 |---|---|
 | **T-23 · The risk-assessment acknowledgement is unreachable by the people it is for** — the gate and the service check do not overlap. The alert acknowledgement had the same shape and was fixed with `/me` routes; this one was not | |
-| **T-24 · `RequiresVisa` and `RequiresHealthClearance` gate nothing.** A trip flagged as needing a visa can be approved, booked and completed with no visa application on it | |
+| **T-24 · `RequiresVisa` and `RequiresHealthClearance` gate nothing.** A trip flagged as needing a visa can be approved, booked and completed with no visa application on it | *Ticketing half fixed in closure lane 5: a flight is not ticketed until a visa application is approved or not required. Deriving the flag from the requirements table, and health clearance, are lane 7's* |
 | **T-25 · Health requirements are shown per country but never checked against the traveller.** Nigeria's mandatory yellow-fever certificate is displayed; nothing verifies the traveller holds one | |
 | **T-26 · An expiring passport does not block anything** — the reminder sweep chases it and no other path reads the expiry | |
 
@@ -2527,6 +2546,18 @@ the module's argument.
 > they read a Finance list that answers 403 (closure finding O-19, fixed in the same lane). Where a step
 > below warns about one of these, the warning describes the code before lane 0.
 >
+> **Closure lane 5, bookings and itinerary (2026-10-02) — slice 5a staged** (5b, the itinerary and destination
+> alerts, to come). **Bookings live on an approved trip** (D-23): made, changed, held, confirmed and ticketed while
+> the trip is Approved or under way, cancelled on any trip not closed, completed or a no-show once it has started.
+> Every booking falls inside the trip's dates, a day either side. **The status moves only by the row's verbs** —
+> an edit never changes it, a new booking is Pending, and the stamps, the fee, nights and totals are the server's
+> (D1, D5). Cancelling records a reason as an internal note and, on a flight or hotel, the supplier's fee. **A flight
+> on a trip needing a visa is ticketed once a visa application is approved or not required (T-24's ticketing half).**
+> Only a pending booking is deleted. **A trip with a confirmed or ticketed booking is not cancelled** until those are;
+> its holds are cancelled with it (D-24). Flight segments have a screen at last; hotels a star rating, ground transport
+> an actual cost. The demo pack approves London and no longer books Lagos (D-26) — § 2.1 and the head of § 5.3 say
+> what that changes on screen.
+>
 > **Closure lane 4, policy and authority (2026-10-02) — lane 4 complete** (4a committed `19f20f2f2`, 4b
 > `3a6792a30`, 4c staged). **The policy (4a):** real cabin classes; an end no earlier than its start; a
 > staff-level band in rank order; its money limits in a stated currency (base by default; the hotel cap had
@@ -2640,7 +2671,7 @@ you out in a demonstration; **five** are the ones to fix before it is called fin
 | **T-3** | request form | **Write the two unions from the enums.** A dropdown value that 400s is the only thing in this module that fails in front of a user for no reason | Twenty minutes, and it is the one a user will hit |
 | **T-1** | policies | **Seed an approved policy, or decide that travel administrators are employee-linked accounts.** A control nobody can switch on is not a control | It is a seeding decision, not code — and until it is made, the module's best feature is inert |
 | **T-23 / T-55** | compliance | **Give the risk-assessment acknowledgement a `/me` route**, exactly as the destination alert already has. Today the gate and the service check do not overlap, so **nobody** can acknowledge a security briefing | It is the duty-of-care record, and it is unreachable |
-| **T-24 / T-42** | compliance | **Make `RequiresVisa` gate something.** A trip flagged as needing a visa can be approved, booked and completed with no visa application, into a country the requirements table says needs one | It is the failure the module exists to prevent |
+| **T-24 / T-42** | compliance | **Make `RequiresVisa` gate something.** A trip flagged as needing a visa can be approved, booked and completed with no visa application, into a country the requirements table says needs one *(lane 5: the ticket now waits for the visa; the derived flag is lane 7's)* | It is the failure the module exists to prevent |
 | **T-58** | finance | **The GL hand-off.** No travel transaction posts to the general ledger; advances, claims and payments live only in travel's tables | It is the open item a finance director will find first |
 
 ### Everything else, by area

@@ -58,6 +58,13 @@ public interface IStaffTravelBookingService
     Task<StaffTravelCarRentalBookingDto> CreateCarRentalAsync(CreateStaffTravelCarRentalBookingDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<StaffTravelCarRentalBookingDto> UpdateCarRentalAsync(UpdateStaffTravelCarRentalBookingDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteCarRentalAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // Status verbs (lane 5, D1) — the only way a booking's status moves. A create is Pending and an edit leaves the
+    // status alone. `actorEmployeeId` authors a cancellation's internal note; `cancel` carries its reason and fee.
+    Task<StaffTravelFlightBookingDto> MoveFlightAsync(Guid id, TravelBookingVerb verb, string? ticketNumber, CancelStaffTravelBookingDto? cancel, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<StaffTravelHotelBookingDto> MoveHotelAsync(Guid id, TravelBookingVerb verb, CancelStaffTravelBookingDto? cancel, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<StaffTravelGroundTransportDto> MoveGroundTransportAsync(Guid id, TravelBookingVerb verb, CancelStaffTravelBookingDto? cancel, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<StaffTravelCarRentalBookingDto> MoveCarRentalAsync(Guid id, TravelBookingVerb verb, CancelStaffTravelBookingDto? cancel, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 }
 
 #endregion

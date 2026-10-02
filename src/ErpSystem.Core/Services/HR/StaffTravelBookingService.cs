@@ -234,24 +234,19 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         if (state == TravelBookingExceptionState.None) entity.ClassExceptionReason = null;
     }
 
+    /// <summary>Books a flight on an approved trip (lane 5, D-23), Pending — the verbs move it from there.</summary>
     public async Task<StaffTravelFlightBookingDto> CreateFlightAsync(CreateStaffTravelFlightBookingDto createDto, Guid tenantId, Guid createdByUserId, Guid? actorEmployeeId = null, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         var request = await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
-        StaffTravelRequestGuards.RequireOpen(request, "a booking");
+        StaffTravelBookingRules.RequireBookable(request, "a flight booking");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.ExceptionState = TravelBookingExceptionState.None;
         await ApplyFlightPolicyAsync(
             entity, request, createDto.ClassExceptionApproved, actorEmployeeId, factsChanged: true, vendorNewlyNamed: true,
             cancellationToken);
-
-        var bookedAt = entity.BookedAt;
-        var cancelledAt = entity.CancelledAt;
-        StampBookingTimestamps(entity.Status, ref bookedAt, ref cancelledAt);
-        entity.BookedAt = bookedAt;
-        entity.CancelledAt = cancelledAt;
 
         await _flightRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -260,19 +255,18 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     }
 
     /// <summary>
-    /// Changes a flight booking. Its policy checks run again; an authorised or refused exception stands while the
-    /// class does not change, and goes back to awaiting authorisation when it does (lane 4, D-8).
+    /// Changes a flight booking — on an approved trip, while the booking is live, never its status (lane 5). Its policy
+    /// checks run again; an authorised or refused exception stands while the class does not change, and goes back to
+    /// awaiting authorisation when it does (lane 4, D-8).
     /// </summary>
     public async Task<StaffTravelFlightBookingDto> UpdateFlightAsync(UpdateStaffTravelFlightBookingDto updateDto, Guid updatedByUserId, Guid? actorEmployeeId = null, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedFlightAsync(updateDto.Id);
         var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        var label = FlightLabel(entity);
+        StaffTravelBookingRules.RequireBookable(request, $"the {label}");
+        StaffTravelBookingRules.RequireLive(entity.Status, label);
 
-        // ⚠ Captured BEFORE the mapper runs. `UpdateEntity` still copies BookedAt/CancelledAt off
-        // the DTO, so re-reading them afterwards would read the client's value back — the stored
-        // ones are the only truthful starting point.
-        var bookedAt = entity.BookedAt;
-        var cancelledAt = entity.CancelledAt;
         var previousClass = entity.BookingClass;
         var previousVendor = entity.VendorId;
 
@@ -283,10 +277,6 @@ public class StaffTravelBookingService : IStaffTravelBookingService
             vendorNewlyNamed: entity.VendorId != previousVendor,
             cancellationToken);
 
-        StampBookingTimestamps(entity.Status, ref bookedAt, ref cancelledAt);
-        entity.BookedAt = bookedAt;
-        entity.CancelledAt = cancelledAt;
-
         await _flightRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -296,11 +286,14 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         return await WithExceptionNamesAsync(refreshed.ToDto(), cancellationToken);
     }
 
-    /// <summary>Removes a flight booking — never one that carries a policy exception (lane 4, D-20): cancel it instead.</summary>
+    /// <summary>Removes a pending flight booking (lane 5) — never one that carries a policy exception (lane 4, D-20):
+    /// cancel it instead.</summary>
     public async Task<bool> DeleteFlightAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedFlightAsync(id);
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
         RequireNoException(entity.ExceptionState, $"Flight booking {entity.BookingReference ?? entity.AirlineName ?? ""}".Trim());
+        StaffTravelBookingRules.RequireDeletable(entity.Status, request, FlightLabel(entity));
         await _flightRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
@@ -308,10 +301,26 @@ public class StaffTravelBookingService : IStaffTravelBookingService
 
     // ---- Flight segments ---------------------------------------------------
 
+    /// <summary>
+    /// The trip and the flight a segment hangs off, checked (lane 5, Q4): segments were added, changed and deleted on a
+    /// cancelled booking or a closed trip, their dates never compared with the trip's.
+    /// </summary>
+    private async Task RequireSegmentWritableAsync(Guid flightBookingId, DateTime? departure, DateTime? arrival)
+    {
+        var flight = await GetOwnedFlightAsync(flightBookingId);
+        var request = await RequireOwnedRequestAsync(flight.StaffTravelRequestId);
+        var label = FlightLabel(flight);
+        StaffTravelBookingRules.RequireBookable(request, $"the segments of the {label}");
+        StaffTravelBookingRules.RequireLive(flight.Status, label);
+        if (departure is not null || arrival is not null)
+            StaffTravelBookingRules.RequireWithinTrip(
+                request, StaffTravelBookingRules.DateOf(departure), StaffTravelBookingRules.DateOf(arrival), "flight segment");
+    }
+
     public async Task<StaffTravelFlightSegmentDto> AddSegmentAsync(CreateStaffTravelFlightSegmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        await GetOwnedFlightAsync(createDto.StaffTravelFlightBookingId);
+        await RequireSegmentWritableAsync(createDto.StaffTravelFlightBookingId, createDto.DepartureDatetime, createDto.ArrivalDatetime);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         ApplySegmentDerivations(entity);
@@ -350,6 +359,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     public async Task<StaffTravelFlightSegmentDto> UpdateSegmentAsync(UpdateStaffTravelFlightSegmentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedSegmentAsync(updateDto.Id);
+        await RequireSegmentWritableAsync(entity.StaffTravelFlightBookingId, updateDto.DepartureDatetime, updateDto.ArrivalDatetime);
         entity.UpdateEntity(updateDto, updatedByUserId);
         ApplySegmentDerivations(entity);
         await _segmentRepository.UpdateAsync(entity);
@@ -360,6 +370,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     public async Task<bool> DeleteSegmentAsync(Guid segmentId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedSegmentAsync(segmentId);
+        await RequireSegmentWritableAsync(entity.StaffTravelFlightBookingId, null, null);
         await _segmentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
@@ -446,24 +457,20 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         if (state == TravelBookingExceptionState.None) entity.RateExceptionReason = null;
     }
 
+    /// <summary>Books a hotel on an approved trip, inside its dates (lane 5, D-23), Pending.</summary>
     public async Task<StaffTravelHotelBookingDto> CreateHotelAsync(CreateStaffTravelHotelBookingDto createDto, Guid tenantId, Guid createdByUserId, Guid? actorEmployeeId = null, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         var request = await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
-        StaffTravelRequestGuards.RequireOpen(request, "a booking");
+        StaffTravelBookingRules.RequireBookable(request, "a hotel booking");
+        StaffTravelBookingRules.RequireWithinTrip(request, createDto.CheckInDate, createDto.CheckOutDate, "hotel stay");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.ExceptionState = TravelBookingExceptionState.None;
         await ApplyHotelDerivationsAsync(
             entity, request, createDto.RateExceptionApproved, actorEmployeeId, factsChanged: true, vendorNewlyNamed: true,
             cancellationToken);
-
-        var bookedAt = entity.BookedAt;
-        var cancelledAt = entity.CancelledAt;
-        StampBookingTimestamps(entity.Status, ref bookedAt, ref cancelledAt);
-        entity.BookedAt = bookedAt;
-        entity.CancelledAt = cancelledAt;
 
         await _hotelRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -479,10 +486,13 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     {
         var entity = await GetOwnedHotelAsync(updateDto.Id);
         var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        var label = HotelLabel(entity);
+        StaffTravelBookingRules.RequireBookable(request, $"the {label}");
+        StaffTravelBookingRules.RequireLive(entity.Status, label);
+        // Checked when they move — a trip's dates changed through a request change (D-9) do not block unrelated edits.
+        if (updateDto.CheckInDate != entity.CheckInDate || updateDto.CheckOutDate != entity.CheckOutDate)
+            StaffTravelBookingRules.RequireWithinTrip(request, updateDto.CheckInDate, updateDto.CheckOutDate, "hotel stay");
 
-        // Captured before the mapper — see UpdateFlightAsync.
-        var bookedAt = entity.BookedAt;
-        var cancelledAt = entity.CancelledAt;
         var (previousRate, previousCurrency, previousCheckIn, previousVendor) =
             (entity.RatePerNight, entity.CurrencyCode, entity.CheckInDate, entity.VendorId);
 
@@ -495,21 +505,20 @@ public class StaffTravelBookingService : IStaffTravelBookingService
             vendorNewlyNamed: entity.VendorId != previousVendor,
             cancellationToken);
 
-        StampBookingTimestamps(entity.Status, ref bookedAt, ref cancelledAt);
-        entity.BookedAt = bookedAt;
-        entity.CancelledAt = cancelledAt;
-
         await _hotelRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         var reloaded = await _hotelRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
         return await WithExceptionNamesAsync((reloaded ?? entity).ToDto(), cancellationToken);
     }
 
-    /// <summary>Removes a hotel booking — never one that carries a policy exception (lane 4, D-20): cancel it instead.</summary>
+    /// <summary>Removes a pending hotel booking (lane 5) — never one that carries a policy exception (lane 4, D-20):
+    /// cancel it instead.</summary>
     public async Task<bool> DeleteHotelAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedHotelAsync(id);
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
         RequireNoException(entity.ExceptionState, $"Hotel booking at {entity.HotelName}");
+        StaffTravelBookingRules.RequireDeletable(entity.Status, request, HotelLabel(entity));
         await _hotelRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
@@ -545,13 +554,14 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         var state = !factsChanged && current is TravelBookingExceptionState.Authorised or TravelBookingExceptionState.Refused
             ? current
             : TravelBookingExceptionState.Pending;
+        // Since lane 5 the status is the verbs', so this is an edit of a booking already confirmed or ticketed: the
+        // change would leave it breaching with an exception nobody has authorised.
         if (state != TravelBookingExceptionState.Authorised
             && status is TravelBookingStatus.Confirmed or TravelBookingStatus.Ticketed or TravelBookingStatus.Completed)
             throw new InvalidOperationException(
-                $"This {what} breaches the travel policy ({said}) and its exception is " +
-                (state == TravelBookingExceptionState.Refused ? "refused" : "not authorised yet") +
-                $", so it cannot be {status.ToString().ToLowerInvariant()}. Save it as Pending until a travel administrator " +
-                "other than the booker authorises the exception.");
+                $"This change makes the {what} breach the travel policy ({said}), and it is already " +
+                $"{StaffTravelBookingRules.Describe(status)} — a confirmed booking is not changed into an unauthorised " +
+                "breach. Cancel it and book again, asking for the exception, or keep the change within the policy.");
         return state;
     }
 
@@ -820,7 +830,10 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         tenantId = RequireCurrentTenant(tenantId);
         await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         var owner = await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
-        StaffTravelRequestGuards.RequireOpen(owner, "a booking");
+        StaffTravelBookingRules.RequireBookable(owner, "ground transport");
+        StaffTravelBookingRules.RequireWithinTrip(owner,
+            StaffTravelBookingRules.DateOf(createDto.PickupDatetime), StaffTravelBookingRules.DateOf(createDto.DropoffDatetime),
+            "ground transport");
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         // D-1 (lane 4): the supplier rule — not for a company vehicle, which no supplier provides.
         if (createDto.TransportType != GroundTransportType.CompanyVehicle)
@@ -874,11 +887,18 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     public async Task<StaffTravelGroundTransportDto> UpdateGroundTransportAsync(UpdateStaffTravelGroundTransportDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedGroundTransportAsync(updateDto.Id);
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        var label = GroundLabel(entity);
+        StaffTravelBookingRules.RequireBookable(request, $"the {label}");
+        StaffTravelBookingRules.RequireLive(entity.Status, label);
+        if (updateDto.PickupDatetime != entity.PickupDatetime || updateDto.DropoffDatetime != entity.DropoffDatetime)
+            StaffTravelBookingRules.RequireWithinTrip(request,
+                StaffTravelBookingRules.DateOf(updateDto.PickupDatetime), StaffTravelBookingRules.DateOf(updateDto.DropoffDatetime),
+                "ground transport");
         var previousVendor = entity.VendorId;
         entity.UpdateEntity(updateDto, updatedByUserId);
         if (entity.TransportType != GroundTransportType.CompanyVehicle)
-            await RequireVendorAsync(entity.VendorId,
-                await _policyGuard.ResolveAsync(await RequireOwnedRequestAsync(entity.StaffTravelRequestId), cancellationToken),
+            await RequireVendorAsync(entity.VendorId, await _policyGuard.ResolveAsync(request, cancellationToken),
                 "ground transport", newlyNamed: entity.VendorId != previousVendor, cancellationToken);
         await _groundRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -889,6 +909,8 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     public async Task<bool> DeleteGroundTransportAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedGroundTransportAsync(id);
+        StaffTravelBookingRules.RequireDeletable(
+            entity.Status, await RequireOwnedRequestAsync(entity.StaffTravelRequestId), GroundLabel(entity));
         await _groundRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
@@ -916,7 +938,9 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         tenantId = RequireCurrentTenant(tenantId);
         await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         var owner = await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
-        StaffTravelRequestGuards.RequireOpen(owner, "a booking");
+        StaffTravelBookingRules.RequireBookable(owner, "a car rental");
+        StaffTravelBookingRules.RequireWithinTrip(owner,
+            DateOnly.FromDateTime(createDto.PickupDatetime), DateOnly.FromDateTime(createDto.DropoffDatetime), "car rental");
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         ApplyCarRentalDerivations(entity);
         await RequireVendorAsync(entity.VendorId, await _policyGuard.ResolveAsync(owner, cancellationToken),
@@ -949,20 +973,19 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     public async Task<StaffTravelCarRentalBookingDto> UpdateCarRentalAsync(UpdateStaffTravelCarRentalBookingDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCarRentalAsync(updateDto.Id);
-
-        // Captured before the mapper — see UpdateFlightAsync. A car rental records no CancelledAt.
-        var bookedAt = entity.BookedAt;
-        DateTime? cancelledAt = null;
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        var label = CarRentalLabel(entity);
+        StaffTravelBookingRules.RequireBookable(request, $"the {label}");
+        StaffTravelBookingRules.RequireLive(entity.Status, label);
+        if (updateDto.PickupDatetime != entity.PickupDatetime || updateDto.DropoffDatetime != entity.DropoffDatetime)
+            StaffTravelBookingRules.RequireWithinTrip(request,
+                DateOnly.FromDateTime(updateDto.PickupDatetime), DateOnly.FromDateTime(updateDto.DropoffDatetime), "car rental");
         var previousVendor = entity.VendorId;
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         ApplyCarRentalDerivations(entity);
-        await RequireVendorAsync(entity.VendorId,
-            await _policyGuard.ResolveAsync(await RequireOwnedRequestAsync(entity.StaffTravelRequestId), cancellationToken),
+        await RequireVendorAsync(entity.VendorId, await _policyGuard.ResolveAsync(request, cancellationToken),
             "car rental", newlyNamed: entity.VendorId != previousVendor, cancellationToken);
-
-        StampBookingTimestamps(entity.Status, ref bookedAt, ref cancelledAt);
-        entity.BookedAt = bookedAt;
 
         await _carRentalRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -973,9 +996,219 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     public async Task<bool> DeleteCarRentalAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCarRentalAsync(id);
+        StaffTravelBookingRules.RequireDeletable(
+            entity.Status, await RequireOwnedRequestAsync(entity.StaffTravelRequestId), CarRentalLabel(entity));
         await _carRentalRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    // ---- Status verbs (lane 5, D1) -----------------------------------------
+    //
+    // A booking's status moves only here — hold, confirm, ticket (flights), cancel, no-show, complete — through
+    // StaffTravelBookingRules.Next's table. A verb never re-runs the policy's cap check: cancelling a booking that
+    // breaches the policy must work whatever its exception says. Confirm and ticket need the exception settled.
+
+    private static string FlightLabel(StaffTravelFlightBooking b)
+        => $"flight booking {b.BookingReference ?? b.AirlineName ?? string.Empty}".Trim();
+
+    private static string HotelLabel(StaffTravelHotelBooking b) => $"hotel booking at {b.HotelName}";
+
+    private static string GroundLabel(StaffTravelGroundTransport b)
+        => $"{b.TransportType} booking {b.BookingReference ?? string.Empty}".Trim();
+
+    private static string CarRentalLabel(StaffTravelCarRentalBooking b)
+        => $"car rental {b.BookingReference ?? string.Empty}".Trim();
+
+    /// <summary>D-8: a booking breaching the policy is confirmed or ticketed only once a travel administrator other than
+    /// the booker has authorised its exception.</summary>
+    private static void RequireExceptionSettled(TravelBookingExceptionState state, string label)
+    {
+        if (state is TravelBookingExceptionState.None or TravelBookingExceptionState.Authorised) return;
+        throw new InvalidOperationException(
+            $"The {label} breaches the travel policy and its exception is {state.ToString().ToLowerInvariant()}, so it " +
+            "is not confirmed or ticketed " +
+            (state == TravelBookingExceptionState.Refused
+                ? "— the refusal stands: change the booking, which asks again, or cancel it."
+                : "until a travel administrator other than the booker authorises it (Staff Travel → Policy Breaches)."));
+    }
+
+    /// <summary>
+    /// T-24's ticketing half: a trip that needs a visa is not ticketed until a visa application on it is approved, or
+    /// the visa is recorded as not required. <c>RequiresVisa</c> gated nothing, so a flight was ticketed — the fare
+    /// spent — for a traveller who might never be let in.
+    /// </summary>
+    private async Task RequireVisaForTicketAsync(StaffTravelRequest request, CancellationToken cancellationToken)
+    {
+        if (!request.RequiresVisa) return;
+        var settled = await _unitOfWork.Repository<StaffTravelVisaApplication>()
+            .GetQueryable(v => v.TenantId == request.TenantId && v.StaffTravelRequestId == request.Id && !v.IsDeleted
+                            && (v.Status == VisaApplicationStatus.Approved || v.Status == VisaApplicationStatus.NotRequired))
+            .AnyAsync(cancellationToken);
+        if (!settled)
+            throw new InvalidOperationException(
+                $"Travel request {request.RequestNumber} needs a visa, and no visa application on it is approved — the " +
+                "flight is ticketed once one is, or once the visa is recorded as not required (the Compliance tab).");
+    }
+
+    /// <summary>
+    /// A cancellation's reason, kept on the trip as an internal note, and its fee: on a flight or hotel, what the
+    /// supplier charged — no more than the booking cost — which the budget counts as committed; ground transport and car
+    /// rentals have nowhere to keep one (Q7).
+    /// </summary>
+    private async Task<decimal?> RecordCancellationAsync(
+        StaffTravelRequest request, string label, CancelStaffTravelBookingDto? cancel, decimal? feeCeiling,
+        string currencyCode, Guid? actorEmployeeId, CancellationToken cancellationToken)
+    {
+        var why = cancel?.Reason?.Trim();
+        if (string.IsNullOrEmpty(why) || why.Length < 5)
+            throw new InvalidOperationException("Say why the booking is cancelled, in at least five characters.");
+        var fee = cancel?.CancellationFee;
+        if (fee is decimal f && f > 0m)
+        {
+            if (feeCeiling is not decimal ceiling)
+                throw new InvalidOperationException(
+                    $"A cancellation fee is kept on a flight or a hotel booking; the {label} has nowhere to record one. " +
+                    "Cancel it without a fee, and note the charge in the reason.");
+            if (f > ceiling)
+                throw new InvalidOperationException(
+                    $"The cancellation fee ({currencyCode} {f:N2}) is more than the booking cost ({currencyCode} {ceiling:N2}).");
+        }
+        if (actorEmployeeId is not Guid author)
+            throw new UnauthorizedAccessException("Cancelling a booking needs a login linked to an employee record.");
+
+        var note = $"Booking cancelled — the {label}: {why}" +
+                   (fee is decimal charged && charged > 0m ? $" (cancellation fee {currencyCode} {charged:N2})" : string.Empty);
+        await _unitOfWork.Repository<StaffTravelRequestComment>().AddAsync(new StaffTravelRequestComment
+        {
+            TenantId = request.TenantId,
+            StaffTravelRequestId = request.Id,
+            AuthorId = author,
+            CommentType = TravelRequestCommentType.InternalNote,
+            Body = note.Length > 2000 ? note[..2000] : note,
+            IsVisibleToTraveller = false,
+            CreatedBy = _currentUserProvider.UserId.ToString(),
+        });
+        return feeCeiling is null ? null : fee;
+    }
+
+    private void Touch(Action<DateTime, string> stamp) => stamp(DateTime.UtcNow, _currentUserProvider.UserId.ToString());
+
+    public async Task<StaffTravelFlightBookingDto> MoveFlightAsync(
+        Guid id, TravelBookingVerb verb, string? ticketNumber, CancelStaffTravelBookingDto? cancel, Guid? actorEmployeeId,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedFlightAsync(id);
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        var label = FlightLabel(entity);
+        var next = StaffTravelBookingRules.Next(entity.Status, verb, request, label);
+
+        if (verb is TravelBookingVerb.Confirm or TravelBookingVerb.Ticket)
+            RequireExceptionSettled(entity.ExceptionState, label);
+        if (verb == TravelBookingVerb.Ticket)
+        {
+            var number = ticketNumber?.Trim();
+            if (string.IsNullOrEmpty(number))
+                throw new InvalidOperationException("Give the ticket number the airline issued.");
+            await RequireVisaForTicketAsync(request, cancellationToken);
+            entity.TicketNumber = number;
+        }
+        if (verb == TravelBookingVerb.Cancel)
+            entity.CancellationFee = await RecordCancellationAsync(
+                request, label, cancel, entity.TotalFare + entity.TaxesAndFees, entity.CurrencyCode, actorEmployeeId, cancellationToken);
+
+        entity.Status = next;
+        var bookedAt = entity.BookedAt;
+        var cancelledAt = entity.CancelledAt;
+        StampBookingTimestamps(next, ref bookedAt, ref cancelledAt);
+        entity.BookedAt = bookedAt;
+        entity.CancelledAt = cancelledAt;
+        Touch((at, by) => { entity.UpdatedAt = at; entity.UpdatedBy = by; });
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);   // tracked — read alone
+        _logger.LogInformation("Flight booking {Id} {Verb} → {Status}", id, verb, next);
+        var refreshed = await _flightRepository.GetWithSegmentsAsync(entity.Id);
+        return await WithExceptionNamesAsync((refreshed ?? entity).ToDto(), cancellationToken);
+    }
+
+    public async Task<StaffTravelHotelBookingDto> MoveHotelAsync(
+        Guid id, TravelBookingVerb verb, CancelStaffTravelBookingDto? cancel, Guid? actorEmployeeId,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedHotelAsync(id);
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        var label = HotelLabel(entity);
+        if (verb == TravelBookingVerb.Ticket)
+            throw new InvalidOperationException("Only a flight is ticketed — a hotel is confirmed.");
+        var next = StaffTravelBookingRules.Next(entity.Status, verb, request, label);
+
+        if (verb == TravelBookingVerb.Confirm)
+            RequireExceptionSettled(entity.ExceptionState, label);
+        if (verb == TravelBookingVerb.Cancel)
+            entity.CancellationFee = await RecordCancellationAsync(
+                request, label, cancel, entity.TotalCost, entity.CurrencyCode, actorEmployeeId, cancellationToken);
+
+        entity.Status = next;
+        var bookedAt = entity.BookedAt;
+        var cancelledAt = entity.CancelledAt;
+        StampBookingTimestamps(next, ref bookedAt, ref cancelledAt);
+        entity.BookedAt = bookedAt;
+        entity.CancelledAt = cancelledAt;
+        Touch((at, by) => { entity.UpdatedAt = at; entity.UpdatedBy = by; });
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Hotel booking {Id} {Verb} → {Status}", id, verb, next);
+        var reloaded = await _hotelRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return await WithExceptionNamesAsync((reloaded ?? entity).ToDto(), cancellationToken);
+    }
+
+    /// <summary>As the flight's, for ground transport. A company vehicle's Fleet trip is not touched — Fleet's side of a
+    /// cancellation is lane 6's (D2).</summary>
+    public async Task<StaffTravelGroundTransportDto> MoveGroundTransportAsync(
+        Guid id, TravelBookingVerb verb, CancelStaffTravelBookingDto? cancel, Guid? actorEmployeeId,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedGroundTransportAsync(id);
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        var label = GroundLabel(entity);
+        if (verb == TravelBookingVerb.Ticket)
+            throw new InvalidOperationException("Only a flight is ticketed — ground transport is confirmed.");
+        var next = StaffTravelBookingRules.Next(entity.Status, verb, request, label);
+        if (verb == TravelBookingVerb.Cancel)
+            await RecordCancellationAsync(request, label, cancel, null, entity.CurrencyCode, actorEmployeeId, cancellationToken);
+
+        entity.Status = next;
+        Touch((at, by) => { entity.UpdatedAt = at; entity.UpdatedBy = by; });
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Ground transport {Id} {Verb} → {Status}", id, verb, next);
+        var reloaded = await _groundRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
+    }
+
+    public async Task<StaffTravelCarRentalBookingDto> MoveCarRentalAsync(
+        Guid id, TravelBookingVerb verb, CancelStaffTravelBookingDto? cancel, Guid? actorEmployeeId,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedCarRentalAsync(id);
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        var label = CarRentalLabel(entity);
+        if (verb == TravelBookingVerb.Ticket)
+            throw new InvalidOperationException("Only a flight is ticketed — a car rental is confirmed.");
+        var next = StaffTravelBookingRules.Next(entity.Status, verb, request, label);
+        if (verb == TravelBookingVerb.Cancel)
+            await RecordCancellationAsync(request, label, cancel, null, entity.CurrencyCode, actorEmployeeId, cancellationToken);
+
+        entity.Status = next;
+        // D5: a car rental's BookedAt was stamped on update only; it is stamped when the rental is confirmed.
+        var bookedAt = entity.BookedAt;
+        DateTime? cancelledAt = null;
+        StampBookingTimestamps(next, ref bookedAt, ref cancelledAt);
+        entity.BookedAt = bookedAt;
+        Touch((at, by) => { entity.UpdatedAt = at; entity.UpdatedBy = by; });
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Car rental {Id} {Verb} → {Status}", id, verb, next);
+        var reloaded = await _carRentalRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 }
 

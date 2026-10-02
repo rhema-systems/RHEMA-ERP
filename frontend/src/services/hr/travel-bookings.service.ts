@@ -39,14 +39,17 @@ import type {
  * traveller will do, day by day — and `api/staff-travel/bookings` holds what has actually been
  * reserved. A leg can point at a booking, which is how the two meet.
  *
- * ⚠ <b>Reads are `HR.Travel.Read`, writes are `HR.Travel.Write`, and every delete is
- * `HR.Travel.Admin`.</b> HR holds Read and Write and deliberately not Admin, so a travel clerk can
- * book and amend but cannot erase a booking — or approve a breach of the travel policy.
+ * ⚠ <b>Reads are `HR.Travel.Read`, writes and the status verbs are `HR.Travel.Write`, and every delete
+ * is `HR.Travel.Admin`</b> — which HR holds since the travel closure's lane 4 (D-3).
  *
- * ⚠ <b>Booking above a policy cap is refused.</b> A cabin class above the policy's ceiling, or a
- * nightly rate above it, comes back 422 naming the cap. Setting the matching `*ExceptionApproved`
- * flag asks for authority to proceed; without `HR.Travel.Admin` that is 403. Both refusals carry a
- * message worth showing verbatim — the cap is not something the screen can predict.
+ * ⚠ <b>Bookings live on an approved trip (lane 5, D-23).</b> A create is refused unless the trip is
+ * Approved or under way, and is saved Pending; the status moves only by the verbs below (hold, confirm,
+ * ticket, cancel, no-show, complete) — an edit never changes it. Only a Pending booking is deleted.
+ *
+ * ⚠ <b>Booking above a policy cap is refused</b> unless the matching `*ExceptionApproved` flag ASKS
+ * for an exception with a reason (lane 4, D-8); the booking then waits for another travel
+ * administrator's authorisation before it can be confirmed. Every refusal carries a message worth
+ * showing verbatim — the cap is not something the screen can predict.
  */
 class TravelBookingsService {
   private readonly itineraries = '/staff-travel/itineraries';
@@ -270,6 +273,39 @@ class TravelBookingsService {
   deleteCarRental(id: string) {
     return apiService.delete<void>(`${this.bookings}/car-rentals/${id}`);
   }
+
+  // ── Status verbs (lane 5, D1) ──────────────────────────────────────────────
+
+  /**
+   * Hold (Pending → On hold), confirm (Pending or On hold → Confirmed — a breach's exception must be
+   * authorised), no-show or complete (Confirmed or Ticketed, once the trip has started).
+   */
+  moveBooking(kind: TravelBookingKind, id: string, verb: 'hold' | 'confirm' | 'no-show' | 'complete') {
+    return apiService.post<unknown>(`${this.bookings}/${BOOKING_KIND_PATH[kind]}/${id}/${verb}`, {});
+  }
+
+  /**
+   * Cancels a live booking: a reason (five characters or more, kept on the trip as an internal note) and,
+   * on a flight or hotel only, the supplier's cancellation fee — which the budget counts as committed.
+   */
+  cancelBooking(kind: TravelBookingKind, id: string, reason: string, cancellationFee?: number | null) {
+    return apiService.post<unknown>(`${this.bookings}/${BOOKING_KIND_PATH[kind]}/${id}/cancel`,
+      { reason, cancellationFee: cancellationFee ?? null });
+  }
+
+  /** Tickets a confirmed flight; refused while the trip needs a visa that is not approved (T-24). */
+  ticketFlight(id: string, ticketNumber: string) {
+    return apiService.post<StaffTravelFlightBooking>(`${this.bookings}/flights/${id}/ticket`, { ticketNumber });
+  }
 }
+
+export type TravelBookingKind = 'Flight' | 'Hotel' | 'Ground' | 'CarRental';
+
+const BOOKING_KIND_PATH: Record<TravelBookingKind, string> = {
+  Flight: 'flights',
+  Hotel: 'hotels',
+  Ground: 'ground-transport',
+  CarRental: 'car-rentals',
+};
 
 export const travelBookingsService = new TravelBookingsService();

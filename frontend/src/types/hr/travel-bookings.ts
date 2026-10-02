@@ -5,20 +5,19 @@
  *
  * Backend routes: `api/staff-travel/itineraries` and `api/staff-travel/bookings`.
  *
- * ⚠ **Several fields on these records are server-assigned. Do not bind a form control to one.**
- * They stay on the write types because the API still accepts and ignores them, and removing them
- * silently would only hide that from the next reader:
+ * ⚠ **Several fields on these records are server-assigned, and since the travel closure's lane 5 they
+ * are on the read types only — the write types no longer carry them:**
  *
  * | field | who decides |
  * |---|---|
+ * | `status` | the booking's verbs (hold, confirm, ticket, cancel, no-show, complete) — a create is Pending |
  * | `policyAllowedClass`, `policyMaxRatePerNight` | the travel policy in force for the traveller |
  * | `numberOfNights`, hotel `totalCost`, car-rental `totalCost` | the dates and the rate |
  * | segment `durationMinutes` | the two datetimes |
- * | `bookedAt`, `cancelledAt` | the booking's own status |
+ * | `bookedAt`, `cancelledAt`, `cancellationFee` | confirm and cancel |
  *
- * The two `*ExceptionApproved` flags ARE inputs, but they are requests for authority rather than
- * statements of fact: they are honoured only for a caller holding `HR.Travel.Admin`. Booking above
- * a policy cap without one is refused (422); asking for one without the right is refused (403).
+ * The two `*ExceptionApproved` flags ARE inputs, but they ASK for an exception (with the reason) rather
+ * than grant it (lane 4, D-8): the booking waits for another travel administrator's authorisation.
  */
 
 import type { AuditFields } from './common';
@@ -352,9 +351,7 @@ export interface CreateStaffTravelFlightBooking {
   airlineCode?: string | null;
   airlineName?: string | null;
   bookingClass: FlightCabinClass;
-  /** Ignored — the cap comes from the policy. Sent only because the DTO still declares it. */
-  policyAllowedClass?: FlightCabinClass;
-  /** A request for authority, honoured only for `HR.Travel.Admin`. */
+  /** ASKS for a policy exception, with the reason (lane 4, D-8). */
   classExceptionApproved: boolean;
   classExceptionReason?: string | null;
   bookedBy: TravelBookingChannel;
@@ -363,14 +360,10 @@ export interface CreateStaffTravelFlightBooking {
   taxesAndFees: number;
   currencyCode: string;
   ticketNumber?: string | null;
-  status: TravelBookingStatus;
 }
 
 export type UpdateStaffTravelFlightBooking =
-  Omit<CreateStaffTravelFlightBooking, 'staffTravelRequestId'> & {
-    id: string;
-    cancellationFee?: number | null;
-  };
+  Omit<CreateStaffTravelFlightBooking, 'staffTravelRequestId'> & { id: string };
 
 export interface CreateStaffTravelFlightSegment {
   staffTravelFlightBookingId: string;
@@ -460,20 +453,16 @@ export interface CreateStaffTravelHotelBooking {
   roomType?: string | null;
   ratePerNight: number;
   currencyCode: string;
-  /** A request for authority, honoured only for `HR.Travel.Admin`. */
+  /** ASKS for a policy exception, with the reason (lane 4, D-8). */
   rateExceptionApproved: boolean;
   rateExceptionReason?: string | null;
   vendorId?: string | null;
   bookedBy: TravelBookingChannel;
-  status: TravelBookingStatus;
   cancellationPolicy?: string | null;
 }
 
 export type UpdateStaffTravelHotelBooking =
-  Omit<CreateStaffTravelHotelBooking, 'staffTravelRequestId'> & {
-    id: string;
-    cancellationFee?: number | null;
-  };
+  Omit<CreateStaffTravelHotelBooking, 'staffTravelRequestId'> & { id: string };
 
 // ── Ground transport ─────────────────────────────────────────────────────────
 
@@ -516,7 +505,6 @@ export interface CreateStaffTravelGroundTransport {
   estimatedCost?: number | null;
   actualCost?: number | null;
   currencyCode: string;
-  status: TravelBookingStatus;
   notes?: string | null;
 }
 
@@ -565,7 +553,6 @@ export interface CreateStaffTravelCarRentalBooking {
   insuranceIncluded: boolean;
   fuelPolicy?: string | null;
   driverLicenseRequired: boolean;
-  status: TravelBookingStatus;
 }
 
 export type UpdateStaffTravelCarRentalBooking =

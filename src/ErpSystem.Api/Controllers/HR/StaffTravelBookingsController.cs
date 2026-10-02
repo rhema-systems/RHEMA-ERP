@@ -88,6 +88,63 @@ public class StaffTravelBookingsController : HrControllerBase
     }
 
     // =========================================================================
+    // STATUS VERBS (lane 5, D1)
+    // =========================================================================
+    //
+    // A booking's status moves only here: an edit no longer writes it, and a create is Pending. The table and the trip
+    // states each verb needs are StaffTravelBookingRules.Next's.
+
+    private const string BookingKinds = "regex(^(flights|hotels|ground-transport|car-rentals)$)";
+
+    private async Task<object> MoveAsync(
+        string kind, Guid id, TravelBookingVerb verb, string? ticketNumber, CancelStaffTravelBookingDto? cancel, Guid? actor)
+        => kind switch
+        {
+            "flights" => (object)await _service.MoveFlightAsync(id, verb, ticketNumber, cancel, actor),
+            "hotels" => (object)await _service.MoveHotelAsync(id, verb, cancel, actor),
+            "ground-transport" => (object)await _service.MoveGroundTransportAsync(id, verb, cancel, actor),
+            _ => (object)await _service.MoveCarRentalAsync(id, verb, cancel, actor),
+        };
+
+    /// <summary>Hold (Pending → OnHold), confirm (Pending or OnHold → Confirmed), no-show or complete (Confirmed or
+    /// Ticketed → NoShow / Completed, once the trip has started).</summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("{kind:" + BookingKinds + "}/{id:guid}/{verb:regex(^(hold|confirm|no-show|complete)$)}")]
+    public async Task<IActionResult> MoveBooking(string kind, Guid id, string verb)
+    {
+        var move = verb switch
+        {
+            "hold" => TravelBookingVerb.Hold,
+            "confirm" => TravelBookingVerb.Confirm,
+            "no-show" => TravelBookingVerb.NoShow,
+            _ => TravelBookingVerb.Complete,
+        };
+        return Ok(await MoveAsync(kind, id, move, null, null, CurrentUser.EmployeeId));
+    }
+
+    /// <summary>Cancels a live booking with the reason (an internal note on the trip) and, on a flight or hotel, the
+    /// supplier's fee. Needs a login linked to an employee — the note's author.</summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("{kind:" + BookingKinds + "}/{id:guid}/cancel")]
+    public async Task<IActionResult> CancelBooking(string kind, Guid id, [FromBody] CancelStaffTravelBookingDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Cancelling a booking") is { } contextError) return contextError;
+        return Ok(await MoveAsync(kind, id, TravelBookingVerb.Cancel, null, dto, employeeId));
+    }
+
+    /// <summary>Tickets a confirmed flight: the ticket number, and an approved visa application (or one recorded as not
+    /// required) when the trip needs a visa (T-24).</summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("flights/{id:guid}/ticket")]
+    public async Task<ActionResult<StaffTravelFlightBookingDto>> TicketFlight(Guid id, [FromBody] TicketStaffTravelFlightDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _service.MoveFlightAsync(id, TravelBookingVerb.Ticket, dto.TicketNumber, null, CurrentUser.EmployeeId));
+    }
+
+    // =========================================================================
     // FLIGHT BOOKINGS
     // =========================================================================
 

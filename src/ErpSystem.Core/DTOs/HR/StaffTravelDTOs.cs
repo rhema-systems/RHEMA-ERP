@@ -1083,13 +1083,6 @@ public class CreateStaffTravelFlightBookingDto : CreateDtoBase
     public FlightCabinClass BookingClass { get; set; }
 
     /// <summary>
-    /// <b>Server-assigned.</b> The cap comes from the travel policy in force for this traveller and
-    /// trip; anything sent here is overwritten. It was a client input, which meant the caller
-    /// declared what the policy permitted them to book.
-    /// </summary>
-    public FlightCabinClass PolicyAllowedClass { get; set; }
-
-    /// <summary>
     /// ASKS for an exception to the policy, with <c>ClassExceptionReason</c> (lane 4, D-8): a class above the cap, or
     /// a flight booked later than the policy asks, is saved awaiting authorisation instead of refused (422 without
     /// it). It no longer grants anything — a travel administrator other than the booker authorises it. Read back, it
@@ -1118,7 +1111,8 @@ public class CreateStaffTravelFlightBookingDto : CreateDtoBase
     [MaxLength(50)]
     public string? TicketNumber { get; set; }
 
-    public TravelBookingStatus Status { get; set; } = TravelBookingStatus.Pending;
+    // Lane 5 (D1, D5): no Status — a booking is created Pending and moves by its verbs (hold, confirm, ticket,
+    // cancel, no-show, complete). The policy's cap (PolicyAllowedClass) is the server's and left the contract.
 }
 
 public class UpdateStaffTravelFlightBookingDto : UpdateDtoBase
@@ -1136,13 +1130,6 @@ public class UpdateStaffTravelFlightBookingDto : UpdateDtoBase
     public FlightCabinClass BookingClass { get; set; }
 
     /// <summary>
-    /// <b>Server-assigned.</b> The cap comes from the travel policy in force for this traveller and
-    /// trip; anything sent here is overwritten. It was a client input, which meant the caller
-    /// declared what the policy permitted them to book.
-    /// </summary>
-    public FlightCabinClass PolicyAllowedClass { get; set; }
-
-    /// <summary>
     /// ASKS for an exception to the policy, with <c>ClassExceptionReason</c> (lane 4, D-8): a class above the cap, or
     /// a flight booked later than the policy asks, is saved awaiting authorisation instead of refused (422 without
     /// it). It no longer grants anything — a travel administrator other than the booker authorises it. Read back, it
@@ -1168,19 +1155,32 @@ public class UpdateStaffTravelFlightBookingDto : UpdateDtoBase
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
+    /// <summary>A correction to the ticket number; the number is first given by the ticket verb.</summary>
     [MaxLength(50)]
     public string? TicketNumber { get; set; }
 
-    [Required]
-    public TravelBookingStatus Status { get; set; }
+    // Lane 5 (D1, D5): an edit no longer writes the status — the verbs do — nor what the server stamps or derives:
+    // BookedAt and CancelledAt (stamped by confirm and cancel), the cancellation fee (the cancel verb's) and the
+    // policy's cap.
+}
 
-    /// <summary>
-    /// <b>Server-stamped from <see cref="Status"/>.</b> Both were client inputs, so a caller
-    /// asserted that a booking had been made or cancelled and nothing checked — the same fiction
-    /// shape as F-09's <c>NotificationSentAt</c>. Kept on the DTO because the mapper reads them.
-    /// </summary>
-    public DateTime? BookedAt { get; set; }
-    public DateTime? CancelledAt { get; set; }
+/// <summary>Tickets a confirmed flight (lane 5): the ticket number, and — on a trip needing a visa — an approved
+/// visa application or one recorded as not required (T-24).</summary>
+public class TicketStaffTravelFlightDto
+{
+    [Required]
+    [MaxLength(50)]
+    public string TicketNumber { get; set; } = string.Empty;
+}
+
+/// <summary>Cancels a booking (lane 5): why, kept on the trip as an internal note, and — on a flight or hotel — what
+/// the supplier charged for it, which the budget counts as committed.</summary>
+public class CancelStaffTravelBookingDto
+{
+    [Required]
+    [MinLength(5)]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
 
     [Range(0, double.MaxValue)]
     public decimal? CancellationFee { get; set; }
@@ -1456,32 +1456,15 @@ public class CreateStaffTravelHotelBookingDto : CreateDtoBase
     [Required]
     public DateOnly CheckOutDate { get; set; }
 
-    /// <summary>
-    /// <b>Server-derived</b> from the two dates above; anything sent here is overwritten. It was a
-    /// client input beside the dates that determine it, so a three-night stay could be recorded as
-    /// one and every report downstream would believe it.
-    /// </summary>
-    public int NumberOfNights { get; set; }
-
     [MaxLength(100)]
     public string? RoomType { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal RatePerNight { get; set; }
 
-    /// <summary>
-    /// <b>Server-derived</b> from the rate and the period; anything sent here is overwritten.
-    /// </summary>
-    public decimal TotalCost { get; set; }
-
     [Required]
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
-
-    /// <summary>
-    /// <b>Server-assigned</b> from the travel policy in force for this traveller and trip.
-    /// </summary>
-    public decimal? PolicyMaxRatePerNight { get; set; }
 
     /// <summary>
     /// ASKS for an exception to the policy, with <c>RateExceptionReason</c> (lane 4, D-8) — a rate above the cap or a
@@ -1498,10 +1481,11 @@ public class CreateStaffTravelHotelBookingDto : CreateDtoBase
     [Required]
     public TravelBookingChannel BookedBy { get; set; }
 
-    public TravelBookingStatus Status { get; set; } = TravelBookingStatus.Pending;
-
     [MaxLength(1000)]
     public string? CancellationPolicy { get; set; }
+
+    // Lane 5 (D1, D5): no Status — created Pending, moved by its verbs; nights, the total and the policy's cap are the
+    // server's and left the contract.
 }
 
 public class UpdateStaffTravelHotelBookingDto : UpdateDtoBase
@@ -1535,32 +1519,15 @@ public class UpdateStaffTravelHotelBookingDto : UpdateDtoBase
     [Required]
     public DateOnly CheckOutDate { get; set; }
 
-    /// <summary>
-    /// <b>Server-derived</b> from the two dates above; anything sent here is overwritten. It was a
-    /// client input beside the dates that determine it, so a three-night stay could be recorded as
-    /// one and every report downstream would believe it.
-    /// </summary>
-    public int NumberOfNights { get; set; }
-
     [MaxLength(100)]
     public string? RoomType { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal RatePerNight { get; set; }
 
-    /// <summary>
-    /// <b>Server-derived</b> from the rate and the period; anything sent here is overwritten.
-    /// </summary>
-    public decimal TotalCost { get; set; }
-
     [Required]
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
-
-    /// <summary>
-    /// <b>Server-assigned</b> from the travel policy in force for this traveller and trip.
-    /// </summary>
-    public decimal? PolicyMaxRatePerNight { get; set; }
 
     /// <summary>
     /// ASKS for an exception to the policy, with <c>RateExceptionReason</c> (lane 4, D-8) — a rate above the cap or a
@@ -1577,18 +1544,11 @@ public class UpdateStaffTravelHotelBookingDto : UpdateDtoBase
     [Required]
     public TravelBookingChannel BookedBy { get; set; }
 
-    [Required]
-    public TravelBookingStatus Status { get; set; }
-
     [MaxLength(1000)]
     public string? CancellationPolicy { get; set; }
 
-    /// <summary><b>Server-stamped from <see cref="Status"/></b> — see the flight update DTO.</summary>
-    public DateTime? BookedAt { get; set; }
-    public DateTime? CancelledAt { get; set; }
-
-    [Range(0, double.MaxValue)]
-    public decimal? CancellationFee { get; set; }
+    // Lane 5 (D1, D5): no Status (the verbs move it), and nothing the server derives or stamps — nights, total, the
+    // policy's cap, BookedAt, CancelledAt, the cancellation fee (the cancel verb's).
 }
 
 #endregion
@@ -1659,10 +1619,10 @@ public class CreateStaffTravelGroundTransportDto : CreateDtoBase
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
-    public TravelBookingStatus Status { get; set; } = TravelBookingStatus.Pending;
-
     [MaxLength(2000)]
     public string? Notes { get; set; }
+
+    // Lane 5 (D1): no Status — created Pending, moved by its verbs.
 }
 
 public class UpdateStaffTravelGroundTransportDto : UpdateDtoBase
@@ -1694,11 +1654,10 @@ public class UpdateStaffTravelGroundTransportDto : UpdateDtoBase
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
-    [Required]
-    public TravelBookingStatus Status { get; set; }
-
     [MaxLength(2000)]
     public string? Notes { get; set; }
+
+    // Lane 5 (D1): an edit no longer writes the status — the verbs do.
 }
 
 #endregion
@@ -1760,11 +1719,6 @@ public class CreateStaffTravelCarRentalBookingDto : CreateDtoBase
     [Range(0, double.MaxValue)]
     public decimal DailyRate { get; set; }
 
-    /// <summary>
-    /// <b>Server-derived</b> from the rate and the period; anything sent here is overwritten.
-    /// </summary>
-    public decimal TotalCost { get; set; }
-
     [Required]
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
@@ -1776,7 +1730,7 @@ public class CreateStaffTravelCarRentalBookingDto : CreateDtoBase
 
     public bool DriverLicenseRequired { get; set; }
 
-    public TravelBookingStatus Status { get; set; } = TravelBookingStatus.Pending;
+    // Lane 5 (D1, D5): no Status — created Pending, moved by its verbs; the total is the server's.
 }
 
 public class UpdateStaffTravelCarRentalBookingDto : UpdateDtoBase
@@ -1807,11 +1761,6 @@ public class UpdateStaffTravelCarRentalBookingDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal DailyRate { get; set; }
 
-    /// <summary>
-    /// <b>Server-derived</b> from the rate and the period; anything sent here is overwritten.
-    /// </summary>
-    public decimal TotalCost { get; set; }
-
     [Required]
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
@@ -1823,11 +1772,7 @@ public class UpdateStaffTravelCarRentalBookingDto : UpdateDtoBase
 
     public bool DriverLicenseRequired { get; set; }
 
-    [Required]
-    public TravelBookingStatus Status { get; set; }
-
-    /// <summary><b>Server-stamped from <see cref="Status"/></b> — see the flight update DTO.</summary>
-    public DateTime? BookedAt { get; set; }
+    // Lane 5 (D1, D5): no Status (the verbs move it), total or BookedAt (stamped by confirm).
 }
 
 #endregion

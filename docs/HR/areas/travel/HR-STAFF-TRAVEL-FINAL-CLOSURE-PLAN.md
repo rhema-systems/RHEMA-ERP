@@ -59,7 +59,11 @@ baseline (D-13); lane 0 was built the same day.**
    ⚠ **The HR role's `HR.Travel.Admin` row reaches an existing database through `seed-db`'s add-only grant, not
    at API startup** (D-22): UAT was granted it by hand on 2026-10-02; the API lets HR through meanwhile (the
    role-fallback handler), but the screens draw from the row.
-8. **Then** lanes **5 → 6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane against this
+8. **Lane 5** (bookings and itinerary) — **IN PROGRESS.** Source-checked against `ef113ea0a` on 2026-10-02
+   (lane 5's *Source check*): every finding holds, seven more (Q1–Q7); D-23…D-26 taken. Two slices: **5a**
+   bookings (the trip-status gate, dates, status verbs, the visa gate, D-24's cascade, the booking doors, the demo
+   pack — built and proven, bookings 90/90 three times, and staged), **5b** itinerary and alerts. No migration.
+9. **Then** lanes **6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane against this
    document before building it — line numbers are as of HEAD `bad482a8d`.
 
 **House rules** (from the HR programme, not repeated in each lane): the user runs builds — never
@@ -101,6 +105,10 @@ lane's slice.
 | **D-20** | With D-3, any booking can be deleted, so a breach could be erased from D-8's register | **Pulled forward from lane 5 in part:** a flight or hotel booking that carries an exception (pending, authorised or refused) is not deleted — it is cancelled. The full "delete only while Pending" rule stays lane 5's. Lane 4, slice 4b. |
 | **D-21** | With D-3, A10's "a comment is changed by its author or a travel administrator" lets any HR officer reword a colleague's comment — the thing A10 closed (found building slice 4c) | **Taken in the build, 2026-10-02, and put to the user — reversible in one line:** editing a comment is its author's alone; deleting stays author-or-administrator (moderation). The comments screen has neither control, so no screen changes. Lane 4, slice 4c. |
 | **D-22** | The plan said the startup seeder converges the grant on existing databases; it does not — `SeedRolePermissionAssignmentsAsync` runs under `seed-db` / `seed-deployment-uat` and development seeding, which Staging and Production refuse at startup (asked at slice 4c's proof, 2026-10-02) | **No migration (the user, 2026-10-02).** A fresh database is granted by `seed-db` from `HrStaffGrants` (the migration would have run before the role and permission exist, inserting nothing); an existing one by its next `seed-db` run, the add-only path every HR grant has taken. **UAT was granted by hand** — the one row that step writes, `GrantedBy = 'System'`. A scaffolded migration was written and deleted unapplied: it duplicated `seed-db` with a second provenance for the same fact. |
+| **D-23** | When may a trip carry bookings? The demo pack holds Confirmed and Ticketed bookings on two Submitted trips (lane 5's source check, 2026-10-02) | **Only once the trip is Approved or under way** — the plan's wording, over holding a fare while the trip awaits approval. Create, edit, hold, confirm, ticket and segments need an Approved or InProgress trip; cancel works on any trip not Closed; a no-show or completion only once the trip has started. Lane 5, slice 5a. *Committed* keeps lane 3's rule (Q6 recorded for TDC). |
+| **D-24** | What happens to a trip's bookings when the trip is cancelled (Q2)? | **Cascade the holds, refuse the live:** cancelling a trip cancels its Pending and OnHold bookings with it, and is refused while any booking is Confirmed or Ticketed — the desk cancels those first, recording the supplier's fee. The itinerary's current version is marked Cancelled (5b). Lane 5. |
+| **D-25** | Who moves an itinerary's status (D5)? | **The server, with a Finalise step:** Draft on create; Finalise on the current version stamps `FinalizedAt` and marks it Approved; Superseded when a newer version becomes current; Cancelled with the trip. An edit no longer writes the status. PendingReview, Active and Completed stay readable with no writer. Lane 5, slice 5b. |
+| **D-26** | D-23 leaves the demo's two Submitted trips unable to hold bookings | **The demo pack approves London** (hr.head's trip — md.tdc at stage 1, `hr.officer` at HR's): its BA flight is held at Confirmed and refused a ticket until the visa is approved (T-24 live), with the Hilton and the Avis car. **Lagos stays Submitted** for the approvals walk, keeping its group, itinerary, insurance and risk assessment, without its flight and hotel. Lane 5, slice 5a. |
 
 **Standing assumptions (not re-asked):** the closure ledger's D-29 holds — the policy rule register
 stays read-only and the policy-exception flow stays withheld until rule enforcement exists; Finance
@@ -119,7 +127,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **2** | The approval ladder and the approver's door | data-only retrofit `20261002042909_TravelClosureApprovalLadder` | `run-final-approvals.mjs` | ✅ complete 2026-10-02 — 2a `4e4d85b2f` (retrofit applied to UAT); 2b `519418f00` (approvals 123/123 twice, lifecycle 255/255 twice, truth 117/117 twice) |
 | **3** | The money chain | batch 1 + `TravelClosureMoneyChain` (D-14, applied to UAT) | `run-final-money.mjs`, `run-final-posting.mjs` (D-17, a scratch copy only) | ✅ complete 2026-10-02 — 3a `e2785ce7b`, 3b `f49e5eb9c`, 3c `b08bd498d` (money 286/286 twice, posting proof 70/70 twice on a scratch copy, lifecycle 256/256, truth 116/116, approvals 123/123 twice) |
 | **4** | Policy and authority | batch 1 (no lane migration) | `run-final-policy.mjs` | ✅ complete 2026-10-02 — 4a `19f20f2f2`, 4b `3a6792a30`, 4c staged (policy 129/129 twice, money 287, lifecycle 256, truth 117, approvals 123 twice each); D-18…D-22 |
-| **5** | Bookings and itinerary | batch 1 | `run-final-bookings.mjs` | ☐ |
+| **5** | Bookings and itinerary | batch 1 (no lane migration) | `run-final-bookings.mjs` | ◐ source-checked 2026-10-02; D-23…D-26; **5a built and staged** (bookings 90/90 ×3, policy 131, money 288, lifecycle 256, truth 118, approvals 123 twice each); next 5b itinerary and alerts |
 | **6** | Fleet | batch 1 | `run-final-fleet.mjs` | ☐ |
 | **7** | Compliance and the portal | batch 1 | `run-final-compliance.mjs`, `run-final-portal.mjs` | ☐ |
 | **8** | Notifications and the sweep | batch 1 | `run-final-reminders.mjs` | ☐ |
@@ -1526,19 +1534,126 @@ clean-up hitting its 5 s command timeout twice during a lifecycle run.
 
 ### Lane 5 — Bookings and itinerary (D1, D3–D5, E4, O-15, T-19, T-24/T-42, T-45)
 
-- [ ] Bookings only on Approved or InProgress requests; booking dates inside the trip (± 1 day); status
+- [x] Bookings only on Approved or InProgress requests; booking dates inside the trip (± 1 day); status
   by verb — confirm, ticket, cancel (with fee), complete — not by PUT; status verbs never re-run the
   cap check (cancelling an authorised over-cap booking must work); delete only while Pending; the
-  mappers stop copying derived fields; a car rental's `BookedAt` on create.
-- [ ] A flight cannot be Ticketed while the request requires a visa and no visa application is
-  Approved or NotRequired.
+  mappers stop copying derived fields; a car rental's `BookedAt` on create. *(5a; `BookedAt` is stamped on
+  confirmation — a booking is created Pending)*
+- [x] A flight cannot be Ticketed while the request requires a visa and no visa application is
+  Approved or NotRequired. *(5a)*
 - [ ] An active Critical or Emergency alert for the destination shows on the approval and booking
   screens (a warning; a block is a TDC question).
 - [ ] Itinerary: delete only a non-current version; `Superseded` set when a version is replaced.
 - [ ] **Doors (D-5):** edit, cancel and status on every booking row; flight segments; itinerary, leg and
-  activity edit and delete; the leg ↔ booking link; the vendor picker, star rating, actual cost.
+  activity edit and delete; the leg ↔ booking link; the vendor picker, star rating, actual cost. *(The booking
+  half — rows, segments, star rating, actual cost — 5a; the vendor picker was 4b's; the itinerary half 5b's.)*
 
-Suite `run-final-bookings.mjs` (and re-run `run-slice8*.mjs`).
+Suite `run-final-bookings.mjs` (and re-run `run-slice8*.mjs`). *(D-13 keeps the slice suites off UAT: `run-slice8*.mjs`
+are retired by name here — `run-final-bookings.mjs` re-proves what they covered.)*
+
+**Source check (2026-10-02, HEAD `ef113ea0a`).** The booking and itinerary services, controllers, DTOs and mappers, the
+budget rollup, the request's cancel, the visa and alert models, the two panels and the client were re-read. Every
+finding holds: a booking needs only a trip that is not Closed (`StaffTravelRequestGuards.RequireOpen`) — a Draft,
+Submitted, Rejected or Cancelled trip takes one; no booking date is compared with the trip's; an edit writes any status
+and re-runs the policy check, so cancelling a breaching booking needs the exception asked again; delete has only lane 4's
+exception guard. The mappers copy nights, totals, caps, `BookedAt`, `CancelledAt`; a car rental's `BookedAt` is stamped on
+update only; the itinerary's status, `FinalizedAt` and day totals are the payload's and `Superseded` has no writer; the
+current itinerary deletes. 20 of the 42 booking and itinerary client methods have no caller (every booking edit, delete
+and status change; add-segment; itinerary and leg edit and delete). T-24 is live on UAT: London's flight is Ticketed on a
+trip needing a visa whose only application is NotStarted. Nothing reads an alert's severity (T-45).
+
+Seven more:
+- **Q1 — the demo pack books two Submitted trips** (081: Lagos's flight and hotel, London's flight, hotel and car) — D-23
+  breaks it; D-26.
+- **Q2 — a cancelled trip's bookings stay live**, and the budget's *Committed* keeps counting them (the request's cancel
+  defers it to lanes 5 and 6) — D-24.
+- **Q3 — a leg's booking links are the payload's:** a flight, hotel or ground booking of another trip can be linked (5b).
+- **Q4 — flight segments** are added, changed and deleted on a cancelled booking or a closed trip, their dates unchecked.
+- **Q5 — the itinerary** is created on a trip in any status, Closed included, and an edit can clear the current flag on
+  the current version, leaving the trip with none (5b).
+- **Q6 — *Committed* counts Pending and OnHold bookings** as spend. Kept as lane 3 built it; a TDC question (lane 10).
+- **Q7 — ground transport and car rentals have no cancellation fee** (no column): a fee is recorded on flights and hotels
+  only; no migration.
+
+**Slices.**
+- **5a — bookings.** D-23's gate on every booking write; booking and segment dates inside the trip, a day either side;
+  status by verb — hold, confirm, ticket (flights), cancel (a reason, kept as an internal note, and a fee on flights and
+  hotels), no-show, complete — an edit no longer writes the status or any derived field (`Status`, `BookedAt`,
+  `CancelledAt`, `CancellationFee`, nights, totals and caps leave the write DTOs), a verb never re-runs the cap check, and
+  Refunded keeps no writer; confirm and ticket need the exception None or Authorised; ticketing needs an Approved or
+  NotRequired visa application when the trip requires a visa (T-24's ticketing half); delete only a Pending booking with
+  no exception; D-24's cascade; segments on a live booking only. The booking doors (edit, the verbs, delete,
+  add-segment, star rating, actual cost) and D-26's demo pack.
+- **5b — itinerary and alerts.** Created on an open trip; only a non-current version deleted; D-25; day totals from the
+  trip's dates; the current flag not cleared by an edit; the leg's booking links the same trip's, with a date mismatch
+  flagged (T-19); the itinerary, leg and activity doors and the leg ↔ booking picker; D-24's itinerary half; a
+  `destination-alerts` read on the approver's door so a Critical or Emergency alert shows on the request and bookings
+  screens (T-45).
+
+**As built — slice 5a (2026-10-02).** No migration.
+
+- *The rules in one place.* `StaffTravelBookingRules` (Core) holds what every booking kind shares: the trip gate, the
+  date window, the verb table, "live", delete and D-24's two queries; `TravelBookingVerb` (Hold, Confirm, Ticket,
+  Cancel, NoShow, Complete) is a new, unstored enum.
+- *The trip gate (D-23).* Create, edit, hold, confirm, ticket and every segment write need the trip Approved or
+  InProgress ("…is submitted, so a flight booking cannot be made or changed — bookings are made once the trip is
+  approved…"); cancel needs a trip not Closed; no-show and complete a trip Approved, InProgress or Completed whose
+  departure has come.
+- *Dates.* A hotel stay, a car rental, ground transport (when its times are given) and a flight segment fall between
+  the day before departure and the day after return — on create, and on an edit when the dates move (a trip's dates
+  changed by D-9 do not block unrelated edits).
+- *Status by verb (D1).* `POST bookings/{flights|hotels|ground-transport|car-rentals}/{id}/{hold|confirm|no-show|complete}`,
+  `…/{id}/cancel` (reason ≥5, an internal note on the trip; a fee on a flight or hotel no more than its cost, ground and
+  car none — Q7) and `bookings/flights/{id}/ticket` (the number). Pending → OnHold; Pending/OnHold → Confirmed
+  (`BookedAt` stamped — a car rental's too, D5); Confirmed → Ticketed; any live booking → Cancelled (`CancelledAt`
+  stamped on flights and hotels); Confirmed/Ticketed → NoShow or Completed. Refunded keeps no writer. A verb never
+  re-runs the policy's cap check; confirm and ticket need the exception None or Authorised (a refused one stands until
+  the booking changes). Cancel needs an employee-linked login (the note's author).
+- *Edits (D5).* A create is Pending whatever it says; `Status`, `BookedAt`, `CancelledAt`, `CancellationFee`,
+  `PolicyAllowedClass`, `PolicyMaxRatePerNight`, nights and totals left the write DTOs and the mappers (JSON naming them
+  is ignored); an edit is refused on a booking no longer live, and an edit that pushes a confirmed booking into an
+  unauthorised breach is refused (cancel and rebook). The ticket number stays editable, as a correction.
+- *T-24's ticketing half.* A trip with `RequiresVisa` is ticketed once a visa application on it is Approved or
+  NotRequired.
+- *Delete.* Only a Pending booking (a booking with an exception never — D-20), on a trip not Closed.
+- *D-24.* `CancelAsync` refuses, before the approval is withdrawn, while any booking is Confirmed or Ticketed, naming
+  each; after it, the trip's Pending and OnHold bookings are cancelled with it. (The itinerary's half is 5b's; a company
+  vehicle's Fleet trip lane 6's.)
+- *Screens.* The bookings panel: Add only on an approved trip (a note says why otherwise); no status picker; each row's
+  menu offers Edit, Put on hold, Confirm, Ticket…, Mark completed, Record a no-show, Cancel booking… (reason, and the fee
+  on a flight or hotel) and Delete (pending, administrators); edit reloads the full record; a flight's **Segments**
+  dialog lists, adds and removes segments (no screen had any); a hotel's star rating; ground transport's actual cost.
+  The client gained `moveBooking`, `cancelBooking`, `ticketFlight`; the write types lost the server's fields. Scoped
+  type-check and lint clean; not walked in a browser.
+- *Demo pack (D-26).* `080` approves London (md.tdc at the line stage, `hr.officer` at HR's — hr.head travels);
+  `081` books only on approved trips, creates Pending and drives each booking to its status by verb: London's BA flight
+  confirmed and its ticket refused while the visa is NotStarted (T-24), the Hilton and the Avis car confirmed, Kumasi's
+  bus confirmed and its taxi completed once the trip starts, Sebrepor's hire completed; Lagos keeps its itinerary and no
+  longer gets a flight or hotel. UAT's existing Lagos and London bookings stay as they were — history, not rebuilt.
+
+**Suite** `run-final-bookings.mjs` (new, 90 assertions; fixture `buildApprovalsFixture`'s lone-unit traveller, no policy
+in force): §1 a draft and a submitted trip take no flight, hotel or car (naming the approval); an approved one does,
+Pending though the payload said Ticketed and sent a booking date; §2 a hotel two days early refused, the day before and
+after accepted (5 nights), a car returned three days late refused, ground transport after the trip refused, a segment a
+month early refused, one on the day added; §3 hold, once; confirm (the date stamped), once; a ticket needs its number;
+ticketed; a hotel is no flight to ticket (404); complete and no-show refused before departure; a pending hotel not
+completed; hotel and car confirmed, the car's `BookedAt` stamped; §4 an edit renames the airline and leaves the
+status, `CancelledAt` and the fee the payload named; a stay moved past the trip refused; §5 a short reason 400, a fee
+above the cost 422, cancelled with 120 (kept, dated, an internal note with the fee), not edited or cancelled again;
+ground transport refuses a fee and cancels without one; §6 a confirmed car not deleted, a pending ground booking deleted;
+§7 a trip needing a visa: confirmed, no ticket with no application, none while it is only Submitted, ticketed once one is
+Approved; §8 a trip that departed two days ago (submitted late from the desk): a flight confirmed and completed, a hotel
+confirmed and a no-show, which is no longer cancelled; §9 a trip with a confirmed flight refused cancellation naming
+it, stays Approved; the flight cancelled, then the trip — its pending hotel and held car cancelled with it; §10 no segment
+added to or removed from a cancelled flight. **90/90 three times** (872134, 901953, 914581; every section ran). The other
+suites move to the verbs: policy §8 a payload saying Confirmed saved Pending and its confirm refused while the exception
+is pending, §10 the authorised flight confirmed by verb and the refused one's confirm refused ("the refusal stands") —
+**131/131 twice** (927755, 939128); money §15 the committed bookings by verb (one no-show set in SQL — its trip departs in
+50 days) — **288/288 twice** (948550, 983967); truth §7 the flight dialog's payload on a draft is now D-23's 422 —
+**118/118 twice** (149341, 165621); lifecycle (a closed trip's booking refused under D-23) **256/256 twice** (008640,
+085224); approvals **123/123 twice** (180444, 252011). No request over 2 s (the slowest booking call 96 ms). The API log
+held only the known noise (defect #23, an identity reconciliation, the notification clean-up's 5 s timeout, and the
+email queue failing at once — UAT has no `EmailSettings` row).
 
 ### Lane 6 — Fleet (D-11, D-12, D2, D4, FX-1…FX-9)
 
@@ -1906,3 +2021,11 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   user's word (D-22), and UAT's HR role was granted its row by hand. Policy 127/127 twice, money 287/287, lifecycle
   256/256, truth 117/117, approvals 123/123, each twice; after the grant, policy 129/129 twice with `/auth/me` checks.
   Staged. Next: lane 5, bookings and itinerary.
+- **2026-10-02, later** — The user committed slice 4c (`ef113ea0a`). **Lane 5 source-checked**: every finding holds; seven
+  more (Q1–Q7); split into 5a and 5b; the user took D-23 (bookings only on an approved trip — the plan's wording),
+  D-24 (a trip's cancel refused while a booking is confirmed or ticketed; the holds cascade), D-25 (the itinerary's
+  status the server's, with a Finalise step) and D-26 (the demo pack approves London; Lagos keeps no booking). **Slice 5a
+  built** — the trip gate, the dates, status by verb, the visa's ticketing gate, D-24, the booking doors (row verbs,
+  segments, star rating, actual cost) and the demo pack. The build succeeded; no migration. `run-final-bookings.mjs`
+  90/90 three times; policy 131/131, money 288/288, lifecycle 256/256, truth 118/118, approvals 123/123, each twice.
+  Staged. Next: slice 5b, itinerary and alerts.

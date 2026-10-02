@@ -1482,9 +1482,12 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     /// and a refusal from the engine stops the cancel. A trip under way cannot be cancelled: it ended
     /// early or it did not, and Complete records that. An Approved trip with an advance whose cash is
     /// still out cannot be cancelled until the advance is settled — cancelling would leave money with
-    /// the traveller against a trip that no longer exists. (Cancelling the trip's bookings and Fleet
-    /// trip is lanes 5 and 6.) A rejected request is refused too: its rejection reason lives in
-    /// <c>CancellationReason</c>, which a cancel would overwrite.</para>
+    /// the traveller against a trip that no longer exists. A rejected request is refused too: its rejection reason
+    /// lives in <c>CancellationReason</c>, which a cancel would overwrite.</para>
+    ///
+    /// <para><b>Lane 5 (D-24).</b> A trip with a booking its supplier has confirmed or ticketed is not cancelled — each
+    /// such booking is cancelled first, with the fee the supplier charges; the pending and on-hold ones are cancelled
+    /// with the trip. (A company vehicle's Fleet trip is lane 6's.)</para>
     /// </remarks>
     public async Task<bool> CancelAsync(CancelStaffTravelRequestDto cancelDto, Guid cancelledByUserId, CancellationToken cancellationToken = default)
     {
@@ -1498,6 +1501,15 @@ public class StaffTravelRequestService : IStaffTravelRequestService
                 "A trip that is under way cannot be cancelled. If it ended early, mark it completed.");
         if (entity.Status == StaffTravelRequestStatus.Approved)
             await RequireNoAdvanceCashOutAsync(entity, "cancelling the trip", cancellationToken);
+        // Lane 5, D-24: a booking a supplier has confirmed or ticketed is the organisation's commitment, cancelled on its
+        // own with the fee the supplier charges — refused here BEFORE the approval is withdrawn below.
+        var committed = await StaffTravelBookingRules.CommittedBookingsAsync(
+            _unitOfWork, entity.TenantId, entity.Id, cancellationToken);
+        if (committed.Count > 0)
+            throw new InvalidOperationException(
+                $"Travel request {entity.RequestNumber} has bookings its suppliers have committed to — " +
+                $"{string.Join("; ", committed)}. Cancel each on the Bookings tab first, recording what the supplier " +
+                "charges, then cancel the trip.");
 
         var reason = cancelDto.CancellationReason.Trim();
         await CancelLiveApprovalAsync(entity, $"Travel request cancelled: {reason}");
@@ -1522,11 +1534,16 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         if (advanceReason.Length > 1000) advanceReason = advanceReason[..1000];
         foreach (var advance in undisbursed)
             StaffTravelAdvanceRules.ApplyCancellation(advance, advanceReason, cancelDto.CancelledById, cancelledByUserId, DateTime.UtcNow);
+        // Lane 5, D-24: the holds — pending or on hold, which no supplier committed to — go with the trip. They stayed
+        // live, and the budget's Committed kept counting them (Q2).
+        var heldCancelled = await StaffTravelBookingRules.CancelHoldsAsync(
+            _unitOfWork, entity.TenantId, entity.Id, cancelledByUserId.ToString(), cancellationToken);
 
         await _requestRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Staff travel request cancelled: {RequestNumber}", entity.RequestNumber);
+        _logger.LogInformation("Staff travel request cancelled: {RequestNumber} ({Held} held bookings cancelled with it)",
+            entity.RequestNumber, heldCancelled);
 
         await PublishLifecycleAsync(entity, "Cancelled", cancellationToken);
 

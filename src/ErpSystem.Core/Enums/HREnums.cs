@@ -9467,6 +9467,20 @@ public enum TravelBookingStatus
 }
 
 /// <summary>
+/// What the desk does to a booking once it exists (travel final closure, lane 5, finding D1) — the only way a booking's
+/// <see cref="TravelBookingStatus"/> moves. Not stored; the table is <c>StaffTravelBookingRules.Next</c>.
+/// </summary>
+public enum TravelBookingVerb
+{
+    Hold,
+    Confirm,
+    Ticket,
+    Cancel,
+    NoShow,
+    Complete,
+}
+
+/// <summary>
 /// Where an above-cap booking's exception stands (travel final closure decision D-8, lane 4): a
 /// booking above a cap is saved Pending and cannot be confirmed or ticketed until a DIFFERENT
 /// <c>HR.Travel.Admin</c> holder authorises it.
