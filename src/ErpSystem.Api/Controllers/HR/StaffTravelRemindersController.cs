@@ -18,7 +18,9 @@ namespace ErpSystem.Api.Controllers.HR;
 ///
 /// <para>Gated on <c>HR.Travel.Admin</c> rather than the area's Read/Write pair: nothing here is
 /// one traveller's own record, the log lists references across the whole tenant, and forcing a
-/// sweep is an administrative act. That is a deliberate step up from the rest of the area.</para>
+/// sweep is an administrative act. That is a deliberate step up from the rest of the area. Since the travel final
+/// closure's lane 4 (D-3) the HR desk holds Admin, so the desk that acts on an expiring passport sees the queue
+/// (T-52).</para>
 /// </summary>
 [ApiController]
 [Route("api/staff-travel/reminders")]

@@ -201,12 +201,12 @@ export default function TravelPoliciesPage() {
       </Card>
 
       <p className="text-xs text-muted-foreground">
-        Approving requires travel administrator rights and an employee record — the approver is
-        stored against your employee profile, so an account with no profile cannot sign a policy
-        even when it holds the permission. Approving also supersedes the policy that covered the
-        same staff levels and organisation unit, so exactly one is ever in force. Withdrawing stands
-        a policy down without unmaking the approval — the record that it governed spending for a
-        period stays.
+        Approving is a travel administrator&apos;s act — the HR desk holds it — and never that of whoever
+        drafted or last changed the policy: a second officer signs. The approver is stored against
+        their employee profile, so an account with no profile cannot sign a policy even when it holds
+        the permission. A version approved for the same staff levels and organisation unit takes over
+        on its own start date, so exactly one is in force on any day. Withdrawing stands a policy down
+        without unmaking the approval — the record that it governed spending for a period stays.
       </p>
     </div>
   );

@@ -53,10 +53,12 @@ baseline (D-13); lane 0 was built the same day.**
    UAT (committed `b08bd498d` — money 286/286 twice, the posting proof 70/70 twice). Decisions D-14…D-17.
    ⚠ The posting proof found that **no HR posting can land on a database seeded with Finance's v2 books**
    (cross-module defect #35): it passed only once the scratch copy's primary book was renamed.
-7. **Lane 4** (policy and authority) — **IN PROGRESS.** Source-checked against `b08bd498d` on 2026-10-02
-   (lane 4's *Source check*): every finding holds, six more found; D-18…D-20 taken. Three slices: **4a** the
-   policy itself (committed `19f20f2f2`), **4b** bookings under the policy (built and proven — policy 119/119 twice — and staged; D-1's
-   booking half, D-8, C4, C5), **4c** authority (D-3, D-19). No migration — batch 1 carries every column.
+7. **Lane 4** (policy and authority) — **COMPLETE 2026-10-02**, in three slices: **4a** the policy itself
+   (committed `19f20f2f2`), **4b** bookings under the policy (committed `3a6792a30`; D-1's booking half, D-8, C4, C5),
+   **4c** authority (D-3, D-19, D-21 — policy 129/129 twice, staged). No migration — batch 1 carries every column.
+   ⚠ **The HR role's `HR.Travel.Admin` row reaches an existing database through `seed-db`'s add-only grant, not
+   at API startup** (D-22): UAT was granted it by hand on 2026-10-02; the API lets HR through meanwhile (the
+   role-fallback handler), but the screens draw from the row.
 8. **Then** lanes **5 → 6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane against this
    document before building it — line numbers are as of HEAD `bad482a8d`.
 
@@ -97,6 +99,8 @@ lane's slice.
 | **D-18** | C5's second half — a Critical trip needs an acknowledged risk assessment — cannot be met before lane 7: the traveller's acknowledgement sits on the desk's Write policy and the portal door is lane 7's (lane 4's source check) | **Moved to lane 7**, beside the portal's acknowledgement door. Lane 4 keeps the Prohibited refusal. |
 | **D-19** | With D-3, the officer who set a trip's budget can approve it (slice 3c refuses only the traveller) | **The officer who set or last changed the budget does not approve it** — the policy's author ≠ approver, applied to the budget. Lane 4, slice 4c. |
 | **D-20** | With D-3, any booking can be deleted, so a breach could be erased from D-8's register | **Pulled forward from lane 5 in part:** a flight or hotel booking that carries an exception (pending, authorised or refused) is not deleted — it is cancelled. The full "delete only while Pending" rule stays lane 5's. Lane 4, slice 4b. |
+| **D-21** | With D-3, A10's "a comment is changed by its author or a travel administrator" lets any HR officer reword a colleague's comment — the thing A10 closed (found building slice 4c) | **Taken in the build, 2026-10-02, and put to the user — reversible in one line:** editing a comment is its author's alone; deleting stays author-or-administrator (moderation). The comments screen has neither control, so no screen changes. Lane 4, slice 4c. |
+| **D-22** | The plan said the startup seeder converges the grant on existing databases; it does not — `SeedRolePermissionAssignmentsAsync` runs under `seed-db` / `seed-deployment-uat` and development seeding, which Staging and Production refuse at startup (asked at slice 4c's proof, 2026-10-02) | **No migration (the user, 2026-10-02).** A fresh database is granted by `seed-db` from `HrStaffGrants` (the migration would have run before the role and permission exist, inserting nothing); an existing one by its next `seed-db` run, the add-only path every HR grant has taken. **UAT was granted by hand** — the one row that step writes, `GrantedBy = 'System'`. A scaffolded migration was written and deleted unapplied: it duplicated `seed-db` with a second provenance for the same fact. |
 
 **Standing assumptions (not re-asked):** the closure ledger's D-29 holds — the policy rule register
 stays read-only and the policy-exception flow stays withheld until rule enforcement exists; Finance
@@ -114,7 +118,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ✅ complete 2026-10-02 — 1a `e1d050da2`, 1b `8fadfd31e`, 1c `895996b6f` |
 | **2** | The approval ladder and the approver's door | data-only retrofit `20261002042909_TravelClosureApprovalLadder` | `run-final-approvals.mjs` | ✅ complete 2026-10-02 — 2a `4e4d85b2f` (retrofit applied to UAT); 2b `519418f00` (approvals 123/123 twice, lifecycle 255/255 twice, truth 117/117 twice) |
 | **3** | The money chain | batch 1 + `TravelClosureMoneyChain` (D-14, applied to UAT) | `run-final-money.mjs`, `run-final-posting.mjs` (D-17, a scratch copy only) | ✅ complete 2026-10-02 — 3a `e2785ce7b`, 3b `f49e5eb9c`, 3c `b08bd498d` (money 286/286 twice, posting proof 70/70 twice on a scratch copy, lifecycle 256/256, truth 116/116, approvals 123/123 twice) |
-| **4** | Policy and authority | batch 1 (no lane migration) | `run-final-policy.mjs` | ◐ source-checked 2026-10-02; D-18…D-20; 4a committed `19f20f2f2`; **4b built and staged** (policy 119/119 twice, money 286, lifecycle 256, truth 117, approvals 123 twice each); next 4c authority |
+| **4** | Policy and authority | batch 1 (no lane migration) | `run-final-policy.mjs` | ✅ complete 2026-10-02 — 4a `19f20f2f2`, 4b `3a6792a30`, 4c staged (policy 129/129 twice, money 287, lifecycle 256, truth 117, approvals 123 twice each); D-18…D-22 |
 | **5** | Bookings and itinerary | batch 1 | `run-final-bookings.mjs` | ☐ |
 | **6** | Fleet | batch 1 | `run-final-fleet.mjs` | ☐ |
 | **7** | Compliance and the portal | batch 1 | `run-final-compliance.mjs`, `run-final-portal.mjs` | ☐ |
@@ -1282,7 +1286,7 @@ date.
 
 ### Lane 4 — Policy and authority (C1–C6, D-1, D-3, D-8, O-3, O-4, O-5, T-1, T-2, T-9, T-46, T-50, T-52)
 
-- [ ] **D-3 in four steps:** add `AdministerTravel` to `HrStaffGrants` (`HrPermissions.cs:687`;
+- [x] **D-3 in four steps:** *(4c — the "runs every startup" below was wrong: see D-22)* add `AdministerTravel` to `HrStaffGrants` (`HrPermissions.cs:687`;
   precedent `AdministerRecruitment`, l.693); the seeder's grant loop is add-only and runs every
   startup, so restarting the UAT API converges existing tenants (`RoleRevocations` is not touched);
   the suite asserts the `hr` actor passes an Admin route, and `mintTravelAdminActor` is retired;
@@ -1312,8 +1316,8 @@ date.
 - [x] **C6:** one shared line in `SelectField.onValueChange` (`fields.tsx:336-338`): `if (next === '')
   return;` before `form.setValue`. Safe: the only legitimate clear is `NONE_VALUE → ''`, and no HR
   option array declares `value: ''` (750 uses in 208 files). Scoped type-check afterwards.
-- [ ] **D-19:** the officer who set or last changed a budget does not approve it. **D-20:** a flight or
-  hotel booking carrying an exception is not deleted. *(D-20 done in 4b; D-19 is 4c's)*
+- [x] **D-19:** the officer who set or last changed a budget does not approve it. **D-20:** a flight or
+  hotel booking carrying an exception is not deleted. *(D-20 done in 4b; D-19 in 4c)*
 
 Suite `run-final-policy.mjs`. (The plan said to re-run `run-slice12-policy-authoring.mjs` too; D-13 keeps the
 slice suites off UAT, so it is **retired by name** here — `run-final-policy.mjs` re-proves what it covered.)
@@ -1477,6 +1481,48 @@ submission not approved. **119/119 twice on UAT** (555393, 597136; every section
 money's second run, one in lifecycle's first); no SQL statement of the hour took over 0.75 s, the new risk-assessment
 read under 10 ms with no grant, and the machine had 2.3 GB of 24 GB free — the low-memory stall the harness memory
 records, not this slice. The API log held only the known noise.
+
+**As built — slice 4c (2026-10-02).** No migration (D-22).
+
+- *D-3.* `AdministerTravel` is in `HrStaffGrants`. The permission's description now lists what Admin decides — and that
+  each act is refused to the person it concerns; `HrPermissions`' remarks say where the narrowing moved (the services,
+  per act: C3, D-2, T-39, D-8, D-19, C4; the delete status guards are lane 7's). The remarks on the policy approve
+  route, the reminders controller and `CallerIsTravelAdminAsync` say HR holds it; the flight and hotel DTOs' exception
+  flags say they ask. The UI's `canAdmin` (`useTravelAccess`, the policy page) reads `HR.Travel.Admin` alone — the
+  `HR_ADMIN_ROLES` fallback is gone (SuperAdmin and TenantAdmin hold the permission as rows); the compliance panel's
+  note and the policy register's footnote say a second officer signs. `StaffTravelMeController` no longer describes the
+  Admin tier (lane 1 rewrote it), so the checklist's line 186 had nothing left to change. The harness's
+  `mintTravelAdminActor` is marked retired — only the old slice suites import it (D-13).
+- *The grant on existing databases (D-22).* The API passes HR at once (the role-fallback handler reads the map); the
+  screens draw from `/auth/me`, which reads `RolePermissions`. The add-only seeder writes that row under `seed-db` and
+  development seeding only — not at a Staging or Production start, as this checklist had assumed. **UAT's HR role was
+  granted the row by hand** (`GrantedBy = 'System'`, as the seeder writes it; one row, guarded, dry-run twice first);
+  any other existing database takes it on its next `seed-db`.
+- *D-19.* `ApproveBudgetAsync` refuses whoever set or last changed the budget (`CreatedBy`/`UpdatedBy`, the platform
+  user) — 403 naming the trip.
+- *D-21.* `UpdateCommentAsync` is the author's alone (`AuthorId` against the token's employee); deleting keeps
+  `RequireCommentAuthorOrAdmin`.
+- *Demo pack.* `080-travel.mjs` approves the Kumasi budget as `hr.officer` (`hr.head` set it; `head.dev` travels) and
+  leaves Sebrepor's awaiting approval for the guide's walk; the policy stays a draft (approving it binds every trip
+  submitted after it — lane 10's call).
+- *Guide.* Rules 1 and 2 (Rule 2 now a table of each Admin act and who it is refused to), the permission ladder, § 2.4
+  Option B (sign in as `hr.officer`; the SQL shortcut marked retired), the Bookings and Attachments notes, chapters 13
+  and 14, the undo table, T-1/T-2, Appendix B, and a lane-4 paragraph in § 19. The full rewrite of the six rules stays
+  lane 10's.
+
+**Suites.** `run-final-policy.mjs` 119 → **129**: §10 and §12 refuse the HR officer for the act — booked and asked, or
+raised — "not for the role", and the second HR officer decides (the hotel's exception, the policy exception); §13 an HR
+officer's draft refused to its author and approved by another HR officer, the reminders screen open to HR and refused to
+a traveller, and `/auth/me` listing `HR.Travel.Admin` for HR and not for a traveller. `run-final-money.mjs` 286 → **287**:
+§7's write-off by the second HR officer, §15 the budget's setter refused with the sentence and re-approval by the other
+officer, §16 the payer's 403 relabelled. `run-final-lifecycle.mjs` §12: an administrator no longer edits another's
+comment (D-21) and the second HR officer deletes one (moderation); `run-final-truth.mjs`: HR deletes an attachment.
+**On UAT, before the grant: policy 127/127 twice (635625, 652993), money 287/287 twice (675031, 699387), lifecycle
+256/256 twice (721954, 764961), truth 117/117 twice (797080, 802170), approvals 123/123 twice (807262, 824020)**; after
+it, with the two `/auth/me` checks, **policy 129/129 twice (946585, 962390)** — every section ran in each. No request over
+2 s (the slowest a 1.6 s login). The API log held the known noise (defect #23, one identity-reconciliation error) and two
+environmental items: 180 queued emails failing at once (UAT has no `EmailSettings` row) and the 90-day notification
+clean-up hitting its 5 s command timeout twice during a lifecycle run.
 
 ### Lane 5 — Bookings and itinerary (D1, D3–D5, E4, O-15, T-19, T-24/T-42, T-45)
 
@@ -1852,3 +1898,11 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   administrator who did not raise them (C4), Prohibited refused (C5). The build succeeded; no migration.
   `run-final-policy.mjs` 119/119 twice, money 286/286, lifecycle 256/256, truth 117/117, approvals 123/123, each twice.
   Staged. Next: slice 4c, authority (D-3, D-19).
+- **2026-10-02, later** — The user committed slice 4b (`3a6792a30`). **Slice 4c built — LANE 4 COMPLETE**: HR holds
+  `HR.Travel.Admin` (D-3), each Admin act refused to whoever did the thing it checks; the budget's setter does not
+  approve it (D-19); a comment is edited by its author alone (D-21, taken in the build and put to the user); the UI's
+  admin check reads the permission alone. The build succeeded. The proof found the grant does not reach an existing
+  database at startup — the add-only seeder runs under `seed-db` only; a migration was scaffolded, then dropped on the
+  user's word (D-22), and UAT's HR role was granted its row by hand. Policy 127/127 twice, money 287/287, lifecycle
+  256/256, truth 117/117, approvals 123/123, each twice; after the grant, policy 129/129 twice with `/auth/me` checks.
+  Staged. Next: lane 5, bookings and itinerary.

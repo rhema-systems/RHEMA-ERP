@@ -381,8 +381,9 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
         artefact of the policy RULES mechanism, and rules are not enforced — nothing evaluates one,
         so nothing can breach one. Raising exceptions by hand would manufacture audit records
         implying a control was in force and consciously waived, which is a worse artefact than an
-        empty queue. A breach of the policy's own caps is a different thing and is authorised
-        inline on the booking by an `HR.Travel.Admin` holder.
+        empty queue. A breach of the policy's own caps is a different thing: the booking is saved
+        awaiting authorisation and decided on Staff Travel → Policy breaches by an `HR.Travel.Admin`
+        holder who did not book it (lane 4, D-8).
       */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4 pb-3">

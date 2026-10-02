@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { PageHeader } from '@/components/hr/common/PageHeader';
-import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
+import { HR_ROLES } from '@/components/hr/common/PermissionGate';
 import { PolicyRulesPanel } from '@/components/hr/travel/PolicyRulesPanel';
 import { TravelPolicyForm } from '@/components/hr/travel/TravelPolicyForm';
 import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
@@ -54,7 +54,8 @@ export default function TravelPolicyDetailPage({ params }: { params: Promise<{ i
 
   const canWrite =
     hasAnyPermission(['HR.Travel.Write', 'HR.Travel.Admin']) || hasAnyRole(HR_ROLES);
-  const canAdmin = hasAnyPermission(['HR.Travel.Admin']) || hasAnyRole(HR_ADMIN_ROLES);
+  // Lane 4, D-3: the permission alone — see useTravelAccess.
+  const canAdmin = hasAnyPermission(['HR.Travel.Admin']);
 
   const { data: policy, isLoading, isError, error } = useQuery({
     queryKey: ['travel-policies', id],

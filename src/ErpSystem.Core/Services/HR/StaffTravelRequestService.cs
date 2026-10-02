@@ -1817,8 +1817,9 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     }
 
     /// <summary>
-    /// Only a comment's author, or a travel administrator, may change or remove it (lane 1, finding
-    /// A10) — any desk officer could rewrite or delete what a colleague had said on a trip.
+    /// Only a comment's author, or a travel administrator, may remove it (lane 1, finding A10) — any desk officer
+    /// could rewrite or delete what a colleague had said on a trip. Editing is the author's alone since lane 4
+    /// (D-21; see <see cref="UpdateCommentAsync"/>).
     /// </summary>
     private void RequireCommentAuthorOrAdmin(StaffTravelRequestComment comment, bool callerIsTravelAdmin, string verb)
     {
@@ -1827,10 +1828,18 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         throw new UnauthorizedAccessException($"Only the comment's author, or a travel administrator, can {verb} it.");
     }
 
+    /// <summary>
+    /// Changes a comment — <b>its author's alone</b> since lane 4 (D-21). The administrator's override stays on delete
+    /// (moderation) but left edit: once the HR desk holds <c>HR.Travel.Admin</c> (D-3) it would have let any desk
+    /// officer reword what a colleague had said, which is what A10 closed. <paramref name="callerIsTravelAdmin"/> is
+    /// kept on the signature and no longer widens anything here.
+    /// </summary>
     public async Task<StaffTravelRequestCommentDto> UpdateCommentAsync(UpdateStaffTravelRequestCommentDto updateDto, Guid updatedByUserId, bool callerIsTravelAdmin, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCommentAsync(updateDto.Id);
-        RequireCommentAuthorOrAdmin(entity, callerIsTravelAdmin, "edit");
+        if (_currentUserService.EmployeeId is not Guid me || me != entity.AuthorId)
+            throw new UnauthorizedAccessException(
+                "Only the comment's author can edit it. A travel administrator can remove it, and say what is meant in a new comment.");
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _commentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

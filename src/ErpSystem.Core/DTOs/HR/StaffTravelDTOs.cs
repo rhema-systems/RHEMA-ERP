@@ -1090,9 +1090,10 @@ public class CreateStaffTravelFlightBookingDto : CreateDtoBase
     public FlightCabinClass PolicyAllowedClass { get; set; }
 
     /// <summary>
-    /// Requests authorisation to book above the policy cap. <b>Honoured only for a caller holding
-    /// <c>HR.Travel.Admin</c></b> — a Write-only travel clerk asking for it gets 403, and a booking
-    /// over the cap without it gets 422. Stored as granted or not; never as claimed.
+    /// ASKS for an exception to the policy, with <c>ClassExceptionReason</c> (lane 4, D-8): a class above the cap, or
+    /// a flight booked later than the policy asks, is saved awaiting authorisation instead of refused (422 without
+    /// it). It no longer grants anything — a travel administrator other than the booker authorises it. Read back, it
+    /// says whether the exception is authorised.
     /// </summary>
     public bool ClassExceptionApproved { get; set; }
 
@@ -1142,9 +1143,10 @@ public class UpdateStaffTravelFlightBookingDto : UpdateDtoBase
     public FlightCabinClass PolicyAllowedClass { get; set; }
 
     /// <summary>
-    /// Requests authorisation to book above the policy cap. <b>Honoured only for a caller holding
-    /// <c>HR.Travel.Admin</c></b> — a Write-only travel clerk asking for it gets 403, and a booking
-    /// over the cap without it gets 422. Stored as granted or not; never as claimed.
+    /// ASKS for an exception to the policy, with <c>ClassExceptionReason</c> (lane 4, D-8): a class above the cap, or
+    /// a flight booked later than the policy asks, is saved awaiting authorisation instead of refused (422 without
+    /// it). It no longer grants anything — a travel administrator other than the booker authorises it. Read back, it
+    /// says whether the exception is authorised.
     /// </summary>
     public bool ClassExceptionApproved { get; set; }
 
@@ -1482,9 +1484,9 @@ public class CreateStaffTravelHotelBookingDto : CreateDtoBase
     public decimal? PolicyMaxRatePerNight { get; set; }
 
     /// <summary>
-    /// Requests authorisation to book above the policy rate cap. <b>Honoured only for a caller
-    /// holding <c>HR.Travel.Admin</c></b>; over the cap without it is 422, asking for it without
-    /// the right is 403.
+    /// ASKS for an exception to the policy, with <c>RateExceptionReason</c> (lane 4, D-8) — a rate above the cap or a
+    /// stay booked later than the policy asks is saved awaiting authorisation by a travel administrator other than
+    /// the booker; without it, 422. Read back, it says whether the exception is authorised.
     /// </summary>
     public bool RateExceptionApproved { get; set; }
 
@@ -1561,9 +1563,9 @@ public class UpdateStaffTravelHotelBookingDto : UpdateDtoBase
     public decimal? PolicyMaxRatePerNight { get; set; }
 
     /// <summary>
-    /// Requests authorisation to book above the policy rate cap. <b>Honoured only for a caller
-    /// holding <c>HR.Travel.Admin</c></b>; over the cap without it is 422, asking for it without
-    /// the right is 403.
+    /// ASKS for an exception to the policy, with <c>RateExceptionReason</c> (lane 4, D-8) — a rate above the cap or a
+    /// stay booked later than the policy asks is saved awaiting authorisation by a travel administrator other than
+    /// the booker; without it, 422. Read back, it says whether the exception is authorised.
     /// </summary>
     public bool RateExceptionApproved { get; set; }
 

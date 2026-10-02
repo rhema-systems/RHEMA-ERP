@@ -42,7 +42,7 @@ public class StaffTravelRequestsController : HrControllerBase
 
     /// <summary>
     /// Whether the caller holds <c>HR.Travel.Admin</c> — evaluated against the same policy the
-    /// <c>[Authorize]</c> attributes use, as the bookings controller does for breach approval.
+    /// <c>[Authorize]</c> attributes use. (Since lane 4, D-3, the HR desk holds it.)
     /// </summary>
     private async Task<bool> CallerIsTravelAdminAsync()
         => (await _authorization.AuthorizeAsync(User, HrPermissions.TravelAdminPolicy)).Succeeded;

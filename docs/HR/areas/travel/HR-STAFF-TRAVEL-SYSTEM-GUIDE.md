@@ -91,10 +91,12 @@ But a policy is a **draft until it is approved**, and the guard checks for that:
     if (policy is null) return TravelPolicyCaps.None;      // ← no policy, no cap
 ```
 
-The demo's *TDC Staff Travel Policy 2026* was created and **never approved**, because approving is
-`HR.Travel.Admin` **and** the endpoint demands the caller be linked to an employee record — and
-**no demo login holds both**. `admin` is SuperAdmin but unlinked; `hr.head` is linked but has only
-Write.
+The demo's *TDC Staff Travel Policy 2026* was created and **never approved**. Approving is
+`HR.Travel.Admin` **and** the endpoint demands the caller be linked to an employee record. Until
+closure lane 4 no demo login held both. **Since lane 4 (slice 4c, D-3) the HR role holds Admin**, so
+**`hr.officer`** can sign it. `hr.head` drafted it, and whoever drafted or last changed a policy does
+not approve it. The demo pack still leaves it a draft: lane 10 decides what the demo's trips should
+meet first.
 
 **What this means for you:** on this database the Bookings tab will accept a First-class fare and a
 GHS 9,000-a-night hotel without a murmur. **Do not offer to demonstrate the cap refusing
@@ -102,28 +104,34 @@ something** unless you have done § 2.4's prep. The policy screen says *Draft* i
 which is the honest hook — chapter 13 turns it into the strongest thirty seconds in the module.
 This is finding **T-1**.
 
-### Rule 2 — `hr.head` cannot delete anything, approve a policy, or authorise a breach
+### Rule 2 — HR administers travel, but nobody authorises what they did themselves
 
-`HR` holds `HR.Travel.Read`, `HR.Travel.Write` and `HR.Travel.Approve`. It does **not** hold
-`HR.Travel.Admin`, and in this module Admin is **not just deletion**:
+> **Changed by closure lane 4 (slice 4c, 2026-10-02, D-3).** Until then `HR` held `HR.Travel.Read`,
+> `Write` and `Approve`, but **not** `HR.Travel.Admin`, so `hr.head` could not delete anything,
+> approve a policy or authorise a breach (**T-2**). The HR desk now holds Admin. The separation that
+> used to come from the role now comes from **the act**: each authority is refused to whoever did
+> the thing it checks.
 
-| Act | Tier |
-|---|---|
-| Delete a request, comment, attachment, itinerary, leg, activity, any booking, any segment, a claim, a claim line, an advance, a per-diem rate, a policy, a rule, a document, a visa requirement, a risk assessment, an alert, an insurance record, a health requirement, a group | **Admin** |
-| **Approve a travel policy** — which is what makes its caps bind at all | **Admin** |
-| **Withdraw a travel policy** | **Admin** |
-| **Authorise a booking above the policy cap** | **Admin** |
-| **Write off an advance; approve a trip's budget; void a claim's payment** *(closure lane 3, 2026-10-02 — each by a travel administrator who is not the traveller, and a void not by the payer)* | **Admin** |
-| **The entire Reminders screen, reads included** | **Admin** |
+In this module Admin is **not just deletion**:
 
-> That third and fourth row are the point. **`HR.Travel.Admin` is a financial authority here, not a
-> housekeeping one** — it decides what the organisation may spend on travel and who may exceed it.
-> The permission map says so deliberately: *"deleting travel records and setting the policies,
-> per-diem rates and approval templates that govern their own spending authority is
-> administration."*
+| Act | Tier | Refused to |
+|---|---|---|
+| Delete a request, attachment, itinerary, leg, activity, any booking, any segment, a claim, a claim line, an advance, a per-diem rate, a policy *(draft)*, a rule, a document, a visa requirement, a risk assessment, an alert, an insurance record, a health requirement, a group | **Admin** | — *(a booking with a policy exception is cancelled, not deleted — lane 4, D-20)* |
+| Delete a comment | its author, or **Admin** | everyone else. **Editing** a comment is its author's alone (lane 4, D-21) |
+| **Approve a travel policy** — which is what makes its caps bind at all | **Admin** | whoever drafted or last changed it |
+| **Withdraw a travel policy** | **Admin** | — |
+| **Authorise or refuse a booking's policy exception** — *Staff Travel → Policy Breaches* (lane 4, D-8) | **Admin** | whoever booked it or asked for the exception |
+| **Decide a policy exception** | **Admin** | whoever raised it |
+| **Write off an advance** | **Admin** | the advance's own traveller |
+| **Approve a trip's budget** | **Admin** | the traveller, and whoever set or last changed the budget (lane 4, D-19) |
+| **Void a claim's payment** | **Admin** | the claimant and whoever paid it |
+| **The entire Reminders screen, reads included** | **Admin** | — *(the desk that renews a passport sees the queue, T-52)* |
 
-This is finding **T-2**, and unlike other modules it is mostly **correct design** rather than a gap.
-The gap is only that the buttons still render.
+> **`HR.Travel.Admin` is a financial authority here, not a housekeeping one.** It decides what the
+> organisation may spend on travel and who may exceed it. Holding it, an HR officer still cannot
+> sign a policy they wrote, wave through their own booking's breach or approve a budget they set.
+> **A second HR officer does** — on the demo, `hr.officer` for what `hr.head` did. Each refusal
+> names the reason, so pressing the button is safe.
 
 ### Rule 3 — Two dropdown values on the request form will 400
 
@@ -219,7 +227,7 @@ named after its `DbSet<>` property in `ApplicationDbContext.HR.cs` — `StaffTra
 |---|---|---|
 | `HR.Travel.Read` | every read — requests, itineraries, bookings, advances, claims, travel documents, visa requirements, health requirements, alerts, insurance, risk assessments and policies | **yes** |
 | `HR.Travel.Write` | raise and amend travel on behalf of staff; make and change every kind of booking; build itineraries; set budgets; request, approve and disburse advances; create, submit, review and **pay** expense claims; record documents, visas, insurance, risk assessments and alerts; author policies and their rules | **yes** |
-| `HR.Travel.Admin` | **delete anything**; **approve and withdraw a travel policy**; **authorise a booking above the policy cap**; maintain per-diem rates' deletion; **the whole Reminders screen, reads included** | **no** |
+| `HR.Travel.Admin` | **delete anything**; **approve and withdraw a travel policy**; **authorise a booking above the policy cap**; decide a policy exception; write off an advance; approve a budget; void a payment; maintain per-diem rates' deletion; **the whole Reminders screen, reads included** — each refused to whoever did the act it checks (Rule 2) | **yes**, since closure lane 4 (D-3) — **no** before |
 | `HR.Travel.Approve` | interim authority to approve a travel request **where no workflow definition is published**. A `STAFF_TRAVEL_REQUEST` definition **is** seeded and published, so in practice this does nothing | **yes** |
 
 **Self-access is a separate controller, not a permission.** `api/staff-travel/me` is gated only on
@@ -234,9 +242,10 @@ request body.
 
 > ⚠ **A permission an unlinked account holds is a permission it cannot exercise.** Three Admin
 > writes here stamp an **Employee** foreign key. `admin` is SuperAdmin, so it holds
-> `HR.Travel.Admin` — and it is not employee-linked, so it cannot approve a policy. That is why
-> Rule 1 exists, and it is a **seeding** question rather than a code one: are TDC's travel
-> administrators real employees, or service accounts?
+> `HR.Travel.Admin` — and it is not employee-linked, so it cannot approve a policy. Since closure
+> lane 4 the HR desk holds Admin and is employee-linked, so this now matters only for platform
+> accounts. Whether TDC's travel administrators are real employees or service accounts is still a
+> **seeding** question, not a code one.
 
 ---
 
@@ -607,14 +616,17 @@ nothing. The Bookings tab will accept anything, and you simply do not offer to s
 Business class on the London trip and be refused by name, which is the most convincing thirty
 seconds in the module.
 
-To do Option B you need a caller holding `HR.Travel.Admin` **and** linked to an employee — which no
-demo login is. Two ways:
+To do Option B you need a caller holding `HR.Travel.Admin` **and** linked to an employee. **Since
+closure lane 4 (D-3) that is any HR officer except the policy's author:** sign in as **`hr.officer`**,
+open Administration → HR → Travel → **Travel Policies** and press **Approve** on the 2026 policy.
+`hr.head` drafted it and is refused by name. That is the route. It needs no grant and no SQL, and the
+server checks the version's dates and steps down the version it replaces (lane 4, O-4).
 
-1. **Grant `HR.Travel.Admin` to the HR role for the demo**, on the roles screen under
-   Administration → Identity. `hr.head` is employee-linked, so approval then works from the same
-   window. ⚠ This also un-greys **every delete button in the module**, so Rule 2 stops being true
-   and you must not press them. Undo it afterwards.
-2. **Approve it in SQL** — the honest shortcut, and it leaves the permission map alone:
+> *Retired routes, kept for a database from before lane 4:* granting `HR.Travel.Admin` to the HR role
+> by hand (since lane 4 the role map carries it — `seed-db` grants it, and UAT was granted it on 2026-10-02), or the
+> SQL below. ⚠ The SQL skips every check the
+> approval makes, including the author rule, the dates and the sibling version. Do not use it on a
+> database built since lane 4.
 
 ```sql
 -- DEMO DATABASE ONLY. Puts the 2026 travel policy in force so its caps bind.
@@ -1073,8 +1085,12 @@ Metro · CompanyVehicle · PrivateCarHire · Shuttle · Motorcycle · Ferry.
 **Car rentals** — Category · Route · Dates · Total · Status. Eight vehicle categories, plus daily
 rate, insurance included, fuel policy and whether a licence is required.
 
-> ⛔ **This is where the policy bites.** A cabin class or a nightly rate above the cap is **refused**
-> unless the caller holds `HR.Travel.Admin` *and* ticks the exception. The refusal explains itself —
+> ⛔ **This is where the policy bites.** A cabin class or a nightly rate above the cap, a booking made
+> with less notice than the policy asks, or (under a preferred-vendors policy) one with no supplier
+> is **refused**, unless the exception is asked for with a reason. Since closure lane 4 (slice 4b,
+> D-8) ticking the exception **asks**; it no longer grants. The booking is saved *Pending*, never
+> *Confirmed*, until a travel administrator who neither booked it nor asked authorises it on
+> **Staff Travel → Policy Breaches**. The refusal explains itself —
 > the toast is titled *"The booking was refused"* and carries the server's own sentence, because the
 > cap is not the form's to predict.
 
@@ -1392,7 +1408,8 @@ Passport copy · Visa · Ticket · Itinerary · Other), a description and a file
 > This goes through the product's **controlled upload gate** — virus scanning, type and size
 > checks, and a DMS record — unlike the company schedule's event attachments, which are references.
 
-🚫 **Remove is `HR.Travel.Admin`.** The button renders and the refusal is surfaced.
+**Remove is `HR.Travel.Admin`**, which the HR role holds since closure lane 4 (D-3), so `hr.head`
+can remove an attachment. 🔴 It is a live write, so do not press it on the demo's two documents.
 
 ### ▶ Walk the Attachments
 
@@ -2116,8 +2133,9 @@ with a **New policy** button.
 **Six columns:** **Policy** · **Version** · **Effective** · **Rules** *(a count)* · **State**
 *(**Draft** / **In force**)* · **Approved by**.
 
-Row actions: **Approve** *(on a draft)* and **Withdraw** *(on one in force)* — 🚫 **both are
-`HR.Travel.Admin` and 403 for `hr.head`**.
+Row actions: **Approve** *(on a draft)* and **Withdraw** *(on one in force)*, both
+`HR.Travel.Admin`. The HR role holds it since closure lane 4 (D-3). But `hr.head` drafted the demo's
+policy, so **Approve refuses `hr.head` by name** (*"…drafted or last changed…"*); `hr.officer` signs it.
 
 Empty state: *"No travel policies — without one, travel bookings are not capped at all."*
 
@@ -2176,15 +2194,17 @@ Approved by — an em dash.
 > nothing. What you are looking at is the state every corporation is in on the day before somebody
 > signs."*
 
-**5 — Point at the greyed *Approve* button.**
+**5 — Point at the *Approve* button.** *(Since closure lane 4 it is live for HR. As `hr.head`,
+pressing it is refused by name, which is safe to show.)*
 
-> *"And I cannot sign it. Approving a travel policy is `HR.Travel.Admin` — the same tier that
-> authorises a breach of it. Running the travel desk and deciding what the travel desk may spend
-> are two different jobs, and the system holds them apart."*
+> *"And I cannot sign it — I wrote it. Approving a travel policy is a travel administrator's act,
+> the same tier that authorises a breach of it, and it is never the author's. A second officer
+> signs. Writing the rules and putting them in force are two different acts, and the system holds
+> them apart by who did what."*
 
-**6 — 🔴 LIVE WRITE 13 *(only if you did § 2.4 Option B)* — approve it** and watch the State flip to
-**In force** with your name in *Approved by*. Then, if you have not already, go back to chapter
-5.3's refusal.
+**6 — 🔴 LIVE WRITE 13 *(only if you chose § 2.4 Option B and kept it for the room)*:** in a second
+window signed in as **`hr.officer`**, **approve it**. The State flips to **In force**, with that
+officer in *Approved by*. Then, if you have not already, go back to chapter 5.3's refusal.
 
 **7 — Scroll to Card 3, the rule register**, and read the five rules.
 
@@ -2240,17 +2260,18 @@ Tables: `StaffTravelPolicies`, `StaffTravelPolicyRules`, `StaffTravelPolicyExcep
 ### 📍 Where you are
 
 **Sidebar:** Administration → HR → Travel → **Travel Reminders** ·
-`/administration/hr/travel/reminders` · **🚫 needs `HR.Travel.Admin` — `hr.head` cannot open it** ·
-**3 minutes**
+`/administration/hr/travel/reminders` · **needs `HR.Travel.Admin`, which the HR role holds since
+closure lane 4 (D-3, T-52)** · **3 minutes**
 
 ### 📖 What it is
 
 > *"The thing that watches the dates nobody else is watching: a passport expiring, a visa about to
 > lapse, an advance past its settlement deadline, a departure coming up."*
 
-### 🚫 **This whole screen is Admin-gated, reads included.** `hr.head` gets a 403 on the page itself,
-not just on its buttons. **Do not navigate here during the demo** unless you are in an
-administrator window.
+### **This whole screen is Admin-gated, reads included.** Before closure lane 4, `hr.head` got a 403
+on the page itself. Since D-3 the HR desk opens it, because the desk that renews an expiring
+passport is the one that needs the queue (T-52). ⚠ **Run the sweep now** posts real in-app
+reminders, each of which is sent only once, so treat it as a live write.
 
 ### 👁 On the page
 
@@ -2443,8 +2464,8 @@ how much of chapter 9 to perform.
 | 10 | **Claim paid** *(ch. 9, LW 10)* | ⚠ **The hardest one.** Payment recovered the advance, so **two** rows moved. Reset the claim as in row 9, *and* `UPDATE StaffTravelAdvances SET Status = 3, SettledAmount = 0 WHERE AdvanceNumber = '…'` *(3 = Disbursed)*, *and* clear `AdvanceDeducted` on the claim. **If you are not comfortable with that, do not perform LW 10** — read the pay dialog aloud and press Cancel instead |
 | 11 | **Visa requirement added** *(ch. 10, LW 11)* | Removal is Admin. `UPDATE StaffTravelVisaRequirements SET IsDeleted = 1 WHERE …` |
 | 12 | **Destination alert raised** *(ch. 11, LW 12)* | ⋯ → **Edit** → turn **Active** off. That works for `hr.head` and is the better undo anyway — an expired advisory is a real thing |
-| 13 | **Travel policy approved** *(ch. 13, LW 13)* | **Withdraw** is Admin. SQL: `UPDATE StaffTravelPolicies SET ApprovedById = NULL, ApprovedAt = NULL WHERE PolicyName = 'TDC Staff Travel Policy 2026'` |
-| — | **§ 2.4 Option B's permission grant**, if you took route 1 | **Remove `HR.Travel.Admin` from the HR role** on the roles screen. ⚠ **Do this.** Leaving it on makes every delete button in the module live for HR staff, which is not the permission map TDC signed off |
+| 13 | **Travel policy approved** *(ch. 13, LW 13)* | **Withdraw** (Admin — any HR officer since closure lane 4) stands it down and keeps the record that it was approved. SQL, to make it a draft again: `UPDATE StaffTravelPolicies SET ApprovedById = NULL, ApprovedAt = NULL, IsCurrentVersion = 0 WHERE PolicyName = 'TDC Staff Travel Policy 2026'` |
+| — | **§ 2.4 Option B's permission grant** | **Retired by closure lane 4.** The HR role holds `HR.Travel.Admin` by design (D-3): the role map carries it, `seed-db` grants it, and UAT holds it since 2026-10-02. ⚠ **Do not remove it** — the HR desk's budget approvals, breach decisions and the reminders screen depend on it |
 
 **The one thing that cannot be put back** is the **request number** — `TR-2026-00005` is spent. It
 comes from the shared `NumberSequences` table, which only moves forward, by design. The same is
@@ -2506,8 +2527,27 @@ the module's argument.
 > they read a Finance list that answers 403 (closure finding O-19, fixed in the same lane). Where a step
 > below warns about one of these, the warning describes the code before lane 0.
 >
+> **Closure lane 4, policy and authority (2026-10-02) — lane 4 complete** (4a committed `19f20f2f2`, 4b
+> `3a6792a30`, 4c staged). **The policy (4a):** real cabin classes; an end no earlier than its start; a
+> staff-level band in rank order; its money limits in a stated currency (base by default; the hotel cap had
+> none, **T-9 fixed**). The server numbers versions, and whoever drafted or last changed a policy does not
+> approve it (**T-50 fixed**). A directorate's policy covers its units, and the nearest unit's wins. A
+> version approved to start later takes over on its own date instead of at once. A USD hotel rate is
+> converted at Finance's rate before it meets the cap. **Bookings (4b):** the policy's advance notice and
+> preferred suppliers bind (D-1). Ticking an exception now **asks** for it with a reason. The booking stays
+> *Pending*, never *Confirmed*, until a travel administrator who neither booked it nor asked authorises it,
+> or refuses it with a reason, on the new **Staff Travel → Policy Breaches** screen (D-8). An authorised
+> exception stands until the booking changes. A booking with an exception is cancelled, not deleted (D-20).
+> A policy exception is decided at the server's time by an administrator who did not raise it. A trip
+> rated, or assessed, *Prohibited* is not submitted or approved. **Authority (4c):** the **HR role holds
+> `HR.Travel.Admin`** (D-3; **T-2 fixed**), and each Admin act is refused to whoever did the thing it
+> checks: a budget to whoever set or last changed it (D-19), a comment edited only by its author (D-21).
+> The reminders screen opens to the HR desk (**T-52 fixed**). On the demo, `hr.officer` decides what
+> `hr.head` did. Rules 1 and 2, § 2.4 Option B and chapters 13–14 were updated in place; lane 10 rewrites
+> the six rules.
+>
 > **Closure lane 3, the money chain (2026-10-02) — lane 3 complete** (3a committed `e2785ce7b`, 3b
-> `f49e5eb9c`, 3c staged). **Advances (3a):** raised only on an approved trip or one under way, for the
+> `f49e5eb9c`, 3c `b08bd498d`). **Advances (3a):** raised only on an approved trip or one under way, for the
 > trip's traveller; approved above zero, no more than asked and within the trip's approved budget; nobody
 > approves, pays out or writes off their own, and the approver does not pay it out; **Reject, Cancel, Cash
 > back and Write off** (Admin) buttons; nothing is owed until the cash goes out; the sweep marks an advance
@@ -2526,8 +2566,9 @@ the module's argument.
 > advance cash paid out as well as claims paid, and an overrun is **flagged, not refused** (**T-20** stays
 > open — whether it should refuse is TDC's question); a travel administrator who neither claimed nor paid
 > it can **Void payment** on a paid claim with a reason — the journal is reversed, the advance's recovery
-> undone and the claim goes back to approved (**T-39 fixed**). The three Admin acts are in Rule 2's table;
-> no demo persona holds Admin, so on the demo the budgets stay unapproved.
+> undone and the claim goes back to approved (**T-39 fixed**). The three Admin acts are in Rule 2's table.
+> *(Written before lane 4: "no demo persona holds Admin, so on the demo the budgets stay unapproved". Since
+> lane 4 the pack approves Kumasi's budget as `hr.officer` and leaves Sebrepor's awaiting approval.)*
 >
 > **Closure lane 2, slice 2b (2026-10-02, committed `519418f00`) — lane 2 complete.** The screens: a **Travel
 > Approvals** queue under Staff Travel; the request page's own **Approve, Reject and Return** buttons,
@@ -2585,8 +2626,8 @@ you out in a demonstration; **five** are the ones to fix before it is called fin
 
 | # | Where | Finding |
 |---|---|---|
-| **T-1** | policies | **Every policy in every tenant is unapproved, so travel caps bind nowhere.** Approval is `HR.Travel.Admin` *and* needs an employee-linked caller, and no demo login is both. **This is a real behaviour change on the day somebody signs one** |
-| **T-2** | everywhere | **`hr.head` cannot delete anything, approve a policy, or authorise a breach.** Mostly correct design — Admin here is a *financial* authority — but every button still renders |
+| **T-1** | policies | **Every policy in every tenant is unapproved, so travel caps bind nowhere.** Approval is `HR.Travel.Admin` *and* needs an employee-linked caller, and no demo login is both. **This is a real behaviour change on the day somebody signs one** *(lane 4, D-3: `hr.officer` can sign now; the demo pack leaves the policy a draft until lane 10)* |
+| **T-2** | everywhere | **`hr.head` cannot delete anything, approve a policy, or authorise a breach.** Mostly correct design — Admin here is a *financial* authority — but every button still renders *(**fixed** by lane 4, D-3: HR holds Admin, each act refused to whoever did it — Rule 2)* |
 | **T-3** | request form | **Two dropdown values 400** — Purpose → *Negotiation* and Risk level → *Extreme* are not enum members. Five purposes and two risk levels are unreachable |
 | **T-4** | policies | **The rule register is enforced by nothing and ships read-only** — a recorded decision, not an omission |
 | **T-5** | everywhere | **Finance's currency conversion is inverted** and travel inherits it deliberately. The dashboard and the claims queue both refuse to add mixed currencies and say why |
@@ -2722,14 +2763,15 @@ This list is longer than the demo-affecting one, and that is the honest summary 
 
 ## Appendix B — the permission map, in one table
 
-`hr.head` holds **Read**, **Write** and **Approve**, and **not Admin**.
+`hr.head` holds **Read**, **Write** and **Approve**, and, since closure lane 4 (D-3), **Admin**. Before
+lane 4 it did not. The rows below describe the tiers; Rule 2 lists who each Admin act is refused to.
 
 | Tier | Actions |
 |---|---|
 | **No permission — signed in and internal** | the whole **`api/staff-travel/me`** surface: list, read, create, update, submit and cancel **your own** travel request; read and **acknowledge your own** destination-alert notifications. It takes no employee id anywhere |
 | **`HR.Travel.Read`** | the **entire controller set** carries it at class level: every read of requests, groups, comments, attachments, itineraries, legs, activities, all four booking kinds and their segments, budgets, advances, claims and lines, per-diem rates, policies, rules, exceptions, documents, visa requirements, visa applications, risk assessments, alerts, notifications, insurance and health requirements — plus the **dashboard** |
 | **`HR.Travel.Write`** | raise, amend, **submit**, **approve**, **reject**, **cancel** and **complete** a travel request; add and amend comments and attachments; create and version **itineraries**, legs and activities and **set the current version**; create and amend **every booking kind** *(subject to the policy guard)*; set a **budget**; request, **approve** and **disburse** an advance; create, add lines to, **submit**, **review a line**, **review** and **pay** an expense claim; maintain **per-diem rates**; author **policies** *(drafts only)* and their **rules**; create and **decide policy exceptions**; record and **verify travel documents**; maintain **visa requirements**, **visa applications**, **risk assessments**, **alerts**, **notifications**, **insurance** and **health requirements**; create and amend **groups** and **add participants** |
-| **`HR.Travel.Admin`** — ***`hr.head` is refused*** | **every delete in the module** — and, more importantly: **approve a travel policy** *(which is what makes its caps bind at all)*, **withdraw a policy**, **authorise a booking above the policy cap**, and **the entire Reminders screen including its reads** |
+| **`HR.Travel.Admin`** — ***held by HR since lane 4*** | **every delete in the module** — and, more importantly: **approve a travel policy** *(which is what makes its caps bind at all)*, **withdraw a policy**, **authorise or refuse a booking's policy exception**, **decide a policy exception**, **write off an advance**, **approve a budget**, **void a payment**, and **the entire Reminders screen including its reads** |
 | **`HR.Travel.Approve`** | interim authority to approve a travel request **where no workflow definition is published**. A `STAFF_TRAVEL_REQUEST` definition **is** seeded and published, so it does nothing on this database |
 
 > **Two things worth naming.** First, **`HR.Travel.Admin` is a financial authority here**, not a

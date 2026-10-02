@@ -392,7 +392,7 @@ public static class HrPermissions
             "Raise and amend travel requests on behalf of staff, make bookings, and process advances and expense claims.",
             CategoryTravel),
         new(AdministerTravel, "Administer Staff Travel",
-            "Delete travel records and administer travel policies, per-diem rates, vendors and approval templates.",
+            "Delete travel records; approve and withdraw travel policies; authorise or refuse a booking above the policy; decide policy exceptions; approve trip budgets; write off advances and void claim payments; run the travel reminders. Each act is refused to the person it concerns — a policy's author, a booking's booker, a budget's setter, a payment's payer.",
             CategoryTravel),
 
         new(ViewSuccession, "View Succession & Talent",
@@ -616,14 +616,21 @@ public static class HrPermissions
 
     /// <summary>
     /// What HR staff hold: they maintain records but do not administer them, so deleting a
-    /// medical record or a paid travel claim stays with tenant administrators.
+    /// medical record stays with tenant administrators. Travel is the exception since its final closure's
+    /// lane 4 (D-3): HR administers it, narrowed per act in the travel services.
     /// </summary>
     /// <remarks>
-    /// <para>Travel follows medical deliberately. HR raises travel on behalf of staff and processes
-    /// advances and claims (Write), but deleting travel records and setting the policies,
-    /// per-diem rates and approval templates that govern their own spending authority is
-    /// administration (Admin) — the same separation that stopped an HR-role user deleting a paid
-    /// medical claim.</para>
+    /// <para>Travel followed medical until the travel final closure's lane 4 (decision D-3, 2026-10-02). HR raises
+    /// travel on behalf of staff and processes advances and claims (Write); deleting travel records and setting the
+    /// policies, per-diem rates and approval templates that govern their own spending authority was held back as
+    /// administration (Admin) — and no admin login had the employee link that Admin's acts require, so in practice
+    /// nobody could approve a policy, authorise a breach, write off an advance or open the reminders screen
+    /// (T-1, T-2, T-52). <b>HR now holds <c>AdministerTravel</c></b>, and the narrowing moved into the travel
+    /// services, where it can be stated per act: a policy's author does not approve it; nobody decides, pays out,
+    /// writes off or voids on their own claim or advance, and the payer does not void the payment (D-2, T-39);
+    /// a booking's breach is authorised by an administrator who neither booked it nor asked (D-8); the officer
+    /// who set a trip's budget does not approve it (D-19); a policy exception is not decided by whoever raised it
+    /// (C4). Status guards on the remaining deletes are lane 7's.</para>
     ///
     /// <para>Succession follows the same ladder for a different reason. HR runs succession
     /// planning — authoring plans, nominating candidates, recording development, facilitating
@@ -703,7 +710,8 @@ public static class HrPermissions
         ViewTraining, MaintainTraining,
         ViewRecruitment, MaintainRecruitment, AdministerRecruitment,
         ViewMedicalRecords, MaintainMedicalRecords,
-        ViewTravel, MaintainTravel,
+        // AdministerTravel: travel final closure lane 4, D-3 — see the remarks above for where the narrowing lives now.
+        ViewTravel, MaintainTravel, AdministerTravel,
         ViewSuccession, MaintainSuccession,
         ViewProbation, MaintainProbation,
         ViewJobArchitecture, MaintainJobArchitecture,

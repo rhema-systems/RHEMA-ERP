@@ -210,8 +210,9 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     }
 
     /// <summary>
-    /// Approves a trip's budget (lane 3, B10, T-22): a travel administrator who is not the traveller, once. The
-    /// budget's <c>ApprovedById</c> and <c>ApprovedAt</c> had no writer, so every budget read as unapproved.
+    /// Approves a trip's budget (lane 3, B10, T-22): a travel administrator who is not the traveller and did not set
+    /// or last change the budget (lane 4, D-19), once. The budget's <c>ApprovedById</c> and <c>ApprovedAt</c> had no
+    /// writer, so every budget read as unapproved.
     /// </summary>
     public async Task<StaffTravelBudgetDto> ApproveBudgetAsync(Guid budgetId, Guid approverEmployeeId, CancellationToken cancellationToken = default)
     {
@@ -224,6 +225,13 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         if (request.EmployeeId == approverEmployeeId)
             throw new UnauthorizedAccessException(
                 $"You cannot approve the budget of your own trip ({request.RequestNumber}). Another officer must.");
+        // D-19 (lane 4): with the HR desk holding Admin (D-3), the officer who set the budget could approve it. Whoever
+        // set it or last changed it does not — the policy's author ≠ approver, applied to the budget.
+        var caller = _currentUserProvider.UserId.ToString();
+        if (string.Equals(entity.CreatedBy, caller, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entity.UpdatedBy, caller, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException(
+                $"You set or last changed the budget of {request.RequestNumber}, so another travel administrator approves it.");
         // The trip's approved budget is fixed once the trip is approved, but a budget set before lane 3 was never
         // held to it — nor to the trip's currency, nor to a total at all: approval is where it is.
         if (entity.CurrencyCode != request.CurrencyCode)
