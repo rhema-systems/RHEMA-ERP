@@ -247,7 +247,12 @@ foreach ($contract in @('vps-release-contract', 'Test-CanonicalMigrationPrefligh
         'environment: test-vps', 'deploy_to_test_vps',
         'reuse_release_run_id', 'reuse_release_artifact_name',
         'reuse_release_commit', 'run-id:',
-        '-ExpectedCommit $env:DEPLOY_EXPECTED_COMMIT')) {
+        '-ExpectedCommit $env:DEPLOY_EXPECTED_COMMIT',
+        'id: build-freshness', 'id: deploy-freshness',
+        'SUPERSEDED_DEPLOYMENT',
+        '$candidateCommit -ceq $masterCommit',
+        "if: steps.build-freshness.outputs.is_current == 'true'",
+        "if: steps.deploy-freshness.outputs.is_current == 'true'")) {
     Assert-Test $workflow.Contains($contract) `
         "CI does not enforce the VPS release contract: $contract"
 }
