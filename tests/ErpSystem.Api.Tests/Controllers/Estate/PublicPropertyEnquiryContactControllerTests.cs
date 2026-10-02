@@ -29,6 +29,39 @@ namespace ErpSystem.Api.Tests.Controllers.Estate;
 public sealed class PublicPropertyEnquiryContactControllerTests
 {
     [Fact]
+    public async Task SmsDeliveryFailureReturnsActionablePublicErrorAndRetiresChallenge()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Sms.Setup(service => service.SendOtpAsync(
+                fixture.Tenant.Id,
+                "+233201234567",
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("provider-secret-detail"));
+
+        var result = await fixture.Controller.RequestPublicPropertyEnquiryContactChallenge(
+            new PublicPropertyEnquiryContactChallengeRequestDto
+            {
+                ListingId = fixture.Listing.Id,
+                Channel = "Phone",
+                Contact = "+233201234567"
+            }, CancellationToken.None);
+
+        var unavailable = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, unavailable.StatusCode);
+        var json = JsonSerializer.Serialize(unavailable.Value);
+        Assert.Contains("PUBLIC_ENQUIRY_SMS_DELIVERY_FAILED", json, StringComparison.Ordinal);
+        Assert.Contains("tenant SMS settings", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("provider-secret-detail", json, StringComparison.Ordinal);
+
+        var challenge = await fixture.Db.EhcPublicPropertyEnquiryVerifications
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.True(challenge.IsDeleted);
+    }
+
+    [Fact]
     public async Task ChallengeForExistingCustomerRemainsGenericUntilOtpIsProven()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -296,8 +329,8 @@ public sealed class PublicPropertyEnquiryContactControllerTests
                     true,
                     false))
                 .Returns(Task.CompletedTask);
-            var sms = new Mock<ITenantSmsSender>();
-            sms.Setup(service => service.SendOtpAsync(
+            Sms = new Mock<ITenantSmsSender>();
+            Sms.Setup(service => service.SendOtpAsync(
                     tenant.Id,
                     It.IsAny<string>(),
                     It.IsAny<string>(),
@@ -338,7 +371,7 @@ public sealed class PublicPropertyEnquiryContactControllerTests
                 Tickets.Object,
                 captcha.Object,
                 Otp.Object,
-                sms.Object,
+                Sms.Object,
                 NullLogger<EstateExternalDocumentsController>.Instance)
             {
                 ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
@@ -351,6 +384,7 @@ public sealed class PublicPropertyEnquiryContactControllerTests
         public EstateManagedAsset Listing { get; }
         public EstateExternalDocumentsController Controller { get; }
         public Mock<IOtpService> Otp { get; }
+        public Mock<ITenantSmsSender> Sms { get; }
         public Mock<IEhcTicketService> Tickets { get; }
 
         public static async Task<Fixture> CreateAsync()
