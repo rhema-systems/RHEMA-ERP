@@ -1421,7 +1421,8 @@ namespace ErpSystem.Api.Services.Finance.AR
         {
             var activeLines = invoice.LineItems.Where(line => !line.IsDeleted).ToList();
             var documentDiscounts = AllocateDocumentDiscount(documentDiscount, activeLines);
-            var totalTax = 0m;
+            var documentLines = new List<TaxDocumentLineRequestDto>();
+            var taxableBases = new Dictionary<Guid, decimal>();
 
             foreach (var line in activeLines)
             {
@@ -1433,29 +1434,45 @@ namespace ErpSystem.Api.Services.Finance.AR
                 line.TaxRate = 0m;
 
                 if (taxableBase <= 0m
-                    || line.TaxTreatment != TaxTreatment.Standard
-                    || (!line.TaxGroupId.HasValue && string.IsNullOrWhiteSpace(line.TaxCode)))
+                    || line.TaxTreatment != TaxTreatment.Standard)
                 {
                     continue;
                 }
 
-                var taxResult = await _taxEngine.CalculateTaxesAsync(new TaxCalculationRequestDto
+                taxableBases[line.Id] = taxableBase;
+                documentLines.Add(new TaxDocumentLineRequestDto
                 {
+                    DocumentLineId = line.Id,
                     TransactionType = line.LineItemType == LineItemType.GLAccount
                         ? TaxTransactionType.SaleOfServices
                         : TaxTransactionType.SaleOfGoods,
                     BaseAmount = taxableBase,
-                    TaxGroupId = line.TaxGroupId,
-                    BusinessPartnerId = invoice.BusinessPartnerId,
-                    BusinessPartnerRole = BusinessPartnerRoleType.Customer,
-                    TransactionDate = invoice.InvoiceDate
-                }, cancellationToken);
-                line.TaxAmount = taxResult.TotalTaxAmount;
-                line.TaxRate = line.TaxAmount > 0m ? line.TaxAmount / taxableBase * 100m : 0m;
-                totalTax += line.TaxAmount;
+                    TaxGroupId = line.TaxGroupId
+                });
             }
 
-            return RoundMoney(totalTax);
+            if (documentLines.Count == 0)
+                return 0m;
+
+            var taxResult = await _taxEngine.CalculateDocumentTaxesAsync(new TaxDocumentCalculationRequestDto
+            {
+                CurrencyCode = invoice.CurrencyCode,
+                TransactionDate = invoice.InvoiceDate,
+                BusinessPartnerId = invoice.BusinessPartnerId,
+                BusinessPartnerRole = BusinessPartnerRoleType.Customer,
+                Lines = documentLines
+            }, cancellationToken);
+
+            foreach (var line in activeLines.Where(line => taxableBases.ContainsKey(line.Id)))
+            {
+                line.TaxAmount = taxResult.TaxBreakdowns
+                    .Where(item => item.DocumentLineId == line.Id)
+                    .Sum(item => item.TaxAmount);
+                var taxableBase = taxableBases[line.Id];
+                line.TaxRate = line.TaxAmount != 0m ? line.TaxAmount / taxableBase * 100m : 0m;
+            }
+
+            return taxResult.TotalTaxAmount;
         }
 
         private async Task<FinancePostingRequestV2Dto> BuildArInvoicePostingRequestAsync(

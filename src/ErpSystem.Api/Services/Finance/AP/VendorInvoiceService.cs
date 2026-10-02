@@ -488,8 +488,6 @@ namespace ErpSystem.Api.Services.Finance.AP
                     lineDto.DiscountPercentage,
                     "AP invoice line");
                 var lineNet = lineGross - lineDiscount;
-                var lineTax = await ResolveApLineTaxAsync(lineDto, lineNet, dto.InvoiceDate, supplier.Id, dto.IsOpeningBalance, cancellationToken);
-
                 var lineItem = new VendorInvoiceLineItem
                 {
                     Id = lineDto.Id is { } requestedLineId && requestedLineId != Guid.Empty
@@ -509,8 +507,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     UnitPrice = lineDto.UnitPrice,
                     TaxGroupId = dto.IsOpeningBalance ? null : lineDto.TaxGroupId,
                     TaxTreatment = lineDto.TaxTreatment,
-                    TaxRate = lineTax.TaxRate,
-                    TaxAmount = lineTax.TaxAmount,
+                    TaxRate = lineDto.TaxRate,
+                    TaxAmount = 0m,
                     TaxCode = lineDto.TaxCode,
                     DiscountPercentage = lineDto.DiscountPercentage,
                     DiscountAmount = lineDiscount,
@@ -521,9 +519,10 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 invoice.LineItems.Add(lineItem);
                 subtotal += lineNet;
-                totalTax += lineTax.TaxAmount;
                 totalDiscount += lineDiscount;
             }
+
+            totalTax = await RecalculateApDocumentTaxesAsync(invoice, dto.IsOpeningBalance, cancellationToken);
 
             invoice.SubTotal = subtotal;
             invoice.TaxAmount = totalTax;
@@ -741,8 +740,6 @@ namespace ErpSystem.Api.Services.Finance.AP
                     lineDto.DiscountPercentage,
                     "AP invoice line");
                 var lineNet = lineGross - lineDiscount;
-                var lineTax = await ResolveApLineTaxAsync(lineDto, lineNet, dto.InvoiceDate, invoice.BusinessPartnerId, dto.IsOpeningBalance, cancellationToken);
-
                 VendorInvoiceLineItem? persistedLine = null;
                 var isExistingLine = lineDto.Id.HasValue
                     && existingLines.TryGetValue(lineDto.Id.Value, out persistedLine);
@@ -768,8 +765,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 lineItem.UnitPrice = lineDto.UnitPrice;
                 lineItem.TaxGroupId = dto.IsOpeningBalance ? null : lineDto.TaxGroupId;
                 lineItem.TaxTreatment = lineDto.TaxTreatment;
-                lineItem.TaxRate = lineTax.TaxRate;
-                lineItem.TaxAmount = lineTax.TaxAmount;
+                lineItem.TaxRate = lineDto.TaxRate;
+                lineItem.TaxAmount = 0m;
                 lineItem.TaxCode = lineDto.TaxCode;
                 lineItem.DiscountPercentage = lineDto.DiscountPercentage;
                 lineItem.DiscountAmount = lineDiscount;
@@ -782,9 +779,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                     await _unitOfWork.Repository<VendorInvoiceLineItem>().AddAsync(lineItem);
                 }
                 subtotal += lineNet;
-                totalTax += lineTax.TaxAmount;
                 totalDiscount += lineDiscount;
             }
+
+            totalTax = await RecalculateApDocumentTaxesAsync(invoice, dto.IsOpeningBalance, cancellationToken);
 
             invoice.SubTotal = subtotal;
             invoice.TaxAmount = totalTax;
@@ -4097,38 +4095,65 @@ namespace ErpSystem.Api.Services.Finance.AP
             throw new InvalidOperationException("AP invoice configured tax calculation does not reconcile to the invoice tax total.");
         }
 
-        private async Task<(decimal TaxRate, decimal TaxAmount)> ResolveApLineTaxAsync(
-            VendorInvoiceLineItemCreateDto lineDto,
-            decimal lineNet,
-            DateTime invoiceDate,
-            Guid supplierId,
+        private async Task<decimal> RecalculateApDocumentTaxesAsync(
+            VendorInvoice invoice,
             bool isOpeningBalance,
             CancellationToken cancellationToken)
         {
-            if (isOpeningBalance || lineDto.TaxTreatment != TaxTreatment.Standard || lineNet <= 0m)
+            var lines = invoice.LineItems
+                .Where(line => !line.IsDeleted)
+                .OrderBy(line => line.CreatedAt)
+                .ThenBy(line => line.Id)
+                .ToList();
+            var bases = lines.ToDictionary(
+                line => line.Id,
+                line => RoundMoney((line.Quantity * line.UnitPrice) - line.DiscountAmount));
+            foreach (var line in lines)
             {
-                return (0m, 0m);
+                line.TaxAmount = 0m;
+                if (isOpeningBalance || line.TaxTreatment != TaxTreatment.Standard || bases[line.Id] <= 0m)
+                    line.TaxRate = 0m;
             }
 
-            if (_taxEngine != null && lineDto.TaxGroupId.HasValue)
-            {
-                var taxResult = await _taxEngine.CalculateTaxesAsync(new TaxCalculationRequestDto
+            if (isOpeningBalance)
+                return 0m;
+
+            var governedLines = lines
+                .Where(line => line.TaxTreatment == TaxTreatment.Standard
+                    && bases[line.Id] > 0m)
+                .Select(line => new TaxDocumentLineRequestDto
                 {
-                    BaseAmount = lineNet,
-                    TaxGroupId = lineDto.TaxGroupId,
-                    TransactionDate = invoiceDate,
-                    TransactionType = ResolveApTaxTransactionType(lineDto.LineItemType),
-                    BusinessPartnerId = supplierId,
-                    BusinessPartnerRole = BusinessPartnerRoleType.Supplier
-                }, cancellationToken);
+                    DocumentLineId = line.Id,
+                    BaseAmount = bases[line.Id],
+                    TaxGroupId = line.TaxGroupId,
+                    TransactionType = ResolveApTaxTransactionType(line)
+                }).ToList();
 
-                return (
-                    taxResult.TotalTaxAmount > 0m ? taxResult.TotalTaxAmount / lineNet * 100m : 0m,
-                    taxResult.TotalTaxAmount);
+            if (governedLines.Count > 0)
+            {
+                if (_taxEngine == null)
+                    throw new InvalidOperationException("Effective-dated tax calculation is not configured for AP invoice taxes.");
+                var result = await _taxEngine.CalculateDocumentTaxesAsync(new TaxDocumentCalculationRequestDto
+                {
+                    CurrencyCode = invoice.CurrencyCode,
+                    TransactionDate = invoice.InvoiceDate,
+                    BusinessPartnerId = invoice.BusinessPartnerId,
+                    BusinessPartnerRole = BusinessPartnerRoleType.Supplier,
+                    Lines = governedLines
+                }, cancellationToken);
+                foreach (var line in lines.Where(line => line.TaxTreatment == TaxTreatment.Standard
+                    && bases[line.Id] > 0m))
+                {
+                    line.TaxAmount = result.TaxBreakdowns
+                        .Where(item => item.DocumentLineId == line.Id)
+                        .Sum(item => item.TaxAmount);
+                    line.TaxRate = line.TaxAmount != 0m
+                        ? line.TaxAmount / bases[line.Id] * 100m
+                        : 0m;
+                }
             }
 
-            var lineTaxRate = lineDto.TaxRate;
-            return (lineTaxRate, lineNet * (lineTaxRate / 100m));
+            return lines.Sum(line => line.TaxAmount);
         }
 
         private static TaxTransactionType ResolveApTaxTransactionType(VendorInvoiceLineItem line)
@@ -4340,8 +4365,39 @@ namespace ErpSystem.Api.Services.Finance.AP
             ReversalType = "Controlled AP void",
             IdempotencyKey = idempotencyKey,
             ReturnExistingOnDuplicate = true,
-            Lines = plan.ReversalLines
+            Lines = plan.ReversalLines,
+            TaxCalculationSnapshots = RemapReversalTaxSnapshots(
+                plan.ReversalTaxCalculationSnapshots,
+                $"{sourceDocumentType}Reversal",
+                sourceDocumentId)
         };
+
+        private static IReadOnlyList<FinanceTaxCalculationSnapshotDto> RemapReversalTaxSnapshots(
+            IReadOnlyList<FinanceTaxCalculationSnapshotDto> snapshots,
+            string documentType,
+            Guid documentId) => snapshots.Select(snapshot => new FinanceTaxCalculationSnapshotDto
+            {
+                DocumentType = documentType,
+                DocumentId = documentId,
+                DocumentLineId = snapshot.DocumentLineId,
+                TaxId = snapshot.TaxId,
+                TaxGroupId = snapshot.TaxGroupId,
+                PostingAccountId = snapshot.PostingAccountId,
+                CurrencyCode = snapshot.CurrencyCode,
+                CurrencyDecimalPlaces = snapshot.CurrencyDecimalPlaces,
+                BaseAmount = snapshot.BaseAmount,
+                TaxableAmount = snapshot.TaxableAmount,
+                TaxRate = snapshot.TaxRate,
+                TaxAmount = snapshot.TaxAmount,
+                RawTaxAmount = snapshot.RawTaxAmount,
+                RoundingAdjustment = snapshot.RoundingAdjustment,
+                AllocationSequence = snapshot.AllocationSequence,
+                CompoundBasis = snapshot.CompoundBasis,
+                CalculationOrder = snapshot.CalculationOrder,
+                CalculationDate = snapshot.CalculationDate,
+                IsManualOverride = snapshot.IsManualOverride,
+                OverrideReason = snapshot.OverrideReason
+            }).ToArray();
 
         private static string AppendLifecycleNote(string? notes, string entry) =>
             string.IsNullOrWhiteSpace(notes) ? entry : $"{notes.TrimEnd()}\n\n{entry}";

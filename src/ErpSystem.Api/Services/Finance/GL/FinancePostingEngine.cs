@@ -264,6 +264,15 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             now, postedByUserId, cancellationToken);
 
         _context.FinancePostingEvents.Add(postingEvent);
+        if (validation.ReversalOfJournalEntryId.HasValue)
+        {
+            AddReversalTaxSnapshots(
+                tenantId,
+                request.TaxCalculationSnapshots ?? Array.Empty<FinanceTaxCalculationSnapshotDto>(),
+                validation.SourceDocumentId,
+                now,
+                postedByUserId);
+        }
         foreach (var replica in parallelReplicas)
         {
             _context.JournalEntries.Add(replica.JournalEntry);
@@ -501,6 +510,40 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             .ToList();
         var resolvedReversalDate = reversalDate?.Date
             ?? await ResolveDefaultReversalDateAsync(tenantId, cancellationToken);
+        var taxSnapshots = await _context.Set<TaxCalculation>()
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && item.DocumentType == postingEvent.SourceDocumentType
+                && item.DocumentId == postingEvent.SourceDocumentId
+                && !item.IsDeleted)
+            .OrderBy(item => item.AllocationSequence)
+            .ThenBy(item => item.DocumentLineId)
+            .ThenBy(item => item.CalculationOrder)
+            .ThenBy(item => item.TaxId)
+            .Select(item => new FinanceTaxCalculationSnapshotDto
+            {
+                DocumentType = item.DocumentType,
+                DocumentId = item.DocumentId,
+                DocumentLineId = item.DocumentLineId,
+                TaxId = item.TaxId,
+                TaxGroupId = item.TaxGroupId,
+                PostingAccountId = item.PostingAccountId,
+                CurrencyCode = item.CurrencyCode,
+                CurrencyDecimalPlaces = item.CurrencyDecimalPlaces,
+                BaseAmount = -item.BaseAmount,
+                TaxableAmount = -item.TaxableAmount,
+                TaxRate = item.TaxRate,
+                TaxAmount = -item.TaxAmount,
+                RawTaxAmount = -item.RawTaxAmount,
+                RoundingAdjustment = -item.RoundingAdjustment,
+                AllocationSequence = item.AllocationSequence,
+                CompoundBasis = item.CompoundBasis,
+                CalculationOrder = item.CalculationOrder,
+                CalculationDate = resolvedReversalDate,
+                IsManualOverride = item.IsManualOverride,
+                OverrideReason = item.OverrideReason
+            })
+            .ToListAsync(cancellationToken);
 
         return new FinanceReversalPlanDto
         {
@@ -510,7 +553,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             PostingAction = "Reverse",
             ReversalDate = resolvedReversalDate,
             Reason = reason.Trim(),
-            ReversalLines = lines
+            ReversalLines = lines,
+            ReversalTaxCalculationSnapshots = taxSnapshots
         };
     }
 
@@ -546,13 +590,91 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             FunctionalCurrencyCode = original.FunctionalCurrencyCode,
             IdempotencyKey = $"exact-reversal:{postingEventId:N}",
             ReturnExistingOnDuplicate = true,
-            Lines = plan.ReversalLines
+            Lines = plan.ReversalLines,
+            TaxCalculationSnapshots = RemapReversalTaxSnapshots(
+                plan.ReversalTaxCalculationSnapshots,
+                "FinancePostingEventReversal",
+                postingEventId)
         };
         // Only this server-derived command can admit inactive historical book mappings. Ordinary
         // V2 requests cannot set or influence the exception.
         return await PostCoreAsync(request, request.AccountingBookCode, producerContext: null,
             allowHistoricalMappingException: true, cancellationToken);
     }
+
+    private void AddReversalTaxSnapshots(
+        Guid tenantId,
+        IReadOnlyList<FinanceTaxCalculationSnapshotDto> snapshots,
+        Guid sourceDocumentId,
+        DateTime now,
+        Guid? actorId)
+    {
+        foreach (var snapshot in snapshots)
+        {
+            if (string.IsNullOrWhiteSpace(snapshot.DocumentType)
+                || snapshot.DocumentId != sourceDocumentId)
+            {
+                throw new InvalidOperationException(
+                    "Reversal tax evidence must be bound to the reversal source document.");
+            }
+
+            _context.Set<TaxCalculation>().Add(new TaxCalculation
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                DocumentType = snapshot.DocumentType,
+                DocumentId = snapshot.DocumentId,
+                DocumentLineId = snapshot.DocumentLineId,
+                TaxId = snapshot.TaxId,
+                TaxGroupId = snapshot.TaxGroupId,
+                PostingAccountId = snapshot.PostingAccountId,
+                CurrencyCode = snapshot.CurrencyCode,
+                CurrencyDecimalPlaces = snapshot.CurrencyDecimalPlaces,
+                BaseAmount = snapshot.BaseAmount,
+                TaxableAmount = snapshot.TaxableAmount,
+                TaxRate = snapshot.TaxRate,
+                TaxAmount = snapshot.TaxAmount,
+                RawTaxAmount = snapshot.RawTaxAmount,
+                RoundingAdjustment = snapshot.RoundingAdjustment,
+                AllocationSequence = snapshot.AllocationSequence,
+                CompoundBasis = snapshot.CompoundBasis,
+                CalculationOrder = snapshot.CalculationOrder,
+                CalculationDate = snapshot.CalculationDate,
+                IsManualOverride = snapshot.IsManualOverride,
+                OverrideReason = snapshot.OverrideReason,
+                CreatedAt = now,
+                CreatedBy = _currentUserService.UserName,
+                CreatedById = actorId
+            });
+        }
+    }
+
+    private static IReadOnlyList<FinanceTaxCalculationSnapshotDto> RemapReversalTaxSnapshots(
+        IReadOnlyList<FinanceTaxCalculationSnapshotDto> snapshots,
+        string documentType,
+        Guid documentId) => snapshots.Select(snapshot => new FinanceTaxCalculationSnapshotDto
+        {
+            DocumentType = documentType,
+            DocumentId = documentId,
+            DocumentLineId = snapshot.DocumentLineId,
+            TaxId = snapshot.TaxId,
+            TaxGroupId = snapshot.TaxGroupId,
+            PostingAccountId = snapshot.PostingAccountId,
+            CurrencyCode = snapshot.CurrencyCode,
+            CurrencyDecimalPlaces = snapshot.CurrencyDecimalPlaces,
+            BaseAmount = snapshot.BaseAmount,
+            TaxableAmount = snapshot.TaxableAmount,
+            TaxRate = snapshot.TaxRate,
+            TaxAmount = snapshot.TaxAmount,
+            RawTaxAmount = snapshot.RawTaxAmount,
+            RoundingAdjustment = snapshot.RoundingAdjustment,
+            AllocationSequence = snapshot.AllocationSequence,
+            CompoundBasis = snapshot.CompoundBasis,
+            CalculationOrder = snapshot.CalculationOrder,
+            CalculationDate = snapshot.CalculationDate,
+            IsManualOverride = snapshot.IsManualOverride,
+            OverrideReason = snapshot.OverrideReason
+        }).ToArray();
 
     private async Task<DateTime> ResolveDefaultReversalDateAsync(
         Guid tenantId,

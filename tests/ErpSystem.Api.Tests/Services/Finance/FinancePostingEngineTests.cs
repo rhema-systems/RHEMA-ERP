@@ -1006,6 +1006,69 @@ public sealed class FinancePostingEngineTests
         (await db.AccountBalances.ToListAsync()).Should().OnlyContain(item => item.ClosingBalance == 0m);
     }
 
+    [Fact]
+    [Trait("Category", "TaxPrecision")]
+    public async Task ExactReversal_ShouldCloneSignedTaxEvidence_AndRemainIdempotent()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        var credit = SeedAccount(db, tenantId, "2100", AccountType.Liability);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var request = CreateRequest(tenantId, debit.Id, credit.Id);
+        var original = await service.PostAsync(request);
+        var taxId = Guid.NewGuid();
+        var sourceLineId = Guid.NewGuid();
+        db.Set<TaxCalculation>().Add(new TaxCalculation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            DocumentType = request.SourceDocumentType,
+            DocumentId = request.SourceDocumentId,
+            DocumentLineId = sourceLineId,
+            TaxId = taxId,
+            PostingAccountId = credit.Id,
+            CurrencyCode = "GHS",
+            CurrencyDecimalPlaces = 2,
+            BaseAmount = 100m,
+            TaxableAmount = 100m,
+            TaxRate = 15m,
+            TaxAmount = 15m,
+            RawTaxAmount = 15.004m,
+            RoundingAdjustment = -0.004m,
+            AllocationSequence = 1,
+            CompoundBasis = CompoundBasis.BaseOnly,
+            CalculationOrder = 1,
+            CalculationDate = request.PostingDate
+        });
+        await db.SaveChangesAsync();
+
+        var reversalDate = new DateTime(2026, 7, 5);
+        var reversal = await service.ReverseAsync(original.PostingEventId, "Correct tax posting", reversalDate);
+        var duplicate = await service.ReverseAsync(original.PostingEventId, "Correct tax posting", reversalDate);
+
+        reversal.WasDuplicate.Should().BeFalse();
+        duplicate.WasDuplicate.Should().BeTrue();
+        var evidence = await db.Set<TaxCalculation>()
+            .Where(item => item.TenantId == tenantId
+                && item.DocumentType == "FinancePostingEventReversal"
+                && item.DocumentId == original.PostingEventId)
+            .ToListAsync();
+        evidence.Should().ContainSingle();
+        evidence[0].DocumentLineId.Should().Be(sourceLineId);
+        evidence[0].TaxId.Should().Be(taxId);
+        evidence[0].BaseAmount.Should().Be(-100m);
+        evidence[0].TaxableAmount.Should().Be(-100m);
+        evidence[0].TaxRate.Should().Be(15m);
+        evidence[0].TaxAmount.Should().Be(-15m);
+        evidence[0].RawTaxAmount.Should().Be(-15.004m);
+        evidence[0].RoundingAdjustment.Should().Be(0.004m);
+        evidence[0].CalculationDate.Should().Be(reversalDate);
+    }
+
     public static TheoryData<string> ExactReversalMutationCases => new()
     {
         { "account" },

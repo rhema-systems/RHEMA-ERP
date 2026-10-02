@@ -525,15 +525,28 @@ public sealed partial class ApInvoicePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
-        TaxCalculationRequestDto? capturedTaxRequest = null;
+        TaxDocumentCalculationRequestDto? capturedTaxRequest = null;
         var taxEngine = new Mock<ITaxCalculationEngine>();
-        taxEngine.Setup(engine => engine.CalculateTaxesAsync(
-                It.IsAny<TaxCalculationRequestDto>(),
+        taxEngine.Setup(engine => engine.CalculateDocumentTaxesAsync(
+                It.IsAny<TaxDocumentCalculationRequestDto>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<TaxCalculationRequestDto, CancellationToken>((request, _) => capturedTaxRequest = request)
-            .ReturnsAsync((TaxCalculationRequestDto request, CancellationToken _) => new TaxCalculationResultDto
+            .Callback<TaxDocumentCalculationRequestDto, CancellationToken>((request, _) => capturedTaxRequest = request)
+            .ReturnsAsync((TaxDocumentCalculationRequestDto request, CancellationToken _) => new TaxCalculationResultDto
             {
-                TotalTaxAmount = decimal.Round(request.BaseAmount * 0.15m, 2, MidpointRounding.AwayFromZero)
+                CurrencyCode = request.CurrencyCode,
+                CurrencyDecimalPlaces = 2,
+                TotalTaxAmount = 13.5m,
+                TaxBreakdowns = request.Lines.Select(line => new TaxBreakdownDto
+                {
+                    DocumentLineId = line.DocumentLineId,
+                    TaxId = Guid.NewGuid(),
+                    TaxCode = "VAT",
+                    TaxName = "VAT",
+                    TaxRate = 15m,
+                    TaxableAmount = line.BaseAmount,
+                    TaxAmount = 13.5m,
+                    RawTaxAmount = 13.5m
+                }).ToList()
             });
         var (service, _) = CreateService(db, tenantId, taxEngine: taxEngine.Object);
 
@@ -562,7 +575,13 @@ public sealed partial class ApInvoicePostingMigrationTests
         });
 
         capturedTaxRequest.Should().NotBeNull();
-        capturedTaxRequest!.BaseAmount.Should().Be(90m);
+        capturedTaxRequest!.CurrencyCode.Should().Be("GHS");
+        capturedTaxRequest.Lines.Should().ContainSingle();
+        capturedTaxRequest.Lines[0].BaseAmount.Should().Be(90m);
+        taxEngine.Verify(engine => engine.CalculateDocumentTaxesAsync(
+            It.IsAny<TaxDocumentCalculationRequestDto>(), It.IsAny<CancellationToken>()), Times.Once);
+        taxEngine.Verify(engine => engine.CalculateTaxesAsync(
+            It.IsAny<TaxCalculationRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
         created.SubTotal.Should().Be(90m);
         created.DiscountAmount.Should().Be(10m);
         created.TaxAmount.Should().Be(13.5m);

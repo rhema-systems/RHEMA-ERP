@@ -159,6 +159,8 @@ public sealed class FinanceReversalPlanDto
     public DateTime ReversalDate { get; set; }
     public string Reason { get; set; } = string.Empty;
     public IReadOnlyList<FinancePostingLineDto> ReversalLines { get; set; } = Array.Empty<FinancePostingLineDto>();
+    public IReadOnlyList<FinanceTaxCalculationSnapshotDto> ReversalTaxCalculationSnapshots { get; set; }
+        = Array.Empty<FinanceTaxCalculationSnapshotDto>();
 }
 
 public sealed class FinanceTaxCalculationSnapshotDto

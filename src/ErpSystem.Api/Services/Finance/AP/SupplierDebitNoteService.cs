@@ -778,7 +778,11 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             ReversalType = "SourceDocument",
             IdempotencyKey = $"AP:SupplierDebitNote:{note.TenantId:N}:{note.Id:N}:Reverse",
             ReturnExistingOnDuplicate = true,
-            Lines = plan.ReversalLines.ToList()
+            Lines = plan.ReversalLines.ToList(),
+            TaxCalculationSnapshots = RemapReversalTaxSnapshots(
+                plan.ReversalTaxCalculationSnapshots,
+                "SupplierDebitNoteReversal",
+                note.Id)
         }, cancellationToken);
 
         note.Status = SupplierDebitNoteStatus.Reversed;
@@ -800,6 +804,33 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             cancellationToken: cancellationToken);
         return await GetRequiredAsync(note.Id, cancellationToken);
     }
+
+    private static IReadOnlyList<FinanceTaxCalculationSnapshotDto> RemapReversalTaxSnapshots(
+        IReadOnlyList<FinanceTaxCalculationSnapshotDto> snapshots,
+        string documentType,
+        Guid documentId) => snapshots.Select(snapshot => new FinanceTaxCalculationSnapshotDto
+        {
+            DocumentType = documentType,
+            DocumentId = documentId,
+            DocumentLineId = snapshot.DocumentLineId,
+            TaxId = snapshot.TaxId,
+            TaxGroupId = snapshot.TaxGroupId,
+            PostingAccountId = snapshot.PostingAccountId,
+            CurrencyCode = snapshot.CurrencyCode,
+            CurrencyDecimalPlaces = snapshot.CurrencyDecimalPlaces,
+            BaseAmount = snapshot.BaseAmount,
+            TaxableAmount = snapshot.TaxableAmount,
+            TaxRate = snapshot.TaxRate,
+            TaxAmount = snapshot.TaxAmount,
+            RawTaxAmount = snapshot.RawTaxAmount,
+            RoundingAdjustment = snapshot.RoundingAdjustment,
+            AllocationSequence = snapshot.AllocationSequence,
+            CompoundBasis = snapshot.CompoundBasis,
+            CalculationOrder = snapshot.CalculationOrder,
+            CalculationDate = snapshot.CalculationDate,
+            IsManualOverride = snapshot.IsManualOverride,
+            OverrideReason = snapshot.OverrideReason
+        }).ToArray();
 
     private IQueryable<SupplierDebitNote> BaseQuery(Guid tenantId) => _db.SupplierDebitNotes
         .Include(item => item.Vendor)
