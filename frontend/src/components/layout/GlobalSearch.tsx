@@ -86,7 +86,7 @@ function SearchInput({ enabled, hasAnyRole, hasAnyPermission }: {
     if (open && active >= 0) document.getElementById(`${listId}-${active}`)?.scrollIntoView?.({ block: 'nearest' });
   }, [active, open, listId]);
 
-  return <div ref={root} className="relative w-full max-w-2xl" onBlur={event => {
+  return <div ref={root} className="relative w-full max-w-2xl xl:max-w-[34rem]" onBlur={event => {
     if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(false);
   }}>
     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -94,7 +94,7 @@ function SearchInput({ enabled, hasAnyRole, hasAnyPermission }: {
       aria-expanded={open} aria-controls={open ? listId : undefined}
       aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
       placeholder="Search records, modules and pages…" maxLength={100} value={query}
-      className="bg-slate-50/70 pl-10 pr-16 dark:bg-neutral-800/80"
+      className="h-10 rounded-xl border-slate-200/80 bg-slate-50/70 pl-10 pr-16 text-sm shadow-inner shadow-slate-100/60 transition-shadow focus-visible:bg-white focus-visible:shadow-sm dark:border-neutral-700 dark:bg-neutral-800/80 dark:shadow-none dark:focus-visible:bg-neutral-800"
       onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onChange={event => { setQuery(event.target.value); setRecords([]); setActiveId(null); setOpen(true); }}
       onKeyDown={event => {
         if (event.key === 'Escape') { setOpen(false); setActiveId(null); }

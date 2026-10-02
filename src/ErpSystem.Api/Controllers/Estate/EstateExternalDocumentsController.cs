@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Ehc;
 using ErpSystem.Core.Interfaces.Ehc;
+using ErpSystem.Api.Filters;
 using ErpSystem.Api.Services;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Globalization;
@@ -2585,6 +2586,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 verification.IsDeleted = true;
                 verification.UpdatedAt = DateTime.UtcNow;
                 await _db.SaveChangesAsync(cancellationToken);
+                HttpContext.Items[SystemExceptionResultLoggingFilter.HandledExceptionItemKey] = ex;
                 _logger.LogError(ex,
                     "Public property enquiry {Channel} verification delivery failed for tenant {TenantId}; listing {ListingId}; trace {TraceId}",
                     channel,
@@ -2593,14 +2595,18 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     HttpContext.TraceIdentifier);
 
                 var deliveryLabel = otpChannel == OtpChannel.Email ? "email" : "SMS";
-                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                var problem = new ProblemDetails
                 {
-                    success = false,
-                    code = otpChannel == OtpChannel.Email
-                        ? "PUBLIC_ENQUIRY_EMAIL_DELIVERY_FAILED"
-                        : "PUBLIC_ENQUIRY_SMS_DELIVERY_FAILED",
-                    message = $"The {deliveryLabel} verification code could not be sent. Ask an administrator to check the tenant {deliveryLabel} settings, then try again."
-                });
+                    Status = StatusCodes.Status503ServiceUnavailable,
+                    Title = "Verification code could not be sent",
+                    Detail = $"The {deliveryLabel} verification code could not be sent. Ask an administrator to check the tenant {deliveryLabel} settings, then try again.",
+                    Instance = Request.Path
+                };
+                problem.Extensions["code"] = otpChannel == OtpChannel.Email
+                    ? "PUBLIC_ENQUIRY_EMAIL_DELIVERY_FAILED"
+                    : "PUBLIC_ENQUIRY_SMS_DELIVERY_FAILED";
+                problem.Extensions["correlationId"] = HttpContext.TraceIdentifier;
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, problem);
             }
 
             return Accepted(new
@@ -2621,12 +2627,21 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         }
         catch (Exception ex)
         {
+            HttpContext.Items[SystemExceptionResultLoggingFilter.HandledExceptionItemKey] = ex;
             _logger.LogError(ex,
                 "Public property enquiry verification challenge failed for listing {ListingId}; trace {TraceId}",
                 request.ListingId,
                 HttpContext.TraceIdentifier);
-            return StatusCode(StatusCodes.Status503ServiceUnavailable,
-                new { success = false, message = "Verification is unavailable right now. Please try again later." });
+            var problem = new ProblemDetails
+            {
+                Status = StatusCodes.Status503ServiceUnavailable,
+                Title = "Verification is temporarily unavailable",
+                Detail = "Verification is unavailable right now. Please try again later. If the problem continues, contact your administrator.",
+                Instance = Request.Path
+            };
+            problem.Extensions["code"] = "PUBLIC_ENQUIRY_VERIFICATION_UNAVAILABLE";
+            problem.Extensions["correlationId"] = HttpContext.TraceIdentifier;
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, problem);
         }
     }
 
