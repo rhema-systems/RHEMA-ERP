@@ -351,6 +351,10 @@ export interface LiquidityAccount {
     isSystemAccount: boolean;
     notes?: string;
     currentBalance: number;
+    settlementBalance: number;
+    balanceDifference: number;
+    isReconciled: boolean;
+    balanceAuthority: 'PrimaryBookGL' | 'LiquiditySubledgerFallback';
     availableToSettle: number;
     openEntryCount: number;
     rowVersion: string;

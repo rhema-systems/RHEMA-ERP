@@ -477,6 +477,20 @@ export default function LiquidityAccountsPage() {
                     minimumFractionDigits: 2,
                   })}
                 </div>
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <span className="text-muted-foreground">
+                    {account.balanceAuthority === 'PrimaryBookGL'
+                      ? 'Primary-book GL balance'
+                      : 'Settlement balance (GL unavailable)'}
+                  </span>
+                  <Badge variant={account.isReconciled ? 'default' : 'secondary'}>
+                    {account.balanceAuthority !== 'PrimaryBookGL'
+                      ? 'GL unavailable'
+                      : account.isReconciled
+                        ? 'Reconciled'
+                        : `Variance ${account.currency} ${account.balanceDifference.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                  </Badge>
+                </div>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <p className="text-muted-foreground">Available</p>
@@ -491,6 +505,13 @@ export default function LiquidityAccountsPage() {
                     <p className="text-muted-foreground">Open items</p>
                     <p>{account.openEntryCount}</p>
                   </div>
+                </div>
+                <div className="text-sm">
+                  <p className="text-muted-foreground">Settlement subledger</p>
+                  <p>
+                    {account.currency}{' '}
+                    {account.settlementBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </p>
                 </div>
                 <div className="border-t pt-3 text-sm">
                   <p className="text-muted-foreground">GL control account</p>
