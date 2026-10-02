@@ -70,6 +70,33 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 || (item.PropertyFileReference != null && EF.Functions.Like(item.PropertyFileReference, search)));
         }
 
+        if (query.IncludeLandDemarcations
+            && !query.AssetId.HasValue
+            && (!query.AssetType.HasValue || query.AssetType == EstateManagedAssetType.Land))
+        {
+            var parentAssets = await assetsQuery
+                .AsNoTracking()
+                .ToListAsync();
+
+            await EnrichLandAcquisitionAssetsForReadAsync(parentAssets);
+
+            var parentDtos = parentAssets.Select(MapToDto).ToList();
+            await ApplyDemarcationCountsAsync(parentDtos);
+            var demarcationDtos = await GetLandDemarcationRegisterRowsAsync(
+                query,
+                normalizedSearch,
+                statuses,
+                excludedStatuses);
+
+            return parentDtos
+                .Concat(demarcationDtos)
+                .OrderBy(item => item.AssetCode)
+                .ThenBy(item => item.Name)
+                .Skip(skip)
+                .Take(take)
+                .ToList();
+        }
+
         var assets = await assetsQuery
             .AsNoTracking()
             .OrderBy(item => item.AssetCode)
@@ -86,7 +113,27 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             return mappedAssets;
         }
 
-        var assetIds = assets.Select(item => item.Id).ToList();
+        await ApplyDemarcationCountsAsync(mappedAssets);
+
+        return mappedAssets;
+    }
+
+    private async Task ApplyDemarcationCountsAsync(IReadOnlyCollection<EstateManagedAssetDto> mappedAssets)
+    {
+        if (mappedAssets.Count == 0)
+        {
+            return;
+        }
+
+        var assetIds = mappedAssets
+            .Where(item => item.ListingScope == "asset")
+            .Select(item => item.Id)
+            .ToList();
+        if (assetIds.Count == 0)
+        {
+            return;
+        }
+
         var demarcationCounts = await _unitOfWork.Repository<EstateLandDemarcation>()
             .GetQueryable(item => item.TenantId == _currentUserProvider.TenantId
                 && assetIds.Contains(item.EstateManagedAssetId)
@@ -108,9 +155,63 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 mappedAsset.VerifiedDemarcationCount = count.VerifiedCount;
             }
         }
-
-        return mappedAssets;
     }
+
+    private async Task<IReadOnlyList<EstateManagedAssetDto>> GetLandDemarcationRegisterRowsAsync(
+        EstateManagedAssetQuery query,
+        string? normalizedSearch,
+        IReadOnlyCollection<EstateManagedAssetStatus> statuses,
+        IReadOnlyCollection<EstateManagedAssetStatus> excludedStatuses)
+    {
+        var demarcationsQuery = _unitOfWork.Repository<EstateLandDemarcation>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted
+                && item.EstateManagedAsset.TenantId == _currentUserProvider.TenantId
+                && !item.EstateManagedAsset.IsDeleted
+                && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
+                && (!query.Status.HasValue || item.EstateManagedAsset.Status == query.Status.Value)
+                && (statuses.Count == 0 || statuses.Contains(item.EstateManagedAsset.Status))
+                && (excludedStatuses.Count == 0 || !excludedStatuses.Contains(item.EstateManagedAsset.Status))
+                && (!query.AvailableForLease.HasValue || item.EstateManagedAsset.IsAvailableForLease == query.AvailableForLease.Value)
+                && (!query.AvailableForSale.HasValue || item.EstateManagedAsset.IsAvailableForSale == query.AvailableForSale.Value)
+                && (!query.AvailableForSaleOrLease.HasValue
+                    || (item.EstateManagedAsset.IsAvailableForSale || item.EstateManagedAsset.IsAvailableForLease) == query.AvailableForSaleOrLease.Value)
+                && (!query.PublishedToExternalPortal.HasValue
+                    || item.IsPublishedToExternalPortal == query.PublishedToExternalPortal.Value)
+                && (query.PortalListingCandidates != true
+                    || item.IsPublishedToExternalPortal
+                    || item.ExternalListingType != "None")
+                && (string.IsNullOrEmpty(query.ExternalListingStatus)
+                    || (query.ExternalListingStatus != "PendingPublication"
+                        && item.ExternalListingStatus == query.ExternalListingStatus)));
+
+        if (normalizedSearch != null)
+        {
+            var search = $"%{normalizedSearch}%";
+            demarcationsQuery = demarcationsQuery.Where(item =>
+                EF.Functions.Like(item.Description, search)
+                || (item.ChildFixedAssetReference != null && EF.Functions.Like(item.ChildFixedAssetReference, search))
+                || (item.ParentLandAssetReference != null && EF.Functions.Like(item.ParentLandAssetReference, search))
+                || (item.ParentFixedAssetReference != null && EF.Functions.Like(item.ParentFixedAssetReference, search))
+                || EF.Functions.Like(item.EstateManagedAsset.AssetCode, search)
+                || EF.Functions.Like(item.EstateManagedAsset.Name, search)
+                || (item.EstateManagedAsset.ProjectCode != null && EF.Functions.Like(item.EstateManagedAsset.ProjectCode, search))
+                || (item.EstateManagedAsset.ProjectTitle != null && EF.Functions.Like(item.EstateManagedAsset.ProjectTitle, search))
+                || (item.EstateManagedAsset.Purpose != null && EF.Functions.Like(item.EstateManagedAsset.Purpose, search))
+                || (item.EstateManagedAsset.ZoningClassification != null && EF.Functions.Like(item.EstateManagedAsset.ZoningClassification, search))
+                || (item.EstateManagedAsset.GisLayerReference != null && EF.Functions.Like(item.EstateManagedAsset.GisLayerReference, search))
+                || (item.EstateManagedAsset.Location != null && EF.Functions.Like(item.EstateManagedAsset.Location, search)));
+        }
+
+        var demarcations = await demarcationsQuery
+            .Include(item => item.EstateManagedAsset)
+            .AsNoTracking()
+            .ToListAsync();
+
+        return demarcations.Select(MapDemarcationToManagedAssetDto).ToList();
+    }
+
 
     public async Task<EstateManagedAssetDto> PublishLandAcquisitionAsync(LandAcquisitionEstateHandoffDto handoff)
         => await ExecuteSerializableMutationAsync(
@@ -546,7 +647,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 && !item.EstateManagedAsset.Demarcations.Any(child =>
                     !child.IsDeleted && child.ParentDemarcationId == item.Id)
                 && ((item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
-                        && (item.IsReadyForProjectManagement || item.EstateManagedAsset.IsReadyForProjectManagement)
+                        && item.IsReadyForProjectManagement
                         && !item.IsPublishedToExternalPortal
                         && !item.EstateManagedAsset.IsPublishedToExternalPortal)
                     || (normalizedCurrentReference != null
@@ -601,7 +702,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                     candidate,
                     currentReferenceSet);
                 var isAvailable = candidate.AssetStatus == EstateManagedAssetStatus.LandBank
-                    && (candidate.DemarcationIsReadyForProjectManagement || candidate.AssetIsReadyForProjectManagement)
+                    && candidate.DemarcationIsReadyForProjectManagement
                     && !candidate.AssetIsPublishedToExternalPortal
                     && !candidate.DemarcationIsPublishedToExternalPortal
                     && !IsReadyLandCandidateAssignedToProject(
@@ -2633,9 +2734,87 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         CreatedBy = demarcation.CreatedBy
     };
 
+    private static EstateManagedAssetDto MapDemarcationToManagedAssetDto(EstateLandDemarcation demarcation)
+    {
+        var asset = demarcation.EstateManagedAsset;
+        var reference = EstateLandDemarcationReference.DisplayReference(
+            demarcation.ChildFixedAssetReference,
+            asset.AssetCode,
+            demarcation.DemarcationNumber);
+
+        return new EstateManagedAssetDto
+        {
+            Id = demarcation.Id,
+            ListingScope = "demarcation",
+            ParentAssetId = demarcation.EstateManagedAssetId,
+            AssetCode = reference,
+            Name = reference,
+            Description = demarcation.Description,
+            Location = asset.Location,
+            Purpose = asset.Purpose,
+            ZoningClassification = asset.ZoningClassification,
+            PlanningComplianceStatus = asset.PlanningComplianceStatus,
+            GisLayerReference = asset.GisLayerReference,
+            GisProvider = asset.GisProvider,
+            GisFeatureId = asset.GisFeatureId,
+            GisSourceCrs = asset.GisSourceCrs,
+            GisSyncStatus = asset.GisSyncStatus,
+            GisLastSyncedAt = asset.GisLastSyncedAt,
+            BoundaryVerified = demarcation.BoundaryVerified,
+            BoundaryCoordinates = demarcation.BoundaryCoordinates,
+            SurveyPlanNumber = asset.SurveyPlanNumber,
+            MapSheetNumber = asset.MapSheetNumber,
+            CadastreDescription = asset.CadastreDescription,
+            Region = asset.Region,
+            District = asset.District,
+            Town = asset.Town,
+            AreaValue = demarcation.AreaSquareFeet,
+            AreaUnit = "sq ft",
+            SurveyorName = asset.SurveyorName,
+            SurveyDate = asset.SurveyDate,
+            BeaconCount = demarcation.BeaconCount,
+            OwnershipHistory = string.IsNullOrWhiteSpace(asset.OwnershipHistoryJson)
+                ? Array.Empty<ExistingLandOwnerDto>()
+                : JsonSerializer.Deserialize<List<ExistingLandOwnerDto>>(asset.OwnershipHistoryJson) ?? [],
+            IsReadyForProjectManagement = demarcation.IsReadyForProjectManagement,
+            AssetType = EstateManagedAssetType.Land,
+            Status = asset.Status,
+            SourceType = asset.SourceType,
+            LandAcquisitionId = asset.LandAcquisitionId,
+            ProjectId = asset.ProjectId,
+            ProjectCode = asset.ProjectCode,
+            ProjectTitle = asset.ProjectTitle,
+            UnitType = "Land parcel",
+            GroundRentPayable = demarcation.GroundRentPayable,
+            GroundRentRatePerAcre = demarcation.GroundRentRatePerAcre,
+            GroundRentComputed = demarcation.GroundRentComputed,
+            AreaSquareMeters = demarcation.AreaSquareFeet / 10.7639104167m,
+            ValuationAmount = demarcation.AllocatedCost,
+            Currency = FirstNonBlankOrNull(demarcation.ExternalListingCurrency, asset.Currency) ?? "GHS",
+            IsAvailableForLease = asset.IsAvailableForLease,
+            IsAvailableForSale = asset.IsAvailableForSale,
+            IsPublishedFromProject = asset.IsPublishedFromProject,
+            PublishedFromProjectAt = asset.PublishedFromProjectAt,
+            IsPublishedToExternalPortal = demarcation.IsPublishedToExternalPortal,
+            ExternalListingType = demarcation.ExternalListingType,
+            ExternalListingStatus = demarcation.ExternalListingStatus,
+            ExternalListingPrice = demarcation.ExternalListingPrice,
+            ExternalSalePrice = demarcation.ExternalSalePrice,
+            ExternalMonthlyRent = demarcation.ExternalMonthlyRent,
+            ExternalGroundRentRequired = demarcation.ExternalGroundRentRequired,
+            ExternalPremiumChargeRequired = demarcation.ExternalPremiumChargeRequired,
+            ExternalLeaseTermMonths = demarcation.ExternalLeaseTermMonths,
+            ExternalListingCurrency = demarcation.ExternalListingCurrency,
+            ExternalListingNotes = demarcation.ExternalListingNotes,
+            ExternalPublishedAt = demarcation.ExternalPublishedAt,
+            Notes = asset.Notes
+        };
+    }
+
     private static EstateManagedAssetDto MapToDto(EstateManagedAsset asset) => new()
     {
         Id = asset.Id,
+        ListingScope = "asset",
         AssetCode = asset.AssetCode,
         Name = asset.Name,
         Description = asset.Description,

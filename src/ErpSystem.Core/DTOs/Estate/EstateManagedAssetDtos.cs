@@ -5,6 +5,8 @@ namespace ErpSystem.Core.DTOs.Estate;
 public class EstateManagedAssetDto
 {
     public Guid Id { get; set; }
+    public string ListingScope { get; set; } = "asset";
+    public Guid? ParentAssetId { get; set; }
     public string AssetCode { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
@@ -324,6 +326,7 @@ public class EstateManagedAssetQuery
     public bool? PortalListingCandidates { get; set; }
     public string? ExternalListingStatus { get; set; }
     public bool? PublishedToExternalPortal { get; set; }
+    public bool IncludeLandDemarcations { get; set; }
     public int Skip { get; set; }
     public int Take { get; set; } = 100;
 }

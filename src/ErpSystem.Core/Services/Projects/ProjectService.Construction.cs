@@ -401,7 +401,7 @@ public partial class ProjectService
                     continue;
                 }
 
-                if ((!asset.IsReadyForProjectManagement && !demarcation.IsReadyForProjectManagement)
+                if (!demarcation.IsReadyForProjectManagement
                     || demarcation.IsPublishedToExternalPortal)
                 {
                     continue;

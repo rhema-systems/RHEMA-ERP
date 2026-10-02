@@ -60,6 +60,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
         [FromQuery] bool? portalListingCandidates = null,
         [FromQuery] string? externalListingStatus = null,
         [FromQuery] bool? publishedToExternalPortal = null,
+        [FromQuery] bool includeLandDemarcations = false,
         [FromQuery] int skip = 0,
         [FromQuery] int take = 100)
     {
@@ -74,6 +75,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
             PortalListingCandidates = portalListingCandidates,
             ExternalListingStatus = externalListingStatus,
             PublishedToExternalPortal = publishedToExternalPortal,
+            IncludeLandDemarcations = includeLandDemarcations,
             Skip = skip,
             Take = take
         });
