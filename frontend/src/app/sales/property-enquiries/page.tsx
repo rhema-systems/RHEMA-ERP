@@ -130,7 +130,6 @@ function PropertyEnquiries() {
   );
   const [depositDraft, setDepositDraft] = useState({
     amount: '',
-    currency: 'GHS',
     paymentMethod: 'BankTransfer',
     transactionReference: '',
     receivedAt: '',
@@ -280,6 +279,12 @@ function PropertyEnquiries() {
     enabled: Boolean(selectedId && detail.data?.prospect?.opportunityId),
     queryFn: () => propertyEnquiryService.listDeposits(selectedId),
   });
+  const depositCurrency = resolveOpportunityCurrency(
+    detail.data?.prospect?.currency ||
+      handoff.data?.opportunity?.currency ||
+      detail.data?.propertyListing?.currency,
+    activeCurrencies.data ?? []
+  );
 
   const qualify = useMutation({
     mutationFn: () =>
@@ -430,7 +435,7 @@ function PropertyEnquiries() {
     mutationFn: () =>
       propertyEnquiryService.recordDeposit(selectedId, {
         amount: Number(depositDraft.amount),
-        currency: depositDraft.currency.trim().toUpperCase(),
+        currency: depositCurrency,
         paymentMethod: depositDraft.paymentMethod,
         transactionReference: depositDraft.transactionReference.trim() || null,
         receivedAt: depositDraft.receivedAt
@@ -455,6 +460,16 @@ function PropertyEnquiries() {
         description:
           'The receipt is pending clearance and does not count toward the threshold yet.',
         variant: 'success',
+      });
+    },
+    onError: (mutationError) => {
+      toast({
+        title: 'Deposit could not be recorded',
+        description:
+          mutationError instanceof Error && mutationError.message.trim()
+            ? mutationError.message
+            : 'The deposit could not be recorded. Please try again.',
+        variant: 'destructive',
       });
     },
   });
@@ -492,6 +507,19 @@ function PropertyEnquiries() {
         variant: 'success',
       });
     },
+    onError: (mutationError) => {
+      toast({
+        title:
+          depositAction?.kind === 'clear'
+            ? 'Deposit could not be cleared'
+            : 'Deposit could not be reversed',
+        description:
+          mutationError instanceof Error && mutationError.message.trim()
+            ? mutationError.message
+            : 'The deposit action could not be completed. Please try again.',
+        variant: 'destructive',
+      });
+    },
   });
   const finalizePartner = useMutation({
     mutationFn: () =>
@@ -518,8 +546,6 @@ function PropertyEnquiries() {
     createPartner.error ||
     createOpportunity.error ||
     depositReceipts.error ||
-    recordDeposit.error ||
-    decideDeposit.error ||
     finalizePartner.error ||
     partnerMatches.error ||
     submitHandoff.error;
@@ -700,7 +726,6 @@ function PropertyEnquiries() {
                 });
                 setDepositDraft({
                   amount: '',
-                  currency: 'GHS',
                   paymentMethod: 'BankTransfer',
                   transactionReference: '',
                   receivedAt: '',
@@ -1148,13 +1173,8 @@ function PropertyEnquiries() {
                         aria-label="Deposit currency"
                         maxLength={3}
                         placeholder="Currency"
-                        value={depositDraft.currency}
-                        onChange={(event) =>
-                          setDepositDraft((value) => ({
-                            ...value,
-                            currency: event.target.value.toUpperCase(),
-                          }))
-                        }
+                        value={depositCurrency}
+                        disabled
                       />
                       <select
                         aria-label="Payment method"
@@ -1202,7 +1222,7 @@ function PropertyEnquiries() {
                           recordDeposit.isPending ||
                           !Number.isFinite(Number(depositDraft.amount)) ||
                           Number(depositDraft.amount) <= 0 ||
-                          !/^[A-Za-z]{3}$/.test(depositDraft.currency)
+                          !/^[A-Z]{3}$/.test(depositCurrency)
                         }
                       >
                         {recordDeposit.isPending
