@@ -13466,7 +13466,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     "[SettlementToleranceAmount] >= 0 AND [SettlementTolerancePercentage] BETWEEN 0 AND 100");
                 table.HasCheckConstraint(
                     "CK_FinanceSettings_InvoiceRoundingReadiness",
-                    "[InvoiceRoundingEnabled] = 0");
+                    "[InvoiceRoundingEnabled] = 0 OR ([InvoiceRoundingIncrement] IS NOT NULL AND [InvoiceRoundingIncrement] > 0 AND [InvoiceRoundingGainAccountId] IS NOT NULL AND [InvoiceRoundingLossAccountId] IS NOT NULL)");
                 if (isSqlServer)
                     table.HasCheckConstraint(
                         "CK_FinanceSettings_BaseCurrencyCanonical_C3",

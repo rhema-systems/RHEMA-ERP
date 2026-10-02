@@ -99,6 +99,19 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 _context.FinanceSettings.Add(settings);
             }
 
+            var effectiveInvoiceRoundingEnabled = dto.InvoiceRoundingEnabled ?? settings.InvoiceRoundingEnabled;
+            if (effectiveInvoiceRoundingEnabled)
+            {
+                var gainAccountId = dto.InvoiceRoundingGainAccountId ?? settings.InvoiceRoundingGainAccountId
+                    ?? throw new InvalidOperationException("Invoice rounding gain account is required before activation.");
+                var lossAccountId = dto.InvoiceRoundingLossAccountId ?? settings.InvoiceRoundingLossAccountId
+                    ?? throw new InvalidOperationException("Invoice rounding loss account is required before activation.");
+                await ValidateWriteOffAccountAsync(
+                    tenantId, gainAccountId, AccountType.Revenue, "Invoice rounding gain account");
+                await ValidateWriteOffAccountAsync(
+                    tenantId, lossAccountId, AccountType.Expense, "Invoice rounding loss account");
+            }
+
             var accountingActivityExists = await HasAccountingActivityAsync(tenantId);
             if (accountingActivityExists && HasPrecisionAccountingChange(dto, settings))
             {
@@ -838,8 +851,17 @@ namespace ErpSystem.Api.Services.Finance.Settings
             var invoiceEnabled = dto.InvoiceRoundingEnabled ?? settings.InvoiceRoundingEnabled;
             if (invoiceEnabled)
             {
-                throw new InvalidOperationException(
-                    "Invoice rounding activation is unavailable until the canonical AR/AP posting integration is explicitly enabled.");
+                var invoiceIncrement = dto.InvoiceRoundingIncrement ?? settings.InvoiceRoundingIncrement;
+                if (!invoiceIncrement.HasValue || invoiceIncrement.Value <= 0m)
+                    throw new InvalidOperationException(
+                        "Invoice/cash rounding requires a positive increment before activation.");
+                if (invoiceIncrement.Value < currencyMinorUnit || invoiceIncrement.Value % currencyMinorUnit != 0m)
+                    throw new InvalidOperationException(
+                        $"Invoice/cash rounding increment must be a whole multiple of the base-currency minor unit {currencyMinorUnit}.");
+                if (!(dto.InvoiceRoundingGainAccountId ?? settings.InvoiceRoundingGainAccountId).HasValue
+                    || !(dto.InvoiceRoundingLossAccountId ?? settings.InvoiceRoundingLossAccountId).HasValue)
+                    throw new InvalidOperationException(
+                        "Invoice/cash rounding requires both gain and loss accounts before activation.");
             }
 
             var settlementAmount = dto.SettlementToleranceAmount ?? settings.SettlementToleranceAmount;

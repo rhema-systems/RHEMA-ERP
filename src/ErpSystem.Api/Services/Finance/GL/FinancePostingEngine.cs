@@ -1654,6 +1654,9 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 $"Future-dated posting is not allowed for fiscal period '{fiscalPeriod.PeriodCode}'.");
         }
 
+        await InvoiceCashRoundingPostingAdapter.ApplyAsync(
+            _context, tenantId, request, functionalCurrency, functionalDecimalPlaces, cancellationToken);
+
         var requestedLines = request.Lines?.ToList() ?? new List<FinancePostingLineDto>();
         if (requestedLines.Count == 0)
         {

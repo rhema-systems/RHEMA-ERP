@@ -355,6 +355,24 @@ export default function FinanceSettingsPage() {
         }
     };
 
+    const roundingGainReady = accounts.some(account =>
+        account.id === formData.invoiceRoundingGainAccountId &&
+        account.accountType === 'Revenue' &&
+        account.status === 'Active' &&
+        account.allowDirectPosting &&
+        !account.isControlAccount);
+    const roundingLossReady = accounts.some(account =>
+        account.id === formData.invoiceRoundingLossAccountId &&
+        account.accountType === 'Expense' &&
+        account.status === 'Active' &&
+        account.allowDirectPosting &&
+        !account.isControlAccount);
+    const invoiceRoundingReady = Boolean(
+        formData.invoiceRoundingIncrement &&
+        formData.invoiceRoundingIncrement > 0 &&
+        roundingGainReady &&
+        roundingLossReady);
+
     if (loading) {
         return (
             <div className="space-y-6">
@@ -542,7 +560,7 @@ export default function FinanceSettingsPage() {
                         <div className="space-y-2"><Label htmlFor="taxRoundingIncrement">Tax monetary increment</Label><Input id="taxRoundingIncrement" type="number" min={0.000001} step={0.000001} disabled={settings?.precisionAccountingPolicyLocked} value={formData.taxRoundingIncrement ?? ''} placeholder="Currency minor unit" onChange={event => setFormData({ ...formData, taxRoundingIncrement: event.target.value ? Number(event.target.value) : null })} /></div>
                     </div>
                     <div className="rounded-md border p-4 space-y-4">
-                        <div className="flex items-center justify-between"><div><Label htmlFor="invoiceRounding">Invoice / cash rounding</Label><p className="text-xs text-muted-foreground">Configuration only. Activation is gated until canonical AR/AP posting integration is approved.</p></div><Switch id="invoiceRounding" disabled checked={formData.invoiceRoundingEnabled ?? false} onCheckedChange={checked => setFormData({ ...formData, invoiceRoundingEnabled: checked })} /></div>
+                        <div className="flex items-center justify-between"><div><Label htmlFor="invoiceRounding">Invoice / cash rounding</Label><p className="text-xs text-muted-foreground">Posts each non-zero delta to the configured gain or loss account through the canonical Finance journal. Configure a positive increment and active direct-posting Revenue and Expense accounts before activation.</p></div><Switch id="invoiceRounding" disabled={settings?.precisionAccountingPolicyLocked || (!formData.invoiceRoundingEnabled && !invoiceRoundingReady)} checked={formData.invoiceRoundingEnabled ?? false} onCheckedChange={checked => setFormData({ ...formData, invoiceRoundingEnabled: checked })} /></div>
                         <div className="grid gap-4 md:grid-cols-3">
                             <div className="space-y-2"><Label htmlFor="invoiceIncrement">Increment</Label><Input id="invoiceIncrement" type="number" step={0.000001} disabled={settings?.precisionAccountingPolicyLocked} value={formData.invoiceRoundingIncrement ?? ''} onChange={event => setFormData({ ...formData, invoiceRoundingIncrement: event.target.value ? Number(event.target.value) : null })} /></div>
                             <div className="space-y-2"><Label>Gain account</Label><AccountPicker id="invoiceRoundingGain" placeholder="Search revenue accounts" accounts={accounts} disabled={settings?.precisionAccountingPolicyLocked} value={formData.invoiceRoundingGainAccountId ?? undefined} onChange={value => setFormData({ ...formData, invoiceRoundingGainAccountId: value ?? null })} /></div>

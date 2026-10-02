@@ -228,6 +228,57 @@ public sealed class FinanceSettingsWriteOffMappingTests
         fixture.Audits.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Invoice_rounding_activation_requires_and_exposes_valid_direct_posting_accounts()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        var result = await fixture.Service.UpdateSettingsAsync(new UpdateFinanceSettingsDto
+        {
+            InvoiceRoundingEnabled = true,
+            InvoiceRoundingIncrement = 0.05m,
+            InvoiceRoundingGainAccountId = fixture.Recovery.Id,
+            InvoiceRoundingLossAccountId = fixture.Expense.Id
+        });
+
+        result.InvoiceRoundingEnabled.Should().BeTrue();
+        result.InvoiceRoundingIncrement.Should().Be(0.05m);
+        result.InvoiceRoundingGainAccountId.Should().Be(fixture.Recovery.Id);
+        result.InvoiceRoundingLossAccountId.Should().Be(fixture.Expense.Id);
+
+        fixture.Recovery.AllowDirectPosting = false;
+        await fixture.Context.SaveChangesAsync();
+        await FluentActions.Awaiting(() => fixture.Service.UpdateSettingsAsync(
+                new UpdateFinanceSettingsDto { InvoiceRoundingEnabled = true }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*rounding gain account*active*Revenue*");
+    }
+
+    [Fact]
+    public async Task Invoice_rounding_policy_cannot_be_activated_after_posted_accounting_activity()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Context.JournalEntries.Add(new JournalEntry
+        {
+            TenantId = fixture.TenantId,
+            JournalEntryNumber = "LOCK-1",
+            Description = "Precision lifecycle lock",
+            PostingStatus = "Posted"
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.UpdateSettingsAsync(new UpdateFinanceSettingsDto
+        {
+            InvoiceRoundingEnabled = true,
+            InvoiceRoundingIncrement = 0.05m,
+            InvoiceRoundingGainAccountId = fixture.Recovery.Id,
+            InvoiceRoundingLossAccountId = fixture.Expense.Id
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*cannot be changed after posted usage*");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         public Guid TenantId { get; } = Guid.NewGuid();
