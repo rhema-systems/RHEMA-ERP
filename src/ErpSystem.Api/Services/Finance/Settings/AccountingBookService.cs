@@ -485,6 +485,8 @@ public sealed class AccountingBookService : IAccountingBookService
                 if (!frozenInitialization) await _initialization.EnsureDeltaStructureAsync(book.Id, ct);
             }
             ApplyPostingFlags(book); ClearPending(book, true);
+            if (target == AccountingBookLifecycleStatus.Active)
+                await EnsurePostingPeriodAuthoritiesAsync(book, actor, ct);
             if (target is AccountingBookLifecycleStatus.Active or AccountingBookLifecycleStatus.Suspended)
             {
                 // Manifest mappings are prepared while inactive, executable only while the
@@ -503,6 +505,43 @@ public sealed class AccountingBookService : IAccountingBookService
         await AuditAsync(eventType, book, before, Snapshot(book), request.Reason, ct);
         return await LoadDtoAsync(book.Id, ct);
     }, ct);
+
+    private async Task EnsurePostingPeriodAuthoritiesAsync(AccountingBook book, Guid actor, CancellationToken ct)
+    {
+        var fiscalPeriods = await _db.FiscalPeriods
+            .Where(period => period.TenantId == TenantId && !period.IsDeleted)
+            .ToListAsync(ct);
+        if (fiscalPeriods.Count == 0) return;
+
+        var existingPeriodIds = await _db.AccountingBookPeriods
+            .Where(period => period.TenantId == TenantId
+                && period.AccountingBookId == book.Id
+                && !period.IsDeleted)
+            .Select(period => period.FiscalPeriodId)
+            .ToListAsync(ct);
+        var existing = existingPeriodIds.ToHashSet();
+        var now = DateTime.UtcNow;
+        var missing = fiscalPeriods
+            .Where(period => !existing.Contains(period.Id))
+            .Select(period => new AccountingBookPeriod
+            {
+                TenantId = TenantId,
+                AccountingBookId = book.Id,
+                FiscalPeriodId = period.Id,
+                PeriodStatus = period.IsLocked
+                    ? AccountingBookPeriodStatus.Locked
+                    : period.IsClosed
+                        ? AccountingBookPeriodStatus.Closed
+                        : period.IsOpen
+                            ? AccountingBookPeriodStatus.Open
+                            : AccountingBookPeriodStatus.Future,
+                CreatedAt = now,
+                CreatedBy = "System (accounting-book activation)",
+                CreatedById = actor
+            })
+            .ToList();
+        if (missing.Count > 0) await _db.AccountingBookPeriods.AddRangeAsync(missing, ct);
+    }
 
     private async Task<ValidatedBookStructure> ValidateStructureAsync(CreateAccountingBookDto request, AccountingBook? currentBook, CancellationToken ct)
     {

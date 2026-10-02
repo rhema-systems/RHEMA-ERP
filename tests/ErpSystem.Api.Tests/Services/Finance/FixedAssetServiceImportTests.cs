@@ -36,6 +36,29 @@ public sealed class FixedAssetServiceImportTests : IDisposable
     }
 
     [Fact]
+    public void ImportAssetsFromExcelAsync_KeepsUserTransactionInsideRetryStrategy()
+    {
+        var source = ReadRepositoryFile(
+            "src/ErpSystem.Api/Services/Finance/FixedAssets/FixedAssetService.cs");
+        var methodStart = source.IndexOf(
+            "public async Task<BulkImportResultDto> ImportAssetsFromExcelAsync",
+            StringComparison.Ordinal);
+        var methodEnd = source.IndexOf(
+            "public async Task<byte[]> GenerateImportTemplateAsync",
+            methodStart,
+            StringComparison.Ordinal);
+
+        methodStart.Should().BeGreaterThanOrEqualTo(0);
+        methodEnd.Should().BeGreaterThan(methodStart);
+        var method = source[methodStart..methodEnd];
+
+        method.Should().Contain("_context.Database.CreateExecutionStrategy()")
+            .And.Contain("strategy.ExecuteInTransactionAsync(")
+            .And.Contain("_context.ChangeTracker.Clear()")
+            .And.NotContain("_context.Database.BeginTransactionAsync(");
+    }
+
+    [Fact]
     public async Task ImportAssetsFromExcelAsync_DryRun_ValidatesLocationWithoutSavingAsset()
     {
         SeedCategory("COMP-HW");
@@ -449,6 +472,22 @@ public sealed class FixedAssetServiceImportTests : IDisposable
         public decimal ResidualValue { get; init; }
         public string? SerialNumber { get; init; }
         public string Status { get; init; } = "Draft";
+    }
+
+    private static string ReadRepositoryFile(string relativePath)
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory != null;
+             directory = directory.Parent)
+        {
+            var candidate = Path.Combine(
+                directory.FullName,
+                relativePath.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(candidate))
+                return File.ReadAllText(candidate);
+        }
+
+        throw new FileNotFoundException($"Could not locate repository file '{relativePath}'.");
     }
 
     public void Dispose()

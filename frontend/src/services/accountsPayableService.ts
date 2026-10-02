@@ -205,6 +205,10 @@ export class AccountsPayableService {
         return apiService.post<VendorInvoice>(`${this.invoiceBaseUrl}/${id}/approve`, comments || 'Approved');
     }
 
+    public async postInvoice(id: string): Promise<VendorInvoice> {
+        return apiService.post<VendorInvoice>(`${this.invoiceBaseUrl}/${id}/post`, {});
+    }
+
     public async submitInvoiceForApproval(id: string): Promise<VendorInvoice> {
         return apiService.post<VendorInvoice>(`${this.invoiceBaseUrl}/${id}/submit`, {});
     }

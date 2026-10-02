@@ -138,6 +138,42 @@ public sealed class FiscalYearDeletionGuardTests
     }
 
     [Fact]
+    public async Task CreateFiscalYearAsync_ShouldProvisionFutureAuthorityForEveryEligibleBook()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedFiscalYear(db, tenantId);
+        var book = new AccountingBook
+        {
+            TenantId = tenantId,
+            Code = "BASE",
+            Name = "Primary",
+            Purpose = "Statutory",
+            BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
+            IsDefault = true,
+            IsActive = true,
+            AllowsPosting = true
+        };
+        db.AccountingBooks.Add(book);
+        await db.SaveChangesAsync();
+
+        var created = await CreateService(db, tenantId).CreateFiscalYearAsync(Create2027Dto());
+        var generatedPeriodIds = await db.FiscalPeriods
+            .Where(period => period.FiscalYearId == created.Id)
+            .Select(period => period.Id)
+            .ToListAsync();
+        var authorities = await db.AccountingBookPeriods
+            .Where(period => period.AccountingBookId == book.Id
+                && generatedPeriodIds.Contains(period.FiscalPeriodId))
+            .ToListAsync();
+
+        authorities.Should().HaveCount(generatedPeriodIds.Count);
+        authorities.Should().OnlyContain(period => period.PeriodStatus == AccountingBookPeriodStatus.Future);
+    }
+
+    [Fact]
     public async Task CreateFiscalYearAsync_ShouldRejectMixedActivePeriodTypes()
     {
         var tenantId = Guid.NewGuid();

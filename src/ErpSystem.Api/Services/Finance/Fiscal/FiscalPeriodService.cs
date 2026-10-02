@@ -214,6 +214,14 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
             await _unitOfWork.Repository<FiscalYear>().AddAsync(fiscalYear);
 
+            var authorityBookIds = await _unitOfWork.Repository<AccountingBook>()
+                .GetQueryable(book => book.TenantId == TenantId
+                    && !book.IsDeleted
+                    && book.LifecycleStatus != AccountingBookLifecycleStatus.Retired)
+                .Select(book => book.Id)
+                .ToListAsync(cancellationToken);
+            var generatedPeriods = new List<FiscalPeriod>();
+
             // Generate periods based on type
             var periodType = dto.PeriodType;
             var currentDate = startDate;
@@ -296,10 +304,27 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 };
 
                 await _unitOfWork.Repository<FiscalPeriod>().AddAsync(period);
+                generatedPeriods.Add(period);
                 
                 // Prepare for next iteration
                 currentDate = periodEnd.AddDays(1);
                 periodNumber++;
+            }
+
+            if (authorityBookIds.Count > 0 && generatedPeriods.Count > 0)
+            {
+                var authorities = generatedPeriods.SelectMany(period => authorityBookIds.Select(bookId =>
+                    new AccountingBookPeriod
+                    {
+                        TenantId = TenantId,
+                        AccountingBookId = bookId,
+                        FiscalPeriodId = period.Id,
+                        PeriodStatus = AccountingBookPeriodStatus.Future,
+                        CreatedAt = now,
+                        CreatedBy = UserName,
+                        CreatedById = CurrentUserId
+                    })).ToList();
+                await _unitOfWork.Repository<AccountingBookPeriod>().AddRangeAsync(authorities);
             }
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);

@@ -62,6 +62,29 @@ async function prepareInvoice(choice: 'Yes' | 'No' | 'Dismiss' = 'No') {
 }
 
 describe('new AP invoice visible supplier defaults', () => {
+  it('derives Migration Clearing and omits manual posting accounts for an opening balance', async () => {
+    const lineId = '2d7b93c1-8f53-4d9c-b594-d76c43e2f0c8';
+    queryData['vendor-invoice'] = {
+      id: 'opening-invoice', invoiceNumber: 'LEG-AP-001', businessPartnerId: 'supplier',
+      status: 'Draft', invoiceDate: '2026-10-01', dueDate: '2026-10-31', currencyCode: 'GHS', exchangeRate: 1,
+      isOpeningBalance: true, paymentTermsDays: 30, applySupplierWithholdingDefaults: false,
+      expenseAccountId: 'expense',
+      lineItems: [{ id: lineId, lineItemType: 'Expense', glAccountId: 'expense', budgetEntryId: 'budget-cell', description: 'Legacy supplier balance', quantity: 1, unitPrice: 12000, unit: 'EA' }],
+    };
+
+    render(<VendorInvoiceFormPage editInvoiceId="opening-invoice" />);
+
+    expect(await screen.findByText(/Migration Clearing is derived from Finance Settings/i)).toBeInTheDocument();
+    expect(screen.queryByText('GL Account')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(accountsPayableService.updateInvoice).toHaveBeenCalled());
+    const request = vi.mocked(accountsPayableService.updateInvoice).mock.calls[0][1];
+    expect(request.expenseAccountId).toBeUndefined();
+    expect(request.lineItems[0].glAccountId).toBeUndefined();
+    expect(request.lineItems[0].budgetEntryId).toBeUndefined();
+    expect(request.financeDimensions?.lines).toEqual([]);
+  });
+
   it('preserves a QS service certificate source and line identity while exposing expense and budget coding', async () => {
     const lineId = '2d7b93c1-8f53-4d9c-b594-d76c43e2f0c8';
     queryData['vendor-invoice'] = {
