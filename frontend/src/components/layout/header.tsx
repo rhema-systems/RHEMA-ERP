@@ -16,6 +16,8 @@ import { ClientOnly } from '../ClientOnly';
 import HeaderNotificationBell from '../notifications/HeaderNotificationBell';
 import { AccountSidebar } from './AccountSidebar';
 import { FontSizeToggle } from './FontSizeToggle';
+import { InterfaceStyleToggle } from './InterfaceStyleToggle';
+import { useInterfaceStyle } from '../../contexts/InterfaceStyleContext';
 import { settingsNavigationItems } from './sidebar';
 import { hasAnyAccessibleSettings } from '../settings/settings-access';
 
@@ -30,6 +32,7 @@ export function Header({ className, accountSidebarContainer }: HeaderProps) {
   const [mounted, setMounted] = useState(false);
   const { user, logout, isLoggingOut, hasAnyRole, hasAnyPermission } = useAuth();
   const { currentTenant, currentTenantCode, setCurrentTenantCode } = useTenant();
+  const { interfaceStyle } = useInterfaceStyle();
 
   // Sync tenant code when user logs in
   useEffect(() => {
@@ -51,7 +54,7 @@ export function Header({ className, accountSidebarContainer }: HeaderProps) {
   }, []);
 
   const handleLogout = () => {
-    logout();
+    logout('logout');
     closeAccountSidebar();
   };
 
@@ -67,10 +70,13 @@ export function Header({ className, accountSidebarContainer }: HeaderProps) {
   return (
     <>
     <header className={cn(
-      'sticky top-0 z-50 w-full border-b border-slate-200/50 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:border-neutral-700/70 dark:bg-neutral-900/95 dark:supports-[backdrop-filter]:bg-neutral-900/80',
+      'sticky top-0 z-50 w-full border-b transition-colors',
+      interfaceStyle === 'immersive'
+        ? 'border-slate-200/50 bg-white/80 shadow-sm backdrop-blur-xl supports-[backdrop-filter]:bg-white/65 dark:border-neutral-700/70 dark:bg-neutral-900/85'
+        : 'border-slate-200 bg-white dark:border-neutral-800 dark:bg-neutral-950',
       className
     )}>
-      <div className="flex min-h-16 w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 sm:flex-nowrap sm:px-6">
+      <div className={cn('flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 sm:flex-nowrap sm:px-6', interfaceStyle === 'immersive' ? 'min-h-16' : 'min-h-14')}>
         {/* Enhanced Search */}
         <div className="order-last flex min-w-0 basis-full items-center space-x-4 sm:order-none sm:basis-auto sm:flex-1">
           <GlobalSearch />
@@ -123,6 +129,7 @@ export function Header({ className, accountSidebarContainer }: HeaderProps) {
           </div> */}
 
           {/* Notifications */}
+          <InterfaceStyleToggle />
           <FontSizeToggle />
           <HeaderNotificationBell />
 

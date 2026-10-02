@@ -53,5 +53,11 @@ namespace ErpSystem.Core.Interfaces
         /// current fiscal year, computed from posted GL activity.
         /// </summary>
         Task<FinanceDashboardDto> GetFinanceDashboardAsync();
+
+        /// <summary>
+        /// Read-side dashboard aggregates for a selected inclusive reporting period, computed
+        /// from posted GL activity in the tenant's functional currency.
+        /// </summary>
+        Task<FinanceDashboardDto> GetFinanceDashboardAsync(DateTime startDate, DateTime endDate);
     }
 }

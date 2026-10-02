@@ -1,37 +1,19 @@
 using ErpSystem.Core.DTOs.Common;
-using ErpSystem.Core.DTOs.Crm;
 using ErpSystem.Core.DTOs.Dashboard;
-using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.DTOs.Projects;
-using ErpSystem.Core.Interfaces.Crm;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Projects;
-using ProcurementPurchaseOrderSummaryDto = ErpSystem.Core.DTOs.Procurement.PurchaseOrderSummaryDto;
-using ProcurementPurchaseRequisitionSummaryDto = ErpSystem.Core.DTOs.Procurement.PurchaseRequisitionSummaryDto;
-using TenderDto = ErpSystem.Core.DTOs.Procurement.TenderDto;
+using ErpSystem.Shared;
+using Microsoft.AspNetCore.Authorization;
 
 namespace ErpSystem.Api.Services;
 
 public sealed class EnterpriseDashboardService
 {
-    private static readonly HashSet<string> ClosedPurchaseOrderStatuses = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Completed",
-        "Cancelled",
-        "Closed"
-    };
-
-    private static readonly HashSet<string> ClosedTenderStatuses = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Closed",
-        "Cancelled",
-        "Awarded",
-        "Completed"
-    };
-
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<EnterpriseDashboardService> _logger;
 
@@ -54,25 +36,34 @@ public sealed class EnterpriseDashboardService
         var rangeStartDate = SpecifyUtcDate(requestedStartDate ?? rangeEndDate.AddMonths(-5));
         var rangeEndExclusive = rangeEndDate.AddDays(1);
         var rangeEndInclusive = rangeEndExclusive.AddTicks(-1);
-        var maintenanceScheduleHorizonDays = Math.Max(0, (rangeEndDate - utcToday).Days);
 
-        var crmOverviewTask = RunModuleAsync(
-            "CRM Overview",
-            async sp => await sp.GetRequiredService<ICrmService>().GetOverviewAsync(8),
-            fallback: (CrmOverviewDto?)null,
-            fallbackMessage: "CRM overview is unavailable");
+        var reportingCurrencyTask = RunModuleAsync(
+            "Reporting Currency",
+            async sp => await sp.GetRequiredService<ITenantSettingsService>().GetBaseCurrencyReferenceAsync(),
+            fallback: new Core.DTOs.Finance.BaseCurrencyReferenceDto
+            {
+                CurrencyCode = string.Empty,
+                CurrencyName = string.Empty,
+                CurrencySymbol = string.Empty,
+                DecimalPlaces = 0
+            },
+            fallbackMessage: "Reporting currency is unavailable");
 
-        var crmReportingTask = RunModuleAsync(
-            "CRM Reporting",
-            async sp => await sp.GetRequiredService<ICrmService>().GetReportingAsync(8),
-            fallback: (CrmReportingDto?)null,
-            fallbackMessage: "CRM reporting is unavailable");
+        var financeTask = RunAuthorizedModuleAsync(
+            "Finance",
+            FinancePermissions.ViewFinance,
+            async sp => await sp.GetRequiredService<IGeneralLedgerService>()
+                .GetFinanceDashboardAsync(rangeStartDate, rangeEndDate),
+            fallback: (Core.DTOs.Finance.FinanceDashboardDto?)null,
+            fallbackMessage: "Finance analytics are unavailable");
 
-        var crmConversionsTask = RunModuleAsync(
-            "CRM Conversions",
-            async sp => await sp.GetRequiredService<ICrmService>().GetConversionsAsync(months: 6),
-            fallback: (CrmConversionsDto?)null,
-            fallbackMessage: "CRM conversions are unavailable");
+        var crmTask = RunAuthorizedModuleAsync(
+            "CRM",
+            "Sales",
+            async sp => await sp.GetRequiredService<EnterpriseDashboardProjectionService>()
+                .GetCrmAsync(rangeStartDate, rangeEndExclusive),
+            fallback: (EnterpriseCrmDashboardDto?)null,
+            fallbackMessage: "CRM analytics are unavailable");
 
         var projectDashboardTask = RunModuleAsync(
             "Projects",
@@ -80,53 +71,21 @@ public sealed class EnterpriseDashboardService
             fallback: (ProjectDashboardDto?)null,
             fallbackMessage: "Project dashboard is unavailable");
 
-        var purchaseRequisitionsTask = RunModuleAsync(
-            "Purchase Requisitions",
-            async sp =>
-            {
-                var repository = sp.GetRequiredService<IPurchaseRequisitionRepository>();
-                var requisitions = await repository.GetPendingApprovalRequisitions();
-                return requisitions
-                    .Where(requisition => IsWithinRange(requisition.RequisitionDate, rangeStartDate, rangeEndExclusive))
-                    .Select(MapPurchaseRequisitionSummary)
-                    .ToList();
-            },
-            fallback: new List<ProcurementPurchaseRequisitionSummaryDto>(),
-            fallbackMessage: "Pending purchase requisitions are unavailable");
+        var procurementQueuesTask = RunAuthorizedModuleAsync(
+            "Procurement Queues",
+            "Procurement",
+            async sp => await sp.GetRequiredService<EnterpriseDashboardProjectionService>()
+                .GetProcurementQueuesAsync(rangeStartDate, rangeEndExclusive),
+            fallback: new EnterpriseOperationalQueueDto(),
+            fallbackMessage: "Procurement queues are unavailable");
 
-        var purchaseOrdersTask = RunModuleAsync(
-            "Purchase Orders",
-            async sp =>
-            {
-                var repository = sp.GetRequiredService<IPurchaseOrderRepository>();
-                var orders = await repository.GetPurchaseOrdersAsync(
-                    1,
-                    250,
-                    startDate: rangeStartDate,
-                    endDate: rangeEndInclusive);
-                return orders.Items
-                    .Where(order => !ClosedPurchaseOrderStatuses.Contains(order.Status ?? string.Empty))
-                    .Select(MapPurchaseOrderSummary)
-                    .ToList();
-            },
-            fallback: new List<ProcurementPurchaseOrderSummaryDto>(),
-            fallbackMessage: "Purchase order data is unavailable");
-
-        var inventoryApprovalTask = RunModuleAsync(
-            "Inventory Approval Queue",
-            async sp => (await sp.GetRequiredService<IInventoryRequisitionService>().GetPendingApprovalAsync())
-                .Where(requisition => IsWithinRange(requisition.RequestDate, rangeStartDate, rangeEndExclusive))
-                .ToList(),
-            fallback: new List<InventoryRequisitionDto>(),
-            fallbackMessage: "Pending inventory approvals are unavailable");
-
-        var inventoryIssueTask = RunModuleAsync(
-            "Inventory Issue Queue",
-            async sp => (await sp.GetRequiredService<IInventoryRequisitionService>().GetPendingIssueAsync())
-                .Where(requisition => IsWithinRange(requisition.RequestDate, rangeStartDate, rangeEndExclusive))
-                .ToList(),
-            fallback: new List<InventoryRequisitionDto>(),
-            fallbackMessage: "Pending inventory issues are unavailable");
+        var inventoryQueuesTask = RunAuthorizedModuleAsync(
+            "Inventory Queues",
+            "Inventory",
+            async sp => await sp.GetRequiredService<EnterpriseDashboardProjectionService>()
+                .GetInventoryQueuesAsync(rangeStartDate, rangeEndExclusive),
+            fallback: new EnterpriseOperationalQueueDto(),
+            fallbackMessage: "Inventory queues are unavailable");
 
         var maintenanceOverviewTask = RunModuleAsync(
             "Maintenance Overview",
@@ -146,90 +105,52 @@ public sealed class EnterpriseDashboardService
             fallback: (WorkOrderTrendsDto?)null,
             fallbackMessage: "Maintenance trends are unavailable");
 
-        var upcomingMaintenanceTask = RunModuleAsync(
-            "Upcoming Maintenance",
-            async sp =>
-            {
-                var schedules = await sp.GetRequiredService<IMaintenanceScheduleService>()
-                    .GetSchedulesDueInDaysAsync(maintenanceScheduleHorizonDays);
-                return schedules
-                    .Select(MapMaintenanceSchedule)
-                    .Where(schedule => GetScheduleDate(schedule) is DateTime scheduleDate
-                        && IsWithinRange(scheduleDate, rangeStartDate, rangeEndExclusive))
-                    .ToList();
-            },
-            fallback: new List<EnterpriseMaintenanceScheduleDto>(),
-            fallbackMessage: "Upcoming maintenance is unavailable");
-
-        var tendersTask = RunModuleAsync(
-            "Tenders",
-            async sp =>
-            {
-                var response = await sp.GetRequiredService<ITenderService>().GetTendersAsync(1, 250);
-                return response.Items
-                    .Where(tender => IsWithinRange(tender.PublishDate ?? tender.CreatedAt, rangeStartDate, rangeEndExclusive))
-                    .Where(tender => !ClosedTenderStatuses.Contains(tender.Status ?? string.Empty))
-                    .ToList();
-            },
-            fallback: new List<TenderDto>(),
-            fallbackMessage: "Tender data is unavailable");
-
-        var procurementInventoryManagementTask = RunModuleAsync(
+        var procurementInventoryManagementTask = RunAuthorizedModuleAsync(
             "Procurement and Inventory Management",
+            "Procurement",
             async sp => await sp.GetRequiredService<ProcurementInventoryManagementDashboardService>()
                 .GetAsync(rangeStartDate, rangeEndDate, warehouseId, locationId),
             fallback: (ProcurementInventoryManagementDashboardDto?)null,
             fallbackMessage: "Procurement and inventory management metrics are unavailable");
 
         await Task.WhenAll(
-            crmOverviewTask,
-            crmReportingTask,
-            crmConversionsTask,
+            reportingCurrencyTask,
+            financeTask,
+            crmTask,
             projectDashboardTask,
-            purchaseRequisitionsTask,
-            purchaseOrdersTask,
-            inventoryApprovalTask,
-            inventoryIssueTask,
+            procurementQueuesTask,
+            inventoryQueuesTask,
             maintenanceOverviewTask,
             maintenanceMetricsTask,
             maintenanceTrendsTask,
-            upcomingMaintenanceTask,
-            tendersTask,
             procurementInventoryManagementTask);
 
         return new EnterpriseDashboardDto
         {
-            CrmOverview = crmOverviewTask.Result.Data,
-            CrmReporting = crmReportingTask.Result.Data,
-            CrmConversions = crmConversionsTask.Result.Data,
+            ReportingCurrency = reportingCurrencyTask.Result.Data,
+            FinanceOverview = financeTask.Result.Data,
+            Crm = crmTask.Result.Data,
             ProjectDashboard = projectDashboardTask.Result.Data,
-            PendingPurchaseRequisitions = purchaseRequisitionsTask.Result.Data,
-            OpenPurchaseOrders = purchaseOrdersTask.Result.Data,
-            PendingInventoryApprovals = inventoryApprovalTask.Result.Data,
-            PendingInventoryIssues = inventoryIssueTask.Result.Data,
+            OperationalQueues = MergeOperationalQueues(
+                procurementQueuesTask.Result.Data,
+                inventoryQueuesTask.Result.Data),
             MaintenanceOverview = maintenanceOverviewTask.Result.Data,
             MaintenanceMetrics = maintenanceMetricsTask.Result.Data,
             MaintenanceTrends = maintenanceTrendsTask.Result.Data,
-            UpcomingMaintenance = upcomingMaintenanceTask.Result.Data,
-            Tenders = tendersTask.Result.Data,
             ProcurementInventoryManagement = procurementInventoryManagementTask.Result.Data,
             RangeStartDate = rangeStartDate,
             RangeEndDate = rangeEndDate,
             ModuleStatus =
             [
-                crmOverviewTask.Result.Status,
-                crmReportingTask.Result.Status,
-                crmConversionsTask.Result.Status,
+                reportingCurrencyTask.Result.Status,
+                financeTask.Result.Status,
+                crmTask.Result.Status,
                 projectDashboardTask.Result.Status,
-                purchaseRequisitionsTask.Result.Status,
-                purchaseOrdersTask.Result.Status,
-                inventoryApprovalTask.Result.Status,
-                inventoryIssueTask.Result.Status,
+                procurementQueuesTask.Result.Status,
+                inventoryQueuesTask.Result.Status,
                 maintenanceOverviewTask.Result.Status,
                 maintenanceMetricsTask.Result.Status,
                 maintenanceTrendsTask.Result.Status,
-                upcomingMaintenanceTask.Result.Status,
-                tendersTask.Result.Status,
                 procurementInventoryManagementTask.Result.Status
             ],
             LastUpdated = DateTime.UtcNow
@@ -239,11 +160,18 @@ public sealed class EnterpriseDashboardService
     private static DateTime SpecifyUtcDate(DateTime value) =>
         DateTime.SpecifyKind(value.Date, DateTimeKind.Utc);
 
-    private static bool IsWithinRange(DateTime value, DateTime startDate, DateTime endExclusive) =>
-        value >= startDate && value < endExclusive;
-
-    private static DateTime? GetScheduleDate(EnterpriseMaintenanceScheduleDto schedule) =>
-        schedule.NextDue ?? schedule.NextDueDate ?? schedule.NextScheduledDate;
+    private static EnterpriseOperationalQueueDto MergeOperationalQueues(
+        EnterpriseOperationalQueueDto procurement,
+        EnterpriseOperationalQueueDto inventory) => new()
+    {
+        PendingPurchaseRequisitionCount = procurement.PendingPurchaseRequisitionCount,
+        OpenPurchaseOrderCount = procurement.OpenPurchaseOrderCount,
+        PendingInventoryApprovalCount = inventory.PendingInventoryApprovalCount,
+        PendingInventoryIssueCount = inventory.PendingInventoryIssueCount,
+        OpenTenderCount = procurement.OpenTenderCount,
+        TendersClosingWithin14DaysCount = procurement.TendersClosingWithin14DaysCount,
+        OpenTendersByStatus = procurement.OpenTendersByStatus
+    };
 
     private async Task<ModuleResult<T>> RunModuleAsync<T>(
         string module,
@@ -274,8 +202,7 @@ public sealed class EnterpriseDashboardService
                 {
                     Module = module,
                     Available = false,
-                    AccessRestricted = true,
-                    Error = ex.Message
+                    AccessRestricted = true
                 });
         }
         catch (Exception ex)
@@ -288,63 +215,69 @@ public sealed class EnterpriseDashboardService
                 {
                     Module = module,
                     Available = false,
-                    Error = ex.Message
+                    Error = fallbackMessage
                 });
         }
     }
 
-    private static ProcurementPurchaseOrderSummaryDto MapPurchaseOrderSummary(Core.Entities.Procurement.PurchaseOrder purchaseOrder)
+    private async Task<ModuleResult<T>> RunAuthorizedModuleAsync<T>(
+        string module,
+        string permissionPolicy,
+        Func<IServiceProvider, Task<T>> action,
+        T fallback,
+        string fallbackMessage)
     {
-        return new ProcurementPurchaseOrderSummaryDto
+        try
         {
-            Id = purchaseOrder.Id,
-            OrderNumber = purchaseOrder.OrderNumber,
-            OrderType = purchaseOrder.OrderType,
-            SupplierId = purchaseOrder.BusinessPartnerId,
-            SupplierName = purchaseOrder.BusinessPartner?.PartnerName ?? string.Empty,
-            OrderDate = purchaseOrder.OrderDate,
-            RequiredDate = purchaseOrder.RequiredDate,
-            PromisedDate = purchaseOrder.PromisedDate,
-            Status = purchaseOrder.Status,
-            TotalAmount = purchaseOrder.TotalAmount,
-            ItemCount = purchaseOrder.Items?.Count ?? 0,
-            RequestedByName = string.Join(' ', new[] { purchaseOrder.RequestedBy?.FirstName, purchaseOrder.RequestedBy?.LastName }
-                .Where(value => !string.IsNullOrWhiteSpace(value)))
-        };
-    }
+            using var scope = _scopeFactory.CreateScope();
+            var authorization = scope.ServiceProvider.GetRequiredService<IAuthorizationService>();
+            var principal = scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>().HttpContext?.User;
+            if (principal?.Identity?.IsAuthenticated != true ||
+                !(await authorization.AuthorizeAsync(principal, resource: null, permissionPolicy)).Succeeded)
+            {
+                return new ModuleResult<T>(
+                    fallback,
+                    new EnterpriseDashboardModuleStatusDto
+                    {
+                        Module = module,
+                        Available = false,
+                        AccessRestricted = true
+                    });
+            }
 
-    private static ProcurementPurchaseRequisitionSummaryDto MapPurchaseRequisitionSummary(Core.Entities.Procurement.PurchaseRequisition requisition)
-    {
-        return new ProcurementPurchaseRequisitionSummaryDto
+            var data = await action(scope.ServiceProvider);
+            return new ModuleResult<T>(
+                data,
+                new EnterpriseDashboardModuleStatusDto
+                {
+                    Module = module,
+                    Available = true
+                });
+        }
+        catch (Exception ex) when (ex is InventoryAnalyticsAuthorizationException or ProcurementAccessAuthorizationException)
         {
-            Id = requisition.Id,
-            RequisitionNumber = requisition.RequisitionNumber,
-            RequisitionDate = requisition.RequisitionDate,
-            RequestedByName = string.Join(' ', new[] { requisition.RequestedBy?.FirstName, requisition.RequestedBy?.LastName }
-                .Where(value => !string.IsNullOrWhiteSpace(value))),
-            RequiredDate = requisition.RequiredDate,
-            Status = requisition.Status,
-            Priority = requisition.Priority,
-            Department = requisition.Department,
-            TotalAmount = requisition.TotalAmount,
-            ItemCount = requisition.Items?.Count ?? 0
-        };
-    }
-
-    private static EnterpriseMaintenanceScheduleDto MapMaintenanceSchedule(MaintenanceScheduleDto schedule)
-    {
-        return new EnterpriseMaintenanceScheduleDto
+            _logger.LogInformation("Enterprise dashboard module {Module} is outside the actor's assigned access", module);
+            return new ModuleResult<T>(
+                fallback,
+                new EnterpriseDashboardModuleStatusDto
+                {
+                    Module = module,
+                    Available = false,
+                    AccessRestricted = true
+                });
+        }
+        catch (Exception ex)
         {
-            Id = schedule.Id,
-            AssetName = schedule.AssetName,
-            MaintenanceTypeName = schedule.MaintenanceTypeName,
-            MaintenanceType = schedule.MaintenanceType,
-            Name = schedule.Name,
-            NextDue = schedule.NextDue,
-            NextDueDate = schedule.NextDueDate,
-            NextScheduledDate = schedule.NextScheduledDate,
-            AssignedTechnicianName = schedule.AssignedTechnicianName
-        };
+            _logger.LogWarning(ex, "Enterprise dashboard module {Module} failed", module);
+            return new ModuleResult<T>(
+                fallback,
+                new EnterpriseDashboardModuleStatusDto
+                {
+                    Module = module,
+                    Available = false,
+                    Error = fallbackMessage
+                });
+        }
     }
 
     private sealed record ModuleResult<T>(T Data, EnterpriseDashboardModuleStatusDto Status);

@@ -3,6 +3,7 @@ using ErpSystem.Api.Services;
 using ErpSystem.Core.DTOs.Dashboard;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -13,6 +14,20 @@ namespace ErpSystem.Api.Tests.Controllers;
 
 public sealed class DashboardControllerDateRangeTests
 {
+    [Fact]
+    public void Enterprise_dashboard_requires_internal_and_dashboard_read_policies()
+    {
+        var action = typeof(DashboardController).GetMethod(nameof(DashboardController.GetEnterpriseDashboard));
+
+        var policies = action!.GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+            .Cast<AuthorizeAttribute>()
+            .Select(attribute => attribute.Policy)
+            .ToArray();
+
+        Assert.Contains("InternalOnly", policies);
+        Assert.Contains("dashboard.read", policies);
+    }
+
     [Fact]
     public async Task Enterprise_dashboard_rejects_a_partial_date_range()
     {

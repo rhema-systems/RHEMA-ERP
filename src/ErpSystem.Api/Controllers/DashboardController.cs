@@ -63,6 +63,7 @@ namespace ErpSystem.Api.Controllers
         /// </summary>
         [HttpGet("enterprise")]
         [Authorize(Policy = "InternalOnly")]
+        [Authorize(Policy = "dashboard.read")]
         public async Task<ActionResult<EnterpriseDashboardDto>> GetEnterpriseDashboard(
             [FromQuery] DateTime? startDate = null,
             [FromQuery] DateTime? endDate = null,

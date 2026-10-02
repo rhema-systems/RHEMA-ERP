@@ -151,6 +151,7 @@ import {
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { useAuth } from '../../hooks/use-auth';
+import { useInterfaceStyle } from '../../contexts/InterfaceStyleContext';
 import {
   hrOperationalTrainingLinks,
   hrSetupNavChildren,
@@ -4476,6 +4477,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
   const openTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pathname = usePathname() ?? '';
   const { hasAnyRole, hasAnyPermission } = useAuth();
+  const { interfaceStyle } = useInterfaceStyle();
   const sidebarIsCollapsed = collapsed && !hoverExpanded;
 
   useEffect(() => {
@@ -4851,13 +4853,16 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
         onMouseEnter={handleSidebarMouseEnter}
         onMouseLeave={handleSidebarMouseLeave}
         className={cn(
-          'flex h-full flex-col bg-white/95 dark:bg-[#181818]/95 backdrop-blur-xl border-r border-slate-200/50 dark:border-neutral-800/70 transition-all duration-300',
-          sidebarIsCollapsed ? 'w-16' : 'w-64',
+          'flex h-full flex-col border-r transition-all duration-300',
+          interfaceStyle === 'immersive'
+            ? 'border-slate-200/50 bg-white/90 backdrop-blur-xl dark:border-neutral-800/70 dark:bg-[#181818]/95'
+            : 'border-slate-200 bg-white dark:border-neutral-800 dark:bg-[#141414]',
+          sidebarIsCollapsed ? 'w-16' : interfaceStyle === 'immersive' ? 'w-64' : 'w-56',
           className
         )}
       >
         {/* Header */}
-        <div className="flex h-16 items-center justify-between px-4 border-b border-slate-200/50 dark:border-neutral-800/70">
+        <div className={cn('flex items-center justify-between border-b border-slate-200/50 px-4 dark:border-neutral-800/70', interfaceStyle === 'immersive' ? 'h-16' : 'h-14')}>
           {!sidebarIsCollapsed && (
             <div className="flex items-center space-x-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600">
@@ -4865,8 +4870,9 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
               </div>
               <div>
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                  ERP System
+                  RHEMA-ERP
                 </h2>
+                {interfaceStyle === 'immersive' && <p className="text-[9px] uppercase tracking-[0.2em] text-slate-500">People · Process · Progress</p>}
               </div>
             </div>
           )}
@@ -4957,7 +4963,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
         <div
           data-sidebar-flyout="true"
           className="fixed z-40"
-          style={getBridgeStyle(sidebarIsCollapsed ? 64 : 256, hoveredItem)}
+          style={getBridgeStyle(sidebarIsCollapsed ? 64 : interfaceStyle === 'immersive' ? 256 : 224, hoveredItem)}
           onMouseEnter={handleMenuMouseEnter}
           onMouseLeave={handleMenuMouseLeave}
         />

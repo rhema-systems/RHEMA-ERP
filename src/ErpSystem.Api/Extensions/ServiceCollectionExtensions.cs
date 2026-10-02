@@ -1500,6 +1500,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IConsignmentSettlementService, ErpSystem.Core.Services.Procurement.ConsignmentSettlementService>();
             services.AddScoped<ErpSystem.Api.Services.ProcurementInventoryManagementDashboardService>();
             services.AddScoped<ErpSystem.Api.Services.EnterpriseDashboardService>();
+            services.AddScoped<ErpSystem.Api.Services.EnterpriseDashboardProjectionService>();
 
             // RFQ (Request For Quotation) - separate from Tender
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IRfqService, ErpSystem.Core.Services.Procurement.RfqService>();
@@ -1641,6 +1642,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement("settings.read", "settings.update")))
                 .AddPolicy("HrIdentityReconciliationManage", policy =>
                     policy.Requirements.Add(new PermissionRequirement("settings.update")))
+                .AddPolicy("dashboard.read", policy =>
+                    policy.Requirements.Add(new PermissionRequirement("dashboard.read")))
                 .AddPolicy("Finance", policy =>
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true
