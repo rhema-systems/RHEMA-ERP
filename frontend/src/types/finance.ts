@@ -1446,6 +1446,7 @@ export interface FinanceSettings {
 }
 
 export interface UpdateFinanceSettingsDto {
+  supplierAdvanceAccountId?: string;
   customerAdvanceAccountId?: string;
   coaType?: 'Standard' | 'Segmented';
   baseCurrency?: string;

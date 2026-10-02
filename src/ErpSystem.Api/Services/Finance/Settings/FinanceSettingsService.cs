@@ -131,6 +131,7 @@ namespace ErpSystem.Api.Services.Finance.Settings
             };
             var beforeControlPolicy = new
             {
+                settings.SupplierAdvanceAccountId,
                 settings.CustomerAdvanceAccountId,
                 settings.ReversalDatePolicy,
                 settings.MinimumReversalReasonLength,
@@ -508,6 +509,7 @@ namespace ErpSystem.Api.Services.Finance.Settings
 
             var afterControlPolicy = new
             {
+                settings.SupplierAdvanceAccountId,
                 settings.CustomerAdvanceAccountId,
                 settings.ReversalDatePolicy,
                 settings.MinimumReversalReasonLength,
