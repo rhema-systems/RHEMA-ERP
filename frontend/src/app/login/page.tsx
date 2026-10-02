@@ -19,6 +19,7 @@ import { authService } from '../../services/auth';
 import { settingsService } from '../../services/settings';
 import { apiService } from '../../services/api.service';
 import { tenantService } from '../../services/tenant';
+import { browserSessionCoordinator } from '../../services/browser-session-coordinator';
 import type { LoginRequest, LoginResponse, OtpChannel } from '../../types';
 import {
   buildTenantSelectRedirectUrl,
@@ -229,6 +230,16 @@ function LoginFormWithSearchParams() {
       user: storedUser as LoginResponse['user'],
     });
   }, [redirectAfterLogin, showTwoFactor]);
+
+  useEffect(() => browserSessionCoordinator.subscribe(event => {
+    if (event.type !== 'login' || showTwoFactor) return;
+    const storedToken = authService.getStoredToken();
+    if (!storedToken) return;
+    void redirectAfterLogin({
+      token: storedToken,
+      user: authService.getStoredUser() as LoginResponse['user'],
+    });
+  }), [redirectAfterLogin, showTwoFactor]);
 
   const loginMutation = useMutation({
     mutationFn: (data: LoginRequest) => authService.login(data),

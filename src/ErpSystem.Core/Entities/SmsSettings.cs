@@ -29,7 +29,7 @@ public class SmsSettings : BaseEntity
     [StringLength(40)]
     public string? TwilioFromNumber { get; set; }
 
-    // Ghana Gateway (configurable HTTP GET template)
+    // mNotify (legacy column names retained for database compatibility)
     public bool GhanaGatewayEnabled { get; set; } = false;
 
     [StringLength(1000)]

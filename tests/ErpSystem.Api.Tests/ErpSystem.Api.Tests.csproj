@@ -38,6 +38,8 @@
     <Compile Include="Services\Ehc\PropertyEnquiryContactLinkageTests.cs" />
     <Compile Include="Services\Ehc\PropertyEnquiryDepositApplicationTests.cs" />
     <Compile Include="Services\Ehc\ProspectDepositFinancePostingServiceTests.cs" />
+    <Compile Include="Services\Otp\OtpServiceSecurityTests.cs" />
+    <Compile Include="Services\Sms\MNotifySmsGatewayTests.cs" />
     <Compile Include="Controllers\Inventory\PhysicalCountReviewTests.cs" />
     <Compile Include="Services\Finance\ProcurementAutoInvoiceTests.cs" />
     <Compile Include="Services\Finance\CustomerBalanceAdjustmentPostingTests.cs" />
@@ -79,6 +81,8 @@
     <Compile Include="Controllers\CrossModuleLegacyAuthorizationSecurityTests.cs" />
     <Compile Include="Controllers\Estate\EstateGisControllerSecurityTests.cs" />
     <Compile Include="Controllers\Estate\PropertyListingEnquiryTests.cs" />
+    <Compile Include="Controllers\Estate\PublicPropertyEnquiryContactContractTests.cs" />
+    <Compile Include="Controllers\Estate\PublicPropertyEnquiryContactControllerTests.cs" />
     <Compile Include="Controllers\Ehc\EhcInternalTicketsAssignmentTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
     <Compile Include="Controllers\Finance\BusinessPartnerFinanceProfilesControllerTests.cs" />

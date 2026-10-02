@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using ErpSystem.Api.Services.Sms;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
 using ErpSystem.Shared;
@@ -15,13 +16,20 @@ public class SettingsController : ControllerBase
     private readonly ISettingsService _settingsService;
     private readonly IAuditLogService _auditLogService;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ITenantSmsSender _tenantSmsSender;
     private readonly ILogger<SettingsController> _logger;
 
-    public SettingsController(ISettingsService settingsService, IAuditLogService auditLogService, ICurrentUserService currentUserService, ILogger<SettingsController> logger)
+    public SettingsController(
+        ISettingsService settingsService,
+        IAuditLogService auditLogService,
+        ICurrentUserService currentUserService,
+        ITenantSmsSender tenantSmsSender,
+        ILogger<SettingsController> logger)
     {
         _settingsService = settingsService;
         _auditLogService = auditLogService;
         _currentUserService = currentUserService;
+        _tenantSmsSender = tenantSmsSender;
         _logger = logger;
     }
 
@@ -493,34 +501,22 @@ public class SettingsController : ControllerBase
             {
                 return Ok(new SmsSettingsDto
                 {
-                    DefaultProvider = "Twilio",
+                    IsConfigured = false,
+                    DefaultProvider = "GhanaGateway",
                     FallbackProvidersCsv = "",
                     TwilioEnabled = false,
                     TwilioAccountSid = "",
                     TwilioAuthToken = "",
                     TwilioFromNumber = "",
                     GhanaGatewayEnabled = false,
-                    GhanaGatewayUrlTemplate = "",
+                    GhanaGatewayUrlTemplate = ErpSystem.Api.Services.Sms.MNotifySmsGateway.DefaultEndpoint,
                     GhanaGatewayApiKey = "",
                     GhanaGatewaySenderId = "",
                     GhanaGatewayTimeoutSeconds = 10
                 });
             }
 
-            return Ok(new SmsSettingsDto
-            {
-                DefaultProvider = settings.DefaultProvider ?? "Twilio",
-                FallbackProvidersCsv = SmsSettingsDto.FallbackJsonToCsv(settings.FallbackProvidersJson),
-                TwilioEnabled = settings.TwilioEnabled,
-                TwilioAccountSid = settings.TwilioAccountSid ?? string.Empty,
-                TwilioAuthToken = settings.TwilioAuthToken ?? string.Empty,
-                TwilioFromNumber = settings.TwilioFromNumber ?? string.Empty,
-                GhanaGatewayEnabled = settings.GhanaGatewayEnabled,
-                GhanaGatewayUrlTemplate = settings.GhanaGatewayUrlTemplate ?? string.Empty,
-                GhanaGatewayApiKey = settings.GhanaGatewayApiKey ?? string.Empty,
-                GhanaGatewaySenderId = settings.GhanaGatewaySenderId ?? string.Empty,
-                GhanaGatewayTimeoutSeconds = settings.GhanaGatewayTimeoutSeconds
-            });
+            return Ok(ToSmsSettingsDto(settings));
         }
         catch (Exception ex)
         {
@@ -544,6 +540,10 @@ public class SettingsController : ControllerBase
                 return Conflict("SMS settings already exist. Use PUT to update them.");
             }
 
+            var validation = ValidateSmsSettings(request, existingSettings);
+            if (validation is not null)
+                return BadRequest(validation);
+
             var created = await _settingsService.UpdateSmsSettingsAsync(new Core.Entities.SmsSettings
             {
                 DefaultProvider = request.DefaultProvider,
@@ -559,22 +559,9 @@ public class SettingsController : ControllerBase
                 GhanaGatewayTimeoutSeconds = request.GhanaGatewayTimeoutSeconds
             });
 
-            await TryAuditAsync("CREATE", "SmsSettings", created.Id.ToString(), oldValues: null, newValues: request);
+            await TryAuditAsync("CREATE", "SmsSettings", created.Id.ToString(), oldValues: null, newValues: ToSmsAuditValues(request));
 
-            return CreatedAtAction(nameof(GetSmsSettings), null, new SmsSettingsDto
-            {
-                DefaultProvider = created.DefaultProvider ?? "Twilio",
-                FallbackProvidersCsv = SmsSettingsDto.FallbackJsonToCsv(created.FallbackProvidersJson),
-                TwilioEnabled = created.TwilioEnabled,
-                TwilioAccountSid = created.TwilioAccountSid ?? string.Empty,
-                TwilioAuthToken = created.TwilioAuthToken ?? string.Empty,
-                TwilioFromNumber = created.TwilioFromNumber ?? string.Empty,
-                GhanaGatewayEnabled = created.GhanaGatewayEnabled,
-                GhanaGatewayUrlTemplate = created.GhanaGatewayUrlTemplate ?? string.Empty,
-                GhanaGatewayApiKey = created.GhanaGatewayApiKey ?? string.Empty,
-                GhanaGatewaySenderId = created.GhanaGatewaySenderId ?? string.Empty,
-                GhanaGatewayTimeoutSeconds = created.GhanaGatewayTimeoutSeconds
-            });
+            return CreatedAtAction(nameof(GetSmsSettings), null, ToSmsSettingsDto(created));
         }
         catch (Exception ex)
         {
@@ -598,6 +585,11 @@ public class SettingsController : ControllerBase
                 return NotFound("SMS settings not found. Use POST to create them first.");
             }
 
+            var validation = ValidateSmsSettings(request, existing);
+            if (validation is not null)
+                return BadRequest(validation);
+
+            var oldAuditValues = ToSmsAuditValues(existing);
             var updated = await _settingsService.UpdateSmsSettingsAsync(new Core.Entities.SmsSettings
             {
                 DefaultProvider = request.DefaultProvider,
@@ -613,28 +605,180 @@ public class SettingsController : ControllerBase
                 GhanaGatewayTimeoutSeconds = request.GhanaGatewayTimeoutSeconds
             });
 
-            await TryAuditAsync("UPDATE", "SmsSettings", updated.Id.ToString(), oldValues: existing, newValues: request);
+            await TryAuditAsync("UPDATE", "SmsSettings", updated.Id.ToString(), oldValues: oldAuditValues, newValues: ToSmsAuditValues(request));
 
-            return Ok(new SmsSettingsDto
-            {
-                DefaultProvider = updated.DefaultProvider ?? "Twilio",
-                FallbackProvidersCsv = SmsSettingsDto.FallbackJsonToCsv(updated.FallbackProvidersJson),
-                TwilioEnabled = updated.TwilioEnabled,
-                TwilioAccountSid = updated.TwilioAccountSid ?? string.Empty,
-                TwilioAuthToken = updated.TwilioAuthToken ?? string.Empty,
-                TwilioFromNumber = updated.TwilioFromNumber ?? string.Empty,
-                GhanaGatewayEnabled = updated.GhanaGatewayEnabled,
-                GhanaGatewayUrlTemplate = updated.GhanaGatewayUrlTemplate ?? string.Empty,
-                GhanaGatewayApiKey = updated.GhanaGatewayApiKey ?? string.Empty,
-                GhanaGatewaySenderId = updated.GhanaGatewaySenderId ?? string.Empty,
-                GhanaGatewayTimeoutSeconds = updated.GhanaGatewayTimeoutSeconds
-            });
+            return Ok(ToSmsSettingsDto(updated));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating SMS settings");
             return StatusCode(500, "An error occurred while updating SMS settings");
         }
+    }
+
+    [HttpGet("sms/balance")]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<ActionResult<MNotifyBalanceDto>> GetSmsBalance()
+    {
+        var tenantId = _currentUserService.TenantId;
+        if (!tenantId.HasValue || tenantId.Value == Guid.Empty)
+            return BadRequest(SmsProblem("SMS tenant is missing", "Select a tenant before checking the SMS balance.", "SMS_TENANT_REQUIRED"));
+
+        try
+        {
+            var balance = await _tenantSmsSender.GetMNotifyBalanceAsync(tenantId.Value, HttpContext.RequestAborted);
+            return Ok(new MNotifyBalanceDto { Balance = balance.Balance, Bonus = balance.Bonus });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "mNotify balance check failed for tenant {TenantId}", tenantId.Value);
+            return BadRequest(SmsProblem("SMS balance could not be checked", ex.Message, "MNOTIFY_BALANCE_FAILED"));
+        }
+    }
+
+    [HttpPost("sms/test")]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<ActionResult<TestSmsResultDto>> SendTestSms([FromBody] SendTestSmsRequestDto request)
+    {
+        var tenantId = _currentUserService.TenantId;
+        if (!tenantId.HasValue || tenantId.Value == Guid.Empty)
+            return BadRequest(SmsProblem("SMS tenant is missing", "Select a tenant before sending a test SMS.", "SMS_TENANT_REQUIRED"));
+
+        try
+        {
+            _ = MNotifySmsGateway.NormalizeRecipient(request.PhoneNumber);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(SmsProblem("Test SMS recipient is invalid", ex.Message, "SMS_RECIPIENT_INVALID"));
+        }
+
+        try
+        {
+            await _tenantSmsSender.SendAsync(
+                tenantId.Value,
+                request.PhoneNumber.Trim(),
+                "Rhema ERP test SMS. Your tenant SMS configuration is working.",
+                HttpContext.RequestAborted);
+            await TryAuditAsync(
+                "TEST",
+                "SmsSettings",
+                tenantId.Value.ToString(),
+                oldValues: null,
+                newValues: new { Recipient = MaskSmsRecipient(request.PhoneNumber), MessageType = "Standard" });
+
+            return Ok(new TestSmsResultDto { Success = true, Message = "Test SMS sent successfully." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Test SMS failed for tenant {TenantId}", tenantId.Value);
+            return BadRequest(SmsProblem("Test SMS could not be sent", ex.Message, "SMS_TEST_FAILED"));
+        }
+    }
+
+    private static SmsSettingsDto ToSmsSettingsDto(Core.Entities.SmsSettings settings) => new()
+    {
+        IsConfigured = true,
+        DefaultProvider = settings.DefaultProvider ?? "GhanaGateway",
+        FallbackProvidersCsv = SmsSettingsDto.FallbackJsonToCsv(settings.FallbackProvidersJson),
+        TwilioEnabled = settings.TwilioEnabled,
+        TwilioAccountSid = settings.TwilioAccountSid ?? string.Empty,
+        TwilioAuthToken = string.Empty,
+        TwilioAuthTokenConfigured = !string.IsNullOrWhiteSpace(settings.TwilioAuthToken),
+        TwilioFromNumber = settings.TwilioFromNumber ?? string.Empty,
+        GhanaGatewayEnabled = settings.GhanaGatewayEnabled,
+        GhanaGatewayUrlTemplate = string.IsNullOrWhiteSpace(settings.GhanaGatewayUrlTemplate)
+            ? ErpSystem.Api.Services.Sms.MNotifySmsGateway.DefaultEndpoint
+            : settings.GhanaGatewayUrlTemplate,
+        GhanaGatewayApiKey = string.Empty,
+        GhanaGatewayApiKeyConfigured = !string.IsNullOrWhiteSpace(settings.GhanaGatewayApiKey),
+        GhanaGatewaySenderId = settings.GhanaGatewaySenderId ?? string.Empty,
+        GhanaGatewayTimeoutSeconds = settings.GhanaGatewayTimeoutSeconds <= 0 ? 10 : settings.GhanaGatewayTimeoutSeconds
+    };
+
+    private static object ToSmsAuditValues(SmsSettingsDto request) => new
+    {
+        request.DefaultProvider,
+        request.FallbackProvidersCsv,
+        request.TwilioEnabled,
+        request.TwilioAccountSid,
+        TwilioAuthTokenSupplied = !string.IsNullOrWhiteSpace(request.TwilioAuthToken),
+        request.TwilioFromNumber,
+        MNotifyEnabled = request.GhanaGatewayEnabled,
+        MNotifyEndpoint = request.GhanaGatewayUrlTemplate,
+        MNotifyApiKeySupplied = !string.IsNullOrWhiteSpace(request.GhanaGatewayApiKey),
+        MNotifySenderId = request.GhanaGatewaySenderId,
+        MNotifyTimeoutSeconds = request.GhanaGatewayTimeoutSeconds
+    };
+
+    private static object ToSmsAuditValues(Core.Entities.SmsSettings settings) => new
+    {
+        settings.DefaultProvider,
+        FallbackProvidersCsv = SmsSettingsDto.FallbackJsonToCsv(settings.FallbackProvidersJson),
+        settings.TwilioEnabled,
+        settings.TwilioAccountSid,
+        TwilioAuthTokenConfigured = !string.IsNullOrWhiteSpace(settings.TwilioAuthToken),
+        settings.TwilioFromNumber,
+        MNotifyEnabled = settings.GhanaGatewayEnabled,
+        MNotifyEndpoint = settings.GhanaGatewayUrlTemplate,
+        MNotifyApiKeyConfigured = !string.IsNullOrWhiteSpace(settings.GhanaGatewayApiKey),
+        MNotifySenderId = settings.GhanaGatewaySenderId,
+        MNotifyTimeoutSeconds = settings.GhanaGatewayTimeoutSeconds
+    };
+
+    private static string? ValidateSmsSettings(SmsSettingsDto request, Core.Entities.SmsSettings? existing)
+    {
+        var provider = request.DefaultProvider?.Trim();
+        if (provider is not null &&
+            !provider.Equals("Twilio", StringComparison.OrdinalIgnoreCase) &&
+            !provider.Equals("mNotify", StringComparison.OrdinalIgnoreCase) &&
+            !provider.Equals("GhanaGateway", StringComparison.OrdinalIgnoreCase) &&
+            !provider.Equals("Ghana", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Default provider must be Twilio or mNotify.";
+        }
+
+        if (request.GhanaGatewayTimeoutSeconds is < 1 or > 60)
+            return "mNotify timeout must be between 1 and 60 seconds.";
+
+        if (request.GhanaGatewayEnabled)
+        {
+            var endpoint = string.IsNullOrWhiteSpace(request.GhanaGatewayUrlTemplate)
+                ? ErpSystem.Api.Services.Sms.MNotifySmsGateway.DefaultEndpoint
+                : request.GhanaGatewayUrlTemplate.Trim();
+            if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri) ||
+                !string.Equals(endpointUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(endpointUri.Host, "api.mnotify.com", StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(endpointUri.AbsolutePath.TrimEnd('/'), "/api/sms/quick", StringComparison.OrdinalIgnoreCase) ||
+                !string.IsNullOrWhiteSpace(endpointUri.Query))
+            {
+                return $"mNotify endpoint must be {ErpSystem.Api.Services.Sms.MNotifySmsGateway.DefaultEndpoint} without query parameters.";
+            }
+            if (string.IsNullOrWhiteSpace(request.GhanaGatewaySenderId))
+                return "mNotify sender ID is required when mNotify is enabled.";
+            if (string.IsNullOrWhiteSpace(request.GhanaGatewayApiKey) && string.IsNullOrWhiteSpace(existing?.GhanaGatewayApiKey))
+                return "mNotify API key is required when mNotify is enabled.";
+        }
+
+        return null;
+    }
+
+    private static ProblemDetails SmsProblem(string title, string detail, string code)
+    {
+        var problem = new ProblemDetails
+        {
+            Title = title,
+            Detail = detail,
+            Status = StatusCodes.Status400BadRequest
+        };
+        problem.Extensions["code"] = code;
+        return problem;
+    }
+
+    private static string MaskSmsRecipient(string phoneNumber)
+    {
+        var digits = new string((phoneNumber ?? string.Empty).Where(char.IsDigit).ToArray());
+        return digits.Length <= 4 ? "***" : $"***{digits[^4..]}";
     }
 
     #region Field Labels
@@ -794,7 +938,8 @@ public class TestEmailResultDto
 
 public class SmsSettingsDto
 {
-    public string DefaultProvider { get; set; } = "Twilio";
+    public bool IsConfigured { get; set; }
+    public string DefaultProvider { get; set; } = "GhanaGateway";
 
     /// <summary>
     /// Comma-separated list of fallback providers (e.g. "GhanaGateway").
@@ -804,11 +949,13 @@ public class SmsSettingsDto
     public bool TwilioEnabled { get; set; } = false;
     public string TwilioAccountSid { get; set; } = string.Empty;
     public string TwilioAuthToken { get; set; } = string.Empty;
+    public bool TwilioAuthTokenConfigured { get; set; }
     public string TwilioFromNumber { get; set; } = string.Empty;
 
     public bool GhanaGatewayEnabled { get; set; } = false;
     public string GhanaGatewayUrlTemplate { get; set; } = string.Empty;
     public string GhanaGatewayApiKey { get; set; } = string.Empty;
+    public bool GhanaGatewayApiKeyConfigured { get; set; }
     public string GhanaGatewaySenderId { get; set; } = string.Empty;
     public int GhanaGatewayTimeoutSeconds { get; set; } = 10;
 
@@ -836,6 +983,23 @@ public class SmsSettingsDto
             return string.Empty;
         }
     }
+}
+
+public sealed class SendTestSmsRequestDto
+{
+    public string PhoneNumber { get; set; } = string.Empty;
+}
+
+public sealed class TestSmsResultDto
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+}
+
+public sealed class MNotifyBalanceDto
+{
+    public decimal Balance { get; set; }
+    public decimal Bonus { get; set; }
 }
 
 public class SecuritySettingsDto

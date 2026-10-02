@@ -1929,7 +1929,7 @@ export default function PayrollPage() {
       </Dialog>
 
       <Dialog open={postingPreviewOpen} onOpenChange={setPostingPreviewOpen}>
-        <DialogContent className="left-0 top-0 h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden rounded-none border-0 p-0 sm:rounded-none">
+        <DialogContent className="left-0 top-0 h-[100dvh] max-h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden rounded-none border-0 p-0 sm:rounded-none">
           <DialogHeader className="border-b px-6 py-4 pr-14">
             <DialogTitle>Payroll Posting Preview</DialogTitle>
           </DialogHeader>

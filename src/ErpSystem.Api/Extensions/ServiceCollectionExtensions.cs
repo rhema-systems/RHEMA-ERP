@@ -455,7 +455,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Core services
             services.AddScoped<ErpSystem.Core.Interfaces.IFileUploadService, ErpSystem.Api.Services.SimpleFileUploadService>();
 
-            // SMS (Twilio + Ghana gateway) - used by notifications + OTP flows
+            // SMS (Twilio + mNotify; GhanaGateway remains the persisted compatibility name)
+            // used by notifications and OTP flows.
             services.AddOptions<ErpSystem.Api.Services.Sms.SmsOptions>()
                 .BindConfiguration("Sms");
             services.AddScoped<ErpSystem.Api.Services.Sms.TwilioSmsSender>();
@@ -464,7 +465,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 var opts = sp.GetRequiredService<IOptions<ErpSystem.Api.Services.Sms.SmsOptions>>().Value;
                 var seconds = Math.Clamp(opts.GhanaGateway.TimeoutSeconds, 1, 60);
                 client.Timeout = TimeSpan.FromSeconds(seconds);
-            });
+            }).RemoveAllLoggers();
+            // mNotify requires the API key in the query string. This dedicated client
+            // must not use the standard HttpClientFactory request logger, which records
+            // request URIs and could therefore disclose the credential.
+            services.AddHttpClient("mnotify").RemoveAllLoggers();
             services.AddScoped<ErpSystem.Api.Services.Sms.CompositeSmsSender>();
             services.AddScoped<ErpSystem.Api.Services.Sms.ISmsSender>(sp => sp.GetRequiredService<ErpSystem.Api.Services.Sms.CompositeSmsSender>());
             services.AddScoped<ErpSystem.Api.Services.Sms.ITenantSmsSender, ErpSystem.Api.Services.Sms.TenantSmsSender>();

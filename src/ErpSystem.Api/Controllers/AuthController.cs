@@ -218,6 +218,17 @@ namespace ErpSystem.Api.Controllers
             return sb.ToString();
         }
 
+        private static DateTime GetJwtExpiryUtc(string token)
+        {
+            var handler = new JwtSecurityTokenHandler();
+            if (!handler.CanReadToken(token))
+            {
+                throw new InvalidOperationException("Generated JWT token could not be read.");
+            }
+
+            return handler.ReadJwtToken(token).ValidTo.ToUniversalTime();
+        }
+
         private async Task<IActionResult> CompleteSuccessfulLoginAsync(ApplicationUser user, Tenant? tenant, string usernameForLogs, string details)
         {
             var accessDecision = await _hrIdentityAccessService.EvaluateAsync(user.Id, HttpContext.RequestAborted);
@@ -365,9 +376,16 @@ namespace ErpSystem.Api.Controllers
             // Update last login timestamp
             user.LastLoginDate = DateTime.UtcNow;
             await _userManager.UpdateAsync(user);
-            var refreshToken = _tokenService.GenerateRefreshToken();
-
-            // TODO: Store refresh token in database for security
+            // The established service issues a fixed 30-day token with unlimited use until
+            // expiry/revocation. Reuse it on refresh instead of introducing rotation here; the
+            // browser coordinates one refresh flight across all of its ERP tabs.
+            var refreshTokenEntity = await _refreshTokenService.CreateRefreshTokenAsync(
+                user.Id,
+                effectiveTenantId,
+                ipAddress,
+                userAgent,
+                deviceFingerprint);
+            var refreshToken = refreshTokenEntity.TokenHash;
 
             _logger.LogInformation("{Details} for user: {Username}", details, usernameForLogs);
 
@@ -390,7 +408,7 @@ namespace ErpSystem.Api.Controllers
             {
                 Token = token,
                 RefreshToken = refreshToken,
-                ExpiresAt = DateTime.UtcNow.AddHours(24), // Match JWT expiry
+                ExpiresAt = GetJwtExpiryUtc(token),
                 User = new UserInfo
                 {
                     Id = user.Id,
@@ -910,9 +928,15 @@ namespace ErpSystem.Api.Controllers
                 var principal = _tokenService.GetPrincipalFromExpiredToken(request.Token);
                 var userId = principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
 
-                if (string.IsNullOrEmpty(userId))
+                if (!Guid.TryParse(userId, out var parsedUserId))
                 {
                     return Unauthorized(new { message = "Invalid token" });
+                }
+
+                var storedRefreshToken = await _refreshTokenService.GetValidRefreshTokenAsync(request.RefreshToken);
+                if (storedRefreshToken == null || storedRefreshToken.UserId != parsedUserId)
+                {
+                    return Unauthorized(new { message = "Invalid refresh token" });
                 }
 
                 var user = await _userManager.FindByIdAsync(userId);
@@ -938,16 +962,44 @@ namespace ErpSystem.Api.Controllers
                     });
                 }
 
-                // TODO: Validate refresh token from database
+                var sessionId = principal.FindFirst("sid")?.Value;
+                if (!string.IsNullOrEmpty(sessionId))
+                {
+                    var session = await _userSessionService.GetSessionAsync(sessionId);
+                    if (session == null || !session.IsActive || session.UserId != user.Id)
+                    {
+                        return Unauthorized(new { message = "Session is no longer active" });
+                    }
+                }
 
-                var newToken = await _tokenService.GenerateTokenAsync(user);
-                var newRefreshToken = _tokenService.GenerateRefreshToken();
+                await _refreshTokenService.MarkRefreshTokenAsUsedAsync(storedRefreshToken);
+                var newToken = string.IsNullOrEmpty(sessionId)
+                    ? await _tokenService.GenerateTokenAsync(user)
+                    : await _tokenService.GenerateTokenAsync(user, sessionId);
+
+                if (!string.IsNullOrEmpty(sessionId))
+                {
+                    await _userSessionService.UpdateSessionActivityAsync(sessionId);
+                    var currentSession = await _context.UserSessions
+                        .FirstOrDefaultAsync(s => s.SessionId == sessionId && s.IsActive);
+                    if (currentSession != null)
+                    {
+                        var newJti = new JwtSecurityTokenHandler().ReadJwtToken(newToken).Claims
+                            .FirstOrDefault(claim => claim.Type == JwtRegisteredClaimNames.Jti)?.Value;
+                        if (!string.IsNullOrEmpty(newJti))
+                        {
+                            currentSession.JwtTokenId = newJti;
+                            await _context.SaveChangesAsync();
+                        }
+                    }
+                }
 
                 var response = new LoginResponse
                 {
                     Token = newToken,
-                    RefreshToken = newRefreshToken,
-                    ExpiresAt = DateTime.UtcNow.AddHours(24),
+                    // No rotation: preserve the fixed-expiry, revocable refresh token.
+                    RefreshToken = request.RefreshToken,
+                    ExpiresAt = GetJwtExpiryUtc(newToken),
                     User = new UserInfo
                     {
                         Id = user.Id,
@@ -1398,13 +1450,15 @@ namespace ErpSystem.Api.Controllers
 
                 _logger.LogInformation("User {Username} selected tenant {TenantCode}", user.UserName, request.TenantCode);
 
-                // Generate new JWT token with updated tenant context
-                var newToken = await _tokenService.GenerateTokenAsync(user);
+                // Generate the tenant-context JWT without dropping the browser session identity.
+                var sessionId = User.FindFirst("sid")?.Value;
+                var newToken = string.IsNullOrEmpty(sessionId)
+                    ? await _tokenService.GenerateTokenAsync(user)
+                    : await _tokenService.GenerateTokenAsync(user, sessionId);
 
                 // Extract JTI from the new token and update the current session
                 try
                 {
-                    var sessionId = User.FindFirst("sid")?.Value;
                     if (!string.IsNullOrEmpty(sessionId) && Guid.TryParse(sessionId, out var sessionGuid))
                     {
                         var currentSession = await _context.UserSessions
@@ -1483,7 +1537,7 @@ namespace ErpSystem.Api.Controllers
                 var response = new SelectTenantResponse
                 {
                     Token = newToken,
-                    ExpiresAt = DateTime.UtcNow.AddHours(24),
+                    ExpiresAt = GetJwtExpiryUtc(newToken),
                     User = new UserInfo
                     {
                         Id = user.Id,
@@ -1712,7 +1766,7 @@ namespace ErpSystem.Api.Controllers
                         maxAttempts: 5,
                         HttpContext.RequestAborted);
 
-                    await _tenantSmsSender.SendAsync(
+                    await _tenantSmsSender.SendOtpAsync(
                         registrationTenant.Id,
                         phone,
                         $"Your {registrationTenant.Name} verification code is {otp}. It expires in 10 minutes.",
@@ -1868,7 +1922,7 @@ namespace ErpSystem.Api.Controllers
                         maxAttempts: 5,
                         HttpContext.RequestAborted);
 
-                    await _tenantSmsSender.SendAsync(
+                    await _tenantSmsSender.SendOtpAsync(
                         registrationTenant.Id,
                         phone,
                         $"Your {registrationTenant.Name} verification code is {otp}. It expires in 10 minutes.",
@@ -2301,7 +2355,7 @@ namespace ErpSystem.Api.Controllers
                          }
                          else
                          {
-                             await _tenantSmsSender.SendAsync(
+                             await _tenantSmsSender.SendOtpAsync(
                                  tenantId,
                                 user.PhoneNumber ?? identifier,
                                 $"Your one-time login code is {otp}. It expires in 10 minutes.",

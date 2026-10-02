@@ -1,14 +1,16 @@
 import { apiService } from './api.service';
 import type { LoginRequest, LoginResponse, RequestLoginOtpRequest, RequestLoginOtpResponse, VerifyLoginOtpRequest, User, Tenant } from '../types';
 import { hasAllPermissionsAccess, hasAnyPermissionAccess, hasPermissionAccess } from '../lib/permissions';
-
-const SESSION_ACTIVITY_STORAGE_KEY = 'erp-session-last-activity';
+import {
+  browserSessionCoordinator,
+  SESSION_ACTIVITY_STORAGE_KEY,
+  SESSION_TOKEN_REFRESHED_AT_STORAGE_KEY,
+} from './browser-session-coordinator';
 
 export class AuthService {
   private markSessionActivityNow(): void {
     if (typeof window === 'undefined') return;
-
-    localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, Date.now().toString());
+    browserSessionCoordinator.recordActivity();
   }
 
   async login(credentials: LoginRequest): Promise<LoginResponse> {
@@ -25,6 +27,7 @@ export class AuthService {
       }
       localStorage.setItem('user', JSON.stringify(response.user));
       this.markSessionActivityNow();
+      browserSessionCoordinator.publish('login');
     }
     
     return response;
@@ -47,12 +50,14 @@ export class AuthService {
       }
       localStorage.setItem('user', JSON.stringify(response.user));
       this.markSessionActivityNow();
+      browserSessionCoordinator.publish('login');
     }
 
     return response;
   }
 
-  logout = async (): Promise<void> => {
+  logout = async (reason: 'logout' | 'session-expired' = 'logout'): Promise<void> => {
+    const sessionVersion = browserSessionCoordinator.getSessionVersion();
     try {
       // Get refresh token before clearing
       const refreshToken = localStorage.getItem('refreshToken');
@@ -63,8 +68,13 @@ export class AuthService {
       // Continue with logout even if API call fails
       console.warn('Logout API call failed:', error);
     } finally {
-      // Always clear local storage
-      this.clearTokens();
+      const currentVersion = browserSessionCoordinator.getSessionVersion();
+      // apiService normally clears the session that initiated logout. If a different tab replaced
+      // it while the request was in flight, preserve that newer login/refresh and emit no logout.
+      if (!this.isAuthenticated() || currentVersion === sessionVersion) {
+        this.clearTokens();
+        browserSessionCoordinator.publish(reason);
+      }
     }
   }
 
@@ -154,6 +164,7 @@ export class AuthService {
     localStorage.removeItem('currentTenant');
     localStorage.removeItem('currentTenantCode');
     localStorage.removeItem(SESSION_ACTIVITY_STORAGE_KEY);
+    localStorage.removeItem(SESSION_TOKEN_REFRESHED_AT_STORAGE_KEY);
   }
 
   setCurrentTenant(tenant: Tenant): void {

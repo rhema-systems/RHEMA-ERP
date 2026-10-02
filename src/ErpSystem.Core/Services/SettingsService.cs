@@ -197,30 +197,8 @@ public class SettingsService : ISettingsService
                 return null;
             }
 
-            if (!string.IsNullOrWhiteSpace(smsSettings.TwilioAuthToken))
-            {
-                try
-                {
-                    smsSettings.TwilioAuthToken = _cryptoService.Decrypt(smsSettings.TwilioAuthToken);
-                }
-                catch
-                {
-                    // backwards compatibility (plain text)
-                }
-            }
-
-            if (!string.IsNullOrWhiteSpace(smsSettings.GhanaGatewayApiKey))
-            {
-                try
-                {
-                    smsSettings.GhanaGatewayApiKey = _cryptoService.Decrypt(smsSettings.GhanaGatewayApiKey);
-                }
-                catch
-                {
-                    // backwards compatibility (plain text)
-                }
-            }
-
+            // Return secrets in their stored form. Controllers must never expose them;
+            // TenantSmsSender decrypts the selected tenant secret only at send time.
             return smsSettings;
         }
         catch (Exception ex)
@@ -254,16 +232,18 @@ public class SettingsService : ISettingsService
 
                 existing.TwilioEnabled = settings.TwilioEnabled;
                 existing.TwilioAccountSid = settings.TwilioAccountSid;
-                existing.TwilioAuthToken = string.IsNullOrWhiteSpace(settings.TwilioAuthToken)
-                    ? settings.TwilioAuthToken
-                    : _cryptoService.Encrypt(settings.TwilioAuthToken);
+                if (!string.IsNullOrWhiteSpace(settings.TwilioAuthToken))
+                {
+                    existing.TwilioAuthToken = _cryptoService.Encrypt(settings.TwilioAuthToken);
+                }
                 existing.TwilioFromNumber = settings.TwilioFromNumber;
 
                 existing.GhanaGatewayEnabled = settings.GhanaGatewayEnabled;
                 existing.GhanaGatewayUrlTemplate = settings.GhanaGatewayUrlTemplate;
-                existing.GhanaGatewayApiKey = string.IsNullOrWhiteSpace(settings.GhanaGatewayApiKey)
-                    ? settings.GhanaGatewayApiKey
-                    : _cryptoService.Encrypt(settings.GhanaGatewayApiKey);
+                if (!string.IsNullOrWhiteSpace(settings.GhanaGatewayApiKey))
+                {
+                    existing.GhanaGatewayApiKey = _cryptoService.Encrypt(settings.GhanaGatewayApiKey);
+                }
                 existing.GhanaGatewaySenderId = settings.GhanaGatewaySenderId;
                 existing.GhanaGatewayTimeoutSeconds = settings.GhanaGatewayTimeoutSeconds;
 

@@ -847,6 +847,7 @@ public sealed class EhcTicketService : IEhcTicketService
 
         var ticket = new EhcTicket
         {
+            PublicPropertyEnquiryContactId = property?.PublicContactId,
             PropertyListingContextJson = property == null ? null : JsonSerializer.Serialize(property),
             ExternalSubmissionId = submissionId,
             TenantId = tenantId,

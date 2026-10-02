@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import BusinessPartnerDetailPage from './page';
 import { businessPartnerService, type BusinessPartnerDetailDto } from '@/services/businessPartnerService';
+import { businessPartnerFinanceProfileService } from '@/services/businessPartnerFinanceProfileService';
 
 const workflowMocks = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -14,6 +15,7 @@ vi.mock('@/services/businessPartnerService', () => ({ businessPartnerService: {
   getById: vi.fn(), getPostingOptions: vi.fn(), submitPartnerForApproval: vi.fn(),
   approvePartner: vi.fn(), rejectPartner: vi.fn(),
 } }));
+vi.mock('@/services/businessPartnerFinanceProfileService', () => ({ businessPartnerFinanceProfileService: { get: vi.fn() } }));
 vi.mock('@/hooks/useWorkflowSummary', () => ({ useWorkflowSummary: workflowMocks.useWorkflowSummary }));
 vi.mock('@/services/partnerConfigService', () => ({ licenseTypeService: { getActive: vi.fn().mockResolvedValue([]) } }));
 vi.mock('@/services/performanceTrackingService', () => ({ performanceTrackingService: {
@@ -31,6 +33,9 @@ Object.assign(globalThis, { React, ResizeObserver: class { observe() {} unobserv
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(businessPartnerService.getPostingOptions).mockResolvedValue({ accounts: [], bankAccounts: [], taxGroups: [] });
+  vi.mocked(businessPartnerFinanceProfileService.get).mockResolvedValue({
+    businessPartnerId: 'partner-role-test', partnerCode: 'ROLE-001', partnerName: 'Role test partner', roles: [],
+  });
   workflowMocks.refresh.mockResolvedValue(undefined);
   workflowMocks.useWorkflowSummary.mockReturnValue({
     summary: {
@@ -58,6 +63,30 @@ describe('business partner detail account roles', () => {
     const name = payables ? 'Accounts Payable' : 'Accounts Receivable';
     fireEvent.mouseDown(screen.getByRole('tab', { name }), { button: 0, ctrlKey: false });
     expect(await screen.findByText(`Current ${payables ? 'payables' : 'receivables'} account sources`)).toBeInTheDocument();
+  });
+
+  it('shows the current approved AR profile values instead of the legacy partner defaults', async () => {
+    vi.mocked(businessPartnerService.getById).mockResolvedValue({
+      id: 'partner-role-test', partnerCode: 'ROLE-001', partnerName: 'Role test partner', partnerType: 'Customer',
+      status: 'Active', approvalStatus: 'Approved', documents: [], licenses: [], currency: 'GHS', creditLimit: 25,
+      isPreferred: false, isBlacklisted: false, createdAt: '2026-09-27T00:00:00Z',
+    } satisfies BusinessPartnerDetailDto);
+    vi.mocked(businessPartnerFinanceProfileService.get).mockResolvedValue({
+      businessPartnerId: 'partner-role-test', partnerCode: 'ROLE-001', partnerName: 'Role test partner', roles: [{
+        id: 'customer-role', roleType: 'Customer', status: 'Active', activeFromUtc: '2026-01-01T00:00:00Z', apProfiles: [],
+        arProfiles: [{
+          id: 'ar-approved', businessPartnerRoleId: 'customer-role', versionNumber: 2, status: 'Approved',
+          effectiveFrom: '2026-01-01T00:00:00Z', creditLimit: 12500, isWithholdingAgent: false,
+        }],
+      }],
+    });
+
+    render(<BusinessPartnerDetailPage />);
+    await screen.findByRole('heading', { name: 'Role test partner' });
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Financial Info' }), { button: 0, ctrlKey: false });
+
+    expect(await screen.findByText('GHS 12,500.00')).toBeInTheDocument();
+    expect(screen.queryByText('GHS 25.00')).not.toBeInTheDocument();
   });
 });
 

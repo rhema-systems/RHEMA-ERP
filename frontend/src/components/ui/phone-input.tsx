@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { ChevronDown, Phone } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { Button } from './button';
@@ -71,7 +71,7 @@ const countryCodes: CountryCode[] = [
   { code: 'MR', name: 'Mauritania', dial: '+222', flag: '🇲🇷' },
   { code: 'ML', name: 'Mali', dial: '+223', flag: '🇲🇱' },
   { code: 'GN', name: 'Guinea', dial: '+224', flag: '🇬🇳' },
-  { code: 'CI', name: 'Côte d\'Ivoire', dial: '+225', flag: '🇨🇮' },
+  { code: 'CI', name: "Côte d'Ivoire", dial: '+225', flag: '🇨🇮' },
   { code: 'BF', name: 'Burkina Faso', dial: '+226', flag: '🇧🇫' },
   { code: 'NE', name: 'Niger', dial: '+227', flag: '🇳🇪' },
   { code: 'TD', name: 'Chad', dial: '+235', flag: '🇹🇩' },
@@ -82,7 +82,12 @@ const countryCodes: CountryCode[] = [
   { code: 'GQ', name: 'Equatorial Guinea', dial: '+240', flag: '🇬🇶' },
   { code: 'GA', name: 'Gabon', dial: '+241', flag: '🇬🇦' },
   { code: 'CG', name: 'Republic of the Congo', dial: '+242', flag: '🇨🇬' },
-  { code: 'CD', name: 'Democratic Republic of the Congo', dial: '+243', flag: '🇨🇩' },
+  {
+    code: 'CD',
+    name: 'Democratic Republic of the Congo',
+    dial: '+243',
+    flag: '🇨🇩',
+  },
   { code: 'AO', name: 'Angola', dial: '+244', flag: '🇦🇴' },
   { code: 'GW', name: 'Guinea-Bissau', dial: '+245', flag: '🇬🇼' },
   { code: 'SC', name: 'Seychelles', dial: '+248', flag: '🇸🇨' },
@@ -209,7 +214,7 @@ const countryCodes: CountryCode[] = [
   { code: 'UZ', name: 'Uzbekistan', dial: '+998', flag: '🇺🇿' },
   // Ghana - Our default
   { code: 'GH', name: 'Ghana', dial: '+233', flag: '🇬🇭' },
-  // Nigeria  
+  // Nigeria
   { code: 'NG', name: 'Nigeria', dial: '+234', flag: '🇳🇬' },
 ].sort((a, b) => {
   // Extract numeric part of dial code for proper sorting
@@ -219,23 +224,31 @@ const countryCodes: CountryCode[] = [
 });
 
 interface PhoneInputProps {
+  id?: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   className?: string;
   error?: boolean;
+  disabled?: boolean;
+  countrySelectLabel?: string;
 }
 
-export default function PhoneInput({ 
-  value, 
-  onChange, 
-  placeholder = "Enter phone number", 
+export default function PhoneInput({
+  id,
+  value,
+  onChange,
+  placeholder = 'Enter phone number',
   className,
-  error 
+  error,
+  disabled = false,
+  countrySelectLabel = 'Country calling code',
 }: PhoneInputProps) {
   // Find Ghana as default country
-  const ghanaCountry = countryCodes.find(c => c.code === 'GH') || countryCodes[0];
-  const [selectedCountry, setSelectedCountry] = useState<CountryCode>(ghanaCountry);
+  const ghanaCountry =
+    countryCodes.find((c) => c.code === 'GH') || countryCodes[0];
+  const [selectedCountry, setSelectedCountry] =
+    useState<CountryCode>(ghanaCountry);
 
   // Parse the current value to extract country code and phone number
   const phoneNumber = value.replace(selectedCountry.dial, '').trim();
@@ -243,13 +256,20 @@ export default function PhoneInput({
   const handleCountrySelect = (country: CountryCode) => {
     setSelectedCountry(country);
     // Update the full phone number with new country code
-    const cleanNumber = phoneNumber.replace(/\D/g, '').slice(0, 10);
+    const maxNationalDigits = 15 - country.dial.replace(/\D/g, '').length;
+    const cleanNumber = phoneNumber
+      .replace(/\D/g, '')
+      .slice(0, maxNationalDigits);
     onChange(`${country.dial}${cleanNumber}`);
   };
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Only allow digits and limit to 10 digits
-    const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
+    // E.164 permits at most 15 digits including the calling code.
+    const maxNationalDigits =
+      15 - selectedCountry.dial.replace(/\D/g, '').length;
+    const digits = e.target.value
+      .replace(/\D/g, '')
+      .slice(0, maxNationalDigits);
     onChange(`${selectedCountry.dial}${digits}`);
   };
 
@@ -269,41 +289,48 @@ export default function PhoneInput({
   };
 
   return (
-    <div className={cn("relative", className)}>
+    <div className={cn('relative', className)}>
       {/* Phone Number Input with Country Selector Inside */}
       <div className="relative">
         <Input
+          id={id}
           type="tel"
           value={formatPhoneNumber(phoneNumber)}
           onChange={handlePhoneChange}
           placeholder={placeholder}
           className={cn(
-            "pl-20 pr-10", // Space for country selector on left and phone icon on right
-            error && "border-red-500"
+            'pl-20 pr-10', // Space for country selector on left and phone icon on right
+            error && 'border-red-500'
           )}
-          maxLength={14} // Account for formatting
+          maxLength={20} // Allows formatting around the E.164 maximum.
+          disabled={disabled}
         />
-        
+
         {/* Country Code Selector - positioned inside left side of input */}
         <div className="absolute left-0 top-0 h-full">
           <select
+            aria-label={countrySelectLabel}
             value={selectedCountry.code}
             onChange={(e) => {
-              const country = countryCodes.find(c => c.code === e.target.value);
+              const country = countryCodes.find(
+                (c) => c.code === e.target.value
+              );
               if (country) handleCountrySelect(country);
             }}
             className={cn(
-              "h-full w-20 rounded-l-md border-0 bg-transparent px-2 text-xs font-medium",
-              "focus:outline-none focus:ring-0 appearance-none cursor-pointer",
-              "border-r border-r-input"
+              'h-full w-20 rounded-l-md border-0 bg-transparent px-2 text-xs font-medium',
+              'focus:outline-none focus:ring-0 appearance-none cursor-pointer',
+              'border-r border-r-input'
             )}
             style={{
-              fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+              fontFamily:
+                'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
             }}
+            disabled={disabled}
           >
             {countryCodes.map((country) => (
-              <option 
-                key={country.code} 
+              <option
+                key={country.code}
                 value={country.code}
                 className="font-medium bg-background"
               >
@@ -314,7 +341,7 @@ export default function PhoneInput({
           {/* Custom dropdown arrow for country selector */}
           <ChevronDown className="absolute right-1 top-1/2 h-2 w-2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
         </div>
-        
+
         {/* Phone icon on the right */}
         <Phone className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
       </div>

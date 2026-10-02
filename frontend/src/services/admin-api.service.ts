@@ -282,19 +282,32 @@ export interface EmailSettings {
 }
 
 export interface SmsSettings {
+  isConfigured: boolean;
   defaultProvider: string;
   fallbackProvidersCsv: string;
 
   twilioEnabled: boolean;
   twilioAccountSid: string;
   twilioAuthToken: string;
+  twilioAuthTokenConfigured: boolean;
   twilioFromNumber: string;
 
   ghanaGatewayEnabled: boolean;
   ghanaGatewayUrlTemplate: string;
   ghanaGatewayApiKey: string;
+  ghanaGatewayApiKeyConfigured: boolean;
   ghanaGatewaySenderId: string;
   ghanaGatewayTimeoutSeconds: number;
+}
+
+export interface SmsBalance {
+  balance: number;
+  bonus: number;
+}
+
+export interface TestSmsResult {
+  success: boolean;
+  message: string;
 }
 
 export interface PasswordPolicy {
@@ -833,35 +846,21 @@ class AdminApiService {
 
   async saveSmsSettings(settings: SmsSettings): Promise<SmsSettings> {
     console.log('Saving SMS settings:', settings.defaultProvider);
-    try {
-      const existing = await this.getSmsSettings();
-      let result: SmsSettings;
-      if (existing && (existing.twilioAccountSid || existing.ghanaGatewayUrlTemplate))
-      {
-        result = await apiService.request<SmsSettings>('/settings/sms', {
-          method: 'PUT',
-          body: JSON.stringify(settings),
-        });
-      }
-      else
-      {
-        result = await apiService.request<SmsSettings>('/settings/sms', {
-          method: 'POST',
-          body: JSON.stringify(settings),
-        });
-      }
-      return result;
-    } catch (error: unknown) {
-      try {
-        return await apiService.request<SmsSettings>('/settings/sms', {
-          method: 'POST',
-          body: JSON.stringify(settings),
-        });
-      } catch (createError) {
-        console.error('Failed to save SMS settings:', createError);
-        throw createError;
-      }
-    }
+    return apiService.request<SmsSettings>('/settings/sms', {
+      method: settings.isConfigured ? 'PUT' : 'POST',
+      body: JSON.stringify(settings),
+    });
+  }
+
+  async getSmsBalance(): Promise<SmsBalance> {
+    return apiService.request<SmsBalance>('/settings/sms/balance');
+  }
+
+  async sendTestSms(phoneNumber: string): Promise<TestSmsResult> {
+    return apiService.request<TestSmsResult>('/settings/sms/test', {
+      method: 'POST',
+      body: JSON.stringify({ phoneNumber }),
+    });
   }
 
   // Keep the old method name for backward compatibility but make it smarter

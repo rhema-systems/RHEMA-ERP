@@ -58,7 +58,7 @@ public sealed class CompositeSmsSender : ISmsSender
         return p switch
         {
             "twilio" => _serviceProvider.GetRequiredService<TwilioSmsSender>(),
-            "ghanagateway" or "ghana" => _serviceProvider.GetRequiredService<GhanaGatewaySmsSender>(),
+            "mnotify" or "ghanagateway" or "ghana" => _serviceProvider.GetRequiredService<GhanaGatewaySmsSender>(),
             _ => throw new InvalidOperationException($"Unknown SMS provider '{provider}'.")
         };
     }

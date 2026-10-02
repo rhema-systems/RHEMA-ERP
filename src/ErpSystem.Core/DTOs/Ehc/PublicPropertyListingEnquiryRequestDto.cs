@@ -18,14 +18,12 @@ public sealed class PublicPropertyListingEnquiryRequestDto : IValidatableObject
     [StringLength(200, MinimumLength = 2, ErrorMessage = "The contact name must be between 2 and 200 characters.")]
     public string ContactName { get; init; } = string.Empty;
 
-    [Required(ErrorMessage = "Enter your email address.")]
     [EmailAddress(ErrorMessage = "Enter a valid email address.")]
     [StringLength(320, ErrorMessage = "The email address cannot exceed 320 characters.")]
-    public string ContactEmail { get; init; } = string.Empty;
+    public string? ContactEmail { get; init; }
 
-    [Required(ErrorMessage = "Enter your phone number.")]
-    [StringLength(40, MinimumLength = 7, ErrorMessage = "The phone number must be between 7 and 40 characters.")]
-    public string ContactPhone { get; init; } = string.Empty;
+    [StringLength(20, MinimumLength = 8, ErrorMessage = "The phone number must be between 8 and 20 characters.")]
+    public string? ContactPhone { get; init; }
 
     [StringLength(40, MinimumLength = 7, ErrorMessage = "The alternative phone number must be between 7 and 40 characters.")]
     public string? AlternativePhoneNumber { get; init; }
@@ -35,6 +33,10 @@ public sealed class PublicPropertyListingEnquiryRequestDto : IValidatableObject
 
     [StringLength(16, ErrorMessage = "The preferred contact method cannot exceed 16 characters.")]
     public string PreferredContactMethod { get; init; } = "Email";
+
+    [Required(ErrorMessage = "Verify your selected contact method before sending the enquiry.")]
+    [StringLength(200, MinimumLength = 32, ErrorMessage = "The contact verification has expired or is invalid.")]
+    public string ContactVerificationToken { get; init; } = string.Empty;
 
     [StringLength(8192, ErrorMessage = "The security token is invalid.")]
     public string? CaptchaToken { get; init; }
@@ -62,27 +64,48 @@ public sealed class PublicPropertyListingEnquiryRequestDto : IValidatableObject
                 new[] { nameof(ContactName) });
         }
 
-        if (!HasValidPhoneShape(ContactPhone))
+        var usesEmail = string.Equals(PreferredContactMethod, "Email", StringComparison.OrdinalIgnoreCase);
+        var usesPhone = string.Equals(PreferredContactMethod, "Phone", StringComparison.OrdinalIgnoreCase);
+
+        if (usesEmail && string.IsNullOrWhiteSpace(ContactEmail))
         {
             yield return new ValidationResult(
-                "Enter a valid phone number.",
+                "Enter your email address.",
+                new[] { nameof(ContactEmail) });
+        }
+
+        if (usesEmail && !string.IsNullOrWhiteSpace(ContactPhone))
+        {
+            yield return new ValidationResult(
+                "Only the selected email address may be submitted.",
                 new[] { nameof(ContactPhone) });
         }
 
-        if (!string.IsNullOrWhiteSpace(AlternativePhoneNumber) &&
-            !HasValidPhoneShape(AlternativePhoneNumber))
+        if (usesPhone && !HasValidPhoneShape(ContactPhone))
         {
             yield return new ValidationResult(
-                "Enter a valid alternative phone number.",
+                "Enter a valid international phone number including its country code.",
+                new[] { nameof(ContactPhone) });
+        }
+
+        if (usesPhone && !string.IsNullOrWhiteSpace(ContactEmail))
+        {
+            yield return new ValidationResult(
+                "Only the selected phone number may be submitted.",
+                new[] { nameof(ContactEmail) });
+        }
+
+        if (!string.IsNullOrWhiteSpace(AlternativePhoneNumber))
+        {
+            yield return new ValidationResult(
+                "An alternative phone number is not accepted for public enquiries.",
                 new[] { nameof(AlternativePhoneNumber) });
         }
 
-        if (!string.Equals(PreferredContactMethod, "Email", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(PreferredContactMethod, "Phone", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(PreferredContactMethod, "Either", StringComparison.OrdinalIgnoreCase))
+        if (!usesEmail && !usesPhone)
         {
             yield return new ValidationResult(
-                "Preferred contact method must be Email, Phone or Either.",
+                "Preferred contact method must be Email or Phone.",
                 new[] { nameof(PreferredContactMethod) });
         }
     }
@@ -95,14 +118,12 @@ public sealed class PublicPropertyListingEnquiryRequestDto : IValidatableObject
         }
 
         var trimmed = value.Trim();
-        if (trimmed.Length is < 7 or > 40 || trimmed.Any(character =>
-                !char.IsDigit(character) && character is not '+' and not '-' and not '(' and not ')' and not ' '))
+        if (trimmed.Length is < 9 or > 16 || trimmed[0] != '+' || trimmed.Skip(1).Any(character => !char.IsDigit(character)))
         {
             return false;
         }
 
         var digitCount = trimmed.Count(char.IsDigit);
-        return digitCount is >= 7 and <= 20 &&
-               (trimmed[0] == '+' || char.IsDigit(trimmed[0]));
+        return digitCount is >= 8 and <= 15 && trimmed[1] != '0';
     }
 }

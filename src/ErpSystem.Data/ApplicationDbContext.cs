@@ -1133,6 +1133,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<EhcPropertyProspectDepositPolicy> EhcPropertyProspectDepositPolicies { get; set; }
     public DbSet<ProspectDepositReceipt> EhcProspectDepositReceipts { get; set; }
     public DbSet<EhcPropertyEnquiryEmailAttempt> EhcPropertyEnquiryEmailAttempts { get; set; }
+    public DbSet<EhcPublicPropertyEnquiryContact> EhcPublicPropertyEnquiryContacts { get; set; }
+    public DbSet<EhcPublicPropertyEnquiryVerification> EhcPublicPropertyEnquiryVerifications { get; set; }
 
     // Estate/DMS integration: Estate acquisition, property assets, and procedure cases are modeled here for shared workflow/DMS links.
     public DbSet<LandAcquisition> LandAcquisitions { get; set; }
@@ -1291,6 +1293,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new ErpSystem.Data.Configuration.Ehc.EhcPropertyProspectDepositPolicyConfiguration());
         builder.ApplyConfiguration(new ErpSystem.Data.Configuration.Ehc.ProspectDepositReceiptConfiguration());
         builder.ApplyConfiguration(new ErpSystem.Data.Configuration.Ehc.EhcPropertyEnquiryEmailAttemptConfiguration());
+        builder.ApplyConfiguration(new ErpSystem.Data.Configuration.Ehc.EhcPublicPropertyEnquiryContactConfiguration());
+        builder.ApplyConfiguration(new ErpSystem.Data.Configuration.Ehc.EhcPublicPropertyEnquiryVerificationConfiguration());
         builder.ApplyConfiguration(new JournalBatchConfiguration());
         builder.ApplyConfiguration(new JournalBatchEntryApprovalConfiguration());
         builder.ApplyConfiguration(new JournalBatchItemConfiguration());
@@ -9861,11 +9865,17 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(x => new { x.TenantId, x.RootCauseId });
             entity.HasIndex(x => new { x.TenantId, x.CrmOpportunityId });
             entity.HasIndex(x => new { x.TenantId, x.EstateListingApplicationCaseId });
+            entity.HasIndex(x => new { x.TenantId, x.PublicPropertyEnquiryContactId });
 
             entity.HasOne(x => x.RequesterUser)
                 .WithMany()
                 .HasForeignKey(x => x.RequesterUserId)
                 .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(x => x.PublicPropertyEnquiryContact)
+                .WithMany(x => x.Enquiries)
+                .HasForeignKey(x => x.PublicPropertyEnquiryContactId)
+                .OnDelete(DeleteBehavior.NoAction);
 
             entity.HasOne(x => x.Category)
                 .WithMany()

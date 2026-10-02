@@ -15,7 +15,8 @@ public enum OtpPurpose
     Login = 1,
     PhoneVerification = 2,
     SupplierApplicantVerification = 3,
-    SupplierApplicantContactCorrection = 4
+    SupplierApplicantContactCorrection = 4,
+    PublicPropertyEnquiry = 5
 }
 
 public interface IOtpService
