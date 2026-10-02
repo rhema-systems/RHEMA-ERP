@@ -91,6 +91,9 @@ public class SalesSaleableItemDto
     public Guid? ActiveAllocationId { get; set; }
     public string? ActiveAllocationStatus { get; set; }
     public DateTime? ActiveAllocationReservedUntil { get; set; }
+    public Guid? ActiveAllocationBusinessPartnerId { get; set; }
+    public Guid? ActiveAllocationOpportunityId { get; set; }
+    public Guid? ActiveAllocationSalesOrderId { get; set; }
     public string? ActiveAllocationCustomerName { get; set; }
     public bool HasActiveAllocation { get; set; }
 }

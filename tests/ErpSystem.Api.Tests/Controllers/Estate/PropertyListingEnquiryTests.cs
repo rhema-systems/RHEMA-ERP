@@ -6,6 +6,7 @@ using ErpSystem.Api.Services.Estate;
 using ErpSystem.Api.Services;
 using ErpSystem.Api.Services.DocumentManagement;
 using ErpSystem.Core.DTOs.Ehc;
+using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Estate;
@@ -21,6 +22,7 @@ using ErpSystem.Core.Interfaces.Ehc;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Procedures;
+using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Core.Interfaces.Workflow;
 using ErpSystem.Core.Services.Estate;
 using ErpSystem.Core.Services.Sales;
@@ -79,6 +81,135 @@ public sealed class PropertyListingEnquiryTests
             PartnerType = "Supplier", IsActive = true, ApprovalStatus = "Approved", UserId = userId };
         db.AddRange(asset, portion, partner, new EhcTicketCategory { TenantId = tenantId, Code = "PROPERTY-LISTING", Name = "Property enquiry", AppliesToType = EhcTicketType.Enquiry });
         await db.SaveChangesAsync(); return (asset, portion, partner);
+    }
+
+    [Theory]
+    [InlineData(EstateManagedAssetType.Land, "land-management", true)]
+    [InlineData(EstateManagedAssetType.Property, "property-register", false)]
+    [InlineData(EstateManagedAssetType.Facility, "property-register", false)]
+    public async Task PropertyEnquirySalesOrderSourceResolvesTheExactEstateListing(
+        EstateManagedAssetType assetType,
+        string adapterKey,
+        bool usesDemarcation)
+    {
+        await using var db = Database();
+        var structure = new OrganizationStructure
+        {
+            TenantId = tenantId,
+            Name = "TDC structure",
+            Code = "TDC",
+            IsActive = true
+        };
+        var level = new OrganizationLevel
+        {
+            TenantId = tenantId,
+            StructureId = structure.Id,
+            OrganizationStructure = structure,
+            Name = "Department",
+            Code = "DEPT",
+            LevelNumber = 3,
+            IsActive = true
+        };
+        var salesUnit = new OrganizationUnit
+        {
+            TenantId = tenantId,
+            OrganizationLevelId = level.Id,
+            OrganizationLevel = level,
+            Name = "Sales",
+            Code = "DEPT-SALES",
+            Path = "/TDC/SALES",
+            IsActive = true
+        };
+        var asset = new EstateManagedAsset
+        {
+            TenantId = tenantId,
+            AssetCode = $"{assetType.ToString().ToUpperInvariant()}-001",
+            Name = $"Test {assetType}",
+            AssetType = assetType,
+            Status = usesDemarcation ? EstateManagedAssetStatus.LandBank : EstateManagedAssetStatus.Available,
+            Location = "Accra",
+            IsAvailableForSale = true,
+            IsPublishedToExternalPortal = !usesDemarcation,
+            ExternalListingStatus = "Published",
+            ExternalListingType = "Sale",
+            ExternalListingCurrency = "GHS"
+        };
+        var demarcationId = usesDemarcation ? Guid.NewGuid() : (Guid?)null;
+        var expectedSourceItemId = demarcationId ?? asset.Id;
+        var ticket = new EhcTicket
+        {
+            TenantId = tenantId,
+            TicketNumber = $"EHC-{assetType}-001",
+            TicketType = EhcTicketType.Enquiry,
+            Status = EhcTicketStatus.Acknowledged,
+            Description = "Property enquiry",
+            AssignedOrganizationUnitId = salesUnit.Id,
+            AssignedOrganizationUnit = salesUnit,
+            PropertyListingContextJson = JsonSerializer.Serialize(new EhcPropertyListingContextDto(
+                "estate-public-listing",
+                expectedSourceItemId,
+                asset.AssetCode,
+                asset.Name,
+                "Sale",
+                "GHS",
+                asset.Location,
+                250000m,
+                asset.Id,
+                demarcationId,
+                null,
+                "Prospect",
+                "Prospect",
+                "prospect@example.test",
+                null))
+        };
+        db.AddRange(structure, level, salesUnit, asset, ticket);
+        await db.SaveChangesAsync();
+
+        var source = new SalesSaleableSourceDto
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = usesDemarcation ? "LAND_MANAGEMENT" : $"{assetType.ToString().ToUpperInvariant()}_REGISTER",
+            DisplayName = assetType.ToString(),
+            SourceType = $"{assetType}Register",
+            AdapterKey = adapterKey,
+            IsActive = true,
+            AllowSalesOrders = true,
+            SortOrder = 1
+        };
+        var item = new SalesSaleableItemDto
+        {
+            SourceId = source.Id,
+            SourceCode = source.Code,
+            SourceType = source.SourceType,
+            AdapterKey = adapterKey,
+            SourceItemId = expectedSourceItemId.ToString("D"),
+            ItemCode = asset.AssetCode,
+            ItemName = asset.Name,
+            ItemType = assetType.ToString(),
+            CanCreateSalesOrder = true
+        };
+        var setup = new Mock<ISalesSetupService>();
+        setup.Setup(service => service.GetSaleableSourcesAsync(false))
+            .ReturnsAsync([source]);
+        setup.Setup(service => service.SearchSaleableItemsAsync(source.Id, asset.AssetCode, 100))
+            .ReturnsAsync([item]);
+
+        var controller = new EhcPropertyEnquiriesController(
+            db,
+            User().Object,
+            Mock.Of<IEhcTicketService>(),
+            Mock.Of<IEstateSalesListingApplicationHandoffService>(),
+            Mock.Of<IPropertyEnquiryProspectService>());
+
+        var response = Assert.IsType<OkObjectResult>(
+            await controller.GetSalesOrderSource(ticket.Id, setup.Object, default));
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(response.Value));
+
+        Assert.Equal(assetType.ToString(), json.RootElement.GetProperty("data").GetProperty("assetType").GetString());
+        Assert.Equal(source.Id, json.RootElement.GetProperty("data").GetProperty("source").GetProperty("Id").GetGuid());
+        Assert.Equal(expectedSourceItemId.ToString("D"),
+            json.RootElement.GetProperty("data").GetProperty("item").GetProperty("SourceItemId").GetString());
     }
 
     [Fact]
@@ -823,6 +954,10 @@ public sealed class PropertyListingEnquiryTests
                 .Replace("\"RowVersion\" BLOB NOT NULL", "\"RowVersion\" BLOB NOT NULL DEFAULT X''", StringComparison.Ordinal));
         }
         var asset = Asset();
+        asset.AssetType = EstateManagedAssetType.Property;
+        asset.Status = EstateManagedAssetStatus.Available;
+        asset.IsPublishedToExternalPortal = true;
+        asset.ExternalListingStatus = "Published";
         var partner = new BusinessPartner { TenantId = tenantId, PartnerCode = "CUS-ESTATE", PartnerName = "Estate Customer", PartnerType = "Customer", IsActive = true, ApprovalStatus = "Approved" };
         var opportunity = new Opportunity { TenantId = tenantId, Name = "Property enquiry", Stage = "Closed Won", Amount = 1250000m, Currency = "GHS", ActualCloseDate = DateTime.UtcNow };
         db.AddRange(asset, partner, opportunity); await db.SaveChangesAsync();
@@ -855,7 +990,8 @@ public sealed class PropertyListingEnquiryTests
         procedures.Verify(item => item.CreateCaseAsync(It.IsAny<CreateProcedureCaseRequest>()), Times.Once);
         var reserved = await db.EstateManagedAssets.AsNoTracking().SingleAsync(item => item.Id == asset.Id);
         Assert.False(reserved.IsPublishedToExternalPortal);
-        Assert.Equal("Reserved", reserved.ExternalListingStatus);
+        Assert.Equal("Published", reserved.ExternalListingStatus);
+        Assert.Equal(EstateManagedAssetStatus.Available, reserved.Status);
     }
 
     [Fact]
@@ -952,5 +1088,12 @@ public sealed class PropertyListingEnquiryTests
         var saved = await db.EhcTickets.SingleAsync(item => item.Id == ticket.Id);
         Assert.Equal(estateCaseId, saved.EstateListingApplicationCaseId);
         Assert.Equal("ESTATE-001", saved.EstateListingApplicationReference);
+        handoffs.Verify(item => item.CreateAsync(
+            tenantId,
+            It.Is<EstateSalesListingApplicationHandoffRequest>(request =>
+                request.ListingId == listingId
+                && request.EhcTicketId == ticket.Id
+                && request.SalesOpportunityId == opportunity.Id),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 }

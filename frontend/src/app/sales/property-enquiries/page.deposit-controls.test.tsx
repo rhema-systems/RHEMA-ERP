@@ -89,6 +89,57 @@ describe('property enquiry deposit controls', () => {
           },
         };
       }
+      if (endpoint.endsWith('/sales-order-source')) {
+        return {
+          success: true,
+          data: {
+            propertyEnquiryId: 'enquiry-1',
+            assetType: 'Property',
+            source: {
+              id: 'property-source-1',
+              tenantId: 'tenant-1',
+              code: 'PROPERTY_REGISTER',
+              displayName: 'Properties',
+              sourceType: 'PropertyRegister',
+              adapterKey: 'property-register',
+              isActive: true,
+              icon: 'Building2',
+              colorCode: '#2563EB',
+              sortOrder: 1,
+              supportedTransactionTypes: 'SalesOrder',
+              defaultCurrency: 'GHS',
+              allowSalesOrders: true,
+              allowSalesAgreements: true,
+              allowReservations: true,
+              requiresExternalModule: false,
+              isSystemSource: true,
+              createdAt: '2026-10-01T00:00:00Z',
+            },
+            item: {
+              sourceId: 'property-source-1',
+              sourceCode: 'PROPERTY_REGISTER',
+              sourceType: 'PropertyRegister',
+              adapterKey: 'property-register',
+              sourceItemId: 'listing-1',
+              itemCode: 'PROP-001',
+              itemName: 'Published Property',
+              itemType: 'Property',
+              estimatedValue: 10000,
+              currency: 'GHS',
+              propertyReference: 'PROP-001',
+              canCreateSalesOrder: false,
+              canCreateSalesAgreement: true,
+              canCreateLeaseAgreement: false,
+              shouldCreateSalesAllocation: true,
+              hasActiveAllocation: true,
+              activeAllocationId: 'allocation-1',
+              activeAllocationStatus: 'Reserved',
+              activeAllocationOpportunityId: 'opportunity-1',
+              activeAllocationBusinessPartnerId: 'customer-1',
+            },
+          },
+        };
+      }
       if (endpoint.endsWith('/prospect/deposits') && options?.method === 'POST') {
         if (mocks.depositError) throw new Error(mocks.depositError);
         return {
@@ -161,6 +212,7 @@ describe('property enquiry deposit controls', () => {
           status: 'Acknowledged',
           messages: [],
           propertyListing: {
+            listingId: 'listing-1',
             listingReference: 'PROP-001',
             listingType: 'Sale',
             contactName: 'Public Enquirer',
@@ -272,6 +324,10 @@ describe('property enquiry deposit controls', () => {
     expect(href).toContain('opportunityId=opportunity-1');
     expect(href).toContain('propertyReference=PROP-001');
     expect(href).toContain('propertyType=Sale');
+    expect(href).toContain('sourceItemId=listing-1');
+    expect(href).toContain('propertyEnquiryId=enquiry-1');
+    expect(href).toContain('propertyEnquiryAssetType=Property');
+    expect(href).toContain('saleableSourceLocked=true');
     client.clear();
   });
 });

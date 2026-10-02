@@ -104,4 +104,73 @@ describe('SaleableSourceQuickStart', () => {
     )).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Use For Sales Order' })).toBeDisabled();
   });
+
+  it('allows the current reservation to be linked to a Sales Order', async () => {
+    const onUseOrder = vi.fn();
+    service.searchSaleableItems.mockResolvedValue([
+      item({
+        sourceId: 'property',
+        sourceItemId: 'property-1',
+        itemName: 'Reserved Property',
+        canCreateSalesOrder: false,
+        hasActiveAllocation: true,
+        activeAllocationId: 'allocation-1',
+        activeAllocationStatus: 'Reserved',
+        activeAllocationOpportunityId: 'opportunity-1',
+        activeAllocationBusinessPartnerId: 'customer-1',
+      }),
+    ]);
+
+    render(
+      <SaleableSourceQuickStart
+        mode="order"
+        linkedContext={null}
+        currentOpportunityId="opportunity-1"
+        currentCustomerId="customer-1"
+        onUseOrder={onUseOrder}
+      />,
+    );
+
+    await screen.findByPlaceholderText('Search saleable items');
+    fireEvent.click(screen.getByRole('button', { name: 'Search saleable items' }));
+
+    expect(await screen.findByText(
+      'This property has a reservation that can be linked to this Sales Order.',
+    )).toBeInTheDocument();
+    const useButton = screen.getByRole('button', { name: 'Use For Sales Order' });
+    expect(useButton).toBeEnabled();
+    fireEvent.click(useButton);
+    expect(onUseOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a reservation disabled for a different Opportunity', async () => {
+    service.searchSaleableItems.mockResolvedValue([
+      item({
+        sourceId: 'property',
+        sourceItemId: 'property-1',
+        itemName: 'Reserved Property',
+        canCreateSalesOrder: false,
+        hasActiveAllocation: true,
+        activeAllocationId: 'allocation-1',
+        activeAllocationStatus: 'Reserved',
+        activeAllocationOpportunityId: 'other-opportunity',
+        activeAllocationBusinessPartnerId: 'customer-1',
+      }),
+    ]);
+
+    render(
+      <SaleableSourceQuickStart
+        mode="order"
+        linkedContext={null}
+        currentOpportunityId="opportunity-1"
+        currentCustomerId="customer-1"
+      />,
+    );
+
+    await screen.findByPlaceholderText('Search saleable items');
+    fireEvent.click(screen.getByRole('button', { name: 'Search saleable items' }));
+
+    expect(await screen.findByText(/already has an active Reserved/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Use For Sales Order' })).toBeDisabled();
+  });
 });

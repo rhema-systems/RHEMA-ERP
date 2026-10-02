@@ -10,6 +10,7 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Ehc;
@@ -191,6 +192,48 @@ public sealed class PublicPropertyEnquiryContactControllerTests
         var json = JsonSerializer.Serialize(conflict.Value);
         Assert.Contains("CUSTOMER_PORTAL_REQUIRED", json, StringComparison.Ordinal);
         Assert.Contains("external-portal", json, StringComparison.OrdinalIgnoreCase);
+        fixture.Tickets.Verify(service => service.CreatePublicPropertyEnquiryAsync(
+            It.IsAny<CreateEhcTicketRequestDto>(),
+            It.IsAny<EhcPropertyListingContextDto>(),
+            It.IsAny<Guid>(),
+            It.IsAny<Guid>(),
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ReservedPropertyIsHiddenAndCannotAcceptAPreviouslyVerifiedEnquiry()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var token = await fixture.ObtainVerificationTokenAsync("Email", "prospect@example.test");
+        fixture.Db.SalesAllocations.Add(new SalesAllocation
+        {
+            TenantId = fixture.Tenant.Id,
+            SaleableSourceId = Guid.NewGuid(),
+            SourceCode = "PROPERTY",
+            SourceType = "PropertyRegister",
+            AdapterKey = "property-register",
+            SourceItemId = fixture.Listing.Id.ToString("D"),
+            SourceItemCode = fixture.Listing.AssetCode,
+            SourceItemName = fixture.Listing.Name,
+            AllocationType = "Reservation",
+            Status = "Reserved",
+            ReservedUntil = DateTime.UtcNow.AddDays(7)
+        });
+        await fixture.Db.SaveChangesAsync();
+
+        var listingsResult = Assert.IsType<OkObjectResult>(await fixture.Controller.GetPublicListings(
+            cancellationToken: CancellationToken.None));
+        using var listingsDocument = JsonDocument.Parse(JsonSerializer.Serialize(listingsResult.Value));
+        Assert.Empty(listingsDocument.RootElement.GetProperty("data").EnumerateArray());
+
+        var enquiryResult = await fixture.Controller.CreatePublicListingEnquiry(
+            fixture.Listing.Id,
+            fixture.Enquiry(Guid.NewGuid(), "Email", "prospect@example.test", null, token),
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundObjectResult>(enquiryResult);
         fixture.Tickets.Verify(service => service.CreatePublicPropertyEnquiryAsync(
             It.IsAny<CreateEhcTicketRequestDto>(),
             It.IsAny<EhcPropertyListingContextDto>(),
@@ -447,7 +490,8 @@ public sealed class PublicPropertyEnquiryContactControllerTests
                 typeof(EhcPublicPropertyEnquiryVerification),
                 typeof(BusinessPartner),
                 typeof(BusinessPartnerRole),
-                typeof(BusinessPartnerUser)
+                typeof(BusinessPartnerUser),
+                typeof(SalesAllocation)
             };
 
             var mappedEntities = entityTypes

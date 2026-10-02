@@ -186,11 +186,14 @@ public sealed class PropertyEnquiryProspectService(
             return await ToDtoAsync(prospect, cancellationToken);
 
         SalesSaleableSource? source = null;
+        string? sourceItemId = null;
         if (request.ReserveProperty && !prospect.SalesAllocationId.HasValue)
         {
-            source = await ResolveSaleableSourceAsync(property, cancellationToken);
+            var sourceSelection = await ResolveSaleableSourceSelectionAsync(property, cancellationToken);
+            source = sourceSelection.Source;
+            sourceItemId = sourceSelection.SourceItemId;
             if (!source.AllowReservations) throw new InvalidOperationException("The selected saleable source does not allow reservations.");
-            if (await allocations.HasActiveAllocationAsync(source.Id, property.ListingId.ToString("D")))
+            if (await allocations.HasActiveAllocationAsync(source.Id, sourceItemId))
                 throw new InvalidOperationException("This property already has an active reservation or allocation.");
         }
 
@@ -227,7 +230,7 @@ public sealed class PropertyEnquiryProspectService(
             var allocation = await allocations.CreateAllocationAsync(new CreateSalesAllocationDto
             {
                 SaleableSourceId = source.Id,
-                SourceItemId = property.ListingId.ToString("D"),
+                SourceItemId = sourceItemId!,
                 SourceItemCode = Clip(property.ListingReference, 100),
                 SourceItemName = Clip(property.ListingName, 250)!,
                 SourceItemType = Clip(property.ListingType, 80),
@@ -810,13 +813,80 @@ public sealed class PropertyEnquiryProspectService(
     }
 
     private async Task<SalesSaleableSource> ResolveSaleableSourceAsync(EhcPropertyListingContextDto property, CancellationToken cancellationToken)
+        => (await ResolveSaleableSourceSelectionAsync(property, cancellationToken)).Source;
+
+    private async Task<(SalesSaleableSource Source, string SourceItemId)> ResolveSaleableSourceSelectionAsync(
+        EhcPropertyListingContextDto property,
+        CancellationToken cancellationToken)
     {
-        var adapter = property.Source.Contains("estate", StringComparison.OrdinalIgnoreCase)
-            || property.Source.Contains("state", StringComparison.OrdinalIgnoreCase) ? "land-management" : property.Source;
-        return await db.SalesSaleableSources.AsNoTracking().Where(x => x.TenantId == TenantId && !x.IsDeleted && x.IsActive
-                && (x.AdapterKey == adapter || x.Code == adapter || x.SourceType == adapter))
-            .OrderBy(x => x.SortOrder).FirstOrDefaultAsync(cancellationToken)
-            ?? throw new InvalidOperationException($"No active Sales saleable source is configured for '{property.Source}'.");
+        var asset = await db.EstateManagedAssets.AsNoTracking()
+            .Where(item => item.Id == property.ParentAssetId
+                && item.TenantId == TenantId
+                && !item.IsDeleted)
+            .Select(item => new { item.Id, item.AssetType, item.ProjectUnitId })
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException("The property enquiry no longer resolves to an Estate asset.");
+
+        var adapter = asset.AssetType == EstateManagedAssetType.Land
+            ? "land-management"
+            : "property-register";
+        var sourceItemId = asset.AssetType == EstateManagedAssetType.Land
+            ? property.DemarcationId?.ToString("D")
+                ?? throw new InvalidOperationException("The land enquiry does not identify a demarcated land record.")
+            : (asset.ProjectUnitId ?? asset.Id).ToString("D");
+
+        var candidates = await db.SalesSaleableSources.AsNoTracking()
+            .Where(item => item.TenantId == TenantId
+                && !item.IsDeleted
+                && item.IsActive
+                && item.AdapterKey == adapter)
+            .OrderBy(item => item.SortOrder)
+            .ToArrayAsync(cancellationToken);
+        var source = asset.AssetType == EstateManagedAssetType.Land
+            ? candidates.FirstOrDefault()
+            : candidates.FirstOrDefault(candidate => SourceSelectsAssetType(candidate.SettingsJson, asset.AssetType));
+
+        return (source
+                ?? throw new InvalidOperationException($"No active Sales saleable source is configured for Estate {asset.AssetType}."),
+            sourceItemId);
+    }
+
+    private static bool SourceSelectsAssetType(string? settingsJson, EstateManagedAssetType assetType)
+    {
+        if (string.IsNullOrWhiteSpace(settingsJson)) return false;
+        try
+        {
+            using var document = JsonDocument.Parse(settingsJson);
+            if (!document.RootElement.TryGetProperty("filters", out var filters)
+                || filters.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            foreach (var filter in filters.EnumerateArray())
+            {
+                if (!filter.TryGetProperty("field", out var field)
+                    || !filter.TryGetProperty("value", out var value)
+                    || field.ValueKind != JsonValueKind.String
+                    || value.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                var normalizedField = field.GetString()?.Replace("_", string.Empty).Replace("-", string.Empty);
+                if (normalizedField?.Equals("assetType", StringComparison.OrdinalIgnoreCase) == true
+                    && value.GetString()?.Equals(assetType.ToString(), StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return true;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        return false;
     }
 
     private static bool ProspectUsesSource(string? propertyContextJson, SalesSaleableSource source)
@@ -827,10 +897,9 @@ public sealed class PropertyEnquiryProspectService(
         catch (JsonException) { return false; }
         if (property is null || string.IsNullOrWhiteSpace(property.Source)) return false;
 
-        var adapter = property.Source.Contains("estate", StringComparison.OrdinalIgnoreCase)
-            || property.Source.Contains("state", StringComparison.OrdinalIgnoreCase)
-                ? "land-management"
-                : property.Source;
+        var adapter = property.DemarcationId.HasValue
+            ? "land-management"
+            : "property-register";
         return string.Equals(source.AdapterKey, adapter, StringComparison.OrdinalIgnoreCase)
             || string.Equals(source.Code, adapter, StringComparison.OrdinalIgnoreCase)
             || string.Equals(source.SourceType, adapter, StringComparison.OrdinalIgnoreCase);
@@ -855,6 +924,14 @@ public sealed class PropertyEnquiryProspectService(
     {
         var required = RequiredDeposit(prospect);
         var cleared = await ClearedDepositAsync(prospect.Id, cancellationToken);
+        var allocation = prospect.SalesAllocationId.HasValue
+            ? await db.SalesAllocations.AsNoTracking()
+                .Where(x => x.TenantId == TenantId
+                    && x.Id == prospect.SalesAllocationId.Value
+                    && !x.IsDeleted)
+                .Select(x => new { x.Status, x.ReservedUntil })
+                .SingleOrDefaultAsync(cancellationToken)
+            : null;
         var partner = prospect.BusinessPartnerId.HasValue
             ? await db.BusinessPartners.AsNoTracking()
                 .Where(x => x.TenantId == TenantId && x.Id == prospect.BusinessPartnerId.Value && !x.IsDeleted)
@@ -865,7 +942,11 @@ public sealed class PropertyEnquiryProspectService(
             prospect.BusinessPartnerId, partner?.PartnerCode, partner?.PartnerName,
             prospect.Status, prospect.AgreedAmount, prospect.Currency,
             prospect.DepositRequirementType, required, cleared, cleared >= required,
-            prospect.QualifiedAt, prospect.BusinessPartnerLinkedAt);
+            prospect.QualifiedAt, prospect.BusinessPartnerLinkedAt)
+        {
+            SalesAllocationStatus = allocation?.Status,
+            SalesAllocationReservedUntil = allocation?.ReservedUntil
+        };
     }
 
     private async Task<decimal> ClearedDepositAsync(Guid prospectId, CancellationToken cancellationToken) =>

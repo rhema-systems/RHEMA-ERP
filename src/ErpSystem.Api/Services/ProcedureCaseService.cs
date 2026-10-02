@@ -417,10 +417,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         // Procedure cases are source records for workflow; keep creation, workflow startup, and linkage atomic.
         // SQL Server retrying execution strategies require user-initiated transactions to run inside the
         // strategy delegate so the complete transaction can be retried as one unit.
-        var executionStrategy = _db.Database.CreateExecutionStrategy();
-        await executionStrategy.ExecuteAsync(async () =>
+        async Task PersistCaseAndStartWorkflowAsync()
         {
-            await using var transaction = await _db.Database.BeginTransactionAsync();
             _db.ProcedureCases.Add(procedureCase);
             await _db.SaveChangesAsync();
 
@@ -474,9 +472,26 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 await _db.SaveChangesAsync();
                 await SyncCaseFromWorkflowRuntimeAsync(procedureCase.Id, workflowInstance.Id, userId);
             }
+        }
 
-            await transaction.CommitAsync();
-        });
+        if (_db.Database.CurrentTransaction is not null)
+        {
+            // A coordinating owner (for example, the Sales-to-Estate handoff) may need the
+            // procedure case and its source-record mutation to commit as one unit. Join that
+            // transaction instead of attempting an unsupported nested transaction.
+            await PersistCaseAndStartWorkflowAsync();
+        }
+        else
+        {
+            var executionStrategy = _db.Database.CreateExecutionStrategy();
+            await executionStrategy.ExecuteAsync(async () =>
+            {
+                await using var transaction = await _db.Database.BeginTransactionAsync();
+                await PersistCaseAndStartWorkflowAsync();
+
+                await transaction.CommitAsync();
+            });
+        }
 
         return await ToDetailDtoAsync((await LoadCaseAsync(procedureCase.Id, asTracking: false))!);
     }

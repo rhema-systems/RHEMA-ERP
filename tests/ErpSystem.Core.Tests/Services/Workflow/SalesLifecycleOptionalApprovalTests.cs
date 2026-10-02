@@ -155,6 +155,49 @@ public sealed class SalesLifecycleOptionalApprovalTests
         _uow.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact]
+    public async Task Reserved_allocation_cannot_be_linked_to_an_order_for_another_opportunity()
+    {
+        var opportunityId = Guid.NewGuid();
+        var allocation = new SalesAllocation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = _tenant,
+            Status = "Reserved",
+            OpportunityId = opportunityId,
+            BusinessPartnerId = Guid.NewGuid()
+        };
+        var order = new SalesOrder
+        {
+            Id = Guid.NewGuid(),
+            TenantId = _tenant,
+            BusinessPartnerId = allocation.BusinessPartnerId.Value,
+            OpportunityId = Guid.NewGuid()
+        };
+        var allocations = new Mock<IGenericRepository<SalesAllocation>>();
+        allocations.Setup(x => x.FirstOrDefaultAsync(It.IsAny<Expression<Func<SalesAllocation, bool>>>() ))
+            .ReturnsAsync((Expression<Func<SalesAllocation, bool>> predicate) =>
+                predicate.Compile()(allocation) ? allocation : null);
+        var orders = new Mock<IGenericRepository<SalesOrder>>();
+        orders.Setup(x => x.FirstOrDefaultAsync(It.IsAny<Expression<Func<SalesOrder, bool>>>() ))
+            .ReturnsAsync((Expression<Func<SalesOrder, bool>> predicate) =>
+                predicate.Compile()(order) ? order : null);
+        _uow.Setup(x => x.Repository<SalesAllocation>()).Returns(allocations.Object);
+        _uow.Setup(x => x.Repository<SalesOrder>()).Returns(orders.Object);
+        var service = new SalesAllocationService(_uow.Object, _user.Object, _workflow.Object, _adapters,
+            NullLogger<SalesAllocationService>.Instance);
+
+        var act = () => service.UpdateAllocationStatusAsync(allocation.Id, new UpdateSalesAllocationStatusDto
+        {
+            Status = "Reserved",
+            SalesOrderId = order.Id
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Opportunity*");
+        allocation.SalesOrderId.Should().BeNull();
+        _uow.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private SalesOrder Order(SalesOrderStatus status = SalesOrderStatus.Draft)
     {
         var order = new SalesOrder { Id = Guid.NewGuid(), TenantId = _tenant, OrderStatus = status,

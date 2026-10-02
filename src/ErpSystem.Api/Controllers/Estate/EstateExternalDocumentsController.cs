@@ -11,6 +11,7 @@ using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.Interfaces;
@@ -44,6 +45,8 @@ namespace ErpSystem.Api.Controllers.Estate;
 public sealed class EstateExternalDocumentsController : ControllerBase
 {
     private const string PortalRecipientFieldKey = "dispatchedto";
+    private static readonly string[] ActiveSalesAllocationStatuses =
+        ["Reserved", "PendingApproval", "Approved", "Allocated", "Sold", "Leased"];
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
     private readonly IProcedureCaseService _procedureCaseService;
@@ -1620,6 +1623,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var normalizedListingType = NormalizeListingType(listingType);
         var normalizedPage = Math.Max(1, page ?? 1);
         var normalizedPageSize = Math.Clamp(pageSize ?? take ?? 10, 1, 10);
+        var activeAllocatedListingIds = await GetActiveSalesAllocationListingIdsAsync(tenantId, cancellationToken);
 
         var query = WhereExternallyAvailableListings(_db.EstateManagedAssets
             .AsNoTracking())
@@ -1627,6 +1631,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && (asset.AssetType == EstateManagedAssetType.Land
                     || asset.AssetType == EstateManagedAssetType.Property
                     || asset.AssetType == EstateManagedAssetType.Facility));
+        if (activeAllocatedListingIds.Length > 0)
+            query = query.Where(asset => !activeAllocatedListingIds.Contains(asset.Id));
 
         var portalUserId = GetUserId();
         if (portalUserId.HasValue && businessPartnerId.HasValue)
@@ -1716,6 +1722,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
                 && !item.EstateManagedAsset.ProjectId.HasValue
                 && !item.EstateManagedAsset.IsPublishedToExternalPortal);
+        if (activeAllocatedListingIds.Length > 0)
+            demarcationQuery = demarcationQuery.Where(item => !activeAllocatedListingIds.Contains(item.Id));
 
         if (normalizedListingType != null)
         {
@@ -1809,6 +1817,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var normalizedListingType = NormalizeListingType(listingType);
         var normalizedPage = Math.Max(1, page ?? 1);
         var normalizedPageSize = Math.Clamp(pageSize ?? take ?? 10, 1, 10);
+        var activeAllocatedListingIds = await GetActiveSalesAllocationListingIdsAsync(tenantId, cancellationToken);
 
         var query = WhereExternallyAvailableListings(_db.EstateManagedAssets
             .AsNoTracking())
@@ -1816,6 +1825,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && (asset.AssetType == EstateManagedAssetType.Land
                     || asset.AssetType == EstateManagedAssetType.Property
                     || asset.AssetType == EstateManagedAssetType.Facility));
+        if (activeAllocatedListingIds.Length > 0)
+            query = query.Where(asset => !activeAllocatedListingIds.Contains(asset.Id));
 
         if (normalizedListingType != null)
         {
@@ -1862,6 +1873,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
                 && !item.EstateManagedAsset.ProjectId.HasValue
                 && !item.EstateManagedAsset.IsPublishedToExternalPortal);
+        if (activeAllocatedListingIds.Length > 0)
+            demarcationQuery = demarcationQuery.Where(item => !activeAllocatedListingIds.Contains(item.Id));
 
         if (normalizedListingType != null)
         {
@@ -2339,6 +2352,14 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         try
         {
             var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+            if (await HasActiveSalesAllocationForListingAsync(tenantId, listingId, cancellationToken))
+            {
+                return Conflict(new
+                {
+                    success = false,
+                    message = "This property has already been reserved and is no longer accepting enquiries."
+                });
+            }
             var asset = await WhereExternallyAvailableListings(_db.EstateManagedAssets.AsNoTracking())
                 .FirstOrDefaultAsync(item => item.Id == listingId
                     && item.TenantId == tenantId
@@ -3197,6 +3218,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         Guid listingId,
         CancellationToken cancellationToken)
     {
+        if (await HasActiveSalesAllocationForListingAsync(tenantId, listingId, cancellationToken))
+            return (null, null);
+
         var asset = await WhereExternallyAvailableListings(_db.EstateManagedAssets.AsNoTracking())
             .FirstOrDefaultAsync(item => item.Id == listingId
                 && item.TenantId == tenantId
@@ -3223,6 +3247,46 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             : null;
 
         return (asset ?? demarcationListing?.EstateManagedAsset, demarcationListing);
+    }
+
+    private async Task<Guid[]> GetActiveSalesAllocationListingIdsAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        if (tenantId == Guid.Empty)
+            return [];
+
+        var sourceItemIds = await _db.SalesAllocations.AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && (item.AdapterKey == "land-management" || item.AdapterKey == "property-register")
+                && ActiveSalesAllocationStatuses.Contains(item.Status))
+            .Select(item => item.SourceItemId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        return sourceItemIds
+            .Select(value => Guid.TryParse(value, out var id) ? id : Guid.Empty)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToArray();
+    }
+
+    private Task<bool> HasActiveSalesAllocationForListingAsync(
+        Guid tenantId,
+        Guid listingId,
+        CancellationToken cancellationToken)
+    {
+        if (tenantId == Guid.Empty || listingId == Guid.Empty)
+            return Task.FromResult(false);
+
+        var sourceItemId = listingId.ToString("D");
+        return _db.SalesAllocations.AsNoTracking().AnyAsync(item =>
+            item.TenantId == tenantId
+            && !item.IsDeleted
+            && (item.AdapterKey == "land-management" || item.AdapterKey == "property-register")
+            && item.SourceItemId == sourceItemId
+            && ActiveSalesAllocationStatuses.Contains(item.Status), cancellationToken);
     }
 
     private async Task<DuplicatePropertyEnquiry?> FindDuplicatePropertyEnquiryAsync(

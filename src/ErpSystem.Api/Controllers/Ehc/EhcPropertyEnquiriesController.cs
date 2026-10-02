@@ -1,9 +1,12 @@
 using System.Text.Json;
 using ErpSystem.Api.Services.Estate;
 using ErpSystem.Core.DTOs.Ehc;
+using ErpSystem.Core.DTOs.Sales;
+using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Ehc;
+using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data;
 using ErpSystem.Shared;
@@ -71,6 +74,165 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
     {
         if (!await Query().AnyAsync(t => t.Id == id, cancellationToken)) return NotFound();
         return Ok(new { success = true, data = await tickets.GetTicketByIdAsync(id, cancellationToken) });
+    }
+
+    [HttpGet("{id:guid}/sales-order-source")]
+    public async Task<IActionResult> GetSalesOrderSource(
+        Guid id,
+        [FromServices] ISalesSetupService salesSetup,
+        CancellationToken cancellationToken)
+    {
+        var snapshotJson = await Query()
+            .Where(ticket => ticket.Id == id)
+            .Select(ticket => ticket.PropertyListingContextJson)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(snapshotJson)) return NotFound();
+
+        EhcPropertyListingContextDto? property;
+        try
+        {
+            property = JsonSerializer.Deserialize<EhcPropertyListingContextDto>(snapshotJson);
+        }
+        catch (JsonException)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "The saved property enquiry snapshot is invalid. Reconcile the enquiry before creating a Sales Order."
+            });
+        }
+
+        if (property is null)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "The saved property enquiry snapshot is missing. Reconcile the enquiry before creating a Sales Order."
+            });
+        }
+
+        var asset = await db.EstateManagedAssets.AsNoTracking()
+            .Where(item => item.Id == property.ParentAssetId
+                && item.TenantId == currentUser.TenantId
+                && !item.IsDeleted)
+            .Select(item => new
+            {
+                item.Id,
+                item.AssetCode,
+                item.AssetType,
+                item.ProjectUnitId
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (asset is null)
+        {
+            return Conflict(new
+            {
+                success = false,
+                message = "The property from this enquiry no longer resolves to an Estate asset. Reconcile the listing before creating a Sales Order."
+            });
+        }
+
+        string adapterKey;
+        Guid sourceItemId;
+        if (asset.AssetType == EstateManagedAssetType.Land)
+        {
+            if (!property.DemarcationId.HasValue || property.DemarcationId == Guid.Empty)
+            {
+                return Conflict(new
+                {
+                    success = false,
+                    message = "This land enquiry does not identify a demarcated land record. Reconcile the listing before creating a Sales Order."
+                });
+            }
+
+            adapterKey = "land-management";
+            sourceItemId = property.DemarcationId.Value;
+        }
+        else if (asset.AssetType is EstateManagedAssetType.Property or EstateManagedAssetType.Facility)
+        {
+            adapterKey = "property-register";
+            sourceItemId = asset.ProjectUnitId ?? asset.Id;
+        }
+        else
+        {
+            return Conflict(new
+            {
+                success = false,
+                message = $"Estate asset type '{asset.AssetType}' is not configured as a property Sales Order source."
+            });
+        }
+
+        var candidates = (await salesSetup.GetSaleableSourcesAsync())
+            .Where(source => source.IsActive
+                && source.AllowSalesOrders
+                && source.AdapterKey.Equals(adapterKey, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(source => source.SortOrder)
+            .ToArray();
+
+        SalesSaleableSourceDto? matchedSource = null;
+        SalesSaleableItemDto? matchedItem = null;
+        foreach (var source in candidates)
+        {
+            var items = await salesSetup.SearchSaleableItemsAsync(source.Id, asset.AssetCode, 100);
+            var item = items.FirstOrDefault(candidate =>
+                candidate.SourceItemId.Equals(sourceItemId.ToString("D"), StringComparison.OrdinalIgnoreCase));
+            if (item is null) continue;
+
+            matchedSource = source;
+            matchedItem = item;
+            break;
+        }
+
+        if (matchedSource is null || matchedItem is null)
+        {
+            return Conflict(new
+            {
+                success = false,
+                message = $"The {asset.AssetType} listing from this enquiry is no longer available in its configured Sales source. Reconcile the listing before creating a Sales Order."
+            });
+        }
+
+        var allocationId = await db.Set<ErpSystem.Core.Entities.Ehc.EhcPropertyEnquiryProspect>()
+            .AsNoTracking()
+            .Where(item => item.TenantId == currentUser.TenantId
+                && item.TicketId == id
+                && !item.IsDeleted)
+            .Select(item => item.SalesAllocationId)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (allocationId.HasValue)
+        {
+            var allocation = await db.SalesAllocations.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.Id == allocationId.Value
+                    && item.TenantId == currentUser.TenantId
+                    && !item.IsDeleted, cancellationToken);
+            if (allocation is not null)
+            {
+                matchedItem.ActiveAllocationId = allocation.Id;
+                matchedItem.ActiveAllocationStatus = allocation.Status;
+                matchedItem.ActiveAllocationReservedUntil = allocation.ReservedUntil;
+                matchedItem.ActiveAllocationBusinessPartnerId = allocation.BusinessPartnerId;
+                matchedItem.ActiveAllocationOpportunityId = allocation.OpportunityId;
+                matchedItem.ActiveAllocationSalesOrderId = allocation.SalesOrderId;
+                matchedItem.ActiveAllocationCustomerName = allocation.CustomerName;
+                matchedItem.HasActiveAllocation = true;
+                matchedItem.CanCreateSalesOrder = false;
+                matchedItem.SalesOrderIneligibilityReason = allocation.SalesOrderId.HasValue
+                    ? "This reservation is already linked to a Sales Order."
+                    : "This item has an active reservation.";
+            }
+        }
+
+        return Ok(new
+        {
+            success = true,
+            data = new
+            {
+                propertyEnquiryId = id,
+                assetType = asset.AssetType.ToString(),
+                source = matchedSource,
+                item = matchedItem
+            }
+        });
     }
 
     [HttpGet("{id:guid}/estate-handoff")]

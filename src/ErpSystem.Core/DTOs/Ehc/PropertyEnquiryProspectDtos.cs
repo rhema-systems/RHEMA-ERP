@@ -18,7 +18,11 @@ public sealed record PropertyEnquiryProspectDto(
     decimal ClearedDeposit,
     bool DepositThresholdMet,
     DateTime? QualifiedAt,
-    DateTime? BusinessPartnerLinkedAt);
+    DateTime? BusinessPartnerLinkedAt)
+{
+    public string? SalesAllocationStatus { get; init; }
+    public DateTime? SalesAllocationReservedUntil { get; init; }
+}
 
 public sealed class QualifyPropertyEnquiryRequest
 {

@@ -2,7 +2,6 @@ using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Sales;
-using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Core.Services.Estate;
 using ErpSystem.Data;
@@ -116,7 +115,11 @@ public sealed class EstateSalesListingApplicationHandoffService(
                     && field.Value == request.SalesOpportunityId.ToString()), cancellationToken);
         if (existingCase is not null)
         {
-            await ReservePortalListingAsync(tenantId, request.ListingId, demarcation is not null, cancellationToken);
+            await CommitListingUnpublishAsync(
+                tenantId,
+                request.ListingId,
+                demarcation is not null,
+                cancellationToken);
             return ToResult(existingCase, alreadyExists: true);
         }
 
@@ -209,30 +212,80 @@ public sealed class EstateSalesListingApplicationHandoffService(
             ["notes"] = string.IsNullOrWhiteSpace(request.Notes) ? description : $"{description} {request.Notes.Trim()}"
         };
 
-        var created = await procedureCaseService.CreateCaseAsync(new CreateProcedureCaseRequest(
-            "PropertyManagement",
-            "EstatePropertyManagementListingApplication",
-            $"{requestLabel} - {listingName}",
-            reference,
-            customer.PartnerName,
-            "Sales - Estate Enquiry",
-            DateTime.UtcNow,
-            description,
-            fieldValues));
+        var executionStrategy = db.Database.CreateExecutionStrategy();
+        return await executionStrategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                var created = await procedureCaseService.CreateCaseAsync(new CreateProcedureCaseRequest(
+                    "PropertyManagement",
+                    "EstatePropertyManagementListingApplication",
+                    $"{requestLabel} - {listingName}",
+                    reference,
+                    customer.PartnerName,
+                    "Sales - Estate Enquiry",
+                    DateTime.UtcNow,
+                    description,
+                    fieldValues));
 
-        await ReservePortalListingAsync(tenantId, request.ListingId, demarcation is not null, cancellationToken);
+                // Publication is Estate-owned lifecycle state. Remove the exact persisted listing
+                // only after Estate has accepted the handoff, and commit it with the new case.
+                await UnpublishPortalListingAsync(
+                    tenantId,
+                    request.ListingId,
+                    demarcation is not null,
+                    cancellationToken);
 
-        return new EstateSalesListingApplicationHandoffResult(
-            created.Id,
-            created.ReferenceNumber,
-            created.Title,
-            created.Status,
-            created.CurrentStageName,
-            DateTime.UtcNow,
-            AlreadyExists: false);
+                await transaction.CommitAsync(cancellationToken);
+
+                return new EstateSalesListingApplicationHandoffResult(
+                    created.Id,
+                    created.ReferenceNumber,
+                    created.Title,
+                    created.Status,
+                    created.CurrentStageName,
+                    DateTime.UtcNow,
+                    AlreadyExists: false);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                db.ChangeTracker.Clear();
+                throw;
+            }
+        });
     }
 
-    private async Task ReservePortalListingAsync(
+    private async Task CommitListingUnpublishAsync(
+        Guid tenantId,
+        Guid listingId,
+        bool isDemarcationListing,
+        CancellationToken cancellationToken)
+    {
+        var executionStrategy = db.Database.CreateExecutionStrategy();
+        await executionStrategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                await UnpublishPortalListingAsync(
+                    tenantId,
+                    listingId,
+                    isDemarcationListing,
+                    cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                db.ChangeTracker.Clear();
+                throw;
+            }
+        });
+    }
+
+    private async Task UnpublishPortalListingAsync(
         Guid tenantId,
         Guid listingId,
         bool isDemarcationListing,
@@ -241,36 +294,31 @@ public sealed class EstateSalesListingApplicationHandoffService(
         var now = DateTime.UtcNow;
         if (isDemarcationListing)
         {
-            await db.EstateLandDemarcations
+            var affectedRows = await db.EstateLandDemarcations
                 .IgnoreQueryFilters()
                 .Where(item => item.TenantId == tenantId
                     && item.Id == listingId
                     && !item.IsDeleted)
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(item => item.IsPublishedToExternalPortal, false)
-                    .SetProperty(item => item.ExternalListingStatus, "Reserved")
-                    .SetProperty(item => item.ExternalPublishedAt, (DateTime?)null)
                     .SetProperty(item => item.UpdatedAt, now),
                     cancellationToken);
+            if (affectedRows != 1)
+                throw new InvalidOperationException("The Estate land listing could not be unpublished during handoff.");
             return;
         }
 
-        await db.EstateManagedAssets
+        var affectedAssetRows = await db.EstateManagedAssets
             .IgnoreQueryFilters()
             .Where(item => item.TenantId == tenantId
                 && item.Id == listingId
                 && !item.IsDeleted)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(item => item.IsPublishedToExternalPortal, false)
-                .SetProperty(item => item.ExternalListingStatus, "Reserved")
-                .SetProperty(item => item.ExternalPublishedAt, (DateTime?)null)
-                .SetProperty(
-                    item => item.Status,
-                    item => item.Status == EstateManagedAssetStatus.Available
-                        ? EstateManagedAssetStatus.Reserved
-                        : item.Status)
                 .SetProperty(item => item.UpdatedAt, now),
                 cancellationToken);
+        if (affectedAssetRows != 1)
+            throw new InvalidOperationException("The Estate property listing could not be unpublished during handoff.");
     }
 
     private static EstateSalesListingApplicationHandoffResult ToResult(ProcedureCase procedureCase, bool alreadyExists)

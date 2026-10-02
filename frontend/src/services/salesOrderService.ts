@@ -143,6 +143,7 @@ export interface CreateSalesOrderDto {
   taxGroupId?: string;
   quoteId?: string;
   opportunityId?: string;
+  salesAllocationId?: string;
   lines: CreateSalesOrderLineDto[];
 }
 

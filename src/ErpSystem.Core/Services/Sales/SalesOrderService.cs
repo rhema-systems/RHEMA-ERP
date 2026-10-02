@@ -77,6 +77,24 @@ public class SalesOrderService : ISalesOrderService
             var bp = await _bpRepo.GetByIdAsync(dto.BusinessPartnerId)
                 ?? throw new InvalidOperationException($"Business Partner {dto.BusinessPartnerId} not found");
             var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId ?? bp.PaymentTermId, bp.TenantId);
+            SalesAllocation? reservedAllocation = null;
+            if (dto.SalesAllocationId.HasValue)
+            {
+                reservedAllocation = await _unitOfWork.Repository<SalesAllocation>().FirstOrDefaultAsync(allocation =>
+                        allocation.Id == dto.SalesAllocationId.Value
+                        && allocation.TenantId == bp.TenantId
+                        && !allocation.IsDeleted)
+                    ?? throw new InvalidOperationException("The selected property reservation was not found.");
+
+                if (!string.Equals(reservedAllocation.Status, "Reserved", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Only an active Reserved allocation can be used for a new Sales Order.");
+                if (reservedAllocation.SalesOrderId.HasValue)
+                    throw new InvalidOperationException("This reservation is already linked to another Sales Order.");
+                if (reservedAllocation.OpportunityId.HasValue && reservedAllocation.OpportunityId != dto.OpportunityId)
+                    throw new InvalidOperationException("The Sales Order must belong to the Opportunity that reserved this item.");
+                if (reservedAllocation.BusinessPartnerId.HasValue && reservedAllocation.BusinessPartnerId != dto.BusinessPartnerId)
+                    throw new InvalidOperationException("The Sales Order customer must match the customer on this reservation.");
+            }
 
             var salesOrder = new SalesOrder
             {
@@ -162,6 +180,30 @@ public class SalesOrderService : ISalesOrderService
                 ? totalTax
                 : dto.TaxAmount ?? totalTax;
             salesOrder.TotalAmount = subTotal + salesOrder.TaxAmount + salesOrder.ShippingAmount - salesOrder.DiscountAmount;
+
+            if (reservedAllocation is not null)
+            {
+                reservedAllocation.SalesOrderId = salesOrder.Id;
+                reservedAllocation.AgreedValue = salesOrder.TotalAmount;
+                reservedAllocation.UpdatedAt = DateTime.UtcNow;
+                reservedAllocation.UpdatedBy = _currentUserProvider.Username;
+                reservedAllocation.LastModifiedById = _currentUserProvider.UserId;
+                await _unitOfWork.Repository<SalesAllocation>().UpdateAsync(reservedAllocation);
+                await _unitOfWork.Repository<SalesAllocationHistory>().AddAsync(new SalesAllocationHistory
+                {
+                    TenantId = reservedAllocation.TenantId,
+                    SalesAllocationId = reservedAllocation.Id,
+                    Action = "SalesOrderLinked",
+                    FromStatus = reservedAllocation.Status,
+                    ToStatus = reservedAllocation.Status,
+                    PerformedById = _currentUserProvider.UserId == Guid.Empty ? null : _currentUserProvider.UserId,
+                    PerformedByName = _currentUserProvider.FullName,
+                    PerformedAt = DateTime.UtcNow,
+                    Notes = $"Linked reservation to Sales Order {salesOrder.DocumentNumber}.",
+                    CreatedBy = _currentUserProvider.Username,
+                    CreatedById = _currentUserProvider.UserId
+                });
+            }
 
             // Record initial status
             await RecordStatusChangeAsync(salesOrder.Id, null, SalesOrderStatus.Draft, "Sales Order created", bp.TenantId);

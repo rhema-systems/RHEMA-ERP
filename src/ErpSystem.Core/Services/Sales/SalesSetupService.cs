@@ -514,11 +514,14 @@ public class SalesSetupService : ISalesSetupService
                 && !allocation.IsDeleted
                 && activeStatuses.Contains(allocation.Status));
 
-        if (source.AdapterKey.Equals("property-register", StringComparison.OrdinalIgnoreCase))
+        if (source.AdapterKey.Equals("property-register", StringComparison.OrdinalIgnoreCase)
+            || source.AdapterKey.Equals("project-units", StringComparison.OrdinalIgnoreCase)
+            || source.AdapterKey.Equals("land-management", StringComparison.OrdinalIgnoreCase))
         {
             allocationQuery = allocationQuery.Where(allocation =>
                 allocation.AdapterKey == "property-register"
-                || allocation.AdapterKey == "project-units");
+                || allocation.AdapterKey == "project-units"
+                || allocation.AdapterKey == "land-management");
         }
         else
         {
@@ -549,6 +552,9 @@ public class SalesSetupService : ISalesSetupService
             item.ActiveAllocationId = allocation.Id;
             item.ActiveAllocationStatus = allocation.Status;
             item.ActiveAllocationReservedUntil = allocation.ReservedUntil;
+            item.ActiveAllocationBusinessPartnerId = allocation.BusinessPartnerId;
+            item.ActiveAllocationOpportunityId = allocation.OpportunityId;
+            item.ActiveAllocationSalesOrderId = allocation.SalesOrderId;
             item.ActiveAllocationCustomerName = allocation.CustomerName;
             item.HasActiveAllocation = true;
             item.CanCreateSalesOrder = false;
