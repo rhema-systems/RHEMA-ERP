@@ -12,6 +12,7 @@ import {
 const mocks = vi.hoisted(() => ({
   loadAssets: vi.fn(),
   updateExternalListing: vi.fn(),
+  updateOccupancy: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
   info: vi.fn(),
@@ -60,7 +61,10 @@ vi.mock('./use-managed-assets-page', () => ({
 vi.mock('./EstateAssetImportDialog', () => ({ EstateAssetImportDialog: () => null }));
 vi.mock('@/services/estate-land-management.service', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/services/estate-land-management.service')>(),
-  estateLandManagementService: { updateExternalListing: mocks.updateExternalListing },
+  estateLandManagementService: {
+    updateExternalListing: mocks.updateExternalListing,
+    updateOccupancy: mocks.updateOccupancy,
+  },
 }));
 vi.mock('sonner', () => ({ toast: { success: mocks.success, error: mocks.error, info: mocks.info } }));
 
@@ -70,6 +74,7 @@ describe('Property and Unit Register', () => {
     mocks.assets = [asset];
     mocks.loadAssets.mockResolvedValue(undefined);
     mocks.updateExternalListing.mockResolvedValue({ ...asset, externalListingType: 'Rent' });
+    mocks.updateOccupancy.mockResolvedValue({ ...asset });
   });
   afterEach(cleanup);
 
@@ -116,5 +121,23 @@ describe('Property and Unit Register', () => {
     fireEvent.keyDown(screen.getByRole('button', { name: 'Actions for Demo Office Suite' }), { key: 'Enter' });
 
     expect(screen.getByRole('menuitem', { name: 'Send to portal' })).not.toHaveAttribute('data-disabled');
+  });
+
+  it('updates a property status from the register action', async () => {
+    render(<PropertyUnitRegister />);
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Actions for Demo Office Suite' }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Change status' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save status' }));
+
+    await waitFor(() => expect(mocks.updateOccupancy).toHaveBeenCalledWith(
+      asset.id,
+      expect.objectContaining({
+        status: EstateManagedAssetStatus.Available,
+        isPublishedToExternalPortal: null,
+      })
+    ));
+    await waitFor(() => expect(mocks.loadAssets).toHaveBeenCalled());
+    expect(mocks.success).toHaveBeenCalledWith('Property status updated.');
   });
 });

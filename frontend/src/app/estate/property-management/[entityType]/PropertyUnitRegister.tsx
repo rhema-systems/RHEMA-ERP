@@ -19,6 +19,7 @@ import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Card,
   CardContent,
@@ -27,6 +28,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Pagination } from '@/components/ui/pagination';
 import {
   Dialog,
@@ -49,6 +51,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Table,
   TableBody,
@@ -92,6 +95,11 @@ const sourceLabels: Record<EstateManagedAssetSourceType, string> = {
   [EstateManagedAssetSourceType.ProjectUnit]: 'Project unit',
   [EstateManagedAssetSourceType.Imported]: 'Excel import',
 };
+
+const statusOptions = Object.entries(statusLabels).map(([value, label]) => ({
+  value: Number(value) as EstateManagedAssetStatus,
+  label,
+}));
 
 function formatArea(asset: EstateManagedAsset) {
   if (asset.areaValue != null) {
@@ -154,6 +162,16 @@ export function PropertyUnitRegister() {
   );
   const [importOpen, setImportOpen] = React.useState(false);
   const [viewAsset, setViewAsset] = React.useState<EstateManagedAsset | null>(null);
+  const [statusAsset, setStatusAsset] = React.useState<EstateManagedAsset | null>(null);
+  const [nextStatus, setNextStatus] = React.useState<EstateManagedAssetStatus>(
+    EstateManagedAssetStatus.Available
+  );
+  const [leaseAvailable, setLeaseAvailable] = React.useState(false);
+  const [saleAvailable, setSaleAvailable] = React.useState(false);
+  const [releaseOccupant, setReleaseOccupant] = React.useState(false);
+  const [actualDate, setActualDate] = React.useState('');
+  const [statusNotes, setStatusNotes] = React.useState('');
+  const [statusSavingId, setStatusSavingId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const importType = new URLSearchParams(window.location.search).get(
@@ -193,6 +211,52 @@ export function PropertyUnitRegister() {
     setPage(1);
     setTypeFilter('all');
     setStatusFilter('all');
+  };
+
+  const openStatusDialog = (asset: EstateManagedAsset) => {
+    setStatusAsset(asset);
+    setNextStatus(asset.status);
+    setLeaseAvailable(asset.isAvailableForLease);
+    setSaleAvailable(asset.isAvailableForSale);
+    setReleaseOccupant(false);
+    setActualDate('');
+    setStatusNotes('');
+  };
+
+  const saveStatus = async () => {
+    if (!statusAsset) return;
+
+    try {
+      setStatusSavingId(statusAsset.id);
+      await estateLandManagementService.updateOccupancy(statusAsset.id, {
+        status: nextStatus,
+        actualDate: actualDate || null,
+        releaseOccupant:
+          nextStatus === EstateManagedAssetStatus.Available
+            ? releaseOccupant
+            : false,
+        isAvailableForLease:
+          nextStatus === EstateManagedAssetStatus.Available
+            ? leaseAvailable
+            : false,
+        isAvailableForSale:
+          nextStatus === EstateManagedAssetStatus.Available
+            ? saleAvailable
+            : false,
+        isPublishedToExternalPortal:
+          nextStatus === EstateManagedAssetStatus.Available ? null : false,
+        notes: statusNotes.trim() || null,
+      });
+      toast.success('Property status updated.');
+      setStatusAsset(null);
+      await loadAssets();
+    } catch (error: unknown) {
+      toast.error(
+        error instanceof Error ? error.message : 'Unable to update property status.'
+      );
+    } finally {
+      setStatusSavingId(null);
+    }
   };
 
   const sendProjectPropertyToPortalListings = async (
@@ -522,11 +586,16 @@ export function PropertyUnitRegister() {
                                   </Link>
                                 </DropdownMenuItem>
                               ) : (
-                                <DropdownMenuItem asChild>
-                                  <Link href={`/estate/property-management/EstatePropertyManagementOccupancyAvailability?assetId=${encodeURIComponent(asset.id)}`}>
-                                    <Settings2 className="mr-2 h-4 w-4" /> Manage status
-                                  </Link>
-                                </DropdownMenuItem>
+                                <>
+                                  <DropdownMenuItem onSelect={() => openStatusDialog(asset)}>
+                                    <Settings2 className="mr-2 h-4 w-4" /> Change status
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/estate/property-management/EstatePropertyManagementOccupancyAvailability?assetId=${encodeURIComponent(asset.id)}`}>
+                                      <Settings2 className="mr-2 h-4 w-4" /> Open status board
+                                    </Link>
+                                  </DropdownMenuItem>
+                                </>
                               )}
                               {isPortalListing && asset.status === EstateManagedAssetStatus.Available ? (
                                 <DropdownMenuItem asChild>
@@ -597,6 +666,141 @@ export function PropertyUnitRegister() {
                 </div>
               ))}
             </dl>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(statusAsset)} onOpenChange={(open) => { if (!open) setStatusAsset(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Change property status</DialogTitle>
+            <DialogDescription>
+              {statusAsset
+                ? `${getPropertyName(statusAsset)} is currently ${statusLabels[statusAsset.status]}.`
+                : 'Update property status.'}
+            </DialogDescription>
+          </DialogHeader>
+          {statusAsset ? (
+            <div className="space-y-4">
+              <div className="grid gap-2">
+                <Label htmlFor="property-status">Status</Label>
+                <Select
+                  value={String(nextStatus)}
+                  onValueChange={(value) => {
+                    const status = Number(value) as EstateManagedAssetStatus;
+                    setNextStatus(status);
+                    if (status !== EstateManagedAssetStatus.Available) {
+                      setLeaseAvailable(false);
+                      setSaleAvailable(false);
+                    }
+                    if (status !== EstateManagedAssetStatus.Available) {
+                      setReleaseOccupant(false);
+                    }
+                  }}
+                >
+                  <SelectTrigger id="property-status">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {statusOptions
+                      .filter((option) =>
+                        option.value !== EstateManagedAssetStatus.LandBank ||
+                        statusAsset.assetType === EstateManagedAssetType.Land
+                      )
+                      .map((option) => (
+                        <SelectItem key={option.value} value={String(option.value)}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {nextStatus === EstateManagedAssetStatus.Available ? (
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="lease-available"
+                      checked={leaseAvailable}
+                      onCheckedChange={(checked) => setLeaseAvailable(Boolean(checked))}
+                    />
+                    <Label htmlFor="lease-available">Available for lease</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="sale-available"
+                      checked={saleAvailable}
+                      onCheckedChange={(checked) => setSaleAvailable(Boolean(checked))}
+                    />
+                    <Label htmlFor="sale-available">Available for sale</Label>
+                  </div>
+                  {statusAsset.status === EstateManagedAssetStatus.Leased ||
+                  statusAsset.status === EstateManagedAssetStatus.Occupied ||
+                  statusAsset.lesseeName ? (
+                    <div className="space-y-3 border-t pt-3">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id="release-occupant"
+                          checked={releaseOccupant}
+                          onCheckedChange={(checked) => setReleaseOccupant(Boolean(checked))}
+                        />
+                        <Label htmlFor="release-occupant">Release current occupant</Label>
+                      </div>
+                      {releaseOccupant ? (
+                        <div className="grid gap-2">
+                          <Label htmlFor="actual-date">Actual move-out date</Label>
+                          <Input
+                            id="actual-date"
+                            type="date"
+                            value={actualDate}
+                            onChange={(event) => setActualDate(event.target.value)}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : nextStatus === EstateManagedAssetStatus.Occupied ? (
+                <div className="grid gap-2">
+                  <Label htmlFor="actual-date">Actual possession date</Label>
+                  <Input
+                    id="actual-date"
+                    type="date"
+                    value={actualDate}
+                    onChange={(event) => setActualDate(event.target.value)}
+                  />
+                </div>
+              ) : null}
+
+              <div className="grid gap-2">
+                <Label htmlFor="status-notes">Notes</Label>
+                <Textarea
+                  id="status-notes"
+                  value={statusNotes}
+                  onChange={(event) => setStatusNotes(event.target.value)}
+                  rows={3}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setStatusAsset(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  disabled={statusSavingId === statusAsset.id}
+                  onClick={() => void saveStatus()}
+                >
+                  {statusSavingId === statusAsset.id ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : null}
+                  Save status
+                </Button>
+              </div>
+            </div>
           ) : null}
         </DialogContent>
       </Dialog>
