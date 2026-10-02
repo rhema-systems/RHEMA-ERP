@@ -328,7 +328,6 @@ export interface CreateStaffTravelRequest {
   requiresVisa: boolean;
   requiresHealthClearance: boolean;
   riskLevel: TravelRiskLevel;
-  groupTravelId?: string | null;
   parentRequestId?: string | null;
   amendmentReason?: string | null;
 }
@@ -336,10 +335,10 @@ export interface CreateStaffTravelRequest {
 /**
  * ⚠ A REPLACE, not a patch: the server writes every field it receives, and an omitted one as its
  * default. Since lane 1 it writes only what the requester may change — the unit, the international
- * flag, the policy and the approved budget are no longer on it — and only while the request is a
- * Draft or returned for revision. `groupTravelId` is still written as sent until slice 1c moves
- * group membership to the group's own endpoints, so `buildTravelRequestUpdate` sends it back as the
- * record has it (finding A8: an edit that omitted it took the traveller out of their group).
+ * flag, the policy, the approved budget and (slice 1c) the group are no longer on it — and only while
+ * the request is a Draft or returned for revision. Group membership is the group's own routes'
+ * (add, link, remove): an edit that omitted the group link used to take the traveller out of their
+ * group (finding A8).
  */
 export type UpdateStaffTravelRequest = Omit<
   CreateStaffTravelRequest,
@@ -418,11 +417,11 @@ export interface CreateStaffGroupTravel {
 }
 
 /**
- * ⚠ Wider than the create by exactly one field: `status`. A group's status is set by editing it —
- * there is no separate transition route — so an edit form that omits it would send the enum's
- * default and silently move the trip back to its first state.
+ * The create's fields plus the id — and no status. Since travel closure lane 1 (slice 1c) a group
+ * opens, closes and is cancelled by its own routes; the edit used to carry the status, and a form that
+ * left it out moved the trip back to Planning. A new destination or new dates are given to the
+ * travellers whose trips are still drafts or returned for revision.
  */
 export type UpdateStaffGroupTravel = CreateStaffGroupTravel & {
   id: string;
-  status: GroupTravelStatus;
 };

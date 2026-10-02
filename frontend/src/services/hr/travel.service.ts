@@ -247,29 +247,54 @@ class TravelService {
   }
 
   /**
-   * ⚠ Send `status` — it is on the update payload and not the create, so omitting it sends the
-   * enum default and moves the trip back to its first state.
+   * No status (lane 1, slice 1c): `openGroup`, `closeGroup` and `cancelGroup` move it. A new
+   * destination or new dates are given to the travellers whose trips are still drafts or returned
+   * for revision; submitted and approved trips keep their own.
    */
   updateGroup(payload: UpdateStaffGroupTravel) {
     return apiService.put<StaffGroupTravel>(`${this.baseUrl}/groups/${payload.id}`, payload);
   }
 
+  /** From Planning, or reopens a closed group, so travellers can be added. */
+  openGroup(id: string) {
+    return apiService.post<StaffGroupTravel>(`${this.baseUrl}/groups/${id}/open`, {});
+  }
+
+  /** No new travellers; the trips already on it carry on. */
+  closeGroup(id: string) {
+    return apiService.post<StaffGroupTravel>(`${this.baseUrl}/groups/${id}/close`, {});
+  }
+
+  /** Refused while any traveller's trip is still going ahead — the server names them. */
+  cancelGroup(id: string) {
+    return apiService.post<StaffGroupTravel>(`${this.baseUrl}/groups/${id}/cancel`, {});
+  }
+
   /**
-   * `HR.Travel.Admin`.
-   *
-   * ⚠ The participants' own travel requests are NOT cancelled — they survive as standalone trips
-   * still carrying the deleted group's id. Deleting the group means "this is no longer organised
-   * as a group", not "nobody is going".
+   * `HR.Travel.Admin`. The travellers come off the group first (lane 1) and their trips carry on as
+   * ordinary ones — they used to keep the deleted group's id. Deleting means "no longer organised as
+   * a group", not "nobody is going".
    */
   deleteGroup(id: string) {
     return apiService.delete<void>(`${this.baseUrl}/groups/${id}`);
   }
 
-  /** Raises one request per employee, skipping anyone already in the group. */
+  /**
+   * Raises one draft request per employee, skipping anyone already holding a place. Refused when the
+   * group is not taking travellers or has no room for them all.
+   */
   addGroupParticipants(groupId: string, employeeIds: string[], template: Record<string, unknown>) {
     return apiService.post<StaffGroupTravel>(`${this.baseUrl}/groups/${groupId}/participants`, {
       groupTravelId: groupId, employeeIds, ...template,
     });
+  }
+
+  /**
+   * Puts an existing draft (or returned) request on the group; it takes the group's destination and
+   * dates (lane 1 — there was no way to do this from any screen).
+   */
+  linkGroupRequest(groupId: string, requestId: string) {
+    return apiService.post<StaffGroupTravel>(`${this.baseUrl}/groups/${groupId}/requests/${requestId}`, {});
   }
 
   /**

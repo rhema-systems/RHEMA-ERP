@@ -26,6 +26,7 @@ public class StaffTravelRequestsController : HrControllerBase
     private readonly ICentralDocumentRepositoryFileService _centralDocuments;
     private readonly IFileStorageService _fileStorage;
     private readonly ApplicationDbContext _db;
+    private readonly IAuthorizationService _authorization;
     private readonly ILogger<StaffTravelRequestsController> _logger;
 
     public StaffTravelRequestsController(
@@ -34,6 +35,7 @@ public class StaffTravelRequestsController : HrControllerBase
         ICentralDocumentRepositoryFileService centralDocuments,
         IFileStorageService fileStorage,
         ApplicationDbContext db,
+        IAuthorizationService authorization,
         ILogger<StaffTravelRequestsController> logger,
         ICurrentUserService currentUser)
         : base(currentUser)
@@ -43,8 +45,16 @@ public class StaffTravelRequestsController : HrControllerBase
         _centralDocuments = centralDocuments;
         _fileStorage = fileStorage;
         _db = db;
+        _authorization = authorization;
         _logger = logger;
     }
+
+    /// <summary>
+    /// Whether the caller holds <c>HR.Travel.Admin</c> — evaluated against the same policy the
+    /// <c>[Authorize]</c> attributes use, as the bookings controller does for breach approval.
+    /// </summary>
+    private async Task<bool> CallerIsTravelAdminAsync()
+        => (await _authorization.AuthorizeAsync(User, HrPermissions.TravelAdminPolicy)).Succeeded;
 
     // =========================================================================
     // QUERIES
@@ -323,6 +333,7 @@ public class StaffTravelRequestsController : HrControllerBase
         return Ok(await _service.AddCommentAsync(dto, tenantId, userId, employeeId));
     }
 
+    /// <summary>Edit a comment — its author's, or a travel administrator's (lane 1, finding A10).</summary>
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("comments/{commentId:guid}")]
     public async Task<ActionResult<StaffTravelRequestCommentDto>> UpdateComment(Guid commentId, [FromBody] UpdateStaffTravelRequestCommentDto dto)
@@ -332,14 +343,19 @@ public class StaffTravelRequestsController : HrControllerBase
 
         if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        return Ok(await _service.UpdateCommentAsync(dto, userId));
+        return Ok(await _service.UpdateCommentAsync(dto, userId, await CallerIsTravelAdminAsync()));
     }
 
-    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
+    /// <summary>
+    /// Delete a comment — its author's, or a travel administrator's (lane 1, finding A10). It was
+    /// administrators only, so an officer could not take back a comment they had just posted, and any
+    /// officer could edit a colleague's.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpDelete("comments/{commentId:guid}")]
     public async Task<IActionResult> DeleteComment(Guid commentId)
     {
-        await _service.DeleteCommentAsync(commentId);
+        await _service.DeleteCommentAsync(commentId, await CallerIsTravelAdminAsync());
         return NoContent();
     }
 
@@ -505,4 +521,31 @@ public class StaffTravelRequestsController : HrControllerBase
         var removed = await _service.RemoveGroupParticipantAsync(groupId, requestId);
         return removed ? NoContent() : NotFound();
     }
+
+    /// <summary>
+    /// Put an existing request on the group (lane 1, finding T-30 — the only door used to create a new
+    /// one). A draft or a returned request; it takes the group's destination and dates.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("groups/{groupId:guid}/requests/{requestId:guid}")]
+    public async Task<ActionResult<StaffGroupTravelDto>> LinkGroupParticipant(Guid groupId, Guid requestId)
+        => Ok(await _service.LinkGroupParticipantAsync(groupId, requestId));
+
+    /// <summary>Open the group to travellers, or reopen a closed one (lane 1 — the status is no longer the PUT's).</summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("groups/{id:guid}/open")]
+    public async Task<ActionResult<StaffGroupTravelDto>> OpenGroup(Guid id)
+        => Ok(await _service.OpenGroupTravelAsync(id));
+
+    /// <summary>Close the group to new travellers; their trips carry on.</summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("groups/{id:guid}/close")]
+    public async Task<ActionResult<StaffGroupTravelDto>> CloseGroup(Guid id)
+        => Ok(await _service.CloseGroupTravelAsync(id));
+
+    /// <summary>Call the group off — once none of its travellers has a trip still going ahead.</summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("groups/{id:guid}/cancel")]
+    public async Task<ActionResult<StaffGroupTravelDto>> CancelGroup(Guid id)
+        => Ok(await _service.CancelGroupTravelAsync(id));
 }

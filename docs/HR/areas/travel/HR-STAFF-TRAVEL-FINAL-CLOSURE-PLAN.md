@@ -36,13 +36,13 @@ baseline (D-13); lane 0 was built the same day.**
 3. **Migration batch 1** (§ 5) — **APPLIED to UAT 2026-10-02**, committed `d426f4ed3`
    (`20261002000637_TravelClosureBatch1`, guarded SQL; 33/33 on a scratch copy of UAT first; verified on
    UAT; truth suite 112/112 twice after). Lanes 1–9 build on it.
-4. **Lane 1** (§ 4) is built in three slices. **Slice 1a — the request's write rules — committed
-   `e1d050da2`** (2026-10-02). **Slice 1b — the lifecycle verbs (cancel, return for revision, request
-   change, recall, complete, close, the approver's stamp) — built and proven 2026-10-02**
-   (`run-final-lifecycle.mjs` 193/193 twice; the truth suite 114/114 twice); staged for the user's
-   commit. **Next: slice 1c** (comment edit and delete by their author, the traveller's privacy, groups).
-5. Then lanes **2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane
-   against this document before building it — line numbers are as of HEAD `bad482a8d`.
+4. **Lane 1** (§ 4) — **COMPLETE 2026-10-02**, in three slices: **1a** the request's write rules
+   (committed `e1d050da2`), **1b** the lifecycle verbs (committed `8fadfd31e`), **1c** comments, the
+   traveller's privacy and groups — built and proven (`run-final-lifecycle.mjs` 255/255 twice; the truth
+   suite 117/117 twice) and staged for the user's commit.
+5. **Next: lane 2** (the approval ladder and the approver's door, D-7), then lanes **3 → 4 → 5 → 6 → 7 →
+   8 → 9 → 10** in that order (§ 2). Source-check each lane against this document before building it —
+   line numbers are as of HEAD `bad482a8d`.
 
 **House rules** (from the HR programme, not repeated in each lane): the user runs builds — never
 `dotnet build`; stop `ErpSystem.Api` by command line before the user builds; migrations are scaffolded
@@ -88,7 +88,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 |---|---|---|---|---|
 | **0** | Harness on UAT, truth and fiction | none | `run-final-truth.mjs` | ✅ complete 2026-10-01 — 112/112 twice on UAT; committed `0b8cdf124` |
 | **M1** | Migration batch 1 | the whole batch | `m1/test-cycle.sh` (session scratchpad) | ✅ applied to UAT 2026-10-02 — 33/33 on a scratch copy first, verified on UAT, truth suite 112/112 twice after; committed `d426f4ed3` |
-| **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ◐ 1a (write rules) committed `e1d050da2`; 1b (verbs) 2026-10-02 — 193/193 twice, truth 114/114 twice; staged. 1c (comments, privacy, groups) to come |
+| **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ✅ complete 2026-10-02 — 1a `e1d050da2`, 1b `8fadfd31e`, 1c 255/255 twice and truth 117/117 twice, staged |
 | **2** | The approval ladder and the approver's door | batch 1 | `run-final-approvals.mjs` | ☐ |
 | **3** | The money chain | batch 1 | `run-final-money.mjs` | ☐ |
 | **4** | Policy and authority | batch 1 | `run-final-policy.mjs` | ☐ |
@@ -136,7 +136,9 @@ Each finding names the lane that owns it.
   2026-10-02**, except `GroupTravelId` on an edit, which slice 1c moves to the group endpoints
 - **A6 H** `GET /me/requests/{id}` returns every comment — `IsVisibleToTraveller` is read by nothing
   on the server, only the client filters — plus the budget, advances, claims and policy exceptions.
-  → lane 1
+  → lane 1 — **fixed in slice 1c, 2026-10-02** (comments the desk did not share, at any depth, and policy
+  exceptions are dropped on the server; the traveller's own budget, advances and claims stay — lane 7
+  builds the portal's views of them)
 - **A7 M** The desk's *Add comment* sends `commentType: 'General'`, which is not a C# member, so it
   **always 400s** (`hr/travel/[id]/page.tsx:137`); `isVisibleToTraveller` is hard-coded true (T-27).
   → lane 0 — **fixed 2026-10-01** (a Comment / Internal note toggle)
@@ -145,17 +147,19 @@ Each finding names the lane that owns it.
   `policyId` and `groupTravelId`, so editing a group participant silently removes them from the
   group; a self-service request gets no organisation unit although a comment says it does. → lanes 0, 1
   — **lane 0's half fixed 2026-10-01** (options from the enums; the edit sends the three back; the
-  comment corrected); the unit and the DTO are lane 1's
+  comment corrected); **lane 1's half fixed 2026-10-02** (the unit is the server's, slice 1a; the three
+  fields are off the edit, the group link last, slice 1c)
 - **A9 M** The attachment upload offers six types, five of them not C# members — 400 unless *Other*
   (`TravelAttachmentsPanel.tsx:33`); its delete button renders for HR and 403s. → lane 0 — **fixed
   2026-10-01**
 - **A10 L** Comment edit and delete check no author; the desk path takes `CancelledAt` from the body;
   the request has no approver column (only `UpdatedBy`); the request-number generator is not atomic
-  (recorded). → lane 1 — **`CancelledAt` and the approver fixed in slice 1b, 2026-10-02**; the comment
-  author check is slice 1c's
+  (recorded). → lane 1 — **`CancelledAt` and the approver fixed in slice 1b, the comment author check in
+  slice 1c, 2026-10-02**; the request-number generator stays recorded (§ 6)
 - **A11 M** Group travel: `MaxParticipants` is not enforced, the group's status is whatever the PUT
   says, dates and destination are not pushed to participants, an existing request cannot be linked,
-  and the add-traveller dialog hard-codes purpose, risk, `requiresVisa: false` and `GHS`. → lane 1
+  and the add-traveller dialog hard-codes purpose, risk, `requiresVisa: false` and `GHS`. → lane 1 —
+  **fixed in slice 1c, 2026-10-02** (the currency half in lane 0)
 - **A12 M** No recall verb in the service or controller although `HrWorkflowFallbackAuthority` says
   *use all four or none*; the generic recall button works only while a definition is published.
   → lane 1 — **fixed in slice 1b, 2026-10-02**
@@ -344,7 +348,8 @@ Each finding names the lane that owns it.
   a desk comment notifies nobody. → lanes 7, 8
 - **O-18 L** — deleting a group leaves its participants linked to it; no status history for requests,
   claims or advances beyond the workflow tab; lookups by number and the effective per-diem read take
-  the first row across tenants (single tenant today). → § 6
+  the first row across tenants (single tenant today). → § 6 — **the group half fixed in slice 1c,
+  2026-10-02** (deleting a group takes its travellers off it); the rest stays in § 6
 - **O-19 H — the people who use the travel screens could pick no currency on any of them** (found
   while building lane 0). Every travel currency dropdown — the request form, the four booking dialogs,
   the visa fee, insurance, the budget, the advance, the claim and its lines, the group's add-traveller
@@ -621,9 +626,9 @@ no fixture leave, policy or active login.
 - [x] **`ApprovedById`** (new column) is the final approver's employee id, stamped in `ApproveAsync`; an
   instance completed through the generic inbox never passes the service, so it stays null there
   (recorded under #15). *Slice 1b.*
-- [ ] Comment edit and delete by their author (or Admin); `CancelledAt` from the clock; the `/me`
+- [x] Comment edit and delete by their author (or Admin); `CancelledAt` from the clock; the `/me`
   detail filters comments by `IsVisibleToTraveller` on the server and drops policy exceptions.
-  *`CancelledAt` done in slice 1b; the rest is slice 1c.*
+  *`CancelledAt` in slice 1b; the rest in slice 1c.*
 
 **Slice 1b as built (2026-10-02)** — `StaffTravelRequestService` (`CancelAsync`, `MarkCompletedAsync`,
 `ApproveAsync`'s stamp, and the new `ReturnForRevisionAsync`, `RequestChangeAsync`, `RecallAsync`,
@@ -668,10 +673,74 @@ no open workflow instance, fixture leave, policy or active login. The API log's 
 known payroll defect #23, the truth suite's deliberate duplicate policy, the known demo-user identity
 reconciliation, and one failure of the platform's notification clean-up job under the suite's load
 (it deleted nothing and recovered).
-- [ ] **Groups:** `MaxParticipants` enforced; a change of the group's dates or destination propagates
+- [x] **Groups:** `MaxParticipants` enforced; a change of the group's dates or destination propagates
   to Draft participants; `POST groups/{id}/requests/{requestId}` links an existing Draft request; the
   group's status moves by verb (open, close, cancel), not by PUT; deleting a group detaches its
-  participants; the add-traveller dialog takes purpose, risk, visa and currency.
+  participants; the add-traveller dialog takes purpose, risk, visa and currency. *Slice 1c.*
+
+**Slice 1c as built (2026-10-02)** — `StaffTravelRequestService` (comment author rule; group create and
+edit checks, propagation, the open / close / cancel verbs, `LinkGroupParticipantAsync`, the delete that
+detaches, capacity on add), the mapper (`SeatsTaken`, `ToTravellerView`, no group link from either
+request DTO, no status from the group edit), the group repository reads (each traveller's destination
+country; the by-status list counts places), both controllers (comment routes with the Admin test, four
+group routes, the traveller's view on `/me`); on the frontend the group page rebuilt around the verbs,
+with a link dialog, the fuller add-traveller dialog and a "differs from the group" mark, and the payload
+builder without the group link.
+- *A place* is held by every linked trip that is not cancelled or rejected — the count used to include
+  them, so a cancelled traveller held a place for ever, and could not be added again.
+- *A new destination or new dates* go to every trip still a draft or returned for revision — the two
+  states the requester may edit (lane 1's lock). A submitted or approved trip keeps what its approver is
+  deciding or decided; the page marks it. The PUT ignores any status it is sent.
+- *Linking* takes only a draft or returned request of a traveller not already on the group, while the
+  group takes travellers (Planning or Open) and has room; the trip takes the group's destination and
+  dates (and so is international if the group goes abroad). A trip on another group must come off it
+  first.
+- *Cancelling a group* is refused while any traveller's trip is going ahead (draft, submitted,
+  approved, returned or under way) — the error names them. Each trip has its own approval and money and
+  its own cancel rules, so the group does not cancel them for the desk.
+- *The group link is off both request DTOs* (create and edit): a payload that names a group is ignored,
+  not believed and not refused. *A group's lead* must be an employee still employed, its destination a
+  country the organisation holds, its dates in order.
+- *The traveller's view* drops comments the desk did not share at every depth of replies, and the
+  policy exceptions; their own budget, advances and claims stay (lane 7 builds the portal's views of
+  them).
+- *Comments* are edited and deleted by their author or a travel administrator (`HR.Travel.Admin`,
+  evaluated against the same policy as the routes); deleting was administrators only, so an officer
+  could not take back their own comment, while any officer could rewrite a colleague's.
+- *The demo pack* links the Lagos request through the new route (`080-travel.mjs`).
+- *InProgress and Completed* group statuses still have no writer; they belong with lane 8's sweep, which
+  can derive them from the travellers' trips (recorded there).
+
+**Suite** `run-final-lifecycle.mjs` gains §12–§14 (255 assertions in all; its fixture adds a second HR
+officer): §12 a comment edited and deleted by its author and an administrator, refused to a colleague;
+§13 the traveller's read without internal notes at any depth and without the policy exception the desk
+reads (a real rule and exception planted on the run's policy); §14 groups — a leaver lead and backwards
+dates refused, the PUT's status ignored, the limit on add, link and edit, a link that aligns the trip,
+links refused twice and for a submitted request, propagation to drafts and not to a submitted trip, the
+request edit leaving the link alone, open/close/reopen, cancel refused with live trips (named) and then
+done, a cancelled trip freeing its place, a cancelled group refusing edits, delete detaching travellers
+while their trips carry on. The first run (stamp 339381) failed one 1a assertion slice 1c had made stale
+— a create naming a group is now accepted on no group, not refused — and, because the suite expected a
+refusal, it had not tracked the request, which stayed live until `teardown-run.mjs 339381 --apply`; the
+suite now asserts the new behaviour and tracks every create, refusal expected or not. Then **255/255
+twice on UAT, 2026-10-02** (stamps 517575, 600995). Regression: `run-final-truth.mjs` **117/117 twice**
+(stamps 702525, 713508) — A8's group link and A6 now asserted; only B9 still observed (lane 3). Five runs
+wrote 120 requests, 11 groups and 2,715 notifications and left none live — no rule, exception, comment,
+register row, open workflow instance, fixture leave, policy or active login.
+
+*A teardown safety net, and the lesson it taught.* Both suites' teardowns now also take in everything
+their own fixture travellers own, found by the run's stamp (`includeDiscovered`), so a create a suite did
+not record is still decided and torn down. Its first two runs (stamps 133298, 231515) passed every
+feature check and then failed the teardown: SQL Server prints GUIDs in upper case and the API in lower,
+so the merged set held both forms of one id, the teardown's id table refused the duplicate, and the
+atomic teardown rolled everything back. Both were recovered with `teardown-run.mjs <stamp> --apply` (no
+approval left open, nothing live after); ids are now lower-cased on discovery and de-duplicated without
+regard to case before any SQL. Then both suites passed twice more on the final harness (lifecycle
+335140, 435255 — 255/255; truth 416045, 519338 — 117/117), and UAT was checked to hold no live travel
+fixture row from any run. The API log's only errors
+were the known ones, and the platform's notification clean-up job failing twice more under the suite's
+load (a bulk `UPDATE` over `Notifications` after 4–6 s, then "Deleted 0") — not travel's; recorded for the
+platform owner.
 
 ### Lane 2 — The approval ladder and the approver's door (D-7, O-1, O-9, T-10)
 
@@ -901,7 +970,10 @@ clamd stub.
   Submitted trip waiting more than N days, escalating to HR when departure is three days away or
   past); briefing unacknowledged;
   passport rungs at 90, 30 and 7 days. **D-6 transitions:** Approved → InProgress on departure (or on
-  Fleet's dispatch, lane 6); Completed → Closed when settled (lane 1's rule); advance → Overdue.
+  Fleet's dispatch, lane 6); Completed → Closed when settled (lane 1's rule); advance → Overdue. *Added
+  by lane 1, slice 1c:* a group's **InProgress** and **Completed** are still written by nothing — the
+  sweep derives them from its travellers' trips (in progress once any is under way; completed once every
+  place is completed or closed).
 - [ ] A dispatch row records `PublishedAt` only when the bus call returned without throwing — the bus
   swallows handler errors, so delivery is proved by counting the notification rows written per
   audience, never by reading the log.
@@ -1093,3 +1165,8 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
 - **2026-10-02, later** — The user committed slice 1a (`e1d050da2`). **Slice 1b built and proven** (the
   lifecycle verbs): the build succeeded; no migration pending on UAT; `run-final-lifecycle.mjs` 193/193
   twice, the truth suite 114/114 twice. Staged. Next: slice 1c.
+- **2026-10-02, later** — The user committed slice 1b (`8fadfd31e`). **Slice 1c built and proven — LANE 1
+  COMPLETE** (comments by their author, the traveller's view, groups by verb with a binding limit, links
+  and propagation): the build succeeded; no migration pending on UAT; one stale 1a assertion and the
+  untracked request it left were fixed; `run-final-lifecycle.mjs` 255/255 twice, the truth suite 117/117
+  twice. Staged. Next: lane 2.

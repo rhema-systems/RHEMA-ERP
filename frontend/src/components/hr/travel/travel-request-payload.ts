@@ -3,11 +3,10 @@
  *
  * ⚠ The update is a REPLACE, not a patch: the server writes every field it receives and an omitted
  * one as its default. Since lane 1 of the travel final closure the server owns the organisation unit
- * (the traveller's own), whether the trip is international (the two countries) and the policy, and
- * the approved budget is the approver's — none of the four is sent any more. `groupTravelId` is still
- * written as sent until slice 1c moves group membership to the group endpoints, so an edit sends it
- * back exactly as the record has it: a group participant edited on the form used to leave the group
- * silently (lane 0 — finding A8).
+ * (the traveller's own), whether the trip is international (the two countries) and the policy, the
+ * approved budget is the approver's, and the group a trip is on is the group's own routes' (slice 1c)
+ * — none of the five is sent. A group participant edited on the form used to leave the group, because
+ * the edit wrote the link it had not been sent (finding A8); an edit now cannot touch the link at all.
  */
 import type {
   CreateStaffTravelRequest,
@@ -84,14 +83,13 @@ export function buildTravelRequestCreate(v: TravelRequestFormOutput, travellerId
   };
 }
 
-/** An edit: the form's fields, plus the group link it does not show, sent back as it is. */
+/** An edit: the form's fields and the request's id — nothing the form does not show. */
 export function buildTravelRequestUpdate(
   v: TravelRequestFormOutput,
-  existing: Pick<StaffTravelRequest, 'id' | 'groupTravelId'>,
+  existing: Pick<StaffTravelRequest, 'id'>,
 ): UpdateStaffTravelRequest {
   return {
     ...buildTravelRequestFields(v, true),
     id: existing.id,
-    groupTravelId: existing.groupTravelId ?? null,
   };
 }

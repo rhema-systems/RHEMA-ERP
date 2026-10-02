@@ -1,4 +1,5 @@
-﻿using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Application.HR.Extensions;
+using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -86,7 +87,12 @@ public class StaffTravelMeController : HrControllerBase
         return Ok(await _service.GetByEmployeeIdAsync(employeeId, ct));
     }
 
-    /// <summary>One of the caller's own travel requests, in full.</summary>
+    /// <summary>One of the caller's own travel requests, as the traveller may read it.</summary>
+    /// <remarks>
+    /// Finding A6 (lane 1, slice 1c): this returned every comment — the desk's internal notes
+    /// included — and the policy-exception decisions, and only the portal page's own filter hid them.
+    /// <see cref="StaffTravelMappingExtensions.ToTravellerView"/> drops both on the server.
+    /// </remarks>
     [HttpGet("requests/{id:guid}")]
     public async Task<ActionResult<StaffTravelRequestDto>> GetMyRequest(Guid id, CancellationToken ct)
     {
@@ -94,7 +100,7 @@ public class StaffTravelMeController : HrControllerBase
                 "Viewing a travel request") is { } error) return error;
 
         var request = await GetOwnActiveRequestAsync(id, employeeId, ct);
-        return request is null ? NotFound() : Ok(request);
+        return request is null ? NotFound() : Ok(request.ToTravellerView());
     }
 
     /// <summary>

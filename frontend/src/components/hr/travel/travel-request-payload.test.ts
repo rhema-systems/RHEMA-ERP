@@ -31,24 +31,22 @@ const values = (overrides: Partial<TravelRequestFormOutput> = {}): TravelRequest
 });
 
 describe('travel request payloads', () => {
-  it('sends the group link back, so a save does not take the traveller out of their group (A8)', () => {
-    const update = buildTravelRequestUpdate(values(), { id: 'req-1', groupTravelId: 'group-1' });
+  it('an edit names the request and carries nothing the form does not show', () => {
+    const update = buildTravelRequestUpdate(values(), { id: 'req-1' });
     expect(update.id).toBe('req-1');
-    expect(update.groupTravelId).toBe('group-1');
   });
 
-  it('sends null, not undefined, for the group link when the record has none', () => {
-    expect(buildTravelRequestUpdate(values(), { id: 'req-1' }).groupTravelId).toBeNull();
-  });
-
-  it("never sends what the server decides: the unit, international, the policy, the approved budget (lane 1)", () => {
+  it("never sends what the server or the group decides: the unit, international, the policy, the approved budget, the group (lane 1)", () => {
     const create = buildTravelRequestCreate(values(), 'emp-9');
-    const update = buildTravelRequestUpdate(values(), { id: 'req-1', groupTravelId: null });
+    const update = buildTravelRequestUpdate(values(), { id: 'req-1' });
     for (const payload of [create, update, buildTravelRequestFields(values(), false)]) {
       expect('organizationUnitId' in payload).toBe(false);
       expect('isInternational' in payload).toBe(false);
       expect('policyId' in payload).toBe(false);
       expect('approvedBudget' in payload).toBe(false);
+      // Slice 1c: group membership is the group's routes' — an edit that omitted the link used to
+      // take the traveller out of their group (A8).
+      expect('groupTravelId' in payload).toBe(false);
     }
   });
 

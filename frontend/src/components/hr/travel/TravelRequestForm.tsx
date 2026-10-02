@@ -101,8 +101,8 @@ const toDateInput = (v?: string | null) => (v ? v.slice(0, 10) : '');
  * policy) and the policy. `TravelPolicyPreview` shows the unit and the policy's limits before the
  * request is saved, so the single-trip limit enforced at submission is not a surprise (T-16).
  *
- * ⚠ An edit REPLACES the record. `buildTravelRequestUpdate` sends the group link back as it is —
- * see `travel-request-payload.ts`.
+ * ⚠ An edit REPLACES the record, so it carries only what this form shows; the group a trip is on is
+ * the group's own routes' (slice 1c) — see `travel-request-payload.ts`.
  */
 export function TravelRequestForm({
   surface,

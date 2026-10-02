@@ -2494,7 +2494,18 @@ the module's argument.
 > they read a Finance list that answers 403 (closure finding O-19, fixed in the same lane). Where a step
 > below warns about one of these, the warning describes the code before lane 0.
 >
-> **Closure lane 1, slice 1b (2026-10-02, staged)** gave the request its other verbs: an approver can
+> **Closure lane 1, slice 1c (2026-10-02, staged) — lane 1 complete.** Groups now move by their own
+> buttons (**Open to travellers, Close, Reopen, Cancel group**) instead of an edit's status dropdown; the
+> **traveller limit binds** (**T-31 fixed**; a cancelled or rejected trip no longer holds a place); an
+> **existing draft request can be linked** to a group (**T-30 fixed**) and takes the group's destination
+> and dates; a new destination or new dates **reach every draft or returned trip** on the group
+> (**T-32 fixed** — submitted and approved trips keep their own and are marked "differs from the group");
+> a group cannot be cancelled while its travellers' trips are going ahead; deleting one takes its
+> travellers off it. The add-traveller dialog asks for purpose, risk, visa and health clearance. A
+> comment is edited or deleted by its author or a travel administrator only, and the traveller's portal
+> receives no internal note and no policy exception from the server.
+>
+> **Closure lane 1, slice 1b (2026-10-02, committed `8fadfd31e`)** gave the request its other verbs: an approver can
 > **return a request for revision** with a reason, an approved trip can be sent back with **Request
 > change** and approved again (its bookings, advances and claims stay), the requester can **recall** a
 > submission, and the desk can **close** a completed trip once nothing is left to settle — after which

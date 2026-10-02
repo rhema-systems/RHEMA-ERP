@@ -219,8 +219,9 @@ public class CreateStaffTravelRequestDto : CreateDtoBase
 
     public TravelRiskLevel RiskLevel { get; set; } = TravelRiskLevel.Low;
 
-    /// <summary>Must be a group trip of this organisation; checked on the server.</summary>
-    public Guid? GroupTravelId { get; set; }
+    // ⚠ No GroupTravelId (lane 1, slice 1c). Group membership belongs to the group's own endpoints —
+    // add participants, link an existing request, remove — which check the group's capacity and status
+    // and align the trip to the group's destination and dates. A payload that names a group is ignored.
 
     /// <summary>Must be an earlier request of the same traveller; checked on the server.</summary>
     public Guid? ParentRequestId { get; set; }
@@ -286,11 +287,9 @@ public class UpdateStaffTravelRequestDto : UpdateDtoBase
     [Required]
     public TravelRiskLevel RiskLevel { get; set; }
 
-    /// <summary>
-    /// ⚠ Still written as sent until slice 1c moves group membership to the group endpoints, so an
-    /// edit must send it back as the record has it (the form's payload builder does).
-    /// </summary>
-    public Guid? GroupTravelId { get; set; }
+    // ⚠ No GroupTravelId since slice 1c: an edit cannot move a trip into, out of or between groups —
+    // the group's endpoints do that. It was written as sent, so an edit that left it out took the
+    // traveller out of their group (finding A8).
 
     [MaxLength(1000)]
     public string? AmendmentReason { get; set; }
@@ -514,6 +513,15 @@ public class CreateStaffGroupTravelDto : CreateDtoBase
     public int? MaxParticipants { get; set; }
 }
 
+/// <remarks>
+/// <para><b>No status</b> (lane 1, slice 1c — finding A11): a group opens, closes and is cancelled by
+/// its own verbs, which check what each move means. The PUT wrote whatever status it was sent, and a
+/// client that left it out sent the enum default and moved the trip back to Planning.</para>
+///
+/// <para><b>A new destination or new dates reach the travellers whose trips can still change</b> —
+/// drafts and requests returned for revision (finding T-32). A submitted or approved trip keeps its own;
+/// the group's page marks it as differing from the group.</para>
+/// </remarks>
 public class UpdateStaffGroupTravelDto : UpdateDtoBase
 {
     [Required]
@@ -538,9 +546,6 @@ public class UpdateStaffGroupTravelDto : UpdateDtoBase
 
     [Required]
     public DateOnly TravelEndDate { get; set; }
-
-    [Required]
-    public GroupTravelStatus Status { get; set; }
 
     [Range(1, 10000)]
     public int? MaxParticipants { get; set; }

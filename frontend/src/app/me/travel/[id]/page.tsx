@@ -158,9 +158,9 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
   // The server refuses a past departure from this surface: the travel desk submits it, with the
   // reason it is late (lane 1). Say so instead of offering a button that can only fail.
   const departed = r.travelStartDate.slice(0, 10) < todayUtc();
-  // Only what the desk chose to share — an internal note is not the traveller's to read.
-  // ⚠ This filter is the only guard until lane 1 of the travel final closure: the self-service
-  // read still returns internal notes to this browser (finding A6).
+  // Only what the desk chose to share. Since lane 1 (slice 1c, finding A6) the server sends nothing
+  // else — internal notes and policy-exception decisions never reach this browser; the filter stays
+  // as a second guard, not the only one.
   const visibleComments = (r.comments ?? []).filter((c) => c.isVisibleToTraveller);
 
   return (

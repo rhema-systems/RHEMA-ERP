@@ -133,14 +133,6 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         return entity;
     }
 
-    private async Task<StaffGroupTravel> GetOwnedGroupTravelAsync(Guid id)
-    {
-        var entity = await _groupTravelRepository.GetByIdAsync(id);
-        if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"Group travel with ID '{id}' not found.");
-        return entity;
-    }
-
     // ---- The trip's facts: the server's, not the payload's -----------------
     //
     // Travel final closure, lane 1 (findings A4, A5, O-5, O-13, O-14, T-17). The request took its
@@ -233,19 +225,15 @@ public class StaffTravelRequestService : IStaffTravelRequestService
                 $"The return date ({end:dd MMM yyyy}) is before the departure date ({start:dd MMM yyyy}).");
     }
 
-    /// <summary>The group and the earlier request a trip names must exist here — and the earlier one must be the same traveller's.</summary>
-    /// <remarks>Tenant checks only. Slice 1c gives group membership its own rules (capacity, status, dates).</remarks>
-    private async Task RequireLinksAsync(
-        Guid tenantId, Guid travellerId, Guid? groupTravelId, Guid? parentRequestId, Guid? selfId,
+    /// <summary>The earlier request a trip names must exist here and be the same traveller's.</summary>
+    /// <remarks>
+    /// The group a trip belongs to is no longer the payload's at all (slice 1c): the group's own
+    /// endpoints add, link and remove travellers.
+    /// </remarks>
+    private async Task RequireParentRequestAsync(
+        Guid tenantId, Guid travellerId, Guid? parentRequestId, Guid? selfId,
         CancellationToken cancellationToken)
     {
-        if (groupTravelId is Guid groupId)
-        {
-            var group = await _groupTravelRepository.GetByIdAsync(groupId);
-            if (group is null || group.TenantId != tenantId || group.IsDeleted)
-                throw new InvalidOperationException("The group trip named does not exist.");
-        }
-
         if (parentRequestId is Guid parentId)
         {
             var parentTraveller = parentId == selfId
@@ -779,8 +767,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         var traveller = await RequireTravellerAsync(tenantId, createDto.EmployeeId, requireActive: true, cancellationToken);
         await RequireKnownCountriesAsync(tenantId, createDto.OriginCountryId, createDto.DestinationCountryId, cancellationToken);
         RequireDatesInOrder(createDto.TravelStartDate, createDto.TravelEndDate);
-        await RequireLinksAsync(tenantId, traveller.Id, createDto.GroupTravelId, createDto.ParentRequestId,
-            selfId: null, cancellationToken);
+        await RequireParentRequestAsync(tenantId, traveller.Id, createDto.ParentRequestId, selfId: null, cancellationToken);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         ApplyServerFacts(entity, traveller);
@@ -812,9 +799,6 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         await _currency.RequireKnownCurrencyAsync(updateDto.CurrencyCode, cancellationToken);
         await RequireKnownCountriesAsync(tenantId, updateDto.OriginCountryId, updateDto.DestinationCountryId, cancellationToken);
         RequireDatesInOrder(updateDto.TravelStartDate, updateDto.TravelEndDate);
-        if (updateDto.GroupTravelId != entity.GroupTravelId)
-            await RequireLinksAsync(tenantId, entity.EmployeeId, updateDto.GroupTravelId, parentRequestId: null,
-                entity.Id, cancellationToken);
         var traveller = await RequireTravellerAsync(tenantId, entity.EmployeeId, requireActive: false, cancellationToken);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
@@ -1412,9 +1396,21 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             .ToList();
     }
 
-    public async Task<StaffTravelRequestCommentDto> UpdateCommentAsync(UpdateStaffTravelRequestCommentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Only a comment's author, or a travel administrator, may change or remove it (lane 1, finding
+    /// A10) — any desk officer could rewrite or delete what a colleague had said on a trip.
+    /// </summary>
+    private void RequireCommentAuthorOrAdmin(StaffTravelRequestComment comment, bool callerIsTravelAdmin, string verb)
+    {
+        if (callerIsTravelAdmin) return;
+        if (_currentUserService.EmployeeId is Guid me && me == comment.AuthorId) return;
+        throw new UnauthorizedAccessException($"Only the comment's author, or a travel administrator, can {verb} it.");
+    }
+
+    public async Task<StaffTravelRequestCommentDto> UpdateCommentAsync(UpdateStaffTravelRequestCommentDto updateDto, Guid updatedByUserId, bool callerIsTravelAdmin, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCommentAsync(updateDto.Id);
+        RequireCommentAuthorOrAdmin(entity, callerIsTravelAdmin, "edit");
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _commentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1423,9 +1419,10 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         return (reloaded ?? entity).ToDto();
     }
 
-    public async Task<bool> DeleteCommentAsync(Guid commentId, CancellationToken cancellationToken = default)
+    public async Task<bool> DeleteCommentAsync(Guid commentId, bool callerIsTravelAdmin, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCommentAsync(commentId);
+        RequireCommentAuthorOrAdmin(entity, callerIsTravelAdmin, "delete");
         await _commentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
@@ -1469,10 +1466,80 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     }
 
     // ---- Group travel ------------------------------------------------------
+    //
+    // Lane 1, slice 1c (findings A11, T-30, T-31, T-32, O-18). The group's status was whatever its PUT
+    // said, MaxParticipants was a label, a new destination or new dates reached nobody, an existing
+    // request could not join, a cancelled traveller held a place for ever, and deleting a group left
+    // its travellers pointing at a deleted row.
+    //
+    // ⚠ The group is read WITH its travellers (GetWithRequestsAsync) wherever they are checked or
+    // moved, and saved through change tracking — never GenericRepository.UpdateAsync, whose
+    // DbSet.Update would repaint every loaded traveller and employee as modified.
+
+    /// <summary>A group takes travellers while it is being planned or is open.</summary>
+    private static void RequireAcceptsTravellers(StaffGroupTravel group)
+    {
+        if (group.Status is GroupTravelStatus.Planning or GroupTravelStatus.Open) return;
+
+        throw new InvalidOperationException(group.Status == GroupTravelStatus.Closed
+            ? $"The group '{group.GroupName}' is closed to new travellers. Reopen it to add someone."
+            : $"The group '{group.GroupName}' is {group.Status} and takes no new travellers.");
+    }
+
+    /// <summary><c>MaxParticipants</c> was a label (T-31); a cancelled or rejected trip holds no place.</summary>
+    private static void RequireRoomFor(StaffGroupTravel group, int joining)
+    {
+        var taken = group.SeatsTaken();
+        if (group.MaxParticipants is int max && taken + joining > max)
+            throw new InvalidOperationException(
+                $"The group '{group.GroupName}' takes at most {max} traveller(s) and has {taken}, so there is " +
+                $"no room for {joining} more.");
+    }
+
+    /// <summary>The group's own foreign keys and dates, checked like a trip's.</summary>
+    private async Task RequireGroupFactsAsync(
+        Guid tenantId, Guid leadEmployeeId, Guid destinationCountryId, DateOnly start, DateOnly end,
+        CancellationToken cancellationToken)
+    {
+        await RequireTravellerAsync(tenantId, leadEmployeeId, requireActive: true, cancellationToken);
+        await RequireKnownCountriesAsync(tenantId, destinationCountryId, destinationCountryId, cancellationToken);
+        RequireDatesInOrder(start, end);
+    }
+
+    /// <summary>Gives a traveller's trip the group's destination and dates (T-32).</summary>
+    private static void AlignToGroup(StaffTravelRequest request, StaffGroupTravel group, Guid userId)
+    {
+        request.DestinationCountryId = group.DestinationCountryId;
+        request.DestinationCity = group.DestinationCity;
+        request.TravelStartDate = group.TravelStartDate;
+        request.TravelEndDate = group.TravelEndDate;
+        request.EstimatedDurationDays = Math.Max(0, group.TravelEndDate.DayNumber - group.TravelStartDate.DayNumber + 1);
+        request.IsInternational = request.OriginCountryId != request.DestinationCountryId;
+        request.UpdatedBy = userId.ToString();
+        request.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private async Task<StaffGroupTravel> GetOwnedGroupWithRequestsAsync(Guid id)
+    {
+        var group = await _groupTravelRepository.GetWithRequestsAsync(id);
+        if (group == null || group.TenantId != GetTenantId())
+            throw new ArgumentException($"Group travel with ID '{id}' not found.");
+        return group;
+    }
+
+    private async Task<StaffGroupTravelDto> ReadGroupAsync(Guid id)
+    {
+        var refreshed = await _groupTravelRepository.GetWithRequestsAsync(id);
+        if (refreshed == null || refreshed.TenantId != GetTenantId())
+            throw new ArgumentException($"Group travel with ID '{id}' not found.");
+        return refreshed.ToDto();
+    }
 
     public async Task<StaffGroupTravelDto> CreateGroupTravelAsync(CreateStaffGroupTravelDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await RequireGroupFactsAsync(tenantId, createDto.LeadEmployeeId, createDto.DestinationCountryId,
+            createDto.TravelStartDate, createDto.TravelEndDate, cancellationToken);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _groupTravelRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1511,29 +1578,163 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     }
 
     /// <remarks>
-    /// ⚠ The re-read is not decoration. <c>GetOwnedGroupTravelAsync</c> uses the plain
-    /// <c>GetByIdAsync</c>, which loads no navigations — so mapping it returned a group with a
-    /// blank lead-employee name, no destination country, and an <b>empty Requests list</b>. A
-    /// screen re-rendering from the edit response would have shown a group trip with nobody on it.
-    /// <c>CreateGroupTravelAsync</c> two methods above already re-reads for the same reason.
+    /// <para>⚠ The re-read is not decoration: a group read without its navigations maps with a blank
+    /// lead, no destination country and an empty traveller list.</para>
+    ///
+    /// <para><b>Slice 1c.</b> No status from the payload (the verbs below move it); not on a cancelled
+    /// or completed group; the limit not below the places already taken; and a new destination or new
+    /// dates are given to every traveller whose trip can still change — a draft, or a request returned
+    /// for revision. A submitted or approved trip keeps its own (the group's page marks it).</para>
     /// </remarks>
     public async Task<StaffGroupTravelDto> UpdateGroupTravelAsync(UpdateStaffGroupTravelDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedGroupTravelAsync(updateDto.Id);
-        entity.UpdateEntity(updateDto, updatedByUserId);
-        await _groupTravelRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        var tenantId = GetTenantId();
+        var entity = await GetOwnedGroupWithRequestsAsync(updateDto.Id);
 
-        var refreshed = await _groupTravelRepository.GetWithRequestsAsync(entity.Id);
-        return (refreshed ?? entity).ToDto();
+        if (entity.Status is GroupTravelStatus.Cancelled or GroupTravelStatus.Completed)
+            throw new InvalidOperationException($"A group trip that is {entity.Status} cannot be changed.");
+        await RequireGroupFactsAsync(tenantId, updateDto.LeadEmployeeId, updateDto.DestinationCountryId,
+            updateDto.TravelStartDate, updateDto.TravelEndDate, cancellationToken);
+        if (updateDto.MaxParticipants is int max && max < entity.SeatsTaken())
+            throw new InvalidOperationException(
+                $"The group already has {entity.SeatsTaken()} traveller(s), so its limit cannot be set below that.");
+
+        var moved = entity.DestinationCountryId != updateDto.DestinationCountryId
+                    || !string.Equals(entity.DestinationCity, updateDto.DestinationCity, StringComparison.Ordinal)
+                    || entity.TravelStartDate != updateDto.TravelStartDate
+                    || entity.TravelEndDate != updateDto.TravelEndDate;
+
+        entity.UpdateEntity(updateDto, updatedByUserId);
+        if (moved)
+        {
+            foreach (var request in entity.Requests.Where(r => r.Status is StaffTravelRequestStatus.Draft
+                                                                        or StaffTravelRequestStatus.ReturnedForRevision))
+                AlignToGroup(request, entity, updatedByUserId);
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return await ReadGroupAsync(entity.Id);
     }
 
+    /// <remarks>
+    /// Slice 1c (O-18): the travellers come off the group first. They kept the deleted group's id, so
+    /// their trips pointed at a row nothing could read. Their trips carry on as ordinary ones.
+    /// </remarks>
     public async Task<bool> DeleteGroupTravelAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedGroupTravelAsync(id);
-        await _groupTravelRepository.DeleteAsync(entity);
+        var entity = await GetOwnedGroupWithRequestsAsync(id);
+        var userId = RequireUserId();
+
+        foreach (var request in entity.Requests.ToList())
+        {
+            request.GroupTravelId = null;
+            request.UpdatedBy = userId.ToString();
+            request.UpdatedAt = DateTime.UtcNow;
+        }
+        entity.IsDeleted = true;
+        entity.DeletedAt = DateTime.UtcNow;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    /// <summary>Opens a group to travellers — from Planning, or reopens a closed one (slice 1c).</summary>
+    public async Task<StaffGroupTravelDto> OpenGroupTravelAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var group = await GetOwnedGroupWithRequestsAsync(id);
+        if (group.Status is not (GroupTravelStatus.Planning or GroupTravelStatus.Closed))
+            throw new InvalidOperationException($"A group trip that is {group.Status} cannot be opened.");
+
+        return await SetGroupStatusAsync(group, GroupTravelStatus.Open, cancellationToken);
+    }
+
+    /// <summary>Closes a group to new travellers (slice 1c). Its travellers' trips carry on.</summary>
+    public async Task<StaffGroupTravelDto> CloseGroupTravelAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var group = await GetOwnedGroupWithRequestsAsync(id);
+        if (group.Status is not (GroupTravelStatus.Planning or GroupTravelStatus.Open))
+            throw new InvalidOperationException($"A group trip that is {group.Status} cannot be closed.");
+
+        return await SetGroupStatusAsync(group, GroupTravelStatus.Closed, cancellationToken);
+    }
+
+    /// <summary>
+    /// Calls a group trip off (slice 1c) — once none of its travellers has a trip still going ahead.
+    /// </summary>
+    /// <remarks>
+    /// Each traveller's trip is its own request, with its own approval and possibly its own money, and
+    /// cancelling one has rules (no cash out, not under way). So the group does not cancel them for the
+    /// desk: it names the trips still live, and the desk cancels them or takes the travellers off first.
+    /// </remarks>
+    public async Task<StaffGroupTravelDto> CancelGroupTravelAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var group = await GetOwnedGroupWithRequestsAsync(id);
+        if (group.Status is GroupTravelStatus.Cancelled or GroupTravelStatus.Completed)
+            throw new InvalidOperationException($"A group trip that is {group.Status} cannot be cancelled.");
+
+        var live = group.Requests
+            .Where(r => r.Status is StaffTravelRequestStatus.Draft or StaffTravelRequestStatus.Submitted
+                or StaffTravelRequestStatus.Approved or StaffTravelRequestStatus.ReturnedForRevision
+                or StaffTravelRequestStatus.InProgress)
+            .OrderBy(r => r.RequestNumber)
+            .Select(r => r.RequestNumber)
+            .ToList();
+        if (live.Count > 0)
+            throw new InvalidOperationException(
+                $"{live.Count} traveller(s) on '{group.GroupName}' still have trips going ahead " +
+                $"({string.Join(", ", live.Take(5))}{(live.Count > 5 ? ", …" : string.Empty)}). Cancel those trips, " +
+                "or take the travellers off the group, before cancelling it.");
+
+        return await SetGroupStatusAsync(group, GroupTravelStatus.Cancelled, cancellationToken);
+    }
+
+    private async Task<StaffGroupTravelDto> SetGroupStatusAsync(
+        StaffGroupTravel group, GroupTravelStatus status, CancellationToken cancellationToken)
+    {
+        group.Status = status;
+        group.UpdatedBy = RequireUserId().ToString();
+        group.UpdatedAt = DateTime.UtcNow;
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Group travel {GroupName} is now {Status}", group.GroupName, status);
+        return await ReadGroupAsync(group.Id);
+    }
+
+    /// <summary>
+    /// Puts an existing request on a group (T-30 — the only door used to create a new one): a draft or
+    /// a request returned for revision, of a traveller not already on the group, while the group takes
+    /// travellers and has room. The trip takes the group's destination and dates.
+    /// </summary>
+    public async Task<StaffGroupTravelDto> LinkGroupParticipantAsync(Guid groupTravelId, Guid requestId, CancellationToken cancellationToken = default)
+    {
+        var group = await GetOwnedGroupWithRequestsAsync(groupTravelId);
+        RequireAcceptsTravellers(group);
+
+        var request = await GetOwnedRequestAsync(requestId);
+        if (request.GroupTravelId == group.Id)
+            throw new InvalidOperationException($"{request.RequestNumber} is already on this group.");
+        if (request.GroupTravelId is not null)
+            throw new InvalidOperationException(
+                $"{request.RequestNumber} is on another group trip. Take it off that group first.");
+        if (request.Status is not (StaffTravelRequestStatus.Draft or StaffTravelRequestStatus.ReturnedForRevision))
+            throw new InvalidOperationException(
+                $"Only a draft, or a request returned for revision, can join a group — {request.RequestNumber} is " +
+                $"{request.Status}. Joining gives it the group's destination and dates, which a submitted or " +
+                "approved trip cannot take.");
+        if (group.Requests.Any(r => r.EmployeeId == request.EmployeeId
+                                    && r.Status is not (StaffTravelRequestStatus.Cancelled or StaffTravelRequestStatus.Rejected)))
+            throw new InvalidOperationException("The traveller is already on this group with another trip.");
+        RequireRoomFor(group, 1);
+
+        var userId = RequireUserId();
+        request.GroupTravelId = group.Id;
+        AlignToGroup(request, group, userId);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Request {RequestNumber} linked to group travel {GroupName}", request.RequestNumber, group.GroupName);
+        return await ReadGroupAsync(group.Id);
     }
 
     public async Task<StaffGroupTravelDto> AddGroupParticipantsAsync(AddGroupTravelParticipantsDto dto, Guid tenantId, Guid createdByUserId, Guid initiatorEmployeeId, CancellationToken cancellationToken = default)
@@ -1542,14 +1743,20 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         var group = await _groupTravelRepository.GetWithRequestsAsync(dto.GroupTravelId);
         if (group == null || group.TenantId != tenantId)
             throw new ArgumentException($"Group travel with ID '{dto.GroupTravelId}' not found.");
+        RequireAcceptsTravellers(group);
 
-        // Skip employees already participating in the group.
-        var existing = group.Requests.Select(r => r.EmployeeId).ToHashSet();
+        // Skip employees already holding a place on the group — not one whose trip was cancelled or
+        // rejected, who can be added again.
+        var existing = group.Requests
+            .Where(r => r.Status is not (StaffTravelRequestStatus.Cancelled or StaffTravelRequestStatus.Rejected))
+            .Select(r => r.EmployeeId)
+            .ToHashSet();
         var toAdd = dto.EmployeeIds
             .Where(id => id != Guid.Empty)
             .Distinct()
             .Where(id => !existing.Contains(id))
             .ToList();
+        RequireRoomFor(group, toAdd.Count);
 
         // The single request's rules, for every participant (lane 1). Each is checked BEFORE any is
         // raised, so a leaver in the list refuses the call instead of leaving half a group behind;
@@ -1583,10 +1790,10 @@ public class StaffTravelRequestService : IStaffTravelRequestService
                 RequiresVisa            = dto.RequiresVisa,
                 RequiresHealthClearance = dto.RequiresHealthClearance,
                 RiskLevel               = dto.RiskLevel,
-                GroupTravelId           = group.Id,
             };
 
             var entity = createDto.ToEntity(tenantId, createdByUserId);
+            entity.GroupTravelId = group.Id;
             // Each participant's own unit — the template's single unit stamped the whole group with one.
             ApplyServerFacts(entity, traveller);
             // Request numbers are derived from the persisted count, so save each in turn.

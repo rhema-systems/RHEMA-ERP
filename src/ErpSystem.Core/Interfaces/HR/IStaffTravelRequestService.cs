@@ -74,8 +74,10 @@ public interface IStaffTravelRequestService
     /// </summary>
     Task<StaffTravelRequestCommentDto> AddCommentAsync(CreateStaffTravelRequestCommentDto createDto, Guid tenantId, Guid createdByUserId, Guid authorEmployeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelRequestCommentDto>> GetCommentsAsync(Guid requestId, CancellationToken cancellationToken = default);
-    Task<StaffTravelRequestCommentDto> UpdateCommentAsync(UpdateStaffTravelRequestCommentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> DeleteCommentAsync(Guid commentId, CancellationToken cancellationToken = default);
+    /// <summary>Only the comment's author, or a travel administrator (<paramref name="callerIsTravelAdmin"/>), may edit it.</summary>
+    Task<StaffTravelRequestCommentDto> UpdateCommentAsync(UpdateStaffTravelRequestCommentDto updateDto, Guid updatedByUserId, bool callerIsTravelAdmin, CancellationToken cancellationToken = default);
+    /// <summary>Only the comment's author, or a travel administrator (<paramref name="callerIsTravelAdmin"/>), may delete it.</summary>
+    Task<bool> DeleteCommentAsync(Guid commentId, bool callerIsTravelAdmin, CancellationToken cancellationToken = default);
 
     // Attachment operations
     /// <summary>
@@ -104,6 +106,18 @@ public interface IStaffTravelRequestService
 
     /// <summary>Unlinks a participant's request from the group (the request itself is retained).</summary>
     Task<bool> RemoveGroupParticipantAsync(Guid groupTravelId, Guid requestId, CancellationToken cancellationToken = default);
+
+    /// <summary>Puts an existing draft (or returned) request on the group, aligned to its destination and dates.</summary>
+    Task<StaffGroupTravelDto> LinkGroupParticipantAsync(Guid groupTravelId, Guid requestId, CancellationToken cancellationToken = default);
+
+    /// <summary>Opens a group to travellers (from Planning, or reopens a closed one).</summary>
+    Task<StaffGroupTravelDto> OpenGroupTravelAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>Closes a group to new travellers.</summary>
+    Task<StaffGroupTravelDto> CloseGroupTravelAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>Calls a group off once none of its travellers has a trip still going ahead.</summary>
+    Task<StaffGroupTravelDto> CancelGroupTravelAsync(Guid id, CancellationToken cancellationToken = default);
 }
 
 #endregion

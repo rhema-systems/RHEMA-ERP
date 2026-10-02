@@ -150,7 +150,6 @@ public static class StaffTravelMappingExtensions
             RequiresVisa = dto.RequiresVisa,
             RequiresHealthClearance = dto.RequiresHealthClearance,
             RiskLevel = dto.RiskLevel,
-            GroupTravelId = dto.GroupTravelId,
             ParentRequestId = dto.ParentRequestId,
             AmendmentReason = dto.AmendmentReason,
             CreatedBy = userId.ToString(),
@@ -159,8 +158,9 @@ public static class StaffTravelMappingExtensions
 
     /// <remarks>
     /// Writes only what the requester may change. The unit, <c>IsInternational</c> and the policy
-    /// are the service's (see <see cref="ToEntity(CreateStaffTravelRequestDto, Guid, Guid)"/>), and
-    /// <c>ApprovedBudget</c> is the approver's — a plain edit used to overwrite all four.
+    /// are the service's (see <see cref="ToEntity(CreateStaffTravelRequestDto, Guid, Guid)"/>),
+    /// <c>ApprovedBudget</c> is the approver's, and the group link is the group's endpoints' (slice
+    /// 1c) — a plain edit used to overwrite all five.
     /// </remarks>
     public static void UpdateEntity(this StaffTravelRequest entity, UpdateStaffTravelRequestDto dto, Guid userId)
     {
@@ -180,7 +180,6 @@ public static class StaffTravelMappingExtensions
         entity.RequiresVisa = dto.RequiresVisa;
         entity.RequiresHealthClearance = dto.RequiresHealthClearance;
         entity.RiskLevel = dto.RiskLevel;
-        entity.GroupTravelId = dto.GroupTravelId;
         entity.AmendmentReason = dto.AmendmentReason;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
@@ -188,6 +187,28 @@ public static class StaffTravelMappingExtensions
 
     public static IEnumerable<StaffTravelRequestSummaryDto> ToSummaryDtoList(this IEnumerable<StaffTravelRequest> entities)
         => entities.Select(e => e.ToSummaryDto());
+
+    /// <summary>
+    /// A request as its traveller may read it: comments the desk shared, and no policy exceptions.
+    /// </summary>
+    /// <remarks>
+    /// Finding A6 (lane 1, slice 1c): the self-service read returned every comment — internal notes
+    /// included, at any depth of replies — and the desk's policy-exception decisions, and only the
+    /// portal page's own filter hid them. Anything sent to the traveller's browser is theirs to read,
+    /// so the filter is here, on the server.
+    /// </remarks>
+    public static StaffTravelRequestDto ToTravellerView(this StaffTravelRequestDto dto)
+    {
+        dto.Comments = SharedWithTraveller(dto.Comments);
+        dto.PolicyExceptions = new List<StaffTravelPolicyExceptionDto>();
+        return dto;
+    }
+
+    private static List<StaffTravelRequestCommentDto> SharedWithTraveller(IEnumerable<StaffTravelRequestCommentDto> comments)
+        => comments
+            .Where(c => c.IsVisibleToTraveller)
+            .Select(c => { c.Replies = SharedWithTraveller(c.Replies); return c; })
+            .ToList();
 
     #endregion
 
@@ -214,10 +235,17 @@ public static class StaffTravelMappingExtensions
             TravelEndDate = entity.TravelEndDate,
             Status = entity.Status,
             MaxParticipants = entity.MaxParticipants,
-            CurrentParticipantCount = entity.Requests.Count,
+            CurrentParticipantCount = entity.SeatsTaken(),
             Requests = entity.Requests.Select(r => r.ToSummaryDto()).ToList(),
         };
     }
+
+    /// <summary>
+    /// The places a group's travellers hold: every linked trip still going ahead or able to — not a
+    /// cancelled or rejected one, which used to count against <c>MaxParticipants</c> for ever.
+    /// </summary>
+    public static int SeatsTaken(this StaffGroupTravel entity)
+        => entity.Requests.Count(r => r.Status is not (StaffTravelRequestStatus.Cancelled or StaffTravelRequestStatus.Rejected));
 
     public static StaffGroupTravelSummaryDto ToSummaryDto(this StaffGroupTravel entity)
     {
@@ -232,7 +260,7 @@ public static class StaffTravelMappingExtensions
             TravelEndDate = entity.TravelEndDate,
             Status = entity.Status,
             MaxParticipants = entity.MaxParticipants,
-            CurrentParticipantCount = entity.Requests.Count,
+            CurrentParticipantCount = entity.SeatsTaken(),
         };
     }
 
@@ -263,7 +291,7 @@ public static class StaffTravelMappingExtensions
         entity.DestinationCity = dto.DestinationCity;
         entity.TravelStartDate = dto.TravelStartDate;
         entity.TravelEndDate = dto.TravelEndDate;
-        entity.Status = dto.Status;
+        // No status: the group's verbs move it (slice 1c, finding A11).
         entity.MaxParticipants = dto.MaxParticipants;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
