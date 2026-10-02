@@ -17,12 +17,14 @@ import {
   Ruler,
   Search,
   Send,
+  ZoomIn,
 } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -138,28 +140,89 @@ function parsePriceFilter(value: string) {
     : undefined;
 }
 
-function buildPublicImageUrl(listing: ExternalEstateListing) {
-  if (!listing.primaryImageUrl) return listingFallbackImage(listing);
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || '/api';
-  return `${apiBase}${listing.primaryImageUrl}`;
-}
+function ListingImage({
+  listing,
+  onSelect,
+  onEnquiry,
+}: {
+  listing: ExternalEstateListing;
+  onSelect: () => void;
+  onEnquiry: () => void;
+}) {
+  const [imageUrl, setImageUrl] = React.useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = React.useState(false);
 
-function ListingImage({ listing }: { listing: ExternalEstateListing }) {
-  const [failed, setFailed] = React.useState(false);
-  const src = failed ? listingFallbackImage(listing) : buildPublicImageUrl(listing);
+  React.useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+
+    const load = async () => {
+      try {
+        const blob =
+          await externalEstateListingsService.getListingImage(listing);
+        if (!blob || !active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setImageUrl(objectUrl);
+      } catch {
+        setImageUrl(null);
+      }
+    };
+
+    void load();
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [listing]);
+
+  const previewUrl = imageUrl || listingFallbackImage(listing);
 
   return (
-    <div className="relative aspect-[4/3] overflow-hidden bg-slate-100">
-      <img
-        src={src}
-        alt=""
-        className="h-full w-full object-cover"
-        onError={() => setFailed(true)}
-      />
-      <div className="absolute right-3 top-3 rounded-md bg-white/90 p-2 text-slate-500 shadow-sm">
-        <ImageIcon className="h-4 w-4" />
-      </div>
-    </div>
+    <>
+      <button
+        type="button"
+        className="relative block w-full overflow-hidden bg-slate-100"
+        aria-label={`Preview image for ${listing.name}`}
+        onClick={() => {
+          onSelect();
+          setPreviewOpen(true);
+        }}
+      >
+        <img
+          src={previewUrl}
+          alt={listing.name}
+          className="aspect-[4/3] w-full object-cover"
+        />
+        <span className="absolute bottom-3 right-3 rounded-md bg-white/95 p-2 text-slate-900 shadow-sm">
+          {imageUrl ? <ZoomIn className="h-4 w-4" /> : <ImageIcon className="h-4 w-4" />}
+        </span>
+      </button>
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="w-[min(96vw,1100px)] max-w-none bg-background p-4 text-foreground">
+          <DialogHeader className="pr-8">
+            <DialogTitle>{listing.name}</DialogTitle>
+            <DialogDescription>{locationLabel(listing)}</DialogDescription>
+          </DialogHeader>
+          <img
+            src={previewUrl}
+            alt={listing.name}
+            className="max-h-[70dvh] w-full object-contain"
+          />
+          <div className="flex justify-end">
+            <Button
+              onClick={() => {
+                setPreviewOpen(false);
+                onEnquiry();
+              }}
+            >
+              <Send className="mr-2 h-4 w-4" />
+              Enquiry
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -377,43 +440,51 @@ export default function PublicPropertyListingsPage() {
               {listings.map((listing) => {
                 const active = selected?.id === listing.id;
                 return (
-                  <button
+                  <div
                     key={listing.id}
-                    type="button"
-                    onClick={() => setSelectedId(listing.id)}
                     className={`overflow-hidden rounded-md border bg-white text-left shadow-sm transition ${
                       active ? 'border-blue-600 ring-2 ring-blue-100' : ''
                     }`}
                   >
-                    <ListingImage listing={listing} />
-                    <div className="space-y-3 p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="truncate font-semibold text-slate-900">
-                            {listing.name}
+                    <ListingImage
+                      listing={listing}
+                      onSelect={() => setSelectedId(listing.id)}
+                      onEnquiry={() => setEnquiryListing(listing)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(listing.id)}
+                      className="block w-full text-left"
+                    >
+                      <div className="space-y-3 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate font-semibold text-slate-900">
+                              {listing.name}
+                            </div>
+                            <div className="mt-1 truncate text-xs text-slate-500">
+                              {listing.assetCode}
+                            </div>
                           </div>
-                          <div className="mt-1 truncate text-xs text-slate-500">
-                            {listing.assetCode}
-                          </div>
+                          <Badge variant="secondary">
+                            {listingTypeLabel(listing.externalListingType)}
+                          </Badge>
                         </div>
-                        <Badge variant="secondary">
-                          {listingTypeLabel(listing.externalListingType)}
-                        </Badge>
+                        <div className="flex items-center gap-2 text-sm text-slate-600">
+                          <MapPin className="h-4 w-4 shrink-0" />
+                          <span className="truncate">{locationLabel(listing)}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 text-sm">
+                          <span className="font-semibold text-slate-900">
+                            {listingPriceSummary(listing)}
+                          </span>
+                          <span className="text-slate-500">
+                            {areaLabel(listing)}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 text-sm text-slate-600">
-                        <MapPin className="h-4 w-4 shrink-0" />
-                        <span className="truncate">{locationLabel(listing)}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3 text-sm">
-                        <span className="font-semibold text-slate-900">
-                          {listingPriceSummary(listing)}
-                        </span>
-                        <span className="text-slate-500">
-                          {areaLabel(listing)}
-                        </span>
-                      </div>
-                    </div>
-                  </button>
+                    </button>
+                  </div>
                 );
               })}
             </div>
