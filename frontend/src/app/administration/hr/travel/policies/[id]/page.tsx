@@ -145,7 +145,8 @@ export default function TravelPolicyDetailPage({ params }: { params: Promise<{ i
             Approved by {policy.approvedByName ?? 'an administrator'} on{' '}
             {fmtDate(policy.approvedAt)}. An approved policy cannot be edited or deleted — raise a
             new version to change what it allows, or withdraw it from the register to stop it
-            capping bookings.
+            capping bookings. A new version approved for the same scope takes over from its own
+            start date; this one stays in force until the day before.
           </CardContent>
         </Card>
       )}
@@ -188,15 +189,14 @@ export default function TravelPolicyDetailPage({ params }: { params: Promise<{ i
             <Detail label="Hotel — international, per night">
               {money(policy.maxHotelRateInternational)}
             </Detail>
-            <Detail label="Max per trip">{money(policy.maxSingleTripBudget)}</Detail>
-            <Detail label="Max per year">{money(policy.maxAnnualTravelBudget)}</Detail>
+            <Detail label="Currency of the limits">{policy.currencyCode ?? 'The base currency'}</Detail>
+            <Detail label="Max per trip">
+              {policy.maxSingleTripBudget > 0 ? money(policy.maxSingleTripBudget) : 'No limit'}
+            </Detail>
             <Detail label="Receipt required above">{money(policy.receiptRequiredAbove)}</Detail>
             <Detail label="Days to submit expenses">{policy.expenseSubmissionDays}</Detail>
             <Detail label="Book flights ahead">{policy.advanceBookingDaysFlight} days</Detail>
             <Detail label="Book hotels ahead">{policy.advanceBookingDaysHotel} days</Detail>
-            <Detail label="Cheapest fare">
-              {policy.requiresCheapestFare ? 'Required' : 'Not required'}
-            </Detail>
             <Detail label="Preferred vendors">
               {policy.preferredVendorMandatory ? 'Mandatory' : 'Not mandatory'}
             </Detail>

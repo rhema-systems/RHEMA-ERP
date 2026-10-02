@@ -50,10 +50,14 @@ baseline (D-13); lane 0 was built the same day.**
    numbers and the lane's migration (committed `e2785ce7b`; `20261002132850_TravelClosureMoneyChain` applied
    to UAT, restore point `ErpSystemDB_UAT_before_travell3.bak`); **3b** the claim chain (committed
    `f49e5eb9c`); **3c** the budget and the payment void, with D-17's posted-path proof on a scratch copy of
-   UAT (built and proven — money 286/286 twice, the posting proof 70/70 twice — and staged). Decisions
-   D-14…D-17. ⚠ The posting proof found that **no HR posting can land on a database seeded with Finance's v2
-   books** (cross-module defect #35): it passed only once the scratch copy's primary book was renamed.
-7. **Then** lanes **4 → 5 → 6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane against this
+   UAT (committed `b08bd498d` — money 286/286 twice, the posting proof 70/70 twice). Decisions D-14…D-17.
+   ⚠ The posting proof found that **no HR posting can land on a database seeded with Finance's v2 books**
+   (cross-module defect #35): it passed only once the scratch copy's primary book was renamed.
+7. **Lane 4** (policy and authority) — **IN PROGRESS.** Source-checked against `b08bd498d` on 2026-10-02
+   (lane 4's *Source check*): every finding holds, six more found; D-18…D-20 taken. Three slices: **4a** the
+   policy itself (built and proven — policy 52/52 twice — and staged), **4b** bookings under the policy (D-1's
+   booking half, D-8, C4, C5), **4c** authority (D-3, D-19). No migration — batch 1 carries every column.
+8. **Then** lanes **5 → 6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane against this
    document before building it — line numbers are as of HEAD `bad482a8d`.
 
 **House rules** (from the HR programme, not repeated in each lane): the user runs builds — never
@@ -90,6 +94,9 @@ lane's slice.
 | **D-15** | A claim is valued in the base currency; how much of it does an advance in another currency cover? (B11) | **Finance's rate on the day the claim is paid.** The deduction is worked in the advance's own currency; whatever a rate movement leaves on the advance is refunded or written off. Rejected: the rate on the day the advance went out, which pays the traveller a windfall or a shortfall whenever the cedi moves between disbursement and spending. |
 | **D-16** | Three refinements of lane 3's own checklist | **All three:** the payer may not be anyone who reviewed a line of the claim, as well as the claim's reviewer; advances only on Approved or InProgress trips (money after the trip is a claim); a budget only once the trip is approved, its total defaulting to the approved budget. |
 | **D-17** | How is the posted path proven — a payment journal reversed by a void and posted again? UAT has no travel posting rule, so every travel row in the posting register is Unposted (lane 3's source check) | **On a scratch copy of UAT (2026-10-02).** UAT here is the developer's local database, so no Finance owner can open its periods or add a travel account. The posted path is proven by one run of the API against a COPY_ONLY restore of UAT on which Finance's authority is prepared (`dev-harness/hr-finance/prep-uat-finance-authority.sql`), a travel expense account added and travel's rules switched on; the copy is dropped afterwards. UAT keeps no travel rule and an empty ledger, and its suites prove the Unposted path. **Done 2026-10-02**: `run-final-posting.mjs` 70/70 twice; its first run found cross-module defect #35 — on a database seeded with Finance's v2 books no HR posting lands (lane 3, *D-17*). |
+| **D-18** | C5's second half — a Critical trip needs an acknowledged risk assessment — cannot be met before lane 7: the traveller's acknowledgement sits on the desk's Write policy and the portal door is lane 7's (lane 4's source check) | **Moved to lane 7**, beside the portal's acknowledgement door. Lane 4 keeps the Prohibited refusal. |
+| **D-19** | With D-3, the officer who set a trip's budget can approve it (slice 3c refuses only the traveller) | **The officer who set or last changed the budget does not approve it** — the policy's author ≠ approver, applied to the budget. Lane 4, slice 4c. |
+| **D-20** | With D-3, any booking can be deleted, so a breach could be erased from D-8's register | **Pulled forward from lane 5 in part:** a flight or hotel booking that carries an exception (pending, authorised or refused) is not deleted — it is cancelled. The full "delete only while Pending" rule stays lane 5's. Lane 4, slice 4b. |
 
 **Standing assumptions (not re-asked):** the closure ledger's D-29 holds — the policy rule register
 stays read-only and the policy-exception flow stays withheld until rule enforcement exists; Finance
@@ -106,8 +113,8 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **M1** | Migration batch 1 | the whole batch | `m1/test-cycle.sh` (session scratchpad) | ✅ applied to UAT 2026-10-02 — 33/33 on a scratch copy first, verified on UAT, truth suite 112/112 twice after; committed `d426f4ed3` |
 | **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ✅ complete 2026-10-02 — 1a `e1d050da2`, 1b `8fadfd31e`, 1c `895996b6f` |
 | **2** | The approval ladder and the approver's door | data-only retrofit `20261002042909_TravelClosureApprovalLadder` | `run-final-approvals.mjs` | ✅ complete 2026-10-02 — 2a `4e4d85b2f` (retrofit applied to UAT); 2b `519418f00` (approvals 123/123 twice, lifecycle 255/255 twice, truth 117/117 twice) |
-| **3** | The money chain | batch 1 + `TravelClosureMoneyChain` (D-14, applied to UAT) | `run-final-money.mjs`, `run-final-posting.mjs` (D-17, a scratch copy only) | ✅ complete 2026-10-02 — 3a `e2785ce7b`, 3b `f49e5eb9c`; 3c built and staged (money 286/286 twice, posting proof 70/70 twice on a scratch copy, lifecycle 256/256, truth 116/116, approvals 123/123 twice) |
-| **4** | Policy and authority | batch 1 | `run-final-policy.mjs` | ☐ |
+| **3** | The money chain | batch 1 + `TravelClosureMoneyChain` (D-14, applied to UAT) | `run-final-money.mjs`, `run-final-posting.mjs` (D-17, a scratch copy only) | ✅ complete 2026-10-02 — 3a `e2785ce7b`, 3b `f49e5eb9c`, 3c `b08bd498d` (money 286/286 twice, posting proof 70/70 twice on a scratch copy, lifecycle 256/256, truth 116/116, approvals 123/123 twice) |
+| **4** | Policy and authority | batch 1 (no lane migration) | `run-final-policy.mjs` | ◐ source-checked 2026-10-02; D-18…D-20; **4a built and staged** (policy 52/52 twice, money 286, lifecycle 256, truth 117, approvals 123 twice each); next 4b bookings under the policy, then 4c authority |
 | **5** | Bookings and itinerary | batch 1 | `run-final-bookings.mjs` | ☐ |
 | **6** | Fleet | batch 1 | `run-final-fleet.mjs` | ☐ |
 | **7** | Compliance and the portal | batch 1 | `run-final-compliance.mjs`, `run-final-portal.mjs` | ☐ |
@@ -1286,26 +1293,136 @@ date.
   cannot be Confirmed or Ticketed until a **different** Admin holder authorises it; the
   `AdvanceBookingDays` override takes the same path; a breach register under Staff Travel lists every
   over-cap booking.
-- [ ] **D-1:** `AdvanceBookingDays*` at flight and hotel create; `PreferredVendorMandatory` → a Supplier
+- [ ] **D-1:** *(the policy half — the two fields out, the form saying what binds — done in 4a; the booking half is
+  4b's)* `AdvanceBookingDays*` at flight and hotel create; `PreferredVendorMandatory` → a Supplier
   is required (picker on the four booking dialogs, tenant-validated); `RequiresCheapestFare` and
   `MaxAnnualTravelBudget` leave the DTOs and the form; the form and `PolicyRulesPanel` say exactly what
   binds, and the rules panel keeps its read-only, non-binding banner (D-29).
-- [ ] **C2, C3:** cabin classes validated as enum members; a policy `CurrencyCode` (the hotel cap
+- [x] **C2, C3:** cabin classes validated as enum members; a policy `CurrencyCode` (the hotel cap
   compared in it, a booking in another currency converted through the bridge); `VersionNumber`
   server-assigned (max + 1 per policy name) with a filtered unique index; `EffectiveFrom ≤ EffectiveTo`;
   the level band in rank order; author ≠ approver.
-- [ ] **O-4:** approving a future-dated version sets the sitting version's `EffectiveTo` to the day
+- [x] **O-4:** approving a future-dated version sets the sitting version's `EffectiveTo` to the day
   before and keeps both in force for their own windows; resolution picks by date.
-- [ ] **O-5:** the guard resolves the unit from the traveller, not the request, and walks the unit's
+- [x] **O-5:** the guard resolves the unit from the traveller, not the request, and walks the unit's
   ancestry (`UnitAncestryAsync`), most specific first.
 - [ ] **C4:** deciding an exception → Admin, `DecidedAt` from the clock, decider ≠ requester (still no
   screen). **C5:** `RiskLevel.Prohibited` refuses submit; `Critical` needs an acknowledged risk
-  assessment before departure.
-- [ ] **C6:** one shared line in `SelectField.onValueChange` (`fields.tsx:336-338`): `if (next === '')
+  assessment before departure — **moved to lane 7 (D-18)**.
+- [x] **C6:** one shared line in `SelectField.onValueChange` (`fields.tsx:336-338`): `if (next === '')
   return;` before `form.setValue`. Safe: the only legitimate clear is `NONE_VALUE → ''`, and no HR
   option array declares `value: ''` (750 uses in 208 files). Scoped type-check afterwards.
+- [ ] **D-19:** the officer who set or last changed a budget does not approve it. **D-20:** a flight or
+  hotel booking carrying an exception is not deleted.
 
-Suite `run-final-policy.mjs` (and re-run `run-slice12-policy-authoring.mjs`).
+Suite `run-final-policy.mjs`. (The plan said to re-run `run-slice12-policy-authoring.mjs` too; D-13 keeps the
+slice suites off UAT, so it is **retired by name** here — `run-final-policy.mjs` re-proves what it covered.)
+
+**Source check (2026-10-02, HEAD `b08bd498d`).** The permission map and its seeder, the role-fallback handler,
+the policy service, guard, repository, DTOs and mapper, the booking service and controller, the exception flow,
+the risk-assessment acknowledgement, the policy form, the access hook and the shared select were re-read. Every
+finding above holds: HR's grant list still lacks `AdministerTravel` (adding it converges at once through the
+role-fallback handler and durably through the startup seeder); the cabin classes are bare `[Required]` enums;
+the policy entity has batch 1's `CurrencyCode` and the DTOs do not; `VersionNumber` is the payload's; no date or
+band check; a policy's author may approve it; approval stands every sibling down at once, and resolution needs
+`IsCurrentVersion`; scope is an exact unit match (`HrAudienceResolver.UnitAncestryAsync` exists — the unit then
+its ancestors, nearest first, tenant explicit); the booking cap guard records a flag, a reason and no authoriser;
+`AdvanceBookingDays*` and `PreferredVendorMandatory` have no reader, and no booking dialog sends a `VendorId`
+(four booking types carry one, FK to Procurement's `Supplier`, read by HR through `api/hr/suppliers`); exceptions
+are decided on Write with the body's status and date; `TravelRiskLevel.Prohibited` prohibits nothing; the select
+still writes a blank. Batch 1 carries every column the lane needs — **no lane-4 migration**. On UAT: one policy
+(unapproved), no booking exception, one policy exception, three suppliers.
+
+Six more:
+- **P1 — a booking's cabin class has C2's defect.** `BookingClass` is a non-nullable enum too: omitted, it is
+  stored as 0 and passes any cap (0 ≤ cap). C2 covers both.
+- **P2 — the request's risk level is the requester's own.** A desk risk assessment rating the destination
+  Prohibited refuses nothing either; the trip's level is the higher of the two.
+- **P3 — the traveller cannot acknowledge a risk assessment.** The route is the traveller's own but sits on
+  `TravelWritePolicy`, and the portal door is lane 7's (D-5) — hence D-18.
+- **P4 — with D-3 every booking is deletable**, so a breach could vanish from D-8's register (D-20). Itinerary and
+  compliance deletes have no status guard either; lane 7 keeps them.
+- **P5 — with D-3 the budget's setter can approve it** (3c refuses only the traveller) — D-19.
+- **P6 — the demo pack decides its policy exception as `hr.head`, who raised it**; C4's decider ≠ requester
+  refuses that, so the pack decides as `hr.officer` (slice 4b).
+
+**Slices.**
+- **4a — the policy itself.** C2 (policy and booking classes, P1); C3 (the policy's currency on the DTOs,
+  defaulting to base, and the hotel cap compared in it; `VersionNumber` server-assigned; dates; the band in
+  rank order; author ≠ approver); O-4; O-5 (the traveller's unit and its ancestry); D-1's policy half
+  (`RequiresCheapestFare`, `MaxAnnualTravelBudget` out of the DTOs and the form; the form says what binds); C6.
+- **4b — bookings under the policy.** D-1's booking half (`AdvanceBookingDays*` at flight and hotel create;
+  `PreferredVendorMandatory` → a supplier on the four bookings, tenant-validated, with a picker); D-8 (the
+  exception state, authorise and refuse by a different Admin holder, Confirmed/Ticketed refused until authorised,
+  the breach register); D-20; C4; C5's Prohibited half (P2). The demo pack's exception decided as `hr.officer`.
+- **4c — authority.** D-3 (the grant, the remarks, the UI's `canAdmin` without its role fallback, the reminders
+  screen open to HR — T-52); D-19; every suite expectation that HR is refused an Admin route turned round.
+  Last, because D-3 leans on 4a's and 4b's two-person rules.
+
+**As built — slice 4a (2026-10-02).** No migration.
+
+- *Shape (C2, C3, P1).* A policy's two cabin classes must be real classes (`Enum.IsDefined`) — omitted, they were
+  stored as 0, below every class, so once approved every flight exceeded the cap; a flight's booked class too (P1:
+  0 passed any cap). The end is not before the start; the unit and the two staff levels are this organisation's
+  (404); the band runs from the lower rank to the higher (`Covers` reads it that way — on UAT rank 1 is
+  Management). The same checks run at approval, for drafts written before lane 4, which also refuses a draft whose
+  end has passed.
+- *Currency (C3, T-9).* The DTOs carry batch 1's `CurrencyCode`: given, it is checked against HR's list; omitted,
+  the policy keeps its own or takes the base. The hotel cap is compared in it — `StaffTravelBookingService`
+  converts the booked rate through `HrCurrencyBridge` at the booking's date and the guard's 422 gives both
+  ("USD 100.00 (GHS 1,250.00) exceeds … GHS 900.00").
+- *Versions (T-50).* The server numbers them: the highest version of the name in the tenant, deleted drafts
+  included, plus one; a renamed draft becomes the next of its new name. `VersionNumber` and `IsCurrentVersion`
+  left the DTOs.
+- *Author ≠ approver (C3).* Whoever created or last changed the draft (`CreatedBy`/`UpdatedBy`, the platform user)
+  does not approve it — 403 with the sentence.
+- *Dates (O-4).* Approval makes room by date among the versions in force for the same scope: one that started
+  earlier keeps going until the day before the new one starts (`EffectiveTo` set); one starting on or after it, and
+  overlapping, is stood down; one with no common day is left alone. Both stay current; the repository's date filter
+  picks the version for a trip's departure. Saved by tracking — `UpdateAsync` on the siblings, read with their
+  rules and approver, would have marked those modified too.
+- *Scope (O-5).* `StaffTravelPolicyGuard` takes the traveller's unit from their employee record (the request's only
+  for a traveller with none) and asks `IHrAudienceResolver.UnitAncestryAsync` for the chain; the repository matches
+  any unit in it and orders nearest first, then banded before unbanded, then the latest start. The `applicable`
+  endpoint resolves the same way.
+- ⚠ *A memory grant, caught by the second suite run.* The first build's resolution query kept the old
+  `Include(Rules)` and `Include(ApprovedBy)` (a whole `Employee` row) and sent the unit chain as a JSON list: SQL
+  Server sized its memory grant at **~600 MB and used 16 KB** (`sys.dm_exec_query_stats`, `max_ideal_grant_kb`
+  606,952), and when workspace memory was busy it queued (`RESOURCE_SEMAPHORE`, seen live with the DMVs) — four policy
+  previews took 25 s in the second run, while the first ran clean (the performance closure's E-d1 pattern: a small
+  read whose wide includes size the grant).
+  Rebuilt: the resolution reads the policies alone, untracked, and filters the unit chain in memory (a tenant has a
+  handful of policies in force on a date); the `applicable` endpoint reads the approver's name and the rule count in a
+  narrow projection of its own. The new statement's grant is **0 KB**, its worst time under 1 ms.
+- *D-1's policy half.* `RequiresCheapestFare` and `MaxAnnualTravelBudget` left the DTOs and the form (the columns
+  stay). The form says what binds once approved (per-trip limit at submission; receipts and the claim window on
+  claims) and what does not yet (booking days ahead, preferred vendors — 4b); the scope note explains ancestry and
+  dated supersession; the currency is chosen on the form; the end date is validated client-side too. The policy
+  page shows the currency and drops the two fields; the register's approve toast reports the state the policy is
+  in (in force, or from its date).
+- *C6.* `SelectField.onValueChange` ignores `''` — the only real clear is the None item. Scoped type-check and lint
+  clean; not walked in a browser.
+- *Demo pack.* `080-travel.mjs`'s policy sends no version, no current flag and neither retired field, and names
+  GHS.
+
+**Suite** `run-final-policy.mjs` (new; fixture `buildApprovalsFixture` — a directorate with a unit under it and a
+lone unit, policies scoped to them only): §1 shape — no class 422, dates backwards 422, a band from Junior Staff down
+to Management Staff 422 and in rank order accepted, a foreign unit 404, no currency → GHS, `usd` → USD, an unknown
+currency 422; §2 versions — 7 in the payload → 1, then 2, version 2 deleted → the next is 3, a renamed draft is 1 of its
+name; §3 the administrator's own draft refused (403, with the sentence), an HR draft the administrator changed refused,
+an untouched one approved, once; §4 the directorate's policy covers a traveller in the unit under it (it matched
+exactly), not one in the lone unit; the unit's own policy wins for its traveller and the directorate's staff keep
+the directorate's; §5 version 2 approved to start in 60 days leaves version 1 in force until day 59 (a trip at day 40
+under v1, at day 70 under v2); version 3 starting the same day replaces v2; an ended draft refused; §6 on an approved
+trip at day 40 under v1 (cap GHS 900): GHS 950 refused, GHS 900 accepted, USD 100 refused naming GHS 1,250 and the cap,
+USD 60 accepted; §7 a flight with no class 422, Economy accepted. On the first build 52/52 twice (194938, 237259 —
+the second run's four 25 s previews are the memory grant above); **on the rebuilt one 52/52 twice (838127, 858328;
+every section ran, no slow request)**. The truth suite's §7 now asserts two drafts of one name are versions 1 and 2
+(the 409 they hit is gone): 116 → 117. Regression on the rebuilt binary: money **286/286 twice** (865025, 891248),
+lifecycle **256/256 twice** (913425, 949815), truth **117/117 twice** (980644, 986185), approvals **123/123 twice**
+(990748, 009065) — none with a slow request; on the first build the same counts twice each. The API log held only
+the known noise (payroll's profile FK, defect #23; one identity-reconciliation job error that predates travel).
+`run-slice12-policy-authoring.mjs` is retired by name (D-13); this suite re-proves it.
 
 ### Lane 5 — Bookings and itinerary (D1, D3–D5, E4, O-15, T-19, T-24/T-42, T-45)
 
@@ -1667,3 +1784,11 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   journal read back from Finance, the copy dropped — after its first run found **cross-module defect #35** (no HR
   posting can land on a database seeded with Finance's v2 books). The demo pack's budgets follow the new rules.
   Staged. Next: lane 4, policy and authority.
+- **2026-10-02, later** — The user committed slice 3c (`b08bd498d`). **Lane 4 source-checked**: every finding holds;
+  six more (P1–P6); split into 4a, 4b, 4c; the user took the recommendations as D-18 (C5's Critical half to lane 7),
+  D-19 (the budget's setter does not approve it) and D-20 (a booking with an exception is not deleted).
+  **Slice 4a built** — the policy itself (shape, currency, server versions, author ≠ approver, dated supersession,
+  unit ancestry, the two retired fields, C6). The build succeeded; no migration. The second policy run caught the
+  resolution query's ~600 MB memory grant (four 25 s previews); fixed, rebuilt — grant 0 KB. On the rebuilt binary
+  `run-final-policy.mjs` 52/52 twice, money 286/286, lifecycle 256/256, truth 117/117, approvals 123/123, each twice,
+  no slow request. Staged. Next: slice 4b, bookings under the policy.

@@ -19,9 +19,10 @@ public interface IStaffTravelPolicyRepository : IGenericRepository<StaffTravelPo
 
     /// <summary>
     /// Returns current-version policies applicable on the given date for the supplied staff level
-    /// and organization unit, ordered most-specific first.
+    /// and organization unit — or any unit above it (<paramref name="unitChain"/>, nearest first; lane 4,
+    /// O-5) — ordered most-specific first.
     /// </summary>
-    Task<IEnumerable<StaffTravelPolicy>> GetApplicablePoliciesAsync(Guid? staffLevelId, Guid? organizationUnitId, DateOnly onDate);
+    Task<IEnumerable<StaffTravelPolicy>> GetApplicablePoliciesAsync(Guid? staffLevelId, IReadOnlyList<Guid> unitChain, DateOnly onDate);
 }
 
 #endregion

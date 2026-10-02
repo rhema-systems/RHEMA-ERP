@@ -2428,12 +2428,14 @@ public class StaffTravelPolicyDto : BaseDto
     public string MaxFlightClassInternationalName => MaxFlightClassInternational.ToString();
     public decimal MaxHotelRateDomestic { get; set; }
     public decimal MaxHotelRateInternational { get; set; }
+    /// <summary>The currency the policy's money limits are set in (lane 4, C3/T-9) — the base currency when
+    /// the policy was written before policies had one.</summary>
+    public string? CurrencyCode { get; set; }
     public int AdvanceBookingDaysFlight { get; set; }
     public int AdvanceBookingDaysHotel { get; set; }
-    public bool RequiresCheapestFare { get; set; }
     public bool PreferredVendorMandatory { get; set; }
     public decimal MaxSingleTripBudget { get; set; }
-    public decimal MaxAnnualTravelBudget { get; set; }
+    // RequiresCheapestFare and MaxAnnualTravelBudget left the DTOs (lane 4, D-1): nothing reads them; the columns stay.
     public decimal ReceiptRequiredAbove { get; set; }
     public int ExpenseSubmissionDays { get; set; }
     public Guid? ApprovedById { get; set; }
@@ -2463,16 +2465,20 @@ public class StaffTravelPolicySummaryDto
     public DateTime? ApprovedAt { get; set; }
 }
 
+/// <summary>
+/// A draft travel policy (lane 4): its version is the server's — the next for its name — and it is in force only once
+/// approved, so neither <c>VersionNumber</c> nor <c>IsCurrentVersion</c> is taken from the caller (T-50). Cabin classes
+/// must be real classes (C2); the end is not before the start; the staff-level band runs low to high (C3).
+/// </summary>
 public class CreateStaffTravelPolicyDto : CreateDtoBase
 {
     [Required]
     [MaxLength(200)]
     public string PolicyName { get; set; } = string.Empty;
 
-    [Range(1, int.MaxValue)]
-    public int VersionNumber { get; set; } = 1;
-
-    public bool IsCurrentVersion { get; set; } = true;
+    /// <summary>The currency the money limits are set in; the base currency when omitted (C3/T-9).</summary>
+    [StringLength(3, MinimumLength = 3)]
+    public string? CurrencyCode { get; set; }
 
     public Guid? AppliesToLevelFromId { get; set; }
     public Guid? AppliesToLevelToId { get; set; }
@@ -2501,14 +2507,10 @@ public class CreateStaffTravelPolicyDto : CreateDtoBase
     [Range(0, 365)]
     public int AdvanceBookingDaysHotel { get; set; }
 
-    public bool RequiresCheapestFare { get; set; }
     public bool PreferredVendorMandatory { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal MaxSingleTripBudget { get; set; }
-
-    [Range(0, double.MaxValue)]
-    public decimal MaxAnnualTravelBudget { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal ReceiptRequiredAbove { get; set; }
@@ -2517,13 +2519,17 @@ public class CreateStaffTravelPolicyDto : CreateDtoBase
     public int ExpenseSubmissionDays { get; set; }
 }
 
+/// <summary>A draft's correction, under <see cref="CreateStaffTravelPolicyDto"/>'s rules. An approved policy is not
+/// edited — a new version is raised.</summary>
 public class UpdateStaffTravelPolicyDto : UpdateDtoBase
 {
     [Required]
     [MaxLength(200)]
     public string PolicyName { get; set; } = string.Empty;
 
-    public bool IsCurrentVersion { get; set; }
+    /// <summary>The currency the money limits are set in; the base currency when omitted.</summary>
+    [StringLength(3, MinimumLength = 3)]
+    public string? CurrencyCode { get; set; }
 
     public Guid? AppliesToLevelFromId { get; set; }
     public Guid? AppliesToLevelToId { get; set; }
@@ -2552,14 +2558,10 @@ public class UpdateStaffTravelPolicyDto : UpdateDtoBase
     [Range(0, 365)]
     public int AdvanceBookingDaysHotel { get; set; }
 
-    public bool RequiresCheapestFare { get; set; }
     public bool PreferredVendorMandatory { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal MaxSingleTripBudget { get; set; }
-
-    [Range(0, double.MaxValue)]
-    public decimal MaxAnnualTravelBudget { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal ReceiptRequiredAbove { get; set; }

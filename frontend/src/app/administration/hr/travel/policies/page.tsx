@@ -65,8 +65,9 @@ export default function TravelPoliciesPage() {
 
   const approve = useMutation({
     mutationFn: (id: string) => travelComplianceService.approvePolicy(id),
-    onSuccess: async () => {
-      toast({ title: 'Policy approved and now in force' });
+    // Lane 4, O-4: a version approved to start later is in force from its own date, not today.
+    onSuccess: async (approved) => {
+      toast({ title: 'Policy approved', description: approved ? travelPolicyState(approved).label : undefined });
       await queryClient.invalidateQueries({ queryKey: ['travel-policies'] });
     },
     onError: (e: Error) =>

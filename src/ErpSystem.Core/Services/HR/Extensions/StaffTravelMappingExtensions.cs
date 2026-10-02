@@ -1566,12 +1566,11 @@ public static class StaffTravelMappingExtensions
             MaxFlightClassInternational = entity.MaxFlightClassInternational,
             MaxHotelRateDomestic = entity.MaxHotelRateDomestic,
             MaxHotelRateInternational = entity.MaxHotelRateInternational,
+            CurrencyCode = entity.CurrencyCode,
             AdvanceBookingDaysFlight = entity.AdvanceBookingDaysFlight,
             AdvanceBookingDaysHotel = entity.AdvanceBookingDaysHotel,
-            RequiresCheapestFare = entity.RequiresCheapestFare,
             PreferredVendorMandatory = entity.PreferredVendorMandatory,
             MaxSingleTripBudget = entity.MaxSingleTripBudget,
-            MaxAnnualTravelBudget = entity.MaxAnnualTravelBudget,
             ReceiptRequiredAbove = entity.ReceiptRequiredAbove,
             ExpenseSubmissionDays = entity.ExpenseSubmissionDays,
             ApprovedById = entity.ApprovedById,
@@ -1599,14 +1598,13 @@ public static class StaffTravelMappingExtensions
         };
     }
 
+    /// <summary>The version, the currency and whether it is in force are the service's (lane 4).</summary>
     public static StaffTravelPolicy ToEntity(this CreateStaffTravelPolicyDto dto, Guid tenantId, Guid userId)
     {
         return new StaffTravelPolicy
         {
             TenantId = tenantId,
-            PolicyName = dto.PolicyName,
-            VersionNumber = dto.VersionNumber,
-            IsCurrentVersion = dto.IsCurrentVersion,
+            PolicyName = dto.PolicyName.Trim(),
             AppliesToLevelFromId = dto.AppliesToLevelFromId,
             AppliesToLevelToId = dto.AppliesToLevelToId,
             AppliesToOrganizationUnitId = dto.AppliesToOrganizationUnitId,
@@ -1618,20 +1616,18 @@ public static class StaffTravelMappingExtensions
             MaxHotelRateInternational = dto.MaxHotelRateInternational,
             AdvanceBookingDaysFlight = dto.AdvanceBookingDaysFlight,
             AdvanceBookingDaysHotel = dto.AdvanceBookingDaysHotel,
-            RequiresCheapestFare = dto.RequiresCheapestFare,
             PreferredVendorMandatory = dto.PreferredVendorMandatory,
             MaxSingleTripBudget = dto.MaxSingleTripBudget,
-            MaxAnnualTravelBudget = dto.MaxAnnualTravelBudget,
             ReceiptRequiredAbove = dto.ReceiptRequiredAbove,
             ExpenseSubmissionDays = dto.ExpenseSubmissionDays,
             CreatedBy = userId.ToString(),
         };
     }
 
+    /// <summary>As <see cref="ToEntity"/>: the version, the currency and whether it is in force are the service's.</summary>
     public static void UpdateEntity(this StaffTravelPolicy entity, UpdateStaffTravelPolicyDto dto, Guid userId)
     {
-        entity.PolicyName = dto.PolicyName;
-        entity.IsCurrentVersion = dto.IsCurrentVersion;
+        entity.PolicyName = dto.PolicyName.Trim();
         entity.AppliesToLevelFromId = dto.AppliesToLevelFromId;
         entity.AppliesToLevelToId = dto.AppliesToLevelToId;
         entity.AppliesToOrganizationUnitId = dto.AppliesToOrganizationUnitId;
@@ -1643,10 +1639,8 @@ public static class StaffTravelMappingExtensions
         entity.MaxHotelRateInternational = dto.MaxHotelRateInternational;
         entity.AdvanceBookingDaysFlight = dto.AdvanceBookingDaysFlight;
         entity.AdvanceBookingDaysHotel = dto.AdvanceBookingDaysHotel;
-        entity.RequiresCheapestFare = dto.RequiresCheapestFare;
         entity.PreferredVendorMandatory = dto.PreferredVendorMandatory;
         entity.MaxSingleTripBudget = dto.MaxSingleTripBudget;
-        entity.MaxAnnualTravelBudget = dto.MaxAnnualTravelBudget;
         entity.ReceiptRequiredAbove = dto.ReceiptRequiredAbove;
         entity.ExpenseSubmissionDays = dto.ExpenseSubmissionDays;
         entity.UpdatedAt = DateTime.UtcNow;

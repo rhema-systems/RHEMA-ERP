@@ -496,12 +496,12 @@ export interface StaffTravelPolicy extends AuditFields {
   maxFlightClassInternational: FlightCabinClassName;
   maxHotelRateDomestic: number;
   maxHotelRateInternational: number;
+  /** The currency the money limits are set in (lane 4, C3/T-9); the base currency on an old policy. */
+  currencyCode?: string | null;
   advanceBookingDaysFlight: number;
   advanceBookingDaysHotel: number;
-  requiresCheapestFare: boolean;
   preferredVendorMandatory: boolean;
   maxSingleTripBudget: number;
-  maxAnnualTravelBudget: number;
   receiptRequiredAbove: number;
   expenseSubmissionDays: number;
   approvedById?: string | null;
@@ -510,9 +510,13 @@ export interface StaffTravelPolicy extends AuditFields {
   rules?: StaffTravelPolicyRule[];
 }
 
+/**
+ * Lane 4: the version is the server's (the next for the name), and so is whether the policy is in force (approval).
+ * `currencyCode` empty takes the base currency. "Cheapest fare" and "max per year" left the contract (D-1).
+ */
 export interface CreateStaffTravelPolicy {
   policyName: string;
-  versionNumber?: number;
+  currencyCode?: string | null;
   appliesToLevelFromId?: string | null;
   appliesToLevelToId?: string | null;
   appliesToOrganizationUnitId?: string | null;
@@ -524,10 +528,8 @@ export interface CreateStaffTravelPolicy {
   maxHotelRateInternational: number;
   advanceBookingDaysFlight: number;
   advanceBookingDaysHotel: number;
-  requiresCheapestFare: boolean;
   preferredVendorMandatory: boolean;
   maxSingleTripBudget: number;
-  maxAnnualTravelBudget: number;
   receiptRequiredAbove: number;
   expenseSubmissionDays: number;
 }

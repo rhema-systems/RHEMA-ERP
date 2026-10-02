@@ -71,16 +71,18 @@ public sealed class StaffTravelPolicyGuard
 {
     private readonly IStaffTravelPolicyRepository _policies;
     private readonly IEmployeeRepository _employees;
+    private readonly IHrAudienceResolver _audience;
 
-    public StaffTravelPolicyGuard(IStaffTravelPolicyRepository policies, IEmployeeRepository employees)
+    public StaffTravelPolicyGuard(IStaffTravelPolicyRepository policies, IEmployeeRepository employees, IHrAudienceResolver audience)
     {
         _policies = policies;
         _employees = employees;
+        _audience = audience;
     }
 
     /// <summary>
     /// The caps in force for this trip: the most specific current policy covering the traveller's
-    /// staff level and organisation unit on the departure date.
+    /// staff level and organisation unit (or a unit above it) on the departure date.
     /// </summary>
     public Task<TravelPolicyCaps> ResolveAsync(
         StaffTravelRequest request, CancellationToken cancellationToken = default)
@@ -89,8 +91,15 @@ public sealed class StaffTravelPolicyGuard
 
     /// <summary>
     /// The same resolution for a trip that is not saved yet — the request form's policy preview
-    /// (finding T-16). Callers pass the unit the request will carry: the traveller's own.
+    /// (finding T-16).
     /// </summary>
+    /// <remarks>
+    /// <b>The unit is the traveller's, and its ancestors count (lane 4, O-5).</b> The guard resolved on the unit the
+    /// request named, matched exactly: a directorate's policy did not cover its departments, and a unit on the request
+    /// could buy a laxer policy. Lane 1 made the request carry the traveller's own unit; the guard now reads it off the
+    /// traveller as well (a traveller who has moved since is checked where they are), using
+    /// <paramref name="organizationUnitId"/> only for a traveller with none, and walks up the tree, nearest first.
+    /// </remarks>
     public async Task<TravelPolicyCaps> ResolveForAsync(
         Guid tenantId, Guid employeeId, Guid? organizationUnitId, DateOnly departure, bool isInternational,
         CancellationToken cancellationToken = default)
@@ -98,12 +107,18 @@ public sealed class StaffTravelPolicyGuard
         // The staff level lives on the traveller's POSITION, not on the employee, so it needs the
         // detail read. A traveller with no position simply resolves to the org-wide policy.
         Guid? staffLevelId = null;
+        var unitId = organizationUnitId;
         var employee = await _employees.GetByIdWithDetailsAsync(employeeId);
         if (employee is not null && employee.TenantId == tenantId)
+        {
             staffLevelId = employee.Position?.StaffLevelId;
+            unitId = employee.OrganizationUnitId ?? organizationUnitId;
+        }
 
-        var candidates = await _policies.GetApplicablePoliciesAsync(
-            staffLevelId, organizationUnitId, departure);
+        var chain = unitId is Guid unit
+            ? await _audience.UnitAncestryAsync(tenantId, unit, cancellationToken)
+            : Array.Empty<Guid>();
+        var candidates = await _policies.GetApplicablePoliciesAsync(staffLevelId, chain, departure);
 
         // ⚠ Two filters, both load-bearing.
         //
@@ -162,30 +177,31 @@ public sealed class StaffTravelPolicyGuard
     /// Refuses a nightly rate above the policy cap unless an authorised caller has approved it.
     /// </summary>
     /// <remarks>
-    /// ⚠ The cap and the rate are compared <b>as numbers in whatever currency each carries</b>.
-    /// <c>StaffTravelPolicy</c> stores no currency alongside <c>MaxHotelRateDomestic/International</c>,
-    /// so there is nothing to convert from; comparing a USD rate against a GHS cap would be wrong in
-    /// the other direction. The comparison is therefore only sound while policy caps and bookings
-    /// are expressed in the same currency. Recorded rather than silently assumed — giving the policy
-    /// a currency is the fix, and it is a schema change beyond this slice.
+    /// The rate is compared <b>in the policy's currency</b> (lane 4, C3/T-9): the caller converts the booked rate
+    /// through <see cref="HrCurrencyBridge"/> and passes both. The cap was a bare number compared with a rate in
+    /// whatever currency the booking carried — a USD 300 room passed a GHS 1,000 cap.
     /// </remarks>
+    /// <param name="rateInPolicyCurrency">The booked nightly rate, converted into <paramref name="policyCurrency"/>.</param>
+    /// <param name="bookedRate">The rate as booked, for the message — "USD 300.00 (GHS 3,750.00)".</param>
     public bool RequireHotelRateWithinPolicy(
-        decimal ratePerNight,
+        decimal rateInPolicyCurrency,
+        string policyCurrency,
+        string bookedRate,
         TravelPolicyCaps caps,
         bool exceptionRequested,
         bool callerMayApproveExceptions)
     {
         if (caps.MaxHotelRatePerNight is not decimal cap || cap <= 0m) return false;
-        if (ratePerNight <= cap) return false;
+        if (rateInPolicyCurrency <= cap) return false;
 
         if (!exceptionRequested)
             throw new InvalidOperationException(
-                $"A nightly rate of {ratePerNight:N2} exceeds the {caps.PolicyName} cap of " +
-                $"{cap:N2} for this trip. An approved policy exception is required.");
+                $"A nightly rate of {bookedRate} exceeds the {caps.PolicyName} cap of " +
+                $"{policyCurrency} {cap:N2} for this trip. An approved policy exception is required.");
 
         if (!callerMayApproveExceptions)
             throw new UnauthorizedAccessException(
-                $"Approving a nightly rate above the {caps.PolicyName} cap of {cap:N2} requires " +
+                $"Approving a nightly rate above the {caps.PolicyName} cap of {policyCurrency} {cap:N2} requires " +
                 "travel administrator rights. Ask a travel administrator to authorise the exception.");
 
         return true;

@@ -199,6 +199,11 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         bool callerMayApproveExceptions,
         CancellationToken cancellationToken)
     {
+        // P1 (lane 4): the booked class is a bare enum too — omitted, it was stored as 0 and sat under every cap.
+        if (!Enum.IsDefined(entity.BookingClass))
+            throw new InvalidOperationException(
+                "Choose the cabin class booked — Economy, Premium Economy, Business or First.");
+
         var caps = await _policyGuard.ResolveAsync(request, cancellationToken);
 
         entity.ClassExceptionApproved = _policyGuard.RequireFlightClassWithinPolicy(
@@ -371,8 +376,22 @@ public class StaffTravelBookingService : IStaffTravelBookingService
 
         var caps = await _policyGuard.ResolveAsync(request, cancellationToken);
 
+        // C3/T-9 (lane 4): the cap is in the policy's currency, so the rate is compared in it — converted at Finance's
+        // rate for the booking's day (the same currency needs no rate).
+        var policyCurrency = caps.CurrencyCode
+                             ?? await _currency.GetBaseCurrencyCodeAsync(cancellationToken)
+                             ?? entity.CurrencyCode;
+        var rateInPolicyCurrency = caps.MaxHotelRatePerNight is > 0m
+            ? decimal.Round(await _currency.ConvertBetweenAsync(
+                entity.RatePerNight, entity.CurrencyCode, policyCurrency,
+                DateOnly.FromDateTime(entity.BookedAt ?? DateTime.UtcNow), cancellationToken), 2, MidpointRounding.AwayFromZero)
+            : entity.RatePerNight;
+        var bookedRate = string.Equals(entity.CurrencyCode, policyCurrency, StringComparison.OrdinalIgnoreCase)
+            ? $"{entity.CurrencyCode} {entity.RatePerNight:N2}"
+            : $"{entity.CurrencyCode} {entity.RatePerNight:N2} ({policyCurrency} {rateInPolicyCurrency:N2})";
+
         entity.RateExceptionApproved = _policyGuard.RequireHotelRateWithinPolicy(
-            entity.RatePerNight, caps, exceptionRequested, callerMayApproveExceptions);
+            rateInPolicyCurrency, policyCurrency, bookedRate, caps, exceptionRequested, callerMayApproveExceptions);
 
         entity.PolicyMaxRatePerNight = caps.MaxHotelRatePerNight;
 
