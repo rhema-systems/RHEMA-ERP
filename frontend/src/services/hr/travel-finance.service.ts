@@ -86,7 +86,7 @@ class TravelFinanceService {
       `${this.baseUrl}/claims/status/${status}`);
   }
 
-  /** The finance desk's payment queue: approved and not yet paid. */
+  /** The finance desk's payment queue: approved or partly approved, and not yet paid. */
   getUnpaidApprovedClaims() {
     return apiService.get<StaffTravelExpenseClaimSummary[]>(
       `${this.baseUrl}/claims/unpaid-approved`);
@@ -111,11 +111,9 @@ class TravelFinanceService {
   }
 
   /**
-   * Sets the claim's status outright. The reviewer is the token's employee record, so this endpoint
-   * needs the caller linked to one.
-   *
-   * ⚠ Reviewing the lines does **not** review the claim — the claim's status is set here and
-   * nowhere else, and `payClaim` refuses anything not `Approved`.
+   * The review's outcome. The reviewer is the token's employee record, so this endpoint needs the caller
+   * linked to one. `Approved` approves what the lines' reviews approved — review every expense first; the
+   * server records `Approved` or `PartiallyApproved` from them. Rejecting or returning needs `notes`.
    */
   reviewClaim(id: string, payload: Omit<ReviewStaffTravelExpenseClaim, 'claimId'>) {
     return apiService.post<{ message: string }>(
@@ -123,8 +121,10 @@ class TravelFinanceService {
   }
 
   /**
-   * Records that the money left. The advance recovery has already happened at approval, so
-   * `netPayable` is what is actually paid — do not re-deduct anything on screen.
+   * Records that the money left; the payer is the token's employee record. The linked advance is recovered
+   * HERE, as part of the payment (not at approval), so until this returns `netPayable` still shows the
+   * approved total — the pay dialog shows the anticipated split instead. Accepts `Approved` and
+   * `PartiallyApproved` claims.
    */
   payClaim(id: string, payload: Omit<PayStaffTravelExpenseClaim, 'claimId'>) {
     return apiService.post<{ message: string }>(
@@ -152,7 +152,10 @@ class TravelFinanceService {
       `${this.baseUrl}/lines/${payload.id}`, payload);
   }
 
-  /** Approving or rejecting one line. Omitting `amountApproved` approves the full amount. */
+  /**
+   * Approving (in whole or part) or rejecting one expense. Omitting `amountApproved` approves the whole line; the
+   * server works out the rejected part. Any rejected part needs `rejectionReason`.
+   */
   reviewClaimLine(lineId: string, payload: Omit<ReviewStaffTravelExpenseClaimLine, 'lineId'>) {
     return apiService.post<{ message: string }>(
       `${this.baseUrl}/lines/${lineId}/review`, { lineId, ...payload });

@@ -163,6 +163,7 @@ export interface StaffTravelExpenseClaimLine extends AuditFields {
 export interface StaffTravelExpenseClaimSummary {
   id: string;
   claimNumber: string;
+  staffTravelRequestId: string;
   employeeId: string;
   employeeName: string;
   claimType: TravelClaimType;
@@ -190,7 +191,7 @@ export interface StaffTravelExpenseClaim extends AuditFields {
   totalClaimed: number;
   totalApproved: number;
   totalRejected: number;
-  /** Server-derived: recovered from the linked advance when the claim is approved. */
+  /** Server-derived: recovered from the linked advance when the claim is PAID (not approved). */
   advanceDeducted: number;
   /** Server-derived: what actually leaves the organisation, net of any advance recovered. */
   netPayable: number;
@@ -203,6 +204,14 @@ export interface StaffTravelExpenseClaim extends AuditFields {
   financeReviewedByName?: string | null;
   financeReviewedAt?: string | null;
   submittedAt?: string | null;
+  // Lane 3 (slice 3b).
+  /** The reviewer's words on the outcome — always there for a returned or rejected claim. */
+  reviewNotes?: string | null;
+  /** Who recorded the payment — never the claimant or a reviewer of the claim. */
+  paidById?: string | null;
+  paidByName?: string | null;
+  /** Why the claim was paid in full past advance cash the traveller held that it did not name. */
+  advanceWaiverReason?: string | null;
   lines: StaffTravelExpenseClaimLine[];
 }
 
@@ -220,30 +229,30 @@ export interface CreateStaffTravelExpenseClaimLine {
   perDiemRateId?: string | null;
 }
 
+/**
+ * The traveller and the currency are the server's (lane 3): the trip's traveller, and the base currency every
+ * claim total is kept in. Only on a trip that is approved, under way or completed.
+ */
 export interface CreateStaffTravelExpenseClaim {
   staffTravelRequestId: string;
-  employeeId: string;
   claimType: TravelClaimType;
+  /** An advance of this trip and traveller, recovered when the claim is paid. */
   travelAdvanceId?: string | null;
-  currencyCode: string;
   lines: CreateStaffTravelExpenseClaimLine[];
 }
 
+/** While the claim is a draft or returned. */
 export interface UpdateStaffTravelExpenseClaim {
   id: string;
   claimType: TravelClaimType;
   travelAdvanceId?: string | null;
-  currencyCode: string;
 }
 
 /**
- * Reviewing a claim sets its status outright — there is no boolean verdict. Both the reviewer and
- * the moment are the server's.
- *
- * ⚠ **The claim's status is not derived from its lines.** Approving every line does not approve the
- * claim; a reviewer says what the claim now is. So a screen must offer the real statuses rather
- * than an approve/reject pair, or it will leave claims stuck in `UnderReview` and unpayable —
- * `pay` refuses anything that is not `Approved`.
+ * The review's outcome (lane 3). `UnderReview`, `Rejected` and `Returned` are recorded as sent — the last two
+ * need `notes`, which the claimant sees. `Approved` asks the server to approve what the lines' reviews
+ * approved: every expense must be decided first, and the claim becomes `Approved` when all of it was approved,
+ * `PartiallyApproved` otherwise. Never the reviewer's own claim.
  */
 export interface ReviewStaffTravelExpenseClaim {
   claimId: string;
@@ -251,19 +260,27 @@ export interface ReviewStaffTravelExpenseClaim {
   notes?: string | null;
 }
 
-/** Omitting `amountApproved` on an approval leaves it null — set it explicitly. */
+/**
+ * One expense decided (lane 3). `Approved` takes `amountApproved` — the whole line when omitted, never more —
+ * and the rest is rejected by the server; `Rejected` takes nothing. Any rejected part needs `rejectionReason`.
+ */
 export interface ReviewStaffTravelExpenseClaimLine {
   lineId: string;
   status: TravelExpenseLineStatus;
   amountApproved?: number | null;
-  amountRejected?: number | null;
   rejectionReason?: string | null;
 }
 
+/**
+ * Not `PayrollOffset` (refused: payroll cannot receive travel claims yet). Never by the claimant or anyone who
+ * reviewed the claim or one of its expenses. `advanceWaiverReason` is needed only when the traveller holds paid-out
+ * advance cash on the trip that the claim does not name.
+ */
 export interface PayStaffTravelExpenseClaim {
   claimId: string;
   paymentMethod: TravelPaymentMethod;
   paymentReference?: string | null;
+  advanceWaiverReason?: string | null;
 }
 
 // ── Advances ─────────────────────────────────────────────────────────────────

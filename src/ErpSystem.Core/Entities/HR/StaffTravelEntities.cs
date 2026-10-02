@@ -898,8 +898,9 @@ public class StaffTravelExpenseClaim : TenantEntity
 
     // ---- Travel final closure, lane 3 migration ----
 
-    /// <summary>The reviewer's words on the outcome — required when a claim is returned, rejected or
-    /// partly approved, so the claimant is told why. The review's notes were accepted and dropped.</summary>
+    /// <summary>The reviewer's words on the outcome — required when a claim is returned or rejected, so the
+    /// claimant is told why (a partly approved claim's cut lines each carry their own reason). The review's notes
+    /// were accepted and dropped.</summary>
     [MaxLength(2000)]
     public string? ReviewNotes { get; set; }
 

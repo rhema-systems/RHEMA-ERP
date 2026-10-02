@@ -1192,7 +1192,11 @@ public static class StaffTravelMappingExtensions
             FinanceReviewedByName = entity.FinanceReviewedBy?.FullName,
             FinanceReviewedAt = entity.FinanceReviewedAt,
             SubmittedAt = entity.SubmittedAt,
-            Lines = entity.Lines.Select(l => l.ToDto()).ToList(),
+            ReviewNotes = entity.ReviewNotes,
+            PaidById = entity.PaidById,
+            PaidByName = entity.PaidBy?.FullName,
+            AdvanceWaiverReason = entity.AdvanceWaiverReason,
+            Lines = entity.Lines.Where(l => !l.IsDeleted).Select(l => l.ToDto()).ToList(),
         };
     }
 
@@ -1202,6 +1206,7 @@ public static class StaffTravelMappingExtensions
         {
             Id = entity.Id,
             ClaimNumber = entity.ClaimNumber,
+            StaffTravelRequestId = entity.StaffTravelRequestId,
             EmployeeId = entity.EmployeeId,
             EmployeeName = entity.Employee?.FullName ?? string.Empty,
             ClaimType = entity.ClaimType,
@@ -1213,17 +1218,20 @@ public static class StaffTravelMappingExtensions
         };
     }
 
-    public static StaffTravelExpenseClaim ToEntity(this CreateStaffTravelExpenseClaimDto dto, Guid tenantId, Guid userId)
+    /// <summary>The traveller and the currency are the server's (lane 3, B3 and B11): the trip's traveller, and the
+    /// base currency every claim total is kept in.</summary>
+    public static StaffTravelExpenseClaim ToEntity(
+        this CreateStaffTravelExpenseClaimDto dto, Guid tenantId, Guid userId, Guid employeeId, string baseCurrencyCode)
     {
         return new StaffTravelExpenseClaim
         {
             TenantId = tenantId,
             StaffTravelRequestId = dto.StaffTravelRequestId,
-            EmployeeId = dto.EmployeeId,
+            EmployeeId = employeeId,
             ClaimType = dto.ClaimType,
             Status = TravelClaimStatus.Draft,
             TravelAdvanceId = dto.TravelAdvanceId,
-            CurrencyCode = dto.CurrencyCode,
+            CurrencyCode = baseCurrencyCode,
             CreatedBy = userId.ToString(),
             Lines = dto.Lines.Select(l => l.ToEntity(tenantId, userId)).ToList(),
         };
@@ -1233,7 +1241,6 @@ public static class StaffTravelMappingExtensions
     {
         entity.ClaimType = dto.ClaimType;
         entity.TravelAdvanceId = dto.TravelAdvanceId;
-        entity.CurrencyCode = dto.CurrencyCode;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }

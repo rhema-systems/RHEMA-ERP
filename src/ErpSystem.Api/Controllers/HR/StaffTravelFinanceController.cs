@@ -155,8 +155,13 @@ public class StaffTravelFinanceController : HrControllerBase
     public async Task<IActionResult> PayClaim(Guid id, [FromBody] PayStaffTravelExpenseClaimDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
+        // PaidById is an Employee FK, and the two-person rule compares the payer with the claimant and the
+        // reviewers (lane 3, D-2) — so paying, like reviewing, needs the caller's employee link.
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Paying an expense claim") is { } contextError) return contextError;
+
         dto.ClaimId = id;
-        await _service.PayClaimAsync(dto);
+        await _service.PayClaimAsync(dto, employeeId);
         return Ok(new { message = "Expense claim paid." });
     }
 

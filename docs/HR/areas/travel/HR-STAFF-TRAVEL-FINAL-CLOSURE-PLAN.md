@@ -49,8 +49,9 @@ baseline (D-13); lane 0 was built the same day.**
 6. **Lane 3** (the money chain, B9 included) — **IN PROGRESS.** Source-checked against `519418f00` on
    2026-10-02: every finding still reproduces, and the check found ten more (N1–N10, lane 3's *Source
    check*). Decisions D-14…D-17 taken (D-17: the posted path is proven on a scratch copy of UAT). **Slice
-   3a built and proven** (money 121/121 twice; the migration `20261002132850_TravelClosureMoneyChain`
-   applied to UAT, restore point `ErpSystemDB_UAT_before_travell3.bak`) and staged. Three slices: **3a** advances,
+   3a committed `e2785ce7b`** (the migration `20261002132850_TravelClosureMoneyChain` applied to UAT,
+   restore point `ErpSystemDB_UAT_before_travell3.bak`); **slice 3b built and proven** (money 202/202
+   twice) and staged. Three slices: **3a** advances,
    numbers and the lane's migration `TravelClosureMoneyChain`; **3b** the claim chain; **3c** the budget
    and void payment.
 7. **Then** lanes **4 → 5 → 6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane against this
@@ -106,7 +107,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **M1** | Migration batch 1 | the whole batch | `m1/test-cycle.sh` (session scratchpad) | ✅ applied to UAT 2026-10-02 — 33/33 on a scratch copy first, verified on UAT, truth suite 112/112 twice after; committed `d426f4ed3` |
 | **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ✅ complete 2026-10-02 — 1a `e1d050da2`, 1b `8fadfd31e`, 1c `895996b6f` |
 | **2** | The approval ladder and the approver's door | data-only retrofit `20261002042909_TravelClosureApprovalLadder` | `run-final-approvals.mjs` | ✅ complete 2026-10-02 — 2a `4e4d85b2f` (retrofit applied to UAT); 2b `519418f00` (approvals 123/123 twice, lifecycle 255/255 twice, truth 117/117 twice) |
-| **3** | The money chain | batch 1 + `TravelClosureMoneyChain` (D-14, applied to UAT) | `run-final-money.mjs` | ◐ 3a built 2026-10-02 — money 121/121 twice, lifecycle 256/256, truth 118/118, approvals 123/123 twice; staged. Next 3b, then 3c |
+| **3** | The money chain | batch 1 + `TravelClosureMoneyChain` (D-14, applied to UAT) | `run-final-money.mjs` | ◐ 3a `e2785ce7b`; 3b built 2026-10-02 — money 202/202 twice, lifecycle 256/256, truth 115/115, approvals 123/123 twice; staged. Next 3c (budget, void, D-17's scratch-copy posting proof) |
 | **4** | Policy and authority | batch 1 | `run-final-policy.mjs` | ☐ |
 | **5** | Bookings and itinerary | batch 1 | `run-final-bookings.mjs` | ☐ |
 | **6** | Fleet | batch 1 | `run-final-fleet.mjs` | ☐ |
@@ -925,22 +926,22 @@ browser.
 
 ### Lane 3 — The money chain (B1–B12, B14, D-2, D-10, O-2, O-6, O-8, O-9, T-21, T-22, T-35–T-39, T-57)
 
-- [ ] **Claim state machine.** Submit: Draft or Returned → Submitted; the request Approved, InProgress
+- [x] **Claim state machine.** Submit: Draft or Returned → Submitted; the request Approved, InProgress
   or Completed; at least one line; every line above `ReceiptRequiredAbove` carries a receipt
   attachment; filed within `ExpenseSubmissionDays` of `TravelEndDate` or the 422 names the date.
   Review: only from Submitted or UnderReview, only to UnderReview, Approved, PartiallyApproved,
   Rejected or Returned; Approved versus PartiallyApproved is computed from the lines; nothing approved →
   "review the lines first". Pay: only Approved or PartiallyApproved with `TotalApproved > 0`;
   `PaidById` stamped; Paid is terminal. Lines are frozen from Submitted except when Returned.
-- [ ] **D-2:** reviewer and payer ≠ the claim's employee; payer ≠ the reviewer; advance approver ≠ the
+- [x] **D-2:** reviewer and payer ≠ the claim's employee; payer ≠ the reviewer; advance approver ≠ the
   employee; disburser ≠ the employee and ≠ the approver — a 403 with the sentence.
-- [ ] **Parents (B3):** the advance must belong to the same request and employee; the claim's and
+- [x] **Parents (B3):** the advance must belong to the same request and employee; the claim's and
   advance's employee is the request's traveller (server-set); a receipt is an attachment of the same
   request; claims and advances only on Approved, InProgress or Completed requests.
-- [ ] **O-2 (T-57):** pay refused while the traveller holds a disbursed advance on the same request
+- [x] **O-2 (T-57):** pay refused while the traveller holds a disbursed advance on the same request
   that the claim does not name, unless the payer records a waiver reason; the filing page preselects
   the outstanding advance, and its copy says recovery happens on payment.
-- [ ] **Valuation (B5, B11, B12):** inline lines valued; the claim's currency server-set to base;
+- [x] **Valuation (B5, B11, B12):** inline lines valued; the claim's currency server-set to base;
   `GetRateToBaseAsync` returns the dated row's rate (direction per PR #99's contract, asserted against
   `GET /api/finance/exchange-rates/current/USD`); an advance in another currency converted before it
   is deducted.
@@ -966,15 +967,18 @@ browser.
   `budgets/{id}/approve` on `TravelAdminPolicy` stamps `ApprovedById/At` (approver ≠ traveller),
   shown on the card; the Finance tab shows committed and actual against the approved budget and flags
   an overrun (whether an overrun refuses is a TDC question, § 6).
-- [ ] **D-10:** payroll offset leaves the pay dialog and is refused by the API for new payments.
+- [x] **D-10:** payroll offset leaves the pay dialog and is refused by the API for new payments.
 - [ ] **T-39:** an Admin *void payment* (a second person, a reason) reverses the payment and the advance
   settlement it made, and asks the posting register to reverse `TravelClaimPaid`. No code in
   `Services/HR/Finance` calls back into a claim after a Finance reversal, so a reversed posting row
   stays retryable as it is.
-- [ ] B7: *awaiting payment* includes PartiallyApproved. B14: user ids in `UpdatedBy`; the ignored DTO
+- [x] B7: *awaiting payment* includes PartiallyApproved. B14: user ids in `UpdatedBy`; the ignored DTO
   fields removed.
-- [ ] **Frontend:** a line review takes an amount and a typed reason; the advance approve dialog
-  prefills and caps; the overdue-settlements queue (D-5); the posting card's wording.
+- [x] **Frontend:** a line review takes an amount and a typed reason; the advance approve dialog
+  prefills and caps; the overdue-settlements queue (D-5); the posting card's wording. *(3a: the advance
+  dialogs and the queue; 3b: the line review. The shared `FinancePostingCard` was left as it is — its
+  wording is not travel's and already says what it does; the panel's own note names the new refund and
+  write-off events)*
 
 Suite `run-final-money.mjs`: every H above as a two-actor assertion; pay twice → 422; review a Paid
 claim → 422; a claim naming another employee's advance → 404; a zero-line approval → 422; inline lines
@@ -1114,6 +1118,72 @@ advance while the trip is approved), truth **118/118 twice** (333841, 342014 —
 a 422 naming the rule), approvals **123/123 twice** (349180, 383684). The API log held only the known noise:
 payroll's profile FK on every employee create (defect #23), the truth suite's deliberate duplicate policy
 version, and notification e-mails failing for want of SMTP.
+
+**As built — slice 3b (2026-10-02).** No migration (the review notes' column came with 3a's).
+
+- *Filing (B3, B5, B11).* A claim is the trip's traveller's and is kept in the base currency — both set by the
+  server; the create DTO lost `EmployeeId` and `CurrencyCode`, the update DTO its currency. Only on a trip that
+  is approved, under way or completed. The advance it names is this trip's and this traveller's (404
+  otherwise) and not rejected, cancelled or written off; a receipt is an attachment of the same trip (404);
+  a per-diem rate is this organisation's. Lines sent with the claim are checked and valued like any other
+  (they were stored at rate 0).
+- *Submitting (D-1's claim half).* At least one expense. Under the approved policy the trip was checked
+  against: every expense above its receipt threshold (converted to base from the policy's currency) carries a
+  receipt — **a per diem excepted**, a refinement taken while building: it is a flat allowance with no receipt
+  behind it, and the demo's Sebrepor claim has one — and a FIRST submission falls within the claim window after
+  the trip ends (a returned claim was filed in time). The 422s name the expenses, the threshold, the last day
+  and the policy.
+- *Expenses* are fixed once the claim is submitted, except on a claim returned to the claimant; changing a
+  reviewed expense sends it back to be reviewed (B6).
+- *Reviewing (B1, B4, D-2, N4).* Only a submitted claim or one under review; never one's own claim or
+  expense. A line is approved in whole or part — the server works out the rejected part, so the two always make
+  the line (`AmountRejected` left the DTO) — and any cut needs its reason. Approving the claim needs every
+  expense decided and something approved, and **records Approved or Partially approved from the lines** (it
+  was set outright: a claim with no reviewed line was approved and paid its claimed total while Finance
+  recognised zero). Rejecting or returning needs the reason, kept in `ReviewNotes` for the claimant.
+- *Paying (B1, D-2, D-10, O-2, B7).* Approved or partly approved, once; on a trip that takes claims; the
+  caller's employee link now required (`PaidById` is recorded); never the claimant, the claim's reviewer or
+  anyone who reviewed one of its expenses (D-16's refinement); never by payroll offset; not in full past advance
+  cash the traveller holds on the trip that the claim does not name unless the payer records why
+  (`AdvanceWaiverReason`). The recovery works on the approved total only. *Awaiting payment* includes partly
+  approved claims.
+- *B12 — the expense date's rate.* `HrCurrencyBridge.GetRateToBaseAsync` reads the rate in force on the date
+  asked, with `ConvertAsync`'s own lookup order (the direct quote, then the inverse), to six places — it had
+  checked the date and then converted at today's rate. **It reaches beyond travel:** HR's Finance posting
+  adapter (every foreign-currency HR posting) and staff requisition costs value at their own date too. The
+  adapter test's fake stored GHS → USD as 12.5 — the transposed seed, which only worked while the bridge read
+  `ConvertAsync` — and now stores Finance's contract, 0.08; its expectations are unchanged (USD 100 → GHS
+  1,250). The bridge's remarks record UAT's actual row.
+- *Saving.* The claim paths save by change tracking: `UpdateAsync` on a claim read with its navigations marked
+  the traveller, trip, reviewer and advance modified too (the tracked-graph trap). The claim's detail read
+  gained the trip, the reviewer and the payer — `RequestNumber` and `FinanceReviewedByName` had always come back
+  empty.
+- *Screens.* The claim page: a receipt picker (the trip's attachments; the dialog opens once they are loaded,
+  so the select cannot blank a linked receipt), changing an expense, a review dialog per expense (approve all
+  or part, or reject, with the reason), the review outcomes (approve-as-reviewed, reject and return with their
+  reason), the reviewer's notes, who paid, the waiver box when unnamed advance cash exists, no payroll offset,
+  controls for the travel desk only. The filing page: no currency to choose, the advance the traveller holds
+  preselected, refused politely for a trip that takes no claims. Copy that said the advance is recovered at
+  approval, or that pay refuses a partly approved claim, corrected (N10). Scoped type-check and lint clean. Not
+  walked in a browser.
+
+**Suite** `run-final-money.mjs` gains §10–§14 (202 assertions): §10 filing — the traveller and currency the
+server's, another traveller's advance 404, a cancelled one 422, inline lines valued (GHS 100 + USD 10 = 225);
+§11 under the run's own approved policy (receipts above GHS 200, a 10-day window) — a late first submission
+refused, an empty claim refused, one unreceipted expense named (the per diem exempt), another trip's attachment
+404, the trip's receipt linked, then nothing added, changed or removed after submission (the suite now uploads,
+so it needs the clamd stub); §12 reviewing — draft refused, one's own refused, undecided expenses refused, a
+cut over the line or without a reason refused, 200 of 300 approved with the 100 rejected computed, Partially
+approved worked out, its posting row; a claim with nothing approved refused and rejected with its kept reason;
+a returned claim's changed expense back to Pending, resubmitted; §13 paying — the partly approved claim in the
+queue, payroll offset refused, a line reviewer and the claim reviewer refused, unnamed advance cash refused then
+waived with the reason, the payer recorded, paid once, not reviewed again, both posting rows; §14 B12 — a
+second GHS → USD rate planted in Finance's table for the run (stamped, removed at once and checked gone in
+`finally`): a USD expense 30 days old valued at 12.5, today's at 16. **202/202 twice on UAT, 2026-10-02**
+(stamps 660163, 728907; every section ran — none skipped). Regression: lifecycle **256/256 twice** (768625,
+836539), truth **115/115 twice** (912862, 923384 — its claim checks moved to the money suite and a claim on its
+draft trip is now a 422), approvals **123/123 twice** (931619, 966528). The posting catalogue tests 37/37 with the
+build's binaries. The API log held only the known noise; every run tore down clean.
 
 ### Lane 4 — Policy and authority (C1–C6, D-1, D-3, D-8, O-3, O-4, O-5, T-1, T-2, T-9, T-46, T-50, T-52)
 
@@ -1495,3 +1565,9 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   restore point taken, the API started on UAT applied the migration (verified in SQL);
   `run-final-money.mjs` 121/121 twice, lifecycle 256/256 twice, truth 118/118 twice, approvals 123/123
   twice. Staged. Next: slice 3b, the claim chain.
+- **2026-10-02, later** — At the user's request the persona seeder gained `hr.officer` (a second HR desk
+  officer) and `seed-hr-demo` ran on UAT after a dry run and a restore point; the user committed slice 3a
+  (`e2785ce7b`). **Slice 3b built** — the claim chain: the build succeeded, the posting catalogue tests 37/37,
+  no migration; `run-final-money.mjs` 202/202 twice, lifecycle 256/256 twice, truth 115/115 twice, approvals
+  123/123 twice. Staged. Next: slice 3c, the budget and void payment, with D-17's posting proof on a scratch
+  copy of UAT.

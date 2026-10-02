@@ -1897,6 +1897,14 @@ public class StaffTravelExpenseClaimDto : BaseDto
     public string? FinanceReviewedByName { get; set; }
     public DateTime? FinanceReviewedAt { get; set; }
     public DateTime? SubmittedAt { get; set; }
+    // Travel final closure, lane 3 (slice 3b).
+    /// <summary>The reviewer's words on the outcome — always there for a returned or rejected claim.</summary>
+    public string? ReviewNotes { get; set; }
+    /// <summary>Who recorded the payment — never the claimant, never a reviewer of the claim (D-2).</summary>
+    public Guid? PaidById { get; set; }
+    public string? PaidByName { get; set; }
+    /// <summary>Why the claim was paid in full although the traveller held advance cash the claim does not name (O-2).</summary>
+    public string? AdvanceWaiverReason { get; set; }
     public List<StaffTravelExpenseClaimLineDto> Lines { get; set; } = new();
 }
 
@@ -1904,6 +1912,7 @@ public class StaffTravelExpenseClaimSummaryDto
 {
     public Guid Id { get; set; }
     public string ClaimNumber { get; set; } = string.Empty;
+    public Guid StaffTravelRequestId { get; set; }
     public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
     public TravelClaimType ClaimType { get; set; }
@@ -1921,17 +1930,15 @@ public class CreateStaffTravelExpenseClaimDto : CreateDtoBase
     [Required]
     public Guid StaffTravelRequestId { get; set; }
 
-    [Required]
-    public Guid EmployeeId { get; set; }
+    // EmployeeId and CurrencyCode removed (lane 3, B3 and B11): a claim is the trip's traveller's and is kept in
+    // the base currency, both set by the server. A payload could name anyone, and a currency nothing reconciled
+    // with totals that were always in base.
 
     [Required]
     public TravelClaimType ClaimType { get; set; }
 
+    /// <summary>An advance of this trip and traveller that the claim settles when it is paid.</summary>
     public Guid? TravelAdvanceId { get; set; }
-
-    [Required]
-    [MaxLength(3)]
-    public string CurrencyCode { get; set; } = string.Empty;
 
     public List<CreateStaffTravelExpenseClaimLineDto> Lines { get; set; } = new();
 }
@@ -1943,9 +1950,7 @@ public class UpdateStaffTravelExpenseClaimDto : UpdateDtoBase
 
     public Guid? TravelAdvanceId { get; set; }
 
-    [Required]
-    [MaxLength(3)]
-    public string CurrencyCode { get; set; } = string.Empty;
+    // CurrencyCode removed (lane 3, B11): the claim's currency is the base currency, set by the server.
 }
 
 public class ReviewStaffTravelExpenseClaimDto
@@ -1953,12 +1958,16 @@ public class ReviewStaffTravelExpenseClaimDto
     [Required]
     public Guid ClaimId { get; set; }
     // FinanceReviewedById removed: stamped from the caller's token, never accepted from the body.
+    // ReviewedAt removed (lane 3, B14): it was ignored — the moment is the clock's.
 
-    public DateTime ReviewedAt { get; set; } = DateTime.UtcNow;
-
+    /// <summary>
+    /// UnderReview, Rejected or Returned — or Approved: the server then records Approved or PartiallyApproved
+    /// from what the lines' reviews approved (PartiallyApproved is accepted as the same request).
+    /// </summary>
     [Required]
     public TravelClaimStatus NewStatus { get; set; }
 
+    /// <summary>Kept on the claim; required to reject or return it.</summary>
     [MaxLength(2000)]
     public string? Notes { get; set; }
 }
@@ -1968,13 +1977,21 @@ public class PayStaffTravelExpenseClaimDto
     [Required]
     public Guid ClaimId { get; set; }
 
+    /// <summary>Not payroll offset: payroll cannot receive travel claims yet (D-10).</summary>
     [Required]
     public TravelPaymentMethod PaymentMethod { get; set; }
 
     [MaxLength(100)]
     public string? PaymentReference { get; set; }
 
-    public DateTime PaidAt { get; set; } = DateTime.UtcNow;
+    // PaidAt removed (lane 3, B14): it was ignored — when money left is the clock's answer.
+
+    /// <summary>
+    /// Required only when the traveller holds paid-out advance cash on this trip that the claim does not name
+    /// (O-2): why the claim is paid in full rather than recovering it.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? AdvanceWaiverReason { get; set; }
 }
 
 #endregion
@@ -2082,18 +2099,21 @@ public class ReviewStaffTravelExpenseClaimLineDto
     [Required]
     public Guid LineId { get; set; }
     // ReviewedById removed: stamped from the caller's token, never accepted from the body.
+    // ReviewedAt removed (lane 3, B14): it was ignored.
 
-    public DateTime ReviewedAt { get; set; } = DateTime.UtcNow;
-
+    /// <summary>Approved or Rejected.</summary>
     [Required]
     public TravelExpenseLineStatus Status { get; set; }
 
+    /// <summary>
+    /// For an approval: the amount approved, in the base currency — the whole line when omitted, never more.
+    /// The rejected part is the rest of the line, worked out by the server (lane 3, B4: approved plus rejected
+    /// could exceed the line). AmountRejected was removed from this DTO for that reason.
+    /// </summary>
     [Range(0, double.MaxValue)]
     public decimal? AmountApproved { get; set; }
 
-    [Range(0, double.MaxValue)]
-    public decimal? AmountRejected { get; set; }
-
+    /// <summary>Required when any of the line is rejected.</summary>
     [MaxLength(1000)]
     public string? RejectionReason { get; set; }
 }

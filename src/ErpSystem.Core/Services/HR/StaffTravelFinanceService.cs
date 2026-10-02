@@ -284,15 +284,28 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
             .ToList();
     }
 
+    /// <summary>
+    /// Files a claim for the trip's traveller, kept in the base currency (lane 3, B3 and B11): only on a trip that
+    /// is approved, under way or completed; an advance it names is this trip's and this traveller's; lines sent with
+    /// it are checked and valued exactly as lines added later (B5 — they were stored at rate 0, worth nothing).
+    /// </summary>
     public async Task<StaffTravelExpenseClaimDto> CreateClaimAsync(CreateStaffTravelExpenseClaimDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
-        StaffTravelRequestGuards.RequireOpen(await RequireOwnedRequestAsync(createDto.StaffTravelRequestId), "an expense claim");
+        var request = await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
+        StaffTravelRequestGuards.RequireOpen(request, "an expense claim");
+        RequireTripTakesClaims(request, "An expense claim can be filed");
+        await RequireClaimableAdvanceAsync(request, createDto.TravelAdvanceId, cancellationToken);
+        var baseCurrency = await RequireBaseCurrencyAsync(cancellationToken);
 
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var entity = createDto.ToEntity(tenantId, createdByUserId, request.EmployeeId, baseCurrency);
         entity.ClaimNumber = await GenerateClaimNumberAsync(tenantId, cancellationToken);
         entity.Status = TravelClaimStatus.Draft;
+        foreach (var line in entity.Lines)
+        {
+            await RequireLineReferencesAsync(request, line.ReceiptAttachmentId, line.PerDiemRateId, cancellationToken);
+            await ApplyBaseCurrencyAmountAsync(line, cancellationToken);
+        }
         entity.TotalClaimed = entity.Lines.Sum(l => l.AmountBaseCurrency);
 
         // Nothing is approved on a draft claim, so the payable figure is provisional and equals the
@@ -312,16 +325,17 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         return refreshed.ToDto();
     }
 
+    /// <summary>The claim's type and the advance it settles — while it is a draft or returned (lane 3, B6).</summary>
     public async Task<StaffTravelExpenseClaimDto> UpdateClaimAsync(UpdateStaffTravelExpenseClaimDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedClaimAsync(updateDto.Id);
 
-        if (entity.Status is TravelClaimStatus.Paid or TravelClaimStatus.Approved)
-            throw new InvalidOperationException($"A claim in status '{entity.Status}' cannot be edited.");
+        RequireClaimEditable(entity);
         await GuardClaimNotPostedAsync(entity.Id, "Editing this claim", cancellationToken);
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        await RequireClaimableAdvanceAsync(request, updateDto.TravelAdvanceId, cancellationToken);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
-        await _claimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         var refreshed = await _claimRepository.GetWithLinesAsync(entity.Id);
@@ -342,28 +356,118 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         return true;
     }
 
+    /// <summary>
+    /// Submits a draft or returned claim (lane 3, D-1's claim half): with at least one expense, on a trip that
+    /// takes claims; under the approved policy the trip was checked against, every expense above its receipt
+    /// threshold carries a receipt (a per diem excepted), and a first submission comes within its claim window
+    /// after the trip ends. A returned claim was filed in time, so the window does not apply to it again.
+    /// </summary>
     public async Task<bool> SubmitClaimAsync(Guid claimId, Guid submittedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedClaimAsync(claimId);
 
         if (entity.Status is not (TravelClaimStatus.Draft or TravelClaimStatus.Returned))
-            throw new InvalidOperationException("Only draft or returned claims can be submitted.");
+            throw new InvalidOperationException(
+                $"Claim {entity.ClaimNumber} is {Describe(entity.Status)}; only a draft or returned claim can be submitted.");
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        RequireTripTakesClaims(request, "A claim can be submitted");
+        var lines = await ClaimLinesAsync(entity, cancellationToken);
+        if (lines.Count == 0)
+            throw new InvalidOperationException("Add the expenses before submitting the claim.");
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var policy = await ApprovedPolicyAsync(request, cancellationToken);
+        if (policy is not null)
+        {
+            if (entity.Status == TravelClaimStatus.Draft && policy.ExpenseSubmissionDays > 0)
+            {
+                var lastDay = request.TravelEndDate.AddDays(policy.ExpenseSubmissionDays);
+                if (today > lastDay)
+                    throw new InvalidOperationException(
+                        $"Claims for {request.RequestNumber} had to be submitted by {lastDay:d MMM yyyy} — " +
+                        $"{policy.ExpenseSubmissionDays} days after the trip ended, under {policy.PolicyName}.");
+            }
+
+            if (policy.ReceiptRequiredAbove > 0m)
+            {
+                var threshold = await _currency.ConvertBetweenAsync(
+                    policy.ReceiptRequiredAbove, policy.CurrencyCode ?? entity.CurrencyCode, entity.CurrencyCode, today, cancellationToken);
+                // A per diem is a flat daily allowance — there is no receipt behind it to ask for.
+                var missing = lines
+                    .Where(l => !l.IsPerDiem && l.ReceiptAttachmentId is null && l.AmountBaseCurrency > threshold)
+                    .OrderBy(l => l.ExpenseDate)
+                    .ToList();
+                if (missing.Count > 0)
+                    throw new InvalidOperationException(
+                        $"{missing.Count} expense(s) above {entity.CurrencyCode} {threshold:N2} have no receipt, which " +
+                        $"{policy.PolicyName} requires: " +
+                        string.Join("; ", missing.Take(3).Select(l =>
+                            $"{Humanise(l.ExpenseCategory.ToString())} on {l.ExpenseDate:d MMM yyyy} ({entity.CurrencyCode} {l.AmountBaseCurrency:N2})")) +
+                        ". Attach each receipt to the trip and link it to its expense.");
+            }
+        }
 
         entity.Status = TravelClaimStatus.Submitted;
         entity.SubmittedAt = DateTime.UtcNow;
         entity.UpdatedBy = submittedByUserId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
 
-        await _claimRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
     }
 
+    /// <summary>
+    /// Records the review's outcome (lane 3, B1, B4, D-2, N4). Only a submitted claim or one under review; never the
+    /// claimant's own. Approving takes what the lines' reviews approved — every line decided and something approved —
+    /// and records Approved when all of it was, PartiallyApproved otherwise; it was set outright, so a claim with
+    /// no reviewed line was approved and paid its whole claimed total while Finance recognised nothing. Rejecting
+    /// or returning needs the reason, kept on the claim for the claimant.
+    /// </summary>
     public async Task<bool> ReviewClaimAsync(ReviewStaffTravelExpenseClaimDto reviewDto, Guid reviewerEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedClaimAsync(reviewDto.ClaimId);
 
-        var approving = reviewDto.NewStatus is TravelClaimStatus.Approved or TravelClaimStatus.PartiallyApproved;
+        if (entity.Status is not (TravelClaimStatus.Submitted or TravelClaimStatus.UnderReview))
+            throw new InvalidOperationException(
+                $"Claim {entity.ClaimNumber} is {Describe(entity.Status)}; only a submitted claim or one under review is reviewed.");
+        RefuseOwnClaim(entity, reviewerEmployeeId, "review");
+        var notes = string.IsNullOrWhiteSpace(reviewDto.Notes) ? null : reviewDto.Notes.Trim();
+
+        TravelClaimStatus outcome;
+        switch (reviewDto.NewStatus)
+        {
+            case TravelClaimStatus.UnderReview:
+                if (entity.Status == TravelClaimStatus.UnderReview)
+                    throw new InvalidOperationException($"Claim {entity.ClaimNumber} is already under review.");
+                outcome = TravelClaimStatus.UnderReview;
+                break;
+            case TravelClaimStatus.Rejected:
+            case TravelClaimStatus.Returned:
+                if (notes is null)
+                    throw new InvalidOperationException(
+                        $"Say why the claim is {(reviewDto.NewStatus == TravelClaimStatus.Rejected ? "rejected" : "returned")} — the claimant is told.");
+                outcome = reviewDto.NewStatus;
+                break;
+            case TravelClaimStatus.Approved:
+            case TravelClaimStatus.PartiallyApproved:
+                var lines = await ClaimLinesAsync(entity, cancellationToken);
+                var undecided = lines.Count(l => l.Status is not (TravelExpenseLineStatus.Approved or TravelExpenseLineStatus.Rejected));
+                if (lines.Count == 0 || undecided > 0)
+                    throw new InvalidOperationException(
+                        $"Review every expense first — {undecided} of {lines.Count} still to decide.");
+                var approved = lines.Sum(l => l.AmountApproved ?? 0m);
+                if (approved <= 0m)
+                    throw new InvalidOperationException("Nothing on this claim was approved. Reject it instead, with the reason.");
+                outcome = approved == lines.Sum(l => l.AmountBaseCurrency)
+                    ? TravelClaimStatus.Approved
+                    : TravelClaimStatus.PartiallyApproved;
+                break;
+            default:
+                throw new InvalidOperationException(
+                    $"'{reviewDto.NewStatus}' is not a review outcome — approve, reject or return the claim, or mark it under review.");
+        }
+
+        var approving = outcome is TravelClaimStatus.Approved or TravelClaimStatus.PartiallyApproved;
         // Moving a claim whose approval Finance already holds to anything other than an approved
         // state would leave the expense recognised with nothing behind it; reverse first.
         if (!approving)
@@ -373,14 +477,17 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         // approval of the same claim is answered by the register as a duplicate, not re-posted.
         await _financePosting.RunAsync(async ct =>
         {
-            entity.Status = reviewDto.NewStatus;
+            entity.Status = outcome;
+            // The outcome's own words; marking a claim under review keeps the last ones. A returned claim
+            // approved later must not keep showing why it was returned.
+            if (outcome != TravelClaimStatus.UnderReview || notes is not null)
+                entity.ReviewNotes = notes;
             entity.FinanceReviewedById = reviewerEmployeeId;   // the caller, not a payload value
             entity.FinanceReviewedAt = DateTime.UtcNow;        // ...and the clock, not one either
 
-            entity.UpdatedBy = reviewerEmployeeId.ToString();
+            entity.UpdatedBy = _currentUserProvider.UserId.ToString();
             entity.UpdatedAt = DateTime.UtcNow;
 
-            await _claimRepository.UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync(ct);
 
             return approving ? HrFinancePostingCommandFactory.TravelClaimApproved(entity) : null;
@@ -390,12 +497,54 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         return true;
     }
 
-    public async Task<bool> PayClaimAsync(PayStaffTravelExpenseClaimDto payDto, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Pays an approved or partly approved claim, once (lane 3, B1, D-2, D-10, O-2): on a trip that takes claims;
+    /// never by payroll offset, which pays nobody yet; never by the claimant, the claim's reviewer or anyone who
+    /// reviewed one of its expenses; and not in full past advance cash the traveller holds on the trip that the
+    /// claim does not name, unless the payer records why. The payer is recorded.
+    /// </summary>
+    public async Task<bool> PayClaimAsync(PayStaffTravelExpenseClaimDto payDto, Guid payerEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedClaimAsync(payDto.ClaimId);
 
         if (entity.Status is not (TravelClaimStatus.Approved or TravelClaimStatus.PartiallyApproved))
-            throw new InvalidOperationException("Only approved claims can be paid.");
+            throw new InvalidOperationException(entity.Status == TravelClaimStatus.Paid
+                ? $"Claim {entity.ClaimNumber} was paid on {entity.PaidAt:d MMM yyyy}."
+                : $"Claim {entity.ClaimNumber} is {Describe(entity.Status)}; only an approved claim can be paid.");
+        if (entity.TotalApproved <= 0m)
+            throw new InvalidOperationException($"Nothing on claim {entity.ClaimNumber} is approved to pay.");
+        var request = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        RequireTripTakesClaims(request, "A claim can be paid");
+        if (payDto.PaymentMethod == TravelPaymentMethod.PayrollOffset)
+            throw new InvalidOperationException(
+                "Payroll cannot receive travel claims yet, so a claim paid by payroll offset would reach nobody. " +
+                "Pay it by bank transfer, cash, cheque or corporate card.");
+        RefuseOwnClaim(entity, payerEmployeeId, "pay");
+        if (entity.FinanceReviewedById == payerEmployeeId)
+            throw new UnauthorizedAccessException(
+                $"You reviewed claim {entity.ClaimNumber}, so another officer must pay it — the person who decides an amount " +
+                "does not also pay it out.");
+        var lines = await ClaimLinesAsync(entity, cancellationToken);
+        if (lines.Any(l => l.ReviewedById == payerEmployeeId))
+            throw new UnauthorizedAccessException(
+                $"You reviewed an expense on claim {entity.ClaimNumber}, so another officer must pay it.");
+
+        // O-2 (T-57): advance cash the claim does not name. Paid as it stands, the claim pays in full and the advance
+        // stays outstanding — the traveller is paid twice.
+        var named = entity.TravelAdvanceId ?? Guid.Empty;
+        var unnamed = await _unitOfWork.Repository<StaffTravelAdvance>()
+            .GetQueryable(a => a.TenantId == entity.TenantId && a.StaffTravelRequestId == entity.StaffTravelRequestId
+                            && a.EmployeeId == entity.EmployeeId && a.Id != named)
+            .Where(StaffTravelAdvanceRules.CashOut)
+            .OrderBy(a => a.AdvanceNumber)
+            .Select(a => new { a.AdvanceNumber, a.CurrencyCode, a.UnsettledAmount })
+            .FirstOrDefaultAsync(cancellationToken);
+        var waiver = string.IsNullOrWhiteSpace(payDto.AdvanceWaiverReason) ? null : payDto.AdvanceWaiverReason.Trim();
+        if (unnamed is not null && waiver is null)
+            throw new InvalidOperationException(
+                $"The traveller still holds advance {unnamed.AdvanceNumber} ({unnamed.CurrencyCode} {unnamed.UnsettledAmount:N2}) " +
+                "on this trip and the claim does not name it, so paid as it stands the claim pays in full and the advance stays " +
+                "outstanding. Link the advance to the claim, or give the reason it is paid in full.");
 
         // Payment, the advance settlement and the Finance journal commit together (lane 8): the
         // settlement posting carries the advance recovery as its own leg, so it must be built AFTER
@@ -408,11 +557,13 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
             // When money left is the clock's answer, not the caller's. `PaidAt` is the date every
             // downstream reconciliation will key off, and it was whatever the payload said.
             entity.PaidAt = DateTime.UtcNow;
+            entity.PaidById = payerEmployeeId;
+            entity.AdvanceWaiverReason = unnamed is null ? null : waiver;
+            entity.UpdatedBy = _currentUserProvider.UserId.ToString();
             entity.UpdatedAt = DateTime.UtcNow;
 
             await SettleLinkedAdvanceAsync(entity, ct);
 
-            await _claimRepository.UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync(ct);
 
             return HrFinancePostingCommandFactory.TravelClaimPaid(entity);
@@ -426,11 +577,15 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     // ---- Expense claim lines -----------------------------------------------
 
+    /// <summary>Adds an expense to a draft or returned claim (lane 3, B6), its receipt and per-diem rate checked (B3).</summary>
     public async Task<StaffTravelExpenseClaimLineDto> AddClaimLineAsync(CreateStaffTravelExpenseClaimLineDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        await GetOwnedClaimAsync(createDto.StaffTravelExpenseClaimId);
+        var claim = await GetOwnedClaimAsync(createDto.StaffTravelExpenseClaimId);
+        RequireClaimEditable(claim);
         await GuardClaimNotPostedAsync(createDto.StaffTravelExpenseClaimId, "Adding a line to this claim", cancellationToken);
+        var request = await RequireOwnedRequestAsync(claim.StaffTravelRequestId);
+        await RequireLineReferencesAsync(request, createDto.ReceiptAttachmentId, createDto.PerDiemRateId, cancellationToken);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await ApplyBaseCurrencyAmountAsync(entity, cancellationToken);
@@ -451,53 +606,103 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
             .ToList();
     }
 
+    /// <summary>
+    /// Changes an expense on a draft or returned claim (lane 3, B6). An expense already reviewed — on a claim
+    /// returned to the claimant — goes back to be reviewed again: the review was of what it said before.
+    /// </summary>
     public async Task<StaffTravelExpenseClaimLineDto> UpdateClaimLineAsync(UpdateStaffTravelExpenseClaimLineDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedClaimLineAsync(updateDto.Id);
+        var claim = await GetOwnedClaimAsync(entity.StaffTravelExpenseClaimId);
+        RequireClaimEditable(claim);
         await GuardClaimNotPostedAsync(entity.StaffTravelExpenseClaimId, "Editing a line of this claim", cancellationToken);
+        var request = await RequireOwnedRequestAsync(claim.StaffTravelRequestId);
+        await RequireLineReferencesAsync(request, updateDto.ReceiptAttachmentId, updateDto.PerDiemRateId, cancellationToken);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
+        entity.Status = TravelExpenseLineStatus.Pending;
+        entity.AmountApproved = null;
+        entity.AmountRejected = null;
+        entity.RejectionReason = null;
+        entity.ReviewedById = null;
+        entity.ReviewedAt = null;
 
         // ⚠ The SAME valuation as the create path, and it was missing here. Slice 4 stopped a caller
         // declaring the converted amount and slice 6 stopped them declaring the rate — but both fixes
-        // landed on AddClaimLineAsync only, so a line could be added at the organisation's published
+        // landed on the add path only, so a line could be added at the organisation's published
         // rate and then EDITED to any rate and any base amount, with RecomputeClaimTotalsAsync
         // summing whatever the payload said. The half-fix shape: when a derived field is taken back
         // from the caller, take it back on every path that writes it.
         await ApplyBaseCurrencyAmountAsync(entity, cancellationToken);
 
-        await _lineRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         await RecomputeClaimTotalsAsync(entity.StaffTravelExpenseClaimId, cancellationToken);
         return entity.ToDto();
     }
 
+    /// <summary>
+    /// Decides one expense (lane 3, B4, D-2): while its claim is submitted or under review, never on one's own claim.
+    /// Approved takes an amount up to the line — the whole line when none is given — and the rest is rejected; the
+    /// server works out the rejected part, so approved and rejected always make the line (they could exceed it). Any
+    /// rejected part needs its reason.
+    /// </summary>
     public async Task<bool> ReviewClaimLineAsync(ReviewStaffTravelExpenseClaimLineDto reviewDto, Guid reviewerEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedClaimLineAsync(reviewDto.LineId);
+        var claim = await GetOwnedClaimAsync(entity.StaffTravelExpenseClaimId);
+        if (claim.Status is not (TravelClaimStatus.Submitted or TravelClaimStatus.UnderReview))
+            throw new InvalidOperationException(
+                $"Claim {claim.ClaimNumber} is {Describe(claim.Status)}; its expenses are reviewed while it is submitted or under review.");
+        RefuseOwnClaim(claim, reviewerEmployeeId, "review");
         await GuardClaimNotPostedAsync(entity.StaffTravelExpenseClaimId, "Reviewing a line of this claim", cancellationToken);
 
+        var amount = entity.AmountBaseCurrency;
+        var reason = string.IsNullOrWhiteSpace(reviewDto.RejectionReason) ? null : reviewDto.RejectionReason.Trim();
+        decimal approved;
+        switch (reviewDto.Status)
+        {
+            case TravelExpenseLineStatus.Approved:
+                approved = reviewDto.AmountApproved ?? amount;
+                if (approved <= 0m)
+                    throw new InvalidOperationException("Approve an amount above zero, or reject the expense with the reason.");
+                if (approved > amount)
+                    throw new InvalidOperationException(
+                        $"{claim.CurrencyCode} {approved:N2} is more than the expense ({claim.CurrencyCode} {amount:N2}).");
+                if (approved < amount && reason is null)
+                    throw new InvalidOperationException(
+                        $"Say why {claim.CurrencyCode} {amount - approved:N2} of the expense is not approved — the claimant is told.");
+                break;
+            case TravelExpenseLineStatus.Rejected:
+                if (reason is null)
+                    throw new InvalidOperationException("Say why the expense is rejected — the claimant is told.");
+                approved = 0m;
+                break;
+            default:
+                throw new InvalidOperationException("Approve the expense, in whole or in part, or reject it.");
+        }
+
         entity.Status = reviewDto.Status;
-        entity.AmountApproved = reviewDto.AmountApproved;
-        entity.AmountRejected = reviewDto.AmountRejected;
-        entity.RejectionReason = reviewDto.RejectionReason;
+        entity.AmountApproved = approved;
+        entity.AmountRejected = amount - approved;
+        entity.RejectionReason = approved < amount ? reason : null;
         entity.ReviewedById = reviewerEmployeeId;   // the caller, not a payload value
         entity.ReviewedAt = DateTime.UtcNow;        // ...and the clock, not one either
 
-        entity.UpdatedBy = reviewerEmployeeId.ToString();
+        entity.UpdatedBy = _currentUserProvider.UserId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
 
-        await _lineRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         await RecomputeClaimTotalsAsync(entity.StaffTravelExpenseClaimId, cancellationToken);
         return true;
     }
 
+    /// <summary>A travel administrator removes an expense from a draft or returned claim (lane 3, B6).</summary>
     public async Task<bool> DeleteClaimLineAsync(Guid lineId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedClaimLineAsync(lineId);
+        RequireClaimEditable(await GetOwnedClaimAsync(entity.StaffTravelExpenseClaimId));
 
         var claimId = entity.StaffTravelExpenseClaimId;
         await GuardClaimNotPostedAsync(claimId, "Deleting a line of this claim", cancellationToken);
@@ -506,6 +711,94 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
         await RecomputeClaimTotalsAsync(claimId, cancellationToken);
         return true;
+    }
+
+    // ---- Claim rules (lane 3) ------------------------------------------------
+
+    private static string Describe(TravelClaimStatus status) => status switch
+    {
+        TravelClaimStatus.UnderReview => "under review",
+        TravelClaimStatus.PartiallyApproved => "partly approved",
+        _ => status.ToString().ToLowerInvariant(),
+    };
+
+    private static string Humanise(string pascal)
+        => System.Text.RegularExpressions.Regex.Replace(pascal, "(?<!^)([A-Z])", " $1");
+
+    /// <summary>A claim is for a trip that went ahead or is going ahead: approved, under way or completed (B3).</summary>
+    private static void RequireTripTakesClaims(StaffTravelRequest request, string what)
+    {
+        if (request.Status is StaffTravelRequestStatus.Approved or StaffTravelRequestStatus.InProgress or StaffTravelRequestStatus.Completed)
+            return;
+        throw new InvalidOperationException(
+            $"{what} only on a trip that is approved, under way or completed; travel request {request.RequestNumber} is " +
+            $"{Humanise(request.Status.ToString()).ToLowerInvariant()}.");
+    }
+
+    /// <summary>A claim's expenses are fixed once it is submitted; a returned claim is the claimant's to change (B6).</summary>
+    private static void RequireClaimEditable(StaffTravelExpenseClaim claim)
+    {
+        if (claim.Status is TravelClaimStatus.Draft or TravelClaimStatus.Returned) return;
+        throw new InvalidOperationException(
+            $"Claim {claim.ClaimNumber} is {Describe(claim.Status)}; its expenses are fixed once it is submitted. " +
+            "A reviewer returns it to the claimant to change them.");
+    }
+
+    /// <summary>D-2: nobody reviews, approves or pays their own claim.</summary>
+    private static void RefuseOwnClaim(StaffTravelExpenseClaim claim, Guid callerEmployeeId, string verb)
+    {
+        if (claim.EmployeeId == callerEmployeeId)
+            throw new UnauthorizedAccessException(
+                $"You cannot {verb} your own expense claim ({claim.ClaimNumber}). Another officer must.");
+    }
+
+    /// <summary>
+    /// The advance a claim names is this trip's and this traveller's (B3 — a claim could settle someone else's), and
+    /// still something a claim can settle.
+    /// </summary>
+    private async Task RequireClaimableAdvanceAsync(StaffTravelRequest request, Guid? advanceId, CancellationToken cancellationToken)
+    {
+        if (advanceId is not Guid id) return;
+        var advance = await _advanceRepository.GetByIdAsync(id);
+        if (advance == null || advance.TenantId != request.TenantId
+            || advance.StaffTravelRequestId != request.Id || advance.EmployeeId != request.EmployeeId)
+            throw new ArgumentException($"Advance '{id}' is not one of travel request {request.RequestNumber}'s for its traveller.");
+        if (advance.Status is TravelAdvanceStatus.Rejected or TravelAdvanceStatus.Cancelled or TravelAdvanceStatus.WrittenOff)
+            throw new InvalidOperationException(
+                $"Advance {advance.AdvanceNumber} is {Describe(advance.Status)}; there is nothing on it for a claim to settle.");
+    }
+
+    /// <summary>A receipt is an attachment of the claim's own trip; a per-diem rate is this organisation's (B3).</summary>
+    private async Task RequireLineReferencesAsync(StaffTravelRequest request, Guid? receiptId, Guid? perDiemRateId, CancellationToken cancellationToken)
+    {
+        if (receiptId is Guid receipt)
+        {
+            var onTrip = await _unitOfWork.Repository<StaffTravelRequestAttachment>()
+                .GetQueryable(a => a.Id == receipt && a.TenantId == request.TenantId && a.StaffTravelRequestId == request.Id)
+                .AnyAsync(cancellationToken);
+            if (!onTrip)
+                throw new ArgumentException($"Receipt '{receipt}' is not an attachment of travel request {request.RequestNumber}.");
+        }
+        if (perDiemRateId is Guid rate)
+            await GetOwnedPerDiemRateAsync(rate);
+    }
+
+    private async Task<string> RequireBaseCurrencyAsync(CancellationToken cancellationToken)
+        => await _currency.GetBaseCurrencyCodeAsync(cancellationToken)
+           ?? throw new InvalidOperationException(
+               "Finance marks no base currency, so a claim has no currency to be kept in. Set the base currency in Finance.");
+
+    /// <summary>The claim's live lines, tracked; read apart from the claim so the claim is never saved as a graph.</summary>
+    private async Task<List<StaffTravelExpenseClaimLine>> ClaimLinesAsync(StaffTravelExpenseClaim claim, CancellationToken cancellationToken)
+        => (await _lineRepository.GetByClaimIdAsync(claim.Id)).Where(l => l.TenantId == claim.TenantId).ToList();
+
+    /// <summary>The approved policy the trip was checked against at submission, if any.</summary>
+    private async Task<StaffTravelPolicy?> ApprovedPolicyAsync(StaffTravelRequest request, CancellationToken cancellationToken)
+    {
+        if (request.PolicyId is not Guid policyId) return null;
+        return await _unitOfWork.Repository<StaffTravelPolicy>()
+            .GetQueryable(p => p.Id == policyId && p.TenantId == request.TenantId && p.ApprovedById != null)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     // ---- Advances ----------------------------------------------------------
@@ -959,13 +1252,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     /// <summary>The claim window of the approved policy the trip was checked against at submission, if any.</summary>
     private async Task<int?> ClaimWindowDaysAsync(StaffTravelRequest request, CancellationToken cancellationToken)
-    {
-        if (request.PolicyId is not Guid policyId) return null;
-        return await _unitOfWork.Repository<StaffTravelPolicy>()
-            .GetQueryable(p => p.Id == policyId && p.TenantId == request.TenantId && !p.IsDeleted && p.ApprovedById != null)
-            .Select(p => (int?)p.ExpenseSubmissionDays)
-            .FirstOrDefaultAsync(cancellationToken);
-    }
+        => (await ApprovedPolicyAsync(request, cancellationToken))?.ExpenseSubmissionDays;
 
     // ---- Per-diem rates ----------------------------------------------------
 
@@ -1107,8 +1394,10 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         var outstanding = advance.UnsettledAmount;
         if (outstanding <= 0m) return;
 
-        // Recover against what the claim is worth before any deduction, not after.
-        var recoverable = claim.TotalApproved > 0m ? claim.TotalApproved : claim.TotalClaimed;
+        // Recover against what the claim is worth before any deduction, not after — its APPROVED total. It fell back
+        // to the claimed total when nothing was approved, which recovered and paid on a claim Finance recognised as
+        // zero (B4); since lane 3 a claim reaches payment only with something approved.
+        var recoverable = claim.TotalApproved;
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var rate = await _currency.GetRateToBaseAsync(advance.CurrencyCode, today, cancellationToken);
         var outstandingInBase = decimal.Round(outstanding * rate, 2, MidpointRounding.AwayFromZero);
@@ -1128,8 +1417,8 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         advance.UnsettledAmount = (advance.ApprovedAmount ?? 0m) - advance.SettledAmount;
         advance.Status = StaffTravelAdvanceRules.SettlementStatus(advance, today);
         advance.UpdatedAt = DateTime.UtcNow;
-
-        await _advanceRepository.UpdateAsync(advance);
+        // Tracked, so the caller's save writes it. `UpdateAsync` would mark the advance's whole loaded graph —
+        // the claim it settles, that claim's lines — modified as well.
     }
 
     /// <summary>
@@ -1151,21 +1440,23 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     private async Task RecomputeClaimTotalsAsync(Guid claimId, CancellationToken cancellationToken)
     {
         var tenantId = GetTenantId();
-        var claim = await _claimRepository.GetWithLinesAsync(claimId);
+        // The claim alone, then its lines: saved by tracking, not as a graph (lane 3 — `UpdateAsync` on the claim
+        // read with every navigation marked its traveller, trip, reviewer and advance modified too).
+        var claim = await _claimRepository.GetByIdAsync(claimId);
         if (claim == null || claim.TenantId != tenantId) return;
+        var lines = await ClaimLinesAsync(claim, cancellationToken);
 
-        claim.TotalClaimed = claim.Lines.Sum(l => l.AmountBaseCurrency);
-        claim.TotalApproved = claim.Lines.Sum(l => l.AmountApproved ?? 0m);
-        claim.TotalRejected = claim.Lines.Sum(l => l.AmountRejected ?? 0m);
+        claim.TotalClaimed = lines.Sum(l => l.AmountBaseCurrency);
+        claim.TotalApproved = lines.Sum(l => l.AmountApproved ?? 0m);
+        claim.TotalRejected = lines.Sum(l => l.AmountRejected ?? 0m);
 
         // Once anything has been reviewed the payable figure is the APPROVED total less the
         // advance. Before that there is nothing approved, so fall back to the claimed total rather
         // than telling the traveller they are owed minus-the-advance.
-        var reviewed = claim.Lines.Any(l => l.AmountApproved.HasValue || l.AmountRejected.HasValue);
+        var reviewed = lines.Any(l => l.AmountApproved.HasValue || l.AmountRejected.HasValue);
         claim.NetPayable = ComputeNetPayable(
             reviewed ? claim.TotalApproved : claim.TotalClaimed, claim.AdvanceDeducted);
 
-        await _claimRepository.UpdateAsync(claim);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 

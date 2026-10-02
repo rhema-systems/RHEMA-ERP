@@ -31,7 +31,9 @@ public interface IStaffTravelFinanceService
     /// <summary>ReviewClaim. <paramref name="reviewerEmployeeId"/> is the caller's employee record and
     /// overrides any <c>FinanceReviewedById</c> on the payload — who acted is identity, not an input.</summary>
     Task<bool> ReviewClaimAsync(ReviewStaffTravelExpenseClaimDto reviewDto, Guid reviewerEmployeeId, CancellationToken cancellationToken = default);
-    Task<bool> PayClaimAsync(PayStaffTravelExpenseClaimDto payDto, CancellationToken cancellationToken = default);
+    /// <summary>PayClaim. <paramref name="payerEmployeeId"/> is the caller's employee record: the payer is recorded
+    /// and is never the claimant or a reviewer of the claim (lane 3, D-2).</summary>
+    Task<bool> PayClaimAsync(PayStaffTravelExpenseClaimDto payDto, Guid payerEmployeeId, CancellationToken cancellationToken = default);
 
     // Expense claim lines
     Task<StaffTravelExpenseClaimLineDto> AddClaimLineAsync(CreateStaffTravelExpenseClaimLineDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);

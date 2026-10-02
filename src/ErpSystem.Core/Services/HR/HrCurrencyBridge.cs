@@ -87,10 +87,14 @@ public class HrCurrencyBridge
     /// travel screen and another on a financial report.</para>
     ///
     /// <para>⚠ <b>RESOLVED 2026-09-10.</b> Finance PR #99 (<c>finance-fx-seed-contract</c>) transposed
-    /// the seed and documented the contract; <c>GET /api/finance/exchange-rates/current/USD</c> now
-    /// reads <c>rate 12.5, inverseRate 0.08</c> and this bridge answers 12.5 GHS per USD (asserted
-    /// by <c>hr-jobarch/run-r7.mjs</c>). The paragraphs below are kept as the record of what was
-    /// wrong and why this class inherited it rather than working around it.</para>
+    /// the seed and documented the contract; this bridge answers 12.5 GHS per USD (asserted by
+    /// <c>hr-jobarch/run-r7.mjs</c>). (This remark said <c>current/USD</c> reads <c>rate 12.5</c>; on
+    /// 2026-10-02 UAT's row reads <c>GHS → USD, Rate 0.08, InverseRate 12.5</c> — the contract's
+    /// "1 base = Rate target" — and the 12.5 is reached through the inverse.) Since the travel final
+    /// closure's lane 3 the rate is the one in force on the date asked, read with the same direct-then-
+    /// inverse lookup <c>ConvertAsync</c> uses, rather than <c>ConvertAsync</c>'s today. The paragraphs
+    /// below are kept as the record of what was wrong and why this class inherited it rather than
+    /// working around it.</para>
     ///
     /// <para><b>Finance's conversion WAS inverted, and this deliberately inherited that.</b>
     /// Measured 2026-08-17: <c>GET /api/finance/currencies/convert</c> answers
@@ -121,26 +125,30 @@ public class HrCurrencyBridge
             string.Equals(baseCode, code, StringComparison.OrdinalIgnoreCase))
             return 1m;
 
-        // Refuse before converting if Finance holds no rate for the pair: ConvertAsync returns the
-        // amount UNCHANGED when it finds none, which would silently value a foreign claim as
-        // though it were local — the same class of error slice 4 removed from the amount.
-        var published = await _rates.GetCurrentRateAsync(
-            targetCurrencyCode: code,
-            baseCurrencyCode: baseCode,
-            effectiveDate: asOf.ToDateTime(TimeOnly.MinValue),
-            cancellationToken: cancellationToken);
+        // ⚠ The rate ON `asOf` (travel final closure, lane 3, B12). This checked that a rate existed for the date
+        // and then converted through `CurrencyService.ConvertAsync`, which reads TODAY's rate — so a back-dated
+        // expense was valued at whatever the rate was on the day it was keyed. Finance's contract (the ExchangeRate
+        // entity): one unit of BaseCurrencyCode equals Rate units of TargetCurrencyCode. `ConvertAsync` looks for a
+        // direct quote (from → base), then the inverse (base → from); this asks the same two questions, dated. On
+        // UAT the row is GHS → USD at 0.08, so a USD expense is valued at 1 / 0.08 = 12.5 GHS, as ConvertAsync
+        // reaches it — but on the expense date. Six decimal places: ConvertAsync converted one unit and rounded
+        // the RESULT to the base currency's two places, which rounded the rate itself.
+        var at = asOf.ToDateTime(TimeOnly.MinValue);
+        var direct = await _rates.GetCurrentRateAsync(
+            targetCurrencyCode: baseCode, baseCurrencyCode: code, effectiveDate: at, cancellationToken: cancellationToken);
+        if (direct is { Rate: > 0m })
+            return decimal.Round(direct.Rate, 6, MidpointRounding.AwayFromZero);
 
-        if (published is null || published.Rate <= 0m)
-            throw new InvalidOperationException(
-                $"Finance holds no exchange rate for {code} on {asOf:yyyy-MM-dd}. " +
-                "Add the rate in Finance, then resubmit — travel does not keep its own rates.");
+        var inverse = await _rates.GetCurrentRateAsync(
+            targetCurrencyCode: code, baseCurrencyCode: baseCode, effectiveDate: at, cancellationToken: cancellationToken);
+        if (inverse is { Rate: > 0m })
+            return decimal.Round(1m / inverse.Rate, 6, MidpointRounding.AwayFromZero);
 
-        var rate = await _currencies.ConvertAsync(1m, code, baseCode, cancellationToken);
-        if (rate <= 0m)
-            throw new InvalidOperationException(
-                $"Finance could not convert {code} to {baseCode}. Check the rate in Finance and resubmit.");
-
-        return rate;
+        // Refused rather than guessed: valuing a foreign claim as though it were local is the error slice 4
+        // removed from the amount.
+        throw new InvalidOperationException(
+            $"Finance holds no exchange rate for {code} on {asOf:yyyy-MM-dd}. " +
+            "Add the rate in Finance, then resubmit — travel does not keep its own rates.");
     }
 
     /// <summary>The organisation's base currency code, or null when Finance marks none.</summary>

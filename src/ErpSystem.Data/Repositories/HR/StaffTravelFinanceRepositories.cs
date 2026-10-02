@@ -41,11 +41,17 @@ public class StaffTravelExpenseClaimRepository : GenericRepository<StaffTravelEx
 
     public async Task<StaffTravelExpenseClaim?> GetWithLinesAsync(Guid id)
     {
+        // The trip, the reviewer and the payer: the DTO names all three, and the first two were never loaded, so
+        // `RequestNumber` and `FinanceReviewedByName` came back empty on every claim (lane 3).
         return await _dbSet
             .Include(c => c.Employee)
+            .Include(c => c.StaffTravelRequest)
+            .Include(c => c.FinanceReviewedBy)
+            .Include(c => c.PaidBy)
             .Include(c => c.TravelAdvance)
             .Include(c => c.Lines).ThenInclude(l => l.PerDiemRate)
             .Include(c => c.Lines).ThenInclude(l => l.ReviewedBy)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
     }
 
@@ -93,11 +99,14 @@ public class StaffTravelExpenseClaimRepository : GenericRepository<StaffTravelEx
             .ToListAsync();
     }
 
+    /// <summary>The payment queue: everything pay accepts — a partly approved claim too (lane 3, B7: it was left out
+    /// of the queue while pay accepted it).</summary>
     public async Task<IEnumerable<StaffTravelExpenseClaim>> GetUnpaidApprovedClaimsAsync()
     {
         return await _dbSet
             .Include(c => c.Employee)
-            .Where(c => c.Status == TravelClaimStatus.Approved && c.PaidAt == null && !c.IsDeleted)
+            .Where(c => (c.Status == TravelClaimStatus.Approved || c.Status == TravelClaimStatus.PartiallyApproved)
+                     && c.PaidAt == null && !c.IsDeleted)
             .OrderBy(c => c.SubmittedAt)
             .ToListAsync();
     }

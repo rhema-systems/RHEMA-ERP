@@ -136,13 +136,16 @@ public sealed class HrFinancePostingAdapterTests
                     });
                 });
 
-            // Finance's currency master, as HrCurrencyBridge reads it: GHS base, USD at 12.5.
+            // Finance's currency master, as HrCurrencyBridge reads it: GHS base, USD at 12.5 GHS. Stored the way
+            // Finance's contract stores it — one unit of the BASE equals Rate units of the TARGET, so GHS → USD is
+            // 0.08 (UAT's row) — and found through the inverse lookup, on the date asked (travel final closure, lane
+            // 3, B12). This fake held GHS → USD at 12.5 — the transposed seed — which only worked while the bridge
+            // took its number from ConvertAsync rather than the dated row.
             Currencies.Setup(c => c.GetBaseCurrencyAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new CurrencyDto { CurrencyCode = "GHS" });
             Currencies.Setup(c => c.GetByCodeAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string code, CancellationToken _) => code is "GHS" or "USD" ? new CurrencyDto { CurrencyCode = code } : null);
-            Currencies.Setup(c => c.ConvertAsync(1m, "USD", "GHS", It.IsAny<CancellationToken>())).ReturnsAsync(12.5m);
             Rates.Setup(r => r.GetCurrentRateAsync("USD", "GHS", It.IsAny<DateTime?>(), null, null, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new ExchangeRateDto { Rate = 12.5m, BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD" });
+                .ReturnsAsync(new ExchangeRateDto { Rate = 0.08m, BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD" });
         }
 
         public Mock<IVendorInvoiceService> VendorInvoices { get; } = new(MockBehavior.Strict);
