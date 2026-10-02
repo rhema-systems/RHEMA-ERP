@@ -1500,6 +1500,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IConsignmentSettlementService, ErpSystem.Core.Services.Procurement.ConsignmentSettlementService>();
             services.AddScoped<ErpSystem.Api.Services.ProcurementInventoryManagementDashboardService>();
             services.AddScoped<ErpSystem.Api.Services.EnterpriseDashboardService>();
+            services.AddScoped<ErpSystem.Api.Services.EnterpriseDashboardProjectionService>();
 
             // RFQ (Request For Quotation) - separate from Tender
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IRfqService, ErpSystem.Core.Services.Procurement.RfqService>();

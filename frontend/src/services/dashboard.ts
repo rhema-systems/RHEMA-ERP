@@ -1,9 +1,5 @@
 import { apiService } from './api.service'
-import type { CrmConversionsDto, CrmOverviewDto, CrmReportingDto } from './crmService'
-import type { InventoryRequisitionDto } from './inventoryRequisitionService'
 import type { ProjectDashboardDto } from './projectService'
-import type { PurchaseOrderSummaryDto, PurchaseRequisitionSummaryDto } from './purchasingService'
-import type { TenderDto } from './tenderService'
 import type { FinanceDashboardData } from '../types/finance-dashboard'
 
 export interface DashboardModuleStatus {
@@ -73,6 +69,29 @@ export interface MaintenanceScheduleDto {
   nextDueDate?: string
   nextScheduledDate?: string
   assignedTechnicianName?: string
+}
+
+export interface EnterpriseCrmDashboard {
+  totalLeadCount: number
+  qualifiedLeadCount: number
+  leadsNeedingFollowUpCount: number
+  openOpportunityCount: number
+  activeQuoteCount: number
+  activeAccountCount: number
+  atRiskAccountCount: number
+  pipelineByStage: Array<{ stage: string; opportunityCount: number; quoteCount: number }>
+  accountRiskByBand: Array<{ label: string; count: number }>
+  conversionFunnel: Array<{ stage: string; count: number; conversionRate: number | null }>
+}
+
+export interface EnterpriseOperationalQueue {
+  pendingPurchaseRequisitionCount: number
+  openPurchaseOrderCount: number
+  pendingInventoryApprovalCount: number
+  pendingInventoryIssueCount: number
+  openTenderCount: number
+  tendersClosingWithin14DaysCount: number
+  openTendersByStatus: Array<{ label: string; count: number }>
 }
 
 export interface ManagementDashboardMoneyPoint {
@@ -146,19 +165,12 @@ export interface ProcurementInventoryManagementDashboard {
 export interface EnterpriseDashboardData {
   reportingCurrency: DashboardCurrencyReference
   financeOverview: FinanceDashboardData | null
-  crmOverview: CrmOverviewDto | null
-  crmReporting: CrmReportingDto | null
-  crmConversions: CrmConversionsDto | null
+  crm: EnterpriseCrmDashboard | null
   projectDashboard: ProjectDashboardDto | null
-  pendingPurchaseRequisitions: PurchaseRequisitionSummaryDto[]
-  openPurchaseOrders: PurchaseOrderSummaryDto[]
-  pendingInventoryApprovals: InventoryRequisitionDto[]
-  pendingInventoryIssues: InventoryRequisitionDto[]
+  operationalQueues: EnterpriseOperationalQueue
   maintenanceOverview: MaintenanceDashboardOverview | null
   maintenanceMetrics: EnterpriseWorkOrderMetrics | null
   maintenanceTrends: WorkOrderTrendsDto | null
-  upcomingMaintenance: MaintenanceScheduleDto[]
-  tenders: TenderDto[]
   procurementInventoryManagement: ProcurementInventoryManagementDashboard | null
   moduleStatus: DashboardModuleStatus[]
   rangeStartDate: string

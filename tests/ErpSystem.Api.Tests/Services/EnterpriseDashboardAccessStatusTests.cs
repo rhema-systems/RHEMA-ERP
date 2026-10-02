@@ -124,10 +124,25 @@ public sealed class EnterpriseDashboardAccessStatusTests
         Assert.Null(GeneralLedgerService.CalculateDashboardChange(100m, 0m));
     }
 
-    private static ServiceProvider CreateProvider(Exception failure) =>
-        new ServiceCollection()
+    private static ServiceProvider CreateProvider(Exception failure)
+    {
+        var authorization = new Mock<IAuthorizationService>();
+        authorization.Setup(service => service.AuthorizeAsync(
+                It.IsAny<ClaimsPrincipal>(), null, It.IsAny<string>()))
+            .ReturnsAsync(AuthorizationResult.Success());
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()) },
+                authenticationType: "Test"))
+        };
+
+        return new ServiceCollection()
+            .AddSingleton(authorization.Object)
+            .AddSingleton<IHttpContextAccessor>(new HttpContextAccessor { HttpContext = httpContext })
             .AddScoped<ProcurementInventoryManagementDashboardService>(_ => throw failure)
             .BuildServiceProvider();
+    }
 
     private static ServiceProvider CreateFinanceProvider(
         bool allowed,
@@ -147,8 +162,11 @@ public sealed class EnterpriseDashboardAccessStatusTests
             .Setup(service => service.AuthorizeAsync(
                 It.IsAny<ClaimsPrincipal>(),
                 null,
-                FinancePermissions.ViewFinance))
-            .ReturnsAsync(allowed ? AuthorizationResult.Success() : AuthorizationResult.Failed());
+                It.IsAny<string>()))
+            .ReturnsAsync((ClaimsPrincipal _, object? _, string policy) =>
+                policy != FinancePermissions.ViewFinance || allowed
+                    ? AuthorizationResult.Success()
+                    : AuthorizationResult.Failed());
 
         var tenantSettings = new Mock<ITenantSettingsService>();
         tenantSettings

@@ -82,16 +82,6 @@ const formatRelativeTime = (value?: string) => {
   return date.toLocaleDateString();
 };
 
-const getDaysUntil = (value?: string, referenceDate = new Date()) => {
-  if (!value) return null;
-
-  const target = new Date(value).getTime();
-  const reference = referenceDate.getTime();
-  if (Number.isNaN(target)) return null;
-
-  return Math.ceil((target - reference) / (1000 * 60 * 60 * 24));
-};
-
 const formatMoneyPoints = (points: Array<{ amount: number; currency: string }>) =>
   points.length === 0
     ? 'No value'
@@ -274,12 +264,7 @@ export default function Dashboard() {
         ? (maintenanceCompletedWorkOrders / Math.max(1, maintenanceTotalWorkOrders)) * 100
         : 0);
 
-  const openTenders = data.tenders.filter((tender) => !['closed', 'cancelled', 'awarded', 'completed'].includes(tender.status.toLowerCase()));
-  const rangeEndReference = new Date(data.rangeEndDate);
-  const closingSoonTenders = openTenders.filter((tender) => {
-    const daysUntil = getDaysUntil(tender.submissionDeadline, rangeEndReference);
-    return daysUntil !== null && daysUntil >= 0 && daysUntil <= 14;
-  });
+  const queues = data.operationalQueues;
   const summaryCards: SummaryCardDefinition[] = [];
 
   if (data.financeOverview) {
@@ -295,11 +280,11 @@ export default function Dashboard() {
     });
   }
 
-  if (moduleIsAvailable('CRM Overview')) summaryCards.push(
+  if (moduleIsAvailable('CRM')) summaryCards.push(
     {
       title: 'CRM Pipeline',
-      value: formatNumber(data.crmOverview?.openOpportunityCount ?? 0),
-      meta: `${data.crmOverview?.leadsNeedingFollowUpCount ?? 0} leads need follow-up`,
+      value: formatNumber(data.crm?.openOpportunityCount ?? 0),
+      meta: `${data.crm?.leadsNeedingFollowUpCount ?? 0} leads need follow-up`,
       href: '/crm',
       accentClassName:
         'border-emerald-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(236,253,245,0.95))] dark:border-emerald-900/70 dark:bg-[linear-gradient(135deg,rgba(2,6,23,0.96),rgba(6,78,59,0.25))]',
@@ -319,11 +304,11 @@ export default function Dashboard() {
       icon: FolderKanban,
     });
 
-  if (moduleIsAvailable('Purchase Orders', 'Purchase Requisitions')) summaryCards.push(
+  if (moduleIsAvailable('Procurement Queues')) summaryCards.push(
     {
       title: 'Procurement',
-      value: formatNumber(data.openPurchaseOrders.length),
-      meta: `${data.pendingPurchaseRequisitions.length} requisitions waiting`,
+      value: formatNumber(queues.openPurchaseOrderCount),
+      meta: `${queues.pendingPurchaseRequisitionCount} requisitions waiting`,
       href: '/procurement/purchase-orders',
       accentClassName:
         'border-amber-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(255,251,235,0.95))] dark:border-amber-900/70 dark:bg-[linear-gradient(135deg,rgba(2,6,23,0.96),rgba(120,53,15,0.24))]',
@@ -331,13 +316,13 @@ export default function Dashboard() {
       icon: ShoppingCart,
     });
 
-  if (moduleIsAvailable('Inventory Approval Queue', 'Inventory Issue Queue')) summaryCards.push(
+  if (moduleIsAvailable('Inventory Queues')) summaryCards.push(
     {
       title: 'Inventory',
       value: data.procurementInventoryManagement
         ? formatReportingMoney(data.procurementInventoryManagement.inventory.stockValue)
-        : formatNumber(data.pendingInventoryApprovals.length + data.pendingInventoryIssues.length),
-      meta: `${data.pendingInventoryIssues.length} issues · ${data.pendingInventoryApprovals.length} approvals`,
+        : formatNumber(queues.pendingInventoryApprovalCount + queues.pendingInventoryIssueCount),
+      meta: `${queues.pendingInventoryIssueCount} issues · ${queues.pendingInventoryApprovalCount} approvals`,
       href: '/inventory/requisitions',
       accentClassName:
         'border-cyan-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(236,254,255,0.95))] dark:border-cyan-900/70 dark:bg-[linear-gradient(135deg,rgba(2,6,23,0.96),rgba(21,94,117,0.24))]',
@@ -357,11 +342,11 @@ export default function Dashboard() {
       icon: Wrench,
     });
 
-  if (moduleIsAvailable('Tenders')) summaryCards.push(
+  if (moduleIsAvailable('Procurement Queues')) summaryCards.push(
     {
       title: 'Tenders',
-      value: formatNumber(openTenders.length),
-      meta: `${closingSoonTenders.length} closing within 14 days`,
+      value: formatNumber(queues.openTenderCount),
+      meta: `${queues.tendersClosingWithin14DaysCount} closing within 14 days`,
       href: '/procurement/tenders',
       accentClassName:
         'border-sky-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(240,249,255,0.95))] dark:border-sky-900/70 dark:bg-[linear-gradient(135deg,rgba(2,6,23,0.96),rgba(12,74,110,0.24))]',
@@ -369,28 +354,22 @@ export default function Dashboard() {
       icon: FileText,
     });
 
-  const pipelineStageData = (data.crmReporting?.pipelineByStage ?? []).map((stage) => ({
+  const pipelineStageData = (data.crm?.pipelineByStage ?? []).map((stage) => ({
     stage: stage.stage,
     opportunities: stage.opportunityCount,
     quotes: stage.quoteCount,
   }));
 
-  const crmFunnelData = (data.crmConversions?.funnel ?? []).map((stage) => ({
+  const crmFunnelData = (data.crm?.conversionFunnel ?? []).map((stage) => ({
     stage: stage.stage,
-    count: stage.entityCount,
-    related: stage.relatedOpportunityCount,
-    value: stage.totalValue,
+    count: stage.count,
     conversionRate: stage.conversionRate,
   }));
 
-  const crmHealthData = Object.values(
-    (data.crmReporting?.accountHealth ?? []).reduce<Record<string, { name: string; value: number }>>((accumulator, account) => {
-      const category = account.healthCategory || 'Unknown';
-      accumulator[category] = accumulator[category] ?? { name: category, value: 0 };
-      accumulator[category].value += 1;
-      return accumulator;
-    }, {}),
-  );
+  const crmHealthData = (data.crm?.accountRiskByBand ?? []).map((band) => ({
+    name: band.label,
+    value: band.count,
+  }));
 
   const projectPressureData = [
     { name: 'Overdue Tasks', value: data.projectDashboard?.overdueTasks ?? 0 },
@@ -400,8 +379,8 @@ export default function Dashboard() {
   ].filter((item) => item.value > 0);
 
   const inventoryQueueData = [
-    { label: 'Approvals', count: data.pendingInventoryApprovals.length },
-    { label: 'Issues', count: data.pendingInventoryIssues.length },
+    { label: 'Approvals', count: queues.pendingInventoryApprovalCount },
+    { label: 'Issues', count: queues.pendingInventoryIssueCount },
   ];
 
   const maintenanceTrendData = (data.maintenanceTrends?.creationTrend ?? []).map((point, index) => ({
@@ -416,32 +395,25 @@ export default function Dashboard() {
     { name: 'Completed', value: maintenanceCompletedWorkOrders },
   ].filter((item) => item.value > 0);
 
-  const tenderStatusData = Object.values(
-    openTenders.reduce<Record<string, { name: string; value: number }>>((accumulator, tender) => {
-      const status = tender.status || 'Unknown';
-      accumulator[status] = accumulator[status] ?? { name: status, value: 0 };
-      accumulator[status].value += 1;
-      return accumulator;
-    }, {}),
-  );
+  const tenderStatusData = queues.openTendersByStatus.map((status) => ({ name: status.label, value: status.count }));
 
   const queueLoadData = [
-    { module: 'CRM', items: (data.crmOverview?.leadsNeedingFollowUpCount ?? 0) + (data.crmOverview?.atRiskAccountCount ?? 0) },
+    { module: 'CRM', items: (data.crm?.leadsNeedingFollowUpCount ?? 0) + (data.crm?.atRiskAccountCount ?? 0) },
     {
       module: 'Projects',
       items: (data.projectDashboard?.overdueTasks ?? 0) + (data.projectDashboard?.overdueMilestones ?? 0) + (data.projectDashboard?.openRisks ?? 0),
     },
-    { module: 'Procurement', items: data.pendingPurchaseRequisitions.length + data.openPurchaseOrders.length },
-    { module: 'Inventory', items: data.pendingInventoryApprovals.length + data.pendingInventoryIssues.length },
+    { module: 'Procurement', items: queues.pendingPurchaseRequisitionCount + queues.openPurchaseOrderCount },
+    { module: 'Inventory', items: queues.pendingInventoryApprovalCount + queues.pendingInventoryIssueCount },
     { module: 'Maintenance', items: maintenanceActiveWorkOrders + maintenanceOverdueWorkOrders },
-    { module: 'Tenders', items: openTenders.length + closingSoonTenders.length },
+    { module: 'Tenders', items: queues.openTenderCount + queues.tendersClosingWithin14DaysCount },
   ];
 
   const criticalAlertCount =
-    (data.crmOverview?.leadsNeedingFollowUpCount ?? 0) +
+    (data.crm?.leadsNeedingFollowUpCount ?? 0) +
     (data.projectDashboard?.overdueMilestones ?? 0) +
     maintenanceOverdueWorkOrders +
-    closingSoonTenders.length;
+    queues.tendersClosingWithin14DaysCount;
 
   const management = data.procurementInventoryManagement;
   const managementSpendByCategory = (management?.spendByCategory ?? []).slice(0, 10).map((item) => ({
@@ -472,7 +444,7 @@ export default function Dashboard() {
                   {criticalAlertCount} active alerts
                 </Badge>
                 <Badge variant="outline" className="border-amber-200 bg-amber-50/80 text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
-                  {closingSoonTenders.length} tenders closing soon
+                  {queues.tendersClosingWithin14DaysCount} tenders closing soon
                 </Badge>
                 <Badge variant="outline" className="border-rose-200 bg-rose-50/80 text-rose-700 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-300">
                   {Math.round(maintenanceCompletionRate)}% maintenance completion
@@ -878,7 +850,7 @@ export default function Dashboard() {
             height={300}
             compact
             formatValue={(value) => formatNumber(Number(value))}
-            error={unavailableModules.find((module) => module.module === 'CRM Reporting')?.error}
+            error={unavailableModules.find((module) => module.module === 'CRM')?.error}
             className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
           />
 
@@ -892,7 +864,7 @@ export default function Dashboard() {
             compact
             showLabels={false}
             formatValue={(value) => formatNumber(Number(value))}
-            error={unavailableModules.find((module) => module.module === 'CRM Conversions')?.error}
+            error={unavailableModules.find((module) => module.module === 'CRM')?.error}
             className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
           />
 
@@ -900,14 +872,14 @@ export default function Dashboard() {
             data={crmHealthData}
             dataKey="value"
             nameKey="name"
-            title="Account Health Mix"
-            description="Live account quality distribution."
+            title="Account Risk Mix"
+            description="Live active-account risk bands from the business-partner register."
             height={300}
             compact
             innerRadius={68}
             showLabels={false}
             colors={[CHART_COLORS.success[0], CHART_COLORS.warning[0], CHART_COLORS.danger[0], CHART_COLORS.info[0]]}
-            error={unavailableModules.find((module) => module.module === 'CRM Reporting')?.error}
+            error={unavailableModules.find((module) => module.module === 'CRM')?.error}
             className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
           />
 
@@ -935,7 +907,7 @@ export default function Dashboard() {
             compact
             orientation="horizontal"
             formatValue={(value) => formatNumber(Number(value))}
-            error={unavailableModules.find((module) => ['Inventory Approval Queue', 'Inventory Issue Queue'].includes(module.module))?.error}
+            error={unavailableModules.find((module) => module.module === 'Inventory Queues')?.error}
             className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
           />
 
@@ -981,7 +953,7 @@ export default function Dashboard() {
             innerRadius={68}
             showLabels={false}
             colors={[CHART_COLORS.info[0], CHART_COLORS.warning[0], CHART_COLORS.success[0], CHART_COLORS.primary[0], CHART_COLORS.danger[0]]}
-            error={unavailableModules.find((module) => module.module === 'Tenders')?.error}
+            error={unavailableModules.find((module) => module.module === 'Procurement Queues')?.error}
             className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
           />
 

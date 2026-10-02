@@ -17,7 +17,7 @@ namespace ErpSystem.Core.DTOs.Dashboard
         public int OnlineUsers { get; set; }
         public int TotalSessions { get; set; }
         public int ActiveSessions { get; set; }
-        public decimal SystemUptime { get; set; }
+        public decimal? SystemUptime { get; set; }
         public Dictionary<string, int> UsersByRole { get; set; } = new();
         public List<ChartDataPoint> UserLoginTrend { get; set; } = new();
         public List<ChartDataPoint> SessionActivity { get; set; } = new();
@@ -64,12 +64,12 @@ namespace ErpSystem.Core.DTOs.Dashboard
 
     public class SystemStatusDto
     {
-        public bool IsHealthy { get; set; } = true;
-        public string Status { get; set; } = "Operational";
-        public double CpuUsage { get; set; }
-        public double MemoryUsage { get; set; }
-        public double DiskUsage { get; set; }
-        public int DatabaseConnections { get; set; }
+        public bool IsHealthy { get; set; }
+        public string Status { get; set; } = "Unavailable";
+        public double? CpuUsage { get; set; }
+        public double? MemoryUsage { get; set; }
+        public double? DiskUsage { get; set; }
+        public int? DatabaseConnections { get; set; }
         public List<ServiceStatusDto> Services { get; set; } = new();
         public DateTime LastCheck { get; set; } = DateTime.UtcNow;
     }

@@ -186,6 +186,7 @@
     <Compile Include="Controllers\Projects\CivilEngineering*.cs" />
     <Compile Include="Controllers\QuantitySurvey\**\*.cs" />
     <Compile Include="Controllers\DashboardControllerDateRangeTests.cs" />
+    <Compile Include="Controllers\DashboardAuthorizationIntegrationTests.cs" />
     <Compile Include="Services\DatabaseSeedingServiceTests.cs" />
     <Compile Include="Services\DatabaseSeedingWorkflowPreservationTests.cs" />
     <Compile Include="Services\DatabaseSeedingDependencyGraphTests.cs" />
@@ -304,6 +305,8 @@
     <Compile Include="Services\Inventory\InventoryAnalyticsServiceTests.cs" />
     <Compile Include="Services\ProcurementInventoryManagementDashboardServiceTests.cs" />
     <Compile Include="Services\EnterpriseDashboardAccessStatusTests.cs" />
+    <Compile Include="Services\EnterpriseDashboardProjectionTests.cs" />
+    <Compile Include="Services\LegacyDashboardRealDataTests.cs" />
     <Compile Include="Services\Inventory\InventoryDisposalServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryDisposalOptionalApprovalMigrationTests.cs" />
     <Compile Include="Services\Inventory\E2E013InventoryDisposalLifecycleTests.cs" />

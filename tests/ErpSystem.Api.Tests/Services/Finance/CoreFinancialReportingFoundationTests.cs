@@ -914,6 +914,59 @@ public sealed class CoreFinancialReportingFoundationTests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-Reporting")]
+    [Trait("Category", "DashboardReconciliation")]
+    public async Task FinanceDashboard_ShouldReconcilePostedIfrsLedgerAndExcludeDraftAndOtherTenantRows()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedTenant(db, otherTenantId, "OTH");
+        SeedAccountingBook(db, tenantId);
+        SeedAccountingBook(db, otherTenantId);
+        var period = SeedPeriod(db, tenantId);
+        var otherPeriod = SeedPeriod(db, otherTenantId);
+        var cash = SeedAccount(db, tenantId, AccountType.Asset, "1000", "Operating Bank");
+        var revenue = SeedAccount(db, tenantId, AccountType.Revenue, "4000", "Property Revenue");
+        var expense = SeedAccount(db, tenantId, AccountType.Expense, "5000", "Operating Expense");
+        var otherRevenue = SeedAccount(db, otherTenantId, AccountType.Revenue, "4000", "Other Revenue");
+        var otherCash = SeedAccount(db, otherTenantId, AccountType.Asset, "1000", "Other Bank");
+        db.BankAccounts.Add(new BankAccount
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountNumber = "BANK-001",
+            AccountName = "Operating Bank", BankName = "Bank", Currency = "GHS",
+            AccountType = BankAccountType.Checking, GLAccountId = cash.Id, IsActive = true
+        });
+
+        SeedJournal(db, tenantId, period.Id, "JE-DASH-SALE", "Posted",
+            (cash.Id, 200m, 0m), (revenue.Id, 0m, 200m));
+        SeedJournal(db, tenantId, period.Id, "JE-DASH-EXPENSE", "Posted",
+            (expense.Id, 50m, 0m), (cash.Id, 0m, 50m));
+        SeedJournal(db, tenantId, period.Id, "JE-DASH-DRAFT", "Draft",
+            (cash.Id, 999m, 0m), (revenue.Id, 0m, 999m));
+        SeedJournal(db, otherTenantId, otherPeriod.Id, "JE-OTHER-TENANT", "Posted",
+            (otherCash.Id, 777m, 0m), (otherRevenue.Id, 0m, 777m));
+        await db.SaveChangesAsync();
+
+        var service = CreateGeneralLedgerService(db, tenantId);
+
+        var dashboard = await service.GetFinanceDashboardAsync(
+            new DateTime(2026, 7, 1),
+            new DateTime(2026, 7, 31));
+
+        dashboard.CurrencyCode.Should().Be("GHS");
+        dashboard.Kpis.Revenue.Should().Be(200m);
+        dashboard.Kpis.Expenses.Should().Be(50m);
+        dashboard.Kpis.NetProfit.Should().Be(150m);
+        dashboard.Kpis.CashOnHand.Should().Be(150m);
+        dashboard.Monthly.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(new { Revenue = 200m, Expenses = 50m });
+        dashboard.ExpenseChart.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(new { Name = "Operating Expense", Value = 50m });
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-Reporting")]
     [Trait("Category", "AccountsPayable")]
     public async Task ApAging_ShouldExcludeUnpostedVendorInvoices()
     {
@@ -975,6 +1028,13 @@ public sealed class CoreFinancialReportingFoundationTests
         var tenantSettings = new Mock<ITenantSettingsService>();
         tenantSettings.Setup(x => x.GetCompanyNameAsync()).ReturnsAsync("Tenant Co");
         tenantSettings.Setup(x => x.GetBaseCurrencyAsync()).ReturnsAsync("GHS");
+        tenantSettings.Setup(x => x.GetBaseCurrencyReferenceAsync()).ReturnsAsync(new BaseCurrencyReferenceDto
+        {
+            CurrencyCode = "GHS",
+            CurrencyName = "Ghana Cedi",
+            CurrencySymbol = "GH₵",
+            DecimalPlaces = 2
+        });
 
         var reportingOptions = new DbContextOptionsBuilder<ReportingDbContext>()
             .UseInMemoryDatabase($"finance-reporting-read-{Guid.NewGuid()}")
@@ -1067,6 +1127,26 @@ public sealed class CoreFinancialReportingFoundationTests
         return period;
     }
 
+    private static AccountingBook SeedAccountingBook(ApplicationDbContext db, Guid tenantId)
+    {
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "IFRS",
+            Name = "IFRS Primary",
+            Purpose = "Reporting",
+            BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
+            IsActive = true,
+            IsDefault = true,
+            AllowsPosting = true
+        };
+        db.AccountingBooks.Add(book);
+        return book;
+    }
+
     private static Account SeedAccount(
         ApplicationDbContext db,
         Guid tenantId,
@@ -1146,6 +1226,8 @@ public sealed class CoreFinancialReportingFoundationTests
         params (Guid AccountId, decimal Debit, decimal Credit)[] lines)
     {
         var journalId = Guid.NewGuid();
+        var accountingBookId = db.AccountingBooks.Local
+            .SingleOrDefault(book => book.TenantId == tenantId && book.Code == "IFRS")?.Id ?? Guid.Empty;
         var journal = new JournalEntry
         {
             Id = journalId,
@@ -1157,6 +1239,7 @@ public sealed class CoreFinancialReportingFoundationTests
             FiscalPeriodId = periodId,
             PostingStatus = status,
             BookClassification = "IFRS",
+            AccountingBookId = accountingBookId,
             TotalDebitAmount = lines.Sum(l => l.Debit),
             TotalCreditAmount = lines.Sum(l => l.Credit),
             IsBalanced = lines.Sum(l => l.Debit) == lines.Sum(l => l.Credit)
@@ -1178,6 +1261,7 @@ public sealed class CoreFinancialReportingFoundationTests
                 CreditAmount = line.Credit,
                 PostingStatus = status,
                 BookClassification = "IFRS",
+                AccountingBookId = accountingBookId,
                 LineNumber = lineNumber++,
                 SourceModule = "GL",
                 SourceDocumentType = "ManualJournalEntry"
