@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using ErpSystem.Api.Services.Sms;
+using ErpSystem.Core.Entities;
 using FluentAssertions;
 using Xunit;
 
@@ -119,6 +120,66 @@ public sealed class MNotifySmsGatewayTests
 
         message.Should().Contain("Review the server log");
         message.Should().NotContain("secret-api-key");
+    }
+
+    [Fact]
+    public void BuildTenantProviderOrder_UsesEnabledMNotifyWhenLegacyDefaultTwilioIsDisabled()
+    {
+        var settings = new SmsSettings
+        {
+            DefaultProvider = "Twilio",
+            TwilioEnabled = false,
+            GhanaGatewayEnabled = true
+        };
+
+        var providers = TenantSmsSender.BuildTenantProviderOrder(settings);
+
+        providers.Should().Equal("GhanaGateway");
+    }
+
+    [Fact]
+    public void BuildTenantProviderOrder_UsesEnabledTwilioWhenMNotifyDefaultIsDisabled()
+    {
+        var settings = new SmsSettings
+        {
+            DefaultProvider = "GhanaGateway",
+            TwilioEnabled = true,
+            GhanaGatewayEnabled = false
+        };
+
+        var providers = TenantSmsSender.BuildTenantProviderOrder(settings);
+
+        providers.Should().Equal("Twilio");
+    }
+
+    [Fact]
+    public void BuildTenantProviderOrder_PreservesConfiguredEnabledFallbackOrder()
+    {
+        var settings = new SmsSettings
+        {
+            DefaultProvider = "Twilio",
+            FallbackProvidersJson = "[\"mNotify\",\"Twilio\"]",
+            TwilioEnabled = true,
+            GhanaGatewayEnabled = true
+        };
+
+        var providers = TenantSmsSender.BuildTenantProviderOrder(settings);
+
+        providers.Should().Equal("Twilio", "GhanaGateway");
+    }
+
+    [Fact]
+    public void BuildTenantProviderOrder_ReturnsNoProvidersWhenEveryProviderIsDisabled()
+    {
+        var settings = new SmsSettings
+        {
+            DefaultProvider = "Twilio",
+            FallbackProvidersJson = "[\"GhanaGateway\"]",
+            TwilioEnabled = false,
+            GhanaGatewayEnabled = false
+        };
+
+        TenantSmsSender.BuildTenantProviderOrder(settings).Should().BeEmpty();
     }
 
     [Fact]

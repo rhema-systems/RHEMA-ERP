@@ -679,7 +679,9 @@ public class SettingsController : ControllerBase
     private static SmsSettingsDto ToSmsSettingsDto(Core.Entities.SmsSettings settings) => new()
     {
         IsConfigured = true,
-        DefaultProvider = settings.DefaultProvider ?? "GhanaGateway",
+        DefaultProvider = ErpSystem.Api.Services.Sms.TenantSmsSender.BuildTenantProviderOrder(settings).FirstOrDefault()
+            ?? settings.DefaultProvider
+            ?? "GhanaGateway",
         FallbackProvidersCsv = SmsSettingsDto.FallbackJsonToCsv(settings.FallbackProvidersJson),
         TwilioEnabled = settings.TwilioEnabled,
         TwilioAccountSid = settings.TwilioAccountSid ?? string.Empty,

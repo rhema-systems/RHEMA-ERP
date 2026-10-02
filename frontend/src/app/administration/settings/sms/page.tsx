@@ -65,7 +65,7 @@ export default function SmsSettingsPage() {
     mutationFn: async () => {
       const payload: SmsSettings = {
         ...form,
-        defaultProvider: (form.defaultProvider || 'Twilio').trim(),
+        defaultProvider: (form.defaultProvider || 'GhanaGateway').trim(),
         fallbackProvidersCsv: (form.fallbackProvidersCsv || '').trim(),
         twilioAccountSid: (form.twilioAccountSid || '').trim(),
         twilioAuthToken: (form.twilioAuthToken || '').trim(),
