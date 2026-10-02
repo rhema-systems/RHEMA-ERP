@@ -33,6 +33,10 @@ public class UnitOfMeasure : TenantEntity
     public bool IsBaseUnit { get; set; } = true;
     public bool IsActive { get; set; } = true;
     public int SortOrder { get; set; } = 0;
+    [Range(0, 6)]
+    public int DecimalPlaces { get; set; } = 4;
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal? RoundingIncrement { get; set; }
 
     // Navigation Properties
     public virtual ICollection<UnitOfMeasureConversion> ConversionsFrom { get; set; } = new List<UnitOfMeasureConversion>();

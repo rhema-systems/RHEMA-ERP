@@ -110215,6 +110215,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<int>("DecimalPlaces")
+                        .HasColumnType("int");
+
                     b.Property<string>("CreatedBy")
                         .HasColumnType("nvarchar(max)");
 
@@ -110250,6 +110253,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<int>("SortOrder")
                         .HasColumnType("int");
+
+                    b.Property<decimal?>("RoundingIncrement")
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<string>("Symbol")
                         .HasMaxLength(10)

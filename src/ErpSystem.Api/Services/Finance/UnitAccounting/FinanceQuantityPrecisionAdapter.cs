@@ -1,8 +1,6 @@
-using ErpSystem.Core.Entities.Finance;
-using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
-using Microsoft.EntityFrameworkCore;
+using ErpSystem.Api.Services.Inventory;
 
 namespace ErpSystem.Api.Services.Finance.UnitAccounting;
 
@@ -40,41 +38,9 @@ public sealed class FinanceQuantityPrecisionAdapter : IFinanceQuantityPrecisionA
         string boundary,
         CancellationToken cancellationToken = default)
     {
-        var normalizedCode = unitTypeCode?.Trim().ToUpperInvariant();
-        if (string.IsNullOrEmpty(normalizedCode))
+        if (string.IsNullOrWhiteSpace(unitTypeCode))
             return;
-
-        var policy = await unitOfWork.Repository<UnitType>()
-            .GetQueryable(unitType =>
-                unitType.TenantId == tenantId &&
-                unitType.Code == normalizedCode &&
-                unitType.IsActive &&
-                !unitType.IsDeleted)
-            .Select(unitType => new
-            {
-                unitType.Code,
-                unitType.DecimalPlaces,
-                unitType.RoundingIncrement
-            })
-            .SingleOrDefaultAsync(cancellationToken);
-
-        // Non-Finance UOM masters remain owned by their source module. Finance
-        // enforces only codes explicitly governed by a Finance Unit Type.
-        if (policy == null)
-            return;
-
-        try
-        {
-            PrecisionRoundingPolicy.ValidateQuantity(
-                quantity,
-                policy.DecimalPlaces,
-                policy.RoundingIncrement);
-        }
-        catch (InvalidOperationException exception)
-        {
-            throw new InvalidOperationException(
-                $"{boundary} quantity {quantity} is invalid for Unit Type '{policy.Code}': {exception.Message}",
-                exception);
-        }
+        await CommercialQuantityPolicyValidator.ResolveAndValidateAsync(
+            unitOfWork, tenantId, null, unitTypeCode, quantity, boundary, cancellationToken);
     }
 }
