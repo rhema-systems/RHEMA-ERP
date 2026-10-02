@@ -853,6 +853,9 @@ public sealed partial class JournalEntryLifecycleBatch5Tests
         var book = new AccountingBook
         {
             Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
             IsDefault = true, IsActive = true, AllowsPosting = true
         };
         var assetClassification = new AccountClassification

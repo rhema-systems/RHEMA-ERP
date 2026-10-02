@@ -1585,6 +1585,23 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             && (string.Equals(sourceDocumentType, "YearEndClose", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(sourceDocumentType, "YearEndCloseReversal", StringComparison.OrdinalIgnoreCase));
 
+        if (!isYearEndClosePosting)
+        {
+            var accountingBookPeriod = await _context.AccountingBookPeriods
+                .AsNoTracking()
+                .SingleOrDefaultAsync(item => item.TenantId == tenantId
+                    && item.AccountingBookId == accountingBook.Id
+                    && item.FiscalPeriodId == fiscalPeriod.Id
+                    && !item.IsDeleted,
+                    cancellationToken);
+            if (accountingBookPeriod == null)
+                throw new InvalidOperationException(
+                    "ACCOUNTING_BOOK_PERIOD_REQUIRED: The selected accounting book has no governed authority for this fiscal period.");
+            if (accountingBookPeriod.PeriodStatus != AccountingBookPeriodStatus.Open)
+                throw new InvalidOperationException(
+                    $"ACCOUNTING_BOOK_PERIOD_NOT_OPEN: Accounting book '{accountingBook.Code}' is {accountingBookPeriod.PeriodStatus} for fiscal period '{fiscalPeriod.PeriodCode}'.");
+        }
+
         if (yearEndCycle == null)
             await EnsureBookYearIsOpenAsync(tenantId, accountingBook.Id, fiscalPeriod.FiscalYearId, cancellationToken);
 
