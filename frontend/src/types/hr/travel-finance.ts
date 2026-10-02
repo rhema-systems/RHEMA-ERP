@@ -76,7 +76,10 @@ export type TravelAdvanceStatus =
   | 'PartiallySettled'
   | 'FullySettled'
   | 'Overdue'
-  | 'WrittenOff';
+  | 'WrittenOff'
+  // Travel final closure, migration batch 1 — written from lane 3.
+  | 'Rejected'
+  | 'Cancelled';
 
 // ── Budget ───────────────────────────────────────────────────────────────────
 

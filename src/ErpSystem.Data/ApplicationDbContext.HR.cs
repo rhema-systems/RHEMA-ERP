@@ -14762,7 +14762,9 @@ private void ConfigureStaffTravelEntities(ModelBuilder builder)
 
         builder.Entity<StaffTravelExpenseClaim>(entity =>
         {
-            entity.HasIndex(x => new { x.TenantId, x.ClaimNumber }).IsUnique();
+            // Filtered (travel final closure, migration batch 1 — finding B9): unfiltered, a
+            // soft-deleted claim kept its number, and the count-based generator issued it again.
+            entity.HasIndex(x => new { x.TenantId, x.ClaimNumber }).IsUnique().HasFilter("[IsDeleted] = 0");
             entity.HasIndex(x => x.Status);
         });
 
@@ -14775,8 +14777,20 @@ private void ConfigureStaffTravelEntities(ModelBuilder builder)
 
         builder.Entity<StaffTravelAdvance>(entity =>
         {
-            entity.HasIndex(x => new { x.TenantId, x.AdvanceNumber }).IsUnique();
+            // Filtered, as the claim number (B9).
+            entity.HasIndex(x => new { x.TenantId, x.AdvanceNumber }).IsUnique().HasFilter("[IsDeleted] = 0");
             entity.HasIndex(x => x.Status);
+        });
+
+        builder.Entity<StaffTravelGroundTransport>(entity =>
+        {
+            // The driver's own request (D-11). Configured WITHOUT a navigation: a second navigation
+            // from the leg to StaffTravelRequest would make EF's pairing of
+            // StaffTravelRequest.GroundTransports ambiguous. Restrict, like every relationship in
+            // the module (the loop below).
+            entity.HasOne<StaffTravelRequest>()
+                .WithMany()
+                .HasForeignKey(x => x.DriverTravelRequestId);
         });
 
         builder.Entity<StaffTravelPerDiemRate>(entity =>
@@ -14789,6 +14803,9 @@ private void ConfigureStaffTravelEntities(ModelBuilder builder)
         {
             entity.HasIndex(x => x.IsCurrentVersion);
             entity.HasIndex(x => x.EffectiveFrom);
+            // One version number per policy name (C3 / T-50): the number was caller-declared and
+            // could repeat. Lane 4 makes the server assign it.
+            entity.HasIndex(x => new { x.TenantId, x.PolicyName, x.VersionNumber }).IsUnique().HasFilter("[IsDeleted] = 0");
         });
 
         builder.Entity<StaffTravelPolicyRule>(entity =>

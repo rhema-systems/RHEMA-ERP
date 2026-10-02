@@ -33,8 +33,9 @@ baseline (D-13); lane 0 was built the same day.**
    API on UAT: auto mode refuses `start-api-uat.ps1` unless this project's local settings allow it
    (the user added that rule on 2026-10-01); before every start, check UAT for pending migrations
    and ask the user first if one would be applied.
-3. **Then migration batch 1** (§ 5): the user scaffolds it, it is rewritten as guarded SQL, the user
-   builds, the data part is dry-run on UAT and applied on the user's go. Lanes 1–9 build on it.
+3. **Migration batch 1** (§ 5) — **APPLIED to UAT 2026-10-02** (`20261002000637_TravelClosureBatch1`,
+   guarded SQL; 33/33 on a scratch copy of UAT first; verified on UAT; truth suite 112/112 twice after);
+   staged for the user's commit. **Next: lane 1.** Lanes 1–9 build on it.
 4. Then lanes **1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane
    against this document before building it — line numbers are as of HEAD `bad482a8d`.
 
@@ -81,7 +82,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | Lane | What | Schema | Suite | Status |
 |---|---|---|---|---|
 | **0** | Harness on UAT, truth and fiction | none | `run-final-truth.mjs` | ✅ complete 2026-10-01 — 112/112 twice on UAT; staged |
-| **M1** | Migration batch 1 | the whole batch | — | ☐ not started |
+| **M1** | Migration batch 1 | the whole batch | `m1/test-cycle.sh` (session scratchpad) | ✅ applied to UAT 2026-10-02 — 33/33 on a scratch copy first, verified on UAT, truth suite 112/112 twice after; staged |
 | **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ☐ |
 | **2** | The approval ladder and the approver's door | batch 1 | `run-final-approvals.mjs` | ☐ |
 | **3** | The money chain | batch 1 | `run-final-money.mjs` | ☐ |
@@ -498,6 +499,9 @@ traveller's own create and edit; § 3 an edit keeps a group participant in the g
 types, the old ones refused, delete for Admin only; § 7 the money and booking payloads, and the claim
 number collision answering 409; § 8 the register's employee filter; the teardown's five checks. Four
 known-open findings are observed, not counted: A5, A6, O-5 and the link an edit that omits it drops.
+*Since migration batch 1 (2026-10-02):* § 7 asserts that a deleted claim no longer blocks the next one,
+observes the reused number (B9, lane 3) as a fifth finding, and proves the 409 on the policy version
+index instead of the claim number.
 
 Checks run 2026-10-01: `frontend/tsconfig.travel-lane0.json` type-checks clean; `travel-enums.test.ts`
 (9) and `travel-request-payload.test.ts` (6) pass; `hr-setup-nav.test.ts` passes. Four layout tests
@@ -594,7 +598,9 @@ refused; HR approves stage 2; a traveller with no manager goes to HR; the inbox 
   is deducted.
 - [ ] **Advances:** `0 < ApprovedAmount ≤ RequestedAmount`; the total approved on a request ≤ its
   approved budget; no new advance while the traveller has an Overdue one; reject and cancel verbs
-  (`TravelAdvanceStatus.Rejected = 8`, `Cancelled = 9`); `UnsettledAmount` 0 until disbursed; the
+  (`TravelAdvanceStatus.Rejected = 8`, `Cancelled = 9`); `UnsettledAmount` 0 until disbursed — and the
+  data step moved here from batch 1: zero it on existing Requested and Approved advances in the same
+  slice as the disbursement code that sets it; the
   outstanding and overdue reads filter status; `SettlementDeadline` defaults to `TravelEndDate +
   ExpenseSubmissionDays` (or 30 days); `Overdue` set by the sweep; `WrittenOff` by an Admin verb with a
   reason; **`RecordRefundAsync`** (amount ≤ unsettled, reference, actor ≠ traveller) settles unused
@@ -852,9 +858,35 @@ hand-merged; the data part is dry-run on the target first and applied on the use
 PolicyName, VersionNumber)`.
 
 **Data** (raw SQL; counted read-only first, applied on the user's go): `IsInternational` recomputed
-from the two countries for live requests; `UnsettledAmount` zeroed for Requested and Approved advances;
-a claim's `CurrencyCode` set to the tenant's base where it differs; a policy's `CurrencyCode` set to
-the tenant's base.
+from the two countries for live requests; a claim's `CurrencyCode` set to the tenant's base where it
+differs; a policy's `CurrencyCode` set to the tenant's base; a reminder dispatch's new `PublishedAt` set
+to the time it was written (the sweep treated those rows as sent — lane 8 must not send them again).
+
+⚠ **Moved to lane 3: zeroing `UnsettledAmount` on Requested and Approved advances** (2026-10-02, while
+writing the migration). Today's disbursement does not recompute the amount — only approval sets it — so
+an Approved advance zeroed by this batch would be disbursed with nothing outstanding, and the claim that
+should recover it would recover nothing. It ships in lane 3 with the code that sets the amount at
+disbursement.
+
+**As built (2026-10-02):** `20261002000637_TravelClosureBatch1` — the scaffold rewritten as guarded SQL
+(74 batches up, 76 down). EF's scaffold also drops `IX_StaffTravelPolicies_TenantId`, because the new
+policy index starts with the tenant and covers its foreign key. Down refuses while an advance records a
+refund, a booking carries an exception state or a claim records a voided payment, and it refuses to
+restore the unfiltered number indexes while a deleted row shares a number. Proven on a scratch copy of
+UAT (`m1/test-cycle.sh`, 33/33): Up, Up again (no rows changed, same schema), Down (UAT's schema exactly),
+Up again; the two corrections on planted rows; a duplicate live policy version refused and rolled back,
+a deleted duplicate not; the three Down refusals rolled back. Against UAT it adds 38 columns, 17
+indexes, 14 foreign keys and 3 defaults, and removes the three indexes it replaces. On UAT the data part
+fills one policy's currency (GHS) and one dispatch's published time; the corrections touch nothing.
+
+**Applied to UAT 2026-10-02, on the user's go.** Restore point: `ErpSystemDB_UAT_before_travelb1.bak`
+(COPY_ONLY, verified), taken just before. The API's startup applied it — history 108 rows, newest
+`20261002000637_TravelClosureBatch1` — and it was verified in SQL, not from the log: every post-Up check
+held, and UAT's schema fingerprint equals the scratch copy's after Up. The truth suite then passed
+112/112 twice. Its claim section had to change, because the batch did what it was meant to: a deleted
+claim no longer blocks the next one, so the old 409 became a 201. The suite now asserts that, records the
+reused number as an observation for lane 3, and shows the 409 mapping on the new policy version index —
+two drafts claiming one version, which lane 4 ends by assigning the number on the server.
 
 Attendance posting needs no schema — it writes the same `StaffDailyAttendance` rows leave's posting
 does, with a reason. Vehicle and driver are never copied onto travel rows — they are read from the
@@ -923,6 +955,11 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   lane 7; the strings that promised more than the code does; the backend tidy-ups and the 409; the new
   fixture, truth suite and harness README. Scoped type-check and unit tests clean. The suite has not
   run: it waits for the user's build and the go to start the API on UAT.
+- **2026-10-02** — Migration batch 1 written: the model changes, the user's scaffold, the guarded-SQL
+  rewrite, and 33/33 on a scratch copy of UAT. The `UnsettledAmount` data step moved to lane 3 (§ 5).
+- **2026-10-02, later** — **Migration batch 1 applied to UAT** on the user's go, after a verified COPY_ONLY
+  backup; verified in SQL; the truth suite's claim section updated for the filtered index and the 409 moved
+  to the policy version index; 112/112 twice. Staged. Next: lane 1.
 - **2026-10-01, night** — **Lane 0 complete.** The build succeeded; no migration was pending on UAT;
   the user allowed `start-api-uat.ps1` under auto mode. The first run passed every feature check but
   its teardown failed (the claim-rename collision in lane 0's checklist) — fixed, and the stranded

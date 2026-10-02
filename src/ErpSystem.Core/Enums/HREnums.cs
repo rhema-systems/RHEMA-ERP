@@ -9466,6 +9466,28 @@ public enum TravelBookingStatus
     OnHold = 8
 }
 
+/// <summary>
+/// Where an above-cap booking's exception stands (travel final closure decision D-8, lane 4): a
+/// booking above a cap is saved Pending and cannot be confirmed or ticketed until a DIFFERENT
+/// <c>HR.Travel.Admin</c> holder authorises it.
+/// </summary>
+/// <remarks>Stored as int. <see cref="TravelBookingExceptionState.None"/> = 0 is the column default, so every booking made before
+/// migration batch 1 reads as carrying no exception.</remarks>
+public enum TravelBookingExceptionState
+{
+    [Description("None")]
+    None = 0,
+
+    [Description("Pending")]
+    Pending = 1,
+
+    [Description("Authorised")]
+    Authorised = 2,
+
+    [Description("Refused")]
+    Refused = 3
+}
+
 public enum GroundTransportType
 {
     [Description("Taxi")]
@@ -9680,7 +9702,20 @@ public enum TravelAdvanceStatus
     Overdue = 6,
 
     [Description("Written Off")]
-    WrittenOff = 7
+    WrittenOff = 7,
+
+    // Added 2026-10-01 (travel final closure, migration batch 1); int-stored, so no schema change.
+    // Lane 3 gives both their writers. ⚠ The posting retry guard in HrFinancePostingAdminService is a
+    // NEGATIVE list of advance statuses — lane 3 flips it to the positive one, or a Rejected advance
+    // could be re-posted.
+
+    /// <summary>Refused before any money moved.</summary>
+    [Description("Rejected")]
+    Rejected = 8,
+
+    /// <summary>Withdrawn before disbursement — by the traveller, or with the trip.</summary>
+    [Description("Cancelled")]
+    Cancelled = 9
 }
 
 public enum TravelPaymentMethod

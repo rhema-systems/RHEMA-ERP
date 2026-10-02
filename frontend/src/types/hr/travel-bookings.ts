@@ -215,6 +215,12 @@ export type TravelBookingChannel =
 /** Ordered Economy → First; the policy cap is a comparison against this ordering. */
 export type FlightCabinClass = 'Economy' | 'PremiumEconomy' | 'Business' | 'First';
 
+/**
+ * Where an above-cap booking's exception stands (travel final closure D-8, lane 4). `None` on every
+ * booking made before migration batch 1.
+ */
+export type TravelBookingExceptionState = 'None' | 'Pending' | 'Authorised' | 'Refused';
+
 export type GroundTransportType =
   | 'Taxi'
   | 'Rideshare'
