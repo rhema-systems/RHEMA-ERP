@@ -8,6 +8,7 @@ using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using FleetStatus = ErpSystem.Core.Entities.Maintenance.FleetTripStatuses;
 
 namespace ErpSystem.Core.Services.HR;
 
@@ -25,7 +26,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     private readonly IStaffTravelGroundTransportRepository _groundRepository;
     private readonly IStaffTravelCarRentalBookingRepository _carRentalRepository;
     private readonly IStaffTravelRequestRepository _requestRepository;
-    private readonly IFleetTripService _fleetTrips;
+    private readonly IStaffTravelFleetService _fleet;
     private readonly HrCurrencyBridge _currency;
     private readonly StaffTravelPolicyGuard _policyGuard;
     private readonly ICurrentUserProvider _currentUserProvider;
@@ -39,7 +40,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         IStaffTravelGroundTransportRepository groundRepository,
         IStaffTravelCarRentalBookingRepository carRentalRepository,
         IStaffTravelRequestRepository requestRepository,
-        IFleetTripService fleetTrips,
+        IStaffTravelFleetService fleet,
         HrCurrencyBridge currency,
         StaffTravelPolicyGuard policyGuard,
         ICurrentUserProvider currentUserProvider,
@@ -53,7 +54,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         _groundRepository = groundRepository;
         _carRentalRepository = carRentalRepository;
         _requestRepository = requestRepository;
-        _fleetTrips = fleetTrips;
+        _fleet = fleet;
         _currency = currency;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
@@ -813,16 +814,26 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     public async Task<StaffTravelGroundTransportDto> GetGroundTransportByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedGroundTransportAsync(id);
-        return entity.ToDto();
+        return await GroundDtoAsync(entity, cancellationToken);
     }
 
     public async Task<IEnumerable<StaffTravelGroundTransportDto>> GetGroundTransportsByRequestAsync(Guid requestId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        return (await _groundRepository.GetByRequestIdAsync(requestId))
+        var legs = (await _groundRepository.GetByRequestIdAsync(requestId))
             .Where(g => g.TenantId == tenantId)
             .Select(g => g.ToDto())
             .ToList();
+        await _fleet.DescribeAsync(legs, cancellationToken);   // lane 6: a company vehicle's facts are Fleet's
+        return legs;
+    }
+
+    /// <summary>A leg as the desk sees it — a company vehicle's vehicle, driver and status read from Fleet (lane 6).</summary>
+    private async Task<StaffTravelGroundTransportDto> GroundDtoAsync(StaffTravelGroundTransport entity, CancellationToken cancellationToken)
+    {
+        var dto = entity.ToDto();
+        await _fleet.DescribeAsync(new[] { dto }, cancellationToken);
+        return dto;
     }
 
     public async Task<StaffTravelGroundTransportDto> CreateGroundTransportAsync(CreateStaffTravelGroundTransportDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
@@ -840,48 +851,23 @@ public class StaffTravelBookingService : IStaffTravelBookingService
             await RequireVendorAsync(entity.VendorId, await _policyGuard.ResolveAsync(owner, cancellationToken),
                 "ground transport", newlyNamed: true, cancellationToken);
 
-        // A company vehicle is a real, finite resource — reserve it in Fleet rather than writing a
-        // note here. Every other mode is somebody else's vehicle and stays travel-owned.
+        // A company vehicle is a real, finite resource — reserved in Fleet rather than written down here (lane 6: the
+        // clashes and the vehicle's compliance checked, the trip submitted when Fleet publishes an approval route —
+        // D-27). Every other mode is somebody else's vehicle and stays travel-owned.
         if (createDto.TransportType == GroundTransportType.CompanyVehicle)
         {
-            if (createDto.VehicleAssetId is not Guid vehicleAssetId || vehicleAssetId == Guid.Empty)
+            if (createDto.PickupDatetime is not DateTime pickup || createDto.DropoffDatetime is not DateTime dropoff)
                 throw new InvalidOperationException(
-                    "A company-vehicle leg must name the vehicle to reserve. Choose a vehicle, or pick a different transport type.");
-
-            var request = await _requestRepository.GetByIdAsync(createDto.StaffTravelRequestId);
-
-            FleetTripDto trip;
-            try
-            {
-                trip = await _fleetTrips.CreateTripAsync(new CreateFleetTripDto
-                {
-                    VehicleAssetId = vehicleAssetId,
-                    DriverEmployeeId = createDto.DriverEmployeeId,
-                    Purpose = $"Staff travel {request?.RequestNumber}".Trim(),
-                    Origin = createDto.PickupLocation,
-                    Destination = createDto.DropoffLocation,
-                    PlannedStartAt = createDto.PickupDatetime,
-                    PlannedEndAt = createDto.DropoffDatetime,
-                    Notes = createDto.Notes,
-                });
-            }
-            catch (ArgumentException ex)
-            {
-                // Fleet uses ArgumentException for VALIDATION failures — "Vehicle not found",
-                // "Selected asset is not a vehicle". Travel's error contract reads ArgumentException
-                // as "the travel record does not exist" and answers 404, so letting Fleet's
-                // exception through told the caller their travel request was missing when in fact
-                // their vehicle choice was wrong. Translate at the seam: another module's exception
-                // vocabulary must not leak into this one's contract.
-                throw new InvalidOperationException($"The vehicle could not be reserved: {ex.Message}");
-            }
-
-            entity.FleetTripId = trip.Id;
+                    "A company vehicle is reserved from a pick-up time to a drop-off time — give both.");
+            entity.FleetTripId = await _fleet.ReserveAsync(owner, new StaffTravelFleetReservation(
+                createDto.VehicleAssetId, createDto.DriverEmployeeId, pickup, dropoff,
+                createDto.PickupLocation, createDto.DropoffLocation, createDto.FleetTripDestinationId,
+                $"Staff travel {owner.RequestNumber}", createDto.Notes), cancellationToken);
         }
         await _groundRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         var reloaded = await _groundRepository.GetWithDetailsAsync(tenantId, entity.Id);
-        return (reloaded ?? entity).ToDto();
+        return await GroundDtoAsync(reloaded ?? entity, cancellationToken);
     }
 
     public async Task<StaffTravelGroundTransportDto> UpdateGroundTransportAsync(UpdateStaffTravelGroundTransportDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -895,6 +881,23 @@ public class StaffTravelBookingService : IStaffTravelBookingService
             StaffTravelBookingRules.RequireWithinTrip(request,
                 StaffTravelBookingRules.DateOf(updateDto.PickupDatetime), StaffTravelBookingRules.DateOf(updateDto.DropoffDatetime),
                 "ground transport");
+        // Lane 6 (D2): a leg does not turn into a company vehicle, or out of one — the fleet trip would be left behind,
+        // or never made.
+        if (updateDto.TransportType != entity.TransportType
+            && (updateDto.TransportType == GroundTransportType.CompanyVehicle || entity.TransportType == GroundTransportType.CompanyVehicle))
+            throw new InvalidOperationException(
+                "A leg does not change to or from a company vehicle — cancel it and book again.");
+        if (entity.FleetTripId is Guid fleetTripId)
+        {
+            if (updateDto.PickupDatetime is not DateTime pickup || updateDto.DropoffDatetime is not DateTime dropoff)
+                throw new InvalidOperationException(
+                    "A company vehicle is reserved from a pick-up time to a drop-off time — give both.");
+            // Fleet's trip changes first, while Fleet allows (a draft or rejected trip; an approved one only its driver).
+            await _fleet.UpdateReservationAsync(request, fleetTripId, new StaffTravelFleetReservation(
+                updateDto.VehicleAssetId, updateDto.DriverEmployeeId, pickup, dropoff,
+                updateDto.PickupLocation, updateDto.DropoffLocation, updateDto.FleetTripDestinationId,
+                $"Staff travel {request.RequestNumber}", updateDto.Notes), cancellationToken);
+        }
         var previousVendor = entity.VendorId;
         entity.UpdateEntity(updateDto, updatedByUserId);
         if (entity.TransportType != GroundTransportType.CompanyVehicle)
@@ -903,7 +906,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         await _groundRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         var reloaded = await _groundRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
-        return (reloaded ?? entity).ToDto();
+        return await GroundDtoAsync(reloaded ?? entity, cancellationToken);
     }
 
     public async Task<bool> DeleteGroundTransportAsync(Guid id, CancellationToken cancellationToken = default)
@@ -911,6 +914,16 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         var entity = await GetOwnedGroundTransportAsync(id);
         StaffTravelBookingRules.RequireDeletable(
             entity.Status, await RequireOwnedRequestAsync(entity.StaffTravelRequestId), GroundLabel(entity));
+        if (entity.FleetTripId is Guid fleetTripId)
+        {
+            // Lane 6: only a reservation the transport office has not taken up — a draft, or one it rejected — goes with
+            // the leg; its fleet trip is cancelled, not left live (D2).
+            var fleetStatus = (await GroundDtoAsync(entity, cancellationToken)).FleetStatus;
+            if (fleetStatus is not (FleetStatus.Draft or FleetStatus.Rejected or FleetStatus.Cancelled or null))
+                throw new InvalidOperationException(
+                    $"The vehicle's trip is {fleetStatus.ToLowerInvariant()} in Fleet, so the leg is not deleted — cancel it instead.");
+            await _fleet.CancelReservationAsync(fleetTripId, $"Travel leg deleted ({GroundLabel(entity)})", cancellationToken);
+        }
         await _groundRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
@@ -1173,6 +1186,22 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         var label = GroundLabel(entity);
         if (verb == TravelBookingVerb.Ticket)
             throw new InvalidOperationException("Only a flight is ticketed — ground transport is confirmed.");
+        // Lane 6 (R3): a company vehicle's leg follows its fleet trip — the transport office approves, dispatches and
+        // completes it in Fleet. Cancelling is the one verb done here, and it cancels the fleet trip.
+        if (entity.FleetTripId is Guid fleetTripId)
+        {
+            if (verb != TravelBookingVerb.Cancel)
+                throw new InvalidOperationException(
+                    "A company vehicle's leg follows its fleet trip — the transport office approves, dispatches and completes " +
+                    "it in Fleet. Only cancelling it is done here.");
+            StaffTravelBookingRules.Next(entity.Status, verb, request, label);
+            var why = cancel?.Reason?.Trim();
+            if (string.IsNullOrEmpty(why) || why.Length < 5)
+                throw new InvalidOperationException("Say why the booking is cancelled, in at least five characters.");
+            if (actorEmployeeId is null)
+                throw new UnauthorizedAccessException("Cancelling a booking needs a login linked to an employee record.");
+            await _fleet.CancelReservationAsync(fleetTripId, why, cancellationToken);
+        }
         var next = StaffTravelBookingRules.Next(entity.Status, verb, request, label);
         if (verb == TravelBookingVerb.Cancel)
             await RecordCancellationAsync(request, label, cancel, null, entity.CurrencyCode, actorEmployeeId, cancellationToken);
@@ -1182,7 +1211,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Ground transport {Id} {Verb} → {Status}", id, verb, next);
         var reloaded = await _groundRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
-        return (reloaded ?? entity).ToDto();
+        return await GroundDtoAsync(reloaded ?? entity, cancellationToken);
     }
 
     public async Task<StaffTravelCarRentalBookingDto> MoveCarRentalAsync(

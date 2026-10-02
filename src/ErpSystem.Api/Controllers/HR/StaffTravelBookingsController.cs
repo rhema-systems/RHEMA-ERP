@@ -16,14 +16,29 @@ namespace ErpSystem.Api.Controllers.HR;
 public class StaffTravelBookingsController : HrControllerBase
 {
     private readonly IStaffTravelBookingService _service;
+    private readonly IStaffTravelFleetService _fleet;
 
     public StaffTravelBookingsController(
         IStaffTravelBookingService service,
+        IStaffTravelFleetService fleet,
         ICurrentUserService currentUser)
         : base(currentUser)
     {
         _service = service;
+        _fleet = fleet;
     }
+
+    /// <summary>
+    /// The vehicles, drivers and destinations a company-vehicle leg chooses from (lane 6, FX-4) — read through travel's
+    /// door, since HR holds no Maintenance permission. Each says why it is not available over the window: the trip's
+    /// days, or the leg's pick-up and drop-off when given. <paramref name="excludeFleetTripId"/> leaves out the leg's
+    /// own fleet trip when it is being changed.
+    /// </summary>
+    [HttpGet("fleet/options")]
+    public async Task<ActionResult<StaffTravelFleetOptionsDto>> GetFleetOptions(
+        [FromQuery] Guid requestId, [FromQuery] DateTime? from = null, [FromQuery] DateTime? to = null,
+        [FromQuery] Guid? excludeFleetTripId = null)
+        => Ok(await _fleet.GetOptionsAsync(requestId, from, to, excludeFleetTripId));
 
     /// <summary>
     /// Tenant + platform user id for audit fields. Deliberately does not require an employee

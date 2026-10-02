@@ -178,12 +178,23 @@ public static class StaffTravelBookingRules
                 .ToListAsync(cancellationToken))
             .Where(b => Committed(b.Status))
             .Select(b => $"the {b.HotelName} ({Describe(b.Status)})"));
-        names.AddRange((await unitOfWork.Repository<StaffTravelGroundTransport>()
-                .GetQueryable(b => b.TenantId == tenantId && b.StaffTravelRequestId == requestId && !b.IsDeleted)
-                .Select(b => new { b.Status, b.TransportType, b.BookingReference })
-                .ToListAsync(cancellationToken))
-            .Where(b => Committed(b.Status))
+        var ground = await unitOfWork.Repository<StaffTravelGroundTransport>()
+            .GetQueryable(b => b.TenantId == tenantId && b.StaffTravelRequestId == requestId && !b.IsDeleted)
+            .Select(b => new { b.Status, b.TransportType, b.BookingReference, b.FleetTripId })
+            .ToListAsync(cancellationToken);
+        names.AddRange(ground
+            .Where(b => b.FleetTripId is null && Committed(b.Status))
             .Select(b => $"the {b.TransportType} transport {b.BookingReference}".TrimEnd() + $" ({Describe(b.Status)})"));
+        // Lane 6: a company vehicle's leg is committed when the transport office has approved or dispatched its fleet
+        // trip — Fleet's status, not the leg's own.
+        var fleetTripIds = ground.Where(b => b.FleetTripId is not null).Select(b => b.FleetTripId!.Value).ToList();
+        if (fleetTripIds.Count > 0)
+            names.AddRange((await unitOfWork.Repository<ErpSystem.Core.Entities.Maintenance.FleetTrip>()
+                    .GetQueryable(t => t.TenantId == tenantId && fleetTripIds.Contains(t.Id))
+                    .Select(t => new { t.Status, VehicleName = t.VehicleAsset!.Name })
+                    .ToListAsync(cancellationToken))
+                .Where(t => StaffTravelFleetService.IsCommitted(t.Status))
+                .Select(t => $"the company vehicle {t.VehicleName} ({t.Status.ToLowerInvariant()} in Fleet)"));
         names.AddRange((await unitOfWork.Repository<StaffTravelCarRentalBooking>()
                 .GetQueryable(b => b.TenantId == tenantId && b.StaffTravelRequestId == requestId && !b.IsDeleted)
                 .Select(b => new { b.Status, b.BookingReference })
@@ -216,8 +227,11 @@ public static class StaffTravelBookingRules
         {
             b.Status = TravelBookingStatus.Cancelled; b.CancelledAt ??= now; b.UpdatedAt = now; b.UpdatedBy = userId; count++;
         }
+        // A company vehicle's leg is not here: its fleet trip is cancelled through Fleet (IStaffTravelFleetService.
+        // CancelForRequestAsync, lane 6), which marks the leg.
         foreach (var b in (await unitOfWork.Repository<StaffTravelGroundTransport>()
-                     .GetQueryable(x => x.TenantId == tenantId && x.StaffTravelRequestId == requestId && !x.IsDeleted)
+                     .GetQueryable(x => x.TenantId == tenantId && x.StaffTravelRequestId == requestId && !x.IsDeleted
+                                     && x.FleetTripId == null)
                      .ToListAsync(cancellationToken)).Where(x => Held(x.Status)))
         {
             b.Status = TravelBookingStatus.Cancelled; b.UpdatedAt = now; b.UpdatedBy = userId; count++;

@@ -486,17 +486,61 @@ export interface StaffTravelGroundTransport extends AuditFields {
   status: TravelBookingStatus;
   statusName: string;
   notes?: string | null;
+  // A company vehicle's fleet trip, read from Fleet (lane 6) — the leg's status is Fleet's, mapped.
+  vehicleAssetId?: string | null;
+  vehicleName?: string | null;
+  vehiclePlate?: string | null;
+  driverEmployeeId?: string | null;
+  driverName?: string | null;
+  /** Fleet's own status: Draft, Submitted, Approved, Rejected, Dispatched, Completed, Cancelled. */
+  fleetStatus?: string | null;
+  fleetRejectionReason?: string | null;
+  /** Why the vehicle is not held yet, when it is not — e.g. Fleet publishes no approval route. */
+  fleetNote?: string | null;
+  dispatchedAt?: string | null;
+  returnedAt?: string | null;
+  distance?: number | null;
+}
+
+/** What a company-vehicle leg chooses from, through travel's own door (lane 6). */
+export interface StaffTravelFleetOptions {
+  windowStart: string;
+  windowEnd: string;
+  vehicles: {
+    vehicleAssetId: string;
+    name: string;
+    assetNumber?: string | null;
+    licensePlate?: string | null;
+    assignedTo?: string | null;
+    blockingCompliance: string[];
+    overlaps: string[];
+    available: boolean;
+  }[];
+  drivers: {
+    employeeId: string;
+    name: string;
+    employeeNumber?: string | null;
+    licenceExpiry?: string | null;
+    flags: string[];
+  }[];
+  defaultVehicleAssetId?: string | null;
+  defaultDriverEmployeeId?: string | null;
+  destinationRequired: boolean;
+  destinations: { id: string; name: string }[];
+  approvalRoutePublished: boolean;
 }
 
 /**
  * ⚠ `vehicleAssetId` is **required when `transportType` is `CompanyVehicle`** — that mode reserves a
- * real vehicle through Fleet rather than recording a note, and the server refuses without it.
+ * real vehicle through Fleet rather than recording a note, and the server refuses without it. Since lane 6 the
+ * pick-up and drop-off are required too, and Fleet's destination when its settings ask one.
  */
 export interface CreateStaffTravelGroundTransport {
   staffTravelRequestId: string;
   transportType: GroundTransportType;
   vehicleAssetId?: string | null;
   driverEmployeeId?: string | null;
+  fleetTripDestinationId?: string | null;
   vendorId?: string | null;
   bookingReference?: string | null;
   pickupLocation?: string | null;
@@ -509,9 +553,9 @@ export interface CreateStaffTravelGroundTransport {
   notes?: string | null;
 }
 
+/** On a company vehicle's leg, a null vehicle or driver keeps the fleet trip's own (lane 6). */
 export type UpdateStaffTravelGroundTransport =
-  Omit<CreateStaffTravelGroundTransport, 'staffTravelRequestId' | 'vehicleAssetId' | 'driverEmployeeId'>
-  & { id: string };
+  Omit<CreateStaffTravelGroundTransport, 'staffTravelRequestId'> & { id: string };
 
 // ── Car rentals ──────────────────────────────────────────────────────────────
 

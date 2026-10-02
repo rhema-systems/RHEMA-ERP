@@ -1570,6 +1570,75 @@ public class StaffTravelGroundTransportDto : BaseDto
     public TravelBookingStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public string? Notes { get; set; }
+
+    // ---- A company vehicle's fleet trip, read from Fleet (lane 6, FX-3) — never copied onto the leg ----
+
+    public Guid? VehicleAssetId { get; set; }
+    public string? VehicleName { get; set; }
+    public string? VehiclePlate { get; set; }
+    public Guid? DriverEmployeeId { get; set; }
+    public string? DriverName { get; set; }
+    /// <summary>Fleet's own status — Draft, Submitted, Approved, Rejected, Dispatched, Completed, Cancelled. The leg's
+    /// <see cref="Status"/> is read from it.</summary>
+    public string? FleetStatus { get; set; }
+    public string? FleetRejectionReason { get; set; }
+    /// <summary>Why the vehicle is not held yet, when it is not — e.g. Fleet publishes no approval route (D-27).</summary>
+    public string? FleetNote { get; set; }
+    public DateTime? DispatchedAt { get; set; }
+    public DateTime? ReturnedAt { get; set; }
+    /// <summary>End mileage less start mileage, once Fleet has both.</summary>
+    public double? Distance { get; set; }
+}
+
+/// <summary>
+/// What the desk chooses a company vehicle from, through travel's own door (lane 6, FX-4) — HR holds no Maintenance
+/// permission. Each vehicle and driver says why it is not available for the trip's days, if it is not.
+/// </summary>
+public class StaffTravelFleetOptionsDto
+{
+    public DateTime WindowStart { get; set; }
+    public DateTime WindowEnd { get; set; }
+    public List<StaffTravelFleetVehicleOptionDto> Vehicles { get; set; } = new();
+    public List<StaffTravelFleetDriverOptionDto> Drivers { get; set; } = new();
+    /// <summary>The traveller's own assigned vehicle, preselected (D-11), and the driver assigned to it.</summary>
+    public Guid? DefaultVehicleAssetId { get; set; }
+    public Guid? DefaultDriverEmployeeId { get; set; }
+    /// <summary>Fleet's settings ask a predefined destination for every trip; choose one of <see cref="Destinations"/>.</summary>
+    public bool DestinationRequired { get; set; }
+    public List<StaffTravelFleetDestinationOptionDto> Destinations { get; set; } = new();
+    /// <summary>Fleet publishes an approval route for its trips; without one the vehicle is reserved as a draft and not
+    /// held (D-27).</summary>
+    public bool ApprovalRoutePublished { get; set; }
+}
+
+public class StaffTravelFleetVehicleOptionDto
+{
+    public Guid VehicleAssetId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? AssetNumber { get; set; }
+    public string? LicensePlate { get; set; }
+    public string? AssignedTo { get; set; }
+    /// <summary>Critical compliance items expired or expiring by the return (FX-5).</summary>
+    public List<string> BlockingCompliance { get; set; } = new();
+    /// <summary>Fleet trips planned on the vehicle over the window (FX-2).</summary>
+    public List<string> Overlaps { get; set; } = new();
+    public bool Available => BlockingCompliance.Count == 0 && Overlaps.Count == 0;
+}
+
+public class StaffTravelFleetDriverOptionDto
+{
+    public Guid EmployeeId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? EmployeeNumber { get; set; }
+    public DateOnly? LicenceExpiry { get; set; }
+    /// <summary>Approved leave or another fleet trip over the window (FX-7) — told, and another trip refused on save.</summary>
+    public List<string> Flags { get; set; } = new();
+}
+
+public class StaffTravelFleetDestinationOptionDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
 }
 
 public class CreateStaffTravelGroundTransportDto : CreateDtoBase
@@ -1582,6 +1651,9 @@ public class CreateStaffTravelGroundTransportDto : CreateDtoBase
 
     /// <summary>Optional driver for the reserved vehicle.</summary>
     public Guid? DriverEmployeeId { get; set; }
+
+    /// <summary>Fleet's predefined destination — required when Fleet's settings ask one of every trip (lane 6).</summary>
+    public Guid? FleetTripDestinationId { get; set; }
 
     [Required]
     public Guid StaffTravelRequestId { get; set; }
@@ -1652,6 +1724,12 @@ public class UpdateStaffTravelGroundTransportDto : UpdateDtoBase
     public string? Notes { get; set; }
 
     // Lane 5 (D1): an edit no longer writes the status — the verbs do.
+
+    // Lane 6: a company vehicle's leg changes its fleet trip — the vehicle, driver and destination — while Fleet allows
+    // (a draft or rejected trip; an approved one only its driver). Ignored on any other kind of leg.
+    public Guid? VehicleAssetId { get; set; }
+    public Guid? DriverEmployeeId { get; set; }
+    public Guid? FleetTripDestinationId { get; set; }
 }
 
 #endregion

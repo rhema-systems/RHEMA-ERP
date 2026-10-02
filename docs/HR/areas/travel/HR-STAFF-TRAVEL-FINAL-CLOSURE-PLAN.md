@@ -62,8 +62,13 @@ baseline (D-13); lane 0 was built the same day.**
 8. **Lane 5** (bookings and itinerary) — **COMPLETE 2026-10-02.** Source-checked against `ef113ea0a` (lane 5's
    *Source check*: Q1–Q7; D-23…D-26). **5a** bookings (the trip-status gate, dates, status verbs, the visa gate, D-24's
    cascade, the booking doors, the demo pack) committed `4b7d12302`; **5b** itinerary and destination alerts (D-25,
-   O-15, Q3, Q5, T-19, T-45) — bookings 148/148 three times — staged. No migration.
-9. **Then** lanes **6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane against this
+   O-15, Q3, Q5, T-19, T-45) — bookings 148/148 three times — committed `f8e9a9e31`. No migration.
+9. **Lane 6** (Fleet) — **IN PROGRESS.** Source-checked against `f8e9a9e31` (lane 6's *Source check*: R1–R4;
+   D-27…D-29). **6a** the reservation (pickers through travel's door, the clash and compliance refusals, the D-27
+   submit, the leg following its fleet trip, Fleet's costs in the budget) — fleet 75/75 twice — staged. No migration;
+   Fleet's code unchanged. ⚠ **UAT has no Fleet data** — the suite makes and removes its own (D-28). Next: **6b** fuel
+   on claims, **6c** drivers as travellers and incidents shown.
+10. **Then** lanes **7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane against this
    document before building it — line numbers are as of HEAD `bad482a8d`.
 
 **House rules** (from the HR programme, not repeated in each lane): the user runs builds — never
@@ -127,8 +132,8 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **2** | The approval ladder and the approver's door | data-only retrofit `20261002042909_TravelClosureApprovalLadder` | `run-final-approvals.mjs` | ✅ complete 2026-10-02 — 2a `4e4d85b2f` (retrofit applied to UAT); 2b `519418f00` (approvals 123/123 twice, lifecycle 255/255 twice, truth 117/117 twice) |
 | **3** | The money chain | batch 1 + `TravelClosureMoneyChain` (D-14, applied to UAT) | `run-final-money.mjs`, `run-final-posting.mjs` (D-17, a scratch copy only) | ✅ complete 2026-10-02 — 3a `e2785ce7b`, 3b `f49e5eb9c`, 3c `b08bd498d` (money 286/286 twice, posting proof 70/70 twice on a scratch copy, lifecycle 256/256, truth 116/116, approvals 123/123 twice) |
 | **4** | Policy and authority | batch 1 (no lane migration) | `run-final-policy.mjs` | ✅ complete 2026-10-02 — 4a `19f20f2f2`, 4b `3a6792a30`, 4c staged (policy 129/129 twice, money 287, lifecycle 256, truth 117, approvals 123 twice each); D-18…D-22 |
-| **5** | Bookings and itinerary | batch 1 (no lane migration) | `run-final-bookings.mjs` | ✅ complete 2026-10-02 — 5a `4b7d12302`, 5b staged (bookings 148/148 ×3, policy 131, money 288, lifecycle 256, truth 118, approvals 123 twice each); D-23…D-26 |
-| **6** | Fleet | batch 1 | `run-final-fleet.mjs` | ☐ |
+| **5** | Bookings and itinerary | batch 1 (no lane migration) | `run-final-bookings.mjs` | ✅ complete 2026-10-02 — 5a `4b7d12302`, 5b `f8e9a9e31` (bookings 148/148 ×3, policy 131, money 288, lifecycle 256, truth 118, approvals 123 twice each); D-23…D-26 |
+| **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ◐ 6a staged 2026-10-02 (fleet 75/75 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-29; next 6b, 6c |
 | **7** | Compliance and the portal | batch 1 | `run-final-compliance.mjs`, `run-final-portal.mjs` | ☐ |
 | **8** | Notifications and the sweep | batch 1 | `run-final-reminders.mjs` | ☐ |
 | **9** | Cross-module touchpoints | none | `run-final-touchpoints.mjs` | ☐ |
@@ -1709,23 +1714,23 @@ held only the known noise.
 
 ### Lane 6 — Fleet (D-11, D-12, D2, D4, FX-1…FX-9)
 
-- [ ] **Pickers through travel's own controller** (HR needs no Maintenance permission): active fleet
+- [x] **Pickers through travel's own controller** (HR needs no Maintenance permission): active fleet
   vehicles with plate, current assignment, the compliance items blocking them on the trip dates
   (`IFleetComplianceService.GetDispatchBlockingItemsAsync(vehicle, date)`) and their planned overlaps
   (Draft, Submitted, Approved or Dispatched fleet trips in the window); drivers with a valid licence,
   flagged when on approved leave or another trip. The traveller's active Primary fleet assignment
   preselects its vehicle and driver.
-- [ ] **A real reservation:** on an Approved request the leg's fleet trip is submitted to Fleet's
+- [x] **A real reservation** (D-27: submitted only when Fleet publishes a route): on an Approved request the leg's fleet trip is submitted to Fleet's
   approval (`SubmitForApprovalAsync`); travel refuses a vehicle or driver with an overlapping planned
   trip (a read-only check on Fleet's trips) and a vehicle whose critical compliance item expires before
   the return; when Fleet requires a predefined destination, the leg offers Fleet's destination
   templates.
-- [ ] **Kept in step:** the leg's status is read from the fleet trip (Submitted → Pending, Approved →
+- [x] **Kept in step:** the leg's status is read from the fleet trip (Submitted → Pending, Approved →
   Confirmed, Dispatched → in use, Completed → Completed, Rejected or Cancelled → Cancelled, with
   Fleet's reason shown); leg edits go through `UpdateTripAsync` while Fleet allows it, otherwise cancel
   and rebook; leg delete, a type change, a request cancel and *Request change* cancel undispatched fleet
   trips. **No copies of Fleet's facts** — vehicle, driver and status are read from the fleet trip.
-- [ ] **Shown on the leg:** vehicle, plate, driver, fleet status, dispatch and return times, distance
+- [x] **Shown on the leg:** vehicle, plate, driver, fleet status, dispatch and return times, distance
   from the start and end mileage. Fleet's costs for the trip feed the budget rollup for that leg.
 - [ ] **Fuel on claims:** claim lines gain `FleetTripId`, `FuelQuantity` and `FleetFuelTransactionId`;
   a Fuel line on a request with a company-vehicle leg names one of its fleet trips; on **payment**
@@ -1750,6 +1755,112 @@ as Submitted; a second leg on the same vehicle and days is refused; a vehicle in
 the return is refused; a request cancel cancels the fleet trip; Fleet's rejection shows on the leg; a
 paid fuel line lands in Fleet's fuel log once and the budget counts it once; the driver's request is
 raised, approved and cancelled with the leg; a fleet incident reaches the desk once.
+
+**Source check (2026-10-02, HEAD `f8e9a9e31`).** Fleet's service interfaces (`IFleetServices.cs`), the trip service
+(create, update, submit, cancel, the dispatched-only conflict check, the licence check, the location scope), the fleet
+DTOs and entities (trip, assignment, compliance, fuel, cost entry, incident), the workflow integration's submit, travel's
+ground-transport path, the claim line and the rollup were re-read. Every FX finding holds. The claim line's
+`FleetTripId`, `FuelQuantity` and `FleetFuelTransactionId` are already in the model and on UAT (batch 1) — **no lane-6
+migration**. Fleet's location scope binds only staff of a Maintenance unit, so the HR desk is not refused a vehicle.
+
+Four more:
+- **R1 — UAT holds no Fleet data at all:** no vehicle category of type Vehicle, no vehicle, assignment, compliance item,
+  destination, fuel, incident or Maintenance settings row, and no verified driver's licence. The company-vehicle path
+  cannot run on UAT; every proof needs its own fixtures (D-28).
+- **R2 — FX-9 is live on UAT:** Fleet submits through the workflow engine and no `FLEET_TRIP` definition exists, so a
+  submitted fleet trip is approved with nobody asked (D-27).
+- **R3 — the 5a verbs fight Fleet:** a company-vehicle leg has its own hold, confirm and complete since slice 5a,
+  independent of the fleet trip — its cancel must go to Fleet and its other verbs be refused.
+- **R4 — Fleet's fuel feeds its own cost entries** (`FleetCostEntry.FleetFuelTransactionId`): with Fleet's costs in the
+  rollup, a fuel cost a travel claim created would be counted twice — the claim's and Fleet's.
+
+**Decisions:** **D-27** — travel submits a leg's fleet trip only when Fleet has a published, active `FLEET_TRIP`
+approval route; otherwise the trip stays Draft and the leg says the vehicle is not held (travel's side of the
+no-definition guard; FX-9 stays Fleet's hand-off). **D-28** — proofs use per-run suite fixtures only (a vehicle
+category, vehicles, compliance items and a verified licence, created through the APIs as the platform admin and
+removed in teardown); UAT keeps no Fleet data, and a demo fleet is Fleet's owner's to seed (hand-off). **D-29** — the
+sweep's fleet signals and notices (dispatch → InProgress, the completion notice, an incident notice once per
+incident) move to **lane 8**; lane 6 shows a trip's fleet incidents read-only on its Compliance tab.
+
+**Slices.**
+- **6a — the reservation.** Pickers through travel's controller (vehicles with plate, assignment, blocking compliance
+  at the return and planned overlaps; drivers with a valid licence, flagged on approved leave or another trip; the
+  traveller's assignment preselected; Fleet's destinations when its settings require one); the overlap and
+  compliance refusals; the D-27 submit; the leg's status read from the fleet trip, its verbs routed (cancel to Fleet,
+  the rest refused — R3), edit through `UpdateTripAsync` while Fleet allows, delete, a type change, the trip's cancel
+  and *Request change* cancelling undispatched fleet trips; vehicle, plate, driver, fleet status, times and distance on
+  the leg; Fleet's costs for the trip in the rollup.
+- **6b — fuel on claims** (FX-6, R4).
+- **6c — drivers as travellers** (FX-7) **and incidents shown** on the Compliance tab (FX-8's read half).
+
+**As built — slice 6a (2026-10-02).** No migration; Fleet's code unchanged (D-12).
+
+- *One seam.* `IStaffTravelFleetService` / `StaffTravelFleetService` (Core) is travel's only door to Fleet: the pickers,
+  the reservation, its changes and cancels, and the leg's Fleet facts. The booking service no longer calls
+  `IFleetTripService` itself.
+- *Pickers (FX-4).* `GET bookings/fleet/options?requestId=&from=&to=&excludeFleetTripId=` on the bookings controller
+  (HR holds no Maintenance permission). Over the trip's days, or the leg's pick-up to drop-off: active vehicles of a
+  Vehicle category, each with plate, current assignment, the critical compliance items blocking it at the window's end
+  (Fleet's own query, its due-soon days included) and its planned overlaps (a Draft, Submitted, Approved or Dispatched
+  fleet trip), and `Available` when it has neither. Drivers: verified, unexpired driver's licences (Fleet's rule — an
+  identification type named with "driver"), flagged when on approved leave or driving another trip. The traveller's
+  Primary assignment preselects its vehicle and, as driver, another licensed driver assigned to it or else the
+  traveller. Fleet's destinations are offered when its settings ask one. `ApprovalRoutePublished` tells the screen
+  about D-27.
+- *Reservation (FX-1, FX-2, FX-5, D-27).* A company-vehicle leg needs a vehicle and pick-up and drop-off times. Before
+  Fleet is asked: the drop-off after the pick-up; a destination if Fleet requires one; no vehicle or driver on a planned
+  fleet trip over the same hours (strict — one trip may end as the next starts); no critical compliance item blocking the
+  vehicle at the drop-off. A leg naming no driver is checked for the vehicle's latest active assignment — the driver
+  Fleet gives it. Then `CreateTripAsync` (purpose "Staff travel TR-…"), and `SubmitForApprovalAsync` only when Fleet
+  publishes an active `FLEET_TRIP` route; otherwise the trip stays a Draft and the leg says the vehicle is not held yet.
+  A failed submit is logged and leaves the draft. Fleet's `ArgumentException` and location-scope refusal are passed on
+  as 422s.
+- *The leg follows Fleet (R3).* Every ground read is described from its fleet trip by one narrow projection: vehicle,
+  plate, driver, Fleet's status and rejection reason, out and back times, distance from the mileages, and a note. The
+  leg's status is Fleet's — Approved or Dispatched → Confirmed, Completed → Completed, Rejected or Cancelled → Cancelled,
+  otherwise Pending; a leg travel cancelled stays Cancelled. Its hold, confirm, no-show and complete are refused ("follows
+  its fleet trip"); cancel (a reason, a linked login) cancels the fleet trip first — not a dispatched one, "the vehicle
+  is out" — and keeps the reason as an internal note, as any booking.
+- *Edit, type change, delete.* An edit goes through `UpdateTripAsync` while Fleet allows it: a Draft or Rejected trip
+  (times, vehicle, driver re-checked; resubmitted under D-27) or an Approved one (only its driver — Fleet refuses the
+  rest). A leg does not change to or from a company vehicle (cancel and rebook). A draft or rejected leg is deleted and
+  its fleet trip cancelled; a live one is cancelled instead.
+- *The trip (D2, D-24).* The trip's cancel refuses while a company vehicle is Approved or Dispatched in Fleet ("the
+  company vehicle {name} ({status} in Fleet)"), like a confirmed booking; otherwise it, and *Request change*, cancel every
+  undispatched fleet trip and mark the legs Cancelled. The hold cascade skips fleet legs.
+- *Money (FX-6).* A company vehicle's leg costs what Fleet books against its trip — the budget's committed sums the
+  trip's `FleetCostEntries` (not a typed estimate), leaving out a fuel cost a travel claim put into Fleet's log (R4; used
+  from 6b).
+- *Screens.* The ground dialog: for a company vehicle, a vehicle picker (availability, plate, why not), a driver picker
+  (flags), Fleet's destination when required, the D-27 note, the traveller's car and driver preselected; no cost fields;
+  the type locked once a fleet leg exists. The row shows vehicle, plate, driver, out/back, distance, Fleet's note and
+  status, and "Fleet's costs"; its actions follow Fleet's status (Edit on Draft, Rejected or Approved; Cancel until
+  dispatched; Delete on Draft or Rejected, administrators). Scoped type-check and lint clean; not walked in a browser.
+- *Demo pack.* No change: `081` books no company vehicle (its Kumasi leg is a bus), and UAT has no fleet (R1, D-28).
+
+**Suite** `run-final-fleet.mjs` (new, **75**), on `buildApprovalsFixture`'s lone-unit traveller. §0 the run's own fleet
+(D-28): a Vehicle category, three vehicles (the Corolla insured only until day 41), verified driving licences for the
+traveller and a second fixture employee, the traveller's Primary assignment to the Hilux — through Fleet's and HR's
+APIs as the platform admin. §1 the HR desk reads the options: the three vehicles with plates, the Corolla flagged by
+its insurance, the traveller's Hilux and the traveller preselected, both licensed drivers offered and an unlicensed one
+not, no approval route. §2 no pick-up refused; the Hilux reserved — a Draft fleet trip with the leg's times, driver and
+purpose, the leg Pending and saying the vehicle is not held, Fleet's vehicle, plate and driver on it. §3 the same
+vehicle, or the same driver in another, over overlapping hours refused, each named; the Corolla refused for days 42–43;
+the same driver back to back accepted. §4 confirm refused ("follows its fleet trip"); a draft's times and driver moved
+in Fleet; a type change refused; an Approved fleet trip (planted in SQL — UAT has no route) reads Confirmed, refuses a
+vehicle change with Fleet's own rule, takes a driver change, holds the trip's cancel back naming the vehicle; a
+Dispatched one is not cancelled. §5 the approved leg cancelled — Fleet's trip Cancelled, the reason an internal note;
+the draft leg deleted and its fleet trip cancelled. §6 the traveller busy in one car, so their assigned car with no
+driver named is refused over the same hours and reserved from noon with them as driver; Request change cancels both
+fleet trips and the legs; a trip's cancel takes its draft vehicle. §7 a toll of 75 booked in Fleet against the leg's
+trip raises the budget's committed by exactly 75. Every fixture and every trip and cost on the run's vehicles
+soft-deleted in `finally`, then counted. **75/75 twice** (683185, 698861; every section ran; UAT holds no live Fleet
+row after). The first run (73/75) sent a cost `Source` Fleet does not accept — the suite's fixture, fixed.
+Regression: bookings **148/148 twice** (724011, 747838), money **288/288 twice** (770538, 811074), policy **131/131
+twice** (841338, 853035), lifecycle **256/256 twice** (863936, 904154), truth **118/118 twice** (943023, 948577),
+approvals **123/123 twice** (953639, 973646). No request over 404 ms (the fleet calls under 100 ms). The API log held
+only the known noise (defect #23, the identity reconciliation, the email queue — UAT has no `EmailSettings` row) and the
+suites' own expected refusals.
 
 ### Lane 7 — Compliance and the portal (E1–E7, D-5, O-7, O-15, O-16, O-17, T-23–T-26, T-40, T-44, T-54–T-56)
 

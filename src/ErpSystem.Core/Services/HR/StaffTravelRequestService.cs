@@ -44,6 +44,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     // and the logins of the traveller's line authorities, whom that stage is addressed to.
     private readonly IWorkflowService _workflowService;
     private readonly UserManager<ApplicationUser> _userManager;
+    // Lane 6 (FX-3, D2): the trip's cancel and its Request change cancel the fleet trips of its company-vehicle legs.
+    private readonly IStaffTravelFleetService _fleet;
     private readonly ILogger<StaffTravelRequestService> _logger;
 
     public StaffTravelRequestService(
@@ -61,8 +63,10 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         StaffTravelPolicyGuard policyGuard,
         IWorkflowService workflowService,
         UserManager<ApplicationUser> userManager,
+        IStaffTravelFleetService fleet,
         ILogger<StaffTravelRequestService> logger)
     {
+        _fleet = fleet;
         _requestRepository = requestRepository;
         _commentRepository = commentRepository;
         _attachmentRepository = attachmentRepository;
@@ -1540,6 +1544,9 @@ public class StaffTravelRequestService : IStaffTravelRequestService
                 "charges, then cancel the trip.");
 
         var reason = cancelDto.CancellationReason.Trim();
+        // Lane 6 (D2): the company vehicles' undispatched fleet trips go with the trip — first, so a refusal from Fleet
+        // stops the cancel before anything of travel's has moved. (Approved ones were refused above, as committed.)
+        await _fleet.CancelForRequestAsync(entity.TenantId, entity.Id, $"Travel request {entity.RequestNumber} cancelled: {reason}", cancellationToken);
         await CancelLiveApprovalAsync(entity, $"Travel request cancelled: {reason}");
 
         entity.Status = StaffTravelRequestStatus.Cancelled;
@@ -1713,6 +1720,10 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             throw new InvalidOperationException("Say what has changed — the trip is approved again on it.");
 
         var userId = RequireUserId();
+        // Lane 6 (FX-3): the trip goes back for re-approval, so its vehicles are not held meanwhile — the undispatched
+        // fleet trips are cancelled (the legs stay, cancelled, as the record), and are booked again once approved.
+        await _fleet.CancelForRequestAsync(entity.TenantId, entity.Id,
+            $"Travel request {entity.RequestNumber} sent back for a change: {reason.Trim()}", cancellationToken);
         entity.Status = StaffTravelRequestStatus.ReturnedForRevision;
         entity.ChangeRequestedAt = DateTime.UtcNow;
         entity.ChangeRequestedById = _currentUserService.EmployeeId;

@@ -1,6 +1,8 @@
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.HR;
 
@@ -61,6 +63,7 @@ public sealed class StaffTravelBudgetRollup
     private readonly IStaffTravelExpenseClaimRepository _claims;
     private readonly IStaffTravelAdvanceRepository _advances;
     private readonly HrCurrencyBridge _currency;
+    private readonly IUnitOfWork _unitOfWork;
 
     public StaffTravelBudgetRollup(
         IStaffTravelFlightBookingRepository flights,
@@ -69,8 +72,10 @@ public sealed class StaffTravelBudgetRollup
         IStaffTravelCarRentalBookingRepository carRentals,
         IStaffTravelExpenseClaimRepository claims,
         IStaffTravelAdvanceRepository advances,
-        HrCurrencyBridge currency)
+        HrCurrencyBridge currency,
+        IUnitOfWork unitOfWork)
     {
+        _unitOfWork = unitOfWork;
         _flights = flights;
         _hotels = hotels;
         _ground = ground;
@@ -116,9 +121,30 @@ public sealed class StaffTravelBudgetRollup
 
         // Ground transport records an estimate up front and an actual afterwards; the actual is the
         // better number the moment it exists.
-        foreach (var g in (await _ground.GetByRequestIdAsync(requestId))
-                     .Where(g => g.TenantId == tenantId && !g.IsDeleted && IsCommitted(g.Status)))
+        var groundLegs = (await _ground.GetByRequestIdAsync(requestId)).Where(g => g.TenantId == tenantId && !g.IsDeleted).ToList();
+        foreach (var g in groundLegs.Where(g => g.FleetTripId is null && IsCommitted(g.Status)))
             committed += await In(g.ActualCost ?? g.EstimatedCost ?? 0m, g.CurrencyCode, g.CreatedAt);
+
+        // Lane 6 (FX-6): a company vehicle's leg costs what Fleet books against its trip — fuel, tolls, parking, the
+        // driver's allowance — not a figure typed on the leg. A fuel cost a travel claim put into Fleet's log (R4, slice
+        // 6b) is counted once, as the claim paid, so it is left out here.
+        var fleetTripIds = groundLegs.Where(g => g.FleetTripId is not null).Select(g => g.FleetTripId!.Value).ToList();
+        if (fleetTripIds.Count > 0)
+        {
+            var claimFuel = await _unitOfWork.Repository<StaffTravelExpenseClaimLine>()
+                .GetQueryable(l => l.TenantId == tenantId && !l.IsDeleted && l.FleetFuelTransactionId != null
+                                && l.ExpenseClaim.StaffTravelRequestId == requestId)
+                .Select(l => l.FleetFuelTransactionId!.Value)
+                .ToListAsync(cancellationToken);
+            var costs = await _unitOfWork.Repository<ErpSystem.Core.Entities.Maintenance.FleetCostEntry>()
+                .GetQueryable(c => c.TenantId == tenantId && !c.IsDeleted && c.FleetTripId != null
+                                && fleetTripIds.Contains(c.FleetTripId.Value)
+                                && (c.FleetFuelTransactionId == null || !claimFuel.Contains(c.FleetFuelTransactionId.Value)))
+                .Select(c => new { c.Amount, c.CurrencyCode, c.CostDateUtc })
+                .ToListAsync(cancellationToken);
+            foreach (var c in costs)
+                committed += await In(c.Amount, c.CurrencyCode, c.CostDateUtc);
+        }
 
         foreach (var c in (await _carRentals.GetByRequestIdAsync(requestId))
                      .Where(c => c.TenantId == tenantId && !c.IsDeleted && IsCommitted(c.Status)))

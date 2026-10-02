@@ -629,6 +629,8 @@ const groundSchema = z
   .object({
     transportType: z.enum(GROUND_TYPES),
     vehicleAssetId: z.string().optional(),
+    driverEmployeeId: z.string().optional(),
+    fleetTripDestinationId: z.string().optional(),
     bookingReference: z.string().max(100).optional(),
     pickupLocation: z.string().max(300).optional(),
     dropoffLocation: z.string().max(300).optional(),
@@ -641,14 +643,98 @@ const groundSchema = z
     vendorId: z.string().optional(),
   })
   .refine((v) => v.transportType !== 'CompanyVehicle' || !!v.vehicleAssetId, {
-    message: 'A company vehicle must be named — a draft trip is created for it in Fleet',
+    message: 'Choose the company vehicle to reserve',
     path: ['vehicleAssetId'],
+  })
+  .refine((v) => v.transportType !== 'CompanyVehicle' || (!!v.pickupDatetime && !!v.dropoffDatetime), {
+    message: 'A company vehicle is reserved from a pick-up to a drop-off time — give both',
+    path: ['dropoffDatetime'],
   })
   .refine((v) => !v.actualCost || (!Number.isNaN(Number(v.actualCost)) && Number(v.actualCost) >= 0), {
     message: 'A cost of 0 or more',
     path: ['actualCost'],
   });
 type GroundForm = z.input<typeof groundSchema>;
+
+/**
+ * The company vehicle, its driver and Fleet's destination, chosen from what travel reads from Fleet (lane 6, FX-4) —
+ * each vehicle and driver saying why it is not available over the leg's window. The server refuses an unavailable
+ * one on save; the picker says so first.
+ */
+function FleetFields({
+  form, requestId, excludeFleetTripId, applyDefaults,
+}: {
+  form: UseFormReturn<GroundForm>;
+  requestId: string;
+  excludeFleetTripId: string | null;
+  applyDefaults: boolean;
+}) {
+  const pickup = form.watch('pickupDatetime');
+  const dropoff = form.watch('dropoffDatetime');
+  const { data: opts, isLoading } = useQuery({
+    queryKey: ['travel-fleet-options', requestId, pickup, dropoff, excludeFleetTripId],
+    queryFn: () => travelBookingsService.getFleetOptions(requestId, orNull(pickup), orNull(dropoff), excludeFleetTripId),
+  });
+  useEffect(() => {
+    if (!applyDefaults || !opts) return;
+    if (!form.getValues('vehicleAssetId') && opts.defaultVehicleAssetId)
+      form.setValue('vehicleAssetId', opts.defaultVehicleAssetId);
+    if (!form.getValues('driverEmployeeId') && opts.defaultDriverEmployeeId)
+      form.setValue('driverEmployeeId', opts.defaultDriverEmployeeId);
+  }, [opts, applyDefaults, form]);
+
+  const vehicleId = form.watch('vehicleAssetId');
+  const driverId = form.watch('driverEmployeeId');
+  const vehicle = opts?.vehicles.find((v) => v.vehicleAssetId === vehicleId);
+  const driver = opts?.drivers.find((d) => d.employeeId === driverId);
+  if (isLoading) return <div className="flex justify-center p-3"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
+  if (!opts) return null;
+
+  return (
+    <div className="space-y-3 rounded-md border p-3">
+      {opts.vehicles.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Fleet holds no active vehicle to reserve.</p>
+      ) : (
+        <SelectField
+          form={form} name="vehicleAssetId" label="Vehicle" required
+          options={opts.vehicles.map((v) => ({
+            value: v.vehicleAssetId,
+            label: `${v.name}${v.licensePlate ? ` · ${v.licensePlate}` : ''}${v.assignedTo ? ` · ${v.assignedTo}` : ''}${v.available ? '' : ' — not available'}`,
+          }))}
+        />
+      )}
+      {vehicle && !vehicle.available && (
+        <p className="flex items-start gap-1.5 text-xs text-destructive">
+          <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {[...vehicle.overlaps.map((o) => `Planned: ${o}`), ...vehicle.blockingCompliance].join(' · ')}
+        </p>
+      )}
+      <SelectField
+        form={form} name="driverEmployeeId" label="Driver" allowEmpty emptyLabel="Fleet's assigned driver, or none"
+        options={opts.drivers.map((d) => ({
+          value: d.employeeId,
+          label: `${d.name}${d.employeeNumber ? ` (${d.employeeNumber})` : ''}${d.flags.length ? ' — ⚠' : ''}`,
+        }))}
+        description="Drivers with a verified licence valid through the trip."
+      />
+      {driver && driver.flags.length > 0 && (
+        <p className="text-xs text-destructive">{driver.flags.join(' · ')}</p>
+      )}
+      {opts.destinationRequired && (
+        <SelectField
+          form={form} name="fleetTripDestinationId" label="Fleet destination" required
+          options={opts.destinations.map((d) => ({ value: d.id, label: d.name }))}
+          description="Fleet's settings ask a predefined destination for every trip."
+        />
+      )}
+      <p className="text-xs text-muted-foreground">
+        {opts.approvalRoutePublished
+          ? 'The trip is sent to the transport office for approval; the leg shows Fleet’s decision.'
+          : 'Fleet publishes no approval route yet, so the trip is reserved as a draft in Fleet and the vehicle is not held until it does.'}
+      </p>
+    </div>
+  );
+}
 
 function GroundDialog({
   requestId, editId, open, onOpenChange, defaultCurrency,
@@ -663,6 +749,7 @@ function GroundDialog({
   const invalidate = useInvalidateBookings(requestId);
   const blank: GroundForm = {
     transportType: 'Taxi', currencyCode: defaultCurrency, estimatedCost: 0, actualCost: '', vendorId: '',
+    vehicleAssetId: '', driverEmployeeId: '', fleetTripDestinationId: '',
   };
   const form = useForm<GroundForm>({ resolver: zodResolver(groundSchema), defaultValues: blank });
   const { data: existing } = useEditRecord('ground', editId, open, (id) => travelBookingsService.getGroundTransport(id));
@@ -678,6 +765,8 @@ function GroundDialog({
         estimatedCost: existing.estimatedCost ?? 0,
         actualCost: existing.actualCost == null ? '' : String(existing.actualCost),
         currencyCode: existing.currencyCode, notes: existing.notes ?? '', vendorId: existing.vendorId ?? '',
+        vehicleAssetId: existing.vehicleAssetId ?? '', driverEmployeeId: existing.driverEmployeeId ?? '',
+        fleetTripDestinationId: '',
       });
     }
   }, [open, editId, existing, form]);
@@ -691,12 +780,14 @@ function GroundDialog({
         notes: v.notes, vendorId: v.vendorId || null,
         actualCost: v.actualCost ? Number(v.actualCost) : null,
         pickupDatetime: orNull(v.pickupDatetime), dropoffDatetime: orNull(v.dropoffDatetime),
+        // Lane 6: a company vehicle's fleet trip — ignored by the server on any other kind of leg.
+        vehicleAssetId: v.vehicleAssetId || null,
+        driverEmployeeId: v.driverEmployeeId || null,
+        fleetTripDestinationId: v.fleetTripDestinationId || null,
       };
       return editId
         ? travelBookingsService.updateGroundTransport({ ...common, id: editId })
-        : travelBookingsService.createGroundTransport({
-            ...common, staffTravelRequestId: requestId, vehicleAssetId: v.vehicleAssetId || null,
-          });
+        : travelBookingsService.createGroundTransport({ ...common, staffTravelRequestId: requestId });
     },
     onSuccess: async () => {
       notify.saved();
@@ -714,8 +805,8 @@ function GroundDialog({
         <DialogHeader>
           <DialogTitle>{editId ? 'Change the ground transport' : 'Add ground transport'}</DialogTitle>
           <DialogDescription>
-            A company vehicle is recorded in Fleet as a draft trip rather than as a note here. Pick-up and
-            drop-off fall inside the trip&apos;s dates.
+            A company vehicle is reserved in Fleet — the vehicle and driver checked for the trip&apos;s days — rather
+            than noted here. Pick-up and drop-off fall inside the trip&apos;s dates.
           </DialogDescription>
         </DialogHeader>
         {editId && !existing ? (
@@ -723,42 +814,44 @@ function GroundDialog({
         ) : (
           <form id="ground-form" className="space-y-4" onSubmit={form.handleSubmit((v) => save.mutate(v))}>
             <FieldRow>
-              <SelectField form={form} name="transportType" label="Transport" required options={options(GROUND_TYPES)} />
+              {/* Lane 6: a leg does not turn into a company vehicle or out of one — the fleet trip would be orphaned. */}
+              <SelectField
+                form={form} name="transportType" label="Transport" required options={options(GROUND_TYPES)}
+                disabled={!!editId && existing?.transportType === 'CompanyVehicle'}
+              />
               <TextField form={form} name="bookingReference" label="Booking reference" />
             </FieldRow>
-
-            {isCompanyVehicle && !editId && (
-              <div className="space-y-2">
-                <TextField
-                  form={form}
-                  name="vehicleAssetId"
-                  label="Vehicle (Fleet asset id)"
-                  required
-                  placeholder="Fleet asset identifier"
-                />
-                <p className="text-xs text-muted-foreground">
-                  This creates a draft trip in Fleet for the vehicle. It is not sent to the transport
-                  office for approval, so the vehicle is not held for these dates. Fleet refuses an
-                  asset that is not a vehicle, and the reason is shown here.
-                </p>
-              </div>
-            )}
 
             <FieldRow>
               <TextField form={form} name="pickupLocation" label="Pick up" />
               <TextField form={form} name="dropoffLocation" label="Drop off" />
             </FieldRow>
             <FieldRow>
-              <DateTimeField form={form} name="pickupDatetime" label="Pick-up time" />
-              <DateTimeField form={form} name="dropoffDatetime" label="Drop-off time" />
+              <DateTimeField form={form} name="pickupDatetime" label="Pick-up time" required={isCompanyVehicle} />
+              <DateTimeField form={form} name="dropoffDatetime" label="Drop-off time" required={isCompanyVehicle} />
             </FieldRow>
-            <FieldRow>
-              <NumberField form={form} name="estimatedCost" label="Estimated cost" />
-              <NumberField
-                form={form} name="actualCost" label="Actual cost"
-                description="What it came to, once known — the budget counts it in place of the estimate."
+
+            {isCompanyVehicle && (
+              <FleetFields
+                form={form} requestId={requestId} excludeFleetTripId={existing?.fleetTripId ?? null}
+                applyDefaults={!editId}
               />
-            </FieldRow>
+            )}
+            {/* Lane 6 (FX-6): a company vehicle's cost is what Fleet books against its trip — the budget reads that. */}
+            {isCompanyVehicle ? (
+              <p className="text-xs text-muted-foreground">
+                The vehicle&apos;s costs — fuel, tolls and the like — are what Fleet records against its trip; the
+                trip&apos;s budget counts those.
+              </p>
+            ) : (
+              <FieldRow>
+                <NumberField form={form} name="estimatedCost" label="Estimated cost" />
+                <NumberField
+                  form={form} name="actualCost" label="Actual cost"
+                  description="What it came to, once known — the budget counts it in place of the estimate."
+                />
+              </FieldRow>
+            )}
             <CurrencyField form={form} name="currencyCode" label="Currency" required />
             {/* A company vehicle has no supplier; the policy's preferred-vendor rule does not apply to it. */}
             {!isCompanyVehicle && <VendorField form={form} />}
@@ -1058,11 +1151,13 @@ type SimpleVerb = 'hold' | 'confirm' | 'no-show' | 'complete';
  * closed; no-show and complete once the trip has started; delete only a Pending booking (travel administrators).
  */
 function BookingActions({
-  kind, status, bookable, started, closed, canWrite, canAdmin,
+  kind, status, fleetStatus, bookable, started, closed, canWrite, canAdmin,
   onEdit, onSegments, onMove, onTicket, onCancel, onDelete,
 }: {
   kind: TravelBookingKind;
   status?: TravelBookingStatus;
+  /** A company vehicle's leg: its fleet trip's status in Fleet (lane 6). */
+  fleetStatus?: string | null;
   bookable: boolean;
   started: boolean;
   closed: boolean;
@@ -1080,6 +1175,33 @@ function BookingActions({
   ) : null;
   const live = isLive(status);
   const items: React.ReactNode[] = [];
+
+  // Lane 6 (R3): a company vehicle's leg follows its fleet trip — the transport office approves, dispatches and
+  // completes it in Fleet. Here it is changed while Fleet allows, cancelled until the vehicle is out, and deleted only
+  // as a draft (or a trip Fleet rejected).
+  if (fleetStatus) {
+    const ending: React.ReactNode[] = [];
+    if (bookable && ['Draft', 'Rejected', 'Approved'].includes(fleetStatus))
+      items.push(<DropdownMenuItem key="edit" onClick={onEdit}>Edit</DropdownMenuItem>);
+    if (!closed && ['Draft', 'Submitted', 'Approved', 'Rejected'].includes(fleetStatus) && status !== 'Cancelled')
+      ending.push(<DropdownMenuItem key="cancel" onClick={onCancel}>Cancel booking…</DropdownMenuItem>);
+    if (canAdmin && !closed && ['Draft', 'Rejected'].includes(fleetStatus))
+      ending.push(<DropdownMenuItem key="delete" className="text-destructive" onClick={onDelete}>Delete</DropdownMenuItem>);
+    if (items.length === 0 && ending.length === 0) return null;
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="sm" aria-label="Booking actions"><MoreHorizontal className="h-4 w-4" /></Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {items}
+          {items.length > 0 && ending.length > 0 && <DropdownMenuSeparator />}
+          {ending}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+
   if (live && bookable) items.push(<DropdownMenuItem key="edit" onClick={onEdit}>Edit</DropdownMenuItem>);
   if (onSegments) items.push(<DropdownMenuItem key="seg" onClick={onSegments}>Segments</DropdownMenuItem>);
   if (bookable && status === 'Pending')
@@ -1237,9 +1359,9 @@ export function TravelBookingsPanel({ request }: { request: StaffTravelRequest }
   const countryOptions = (countries ?? []).map((c) => ({ value: c.id, label: c.name }));
 
   const actions = (kind: TravelBookingKind, id: string, status: TravelBookingStatus | undefined, label: string,
-    currencyCode: string, dialogKind: 'flight' | 'hotel' | 'ground' | 'car') => (
+    currencyCode: string, dialogKind: 'flight' | 'hotel' | 'ground' | 'car', fleetStatus?: string | null) => (
     <BookingActions
-      kind={kind} status={status} bookable={bookable} started={started} closed={closed}
+      kind={kind} status={status} fleetStatus={fleetStatus} bookable={bookable} started={started} closed={closed}
       canWrite={canWrite} canAdmin={canAdmin}
       onEdit={() => setDialog({ kind: dialogKind, editId: id })}
       onSegments={kind === 'Flight' ? () => setSegmentsOf({ id, writable: canWrite && bookable && isLive(status) }) : undefined}
@@ -1384,21 +1506,36 @@ export function TravelBookingsPanel({ request }: { request: StaffTravelRequest }
                   <TableCell className="font-medium">
                     <span className="flex items-center gap-1.5">
                       {humanize(g.transportTypeName)}
-                      {g.fleetTripId && (
-                        <span className="text-xs text-muted-foreground">(Fleet trip)</span>
-                      )}
                     </span>
+                    {/* Lane 6 (FX-3): the vehicle, driver and trip as Fleet holds them. */}
+                    {g.fleetTripId && (
+                      <span className="block text-xs font-normal text-muted-foreground">
+                        {g.vehicleName ?? 'Fleet vehicle'}{g.vehiclePlate ? ` · ${g.vehiclePlate}` : ''}
+                        {g.driverName ? ` · driver ${g.driverName}` : ''}
+                        {g.dispatchedAt ? ` · out ${fmtDate(g.dispatchedAt)}` : ''}
+                        {g.returnedAt ? ` · back ${fmtDate(g.returnedAt)}` : ''}
+                        {g.distance != null ? ` · ${g.distance.toLocaleString()} driven` : ''}
+                      </span>
+                    )}
+                    {g.fleetNote && <span className="block text-xs font-normal text-muted-foreground">{g.fleetNote}</span>}
                   </TableCell>
                   <TableCell>
                     {g.pickupLocation || '—'} → {g.dropoffLocation || '—'}
                   </TableCell>
                   <TableCell className="text-right whitespace-nowrap">
-                    {fmtMoney(g.actualCost ?? g.estimatedCost, g.currencyCode)}
-                    {g.actualCost != null && <span className="ml-1 text-xs text-muted-foreground">actual</span>}
+                    {g.fleetTripId
+                      ? <span className="text-xs text-muted-foreground">Fleet&apos;s costs</span>
+                      : <>
+                          {fmtMoney(g.actualCost ?? g.estimatedCost, g.currencyCode)}
+                          {g.actualCost != null && <span className="ml-1 text-xs text-muted-foreground">actual</span>}
+                        </>}
                   </TableCell>
-                  <TableCell><StatusBadge status={humanize(g.statusName)} /></TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    <StatusBadge status={humanize(g.statusName)} />
+                    {g.fleetStatus && <span className="ml-2 text-xs text-muted-foreground">Fleet: {g.fleetStatus}</span>}
+                  </TableCell>
                   <TableCell>
-                    {actions('Ground', g.id, g.status, `${humanize(g.transportTypeName).toLowerCase()} booking`, g.currencyCode, 'ground')}
+                    {actions('Ground', g.id, g.status, `${humanize(g.transportTypeName).toLowerCase()} booking`, g.currencyCode, 'ground', g.fleetStatus)}
                   </TableCell>
                 </TableRow>
               ))}

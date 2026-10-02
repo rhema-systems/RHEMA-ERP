@@ -30,6 +30,7 @@ import type {
   TravelBookingStatus,
   TravelBookingExceptionState,
   StaffTravelBookingException,
+  StaffTravelFleetOptions,
 } from '@/types/hr/travel-bookings';
 
 /**
@@ -277,6 +278,20 @@ class TravelBookingsService {
 
   deleteCarRental(id: string) {
     return apiService.delete<void>(`${this.bookings}/car-rentals/${id}`);
+  }
+
+  // ── Company vehicles (lane 6) ──────────────────────────────────────────────
+
+  /**
+   * The vehicles, drivers and destinations a company-vehicle leg chooses from, through travel's door (HR holds no
+   * Maintenance permission). Each vehicle and driver says why it is not available over the window.
+   */
+  getFleetOptions(requestId: string, from?: string | null, to?: string | null, excludeFleetTripId?: string | null) {
+    const params: Record<string, string> = { requestId };
+    if (from) params.from = from;
+    if (to) params.to = to;
+    if (excludeFleetTripId) params.excludeFleetTripId = excludeFleetTripId;
+    return apiService.get<StaffTravelFleetOptions>(`${this.bookings}/fleet/options`, params);
   }
 
   // ── Status verbs (lane 5, D1) ──────────────────────────────────────────────

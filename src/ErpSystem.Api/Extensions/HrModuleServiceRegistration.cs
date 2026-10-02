@@ -662,6 +662,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IStaffTravelRequestService, StaffTravelRequestService>();
         services.AddScoped<IStaffTravelItineraryService, StaffTravelItineraryService>();
         services.AddScoped<IStaffTravelBookingService, StaffTravelBookingService>();
+        // Travel's side of the seam with Fleet (travel final closure, lane 6) — Fleet's services, Fleet's code untouched.
+        services.AddScoped<IStaffTravelFleetService, StaffTravelFleetService>();
         services.AddScoped<IStaffTravelFinanceService, StaffTravelFinanceService>();
         services.AddScoped<IStaffTravelPolicyService, StaffTravelPolicyService>();
         services.AddScoped<IStaffTravelComplianceService, StaffTravelComplianceService>();

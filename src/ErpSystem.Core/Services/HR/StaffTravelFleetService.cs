@@ -1,0 +1,448 @@
+using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.StaffLeave;
+using ErpSystem.Core.Entities.HR.StaffTravel;
+using ErpSystem.Core.Entities.Maintenance;
+using ErpSystem.Core.Entities.Workflow;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+
+namespace ErpSystem.Core.Services.HR;
+
+/// <summary>
+/// Travel's side of the seam with Fleet (travel final closure, lane 6, slice 6a — FX-1…FX-5, D2, D4, D-27).
+/// </summary>
+/// <remarks>
+/// <para><b>Fleet's facts stay Fleet's.</b> A company-vehicle leg keeps only its fleet trip's id; the vehicle, plate,
+/// driver, status, times and mileage are read from the fleet trip whenever the leg is read, and the leg's status is
+/// Fleet's mapped: Draft and Submitted → Pending, Approved and Dispatched → Confirmed, Completed → Completed, Rejected
+/// and Cancelled → Cancelled.</para>
+///
+/// <para><b>A reservation that holds.</b> The fleet trip was made Draft and never submitted, so the transport office had
+/// nothing to approve and nothing was held (FX-1), and Fleet's only clash check looked at dispatched trips (FX-2) and its
+/// compliance at dispatch (FX-5). Travel now refuses a vehicle or driver with another trip planned over the leg —
+/// Draft, Submitted, Approved or Dispatched — and a vehicle whose critical compliance item runs out by the return; and
+/// submits the trip to Fleet's approval when Fleet publishes an approval route (D-27) — with none the engine would
+/// approve it with nobody asked, so the trip stays a draft and the leg says the vehicle is not held.</para>
+///
+/// <para><b>Through travel's door.</b> HR holds no Maintenance permission, so the pickers are read here (FX-4).</para>
+/// </remarks>
+public class StaffTravelFleetService : IStaffTravelFleetService
+{
+    private static readonly string[] Planned =
+        { FleetTripStatuses.Draft, FleetTripStatuses.Submitted, FleetTripStatuses.Approved, FleetTripStatuses.Dispatched };
+
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IFleetTripService _fleetTrips;
+    private readonly IFleetComplianceService _compliance;
+    private readonly IFleetTripDestinationService _destinations;
+    private readonly ILogger<StaffTravelFleetService> _logger;
+
+    public StaffTravelFleetService(
+        IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
+        IFleetTripService fleetTrips,
+        IFleetComplianceService compliance,
+        IFleetTripDestinationService destinations,
+        ILogger<StaffTravelFleetService> logger)
+    {
+        _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
+        _fleetTrips = fleetTrips;
+        _compliance = compliance;
+        _destinations = destinations;
+        _logger = logger;
+    }
+
+    private Guid TenantId
+    {
+        get
+        {
+            var tenantId = _currentUserProvider.TenantId;
+            if (tenantId == Guid.Empty)
+                throw new InvalidOperationException("No tenant is associated with the current user.");
+            return tenantId;
+        }
+    }
+
+    /// <summary>The leg's status, read from its fleet trip.</summary>
+    public static TravelBookingStatus LegStatus(string? fleetStatus) => fleetStatus switch
+    {
+        FleetTripStatuses.Approved or FleetTripStatuses.Dispatched => TravelBookingStatus.Confirmed,
+        FleetTripStatuses.Completed => TravelBookingStatus.Completed,
+        FleetTripStatuses.Rejected or FleetTripStatuses.Cancelled => TravelBookingStatus.Cancelled,
+        _ => TravelBookingStatus.Pending,
+    };
+
+    /// <summary>A fleet trip the transport office has committed the vehicle to — what refuses a trip's cancel (D-24).</summary>
+    public static bool IsCommitted(string? fleetStatus)
+        => fleetStatus is FleetTripStatuses.Approved or FleetTripStatuses.Dispatched;
+
+    private static string Window(DateTime? start, DateTime? end)
+        => $"{start:d MMM HH:mm} to {(end ?? start):d MMM HH:mm}";
+
+    private static string NameOf(string? first, string? last) => $"{first} {last}".Trim();
+
+    /// <summary>D-27: Fleet publishes an approval route for its trips — otherwise its engine approves with nobody asked.</summary>
+    private async Task<bool> IsApprovalRoutePublishedAsync(Guid tenantId, CancellationToken cancellationToken)
+        => await _unitOfWork.Repository<WorkflowDefinition>().GetQueryable()
+            .AnyAsync(d => d.TenantId == tenantId
+                        && !d.IsDeleted
+                        && d.IsActive
+                        && d.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published
+                        && d.EntityType != null
+                        && (d.EntityType.Code == "FLEET_TRIP" || d.EntityType.Name == "FleetTrip"),
+                cancellationToken);
+
+    private async Task<bool> DestinationRequiredAsync(Guid tenantId, CancellationToken cancellationToken)
+        => await _unitOfWork.Repository<MaintenanceSettings>()
+            .GetQueryable(s => s.TenantId == tenantId && !s.IsDeleted)
+            .Select(s => s.RequirePredefinedFleetTripDestinationOnDispatch)
+            .FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<StaffTravelFleetOptionsDto> GetOptionsAsync(
+        Guid requestId, DateTime? from = null, DateTime? to = null, Guid? excludeFleetTripId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var request = await _unitOfWork.Repository<StaffTravelRequest>()
+            .GetQueryable(r => r.Id == requestId && r.TenantId == tenantId && !r.IsDeleted)
+            .Select(r => new { r.EmployeeId, r.TravelStartDate, r.TravelEndDate })
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new ArgumentException($"Staff travel request with ID '{requestId}' not found.");
+        var start = from ?? request.TravelStartDate.ToDateTime(TimeOnly.MinValue);
+        var end = to ?? request.TravelEndDate.ToDateTime(new TimeOnly(23, 59));
+        if (end < start) end = start;
+
+        var vehicles = await _unitOfWork.Repository<MaintenanceAsset>()
+            .GetQueryable(a => a.TenantId == tenantId && !a.IsDeleted && a.Status == AssetStatus.Active
+                            && a.AssetCategory != null && a.AssetCategory.AssetType == "Vehicle")
+            .OrderBy(a => a.Name)
+            .Select(a => new { a.Id, a.Name, a.AssetNumber, a.LicensePlate })
+            .ToListAsync(cancellationToken);
+        var vehicleIds = vehicles.Select(v => v.Id).ToList();
+
+        var assignments = await _unitOfWork.Repository<FleetVehicleAssignment>()
+            .GetQueryable(a => a.TenantId == tenantId && !a.IsDeleted && a.IsActive && vehicleIds.Contains(a.VehicleAssetId))
+            .OrderByDescending(a => a.AssignedFromUtc)
+            .Select(a => new { a.VehicleAssetId, a.EmployeeId, a.AssignmentType })
+            .ToListAsync(cancellationToken);
+
+        var trips = await _unitOfWork.Repository<FleetTrip>()
+            .GetQueryable(t => t.TenantId == tenantId && !t.IsDeleted && Planned.Contains(t.Status)
+                            && t.PlannedStartAt != null && t.PlannedStartAt < end
+                            && (t.PlannedEndAt ?? t.PlannedStartAt) > start
+                            && (excludeFleetTripId == null || t.Id != excludeFleetTripId))
+            .Select(t => new { t.VehicleAssetId, t.DriverEmployeeId, t.Status, t.Purpose, t.PlannedStartAt, t.PlannedEndAt })
+            .ToListAsync(cancellationToken);
+
+        var startDay = DateOnly.FromDateTime(start);
+        var endDay = DateOnly.FromDateTime(end);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var licences = (await _unitOfWork.Repository<EmployeeIdentificationCard>()
+                .GetQueryable(c => c.TenantId == tenantId && !c.IsDeleted && c.IsVerified
+                                && c.ExpiryDate != null && c.ExpiryDate >= endDay
+                                && (c.IssueDate == null || c.IssueDate <= today)
+                                && c.IdentificationType.Name.ToLower().Contains("driver"))
+                .Select(c => new { c.EmployeeId, c.ExpiryDate })
+                .ToListAsync(cancellationToken))
+            .GroupBy(c => c.EmployeeId)
+            .ToDictionary(g => g.Key, g => g.Max(c => c.ExpiryDate));
+        var people = licences.Keys.Concat(assignments.Select(a => a.EmployeeId)).Distinct().ToList();
+        var employees = await _unitOfWork.Repository<Employee>()
+            .GetQueryable(e => e.TenantId == tenantId && !e.IsDeleted && people.Contains(e.Id))
+            .Select(e => new { e.Id, e.FirstName, e.LastName, e.EmployeeNumber, e.IsActive })
+            .ToListAsync(cancellationToken);
+        var leave = await _unitOfWork.Repository<LeaveRequest>().GetQueryable()
+            .Where(l => l.TenantId == tenantId && people.Contains(l.EmployeeId)
+                     && (l.Status == LeaveStatus.Approved || l.Status == LeaveStatus.InProgress)
+                     && l.StartDate <= endDay && l.EndDate >= startDay)
+            .Select(l => new { l.EmployeeId, l.StartDate, l.EndDate })
+            .ToListAsync(cancellationToken);
+
+        var dto = new StaffTravelFleetOptionsDto { WindowStart = start, WindowEnd = end };
+        foreach (var v in vehicles)
+        {
+            var option = new StaffTravelFleetVehicleOptionDto
+            {
+                VehicleAssetId = v.Id, Name = v.Name, AssetNumber = v.AssetNumber, LicensePlate = v.LicensePlate,
+            };
+            var assigned = assignments.FirstOrDefault(a => a.VehicleAssetId == v.Id);
+            if (assigned is not null && employees.FirstOrDefault(e => e.Id == assigned.EmployeeId) is { } holder)
+                option.AssignedTo = $"{NameOf(holder.FirstName, holder.LastName)} ({assigned.AssignmentType})";
+            foreach (var item in await _compliance.GetDispatchBlockingItemsAsync(v.Id, end))
+                option.BlockingCompliance.Add(item.ExpiryDate is DateTime expiry
+                    ? $"{item.ComplianceType} expires {expiry:d MMM yyyy}"
+                    : $"{item.ComplianceType} has no expiry date");
+            foreach (var t in trips.Where(t => t.VehicleAssetId == v.Id))
+                option.Overlaps.Add($"{t.Purpose ?? "a fleet trip"}, {Window(t.PlannedStartAt, t.PlannedEndAt)} ({t.Status})");
+            dto.Vehicles.Add(option);
+        }
+
+        foreach (var (employeeId, expiry) in licences)
+        {
+            if (employees.FirstOrDefault(e => e.Id == employeeId) is not { IsActive: true } person) continue;
+            var option = new StaffTravelFleetDriverOptionDto
+            {
+                EmployeeId = employeeId, Name = NameOf(person.FirstName, person.LastName),
+                EmployeeNumber = person.EmployeeNumber, LicenceExpiry = expiry,
+            };
+            foreach (var l in leave.Where(l => l.EmployeeId == employeeId))
+                option.Flags.Add($"on approved leave {l.StartDate:d MMM} to {l.EndDate:d MMM}");
+            foreach (var t in trips.Where(t => t.DriverEmployeeId == employeeId))
+                option.Flags.Add($"driving {t.Purpose ?? "a fleet trip"}, {Window(t.PlannedStartAt, t.PlannedEndAt)}");
+            dto.Drivers.Add(option);
+        }
+        dto.Drivers = dto.Drivers.OrderBy(d => d.Flags.Count).ThenBy(d => d.Name).ToList();
+
+        // D-11: the traveller's own official car first. Fleet assigns a vehicle only to a licensed driver, so the
+        // traveller with an assigned car drives it — unless another licensed driver is assigned to it too.
+        var own = assignments.FirstOrDefault(a => a.EmployeeId == request.EmployeeId
+                                                && string.Equals(a.AssignmentType, "Primary", StringComparison.OrdinalIgnoreCase));
+        if (own is not null)
+        {
+            dto.DefaultVehicleAssetId = own.VehicleAssetId;
+            dto.DefaultDriverEmployeeId = assignments
+                .Where(a => a.VehicleAssetId == own.VehicleAssetId && a.EmployeeId != request.EmployeeId && licences.ContainsKey(a.EmployeeId))
+                .Select(a => (Guid?)a.EmployeeId)
+                .FirstOrDefault()
+                ?? (licences.ContainsKey(request.EmployeeId) ? request.EmployeeId : null);
+        }
+
+        dto.DestinationRequired = await DestinationRequiredAsync(tenantId, cancellationToken);
+        if (dto.DestinationRequired)
+            dto.Destinations = (await _destinations.GetAllAsync(activeOnly: true))
+                .Select(d => new StaffTravelFleetDestinationOptionDto { Id = d.Id, Name = d.Name })
+                .ToList();
+        dto.ApprovalRoutePublished = await IsApprovalRoutePublishedAsync(tenantId, cancellationToken);
+        return dto;
+    }
+
+    /// <summary>FX-2, FX-5 and Fleet's destination rule, checked before Fleet is asked anything.</summary>
+    private async Task RequireReservableAsync(
+        Guid vehicleAssetId, StaffTravelFleetReservation r, Guid? excludeFleetTripId, CancellationToken cancellationToken)
+    {
+        var tenantId = TenantId;
+        if (r.End <= r.Start)
+            throw new InvalidOperationException("A company vehicle is reserved from the pick-up to a later drop-off.");
+        if (r.DestinationId is null && await DestinationRequiredAsync(tenantId, cancellationToken))
+            throw new InvalidOperationException(
+                "Fleet asks a predefined destination for every trip (its Maintenance settings) — choose one of Fleet's destinations.");
+
+        var clashes = await _unitOfWork.Repository<FleetTrip>()
+            .GetQueryable(t => t.TenantId == tenantId && !t.IsDeleted && Planned.Contains(t.Status)
+                            && t.PlannedStartAt != null && t.PlannedStartAt < r.End
+                            && (t.PlannedEndAt ?? t.PlannedStartAt) > r.Start
+                            && (excludeFleetTripId == null || t.Id != excludeFleetTripId)
+                            && (t.VehicleAssetId == vehicleAssetId
+                                || (r.DriverEmployeeId != null && t.DriverEmployeeId == r.DriverEmployeeId)))
+            .Select(t => new { t.VehicleAssetId, t.Status, t.Purpose, t.PlannedStartAt, t.PlannedEndAt })
+            .ToListAsync(cancellationToken);
+        if (clashes.FirstOrDefault(c => c.VehicleAssetId == vehicleAssetId) is { } vehicleClash)
+            throw new InvalidOperationException(
+                $"The vehicle is already planned for {vehicleClash.Purpose ?? "another fleet trip"}, " +
+                $"{Window(vehicleClash.PlannedStartAt, vehicleClash.PlannedEndAt)} ({vehicleClash.Status} in Fleet). " +
+                "Choose another vehicle or other times.");
+        if (clashes.FirstOrDefault() is { } driverClash)
+            throw new InvalidOperationException(
+                $"The driver is already planned for {driverClash.Purpose ?? "another fleet trip"}, " +
+                $"{Window(driverClash.PlannedStartAt, driverClash.PlannedEndAt)} ({driverClash.Status} in Fleet). " +
+                "Choose another driver or other times.");
+
+        var blocking = await _compliance.GetDispatchBlockingItemsAsync(vehicleAssetId, r.End);
+        if (blocking.Count > 0)
+        {
+            var first = blocking[0];
+            throw new InvalidOperationException(first.ExpiryDate is DateTime expiry
+                ? $"The vehicle's {first.ComplianceType} expires on {expiry:d MMM yyyy}, by the time it would be back — " +
+                  "Fleet will not dispatch it. Choose another vehicle, or have the item renewed first."
+                : $"The vehicle's {first.ComplianceType} has no expiry date in Fleet, so Fleet will not dispatch it.");
+        }
+    }
+
+    /// <summary>D-27: submitted only when Fleet publishes an approval route; a failure leaves the trip a draft.</summary>
+    private async Task<bool> SubmitIfRoutedAsync(Guid fleetTripId, CancellationToken cancellationToken)
+    {
+        if (!await IsApprovalRoutePublishedAsync(TenantId, cancellationToken)) return false;
+        try
+        {
+            return await _fleetTrips.SubmitForApprovalAsync(fleetTripId);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            _logger.LogWarning(ex, "Fleet trip {FleetTripId} was reserved but not submitted to Fleet's approval", fleetTripId);
+            return false;
+        }
+    }
+
+    public async Task<Guid> ReserveAsync(StaffTravelRequest request, StaffTravelFleetReservation reservation, CancellationToken cancellationToken = default)
+    {
+        if (reservation.VehicleAssetId is not Guid vehicleAssetId || vehicleAssetId == Guid.Empty)
+            throw new InvalidOperationException(
+                "A company-vehicle leg must name the vehicle to reserve. Choose a vehicle, or pick a different transport type.");
+        // Fleet gives a trip with no driver the vehicle's latest active assignment — so the clash check asks about
+        // that driver too, and Fleet is handed the same one.
+        var tenantId = TenantId;
+        if (reservation.DriverEmployeeId is null)
+            reservation = reservation with
+            {
+                DriverEmployeeId = await _unitOfWork.Repository<FleetVehicleAssignment>()
+                    .GetQueryable(a => a.TenantId == tenantId && a.VehicleAssetId == vehicleAssetId && a.IsActive && !a.IsDeleted)
+                    .OrderByDescending(a => a.AssignedFromUtc)
+                    .Select(a => (Guid?)a.EmployeeId)
+                    .FirstOrDefaultAsync(cancellationToken),
+            };
+        await RequireReservableAsync(vehicleAssetId, reservation, null, cancellationToken);
+
+        FleetTripDto trip;
+        try
+        {
+            trip = await _fleetTrips.CreateTripAsync(new CreateFleetTripDto
+            {
+                VehicleAssetId = vehicleAssetId,
+                DriverEmployeeId = reservation.DriverEmployeeId,
+                Purpose = reservation.Purpose,
+                Origin = reservation.Origin,
+                Destination = reservation.Destination,
+                FleetTripDestinationId = reservation.DestinationId,
+                Notes = reservation.Notes,
+                PlannedStartAt = reservation.Start,
+                PlannedEndAt = reservation.End,
+            });
+        }
+        catch (Exception ex) when (ex is ArgumentException or UnauthorizedAccessException)
+        {
+            // Fleet's validation speaks ArgumentException ("Vehicle not found") — travel's contract reads that as "the
+            // travel record does not exist" (404). Translated at the seam, as before lane 6.
+            throw new InvalidOperationException($"The vehicle could not be reserved: {ex.Message}");
+        }
+
+        await SubmitIfRoutedAsync(trip.Id, cancellationToken);
+        return trip.Id;
+    }
+
+    public async Task UpdateReservationAsync(
+        StaffTravelRequest request, Guid fleetTripId, StaffTravelFleetReservation reservation, CancellationToken cancellationToken = default)
+    {
+        var trip = await _fleetTrips.GetTripByIdAsync(fleetTripId)
+                   ?? throw new InvalidOperationException("The leg's fleet trip is no longer in Fleet — cancel the leg and book again.");
+        var change = reservation with
+        {
+            VehicleAssetId = reservation.VehicleAssetId ?? trip.VehicleAssetId,
+            DriverEmployeeId = reservation.DriverEmployeeId ?? trip.DriverEmployeeId,
+        };
+        if (trip.Status is not (FleetTripStatuses.Draft or FleetTripStatuses.Rejected or FleetTripStatuses.Approved))
+            throw new InvalidOperationException(
+                $"The vehicle's trip is {trip.Status.ToLowerInvariant()} in Fleet" +
+                (trip.Status == FleetTripStatuses.Submitted ? " — the transport office is deciding it" : string.Empty) +
+                ", so it is not changed now. Cancel the leg and book again.");
+
+        await RequireReservableAsync(change.VehicleAssetId!.Value, change, fleetTripId, cancellationToken);
+        try
+        {
+            // Fleet itself holds an approved trip to its vehicle, dates and destination: only the driver changes.
+            await _fleetTrips.UpdateTripAsync(fleetTripId, new UpdateFleetTripDto
+            {
+                VehicleAssetId = change.VehicleAssetId!.Value,
+                DriverEmployeeId = change.DriverEmployeeId,
+                Purpose = trip.Status == FleetTripStatuses.Approved ? trip.Purpose : change.Purpose,
+                Origin = change.Origin,
+                Destination = change.Destination,
+                FleetTripDestinationId = change.DestinationId ?? trip.FleetTripDestinationId,
+                Notes = change.Notes,
+                PlannedStartAt = change.Start,
+                PlannedEndAt = change.End,
+            });
+        }
+        catch (ArgumentException ex)
+        {
+            throw new InvalidOperationException($"The vehicle's trip could not be changed: {ex.Message}");
+        }
+        if (trip.Status != FleetTripStatuses.Approved)
+            await SubmitIfRoutedAsync(fleetTripId, cancellationToken);
+    }
+
+    public async Task CancelReservationAsync(Guid fleetTripId, string reason, CancellationToken cancellationToken = default)
+    {
+        var trip = await _fleetTrips.GetTripByIdAsync(fleetTripId);
+        if (trip is null || trip.Status is FleetTripStatuses.Completed or FleetTripStatuses.Cancelled) return;
+        if (trip.Status == FleetTripStatuses.Dispatched)
+            throw new InvalidOperationException(
+                "The vehicle is out on this trip — Fleet completes it when it is back; it is not cancelled now.");
+        await _fleetTrips.CancelAsync(fleetTripId, reason);
+    }
+
+    public async Task<int> CancelForRequestAsync(Guid tenantId, Guid requestId, string reason, CancellationToken cancellationToken = default)
+    {
+        var legs = await _unitOfWork.Repository<StaffTravelGroundTransport>()
+            .GetQueryable(g => g.TenantId == tenantId && g.StaffTravelRequestId == requestId && !g.IsDeleted && g.FleetTripId != null)
+            .ToListAsync(cancellationToken);
+        var count = 0;
+        foreach (var leg in legs)
+        {
+            var trip = await _fleetTrips.GetTripByIdAsync(leg.FleetTripId!.Value);
+            if (trip is null || trip.Status is FleetTripStatuses.Completed or FleetTripStatuses.Cancelled or FleetTripStatuses.Dispatched)
+                continue;
+            await _fleetTrips.CancelAsync(leg.FleetTripId.Value, reason.Length > 500 ? reason[..500] : reason);
+            leg.Status = TravelBookingStatus.Cancelled;
+            leg.UpdatedAt = DateTime.UtcNow;
+            leg.UpdatedBy = _currentUserProvider.UserId.ToString();
+            count++;
+        }
+        return count;
+    }
+
+    public async Task DescribeAsync(IReadOnlyCollection<StaffTravelGroundTransportDto> legs, CancellationToken cancellationToken = default)
+    {
+        var ids = legs.Where(l => l.FleetTripId is not null).Select(l => l.FleetTripId!.Value).Distinct().ToList();
+        if (ids.Count == 0) return;
+        var tenantId = TenantId;
+        var trips = await _unitOfWork.Repository<FleetTrip>()
+            .GetQueryable(t => t.TenantId == tenantId && ids.Contains(t.Id))
+            .Select(t => new
+            {
+                t.Id, t.Status, t.VehicleAssetId, VehicleName = t.VehicleAsset!.Name, Plate = t.VehicleAsset!.LicensePlate,
+                t.DriverEmployeeId, DFirst = t.DriverEmployee!.FirstName, DLast = t.DriverEmployee!.LastName,
+                t.RejectionReason, t.DispatchedAt, t.ActualStartAt, t.ActualEndAt, t.CompletedAt, t.StartMileage, t.EndMileage,
+            })
+            .ToListAsync(cancellationToken);
+        var routed = await IsApprovalRoutePublishedAsync(tenantId, cancellationToken);
+
+        foreach (var leg in legs.Where(l => l.FleetTripId is not null))
+        {
+            var t = trips.FirstOrDefault(x => x.Id == leg.FleetTripId);
+            if (t is null)
+            {
+                leg.FleetNote = "The fleet trip is no longer in Fleet.";
+                continue;
+            }
+            leg.VehicleAssetId = t.VehicleAssetId;
+            leg.VehicleName = t.VehicleName;
+            leg.VehiclePlate = t.Plate;
+            leg.DriverEmployeeId = t.DriverEmployeeId;
+            leg.DriverName = t.DriverEmployeeId is null ? null : NameOf(t.DFirst, t.DLast);
+            leg.FleetStatus = t.Status;
+            leg.FleetRejectionReason = t.RejectionReason;
+            leg.DispatchedAt = t.DispatchedAt ?? t.ActualStartAt;
+            leg.ReturnedAt = t.CompletedAt ?? t.ActualEndAt;
+            leg.Distance = t.StartMileage is double s && t.EndMileage is double e && e >= s ? e - s : null;
+            // A leg Fleet has not decided, cancelled by travel, stays cancelled.
+            leg.Status = leg.Status == TravelBookingStatus.Cancelled ? TravelBookingStatus.Cancelled : LegStatus(t.Status);
+            leg.FleetNote = t.Status switch
+            {
+                FleetTripStatuses.Draft when !routed =>
+                    "Reserved as a draft in Fleet — Fleet publishes no approval route, so the vehicle is not held yet.",
+                FleetTripStatuses.Draft => "A draft in Fleet, not yet submitted to the transport office.",
+                FleetTripStatuses.Submitted => "Awaiting the transport office's approval in Fleet.",
+                FleetTripStatuses.Rejected => $"Fleet rejected it{(string.IsNullOrWhiteSpace(t.RejectionReason) ? "." : $": {t.RejectionReason}")}",
+                _ => null,
+            };
+        }
+    }
+}
