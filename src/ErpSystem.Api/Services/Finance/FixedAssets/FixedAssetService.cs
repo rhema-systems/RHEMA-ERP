@@ -775,11 +775,19 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         // Import valid rows. All validation errors are returned above before any data is saved.
         if (rowsToImport.Any())
         {
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            try
+            var importedAssetCodes = rowsToImport
+                .Select(row => row.Data.AssetCode)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var defaultBook = GetDefaultBook(activeBooks);
+
+            async Task PersistImportAttemptAsync(CancellationToken cancellationToken)
             {
+                // A retry must rebuild the graph from the validated workbook rows. Retaining Added
+                // entities from a rolled-back attempt can duplicate assets, book values and audit
+                // transactions on the next SaveChanges call.
+                _context.ChangeTracker.Clear();
                 result.SuccessfulAssetCodes.Clear();
-                var defaultBook = GetDefaultBook(activeBooks);
                 foreach (var assetGroup in rowsToImport.GroupBy(row => row.Data.AssetCode, StringComparer.OrdinalIgnoreCase))
                 {
                     var firstRow = assetGroup.First();
@@ -883,13 +891,32 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     result.SuccessfulAssetCodes.Add(data.AssetCode);
                 }
 
-                await _context.SaveChangesAsync();
-                await transaction.CommitAsync();
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+
+            var strategy = _context.Database.CreateExecutionStrategy();
+            try
+            {
+                // ExecuteInTransactionAsync creates the user transaction inside the configured
+                // retry strategy. The verification delegate also handles the ambiguous-commit case:
+                // if SQL committed but the acknowledgement was lost, the import is not repeated.
+                await strategy.ExecuteInTransactionAsync(
+                    PersistImportAttemptAsync,
+                    async verificationToken =>
+                        await _context.FixedAssets
+                            .IgnoreQueryFilters()
+                            .AsNoTracking()
+                            .Where(asset => asset.TenantId == TenantId
+                                && importedAssetCodes.Contains(asset.AssetCode))
+                            .Select(asset => asset.AssetCode)
+                            .Distinct()
+                            .CountAsync(verificationToken) == importedAssetCodes.Count,
+                    CancellationToken.None);
                 result.SuccessCount = result.SuccessfulAssetCodes.Count;
             }
             catch (Exception ex)
             {
-                await transaction.RollbackAsync();
+                _context.ChangeTracker.Clear();
                 result.Errors.Add(new BulkImportErrorDto
                 {
                     RowNumber = 0,
