@@ -23,6 +23,7 @@ public static class FinanceAuditEvents
     public const string AccountingBookPrimaryReplacementReversalApproved = "Finance.GL.AccountingBook.PrimaryReplacementReversalApproved";
     public const string AccountingBookPrimaryReplacementReversalRejected = "Finance.GL.AccountingBook.PrimaryReplacementReversalRejected";
     public const string AccountingBookTransitionApproved = "Finance.GL.AccountingBook.TransitionApproved";
+    public const string AccountingBookReactivated = "Finance.GL.AccountingBook.Reactivated";
     public const string AccountingBookTransitionApprovalStepCompleted = "Finance.GL.AccountingBook.TransitionApprovalStepCompleted";
     public const string AccountingBookTransitionRejected = "Finance.GL.AccountingBook.TransitionRejected";
     public const string AccountingBookPeriodCreated = "Finance.GL.AccountingBookPeriod.Created";

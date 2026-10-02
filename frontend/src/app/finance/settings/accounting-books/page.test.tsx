@@ -196,6 +196,35 @@ describe('accounting book settings', () => {
         expect(screen.getByRole('button', { name: 'Submit for approval' })).toBeDisabled();
     });
 
+    it('presents suspended-to-active as reactivation without obsolete exact-book periods', async () => {
+        permissions.add('Finance.AccountingBooks.Transitions.Request');
+        const suspended = {
+            ...initializingBook,
+            lifecycleStatus: 'Suspended' as const,
+            activationReady: true,
+            readinessMessage: 'Approved legacy evidence remains current.',
+        };
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([suspended]);
+        vi.mocked(financeDataService.getAccountingBookActivationReadiness).mockResolvedValue({
+            isReady: true,
+            blockers: [],
+            initializationFingerprint: 'A'.repeat(64),
+            requiredPeriodCount: 0,
+            readyPeriodCount: 0,
+        });
+        vi.mocked(financeDataService.getAccountingBookPeriods).mockResolvedValue([]);
+
+        render(<AccountingBooksSettingsPage />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Request lifecycle change' }));
+
+        expect(await screen.findByText('Reactivation readiness confirmed')).toBeInTheDocument();
+        expect(screen.getByText('Tenant fiscal-period authority')).toBeInTheDocument();
+        expect(screen.getByText(/Reactivation does not reopen or rerun the historical first-posting period/)).toBeInTheDocument();
+        expect(screen.getByText(/will not rerun opening conversion or historical replay/)).toBeInTheDocument();
+        expect(screen.queryByText('Required exact-book periods')).not.toBeInTheDocument();
+        expect(screen.queryByText('No exact-book periods are configured.')).not.toBeInTheDocument();
+    });
+
     it('excludes the tenant base currency when creating a Parallel book', async () => {
         permissions.add('Finance.AccountingBooks.Manage');
         vi.mocked(financeDataService.createAccountingBook).mockResolvedValue(initializingBook);
@@ -402,7 +431,8 @@ describe('accounting book settings', () => {
         fireEvent.click(await screen.findByRole('button', { name: 'Review & approve' }));
 
         expect(await screen.findByText('Activation readiness confirmed')).toBeInTheDocument();
-        expect(screen.getByText('2026-01: Open')).toBeInTheDocument();
+        expect(screen.getByText('Tenant fiscal-period authority')).toBeInTheDocument();
+        expect(screen.getByText(/Activation requires 1 matching tenant fiscal period/)).toBeInTheDocument();
         expect(screen.getByText('Account-level reconciliation')).toBeInTheDocument();
         expect(screen.getByText(/Reason: Reconciliation evidence reviewed/)).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Approve transition' })).toBeDisabled();

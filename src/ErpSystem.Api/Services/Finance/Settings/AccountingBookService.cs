@@ -447,6 +447,9 @@ public sealed class AccountingBookService : IAccountingBookService
         // The base graph is mutable while a request waits for approval. Revalidate it under the
         // serializable writer boundary before advancing the workflow or recording approval evidence.
         if (action == "Approve") await ValidateGovernedTransitionAsync(book, book.PendingLifecycleStatus.Value, ct);
+        var isReactivation = action == "Approve"
+            && book.LifecycleStatus == AccountingBookLifecycleStatus.Suspended
+            && book.PendingLifecycleStatus == AccountingBookLifecycleStatus.Active;
         var before = Snapshot(book);
         var result = await workflow.ProcessApprovalStepAsync(WorkflowEntityType, book.Id, actor, action, request.Reason.Trim());
         if (!result.Success) throw new InvalidOperationException(result.Message ?? $"The transition {action.ToLowerInvariant()} action failed.");
@@ -457,7 +460,8 @@ public sealed class AccountingBookService : IAccountingBookService
         {
             var target = book.PendingLifecycleStatus!.Value;
             if (target == AccountingBookLifecycleStatus.Active
-                && book.BookType == AccountingBookType.ParallelFull)
+                && book.BookType == AccountingBookType.ParallelFull
+                && !isReactivation)
             {
                 if (_initialization == null)
                     throw new InvalidOperationException("Parallel opening initialization is unavailable.");
@@ -494,6 +498,7 @@ public sealed class AccountingBookService : IAccountingBookService
         book.UpdatedAt = DateTime.UtcNow; book.UpdatedBy = ActorName();
         await _db.SaveChangesAsync(ct);
         var eventType = action == "Reject" ? FinanceAuditEvents.AccountingBookTransitionRejected
+            : completed && isReactivation ? FinanceAuditEvents.AccountingBookReactivated
             : completed ? FinanceAuditEvents.AccountingBookTransitionApproved : FinanceAuditEvents.AccountingBookTransitionApprovalStepCompleted;
         await AuditAsync(eventType, book, before, Snapshot(book), request.Reason, ct);
         return await LoadDtoAsync(book.Id, ct);

@@ -792,6 +792,7 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
     public async Task<AccountingBookActivationReadinessDto> GetReadinessAsync(Guid accountingBookId, CancellationToken cancellationToken = default)
     {
         var book = await RequireBookAsync(accountingBookId, cancellationToken);
+        var isReactivation = book.LifecycleStatus == AccountingBookLifecycleStatus.Suspended;
         var blockers = new List<string>();
         var initialization = await Query().AsNoTracking().Where(item => item.AccountingBookId == book.Id)
             .OrderByDescending(item => item.Version).ThenByDescending(item => item.Id).FirstOrDefaultAsync(cancellationToken);
@@ -799,9 +800,18 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             blockers.Add("The latest initialization version must be approved.");
         else
         {
-            try { await EnsureEvidenceUnchangedAsync(initialization, cancellationToken); }
+            try { await EnsureEvidenceUnchangedAsync(initialization, cancellationToken, enforceCurrentParallelCutoff: !isReactivation); }
             catch (InvalidOperationException ex) { blockers.Add(ex.Message); }
         }
+        if (isReactivation)
+            return new AccountingBookActivationReadinessDto
+            {
+                IsReady = blockers.Count == 0,
+                Blockers = blockers,
+                InitializationFingerprint = initialization?.EvidenceFingerprint,
+                RequiredPeriodCount = 0,
+                ReadyPeriodCount = 0
+            };
         // Tenant fiscal authority is the sole period gate. Accounting books no longer maintain a
         // second open/close state that can drift from the tenant calendar.
         var firstPostingDate = initialization == null ? (DateTime?)null : initialization.CutoffDate.Date.AddDays(1);
@@ -841,7 +851,7 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
 
     public async Task<AccountingBookInitializationEvidenceValidationDto> ValidateCurrentApprovedEvidenceAsync(Guid accountingBookId, CancellationToken cancellationToken = default)
     {
-        await RequireBookAsync(accountingBookId, cancellationToken);
+        var book = await RequireBookAsync(accountingBookId, cancellationToken);
         var latest = await Query().AsNoTracking().Where(item => item.AccountingBookId == accountingBookId)
             .OrderByDescending(item => item.Version).ThenByDescending(item => item.Id).FirstOrDefaultAsync(cancellationToken);
         if (latest?.InitializationStatus != AccountingBookInitializationStatus.Approved)
@@ -849,7 +859,8 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         try
         {
             // Re-derivation is the C4 authority: retained hashes alone are not proof that mappings and balances stayed reconciled.
-            await EnsureEvidenceUnchangedAsync(latest, cancellationToken);
+            await EnsureEvidenceUnchangedAsync(latest, cancellationToken,
+                enforceCurrentParallelCutoff: book.LifecycleStatus != AccountingBookLifecycleStatus.Suspended);
             return new() { IsValid = true, InitializationId = latest.Id, Version = latest.Version,
                 EvidenceFingerprint = latest.EvidenceFingerprint, ReconciliationFingerprint = latest.ReconciliationFingerprint };
         }
@@ -860,11 +871,15 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         }
     }
 
-    private async Task EnsureEvidenceUnchangedAsync(AccountingBookInitialization entity, CancellationToken ct)
+    private async Task EnsureEvidenceUnchangedAsync(
+        AccountingBookInitialization entity,
+        CancellationToken ct,
+        bool enforceCurrentParallelCutoff = true)
     {
         var source = await ValidateSourceAsync(entity.AccountingBook, entity.Mode, entity.SourceAccountingBookId, ct);
         var prepared = await PrepareEvidenceAsync(entity.AccountingBook, source, entity.Mode, entity.CutoffDate,
-            entity.IdempotencyKey, entity.Reason, entity.Lines.Select(MapLine).ToList(), ct);
+            entity.IdempotencyKey, entity.Reason, entity.Lines.Select(MapLine).ToList(), ct,
+            enforceCurrentParallelCutoff);
         if (prepared.CutoffFiscalPeriodId != entity.CutoffFiscalPeriodId)
             throw new InvalidOperationException("INITIALIZATION_EVIDENCE_STALE: The authoritative cutoff period changed.");
         if (!prepared.AcceptedEvidenceFingerprints.Contains(entity.EvidenceFingerprint))
@@ -874,9 +889,11 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
     }
 
     private async Task<Prepared> PrepareEvidenceAsync(AccountingBook book, AccountingBook? source, AccountingBookInitializationMode mode, DateTime cutoff,
-        string idempotencyKey, string reason, IReadOnlyCollection<AccountingBookInitializationLineDto> requested, CancellationToken ct)
+        string idempotencyKey, string reason, IReadOnlyCollection<AccountingBookInitializationLineDto> requested, CancellationToken ct,
+        bool enforceCurrentParallelCutoff = true)
     {
-        ValidateParallelCutoffContinuity(book, cutoff);
+        if (enforceCurrentParallelCutoff)
+            ValidateParallelCutoffContinuity(book, cutoff);
         var cutoffPeriods = (await _db.FiscalPeriods.AsNoTracking().Where(item => item.TenantId == TenantId && !item.IsDeleted).ToListAsync(ct))
             .Where(item => item.EndDate.Date == cutoff.Date).ToList();
         if (cutoffPeriods.Count != 1)

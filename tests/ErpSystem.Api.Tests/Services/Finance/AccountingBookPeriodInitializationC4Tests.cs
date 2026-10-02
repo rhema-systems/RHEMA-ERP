@@ -622,6 +622,123 @@ public sealed class AccountingBookPeriodInitializationC4Tests
     }
 
     [Fact]
+    public async Task SuspendedParallelBook_ReactivatesLegacyEvidenceWithoutReplayingInitialization()
+    {
+        await using var db = Context();
+        var state = Seed(db);
+        var primary = new AccountingBook
+        {
+            TenantId = state.TenantId,
+            Code = "BASE",
+            Name = "Primary",
+            Purpose = "Statutory",
+            BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
+            IsDefault = true,
+            IsActive = true,
+            AllowsPosting = true
+        };
+        db.AccountingBooks.Add(primary);
+        state.Book.Code = "USD_PARALLEL";
+        state.Book.Name = "USD Parallel";
+        state.Book.Purpose = "Foreign-currency replication";
+        state.Book.BookType = AccountingBookType.ParallelFull;
+        state.Book.FunctionalCurrencyCode = "USD";
+        state.Book.IsDefault = false;
+        state.Book.BaseAccountingBookId = primary.Id;
+        state.Book.ParallelOpeningMode = ParallelBookOpeningMode.HistoricalReplay;
+        state.Book.ReplicationStartDate = new DateTime(2026, 1, 1);
+        await db.SaveChangesAsync();
+
+        var maker = Guid.NewGuid();
+        var initialization = InitializationService(db, state.TenantId, maker);
+        var request = Independent(state, "legacy-parallel-reactivation", 0m);
+        foreach (var line in request.Lines) line.CurrencyCode = "USD";
+        await initialization.ConfigureAsync(state.Book.Id, request);
+        await initialization.SubmitAsync(state.Book.Id);
+        var evidence = db.AccountingBookInitializations.Single();
+        evidence.RowVersion = [7];
+        await db.SaveChangesAsync();
+        await InitializationService(db, state.TenantId, Guid.NewGuid()).ApproveAsync(state.Book.Id,
+            new DecideAccountingBookInitializationDto
+            {
+                Reason = "Approved under the original continuity policy",
+                RowVersion = Convert.ToBase64String([7])
+            });
+
+        // Model a previously active legacy book whose retained cutoff predates the current
+        // day-before-replication rule. Lifecycle immutability prevents this structural value from
+        // changing through the application after activation.
+        state.Book.ReplicationStartDate = new DateTime(2026, 1, 2);
+        state.Book.LifecycleStatus = AccountingBookLifecycleStatus.Suspended;
+        state.Book.IsActive = false;
+        state.Book.AllowsPosting = false;
+        state.Book.RowVersion = [8];
+        state.Period.IsOpen = false;
+        state.Period.IsClosed = true;
+        foreach (var mapping in db.AccountAccountingBooks.Where(item => item.AccountingBookId == state.Book.Id))
+        {
+            mapping.CreatedBy = $"System ({FinanceClassificationManifestSeeder.ManifestVersion})";
+            mapping.IsEnabled = false;
+        }
+        await db.SaveChangesAsync();
+
+        var readiness = await initialization.GetReadinessAsync(state.Book.Id);
+        readiness.IsReady.Should().BeTrue(string.Join(" ", readiness.Blockers));
+        readiness.RequiredPeriodCount.Should().Be(0);
+        readiness.ReadyPeriodCount.Should().Be(0);
+
+        var journalCount = await db.JournalEntries.CountAsync();
+        var postingEventCount = await db.FinancePostingEvents.CountAsync();
+        var audit = Audit();
+        var workflow = Workflow();
+        var lifecycle = new AccountingBookService(db, User(state.TenantId, maker).Object,
+            workflow.Object, audit.Object, initialization);
+        await lifecycle.RequestTransitionAsync(state.Book.Id, new RequestAccountingBookTransitionDto
+        {
+            TargetStatus = "Active",
+            Reason = "Resume unchanged parallel authority",
+            RowVersion = Convert.ToBase64String([8])
+        });
+        await new AccountingBookService(db, User(state.TenantId, Guid.NewGuid()).Object,
+                workflow.Object, audit.Object, initialization)
+            .ApproveTransitionAsync(state.Book.Id, new DecideAccountingBookTransitionDto
+            {
+                Reason = "Legacy evidence and structure independently verified",
+                RowVersion = Convert.ToBase64String([8])
+            });
+
+        state.Book.LifecycleStatus.Should().Be(AccountingBookLifecycleStatus.Active);
+        state.Book.IsActive.Should().BeTrue();
+        state.Book.AllowsPosting.Should().BeTrue();
+        db.AccountAccountingBooks.Where(item => item.AccountingBookId == state.Book.Id)
+            .Should().OnlyContain(mapping => mapping.IsEnabled);
+        (await db.JournalEntries.CountAsync()).Should().Be(journalCount);
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(postingEventCount);
+        audit.Verify(item => item.RecordAsync(
+            It.Is<FinanceAuditEventDto>(entry => entry.EventType == FinanceAuditEvents.AccountingBookReactivated),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        // Compatibility never means trusting stale evidence. A changed account-authority
+        // fingerprint must still block a later resumption.
+        state.Book.LifecycleStatus = AccountingBookLifecycleStatus.Suspended;
+        state.Book.IsActive = false;
+        state.Book.AllowsPosting = false;
+        state.Book.RowVersion = [9];
+        state.Debit.AccountNumber = "1000-CHANGED";
+        await db.SaveChangesAsync();
+        await FluentActions.Awaiting(() => lifecycle.RequestTransitionAsync(state.Book.Id,
+            new RequestAccountingBookTransitionDto
+            {
+                TargetStatus = "Active",
+                Reason = "Must reject stale authority",
+                RowVersion = Convert.ToBase64String([9])
+            })).Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*ACCOUNTING_BOOK_ACTIVATION_NOT_READY*");
+    }
+
+    [Fact]
     public async Task ActivationReadiness_ReDerivesLatestEvidenceAndRejectsPendingBookClose()
     {
         await using var db = Context(); var state = Seed(db); await db.SaveChangesAsync();

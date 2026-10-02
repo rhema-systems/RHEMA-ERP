@@ -145,6 +145,7 @@ function LifecycleTransitionEvidence({
   retry: () => void;
 }) {
   const current = statusOf(book);
+  const isReactivation = current === 'Suspended' && target === 'Active';
   const hasPreparationEvidence =
     Boolean(evidence.initialization) || evidence.periods.length > 0;
   return (
@@ -306,34 +307,29 @@ function LifecycleTransitionEvidence({
               <ShieldAlert className="h-4 w-4" />
               <AlertTitle>
                 {evidence.readiness?.isReady
-                  ? 'Activation readiness confirmed'
-                  : 'Activation is not ready'}
+                  ? isReactivation
+                    ? 'Reactivation readiness confirmed'
+                    : 'Activation readiness confirmed'
+                  : isReactivation
+                    ? 'Reactivation is not ready'
+                    : 'Activation is not ready'}
               </AlertTitle>
               <AlertDescription>
                 {evidence.readiness?.isReady
-                  ? `Approved initialization and ${evidence.readiness.readyPeriodCount} required open period(s) are current.`
+                  ? isReactivation
+                    ? 'Approved activation evidence and immutable book structure remain current. Reactivation will not rerun opening conversion or historical replay.'
+                    : 'Approved initialization and ' + evidence.readiness.readyPeriodCount + ' required tenant fiscal period(s) are current.'
                   : evidence.readiness?.blockers.join(' ') ||
                     'Readiness could not be confirmed.'}
               </AlertDescription>
             </Alert>
             <div className="rounded-md border p-3 text-sm">
-              <p className="font-medium">Required exact-book periods</p>
-              {evidence.periods.length === 0 ? (
-                <p className="mt-1 text-muted-foreground">
-                  No exact-book periods are configured.
-                </p>
-              ) : (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {evidence.periods.map((period) => (
-                    <Badge
-                      key={period.id}
-                      variant={period.status === 'Open' ? 'default' : 'outline'}
-                    >
-                      {period.fiscalPeriodCode}: {period.status}
-                    </Badge>
-                  ))}
-                </div>
-              )}
+              <p className="font-medium">Tenant fiscal-period authority</p>
+              <p className="mt-1 text-muted-foreground">
+                {isReactivation
+                  ? 'Reactivation does not reopen or rerun the historical first-posting period. Subsequent posting remains governed by the tenant fiscal calendar.'
+                  : 'Activation requires ' + (evidence.readiness?.requiredPeriodCount ?? 0) + ' matching tenant fiscal period(s); book-specific period rows are not a separate posting gate.'}
+              </p>
             </div>
             {evidence.initialization ? (
               <InitializationEvidencePack
