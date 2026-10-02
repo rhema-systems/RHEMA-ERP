@@ -1598,8 +1598,18 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 throw new InvalidOperationException(
                     "ACCOUNTING_BOOK_PERIOD_REQUIRED: The selected accounting book has no governed authority for this fiscal period.");
             if (accountingBookPeriod.PeriodStatus != AccountingBookPeriodStatus.Open)
+            {
+                await RecordPostingBlockedByBookPeriodAuditAsync(
+                    tenantId,
+                    request,
+                    accountingBook,
+                    accountingBookPeriod,
+                    fiscalPeriod,
+                    postingDate,
+                    cancellationToken);
                 throw new InvalidOperationException(
                     $"ACCOUNTING_BOOK_PERIOD_NOT_OPEN: Accounting book '{accountingBook.Code}' is {accountingBookPeriod.PeriodStatus} for fiscal period '{fiscalPeriod.PeriodCode}'.");
+            }
         }
 
         if (yearEndCycle == null)
@@ -2911,6 +2921,49 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
             Comment = "Posting blocked because the accounting period is closed, locked, or not open.",
             Resource = "Finance.FiscalPeriod",
             ResourceId = fiscalPeriod.Id.ToString()
+        }, cancellationToken);
+    }
+
+    private async Task RecordPostingBlockedByBookPeriodAuditAsync(
+        Guid tenantId,
+        FinancePostingCommandDto request,
+        AccountingBook accountingBook,
+        AccountingBookPeriod accountingBookPeriod,
+        FiscalPeriod fiscalPeriod,
+        DateTime postingDate,
+        CancellationToken cancellationToken)
+    {
+        if (_financeAuditService == null)
+        {
+            return;
+        }
+
+        await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = FinanceAuditEvents.PostingBlockedPeriodClosedLocked,
+            TenantId = tenantId,
+            SourceModule = request.SourceModule,
+            SourceDocumentType = request.SourceDocumentType,
+            SourceDocumentId = request.SourceDocumentId == Guid.Empty ? null : request.SourceDocumentId,
+            AfterValues = new
+            {
+                request.SourceModule,
+                request.SourceDocumentType,
+                request.SourceDocumentId,
+                request.PostingAction,
+                request.SourceDocumentReference,
+                PostingDate = postingDate,
+                FiscalPeriodId = fiscalPeriod.Id,
+                fiscalPeriod.PeriodCode,
+                fiscalPeriod.PeriodName,
+                AccountingBookId = accountingBook.Id,
+                accountingBook.Code,
+                AccountingBookPeriodId = accountingBookPeriod.Id,
+                accountingBookPeriod.PeriodStatus
+            },
+            Comment = "Posting blocked because the selected accounting book is not open for the fiscal period.",
+            Resource = "Finance.AccountingBookPeriod",
+            ResourceId = accountingBookPeriod.Id.ToString()
         }, cancellationToken);
     }
 

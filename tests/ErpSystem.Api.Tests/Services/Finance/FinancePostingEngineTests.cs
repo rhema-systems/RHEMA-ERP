@@ -400,16 +400,15 @@ public sealed class FinancePostingEngineTests
         var act = () => service.PostAsync(request);
 
         var error = await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Posting period is not open.*");
+            .WithMessage("ACCOUNTING_BOOK_PERIOD_NOT_OPEN:*");
         error.Which.Message.Should().Contain($"book '{request.AccountingBookCode}'")
-            .And.Contain($"fiscal period '{period.PeriodCode}'")
-            .And.Contain(request.PostingDate.ToString("yyyy-MM-dd"))
-            .And.Contain("approved workflow");
+            .And.Contain("is Closed")
+            .And.Contain($"fiscal period '{period.PeriodCode}'");
     }
 
     [Fact]
     [Trait("Category", "AccountingBookPeriodC4")]
-    public async Task PostAsync_ShouldUseTenantFiscalPeriod_WhenLegacyBookPeriodAuthorityIsMissing()
+    public async Task PostAsync_ShouldRejectPosting_WhenBookPeriodAuthorityIsMissing()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -420,16 +419,19 @@ public sealed class FinancePostingEngineTests
         var credit = SeedAccount(db, tenantId, "2110", AccountType.Liability);
         await db.SaveChangesAsync();
 
-        await CreateService(db, tenantId).PostAsync(CreateRequest(tenantId, debit.Id, credit.Id));
+        var act = () => CreateService(db, tenantId)
+            .PostAsync(CreateRequest(tenantId, debit.Id, credit.Id));
 
-        db.JournalEntries.Should().ContainSingle();
-        (await db.AccountBalances.CountAsync(item => item.AccountId == debit.Id)).Should().Be(1);
-        (await db.AccountBalances.CountAsync(item => item.AccountId == credit.Id)).Should().Be(1);
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("ACCOUNTING_BOOK_PERIOD_REQUIRED:*");
+        db.JournalEntries.Should().BeEmpty();
+        (await db.AccountBalances.CountAsync(item => item.AccountId == debit.Id)).Should().Be(0);
+        (await db.AccountBalances.CountAsync(item => item.AccountId == credit.Id)).Should().Be(0);
     }
 
     [Fact]
     [Trait("Category", "AccountingBookPeriodC4")]
-    public async Task PostAsync_ShouldUseTenantFiscalPeriod_WhenLegacyBookPeriodIsClosed()
+    public async Task PostAsync_ShouldRejectPosting_WhenBookPeriodAuthorityIsClosed()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -440,9 +442,12 @@ public sealed class FinancePostingEngineTests
         var credit = SeedAccount(db, tenantId, "2120", AccountType.Liability);
         await db.SaveChangesAsync();
 
-        await CreateService(db, tenantId).PostAsync(CreateRequest(tenantId, debit.Id, credit.Id));
+        var act = () => CreateService(db, tenantId)
+            .PostAsync(CreateRequest(tenantId, debit.Id, credit.Id));
 
-        db.JournalEntries.Should().ContainSingle();
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("ACCOUNTING_BOOK_PERIOD_NOT_OPEN:*");
+        db.JournalEntries.Should().BeEmpty();
     }
 
     [Fact]
@@ -569,7 +574,7 @@ public sealed class FinancePostingEngineTests
         var act = () => service.PostAsync(request);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Posting period is not open.*");
+            .WithMessage("ACCOUNTING_BOOK_PERIOD_NOT_OPEN:*");
         (await db.AuditLogs.CountAsync(a =>
             a.TenantId == tenantId &&
             a.Action == FinanceAuditEvents.PostingBlockedPeriodClosedLocked)).Should().Be(1);
