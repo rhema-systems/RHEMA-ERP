@@ -1641,6 +1641,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement("settings.read", "settings.update")))
                 .AddPolicy("HrIdentityReconciliationManage", policy =>
                     policy.Requirements.Add(new PermissionRequirement("settings.update")))
+                .AddPolicy("dashboard.read", policy =>
+                    policy.Requirements.Add(new PermissionRequirement("dashboard.read")))
                 .AddPolicy("Finance", policy =>
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true

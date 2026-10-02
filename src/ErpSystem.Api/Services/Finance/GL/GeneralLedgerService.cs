@@ -2871,87 +2871,166 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance year-end lock.', 1;");
         {
             var tenantId = TenantId;
             var today = DateTime.UtcNow.Date;
-
             var fiscalYear = await _context.FiscalYears
+                .AsNoTracking()
                 .Where(fy => fy.TenantId == tenantId && !fy.IsDeleted && fy.StartDate <= today && fy.EndDate >= today)
                 .OrderByDescending(fy => fy.StartDate)
                 .FirstOrDefaultAsync();
 
             var startDate = fiscalYear?.StartDate.Date ?? new DateTime(today.Year, 1, 1);
-            var endDate = fiscalYear?.EndDate.Date ?? new DateTime(today.Year, 12, 31);
+            return await GetFinanceDashboardAsync(startDate, today);
+        }
 
-            var activity = await _context.AccountTransactions
-                .Where(t => t.TenantId == tenantId
-                    && !t.IsDeleted
-                    && t.TransactionDate >= startDate
-                    && t.TransactionDate <= endDate
-                    && (t.Account.AccountType == AccountType.Revenue || t.Account.AccountType == AccountType.Expense))
-                .Select(t => new
+        public async Task<FinanceDashboardDto> GetFinanceDashboardAsync(DateTime startDate, DateTime endDate)
+        {
+            var tenantId = TenantId;
+            startDate = startDate.Date;
+            endDate = endDate.Date;
+            if (startDate > endDate)
+                throw new ArgumentException("Finance dashboard start date cannot be later than the end date.");
+            if ((endDate - startDate).TotalDays > 3660)
+                throw new ArgumentException("Finance dashboard date range cannot exceed 10 years.");
+
+            var endExclusive = endDate.AddDays(1);
+            var periodDays = (endDate - startDate).Days + 1;
+            var comparisonEndDate = startDate.AddDays(-1);
+            var comparisonStartDate = comparisonEndDate.AddDays(-(periodDays - 1));
+            var currency = await _tenantSettings.GetBaseCurrencyReferenceAsync();
+
+            // Reuse the same book and posting-status boundary as the statutory Finance reports.
+            // Reversed entries remain in the ledger so their reversing lines preserve net truth.
+            var activity = BuildPostedLedgerQuery(tenantId, bookClassification: null)
+                .Where(transaction => transaction.TransactionDate >= comparisonStartDate
+                    && transaction.TransactionDate < endExclusive
+                    && (transaction.Account.AccountType == AccountType.Revenue
+                        || transaction.Account.AccountType == AccountType.Expense));
+
+            var currentTotals = await activity
+                .Where(transaction => transaction.TransactionDate >= startDate)
+                .GroupBy(transaction => transaction.Account.AccountType)
+                .Select(group => new
                 {
-                    t.Account.AccountType,
-                    t.Account.AccountName,
-                    t.TransactionDate,
-                    t.DebitAmount,
-                    t.CreditAmount
+                    AccountType = group.Key,
+                    Debit = group.Sum(transaction => transaction.DebitAmount),
+                    Credit = group.Sum(transaction => transaction.CreditAmount)
                 })
                 .ToListAsync();
 
-            var revenue = activity
-                .Where(t => t.AccountType == AccountType.Revenue)
-                .Sum(t => t.CreditAmount - t.DebitAmount);
-            var expenses = activity
-                .Where(t => t.AccountType == AccountType.Expense)
-                .Sum(t => t.DebitAmount - t.CreditAmount);
+            var comparisonTotals = await activity
+                .Where(transaction => transaction.TransactionDate < startDate)
+                .GroupBy(transaction => transaction.Account.AccountType)
+                .Select(group => new
+                {
+                    AccountType = group.Key,
+                    Debit = group.Sum(transaction => transaction.DebitAmount),
+                    Credit = group.Sum(transaction => transaction.CreditAmount)
+                })
+                .ToListAsync();
 
+            var monthlyTotals = await activity
+                .Where(transaction => transaction.TransactionDate >= startDate)
+                .GroupBy(transaction => new
+                {
+                    transaction.TransactionDate.Year,
+                    transaction.TransactionDate.Month,
+                    transaction.Account.AccountType
+                })
+                .Select(group => new
+                {
+                    group.Key.Year,
+                    group.Key.Month,
+                    AccountType = group.Key.AccountType,
+                    Debit = group.Sum(transaction => transaction.DebitAmount),
+                    Credit = group.Sum(transaction => transaction.CreditAmount)
+                })
+                .ToListAsync();
+
+            var expenseChart = await activity
+                .Where(transaction => transaction.TransactionDate >= startDate
+                    && transaction.Account.AccountType == AccountType.Expense)
+                .GroupBy(transaction => transaction.Account.AccountName)
+                .Select(group => new FinanceDashboardBreakdownPointDto
+                {
+                    Name = group.Key,
+                    Value = group.Sum(transaction => transaction.DebitAmount - transaction.CreditAmount)
+                })
+                .Where(point => point.Value > 0)
+                .OrderByDescending(point => point.Value)
+                .Take(8)
+                .ToListAsync();
+
+            var currentTotalsByType = currentTotals.ToDictionary(
+                item => item.AccountType,
+                item => item.AccountType == AccountType.Revenue ? item.Credit - item.Debit : item.Debit - item.Credit);
+            var comparisonTotalsByType = comparisonTotals.ToDictionary(
+                item => item.AccountType,
+                item => item.AccountType == AccountType.Revenue ? item.Credit - item.Debit : item.Debit - item.Credit);
+            var revenue = currentTotalsByType.GetValueOrDefault(AccountType.Revenue);
+            var expenses = currentTotalsByType.GetValueOrDefault(AccountType.Expense);
+            var previousRevenue = comparisonTotalsByType.GetValueOrDefault(AccountType.Revenue);
+            var previousExpenses = comparisonTotalsByType.GetValueOrDefault(AccountType.Expense);
+            var netProfit = revenue - expenses;
+            var previousNetProfit = previousRevenue - previousExpenses;
+
+            var monthlyLookup = monthlyTotals
+                .ToDictionary(
+                    item => (item.Year, item.Month, item.AccountType),
+                    item => item.AccountType == AccountType.Revenue ? item.Credit - item.Debit : item.Debit - item.Credit);
             var monthly = new List<FinanceDashboardMonthlyPointDto>();
             var monthCursor = new DateTime(startDate.Year, startDate.Month, 1);
             var lastMonth = new DateTime(endDate.Year, endDate.Month, 1);
-            while (monthCursor <= lastMonth && monthly.Count < 12)
+            while (monthCursor <= lastMonth)
             {
-                var monthEnd = monthCursor.AddMonths(1);
-                var monthRows = activity.Where(t => t.TransactionDate >= monthCursor && t.TransactionDate < monthEnd).ToList();
                 monthly.Add(new FinanceDashboardMonthlyPointDto
                 {
-                    Name = monthCursor.ToString("MMM"),
-                    Revenue = monthRows.Where(t => t.AccountType == AccountType.Revenue).Sum(t => t.CreditAmount - t.DebitAmount),
-                    Expenses = monthRows.Where(t => t.AccountType == AccountType.Expense).Sum(t => t.DebitAmount - t.CreditAmount)
+                    Name = monthCursor.ToString("MMM yy"),
+                    Revenue = monthlyLookup.GetValueOrDefault((monthCursor.Year, monthCursor.Month, AccountType.Revenue)),
+                    Expenses = monthlyLookup.GetValueOrDefault((monthCursor.Year, monthCursor.Month, AccountType.Expense))
                 });
-                monthCursor = monthEnd;
+                monthCursor = monthCursor.AddMonths(1);
             }
 
-            var expenseChart = activity
-                .Where(t => t.AccountType == AccountType.Expense)
-                .GroupBy(t => t.AccountName)
-                .Select(g => new FinanceDashboardBreakdownPointDto
-                {
-                    Name = g.Key,
-                    Value = g.Sum(t => t.DebitAmount - t.CreditAmount)
-                })
-                .Where(p => p.Value > 0)
-                .OrderByDescending(p => p.Value)
-                .Take(8)
-                .ToList();
-
-            // Cash on hand comes from the posted cash/bank ledger (source of truth), matching
-            // the cash position report rather than stored snapshots.
+            // Closing cash is authoritative as at the selected period end. The report service
+            // supplies its opening balance, so this is not a sum of heterogeneous currencies.
             var cashLedger = await GenerateCashBankLedgerAsync(new CashBankLedgerRequestDto
             {
-                StartDate = today,
-                EndDate = today
+                StartDate = endDate,
+                EndDate = endDate
             });
 
             return new FinanceDashboardDto
             {
+                CurrencyCode = currency.CurrencyCode,
+                CurrencySymbol = currency.CurrencySymbol,
+                CurrencyDecimalPlaces = currency.DecimalPlaces,
+                RangeStartDate = startDate,
+                RangeEndDate = endDate,
+                ComparisonStartDate = comparisonStartDate,
+                ComparisonEndDate = comparisonEndDate,
                 Kpis = new FinanceDashboardKpisDto
                 {
                     Revenue = revenue,
                     Expenses = expenses,
-                    NetProfit = revenue - expenses,
-                    CashOnHand = cashLedger.TotalClosingBalance
+                    NetProfit = netProfit,
+                    CashOnHand = cashLedger.TotalClosingBalance,
+                    PreviousRevenue = previousRevenue,
+                    PreviousExpenses = previousExpenses,
+                    PreviousNetProfit = previousNetProfit,
+                    RevenueChangePercent = CalculateDashboardChange(revenue, previousRevenue),
+                    ExpensesChangePercent = CalculateDashboardChange(expenses, previousExpenses),
+                    NetProfitChangePercent = CalculateDashboardChange(netProfit, previousNetProfit)
                 },
                 Monthly = monthly,
                 ExpenseChart = expenseChart
             };
+        }
+
+        internal static decimal? CalculateDashboardChange(decimal current, decimal previous)
+        {
+            if (previous == 0m)
+                return current == 0m ? 0m : null;
+
+            return decimal.Round((current - previous) * 100m / Math.Abs(previous), 1);
         }
 
         private async Task<(Guid? PostingEventId, Guid? ClosingJournalEntryId, decimal NetIncome)> TransferRetainedEarningsAsync(

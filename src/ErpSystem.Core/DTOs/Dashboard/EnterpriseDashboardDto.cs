@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Crm;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.DTOs.Projects;
@@ -10,6 +11,8 @@ namespace ErpSystem.Core.DTOs.Dashboard;
 
 public class EnterpriseDashboardDto
 {
+    public BaseCurrencyReferenceDto ReportingCurrency { get; set; } = new();
+    public FinanceDashboardDto? FinanceOverview { get; set; }
     public CrmOverviewDto? CrmOverview { get; set; }
     public CrmReportingDto? CrmReporting { get; set; }
     public CrmConversionsDto? CrmConversions { get; set; }

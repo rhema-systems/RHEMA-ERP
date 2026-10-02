@@ -4,12 +4,20 @@ import type { InventoryRequisitionDto } from './inventoryRequisitionService'
 import type { ProjectDashboardDto } from './projectService'
 import type { PurchaseOrderSummaryDto, PurchaseRequisitionSummaryDto } from './purchasingService'
 import type { TenderDto } from './tenderService'
+import type { FinanceDashboardData } from '../types/finance-dashboard'
 
 export interface DashboardModuleStatus {
   module: string
   available: boolean
   accessRestricted?: boolean
   error?: string
+}
+
+export interface DashboardCurrencyReference {
+  currencyCode: string
+  currencyName: string
+  currencySymbol: string
+  decimalPlaces: number
 }
 
 export function getUnavailableDashboardModules(statuses: readonly DashboardModuleStatus[]): DashboardModuleStatus[] {
@@ -136,6 +144,8 @@ export interface ProcurementInventoryManagementDashboard {
 }
 
 export interface EnterpriseDashboardData {
+  reportingCurrency: DashboardCurrencyReference
+  financeOverview: FinanceDashboardData | null
   crmOverview: CrmOverviewDto | null
   crmReporting: CrmReportingDto | null
   crmConversions: CrmConversionsDto | null
@@ -154,6 +164,28 @@ export interface EnterpriseDashboardData {
   rangeStartDate: string
   rangeEndDate: string
   lastUpdated: string
+}
+
+export function resolveDashboardReportingCurrency(
+  data: Pick<EnterpriseDashboardData, 'reportingCurrency' | 'financeOverview'>,
+): { currencyCode: string; decimalPlaces: number } {
+  const configuredCode = data.reportingCurrency?.currencyCode?.trim().toUpperCase()
+  if (configuredCode && /^[A-Z]{3}$/.test(configuredCode)) {
+    return {
+      currencyCode: configuredCode,
+      decimalPlaces: data.reportingCurrency.decimalPlaces,
+    }
+  }
+
+  const financeCode = data.financeOverview?.currencyCode?.trim().toUpperCase()
+  if (financeCode && /^[A-Z]{3}$/.test(financeCode)) {
+    return {
+      currencyCode: financeCode,
+      decimalPlaces: data.financeOverview?.currencyDecimalPlaces ?? 0,
+    }
+  }
+
+  return { currencyCode: '', decimalPlaces: 0 }
 }
 
 class DashboardService {

@@ -4,11 +4,14 @@ using ErpSystem.Core.DTOs.Dashboard;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.DTOs.Projects;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Crm;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Projects;
+using ErpSystem.Shared;
+using Microsoft.AspNetCore.Authorization;
 using ProcurementPurchaseOrderSummaryDto = ErpSystem.Core.DTOs.Procurement.PurchaseOrderSummaryDto;
 using ProcurementPurchaseRequisitionSummaryDto = ErpSystem.Core.DTOs.Procurement.PurchaseRequisitionSummaryDto;
 using TenderDto = ErpSystem.Core.DTOs.Procurement.TenderDto;
@@ -55,6 +58,26 @@ public sealed class EnterpriseDashboardService
         var rangeEndExclusive = rangeEndDate.AddDays(1);
         var rangeEndInclusive = rangeEndExclusive.AddTicks(-1);
         var maintenanceScheduleHorizonDays = Math.Max(0, (rangeEndDate - utcToday).Days);
+
+        var reportingCurrencyTask = RunModuleAsync(
+            "Reporting Currency",
+            async sp => await sp.GetRequiredService<ITenantSettingsService>().GetBaseCurrencyReferenceAsync(),
+            fallback: new Core.DTOs.Finance.BaseCurrencyReferenceDto
+            {
+                CurrencyCode = string.Empty,
+                CurrencyName = string.Empty,
+                CurrencySymbol = string.Empty,
+                DecimalPlaces = 0
+            },
+            fallbackMessage: "Reporting currency is unavailable");
+
+        var financeTask = RunAuthorizedModuleAsync(
+            "Finance",
+            FinancePermissions.ViewFinance,
+            async sp => await sp.GetRequiredService<IGeneralLedgerService>()
+                .GetFinanceDashboardAsync(rangeStartDate, rangeEndDate),
+            fallback: (Core.DTOs.Finance.FinanceDashboardDto?)null,
+            fallbackMessage: "Finance analytics are unavailable");
 
         var crmOverviewTask = RunModuleAsync(
             "CRM Overview",
@@ -182,6 +205,8 @@ public sealed class EnterpriseDashboardService
             fallbackMessage: "Procurement and inventory management metrics are unavailable");
 
         await Task.WhenAll(
+            reportingCurrencyTask,
+            financeTask,
             crmOverviewTask,
             crmReportingTask,
             crmConversionsTask,
@@ -199,6 +224,8 @@ public sealed class EnterpriseDashboardService
 
         return new EnterpriseDashboardDto
         {
+            ReportingCurrency = reportingCurrencyTask.Result.Data,
+            FinanceOverview = financeTask.Result.Data,
             CrmOverview = crmOverviewTask.Result.Data,
             CrmReporting = crmReportingTask.Result.Data,
             CrmConversions = crmConversionsTask.Result.Data,
@@ -217,6 +244,8 @@ public sealed class EnterpriseDashboardService
             RangeEndDate = rangeEndDate,
             ModuleStatus =
             [
+                reportingCurrencyTask.Result.Status,
+                financeTask.Result.Status,
                 crmOverviewTask.Result.Status,
                 crmReportingTask.Result.Status,
                 crmConversionsTask.Result.Status,
@@ -274,8 +303,7 @@ public sealed class EnterpriseDashboardService
                 {
                     Module = module,
                     Available = false,
-                    AccessRestricted = true,
-                    Error = ex.Message
+                    AccessRestricted = true
                 });
         }
         catch (Exception ex)
@@ -288,7 +316,55 @@ public sealed class EnterpriseDashboardService
                 {
                     Module = module,
                     Available = false,
-                    Error = ex.Message
+                    Error = fallbackMessage
+                });
+        }
+    }
+
+    private async Task<ModuleResult<T>> RunAuthorizedModuleAsync<T>(
+        string module,
+        string permissionPolicy,
+        Func<IServiceProvider, Task<T>> action,
+        T fallback,
+        string fallbackMessage)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var authorization = scope.ServiceProvider.GetRequiredService<IAuthorizationService>();
+            var principal = scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>().HttpContext?.User;
+            if (principal?.Identity?.IsAuthenticated != true ||
+                !(await authorization.AuthorizeAsync(principal, resource: null, permissionPolicy)).Succeeded)
+            {
+                return new ModuleResult<T>(
+                    fallback,
+                    new EnterpriseDashboardModuleStatusDto
+                    {
+                        Module = module,
+                        Available = false,
+                        AccessRestricted = true
+                    });
+            }
+
+            var data = await action(scope.ServiceProvider);
+            return new ModuleResult<T>(
+                data,
+                new EnterpriseDashboardModuleStatusDto
+                {
+                    Module = module,
+                    Available = true
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Enterprise dashboard module {Module} failed", module);
+            return new ModuleResult<T>(
+                fallback,
+                new EnterpriseDashboardModuleStatusDto
+                {
+                    Module = module,
+                    Available = false,
+                    Error = fallbackMessage
                 });
         }
     }

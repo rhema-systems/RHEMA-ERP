@@ -9,18 +9,19 @@ import type { DateRange } from 'react-day-picker';
 import {
   AlertTriangle,
   ArrowRight,
+  Banknote,
   Boxes,
   Clock3,
   FileText,
   FolderKanban,
   Gauge,
-  Loader2,
   MapPin,
   ShieldAlert,
   type LucideIcon,
   RefreshCw,
   ShoppingCart,
   TrendingUp,
+  WalletCards,
   Wrench,
 } from 'lucide-react';
 import { DashboardLayout } from '../../components/layout/dashboard-layout';
@@ -37,11 +38,13 @@ import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { DatePickerWithRange } from '../../components/ui/date-range-picker';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
+import { Skeleton } from '../../components/ui/skeleton';
 import { useAuth } from '../../hooks/use-auth';
 import { getAuthenticatedHomePath, getExternalPortalPath, isCandidateUser, isConsultantClientUser, isExternalPortalUser } from '../../lib/auth-routing';
 import { cn } from '../../lib/utils';
+import { formatCurrencyAmount } from '../../lib/currency';
 import { authService } from '../../services/auth';
-import { dashboardService, getUnavailableDashboardModules } from '../../services/dashboard';
+import { dashboardService, getUnavailableDashboardModules, resolveDashboardReportingCurrency } from '../../services/dashboard';
 import { inventoryWarehouseService } from '../../services/inventoryWarehouseService';
 
 interface SummaryCardDefinition {
@@ -53,19 +56,6 @@ interface SummaryCardDefinition {
   iconClassName: string;
   icon: LucideIcon;
 }
-
-const formatCurrency = (value: number, currency = 'USD') => {
-  try {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
-  } catch {
-    return `${currency} ${formatNumber(value)}`;
-  }
-};
 
 const formatNumber = (value: number) =>
   new Intl.NumberFormat('en-US', {
@@ -102,13 +92,39 @@ const getDaysUntil = (value?: string, referenceDate = new Date()) => {
   return Math.ceil((target - reference) / (1000 * 60 * 60 * 24));
 };
 
-const sumBy = <T,>(items: T[], selector: (item: T) => number) =>
-  items.reduce((total, item) => total + selector(item), 0);
-
 const formatMoneyPoints = (points: Array<{ amount: number; currency: string }>) =>
   points.length === 0
     ? 'No value'
-    : points.slice(0, 2).map((point) => formatCurrency(point.amount, point.currency)).join(' · ');
+    : points.slice(0, 2).map((point) => {
+      const currency = point.currency.trim().toUpperCase();
+      return /^[A-Z]{3}$/.test(currency)
+        ? formatCurrencyAmount(point.amount, currency)
+        : `${formatNumber(point.amount)} (currency unavailable)`;
+    }).join(' · ');
+
+const formatComparison = (change: number | null, label: string) => {
+  if (change === null) return `No ${label} baseline`;
+  if (change === 0) return `No change vs ${label}`;
+  return `${change > 0 ? '+' : ''}${change.toFixed(1)}% vs ${label}`;
+};
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-5" aria-label="Loading enterprise dashboard">
+      <Skeleton className="h-36 w-full rounded-[28px]" />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <Skeleton key={index} className="h-36 rounded-xl" />
+        ))}
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <Skeleton key={index} className="h-[300px] rounded-xl" />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 const createDefaultDashboardRange = (): DateRange => {
   const to = new Date();
@@ -233,23 +249,18 @@ export default function Dashboard() {
   if (isLoading || !data) {
     return (
       <DashboardLayout>
-        <div className="flex min-h-[60vh] items-center justify-center">
-          <div className="space-y-4 text-center">
-            <Loader2 className="mx-auto h-8 w-8 animate-spin" />
-            <p className="text-muted-foreground">Loading enterprise dashboard...</p>
-          </div>
-        </div>
+        <DashboardSkeleton />
       </DashboardLayout>
     );
   }
 
   const unavailableModules = getUnavailableDashboardModules(data.moduleStatus);
-
-  const openPurchaseOrderValue = sumBy(data.openPurchaseOrders, (order) => order.totalAmount);
-  const pendingPurchaseRequisitionValue = sumBy(data.pendingPurchaseRequisitions, (requisition) => requisition.totalAmount);
-  const pendingInventoryApprovalValue = sumBy(data.pendingInventoryApprovals, (requisition) => requisition.totalValue);
-  const pendingInventoryIssueValue = sumBy(data.pendingInventoryIssues, (requisition) => requisition.totalValue);
-  const pendingInventoryValue = pendingInventoryApprovalValue + pendingInventoryIssueValue;
+  const moduleIsAvailable = (...names: string[]) => names.every((name) =>
+    data.moduleStatus.find((module) => module.module === name)?.available !== false);
+  const { currencyCode: reportingCurrency, decimalPlaces: reportingDecimals } = resolveDashboardReportingCurrency(data);
+  const formatReportingMoney = (value: number) => reportingCurrency
+    ? formatCurrencyAmount(value, reportingCurrency, reportingDecimals)
+    : 'Currency unavailable';
 
   const maintenanceSummary = data.maintenanceOverview?.summary;
   const maintenanceMetrics = data.maintenanceMetrics;
@@ -269,19 +280,34 @@ export default function Dashboard() {
     const daysUntil = getDaysUntil(tender.submissionDeadline, rangeEndReference);
     return daysUntil !== null && daysUntil >= 0 && daysUntil <= 14;
   });
-  const tenderEstimatedValue = sumBy(openTenders, (tender) => tender.estimatedValue ?? 0);
+  const summaryCards: SummaryCardDefinition[] = [];
 
-  const summaryCards: SummaryCardDefinition[] = [
+  if (data.financeOverview) {
+    summaryCards.push({
+      title: 'Revenue',
+      value: formatReportingMoney(data.financeOverview.kpis.revenue),
+      meta: formatComparison(data.financeOverview.kpis.revenueChangePercent, 'previous period'),
+      href: '/finance/reports/income-statement',
+      accentClassName:
+        'border-blue-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(239,246,255,0.95))] dark:border-blue-900/70 dark:bg-[linear-gradient(135deg,rgba(2,6,23,0.96),rgba(30,64,175,0.22))]',
+      iconClassName: 'bg-blue-500/15 text-blue-600 dark:text-blue-300',
+      icon: Banknote,
+    });
+  }
+
+  if (moduleIsAvailable('CRM Overview')) summaryCards.push(
     {
       title: 'CRM Pipeline',
-      value: formatCurrency(data.crmOverview?.weightedPipelineValue ?? 0),
-      meta: `${data.crmOverview?.openOpportunityCount ?? 0} open opportunities`,
+      value: formatNumber(data.crmOverview?.openOpportunityCount ?? 0),
+      meta: `${data.crmOverview?.leadsNeedingFollowUpCount ?? 0} leads need follow-up`,
       href: '/crm',
       accentClassName:
         'border-emerald-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(236,253,245,0.95))] dark:border-emerald-900/70 dark:bg-[linear-gradient(135deg,rgba(2,6,23,0.96),rgba(6,78,59,0.25))]',
       iconClassName: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300',
       icon: TrendingUp,
-    },
+    });
+
+  if (moduleIsAvailable('Projects')) summaryCards.push(
     {
       title: 'Projects',
       value: formatNumber(data.projectDashboard?.activeProjects ?? 0),
@@ -291,27 +317,35 @@ export default function Dashboard() {
         'border-violet-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(245,243,255,0.95))] dark:border-violet-900/70 dark:bg-[linear-gradient(135deg,rgba(2,6,23,0.96),rgba(76,29,149,0.22))]',
       iconClassName: 'bg-violet-500/15 text-violet-600 dark:text-violet-300',
       icon: FolderKanban,
-    },
+    });
+
+  if (moduleIsAvailable('Purchase Orders', 'Purchase Requisitions')) summaryCards.push(
     {
       title: 'Procurement',
-      value: formatCurrency(openPurchaseOrderValue),
+      value: formatNumber(data.openPurchaseOrders.length),
       meta: `${data.pendingPurchaseRequisitions.length} requisitions waiting`,
       href: '/procurement/purchase-orders',
       accentClassName:
         'border-amber-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(255,251,235,0.95))] dark:border-amber-900/70 dark:bg-[linear-gradient(135deg,rgba(2,6,23,0.96),rgba(120,53,15,0.24))]',
       iconClassName: 'bg-amber-500/15 text-amber-600 dark:text-amber-300',
       icon: ShoppingCart,
-    },
+    });
+
+  if (moduleIsAvailable('Inventory Approval Queue', 'Inventory Issue Queue')) summaryCards.push(
     {
       title: 'Inventory',
-      value: formatCurrency(pendingInventoryValue),
-      meta: `${data.pendingInventoryIssues.length} issue queues active`,
+      value: data.procurementInventoryManagement
+        ? formatReportingMoney(data.procurementInventoryManagement.inventory.stockValue)
+        : formatNumber(data.pendingInventoryApprovals.length + data.pendingInventoryIssues.length),
+      meta: `${data.pendingInventoryIssues.length} issues · ${data.pendingInventoryApprovals.length} approvals`,
       href: '/inventory/requisitions',
       accentClassName:
         'border-cyan-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(236,254,255,0.95))] dark:border-cyan-900/70 dark:bg-[linear-gradient(135deg,rgba(2,6,23,0.96),rgba(21,94,117,0.24))]',
       iconClassName: 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-300',
       icon: Boxes,
-    },
+    });
+
+  if (moduleIsAvailable('Maintenance Overview', 'Maintenance Metrics')) summaryCards.push(
     {
       title: 'Maintenance',
       value: formatNumber(maintenanceActiveWorkOrders),
@@ -321,23 +355,24 @@ export default function Dashboard() {
         'border-rose-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(255,241,242,0.95))] dark:border-rose-900/70 dark:bg-[linear-gradient(135deg,rgba(2,6,23,0.96),rgba(127,29,29,0.24))]',
       iconClassName: 'bg-rose-500/15 text-rose-600 dark:text-rose-300',
       icon: Wrench,
-    },
+    });
+
+  if (moduleIsAvailable('Tenders')) summaryCards.push(
     {
       title: 'Tenders',
-      value: formatCurrency(tenderEstimatedValue),
+      value: formatNumber(openTenders.length),
       meta: `${closingSoonTenders.length} closing within 14 days`,
       href: '/procurement/tenders',
       accentClassName:
         'border-sky-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(240,249,255,0.95))] dark:border-sky-900/70 dark:bg-[linear-gradient(135deg,rgba(2,6,23,0.96),rgba(12,74,110,0.24))]',
       iconClassName: 'bg-sky-500/15 text-sky-600 dark:text-sky-300',
       icon: FileText,
-    },
-  ];
+    });
 
   const pipelineStageData = (data.crmReporting?.pipelineByStage ?? []).map((stage) => ({
     stage: stage.stage,
-    totalValue: stage.totalValue,
-    weightedValue: stage.weightedValue,
+    opportunities: stage.opportunityCount,
+    quotes: stage.quoteCount,
   }));
 
   const crmFunnelData = (data.crmConversions?.funnel ?? []).map((stage) => ({
@@ -357,12 +392,6 @@ export default function Dashboard() {
     }, {}),
   );
 
-  const projectBudgetData = [
-    { label: 'Estimated', amount: data.projectDashboard?.totalEstimatedBudget ?? 0 },
-    { label: 'Approved', amount: data.projectDashboard?.totalApprovedBudget ?? 0 },
-    { label: 'Actual', amount: data.projectDashboard?.totalActualCost ?? 0 },
-  ];
-
   const projectPressureData = [
     { name: 'Overdue Tasks', value: data.projectDashboard?.overdueTasks ?? 0 },
     { name: 'Overdue Milestones', value: data.projectDashboard?.overdueMilestones ?? 0 },
@@ -370,16 +399,9 @@ export default function Dashboard() {
     { name: 'Open Issues', value: data.projectDashboard?.openIssues ?? 0 },
   ].filter((item) => item.value > 0);
 
-  const procurementExposureData = [
-    { label: 'Requisitions', amount: pendingPurchaseRequisitionValue },
-    { label: 'Purchase Orders', amount: openPurchaseOrderValue },
-    { label: 'Tenders', amount: tenderEstimatedValue },
-    { label: 'Inventory', amount: pendingInventoryValue },
-  ];
-
   const inventoryQueueData = [
-    { label: 'Approvals', count: data.pendingInventoryApprovals.length, value: pendingInventoryApprovalValue },
-    { label: 'Issues', count: data.pendingInventoryIssues.length, value: pendingInventoryIssueValue },
+    { label: 'Approvals', count: data.pendingInventoryApprovals.length },
+    { label: 'Issues', count: data.pendingInventoryIssues.length },
   ];
 
   const maintenanceTrendData = (data.maintenanceTrends?.creationTrend ?? []).map((point, index) => ({
@@ -565,6 +587,103 @@ export default function Dashboard() {
           })}
         </div>
 
+        {data.financeOverview && (
+          <section className="space-y-3" aria-labelledby="finance-performance-title">
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <h2 id="finance-performance-title" className="text-lg font-semibold text-slate-950 dark:text-slate-50">
+                  Financial performance
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Posted general-ledger activity from {format(new Date(data.financeOverview.rangeStartDate), 'dd MMM yyyy')} to{' '}
+                  {format(new Date(data.financeOverview.rangeEndDate), 'dd MMM yyyy')} in {reportingCurrency || 'the configured reporting currency'}.
+                </p>
+              </div>
+              <Link href="/finance/reports/income-statement">
+                <Button variant="outline" size="sm">
+                  Open income statement
+                  <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                </Button>
+              </Link>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <Card className="border-emerald-200/80 dark:border-emerald-900/70">
+                <CardContent className="flex items-start justify-between gap-3 p-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Revenue</p>
+                    <p className="mt-2 text-xl font-semibold">{formatReportingMoney(data.financeOverview.kpis.revenue)}</p>
+                    <p className="mt-1 text-xs text-slate-500">{formatComparison(data.financeOverview.kpis.revenueChangePercent, 'previous period')}</p>
+                  </div>
+                  <TrendingUp className="h-5 w-5 text-emerald-600" />
+                </CardContent>
+              </Card>
+
+              <Card className="border-amber-200/80 dark:border-amber-900/70">
+                <CardContent className="flex items-start justify-between gap-3 p-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Expenses</p>
+                    <p className="mt-2 text-xl font-semibold">{formatReportingMoney(data.financeOverview.kpis.expenses)}</p>
+                    <p className="mt-1 text-xs text-slate-500">{formatComparison(data.financeOverview.kpis.expensesChangePercent, 'previous period')}</p>
+                  </div>
+                  <Banknote className="h-5 w-5 text-amber-600" />
+                </CardContent>
+              </Card>
+
+              <Card className="border-blue-200/80 dark:border-blue-900/70">
+                <CardContent className="flex items-start justify-between gap-3 p-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Net position</p>
+                    <p className="mt-2 text-xl font-semibold">{formatReportingMoney(data.financeOverview.kpis.netProfit)}</p>
+                    <p className="mt-1 text-xs text-slate-500">{formatComparison(data.financeOverview.kpis.netProfitChangePercent, 'previous period')}</p>
+                  </div>
+                  <Gauge className="h-5 w-5 text-blue-600" />
+                </CardContent>
+              </Card>
+
+              <Card className="border-violet-200/80 dark:border-violet-900/70">
+                <CardContent className="flex items-start justify-between gap-3 p-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Cash on hand</p>
+                    <p className="mt-2 text-xl font-semibold">{formatReportingMoney(data.financeOverview.kpis.cashOnHand)}</p>
+                    <p className="mt-1 text-xs text-slate-500">As at the selected period end</p>
+                  </div>
+                  <WalletCards className="h-5 w-5 text-violet-600" />
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <BaseLineChart
+                data={data.financeOverview.monthly}
+                xAxisKey="name"
+                lines={[
+                  { dataKey: 'revenue', name: 'Revenue', color: CHART_COLORS.success[0] },
+                  { dataKey: 'expenses', name: 'Expenses', color: CHART_COLORS.warning[0] },
+                ]}
+                title="Revenue and Expenses"
+                description="Posted general-ledger movement for the selected period."
+                height={300}
+                compact
+                formatValue={(value) => formatReportingMoney(Number(value))}
+                className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
+              />
+              <BaseBarChart
+                data={data.financeOverview.expenseChart}
+                xAxisKey="name"
+                bars={[{ dataKey: 'value', name: 'Expense', color: CHART_COLORS.danger[0] }]}
+                title="Top Expense Accounts"
+                description="Largest posted expense balances in the selected period."
+                height={300}
+                compact
+                orientation="horizontal"
+                formatValue={(value) => formatReportingMoney(Number(value))}
+                className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
+              />
+            </div>
+          </section>
+        )}
+
         {management && (
           <section className="space-y-3" aria-labelledby="procurement-inventory-management-title">
             <div className="flex flex-wrap items-end justify-between gap-2">
@@ -623,7 +742,7 @@ export default function Dashboard() {
                 <CardContent className="flex items-start justify-between gap-3 p-4">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Stock value</p>
-                    <p className="mt-2 text-xl font-semibold">{formatNumber(management.inventory.stockValue)}</p>
+                    <p className="mt-2 text-xl font-semibold">{formatReportingMoney(management.inventory.stockValue)}</p>
                     <p className="mt-1 text-xs text-slate-500">
                       {management.inventory.itemLocationCount} item locations · {management.inventory.stockoutCount} stockouts
                     </p>
@@ -751,14 +870,14 @@ export default function Dashboard() {
             data={pipelineStageData}
             xAxisKey="stage"
             bars={[
-              { dataKey: 'totalValue', name: 'Total Value', color: CHART_COLORS.success[0] },
-              { dataKey: 'weightedValue', name: 'Weighted Value', color: CHART_COLORS.primary[0] },
+              { dataKey: 'opportunities', name: 'Opportunities', color: CHART_COLORS.success[0] },
+              { dataKey: 'quotes', name: 'Quotes', color: CHART_COLORS.primary[0] },
             ]}
-            title="CRM Pipeline by Stage"
-            description="Stage exposure and weighted pipeline."
+            title="CRM Pipeline Activity"
+            description="Open opportunities and related quotes by configured CRM stage."
             height={300}
             compact
-            formatValue={(value) => formatCurrency(Number(value))}
+            formatValue={(value) => formatNumber(Number(value))}
             error={unavailableModules.find((module) => module.module === 'CRM Reporting')?.error}
             className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
           />
@@ -793,19 +912,6 @@ export default function Dashboard() {
           />
 
           <BaseBarChart
-            data={projectBudgetData}
-            xAxisKey="label"
-            bars={[{ dataKey: 'amount', name: 'Amount', color: CHART_COLORS.primary[1] }]}
-            title="Project Budget Position"
-            description="Estimated, approved, and actual spend."
-            height={300}
-            compact
-            formatValue={(value) => formatCurrency(Number(value))}
-            error={unavailableModules.find((module) => module.module === 'Projects')?.error}
-            className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
-          />
-
-          <BaseBarChart
             data={projectPressureData}
             xAxisKey="name"
             bars={[{ dataKey: 'value', name: 'Open Items', color: CHART_COLORS.danger[0] }]}
@@ -816,19 +922,6 @@ export default function Dashboard() {
             orientation="horizontal"
             formatValue={(value) => formatNumber(Number(value))}
             error={unavailableModules.find((module) => module.module === 'Projects')?.error}
-            className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
-          />
-
-          <BaseBarChart
-            data={procurementExposureData}
-            xAxisKey="label"
-            bars={[{ dataKey: 'amount', name: 'Value', color: CHART_COLORS.warning[0] }]}
-            title="Procurement Exposure"
-            description="Value across requisitions, POs, tenders, and inventory."
-            height={300}
-            compact
-            formatValue={(value) => formatCurrency(Number(value))}
-            error={unavailableModules.find((module) => ['Purchase Orders', 'Purchase Requisitions', 'Tenders'].includes(module.module))?.error}
             className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
           />
 
